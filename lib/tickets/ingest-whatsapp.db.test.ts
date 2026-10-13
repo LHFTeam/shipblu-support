@@ -16,8 +16,17 @@ import {
 } from '@/db/schema';
 import { withCleanDatabase } from '@/lib/testing/db';
 import { storeBusinessToken } from '@/lib/whatsapp/credentials';
-import type { NormalisedEcho, NormalisedInboundMessage } from '@/lib/whatsapp/types';
-import { applyWhatsAppStatus, ingestWhatsAppEcho, ingestWhatsAppMessage } from './ingest-whatsapp';
+import type {
+  NormalisedEcho,
+  NormalisedInboundMessage,
+  NormalisedReaction,
+} from '@/lib/whatsapp/types';
+import {
+  applyWhatsAppStatus,
+  ingestWhatsAppEcho,
+  ingestWhatsAppMessage,
+  ingestWhatsAppReaction,
+} from './ingest-whatsapp';
 import { ingestWhatsAppHistoryChunk } from './ingest-whatsapp-history';
 
 /**
@@ -71,6 +80,94 @@ function echo(overrides: Partial<NormalisedEcho> = {}): NormalisedEcho {
     raw: { id: 'wamid.bot-1' },
     ...overrides,
   };
+}
+
+/**
+ * A customer's reaction to `wamid.first`, as `parseWebhook` hands it over —
+ * the delivery's own shape in `raw`, which is what the console reads the
+ * reacted-to message back off. No emoji is the customer taking theirs back.
+ */
+function customerReaction(
+  emoji: string | null,
+  overrides: Partial<NormalisedInboundMessage> = {},
+): NormalisedReaction {
+  const wamid = overrides.wamid ?? 'wamid.reaction';
+  return {
+    side: 'customer',
+    message: inbound({
+      wamid,
+      type: 'reaction',
+      text: emoji ? `[reacted ${emoji}]` : '[reacted]',
+      sentAt: LATER,
+      raw: {
+        id: wamid,
+        from: CUSTOMER,
+        type: 'reaction',
+        reaction: { message_id: 'wamid.first', ...(emoji ? { emoji } : {}) },
+      },
+      ...overrides,
+    }),
+  };
+}
+
+/** The business's reaction to `wamid.first`, echoed back from its own number. */
+function businessReaction(
+  emoji: string,
+  overrides: Partial<NormalisedEcho> = {},
+): NormalisedReaction {
+  const wamid = overrides.wamid ?? 'wamid.business-reaction';
+  return {
+    side: 'business',
+    echo: echo({
+      wamid,
+      type: 'reaction',
+      text: `[reacted ${emoji}]`,
+      sentAt: LATER,
+      raw: {
+        id: wamid,
+        to: CUSTOMER,
+        type: 'reaction',
+        reaction: { message_id: 'wamid.first', emoji },
+      },
+      ...overrides,
+    }),
+  };
+}
+
+/** Every column a reaction must leave as it found it. */
+async function untouched(id: string) {
+  const [row] = await db
+    .select({
+      status: ticketStatuses.name,
+      reopenCount: conversations.reopenCount,
+      resolvedAt: conversations.resolvedAt,
+      lastMessageAt: conversations.lastMessageAt,
+      lastCustomerMessageAt: conversations.lastCustomerMessageAt,
+      lastAgentMessageAt: conversations.lastAgentMessageAt,
+      firstResponseDueAt: conversations.firstResponseDueAt,
+      nextResponseDueAt: conversations.nextResponseDueAt,
+      resolutionDueAt: conversations.resolutionDueAt,
+      firstRespondedAt: conversations.firstRespondedAt,
+      priority: conversations.priority,
+      assigneeAgentId: conversations.assigneeAgentId,
+      autoRespondedAt: conversations.autoRespondedAt,
+    })
+    .from(conversations)
+    .innerJoin(ticketStatuses, eq(ticketStatuses.id, conversations.statusId))
+    .where(eq(conversations.id, id));
+  if (!row) throw new Error(`no conversation ${id}`);
+  return row;
+}
+
+/** A wall-clock policy, so a due date is the instant plus an hour. */
+async function hourlyPolicy() {
+  const target = { firstResponseMins: 60, nextResponseMins: null, resolutionMins: 1440 };
+  await db.insert(slaPolicies).values({
+    name: 'default',
+    isDefault: true,
+    hoursSource: 'round_the_clock',
+    targets: { low: target, medium: target, high: target, urgent: target },
+  });
 }
 
 async function conversation(id: string) {
@@ -446,6 +543,198 @@ describe('ingestWhatsAppEcho', () => {
 });
 
 /**
+ * A reaction is a row on the customer's thread and nothing more: what a 🙏 on
+ * our reply asks of the team is nothing, so the ticket it lands on is left
+ * exactly as it was. In production one support ticket had been reopened by
+ * nothing but two 👍🏻, and two more counted their window from one (2026-10-13).
+ */
+describe('ingestWhatsAppReaction', () => {
+  it('files the reaction on the live conversation and moves none of its clocks', async () => {
+    await hourlyPolicy();
+    const asked = await ingestWhatsAppMessage(inbound());
+    const before = await untouched(asked.conversationId);
+    const queued = await db.select().from(jobs);
+
+    const reacted = await ingestWhatsAppReaction(customerReaction('🙏'));
+
+    expect(reacted).toEqual({
+      conversationId: asked.conversationId,
+      conversationNumber: 1,
+      messageId: expect.any(String),
+      duplicate: false,
+      skipped: null,
+    });
+    // The window, the next-response target and the inbox's order all stay
+    // where the customer's question put them.
+    expect(await untouched(asked.conversationId)).toEqual(before);
+    expect(before).toMatchObject({
+      lastMessageAt: SENT,
+      lastCustomerMessageAt: SENT,
+      // Counted from the ticket's own creation, which is now.
+      firstResponseDueAt: expect.any(Date),
+    });
+
+    // Stored as the message it arrived as, so the console can draw it on the
+    // message it names.
+    const [, row] = await messagesOf(asked.conversationId);
+    expect(row).toMatchObject({
+      id: reacted.messageId,
+      direction: 'inbound',
+      kind: 'reply',
+      authorContactId: (await conversation(asked.conversationId)).requesterContactId,
+      bodyText: '[reacted 🙏]',
+      channelMessageId: 'wamid.reaction',
+      meta: { whatsappType: 'reaction', phoneNumberId: SUPPORT_NUMBER },
+      createdAt: LATER,
+    });
+    expect(JSON.parse(row!.rawBody!)).toMatchObject({
+      reaction: { message_id: 'wamid.first', emoji: '🙏' },
+    });
+
+    // Nothing downstream of a message ran: no categorisation of a 🙏, and
+    // nothing queued for it.
+    expect(await eventTypes(asked.conversationId)).toEqual(['categorised']);
+    expect(await db.select().from(jobs)).toEqual(queued);
+  });
+
+  it('leaves a resolved conversation resolved', async () => {
+    const asked = await ingestWhatsAppMessage(inbound());
+    await setStatus(asked.conversationId, 'Resolved', {
+      resolvedAt: new Date('2026-09-20T10:30:00Z'),
+    });
+    const before = await untouched(asked.conversationId);
+
+    const reacted = await ingestWhatsAppReaction(customerReaction('👍'));
+
+    expect(reacted.conversationId).toBe(asked.conversationId);
+    expect(await untouched(asked.conversationId)).toEqual(before);
+    expect(before).toMatchObject({ status: 'Resolved', reopenCount: 0 });
+    expect(await eventTypes(asked.conversationId)).not.toContain('reopened');
+  });
+
+  it('files it on a closed conversation as it stands, and opens no ticket of its own', async () => {
+    const asked = await ingestWhatsAppMessage(inbound());
+    await setStatus(asked.conversationId, 'Closed');
+    const before = await untouched(asked.conversationId);
+
+    const reacted = await ingestWhatsAppReaction(customerReaction('❤️'));
+
+    expect(reacted).toMatchObject({ conversationId: asked.conversationId, skipped: null });
+    expect(await untouched(asked.conversationId)).toEqual(before);
+    expect(await db.select().from(conversations)).toHaveLength(1);
+
+    // Still finished: the customer's next message opens a new ticket, and their
+    // next reaction goes on that one, the newest.
+    const next = await ingestWhatsAppMessage(
+      inbound({
+        wamid: 'wamid.second',
+        text: 'New question',
+        sentAt: new Date('2026-09-21T09:00:00Z'),
+      }),
+    );
+    expect(next).toMatchObject({ createdConversation: true, conversationNumber: 2 });
+    const again = await ingestWhatsAppReaction(
+      customerReaction('👍', {
+        wamid: 'wamid.reaction-2',
+        sentAt: new Date('2026-09-21T09:05:00Z'),
+      }),
+    );
+    expect(again.conversationId).toBe(next.conversationId);
+  });
+
+  it('stores nothing, and makes no contact, for somebody with no conversation', async () => {
+    const reacted = await ingestWhatsAppReaction(customerReaction('👍'));
+
+    expect(reacted).toEqual({
+      conversationId: null,
+      conversationNumber: 0,
+      messageId: null,
+      duplicate: false,
+      skipped: 'no_conversation',
+    });
+    expect(await db.select().from(contacts)).toEqual([]);
+    expect(await db.select().from(conversations)).toEqual([]);
+    expect(await db.select().from(messages)).toEqual([]);
+  });
+
+  it('files a reaction taken back like any other, for the console to undo the first', async () => {
+    const asked = await ingestWhatsAppMessage(inbound());
+    await ingestWhatsAppReaction(customerReaction('👍'));
+    const before = await untouched(asked.conversationId);
+
+    await ingestWhatsAppReaction(
+      customerReaction(null, {
+        wamid: 'wamid.unreaction',
+        sentAt: new Date('2026-09-20T12:00:00Z'),
+      }),
+    );
+
+    expect(await untouched(asked.conversationId)).toEqual(before);
+    const rows = await messagesOf(asked.conversationId);
+    expect(rows.map((row) => row.bodyText)).toEqual([
+      'Where is my parcel?\nIt was due yesterday.',
+      '[reacted 👍]',
+      '[reacted]',
+    ]);
+    expect(JSON.parse(rows[2]!.rawBody!)).toEqual({
+      id: 'wamid.unreaction',
+      from: CUSTOMER,
+      type: 'reaction',
+      reaction: { message_id: 'wamid.first' },
+    });
+  });
+
+  it('writes nothing the second time a reaction’s wamid arrives', async () => {
+    const asked = await ingestWhatsAppMessage(inbound());
+    const first = await ingestWhatsAppReaction(customerReaction('🙏'));
+
+    expect(await ingestWhatsAppReaction(customerReaction('🙏'))).toEqual({
+      conversationId: asked.conversationId,
+      conversationNumber: 1,
+      messageId: first.messageId,
+      duplicate: true,
+      skipped: null,
+    });
+    expect(await messagesOf(asked.conversationId)).toHaveLength(2);
+  });
+
+  it('does not mirror a reaction echoed on an ordinary support number, which is our own', async () => {
+    await ingestWhatsAppMessage(inbound());
+
+    const reacted = await ingestWhatsAppReaction(
+      businessReaction('👍', { from: SUPPORT_NUMBER, phoneNumberId: SUPPORT_NUMBER }),
+    );
+
+    expect(reacted).toMatchObject({ skipped: 'not_mirrored', messageId: null });
+    expect(await db.select().from(messages)).toHaveLength(1);
+  });
+
+  describe('on the bot’s number', () => {
+    it('files it on the transcript without opening a window for us', async () => {
+      const opened = await ingestWhatsAppEcho(echo());
+      const before = await untouched(opened.conversationId!);
+
+      const reacted = await ingestWhatsAppReaction(
+        customerReaction('👍', { phoneNumberId: BOT_NUMBER }),
+      );
+
+      expect(reacted.conversationId).toBe(opened.conversationId);
+      expect(await untouched(opened.conversationId!)).toEqual(before);
+      expect(before.lastCustomerMessageAt).toBeNull();
+    });
+
+    // Most reactions on the bot's number name the bot's own messages, which
+    // are not stored; 71 of them had opened a transcript holding nothing else.
+    it('opens no transcript for a reaction that arrives first', async () => {
+      expect(
+        await ingestWhatsAppReaction(customerReaction('👍', { phoneNumberId: BOT_NUMBER })),
+      ).toMatchObject({ skipped: 'no_conversation' });
+      expect(await db.select().from(conversations)).toEqual([]);
+    });
+  });
+});
+
+/**
  * A support number connected through coexistence is also on the WhatsApp
  * Business app, so its echoes are the business typing on the phone — nothing
  * else wrote them, and the business decided they count as the team's reply.
@@ -781,6 +1070,123 @@ describe('ingestWhatsAppEcho on a number connected through coexistence', () => {
 
     expect(await ingestWhatsAppEcho(phoneEcho())).toMatchObject({ duplicate: true });
     expect((await clocks(asked.conversationId)).firstRespondedAt).toBeNull();
+  });
+
+  /**
+   * Both sides of the chat react on a coexistence number: the customer to the
+   * reply the business typed on the phone, the business to the customer's
+   * message. Neither is somebody answering. Seven of the fourteen reactions the
+   * business sent from the phone had stopped a ticket's response clocks.
+   */
+  describe('a reaction, from either side', () => {
+    const at = (time: string) => new Date(`2026-09-20T${time}:00Z`);
+    const phoneReaction = (emoji: string, time: string) =>
+      businessReaction(emoji, {
+        from: '15550783881',
+        phoneNumberId: COEX_NUMBER,
+        sentAt: at(time),
+      });
+
+    it('restarts no response clock when the customer reacts to the phone’s reply', async () => {
+      await coexistenceChannel();
+      await hourlyPolicy();
+      const asked = await ingestWhatsAppMessage(
+        inbound({ phoneNumberId: COEX_NUMBER, sentAt: at('09:00') }),
+      );
+      await ingestWhatsAppEcho(phoneEcho({ sentAt: at('09:30') }));
+      const answered = await untouched(asked.conversationId);
+
+      await ingestWhatsAppReaction(
+        customerReaction('🙏', { phoneNumberId: COEX_NUMBER, sentAt: at('09:40') }),
+      );
+
+      expect(await untouched(asked.conversationId)).toEqual(answered);
+      expect(answered).toMatchObject({
+        nextResponseDueAt: null,
+        lastCustomerMessageAt: at('09:00'),
+        lastMessageAt: at('09:30'),
+      });
+
+      // The clock is still the customer's to start, by writing.
+      await ingestWhatsAppMessage(
+        inbound({ wamid: 'wamid.second', phoneNumberId: COEX_NUMBER, sentAt: at('10:05') }),
+      );
+      expect((await untouched(asked.conversationId)).nextResponseDueAt).toEqual(at('11:05'));
+    });
+
+    it('does not count the business’s reaction from the phone as an answer', async () => {
+      await coexistenceChannel();
+      await hourlyPolicy();
+      const asked = await ingestWhatsAppMessage(
+        inbound({ phoneNumberId: COEX_NUMBER, sentAt: at('09:00') }),
+      );
+      const before = await untouched(asked.conversationId);
+
+      const reacted = await ingestWhatsAppReaction(phoneReaction('❤️', '09:10'));
+
+      expect(reacted).toMatchObject({ conversationId: asked.conversationId, skipped: null });
+      expect(await untouched(asked.conversationId)).toEqual(before);
+      expect(before).toMatchObject({
+        firstRespondedAt: null,
+        lastAgentMessageAt: null,
+        firstResponseDueAt: expect.any(Date),
+      });
+      const [, row] = await messagesOf(asked.conversationId);
+      expect(row).toMatchObject({
+        direction: 'outbound',
+        authorAgentId: null,
+        authorContactId: null,
+        bodyText: '[reacted ❤️]',
+        meta: { whatsappType: 'reaction', echo: true, echoSource: 'business_app' },
+      });
+    });
+
+    it('opens no conversation for the business’s reaction, beside an import or not', async () => {
+      await coexistenceChannel();
+      expect(await ingestWhatsAppReaction(phoneReaction('👍', '09:10'))).toMatchObject({
+        skipped: 'no_conversation',
+      });
+
+      // The copied history is a record, and a live reaction does not join it.
+      await ingestWhatsAppHistoryChunk(
+        {
+          phoneNumberId: COEX_NUMBER,
+          phase: 0,
+          chunkOrder: 1,
+          progress: 100,
+          declined: null,
+          messages: [
+            {
+              wamid: 'wamid.first',
+              customer: CUSTOMER,
+              direction: 'inbound',
+              sentAt: EARLIER,
+              type: 'text',
+              text: 'Is it shipped?',
+              mediaPlaceholder: false,
+              location: null,
+              replyToWamid: null,
+              phoneStatus: null,
+              raw: { id: 'wamid.first', from: CUSTOMER },
+            },
+          ],
+        },
+        EARLIER,
+      );
+
+      expect(await ingestWhatsAppReaction(phoneReaction('👍', '09:20'))).toMatchObject({
+        skipped: 'no_conversation',
+      });
+      expect(
+        await ingestWhatsAppReaction(
+          customerReaction('👍', { phoneNumberId: COEX_NUMBER, sentAt: at('09:25') }),
+        ),
+      ).toMatchObject({ skipped: 'no_conversation' });
+      expect(await categories()).toEqual([
+        { id: expect.any(String), sourceSystem: 'import', category: 'resolved' },
+      ]);
+      expect(await db.select().from(messages)).toHaveLength(1);
+    });
   });
 });
 

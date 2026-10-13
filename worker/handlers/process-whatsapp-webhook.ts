@@ -5,6 +5,7 @@ import {
   applyWhatsAppStatus,
   ingestWhatsAppEcho,
   ingestWhatsAppMessage,
+  ingestWhatsAppReaction,
 } from '@/lib/tickets/ingest-whatsapp';
 import {
   applyWhatsAppContactSync,
@@ -67,6 +68,7 @@ export async function processWhatsAppWebhook(event: {
   let historyFailed = false;
   let ingested = 0;
   let echoed = 0;
+  let reacted = 0;
   let statusUpdates = 0;
   let historyMessages = 0;
   let contactsApplied = 0;
@@ -101,6 +103,26 @@ export async function processWhatsAppWebhook(event: {
       );
     } catch (error) {
       failures.push(`echo ${echo.wamid}: ${errorMessage(error)}`);
+    }
+  }
+
+  // A reaction from either side is filed on the person's conversation and
+  // moves nothing on it — no clock, no status, no ticket of its own
+  // (`ingestWhatsAppReaction`).
+  for (const reaction of parsed.reactions) {
+    const wamid = reaction.side === 'customer' ? reaction.message.wamid : reaction.echo.wamid;
+    try {
+      const result = await ingestWhatsAppReaction(reaction);
+      if (result.skipped === 'not_mirrored') continue;
+      reacted += 1;
+      log.info(
+        result.skipped === 'no_conversation'
+          ? `reaction ${wamid} not stored: no conversation to file it on`
+          : `reaction ${wamid} → #${result.conversationNumber} ` +
+              `(${result.duplicate ? 'duplicate' : 'appended'})`,
+      );
+    } catch (error) {
+      failures.push(`reaction ${wamid}: ${errorMessage(error)}`);
     }
   }
 
@@ -194,6 +216,7 @@ export async function processWhatsAppWebhook(event: {
   const attempted =
     parsed.messages.length +
     parsed.echoes.length +
+    parsed.reactions.length +
     parsed.statuses.length +
     parsed.history.length +
     parsed.historyMedia.length +
@@ -232,6 +255,7 @@ export async function processWhatsAppWebhook(event: {
 
   log.info(
     `${event.id}: ${ingested} message(s), ${echoed} echo(es), ` +
+      (reacted ? `${reacted} reaction(s), ` : '') +
       `${statusUpdates} status update(s)` +
       coexistence +
       (failures.length ? `, ${failures.length} failed` : ''),

@@ -1,6 +1,7 @@
 import { and, count, desc, eq, inArray } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { attachments, messages } from '@/db/schema';
+import { notReaction } from '@/lib/tickets/not-reaction';
 import { HISTORY_LIMIT, type HistoryAuthor, type HistoryMessage } from './request';
 
 /**
@@ -15,6 +16,11 @@ import { HISTORY_LIMIT, type HistoryAuthor, type HistoryMessage } from './reques
  * and it does not leave the building for a suggestion. `system` rows are our own
  * bookkeeping and a `forward` is a copy sent elsewhere; neither is the
  * conversation the next reply continues.
+ *
+ * Nor is a WhatsApp reaction, though it is stored as a reply. A 🙏 after the
+ * customer's question would otherwise be the anchor — a fresh call, asked
+ * whether `[reacted 🙏]` needs an answer, whose honest reply is `none` — and
+ * would take one of the `HISTORY_LIMIT` places from something somebody said.
  */
 
 export type ConversationHistory = {
@@ -42,7 +48,9 @@ export async function readHistory(conversationId: string): Promise<ConversationH
       bodyText: messages.bodyText,
     })
     .from(messages)
-    .where(and(eq(messages.conversationId, conversationId), eq(messages.kind, 'reply')))
+    .where(
+      and(eq(messages.conversationId, conversationId), eq(messages.kind, 'reply'), notReaction()),
+    )
     .orderBy(desc(messages.createdAt), desc(messages.id))
     .limit(HISTORY_LIMIT);
 

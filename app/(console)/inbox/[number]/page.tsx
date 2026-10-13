@@ -22,6 +22,7 @@ import {
 import { answeredFromConsole } from '@/lib/tickets/channel-policy';
 import { suggestionsLive } from '@/lib/canned-suggest/settings';
 import { accountIdForConversation } from '@/lib/whatsapp/conversation';
+import { isReaction } from '@/lib/whatsapp/reaction';
 import { InboxShell } from '../shell';
 import { FocusBeat } from './focus';
 import { ConversationView } from './view';
@@ -95,7 +96,10 @@ export default async function ConversationPage({
   */
   const lastInbound = [...conversation.messages]
     .reverse()
-    .find((message) => message.direction === 'inbound' && message.kind === 'reply');
+    .find(
+      (message) =>
+        message.direction === 'inbound' && message.kind === 'reply' && !isReaction(message.meta),
+    );
 
   // The panel lives in the reply form, so a ticket with no reply box (read-only,
   // or a channel not answered from here) has nowhere to show it.

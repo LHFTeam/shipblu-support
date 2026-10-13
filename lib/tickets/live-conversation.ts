@@ -52,6 +52,23 @@ export async function findLiveConversation(
   contactId: string,
   channel: PersonThreadedChannel,
 ): Promise<LiveConversation | null> {
+  const row = await findLatestConversation(contactId, channel);
+  if (!row || row.statusCategory === 'closed') return null;
+  return row;
+}
+
+/**
+ * The contact's newest conversation on the channel, closed or not: the one
+ * `findLiveConversation` reads before deciding whether it may be continued.
+ *
+ * For something that belongs on the customer's thread without continuing it —
+ * a WhatsApp reaction, which changes nothing about the ticket it is filed on, so
+ * a closed one is as good a home as any (`ingestWhatsAppReaction`).
+ */
+export async function findLatestConversation(
+  contactId: string,
+  channel: PersonThreadedChannel,
+): Promise<LiveConversation | null> {
   const rows = await db
     .select({
       id: conversations.id,
@@ -65,7 +82,5 @@ export async function findLiveConversation(
     .orderBy(desc(conversations.lastMessageAt))
     .limit(1);
 
-  const row = rows[0];
-  if (!row || row.statusCategory === 'closed') return null;
-  return row;
+  return rows[0] ?? null;
 }

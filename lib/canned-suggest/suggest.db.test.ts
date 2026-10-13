@@ -204,6 +204,35 @@ describe('readHistory', () => {
       Array.from({ length: 10 }, (_, i) => `m${i + 3}`),
     );
   });
+
+  it('leaves out a reaction from either side, so the question stays the anchor', async () => {
+    const agent = await signedIn();
+    const id = await ticket('whatsapp');
+    await say(id, 'Let me check', { direction: 'outbound', authorAgentId: agent.id });
+    const question = await say(id, 'فين الشحنة');
+    await say(id, '[reacted ❤️]', {
+      direction: 'outbound',
+      meta: { whatsappType: 'reaction', echo: true, echoSource: 'business_app' },
+    });
+    await say(id, '[reacted 🙏]', { meta: { whatsappType: 'reaction' } });
+
+    const history = await readHistory(id);
+
+    expect(history.messages).toEqual([
+      { from: 'support_agent', text: 'Let me check', attachments: 0 },
+      { from: 'customer', text: 'فين الشحنة', attachments: 0 },
+    ]);
+    expect(history.anchorMessageId).toBe(question);
+  });
+
+  it('finds nothing to answer where the customer has only reacted', async () => {
+    const agent = await signedIn();
+    const id = await ticket('whatsapp');
+    await say(id, 'On its way', { direction: 'outbound', authorAgentId: agent.id });
+    await say(id, '[reacted 👍]', { meta: { whatsappType: 'reaction' } });
+
+    expect(await readHistory(id)).toMatchObject({ hasInbound: false });
+  });
 });
 
 describe('the switch', () => {

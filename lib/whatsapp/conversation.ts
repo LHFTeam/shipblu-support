@@ -1,6 +1,7 @@
 import { and, desc, eq } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { channels, conversations, messages } from '@/db/schema';
+import { notReaction } from '@/lib/tickets/not-reaction';
 import { accountForPhoneNumberId, type WhatsAppAccount } from './accounts';
 
 /**
@@ -34,7 +35,15 @@ export async function sendingNumberFor(
   const inbound = await db
     .select({ meta: messages.meta })
     .from(messages)
-    .where(and(eq(messages.conversationId, conversationId), eq(messages.direction, 'inbound')))
+    .where(
+      and(
+        eq(messages.conversationId, conversationId),
+        eq(messages.direction, 'inbound'),
+        // The number the customer last wrote on, which is the one whose window
+        // `last_customer_message_at` measures — a reaction moves neither.
+        notReaction(),
+      ),
+    )
     .orderBy(desc(messages.createdAt))
     .limit(1);
 

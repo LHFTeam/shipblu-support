@@ -659,6 +659,20 @@ unset `_PREVIOUS`; the dry run opens every envelope it would move, which is what
 proves the previous key is the one the rows were sealed under before anything
 depends on it.
 
+**A WhatsApp reaction is stored as a message and is not one.** It arrives as
+`type: 'reaction'`, from the customer or echoed from our own number, and
+`parseWebhook` files it apart from both. `ingestWhatsAppReaction` puts the row on
+the person's newest conversation, closed or not, and changes nothing else — no
+clock, `last_message_at` included, no reopen, no ticket of its own, nothing
+downstream of a message — for the reasons `applyMetaInteraction` gives for a
+Facebook or Instagram reaction. The row stays a `kind: 'reply'` because the
+console reads the reaction back off it, so anything that picks "the latest
+message" or "what the customer last said" leaves reactions out: `notReaction()`
+in a query (`lib/tickets/not-reaction.ts`), `isReaction(meta)` over rows already
+in hand (`lib/whatsapp/reaction.ts`). A new reader that forgets shows a 👍 as the
+customer's last words — it was the inbox preview, the canned suggestion's anchor
+and the language automated replies went out in.
+
 **A coexistence number is live on the phone and on Cloud API at once**, and
 four rules keep the two sides from being read as each other. The copied
 history is a record, not traffic (`lib/tickets/ingest-whatsapp-history.ts`):

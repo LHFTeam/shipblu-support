@@ -27,6 +27,7 @@ import {
   refuseRecipients,
 } from '@/lib/side-conversations/guard';
 import { lastSideMessageId, loadSideConversation } from '@/lib/side-conversations/queries';
+import { isReaction } from '@/lib/whatsapp/reaction';
 import {
   applyStatusCategory,
   loadConversation,
@@ -357,6 +358,7 @@ async function quotedAnchorMessage(
     .select({
       bodyText: messages.bodyText,
       kind: messages.kind,
+      meta: messages.meta,
       createdAt: messages.createdAt,
       contactName: contacts.name,
     })
@@ -370,6 +372,9 @@ async function quotedAnchorMessage(
   // A private note is ours, not the customer's, and forwarding one to a hub
   // under the heading "the customer wrote" would be a lie about who said it.
   if (message.kind === 'note') return null;
+  // Nor is a reaction anything they wrote: the composer leaves it out, and the
+  // id is a form field.
+  if (isReaction(message.meta)) return null;
 
   return quoteAnchor(message.contactName, message.bodyText, message.createdAt);
 }
