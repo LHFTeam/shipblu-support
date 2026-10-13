@@ -139,6 +139,15 @@ export function AgentActivity({
 
   const [warning, setWarning] = useState(false);
   const [remainingMs, setRemainingMs] = useState(0);
+  /**
+   * The countdown's own element, so the listeners below can tell input *in*
+   * the dialog from input anywhere else. A press on "Sign out now" reaches the
+   * window's `pointerdown` listener before the button's `click` fires, and
+   * read as activity it dismissed the countdown and kept the session — so the
+   * button could not sign anyone out, and Enter on it went the same way through
+   * `keydown`. Answering the dialog is not the agent coming back.
+   */
+  const dialog = useRef<HTMLDivElement>(null);
 
   const awayMs = awayAfterMins === null ? null : awayAfterMins * 60_000;
   const signoutMs = signoutAfterMins === null ? null : signoutAfterMins * 60_000;
@@ -254,22 +263,43 @@ export function AgentActivity({
     reportedIdle.current = false;
     warningUp.current = false;
 
+    // The input listeners come through here rather than straight into
+    // `noteInput`, which stays the explicit signal "Stay signed in" and the
+    // tab becoming visible call directly. Two things are not activity while
+    // the countdown is up. A press on one of its buttons is the agent
+    // answering the dialog, and the button says what that answer is — the
+    // window must not decide it first (see `dialog` above). Only the buttons:
+    // a press on the dialog's text, or a touch the browser then cancels, is
+    // still the agent back at the desk, and swallowing it would let the clock
+    // run out on them. And the window's own `focus`, which a mousedown on the
+    // dialog raises first when another application had the window — reading
+    // that as "they are here" dismissed the dialog from under the very click
+    // it was raised by. A tab coming back is `visibilitychange`'s to report.
+    const onInput = (event: Event) => {
+      if (warningUp.current) {
+        if (event.type === 'focus') return;
+        const control = event.target instanceof Element ? event.target.closest('button') : null;
+        if (control && dialog.current?.contains(control)) return;
+      }
+      noteInput();
+    };
+
     // `passive` throughout: none of these prevent default, and a non-passive
     // scroll listener on a long ticket timeline is visible jank.
     for (const event of INPUT_EVENTS) {
-      window.addEventListener(event, noteInput, { passive: true });
+      window.addEventListener(event, onInput, { passive: true });
     }
     // Scroll is the exception, and it has to be captured on the document: the
     // event does not bubble, and this console has no document scroller at all —
     // the shell is `h-dvh overflow-hidden` and every list is its own
     // `overflow-y-auto` box, so a window listener would never fire once.
-    document.addEventListener('scroll', noteInput, { capture: true, passive: true });
+    document.addEventListener('scroll', onInput, { capture: true, passive: true });
     // Turning back to the tab is a person doing something, the same as a click.
     const onVisibility = () => {
       if (document.visibilityState === 'visible') noteInput();
     };
     document.addEventListener('visibilitychange', onVisibility);
-    window.addEventListener('focus', noteInput);
+    window.addEventListener('focus', onInput);
 
     const tick = setInterval(() => {
       const now = Date.now();
@@ -303,10 +333,10 @@ export function AgentActivity({
 
     return () => {
       clearInterval(tick);
-      for (const event of INPUT_EVENTS) window.removeEventListener(event, noteInput);
-      document.removeEventListener('scroll', noteInput, { capture: true });
+      for (const event of INPUT_EVENTS) window.removeEventListener(event, onInput);
+      document.removeEventListener('scroll', onInput, { capture: true });
       document.removeEventListener('visibilitychange', onVisibility);
-      window.removeEventListener('focus', noteInput);
+      window.removeEventListener('focus', onInput);
     };
   }, [active, awayMs, signoutMs, warningLeadMs, beat, noteInput, signOut]);
 
@@ -332,6 +362,7 @@ export function AgentActivity({
   return (
     <div className="fixed inset-0 z-60 flex items-start justify-center bg-black/30 p-4 pt-[18vh]">
       <div
+        ref={dialog}
         role="alertdialog"
         aria-modal="true"
         aria-labelledby="idle-warning-title"
@@ -350,14 +381,23 @@ export function AgentActivity({
           </div>
         </div>
         {/* No `autoFocus` on "Stay signed in", although a dialog would usually
-            take it. Any key dismisses this through `noteInput`, so a focused
-            button would swallow the returning agent's first keystroke and
-            leave focus on the button instead of in the reply they were typing. */}
+            take it. Any key pressed *outside* this dialog dismisses it through
+            `noteInput` — a key on one of its buttons is the agent answering the
+            dialog and is not counted — so a focused button would swallow the
+            returning agent's first keystroke, leave focus on the button instead
+            of in the reply they were typing, and not even dismiss the
+            countdown. The cost is deliberate: an agent who only has a keyboard
+            cannot Tab into the dialog, because that first Tab lands outside it
+            and is the proof of presence that keeps them signed in; the
+            header's Sign out is their route. Each button says what it means
+            directly: `noteInput` called by hand is the explicit "I am here",
+            where the listeners above would have read the press that reached
+            "Sign out now" as the same thing. */}
         <div className="flex justify-end gap-2">
           <Button variant="ghost" onClick={signOut}>
             Sign out now
           </Button>
-          <Button onClick={noteInput}>Stay signed in</Button>
+          <Button onClick={() => noteInput()}>Stay signed in</Button>
         </div>
       </div>
     </div>
