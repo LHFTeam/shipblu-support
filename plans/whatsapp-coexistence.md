@@ -737,7 +737,7 @@ return IGNORED;`; on a coexistence channel `meta.echoSource = 'business_app'`,
   the comment block rewritten (its "silence is the proof" argument is now
   false: a number _is_ operated from the app). Verify each name in the v23.0
   reference first — one bad name fails every run.
-- Timeline (`app/(console)/inbox/[number]/timeline.tsx:106`): `meta.echo ?
+- Thread voice (`voiceOf` in `lib/tickets/thread.ts`): `meta.echo ?
 (meta.echoSource === 'business_app' ? 'WhatsApp Business app' : 'Customer
 bot') : …`.
 

@@ -466,7 +466,16 @@ function disconnectedBy(initiatedBy: string | null): string {
 
 export type CoexistenceBadge = {
   label: string;
-  tone: 'brand' | 'neutral' | 'pending' | 'success' | 'warning' | 'danger';
+  /**
+   * The design system's reading of each, one meaning per tone on the row:
+   * `neutral` is a fact about the number (how it is connected), `info` is in
+   * motion — a copy the phone is sending — where `warning` is waiting on
+   * somebody, so a copy that stalled, or a phone that has to be reconnected,
+   * is amber and a copy that is merely not finished is not. The identity badge
+   * is not `brand`, which draws the same blue as `info` and would put a static
+   * fact and work in progress side by side in one fill.
+   */
+  tone: 'neutral' | 'info' | 'success' | 'warning' | 'danger';
   /** The sentence behind the ⓘ: what the badge means and what, if anything, to do. */
   explain: string;
 };
@@ -490,7 +499,7 @@ export function coexistenceBadges(coexistence: Coexistence, now: Date): Coexiste
     coexistence.notOnBusinessApp
       ? {
           label: 'connected through Meta',
-          tone: 'brand',
+          tone: 'neutral',
           explain:
             `${connectedOn} Meta reported then that this number is not on the WhatsApp ` +
             `Business app, so it works as a Cloud API number: there is no phone to copy ` +
@@ -498,7 +507,7 @@ export function coexistenceBadges(coexistence: Coexistence, now: Date): Coexiste
         }
       : {
           label: 'WhatsApp Business app',
-          tone: 'brand',
+          tone: 'neutral',
           explain:
             `${connectedOn} The number keeps working on the phone: replies typed there count ` +
             `as the team's and appear on tickets as "WhatsApp Business app"; console replies go ` +
@@ -597,7 +606,7 @@ export function coexistenceBadges(coexistence: Coexistence, now: Date): Coexiste
         history.chunks === 0
           ? 'copying history · waiting for the phone'
           : `copying history · ${history.percent}%`,
-      tone: 'pending',
+      tone: 'info',
       explain:
         'The phone is sending up to six months of chats. Keep the WhatsApp Business app open ' +
         'on the phone until it reaches 100% — it can take hours.',
@@ -625,7 +634,7 @@ export function coexistenceBadges(coexistence: Coexistence, now: Date): Coexiste
           }
         : {
             label: 'waiting for contacts',
-            tone: 'pending',
+            tone: 'info',
             explain:
               "The phone's contacts were requested and none has arrived yet. They arrive " +
               'while the WhatsApp Business app is open on the phone.',

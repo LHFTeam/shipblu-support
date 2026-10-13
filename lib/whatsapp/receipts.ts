@@ -9,8 +9,9 @@
  * about it either way".
  *
  * Pure and import-free because the conversation view is a client component.
- * It does not look at a failed row: `DeliveryState` renders the failure before
- * it asks, and `send_whatsapp` writes `wamidLost` only together with `sent`, a
+ * It does not look at a failed row: `deliveryOf` (`lib/tickets/thread.ts`)
+ * reports the failure before it asks, and `send_whatsapp` writes `wamidLost`
+ * only together with `sent`, a
  * status nothing moves such a row out of.
  */
 export function lostReceiptNote(message: {

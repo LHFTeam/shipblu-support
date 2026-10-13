@@ -4,19 +4,19 @@ import type { ReactNode } from 'react';
 import { AgentAvatar, Avatar } from '@/components/avatar';
 import { ChatBubble, ChatEvent } from '@/components/chat';
 import { BotIcon, ExternalIcon, PinIcon, UserIcon, WarningIcon } from '@/components/icons';
-import { Badge, type BadgeTone } from '@/components/ui';
+import { Badge } from '@/components/ui';
 import { runPositions } from '@/lib/chat/runs';
-import { TEAM_TIME_ZONE } from '@/lib/hours/zone';
+import { formatDay, formatTime } from '@/lib/format';
 import type { ConversationDetail } from '@/lib/tickets/conversation';
-import { isPrivateReplyMessage, isPublicMetaMessage } from '@/lib/meta/visibility';
+import { isPublicMetaMessage } from '@/lib/meta/visibility';
 import {
   formatCoordinates,
   mapUrl,
   readSharedLocation,
   type SharedLocation,
 } from '@/lib/tickets/shared-location';
-import { lostReceiptNote } from '@/lib/whatsapp/receipts';
 import { readOnlyReason } from '@/lib/tickets/channel-policy';
+import { deliveryOf, type MessageMeta, type Voice, voiceOf } from '@/lib/tickets/thread';
 import { AttachmentList } from './attachments';
 import { CommentModeration } from './comment-moderation';
 import { SideConversationCard } from './side-conversations';
@@ -58,31 +58,8 @@ function timelineEntries(conversation: ConversationDetail): TimelineEntry[] {
   return entries.sort((a, b) => a.at.getTime() - b.at.getTime());
 }
 
-/*
-  A day break above the first entry of each Cairo day, and a bare time under
-  each message, in place of the full date and time every message used to carry.
-  Lossless only because the break goes in on every change of day — before a
-  side card as well as a message — and in the team's zone rather than the
-  browser's, so two agents read the same day, and the server's render and the
-  browser's agree on where the breaks fall.
-*/
-const DAY = new Intl.DateTimeFormat('en-GB', {
-  weekday: 'long',
-  day: 'numeric',
-  month: 'long',
-  year: 'numeric',
-  timeZone: TEAM_TIME_ZONE,
-});
-
-const TIME = new Intl.DateTimeFormat('en-GB', {
-  hour: '2-digit',
-  minute: '2-digit',
-  hourCycle: 'h23',
-  timeZone: TEAM_TIME_ZONE,
-});
-
 function Time({ at }: { at: Date }) {
-  return <time dateTime={at.toISOString()}>{TIME.format(at)}</time>;
+  return <time dateTime={at.toISOString()}>{formatTime(at)}</time>;
 }
 
 export function Timeline({
@@ -102,7 +79,9 @@ export function Timeline({
   let day: string | null = null;
 
   for (const entry of timelineEntries(conversation)) {
-    const label = DAY.format(entry.at);
+    // A day break above the first entry of each Cairo day, before a side card
+    // as well as a message — `formatDay` says why the zone is the team's.
+    const label = formatDay(entry.at);
     if (label !== day) {
       items.push(
         <ChatEvent key={`day-${label}`} variant="day">
@@ -152,91 +131,6 @@ export function Timeline({
   }
 
   return <ol className="flex flex-col">{items}</ol>;
-}
-
-type MessageMeta = {
-  metaKind?: string;
-  isPublic?: boolean;
-  echo?: boolean;
-  echoSource?: string;
-  media?: { downloaded?: boolean; error?: string };
-};
-
-/**
- * Who a message is from, in the thread's terms: which side it sits on, what
- * the bubble is, and the face and words beside it.
- *
- * The sides are the viewer's. Everything the team's side wrote — an agent, the
- * customer bot, an automation, the business on its own phone — is `out`,
- * because the bot is our half of the conversation, and the customer reading a
- * bot's answer as one of ours is exactly what happened.
- */
-type Voice = {
-  from: 'in' | 'out';
-  kind: 'message' | 'note' | 'bot';
-  author: string;
-  avatar: 'contact' | 'agent' | 'bot' | 'business-app';
-  badges: { tone: BadgeTone; label: string }[];
-};
-
-function voiceOf(message: Message, meta: MessageMeta): Voice {
-  const isInbound = message.direction === 'inbound';
-  const isNote = message.kind === 'note';
-  const businessApp = meta.echo === true && meta.echoSource === 'business_app';
-
-  /*
-    An echo has no author on either side: no agent wrote it and the customer
-    did not send it. "Automation" would be technically true and useless — it
-    was the customer bot, or the business typing on the WhatsApp Business app
-    of a number connected through coexistence, and saying which one matters
-    most. The bot's echoes predate `echoSource`, so its absence is the bot.
-  */
-  const author =
-    message.authorName ??
-    (meta.echo
-      ? businessApp
-        ? 'WhatsApp Business app'
-        : 'Customer bot'
-      : isInbound
-        ? 'Customer'
-        : 'Automation');
-
-  // A person typed the business-app echo, on the phone; everything else on
-  // our side with no agent behind it was written by a machine, and says so.
-  const machine = !isInbound && !isNote && !message.authorIsAgent && !businessApp;
-
-  const badges: Voice['badges'] = [];
-  if (isNote) badges.push({ tone: 'note', label: 'Private note' });
-  if (machine) badges.push({ tone: 'automated', label: 'Automated' });
-  // Whether a reply was public is the thing an agent most needs to be sure of
-  // on a social ticket, so it is stated rather than implied by which side the
-  // bubble is on.
-  if (isPublicMetaMessage(meta)) {
-    badges.push({ tone: 'public', label: isInbound ? 'Public comment' : 'Posted publicly' });
-  }
-  if (isPrivateReplyMessage(meta, message.direction)) {
-    badges.push({ tone: 'private', label: 'Sent privately' });
-  }
-  if (!isInbound && !isNote && meta.metaKind === 'direct_message') {
-    badges.push({ tone: 'private', label: 'Direct message' });
-  }
-
-  return {
-    // A note is the team's working, whichever way the row was filed.
-    from: isInbound && !isNote ? 'in' : 'out',
-    kind: isNote ? 'note' : machine ? 'bot' : 'message',
-    author,
-    avatar: message.authorIsAgent
-      ? 'agent'
-      : isNote
-        ? 'bot'
-        : isInbound
-          ? 'contact'
-          : businessApp
-            ? 'business-app'
-            : 'bot',
-    badges,
-  };
 }
 
 /*
@@ -364,7 +258,17 @@ function MessageParts({
           {media.error ? `Attachment unavailable: ${media.error}` : 'Downloading attachment…'}
         </p>
       ) : null}
-      {delivery?.note}
+      {delivery?.note ? (
+        <p
+          className={`px-1 text-xs ${
+            delivery.note.tone === 'warning'
+              ? 'text-(--color-feedback-warning-fg)'
+              : 'text-(--color-text-secondary)'
+          }`}
+        >
+          {delivery.note.text}
+        </p>
+      ) : null}
       {isInbound && isPublicMetaMessage(meta) ? (
         <CommentModeration messageId={message.id} meta={message.meta} canModerate={canModerate} />
       ) : null}
@@ -410,52 +314,6 @@ function MessageParts({
       </ChatBubble>
     );
   });
-}
-
-/**
- * What happened to something we sent, said under it.
- *
- * Every outbound row that is not a note, the bot's and the automations'
- * included: a reply that never reached the customer is the same failure
- * whoever wrote it.
- */
-function deliveryOf(message: Message): {
-  receipt?: 'sending' | 'sent' | 'delivered' | 'read';
-  error?: string;
-  note?: ReactNode;
-} {
-  if (message.deliveryStatus === 'failed') {
-    // A delivery error explains itself in paragraphs — what Meta said, and
-    // what it means — so the bubble keeps its line breaks.
-    return { error: `Not delivered — ${message.deliveryError ?? 'unknown error'}` };
-  }
-
-  // Replaces the bare "Sent" rather than sitting under it: that word alone is
-  // what reads as confirmed, and here it never will be.
-  const lostReceipt = lostReceiptNote(message);
-  if (lostReceipt) {
-    return {
-      note: <p className="px-1 text-xs text-(--color-feedback-warning-fg)">{lostReceipt}</p>,
-    };
-  }
-
-  switch (message.deliveryStatus) {
-    case 'pending':
-      return { receipt: 'sending' };
-    case 'sent':
-    case 'delivered':
-    case 'read':
-      return { receipt: message.deliveryStatus };
-    // The mail server refused it: a failure, said as one.
-    case 'bounced':
-      return { error: 'Bounced' };
-    default:
-      return {
-        note: (
-          <p className="px-1 text-xs text-(--color-text-secondary)">{message.deliveryStatus}</p>
-        ),
-      };
-  }
 }
 
 function MessageBody({

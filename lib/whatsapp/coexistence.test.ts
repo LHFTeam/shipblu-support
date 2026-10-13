@@ -286,7 +286,7 @@ describe('coexistenceBadges', () => {
 
   it('always names the connection, and every badge explains itself', () => {
     const badges = coexistenceBadges(connected(), at(60_000));
-    expect(badges[0]).toMatchObject({ label: 'WhatsApp Business app', tone: 'brand' });
+    expect(badges[0]).toMatchObject({ label: 'WhatsApp Business app', tone: 'neutral' });
     expect(badges[0]!.explain).toMatch(/phone-typed|typed there/);
     for (const badge of badges) expect(badge.explain.length).toBeGreaterThan(20);
   });
@@ -300,7 +300,7 @@ describe('coexistenceBadges', () => {
     const notOnApp = connected({}, { notOnBusinessApp: true });
     const after = coexistenceBadges(notOnApp, at(SYNC_WINDOW_MS + 1));
 
-    expect(after[0]).toMatchObject({ label: 'connected through Meta', tone: 'brand' });
+    expect(after[0]).toMatchObject({ label: 'connected through Meta', tone: 'neutral' });
     expect(after[0]!.explain).toMatch(/not on the WhatsApp Business app/);
     expect(after[0]!.explain).not.toMatch(/typed there/);
     expect(after.map((badge) => badge.label)).not.toContain('copy window closed');
@@ -348,6 +348,13 @@ describe('coexistenceBadges', () => {
     expect(labels({ history: { requestId: 'r', requestedAt: ONBOARDED } })).toContain(
       'copying history · waiting for the phone',
     );
+    // In motion, not waiting on somebody: blue, where a stall is amber.
+    expect(
+      coexistenceBadges(
+        connected({ history: { requestId: 'r', requestedAt: ONBOARDED } }),
+        at(60_000),
+      ).find((badge) => badge.label.startsWith('copying history'))?.tone,
+    ).toBe('info');
     expect(
       labels({
         history: {
@@ -576,6 +583,12 @@ describe('coexistenceBadges', () => {
     expect(labels({ contacts: { requestId: 'c', requestedAt: ONBOARDED } })).toContain(
       'waiting for contacts',
     );
+    expect(
+      coexistenceBadges(
+        connected({ contacts: { requestId: 'c', requestedAt: ONBOARDED } }),
+        at(60_000),
+      ).find((badge) => badge.label === 'waiting for contacts')?.tone,
+    ).toBe('info');
     expect(
       labels({}, at(60_000), {
         disconnected: { at: ONBOARDED, event: 'PARTNER_REMOVED', reason: 'user removed' },
