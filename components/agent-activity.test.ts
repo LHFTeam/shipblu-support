@@ -101,7 +101,7 @@ describe('AgentActivity countdown', () => {
     expect(replace).toHaveBeenCalledWith('/login?signedOut=inactivity');
   });
 
-  it('lets Enter on "Sign out now" sign out: the key is not counted either', async () => {
+  it('lets Enter on a focused "Sign out now" sign out: the key is not counted either', async () => {
     const { button } = mountWithCountdown();
     await press(button('Sign out now'), 'Enter');
 
@@ -131,13 +131,37 @@ describe('AgentActivity countdown', () => {
     expect(calls('/api/auth/logout')).toHaveLength(0);
   });
 
-  it('the window regaining focus still counts, although its target is no node', async () => {
+  it('a press on the dialog itself, off its buttons, still counts as being back', async () => {
+    const { container, dialog } = mountWithCountdown();
+    await press(container.querySelector('#idle-warning-desc')!);
+
+    expect(dialog()).toBeNull();
+    expect(calls('/api/presence/activity')).toHaveLength(1);
+    expect(calls('/api/auth/logout')).toHaveLength(0);
+  });
+
+  it('the window regaining focus while the countdown is up is not an answer to it', async () => {
+    // A mousedown on the dialog raises the window's focus first when another
+    // application had the window; dismissing on it would pull the dialog out
+    // from under that click.
     const { dialog } = mountWithCountdown();
     await act(async () => {
       window.dispatchEvent(new Event('focus'));
     });
 
-    expect(dialog()).toBeNull();
+    expect(dialog()).not.toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('the window regaining focus counts as activity when nothing is asked', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    root = createRoot(container);
+    act(() => root!.render(createElement(AgentActivity, { ...POLICY, sessionIdleForMs: 0 })));
+    await act(async () => {
+      window.dispatchEvent(new Event('focus'));
+    });
+
     expect(calls('/api/presence/activity')).toHaveLength(1);
   });
 

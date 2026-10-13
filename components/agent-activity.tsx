@@ -264,15 +264,23 @@ export function AgentActivity({
     warningUp.current = false;
 
     // The input listeners come through here rather than straight into
-    // `noteInput`, because each carries a target that can sit inside the
-    // countdown: an event there is the agent answering the dialog, and the
-    // dialog's buttons say what that answer is — the window must not decide it
-    // first (see `dialog` above). `noteInput` itself stays the explicit signal:
-    // "Stay signed in" and the tab becoming visible call it directly. The
-    // `instanceof` is for the window's own `focus`, whose target is the window
-    // and not a node; asking the dialog about it would throw.
+    // `noteInput`, which stays the explicit signal "Stay signed in" and the
+    // tab becoming visible call directly. Two things are not activity while
+    // the countdown is up. A press on one of its buttons is the agent
+    // answering the dialog, and the button says what that answer is — the
+    // window must not decide it first (see `dialog` above). Only the buttons:
+    // a press on the dialog's text, or a touch the browser then cancels, is
+    // still the agent back at the desk, and swallowing it would let the clock
+    // run out on them. And the window's own `focus`, which a mousedown on the
+    // dialog raises first when another application had the window — reading
+    // that as "they are here" dismissed the dialog from under the very click
+    // it was raised by. A tab coming back is `visibilitychange`'s to report.
     const onInput = (event: Event) => {
-      if (event.target instanceof Node && dialog.current?.contains(event.target)) return;
+      if (warningUp.current) {
+        if (event.type === 'focus') return;
+        const control = event.target instanceof Element ? event.target.closest('button') : null;
+        if (control && dialog.current?.contains(control)) return;
+      }
       noteInput();
     };
 
@@ -374,14 +382,17 @@ export function AgentActivity({
         </div>
         {/* No `autoFocus` on "Stay signed in", although a dialog would usually
             take it. Any key pressed *outside* this dialog dismisses it through
-            `noteInput` — a key inside it is the agent answering the dialog and
-            is not counted — so a focused button would swallow the returning
-            agent's first keystroke, leave focus on the button instead of in the
-            reply they were typing, and not even dismiss the countdown. The
-            buttons are the only input in here that means anything, and each
-            says what it means directly: `noteInput` called by hand is the
-            explicit "I am here", where the listeners above would have read the
-            press that reached "Sign out now" as the same thing. */}
+            `noteInput` — a key on one of its buttons is the agent answering the
+            dialog and is not counted — so a focused button would swallow the
+            returning agent's first keystroke, leave focus on the button instead
+            of in the reply they were typing, and not even dismiss the
+            countdown. The cost is deliberate: an agent who only has a keyboard
+            cannot Tab into the dialog, because that first Tab lands outside it
+            and is the proof of presence that keeps them signed in; the
+            header's Sign out is their route. Each button says what it means
+            directly: `noteInput` called by hand is the explicit "I am here",
+            where the listeners above would have read the press that reached
+            "Sign out now" as the same thing. */}
         <div className="flex justify-end gap-2">
           <Button variant="ghost" onClick={signOut}>
             Sign out now
