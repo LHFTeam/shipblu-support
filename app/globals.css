@@ -131,6 +131,16 @@
   --font-console:
     'Tajawal Arabic', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue',
     Arial, sans-serif;
+  /* Message text only: bubbles, reply boxes (console, widget, portal) and the
+     message lines of a conversation-list row, so a draft looks like the
+     message it becomes. Arabic there is set in Rubik, everywhere else in
+     Tajawal. 'Rubik Arabic' is declared below `@theme` with the same Arabic
+     `unicode-range` and for the same reason as 'Tajawal Arabic': led by it,
+     the stack swaps Arabic letters and leaves Latin on the surface's own face.
+     next/font's Rubik would bring a Latin face and an Arial fallback with no
+     range, and either would take every Latin letter in a message. `.kb-shell`
+     redefines it over the help centre's stack. */
+  --font-conversation: 'Rubik Arabic', var(--font-console);
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
   --font-emoji: 'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', sans-serif;
 
@@ -179,6 +189,7 @@
   --radius-logo: 28%;
   --radius-bubble: 20px;
   --radius-bubble-tail: 4px;
+  --radius-launcher: 28px 6px 28px 28px; /* literal in the embed route; mirrored when docked left */
 
   /* Elevation. The console is flat; shadows are for things that float. */
   --shadow-card:
@@ -639,6 +650,40 @@
     U+2010-2011, U+204F, U+2E41, U+FB50-FDFF, U+FE70-FE74, U+FE76-FEFC;
 }
 
+/* Message text's Arabic typeface (--font-conversation): Rubik's Arabic subset,
+   the Fontsource builds the design system ships, self-hosted beside the
+   Tajawal faces for the same reasons. */
+@font-face {
+  font-family: 'Rubik Arabic';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('./fonts/rubik-arabic-400.woff2') format('woff2');
+  unicode-range:
+    U+0600-06FF, U+0750-077F, U+0870-088E, U+0890-0891, U+0897-08E1, U+08E3-08FF, U+200C-200E,
+    U+2010-2011, U+204F, U+2E41, U+FB50-FDFF, U+FE70-FE74, U+FE76-FEFC;
+}
+@font-face {
+  font-family: 'Rubik Arabic';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('./fonts/rubik-arabic-500.woff2') format('woff2');
+  unicode-range:
+    U+0600-06FF, U+0750-077F, U+0870-088E, U+0890-0891, U+0897-08E1, U+08E3-08FF, U+200C-200E,
+    U+2010-2011, U+204F, U+2E41, U+FB50-FDFF, U+FE70-FE74, U+FE76-FEFC;
+}
+@font-face {
+  font-family: 'Rubik Arabic';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('./fonts/rubik-arabic-700.woff2') format('woff2');
+  unicode-range:
+    U+0600-06FF, U+0750-077F, U+0870-088E, U+0890-0891, U+0897-08E1, U+08E3-08FF, U+200C-200E,
+    U+2010-2011, U+204F, U+2E41, U+FB50-FDFF, U+FE70-FE74, U+FE76-FEFC;
+}
+
 body {
   background: var(--color-background-canvas);
   color: var(--color-text-primary);
@@ -706,19 +751,15 @@ body {
      font is loading, which is the only thing they are good for. Repeating a
      family in a stack is harmless — the browser takes the first entry that has
      the glyph. Anything that covers every codepoint belongs after Tajawal, not
-     before it. */
-  font-family:
-    Lato,
-    Tajawal,
-    var(--font-lato),
-    var(--font-tajawal),
-    ui-sans-serif,
-    system-ui,
-    -apple-system,
-    'Segoe UI',
-    Roboto,
-    'Noto Sans Arabic',
-    sans-serif;
+     before it.
+
+     Held in a variable so message text can name Rubik ahead of the same stack:
+     a bubble or a reply box in the help centre keeps Lato for its Latin. */
+  --font-help:
+    Lato, Tajawal, var(--font-lato), var(--font-tajawal), ui-sans-serif, system-ui, -apple-system,
+    'Segoe UI', Roboto, 'Noto Sans Arabic', sans-serif;
+  --font-conversation: 'Rubik Arabic', var(--font-help);
+  font-family: var(--font-help);
   /* The console runs tabular figures so ticket numbers stop jittering. Prose
      wants the proportional ones. */
   font-variant-numeric: normal;

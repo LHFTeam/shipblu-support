@@ -85,6 +85,24 @@ describe('the embed snippet', () => {
     expect(body).not.toContain('#0b6bcb');
     expect(body).not.toContain('#dc2626');
   });
+
+  /*
+   * The shape is a token too, and the snippet holds it twice: as declared, and
+   * mirrored for a launcher docked left. The tail moved from the bottom-left to
+   * the top-right once already, so the docked copy is checked to be the
+   * declared one turned over rather than a third shape of its own.
+   */
+  it('draws the launcher in the shape app/globals.css declares, mirrored when docked left', async () => {
+    const body = await (await GET()).text();
+    const css = readFileSync(join(process.cwd(), 'app/globals.css'), 'utf8');
+
+    const declared = /--radius-launcher:\s*([^;]+);/.exec(css)?.[1]?.trim();
+    expect(declared).toBeDefined();
+    const [topLeft, topRight, bottomRight, bottomLeft] = declared!.split(/\s+/);
+
+    expect(body).toContain(`'${declared}'`);
+    expect(body).toContain(`'${[topRight, topLeft, bottomLeft, bottomRight].join(' ')}'`);
+  });
 });
 
 /**

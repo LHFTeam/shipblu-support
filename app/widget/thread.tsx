@@ -397,7 +397,7 @@ export function WidgetThread({
             up is the fix that does not also disable pinch-zoom for the
             visitor.
           */
-          className={`${WIDGET_FIELD} flex-1 resize-none px-3 py-2`}
+          className={`${WIDGET_FIELD} flex-1 resize-none px-3 py-2 font-conversation`}
         />
         {/*
           The word is the button's name rather than its face: a 380px panel

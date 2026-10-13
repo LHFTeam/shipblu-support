@@ -771,7 +771,12 @@ thread, the portal and the widget, `components/shipment-status.tsx`
 `components/details-section.tsx`, `components/conversation-row.tsx` and
 `components/views-panel.tsx`. The console's Arabic face is its own family,
 `'Tajawal Arabic'`, self-hosted in `app/fonts/` — not next/font's Tajawal, which
-would set Latin in Tajawal too (§6.92).
+would set Latin in Tajawal too (§6.92). Message text is the one exception:
+bubbles, reply boxes and a conversation row's message lines take
+`font-conversation`, which sets Arabic in `'Rubik Arabic'` (self-hosted beside
+it, Arabic range only) and leaves Latin on the surface's own face, so a draft
+looks like the message it becomes. Names, times, events and chips keep the
+surface font.
 
 **Ticket forms.** A form is a row in `ticket_forms` whose layout is one jsonb
 document, parsed on every read by `parseFormElements` against the fields that

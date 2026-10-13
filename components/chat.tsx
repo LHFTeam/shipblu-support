@@ -178,7 +178,7 @@ export function ChatBubble({
         ) : null}
 
         <div className={bubble}>
-          <div dir="auto" lang={lang} className="text-start">
+          <div dir="auto" lang={lang} className="text-start font-conversation">
             {children}
           </div>
         </div>

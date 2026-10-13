@@ -110,7 +110,7 @@ export function ConversationRow({
             alignment, so it is still the sentence's end that is cut. */}
         <span
           dir="auto"
-          className={`block truncate text-sm text-left ${
+          className={`block truncate font-conversation text-sm text-left ${
             layout === 'ticket'
               ? 'leading-[22px] text-(--color-text-primary)'
               : 'leading-5 text-(--color-text-secondary)'
@@ -121,7 +121,7 @@ export function ConversationRow({
         {layout === 'ticket' && secondary ? (
           <span
             dir="auto"
-            className="block truncate text-xs leading-[18px] text-(--color-text-secondary) text-left"
+            className="block truncate font-conversation text-xs leading-[18px] text-(--color-text-secondary) text-left"
           >
             {secondary}
           </span>

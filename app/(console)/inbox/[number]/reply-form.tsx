@@ -355,6 +355,7 @@ function ReplyBody({
         name="body"
         rows={4}
         dir="auto"
+        className="font-conversation"
         // The suggestion is the placeholder: grey, gone the moment the agent
         // types, and never sent by accident — the box is still empty and still
         // `required`, so Send refuses it until Tab or Use has put the text in.
