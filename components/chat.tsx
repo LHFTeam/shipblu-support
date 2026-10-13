@@ -156,14 +156,6 @@ export function ChatBubble({
           kind === 'note' ? BUBBLE_TONE.note : kind === 'bot' ? BUBBLE_TONE.bot : BUBBLE_TONE[from]
         } ${shape === 'tail' ? TAIL[from][group] : ''}`;
 
-  const body = (
-    <div className={bubble}>
-      <div dir="auto" lang={lang} className="text-start font-conversation">
-        {children}
-      </div>
-    </div>
-  );
-
   return (
     <li
       className={`flex w-full items-end gap-2 first:mt-0 [[data-chat-event]+&]:mt-0 ${
@@ -198,19 +190,26 @@ export function ChatBubble({
           sender: that corner is never the tail, and on a short bubble the
           avatar's side is where the eye already is. Wrapped so `self-*` is
           measured against the bubble, not against a wider error or receipt.
+
+          The wrapper is there with or without reactions. Drawn only when
+          there were some, the first 👍 to arrive changed the tree above the
+          message's body, and React remounted it: a voice note an agent was
+          playing stopped, and an opened photo closed.
         */}
-        {reactions ? (
-          <div className={`flex max-w-full min-w-0 flex-col ${out ? 'items-end' : 'items-start'}`}>
-            {body}
+        <div className={`flex max-w-full min-w-0 flex-col ${out ? 'items-end' : 'items-start'}`}>
+          <div className={bubble}>
+            <div dir="auto" lang={lang} className="text-start font-conversation">
+              {children}
+            </div>
+          </div>
+          {reactions ? (
             <div
               className={`relative -mt-3 flex flex-wrap gap-1 px-2.5 ${out ? 'self-start' : 'self-end'}`}
             >
               {reactions}
             </div>
-          </div>
-        ) : (
-          body
-        )}
+          ) : null}
+        </div>
 
         {error ? (
           <p className="flex items-start gap-1 px-1 text-start text-xs text-(--color-feedback-danger-fg)">
@@ -246,23 +245,35 @@ export function ChatBubble({
  *
  * `mine` is the viewer's side — the team's in the console — in the design
  * system's blue wash, so an agent can tell the customer's 🙏 from the one the
- * business sent back from its phone. Colour is not the only signal, so the
- * pill names nobody itself: the caller says who reacted, and when, to a screen
- * reader and a gesture away — the console wraps it in a `Tooltip` whose label
- * is that sentence.
+ * business sent back from its phone. The wash is not the only signal: `glyph`
+ * puts the reactor's mark beside the emoji (the console uses the same glyph as
+ * the reactor's tile in the thread), because the side a pill sits on says
+ * nothing about who reacted — customers react to their own messages too. Who
+ * and when, in words, is the caller's: the console wraps the pill in a
+ * `Tooltip` whose label is that sentence.
  *
  * The emoji is the customer's content, not an icon, so it is drawn in the
  * platform's emoji face rather than replaced by one of ours.
  */
-export function ChatReaction({ emoji, mine = false }: { emoji: string; mine?: boolean }) {
+export function ChatReaction({
+  emoji,
+  mine = false,
+  glyph,
+}: {
+  emoji: string;
+  mine?: boolean;
+  /** A small icon before the emoji, in the pill's own ink. */
+  glyph?: ReactNode;
+}) {
   return (
     <span
-      className={`inline-flex h-6 min-w-6 items-center justify-center rounded-full border px-1.5 font-emoji text-sm leading-none ${
+      className={`inline-flex h-6 min-w-6 items-center justify-center gap-0.5 rounded-full border px-1.5 font-emoji text-sm leading-none ${
         mine
           ? 'border-(--color-reaction-mine-border) bg-(--color-reaction-mine-bg) text-(--color-reaction-mine-fg)'
           : 'border-(--color-reaction-border) bg-(--color-reaction-bg) text-(--color-reaction-fg)'
       }`}
     >
+      {glyph}
       {emoji}
     </span>
   );

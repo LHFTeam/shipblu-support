@@ -704,8 +704,12 @@ routing.
 
 The same message can reach us under two wamids — the business app's echo of a
 reply names it from one chat, a customer's reaction to that reply from another
-— so two WhatsApp messages are compared through `wamidKey()`
-(`lib/whatsapp/wamid.ts`), never as strings (`docs/PROJECT-STATE.md` §6.94).
+— so pairing one WhatsApp message with another tries the exact string and then
+`wamidKey()` (`lib/whatsapp/wamid.ts`), as the reaction fold does
+(`docs/PROJECT-STATE.md` §6.94). String equality stays right where the same
+delivery comes back — a redelivery's dedupe, a status update — because Meta
+repeats its own wamid there, and the unique index on `channel_message_id` is
+what serves it.
 A reaction is a stored message row and stays one; the console draws it on the
 message it names (`lib/tickets/reactions.ts`), and as a line of its own only
 when that message is not on the ticket.

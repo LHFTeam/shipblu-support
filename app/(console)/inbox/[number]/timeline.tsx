@@ -340,11 +340,14 @@ function MessageParts({
 /**
  * What a message carries now, as pills on its bubble.
  *
- * Who reacted, and when, is a tap away rather than on the pill: the pill is
- * the size of the emoji, and the side it is drawn in (`mine` is the team's) is
- * the one thing an agent needs at a glance. The day is added only when it is
- * not the message's own, because "reacted · 09:12" under a message sent at
- * 18:40 reads as a clock running backwards.
+ * Whose side reacted is on the pill: the team's carries the wash and the
+ * glyph its tile carries in the thread — the bot's, or the business app's —
+ * and a customer's carries neither. Not the bubble's side, which says nothing
+ * here: every reaction on the bot number that finds its message is a customer
+ * reacting to their own. Who exactly, and when, is a tap away, because the
+ * pill is the size of the emoji. The day is added only when it is not the
+ * message's own, because "reacted · 09:12" under a message sent at 18:40 reads
+ * as a clock running backwards.
  */
 function Reactions({
   message,
@@ -376,7 +379,17 @@ function Reactions({
           </>
         }
       >
-        <ChatReaction emoji={emoji} mine={voice.from === 'out'} />
+        <ChatReaction
+          emoji={emoji}
+          mine={voice.from === 'out'}
+          glyph={
+            voice.from !== 'out' ? undefined : voice.avatar === 'bot' ? (
+              <BotIcon size={12} className="shrink-0" />
+            ) : (
+              <UserIcon size={12} className="shrink-0" />
+            )
+          }
+        />
       </Tooltip>
     );
   });
