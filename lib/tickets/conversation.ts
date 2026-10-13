@@ -21,6 +21,12 @@ import type { CustomFieldValues } from './custom-fields';
 import { threadControlTakenAt } from './meta-thread';
 import { hiddenChannels } from './channel-policy';
 import {
+  foldReactions,
+  type PlacedReaction,
+  type ShownReaction,
+  storedReaction,
+} from './reactions';
+import {
   shipmentsForConversation,
   shippingAccountsForConversation,
   type LinkedShipment,
@@ -56,6 +62,15 @@ export type TimelineMessage = {
   createdAt: Date;
   meta: Record<string, unknown>;
   attachments: { id: string; filename: string; contentType: string; sizeBytes: number }[];
+  /**
+   * Set when this row is a reaction rather than something anybody said — the
+   * emoji (empty when the reactor took theirs back, null when its payload could
+   * not be read) and the message it is about, null when that message is not on
+   * this ticket. `lib/tickets/reactions.ts`.
+   */
+  reaction: PlacedReaction | null;
+  /** The reactions this message carries now, each naming the row it came from. */
+  reactions: ShownReaction[];
 };
 
 export type ConversationDetail = {
@@ -279,6 +294,19 @@ export async function getConversation(
       threadControlTakenAt(row.conversation.id),
     ]);
 
+  // Paired here rather than in the browser: the target is only named in the
+  // stored delivery, and `raw_body` is not something to ship to the client for
+  // every message of a long ticket.
+  const reactions = foldReactions(
+    timeline.map((entry) => ({
+      id: entry.message.id,
+      direction: entry.message.direction,
+      authorContactId: entry.message.authorContactId,
+      channelMessageId: entry.message.channelMessageId,
+      reaction: storedReaction(entry.message.meta, entry.message.rawBody),
+    })),
+  );
+
   const filesByMessage = new Map<string, ConversationDetail['messages'][number]['attachments']>();
   for (const file of files) {
     // `messageId` is nullable since attachments also hang off side conversation
@@ -383,6 +411,8 @@ export async function getConversation(
       createdAt: entry.message.createdAt,
       meta: entry.message.meta,
       attachments: filesByMessage.get(entry.message.id) ?? [],
+      reaction: reactions.rows.get(entry.message.id) ?? null,
+      reactions: reactions.shown.get(entry.message.id) ?? [],
     })),
     events: events.map((event) => ({
       id: event.id,

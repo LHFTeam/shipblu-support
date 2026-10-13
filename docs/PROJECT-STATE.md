@@ -6141,6 +6141,24 @@ still waiting for it` one whose outcome is not known yet.
     (`Input tone="note"`), and check the result in a browser — `tsc` and the
     linters cannot see it.
 
+94. **One WhatsApp message has more than one wamid.** A wamid is `wamid.` and
+    the base64 of WhatsApp's message key, a Thrift compact struct of the chat,
+    `fromMe` and the message's own id — and the chat is whose copy it names. On
+    a coexistence number a reply typed on the phone is echoed to us keyed on
+    an `EG.<digits>` chat, and the customer's reaction to it names the same
+    reply keyed on their phone number: same `fromMe`, same id, a different
+    string. Matched on `channel_message_id`, none of the sixteen customer
+    reactions on the support number found the reply they were about (2026-10-13);
+    matched on `wamidKey()` (`lib/whatsapp/wamid.ts`), all sixteen did, and so
+    did the fourteen the business sent from the phone and the 28 on the bot
+    number that string equality already found. The other 1,063 reactions on the
+    bot number name the bot's own replies, which the bot's channel has never
+    stored, so they find nothing either way and the timeline says so. A quoted
+    reply's `context.id`, stored as `in_reply_to`, is not affected so far: all
+    37 on the support number match a stored row as a string. Pair anything new
+    through `wamidKey()` all the same — the reaction was the one nobody expected
+    either.
+
 ### Tooling notes for this environment
 
 Supabase and Render MCP tools work and are the fastest way to check real state —

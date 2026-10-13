@@ -668,7 +668,9 @@ clock, `last_message_at` included, no reopen, no ticket of its own, nothing
 downstream of a message — for the reasons `applyMetaInteraction` gives for a
 Facebook or Instagram reaction, though unlike that path it keeps a row. The
 row stays a `kind: 'reply'`, with the delivery in `raw_body` naming the
-message it is about, so the timeline can pair the two; and so anything that
+message it is about, so the timeline draws it on that message
+(`lib/tickets/reactions.ts`) — and as a line of its own only when that message
+is not on the ticket; and so anything that
 picks "the latest message" or "what the customer last said" for what it says
 leaves reactions out: `notReaction()`
 in a query (`lib/tickets/not-reaction.ts`), `isReaction(meta)` over rows already
@@ -701,6 +703,15 @@ both mean "reconnect"). And `saveChannel` carries `coexistence` and the stored
 `phoneNumberId` over rather than rebuilding `config` as `{phoneNumberId}`,
 which is how a rename used to wipe the connection while the number kept
 routing.
+
+The same message can reach us under two wamids — the business app's echo of a
+reply names it from one chat, a customer's reaction to that reply from another
+— so pairing one WhatsApp message with another tries the exact string and then
+`wamidKey()` (`lib/whatsapp/wamid.ts`), as the reaction fold does
+(`docs/PROJECT-STATE.md` §6.94). String equality stays right where the same
+delivery comes back — a redelivery's dedupe, a status update — because Meta
+repeats its own wamid there, and the unique index on `channel_message_id` is
+what serves it.
 
 **Explaining a control.** A label short enough to fit a dense table is rarely
 long enough to explain itself. `InfoTip` from `components/tooltip.tsx` is the
