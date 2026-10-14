@@ -695,18 +695,25 @@ customer _said_ has the same question to answer.
 customer's.** `displayText` in `lib/whatsapp/parse.ts` and `lib/meta/parse.ts`
 writes a caption-less photo, voice note or document into `body_text` as
 `[image]`, `[voice note]`, `[2 attachments]`, so the console draws a bubble
-rather than a blank, and a WhatsApp edit as `[edited a message: …]` round the
-customer's new words. A reader that only shows the latest message — the inbox
-preview — keeps the label; that is what it is for. Anything that reads the
-customer's last words for what they _say_ looks past it: `carriesCustomerText()`
-in a query (`lib/tickets/carries-customer-text.ts`), `hasCustomerText(bodyText)`
-over rows already in hand (`lib/tickets/customer-text.ts`), built from one set of
-patterns and held to the same answer by `carries-customer-text.db.test.ts`. The
-priority classifier, `requesterLocale` and the ticket page's knowledge panel and
-canned picker do.
-A reader that forgets answers an Arabic customer in English for sending a photo
-of the damaged parcel, which is what the out-of-hours acknowledgement and the
-automation engine did (§6.96).
+rather than a blank; a WhatsApp edit, a document's file name and a pin's address
+arrive wrapped in one; and a chat ticket's subject is its opening message's
+first line, so it can be a label too. A reader that only shows the latest
+message — the inbox preview — keeps the label; that is what it is for. Anything
+that reads the customer's last words for what they _say_ looks past it:
+`carriesCustomerText()` in a query (`lib/tickets/carries-customer-text.ts`), and
+over rows already in hand `hasCustomerText(bodyText)`,
+`lastCustomerWords(timeline)` and `subjectWords(subject)`
+(`lib/tickets/customer-text.ts`) — one set of patterns, held to one answer by
+`carries-customer-text.db.test.ts`. The rule is the whole message in brackets,
+so `[urgent] where is my COD` is words, and it is looser than a rule for what a
+thread may hide should be: a story mention or a document's name says nothing
+for the customer, though an agent needs to see it. The priority classifier,
+`requesterLocale`, the ticket page's knowledge panel and canned picker, and the
+language a canned suggestion is filed under use it; the categorisers, which read
+every message rather than the last, do not yet. A reader that forgets answers
+an Arabic customer in English for sending a photo of the damaged parcel, which
+the out-of-hours acknowledgement and the automation engine would have done
+(§6.96).
 
 **A coexistence number is live on the phone and on Cloud API at once**, and
 four rules keep the two sides from being read as each other. The copied

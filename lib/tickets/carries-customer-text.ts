@@ -1,7 +1,7 @@
 import type { SQL } from 'drizzle-orm';
 import { sql } from 'drizzle-orm';
 import { messages } from '@/db/schema';
-import { EDIT_LABEL, PLACEHOLDER, WHITESPACE } from './customer-text';
+import { WRAPPED_LABEL, PLACEHOLDER, WHITESPACE } from './customer-text';
 
 /**
  * Keeps only the messages that carry words somebody wrote — the SQL twin of
@@ -19,5 +19,5 @@ import { EDIT_LABEL, PLACEHOLDER, WHITESPACE } from './customer-text';
  */
 export function carriesCustomerText(): SQL {
   const text = sql`btrim(${messages.bodyText}, ${WHITESPACE})`;
-  return sql`(${text} <> '' and ${text} !~ ${PLACEHOLDER.source} and ${text} !~ ${EDIT_LABEL.source})`;
+  return sql`(${text} <> '' and ${text} !~ ${PLACEHOLDER.source} and ${text} !~ ${WRAPPED_LABEL.source})`;
 }

@@ -67,8 +67,10 @@ export const cannedSuggestions = pgTable(
 
     /**
      * The customer's language as the inbox page reads it (`detectLocale` on the
-     * newest inbound message). The report splits on it, because a suggester that
-     * works for English and not for Arabic is the systematic gap a total hides.
+     * newest inbound message carrying the customer's own words, and on the
+     * subject unless it is our label). The report splits on it, because a
+     * suggester that works for English and not for Arabic is the systematic gap
+     * a total hides.
      */
     customerLocale: text('customer_locale'),
 

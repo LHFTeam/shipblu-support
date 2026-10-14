@@ -11,7 +11,7 @@ import { requestBaseUrl } from '@/lib/kb/site';
 import { categoryOptions, rootCauseOptions } from '@/lib/categorise/queries';
 import { listSideConversationRecipients } from '@/lib/side-conversations/queries';
 import { getConversation } from '@/lib/tickets/conversation';
-import { hasCustomerText } from '@/lib/tickets/customer-text';
+import { lastCustomerWords, subjectWords } from '@/lib/tickets/customer-text';
 import {
   listActiveAgents,
   listApprovedTemplates,
@@ -23,7 +23,6 @@ import {
 import { answeredFromConsole } from '@/lib/tickets/channel-policy';
 import { suggestionsLive } from '@/lib/canned-suggest/settings';
 import { accountIdForConversation } from '@/lib/whatsapp/conversation';
-import { isReaction } from '@/lib/whatsapp/reaction';
 import { InboxShell } from '../shell';
 import { FocusBeat } from './focus';
 import { ConversationView } from './view';
@@ -90,31 +89,29 @@ export default async function ConversationPage({
     from `contacts.locale` — that column is written by nothing and reads 'en'
     for all six thousand contacts, so trusting it would search the English
     articles for every Arabic ticket in the system. Nor from our own label for a
-    photo or a voice note sent without a caption (`hasCustomerText`), which
-    reads as English and would search for "image": a ticket whose newest
-    message is a photo opens on the customer's words before it, as
-    `requesterLocale` does for a reply nobody watches go out.
+    photo or a voice note sent without a caption, which reads as English and
+    would search for "image": a ticket whose newest message is a photo opens on
+    the customer's words before it, as `requesterLocale` does for a reply
+    nobody watches go out. The subject is read the same way, because a chat
+    ticket's subject is its opening message's first line, and one that opened
+    with a photo is called `[image]`.
 
     It is also what the composer's canned-response picker starts on, and it is
     handed over separately from the panel: the two are the same question asked
-    once, and an agent without `kb.view` still needs the answer.
+    once, and an agent without `kb.view` still needs the answer. A canned
+    suggestion records the same reading as the language it was asked in
+    (`lib/canned-suggest/suggest.ts`), so its report splits on what the agent
+    saw.
   */
-  const lastInbound = [...conversation.messages]
-    .reverse()
-    .find(
-      (message) =>
-        message.direction === 'inbound' &&
-        message.kind === 'reply' &&
-        !isReaction(message.meta) &&
-        hasCustomerText(message.bodyText),
-    );
+  const lastInbound = lastCustomerWords(conversation.messages);
+  const subject = subjectWords(conversation.subject);
 
   // The panel lives in the reply form, so a ticket with no reply box (read-only,
   // or a channel not answered from here) has nowhere to show it.
   const answersHere = answeredFromConsole(conversation.channel);
   const wantsKnowledge = can(agent, 'kb.view') && answersHere;
-  const kbLocale = detectLocale(lastInbound?.bodyText, conversation.subject);
-  const terms = wantsKnowledge ? seedTerms(conversation.subject, lastInbound?.bodyText) : [];
+  const kbLocale = detectLocale(lastInbound?.bodyText, subject);
+  const terms = wantsKnowledge ? seedTerms(subject, lastInbound?.bodyText) : [];
 
   // The host this agent is actually on, so the article they open and the link
   // they paste both resolve. `publicBaseUrl()` names the address we publish,

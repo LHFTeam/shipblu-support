@@ -69,23 +69,28 @@ export function preferredLocale(contactLocale: string, sample: string | null): '
  * Four things narrow which message decides it, and each of them is a way the
  * answer went wrong:
  *
- * - **`reply` only.** A bounce, an out-of-office or one of our own system
- *   notices is written by a mail server or by us, not by the person we are
- *   about to write to.
+ * - **`reply` only.** One of our own system notices, like that attachment line,
+ *   is written by us, not by the person we are about to write to. A mail
+ *   server's bounce or out-of-office is not kept out by this: it arrives as
+ *   mail and is stored as a reply, flagged on `meta` (`isBounce`,
+ *   `isAutoReply`), and nothing here reads those flags yet.
  * - **Words the customer wrote.** A media message is not blank: a photo, a
  *   voice note or a document sent without a caption is stored with our own
  *   English label — `[image]`, `[voice note]`, `[2 attachments]` — so the
  *   console draws a bubble, and read as the customer's words its Latin letters
- *   answered an Arabic customer in English for sending a photo of the damaged
- *   parcel. `carriesCustomerText()` passes over a label, and over a body that
- *   is blank once trimmed, in which `preferredLocale` would find nothing to
- *   read. It passes over a WhatsApp edit too, although that label holds the
- *   customer's corrected words: they sit inside fourteen Latin letters of
- *   ours, which outvote a short Arabic correction, and a correction is in the
- *   language of the message it corrects, which the same person already sent.
- *   A label is passed over even when what it names is Arabic — a document's
- *   file name, the address of a dropped pin — because neither was written to
- *   us.
+ *   would answer an Arabic customer in English for sending a photo of the
+ *   damaged parcel. `carriesCustomerText()` passes over a label, and over a
+ *   body that is blank once trimmed, in which `preferredLocale` would find
+ *   nothing to read. It passes over a WhatsApp edit too, although that label
+ *   holds the customer's corrected words: they sit inside fourteen Latin
+ *   letters of ours, which outvote a short Arabic correction, and a correction
+ *   is in the language of the message it corrects, which the same person
+ *   already sent — on this ticket, unless the edit came after it closed and
+ *   opened one of its own, where nothing is left to read. A label is passed
+ *   over even when what it names is Arabic — a document's file name, the
+ *   address of a dropped pin — because neither was written to us. A ticket
+ *   holding nothing else falls to the contact's locale, which is 'en' for
+ *   every contact until something writes the column.
  * - **Not a WhatsApp reaction.** Its text is our own `[reacted 🙏]`, seven
  *   Latin letters and an emoji, so an Arabic customer who answered the agent's
  *   reply with a thumbs-up would be read as English from then on. The label

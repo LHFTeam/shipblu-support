@@ -51,7 +51,7 @@ describe('requesterLocale', () => {
   });
 
   // A photo, a voice note or a document sent without a caption is stored as
-  // our own label, and its Latin letters answered an Arabic customer in
+  // our own label, and its Latin letters would answer an Arabic customer in
   // English for sending a photo of the damaged parcel.
   const labels = [
     { channel: 'whatsapp', bodyText: '[image]', meta: { whatsappType: 'image' } },
@@ -88,7 +88,7 @@ describe('requesterLocale', () => {
 
   // An edit's label holds the corrected words inside fourteen Latin letters of
   // ours, which outvote a short Arabic correction. Over two lines, only
-  // `EDIT_LABEL` recognises it as ours.
+  // `WRAPPED_LABEL` recognises it as ours.
   it('reads past a WhatsApp edit to the message it corrects', async () => {
     const id = await ticket('whatsapp');
     await db.insert(messages).values([
@@ -105,6 +105,63 @@ describe('requesterLocale', () => {
         bodyText: '[edited a message: بكرة\nالساعة 10]',
         meta: { whatsappType: 'edit' },
         createdAt: new Date('2026-10-01T10:02:00Z'),
+      },
+    ]);
+
+    expect(await requesterLocale(id)).toBe('ar');
+  });
+
+  // The newest words decide, not the first: a customer who wrote Arabic, then
+  // English, then sent a photo reads English. A query that found the oldest
+  // surviving message would pass every test above.
+  it('reads the newest of the customer’s words, not the first', async () => {
+    const id = await ticket('whatsapp');
+    await db.insert(messages).values([
+      {
+        conversationId: id,
+        direction: 'inbound',
+        bodyText: 'الشحنة وصلت مكسورة',
+        meta: { whatsappType: 'text' },
+        createdAt: new Date('2026-10-01T10:00:00Z'),
+      },
+      {
+        conversationId: id,
+        direction: 'inbound',
+        bodyText: 'the parcel arrived broken',
+        meta: { whatsappType: 'text' },
+        createdAt: new Date('2026-10-01T10:01:00Z'),
+      },
+      {
+        conversationId: id,
+        direction: 'inbound',
+        bodyText: '[image]',
+        meta: { whatsappType: 'image' },
+        createdAt: new Date('2026-10-01T10:02:00Z'),
+      },
+    ]);
+
+    expect(await requesterLocale(id)).toBe('en');
+  });
+
+  // A reaction is known by the type WhatsApp gave it, not by our spelling of
+  // its text, which the label rule would also refuse: here only `notReaction`
+  // stands between a thumbs-up and the customer's language.
+  it('reads past a reaction whatever its text', async () => {
+    const id = await ticket('whatsapp');
+    await db.insert(messages).values([
+      {
+        conversationId: id,
+        direction: 'inbound',
+        bodyText: 'فين شحنتي؟',
+        meta: { whatsappType: 'text' },
+        createdAt: new Date('2026-10-01T10:00:00Z'),
+      },
+      {
+        conversationId: id,
+        direction: 'inbound',
+        bodyText: 'thumbs up',
+        meta: { whatsappType: 'reaction' },
+        createdAt: new Date('2026-10-01T10:05:00Z'),
       },
     ]);
 

@@ -35,6 +35,13 @@ const LABELS = [
   '[unsupported message: Message type is not supported]',
   '[2 attachments]',
   '[story_mention]',
+  '[empty comment]',
+  // Round a string from elsewhere, which may hold a bracket or a line break.
+  '[document: فاتورة [1].pdf]',
+  '[location: Hub [B], 12 Tahrir\nDokki (30.04, 31.23)]',
+  '[location (30.04, 31.23)]',
+  '[unsupported message: Message [x] is not supported]',
+  '[unsupported message type: a\nb]',
   '[]',
   '[[image]',
   '[\\]',
@@ -62,9 +69,11 @@ const WORDS = [
   '[one]two]',
   '[[image]]',
   '[image]\n[video]',
-  // Not quite an edit: the label is ours, so its spelling is exact.
+  // Not quite one of ours: the label's opening words are exact.
   '[Edited a message: one\ntwo]',
   '[edited a message:one\ntwo]',
+  '[documents\nlist]',
+  '[location of\nthe hub]',
 ];
 
 /** Characters `trim()` leaves, and so must `btrim`: each is not whitespace to it. */

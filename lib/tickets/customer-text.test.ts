@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { parseMetaWebhook } from '@/lib/meta/parse';
 import { displayText } from '@/lib/whatsapp/parse';
-import { EDIT_LABEL, PLACEHOLDER, WHITESPACE, hasCustomerText } from './customer-text';
+import {
+  PLACEHOLDER,
+  WHITESPACE,
+  WRAPPED_LABEL,
+  hasCustomerText,
+  lastCustomerWords,
+  subjectWords,
+} from './customer-text';
 
 /**
  * Which stored messages are somebody's words. The query's half,
@@ -21,6 +28,7 @@ describe('hasCustomerText', () => {
       '[sticker]',
       '[document: فاتورة.pdf]',
       '[2 attachments]',
+      '[empty comment]',
       ' [video] ',
       '\n[image]\n',
       '\u00A0[voice note]\u3000',
@@ -36,6 +44,20 @@ describe('hasCustomerText', () => {
       '[edited a message: بكرة الساعة 10\nمش النهارده]',
       '[edited a message: see [the photo] again]',
       '[edited a message: one\r\ntwo\u2028three]',
+    ]) {
+      expect(hasCustomerText(label), label).toBe(false);
+    }
+  });
+
+  // A file's name, a pin's address and Meta's reason come from elsewhere, and
+  // a bracket or a line break in one is not ours to have closed the label.
+  it('refuses a label round a string that holds a bracket or a line break', () => {
+    for (const label of [
+      '[document: فاتورة [1].pdf]',
+      '[location: برج القاهرة\nالزمالك (30.0459, 31.2243)]',
+      '[location (30.0459, 31.2243)]',
+      '[unsupported message: Message type [x] is not supported]',
+      '[unsupported message type: a\nb]',
     ]) {
       expect(hasCustomerText(label), label).toBe(false);
     }
@@ -58,11 +80,21 @@ describe('hasCustomerText', () => {
       { type: 'audio', audio: { id: '1', voice: true } },
       { type: 'document', document: { id: '1' } },
       { type: 'document', document: { id: '1', filename: 'فاتورة.pdf' } },
+      { type: 'document', document: { id: '1', filename: 'فاتورة [1].pdf' } },
       { type: 'sticker', sticker: { id: '1' } },
       { type: 'location', location: { latitude: 30.04, longitude: 31.23 } },
       {
         type: 'location',
         location: { latitude: 30.04, longitude: 31.23, name: 'برج القاهرة', address: 'الزمالك' },
+      },
+      {
+        type: 'location',
+        location: {
+          latitude: 30.04,
+          longitude: 31.23,
+          name: 'Hub [B]',
+          address: '12 Tahrir\nDokki',
+        },
       },
       { type: 'contacts', contacts: [{}, {}] },
       { type: 'reaction', reaction: { message_id: 'wamid.0', emoji: '🙏' } },
@@ -81,6 +113,7 @@ describe('hasCustomerText', () => {
         },
       },
       { type: 'unsupported', errors: [{ code: 131051, title: 'Message type is not supported' }] },
+      { type: 'unsupported', errors: [{ code: 131051, title: 'Message [x] is not supported' }] },
       { type: 'unsupported' },
     ];
 
@@ -127,6 +160,50 @@ describe('hasCustomerText', () => {
   });
 });
 
+describe('lastCustomerWords', () => {
+  const row = (bodyText: string, extra: Record<string, unknown> = {}) => ({
+    direction: 'inbound',
+    kind: 'reply',
+    meta: {} as unknown,
+    bodyText,
+    ...extra,
+  });
+
+  // The page's half of the pick `requesterLocale` makes: the newest words, not
+  // the first, and nothing that only looks like the newest message.
+  it('takes the newest inbound reply that carries the customer’s words', () => {
+    const timeline = [
+      row('الشحنة وصلت مكسورة'),
+      row('my parcel arrived broken'),
+      row('[image]', { meta: { whatsappType: 'image' } }),
+      row('[reacted 🙏]', { meta: { whatsappType: 'reaction' } }),
+      row('thanks', { meta: { whatsappType: 'reaction' } }),
+      row('[edited a message: broken\nbadly]', { meta: { whatsappType: 'edit' } }),
+      row('\n'),
+      row('we are on it', { direction: 'outbound' }),
+      row('checked with the hub', { kind: 'note' }),
+    ];
+
+    expect(lastCustomerWords(timeline)?.bodyText).toBe('my parcel arrived broken');
+  });
+
+  it('finds nothing in a timeline with no words of the customer’s own', () => {
+    expect(lastCustomerWords([row('[voice note]'), row('[2 attachments]')])).toBeUndefined();
+    expect(lastCustomerWords([])).toBeUndefined();
+  });
+});
+
+describe('subjectWords', () => {
+  // A chat ticket's subject is its opening message's first line.
+  it('keeps a subject somebody wrote and drops one that is our label', () => {
+    expect(subjectWords('فين شحنتي')).toBe('فين شحنتي');
+    expect(subjectWords('Re: [SB-1234] where is my order')).toBe('Re: [SB-1234] where is my order');
+    expect(subjectWords('[voice note]')).toBeNull();
+    expect(subjectWords('[image]')).toBeNull();
+    expect(subjectWords(null)).toBeNull();
+  });
+});
+
 describe('the constants the query is built from', () => {
   // Postgres's `btrim` is handed `WHITESPACE` where this module calls `trim()`,
   // so a character in one set and not the other is a body the twins disagree
@@ -147,6 +224,6 @@ describe('the constants the query is built from', () => {
   // and any other would be a difference only one side applies.
   it('carry no flag but the one Postgres behaves as if it had', () => {
     expect(PLACEHOLDER.flags).toBe('');
-    expect(EDIT_LABEL.flags).toBe('s');
+    expect(WRAPPED_LABEL.flags).toBe('s');
   });
 });
