@@ -108,6 +108,19 @@ describe('parseIgnoredNumbers', () => {
     expect(parseIgnoredNumbers('   ')).toEqual({ ok: true, value: [] });
   });
 
+  // What a clipboard carries out of WhatsApp or an Arabic page: direction
+  // marks round it, a non-breaking hyphen, Arabic-Indic digits.
+  it('reads a pasted number the way it looks', () => {
+    expect(
+      parseIgnoredNumbers(
+        '\u202a+20 2 3569 1100\u202c\n\u200e+20 2 3569\u20111220\n٢٠١٠٠١٢٣٤٥٦٧\n۲۰۱۰۰۱۲۳۴۵۶۸',
+      ),
+    ).toEqual({
+      ok: true,
+      value: ['20235691100', '20235691220', '201001234567', '201001234568'],
+    });
+  });
+
   it('accepts a phone number id, which matches on its own', () => {
     expect(parseIgnoredNumbers('1345390131993034')).toEqual({
       ok: true,
@@ -118,7 +131,7 @@ describe('parseIgnoredNumbers', () => {
   // The local spelling would be stored as 0235691100 and never match the
   // 20235691100 Meta sends: the number would keep arriving while the screen
   // said it was ignored.
-  it.each(['02 3569 1100', '0020 2 3569 1100', '010 0123 4567'])(
+  it.each(['02 3569 1100', '0020 2 3569 1100', '010 0123 4567', '+20 (0)2 3569 1100'])(
     'refuses %s, which is missing its country code',
     (written) => {
       const result = parseIgnoredNumbers(`20235691220\n${written}`);

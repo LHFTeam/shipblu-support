@@ -600,7 +600,11 @@ describe('processWhatsAppWebhook: a number another service answers', () => {
 
   async function storedPayload(id: string) {
     const [row] = await db
-      .select({ payload: webhookEvents.payload, processedAt: webhookEvents.processedAt })
+      .select({
+        payload: webhookEvents.payload,
+        processedAt: webhookEvents.processedAt,
+        providerEventId: webhookEvents.providerEventId,
+      })
       .from(webhookEvents)
       .where(eq(webhookEvents.id, id));
     return row!;
@@ -617,7 +621,7 @@ describe('processWhatsAppWebhook: a number another service answers', () => {
   it('keeps nothing about the ignored number, even where it has a channel, and takes it out of the stored delivery', async () => {
     await ignore([OTHER.display]);
 
-    const id = await deliver(
+    const id = await store(
       delivery(
         change(OTHER, {
           ...ask('wamid.other', '2026-10-08T09:00:00Z'),
@@ -626,12 +630,19 @@ describe('processWhatsAppWebhook: a number another service answers', () => {
         change(SUPPORT, ask('wamid.support', '2026-10-08T09:05:00Z')),
       ),
     );
+    // The key the route derives on arrival: wamids, each the sender's number in base64.
+    await db
+      .update(webhookEvents)
+      .set({ providerEventId: 'm:wamid.other|m:wamid.support|s:wamid.sent-by-them:read' })
+      .where(eq(webhookEvents.id, id));
+    await run(id);
 
     expect(await db.select({ id: messages.channelMessageId }).from(messages)).toEqual([
       { id: 'wamid.support' },
     ]);
     const event = await storedPayload(id);
     expect(event.processedAt).not.toBeNull();
+    expect(event.providerEventId).toBeNull();
     expect(JSON.stringify(event.payload)).not.toContain('wamid.other');
     expect(JSON.stringify(event.payload)).not.toContain(OTHER.display);
     expect(JSON.stringify(event.payload)).toContain('wamid.support');

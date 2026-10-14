@@ -139,7 +139,7 @@ export function parseIgnoredNumbers(raw: string): IgnoredNumbersResult {
   const numbers: string[] = [];
 
   for (const line of raw.split(/[\r\n,]+/)) {
-    const written = line.trim();
+    const written = asTyped(line);
     if (!written) continue;
 
     if (!/^[+\d\s().-]+$/.test(written)) {
@@ -150,12 +150,15 @@ export function parseIgnoredNumbers(raw: string): IgnoredNumbersResult {
     }
 
     const number = written.replace(/\D/g, '');
-    if (number.startsWith('0')) {
+    // `+20 (0)2 …` is the other way the trunk 0 is written, and it slips past
+    // the check below because the first digit is the country code's.
+    if (number.startsWith('0') || /\(\s*0\s*\)/.test(written)) {
       return {
         ok: false,
         error:
-          `“${written}” starts with 0. Write it with the country code in place of the ` +
-          `leading 0 — +20 2 3569 1100, not 02 3569 1100 or 0020 2 3569 1100.`,
+          `“${written}” has the local 0 in it. Write it with the country code in place of the ` +
+          `leading 0 — +20 2 3569 1100, not 02 3569 1100, +20 (0)2 3569 1100 or ` +
+          `0020 2 3569 1100.`,
       };
     }
     if (number.length < 8 || number.length > 20) {
@@ -176,6 +179,24 @@ export function parseIgnoredNumbers(raw: string): IgnoredNumbersResult {
   }
 
   return { ok: true, value: numbers };
+}
+
+/**
+ * A line as the admin meant it, rather than as the clipboard carried it.
+ *
+ * A number copied from WhatsApp, or from any page in an Arabic interface,
+ * arrives wrapped in invisible direction marks, with a phone's non-breaking
+ * hyphen, or in Arabic-Indic digits. Each is a number the admin can see is
+ * right, refused by a message quoting it back looking identical to the
+ * example it recommends.
+ */
+function asTyped(line: string): string {
+  return line
+    .replace(/\p{Cf}/gu, '')
+    .replace(/[\u0660-\u0669]/g, (d) => String(d.charCodeAt(0) - 0x0660))
+    .replace(/[\u06f0-\u06f9]/g, (d) => String(d.charCodeAt(0) - 0x06f0))
+    .replace(/[\u2010-\u2015\u2212]/g, '-')
+    .trim();
 }
 
 /**

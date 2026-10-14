@@ -61,11 +61,20 @@ export async function processWhatsAppWebhook(event: {
   // Before anything reads the delivery, and written back before anything can
   // fail, so a retry parses what is left and the stored row never again holds
   // the other service's customers (`withoutIgnoredNumbers`).
+  //
+  // The delivery key goes too. The route built it from the whole delivery, and
+  // a wamid is the sender's number in base64, so it would keep every one of
+  // those customers for the retention the payload was stripped to escape.
+  // Recomputing it from what is left could collide with a delivery already
+  // stored under that smaller key, and a unique violation here would send the
+  // job dead; null is distinct to the index. What that gives up is dedupe of a
+  // redelivery of this one batch, which lands as a new row and is stripped and
+  // re-run here — safe, because every part of a delivery is (above).
   const kept = withoutIgnoredNumbers(event.payload, await ignoredBusinessNumbers());
   if (kept.dropped > 0) {
     await db
       .update(webhookEvents)
-      .set({ payload: kept.payload })
+      .set({ payload: kept.payload, providerEventId: null })
       .where(eq(webhookEvents.id, event.id));
     log.info(`${event.id}: dropped ${kept.dropped} change(s) for ignored business numbers`);
   }
