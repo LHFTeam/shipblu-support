@@ -691,6 +691,23 @@ drawn in its place. A bracket regex would also hide a caption like
 story, and the name a document was sent under. Anything else asking what the
 customer _said_ has the same question to answer.
 
+**A message without words is stored with our label, and the label is not the
+customer's.** `displayText` in `lib/whatsapp/parse.ts` and `lib/meta/parse.ts`
+writes a caption-less photo, voice note or document into `body_text` as
+`[image]`, `[voice note]`, `[2 attachments]`, so the console draws a bubble
+rather than a blank, and a WhatsApp edit as `[edited a message: …]` round the
+customer's new words. A reader that only shows the latest message — the inbox
+preview — keeps the label; that is what it is for. Anything that reads the
+customer's last words for what they _say_ looks past it: `carriesCustomerText()`
+in a query (`lib/tickets/carries-customer-text.ts`), `hasCustomerText(bodyText)`
+over rows already in hand (`lib/tickets/customer-text.ts`), built from one set of
+patterns and held to the same answer by `carries-customer-text.db.test.ts`. The
+priority classifier, `requesterLocale` and the ticket page's knowledge panel and
+canned picker do.
+A reader that forgets answers an Arabic customer in English for sending a photo
+of the damaged parcel, which is what the out-of-hours acknowledgement and the
+automation engine did (§6.96).
+
 **A coexistence number is live on the phone and on Cloud API at once**, and
 four rules keep the two sides from being read as each other. The copied
 history is a record, not traffic (`lib/tickets/ingest-whatsapp-history.ts`):
@@ -1127,10 +1144,11 @@ Two different questions decide the language, and they are not the same module.
 **Anything that writes to a customer unattended goes through
 `lib/tickets/locale.ts`** — the out-of-hours acknowledgement and an automation's
 canned reply both call `requesterLocale()`, which picks the most recent inbound
-`reply` carrying text and hands it to `preferredLocale()`. Each of those
-narrowings is a way the answer went wrong: the last inbound row of _any_ kind
-includes the English `system` notice we write when a form attachment fails, and
-a media message carries no text at all. A sender that reads the language off a
+`reply` carrying words the customer wrote and hands it to `preferredLocale()`.
+Each of those narrowings is a way the answer went wrong: the last inbound row of
+_any_ kind includes the English `system` notice we write when a form attachment
+fails, and a photo sent without a caption is stored as our own English
+`[image]`. A sender that reads the language off a
 message it already happens to be holding is how the two came to disagree, so do
 not reintroduce that shortcut — one indexed query is the price of the invariant.
 

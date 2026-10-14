@@ -4,7 +4,7 @@ import { conversations } from '@/db/schema';
 import { isCategorisableMessage } from '@/lib/categorise/apply';
 import { enqueue } from '@/lib/queue';
 import { isReadOnlyChannel } from '@/lib/tickets/channel-policy';
-import { hasCustomerText } from './request';
+import { hasCustomerText } from '@/lib/tickets/customer-text';
 import { priorityAiMode } from './settings';
 
 /**

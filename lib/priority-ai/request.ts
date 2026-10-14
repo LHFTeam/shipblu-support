@@ -61,35 +61,6 @@ const INSTRUCTIONS = [
   'judge; that is a real answer, not a last resort.',
 ].join(' ');
 
-/**
- * Whether a message carries words the customer wrote.
- *
- * A photo, a voice note or a document sent without a caption is stored as our
- * own label for it — `[image]`, `[voice note]`, `[2 attachments]`, from the
- * `displayText` in `lib/whatsapp/parse.ts` and `lib/meta/parse.ts` — so the
- * console shows a bubble rather than a blank. Asked about that label, the model
- * sees a message too short to judge and answers `low`, as `INSTRUCTIONS` tell
- * it to; on an opening message that lowers a ticket whose photo may well be of
- * the damaged parcel. The model cannot see the photo, so it is not asked about
- * one. The message still counts as the ticket's opening, so the words that
- * follow it may raise and never lower.
- *
- * A WhatsApp edit is refused too, whatever it says. Its label wraps the
- * customer's new words in ours — `[edited a message: …]`, from the same
- * `displayText` — which `PLACEHOLDER` recognised only when the words fitted on
- * one line and held no bracket: a two-line edit went to the model with our
- * wrapper around it, and a one-line one did not go at all. The message it
- * edits was asked about when it arrived, so skipping every edit is the
- * consistent half of that, and keeps our label out of what the model reads.
- */
-export function hasCustomerText(bodyText: string): boolean {
-  const text = bodyText.trim();
-  return text !== '' && !PLACEHOLDER.test(text) && !EDIT_LABEL.test(text);
-}
-
-const PLACEHOLDER = /^\[[^\]\n]*\]$/;
-const EDIT_LABEL = /^\[edited a message(?:: [\s\S]*)?\]$/;
-
 export function priorityQuestion(): ChoiceQuestion {
   const criteria: Record<string, string> = {};
   // In `PRIORITIES` order, so the request is the same bytes every time.

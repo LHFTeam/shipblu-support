@@ -11,6 +11,7 @@ import { requestBaseUrl } from '@/lib/kb/site';
 import { categoryOptions, rootCauseOptions } from '@/lib/categorise/queries';
 import { listSideConversationRecipients } from '@/lib/side-conversations/queries';
 import { getConversation } from '@/lib/tickets/conversation';
+import { hasCustomerText } from '@/lib/tickets/customer-text';
 import {
   listActiveAgents,
   listApprovedTemplates,
@@ -88,7 +89,11 @@ export default async function ConversationPage({
     The language comes from the script of what the customer actually wrote, not
     from `contacts.locale` — that column is written by nothing and reads 'en'
     for all six thousand contacts, so trusting it would search the English
-    articles for every Arabic ticket in the system.
+    articles for every Arabic ticket in the system. Nor from our own label for a
+    photo or a voice note sent without a caption (`hasCustomerText`), which
+    reads as English and would search for "image": a ticket whose newest
+    message is a photo opens on the customer's words before it, as
+    `requesterLocale` does for a reply nobody watches go out.
 
     It is also what the composer's canned-response picker starts on, and it is
     handed over separately from the panel: the two are the same question asked
@@ -98,7 +103,10 @@ export default async function ConversationPage({
     .reverse()
     .find(
       (message) =>
-        message.direction === 'inbound' && message.kind === 'reply' && !isReaction(message.meta),
+        message.direction === 'inbound' &&
+        message.kind === 'reply' &&
+        !isReaction(message.meta) &&
+        hasCustomerText(message.bodyText),
     );
 
   // The panel lives in the reply form, so a ticket with no reply box (read-only,

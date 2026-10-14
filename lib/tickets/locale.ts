@@ -1,6 +1,7 @@
-import { and, desc, eq, sql } from 'drizzle-orm';
+import { and, desc, eq } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { contacts, conversations, messages } from '@/db/schema';
+import { carriesCustomerText } from './carries-customer-text';
 import { notReaction } from './not-reaction';
 
 /**
@@ -71,15 +72,25 @@ export function preferredLocale(contactLocale: string, sample: string | null): '
  * - **`reply` only.** A bounce, an out-of-office or one of our own system
  *   notices is written by a mail server or by us, not by the person we are
  *   about to write to.
- * - **Non-empty text.** `body_text` is `not null default ''` and a WhatsApp or
- *   Instagram media message carries no text at all, so an Arabic customer whose
- *   last message is a photo of the damaged parcel would otherwise fall through
- *   to the contact locale and be answered in English. `btrim` rather than `<>
- *   ''` because `preferredLocale` treats whitespace as nothing to read, and a
- *   row it would reject should not have been the row that decided.
+ * - **Words the customer wrote.** A media message is not blank: a photo, a
+ *   voice note or a document sent without a caption is stored with our own
+ *   English label — `[image]`, `[voice note]`, `[2 attachments]` — so the
+ *   console draws a bubble, and read as the customer's words its Latin letters
+ *   answered an Arabic customer in English for sending a photo of the damaged
+ *   parcel. `carriesCustomerText()` passes over a label, and over a body that
+ *   is blank once trimmed, in which `preferredLocale` would find nothing to
+ *   read. It passes over a WhatsApp edit too, although that label holds the
+ *   customer's corrected words: they sit inside fourteen Latin letters of
+ *   ours, which outvote a short Arabic correction, and a correction is in the
+ *   language of the message it corrects, which the same person already sent.
+ *   A label is passed over even when what it names is Arabic — a document's
+ *   file name, the address of a dropped pin — because neither was written to
+ *   us.
  * - **Not a WhatsApp reaction.** Its text is our own `[reacted 🙏]`, seven
  *   Latin letters and an emoji, so an Arabic customer who answered the agent's
- *   reply with a thumbs-up would be read as English from then on.
+ *   reply with a thumbs-up would be read as English from then on. The label
+ *   rule refuses that text as well; `notReaction()` stays because it reads the
+ *   type WhatsApp gave the row rather than our spelling of it.
  * - **The most recent one that survives those.** Not the first message on the
  *   ticket: somebody who opened in English and has been writing Arabic for
  *   three messages reads Arabic.
@@ -103,7 +114,7 @@ export async function requesterLocale(conversationId: string): Promise<'ar' | 'e
           eq(messages.conversationId, conversationId),
           eq(messages.direction, 'inbound'),
           eq(messages.kind, 'reply'),
-          sql`btrim(${messages.bodyText}) <> ''`,
+          carriesCustomerText(),
           notReaction(),
         ),
       )

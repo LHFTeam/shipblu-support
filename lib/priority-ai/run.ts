@@ -10,6 +10,7 @@ import { onPriorityChanged } from '@/lib/sla';
 import { afterTicketUpdate } from '@/lib/tickets/lifecycle';
 import { PRIORITY_STAMP } from '@/lib/tickets/priority-stamp';
 import { isReadOnlyChannel } from '@/lib/tickets/channel-policy';
+import { hasCustomerText } from '@/lib/tickets/customer-text';
 import { notReaction } from '@/lib/tickets/not-reaction';
 import { PRIORITIES, isPriority, type Priority } from '@/lib/tickets/vocabulary';
 import {
@@ -21,7 +22,7 @@ import {
   typesafeModel,
 } from '@/lib/typesafe/client';
 import { CONFIDENT_OUTCOMES, DEFAULT_PRIORITY, decide, type PriorityOutcome } from './decide';
-import { PRIORITY_QUESTION, hasCustomerText, priorityRequest } from './request';
+import { PRIORITY_QUESTION, priorityRequest } from './request';
 import { priorityAiMinProbability, priorityAiMode, type PriorityAiMode } from './settings';
 
 const log = logger('classify_priority');
@@ -331,6 +332,16 @@ type LoadedRow = {
  * the volume. Machine mail is not the customer — the email ingest flags it and
  * keeps an autoresponder's time off the customer's clock — and a spam or
  * deleted ticket is not in anybody's queue.
+ *
+ * A message with no words of the customer's own is not asked about either:
+ * our label for a caption-less photo, voice note or document, or a WhatsApp
+ * edit (`hasCustomerText`). Asked about `[image]`, the model sees a message too
+ * short to judge and answers `low`, as the question's instructions tell it to;
+ * on an opening message that lowers a ticket whose photo may well be of the
+ * damaged parcel. The model cannot see the photo, so it is not asked about
+ * one. The message still counts as the ticket's opening, so the words that
+ * follow it may raise and never lower. The message an edit corrects was asked
+ * about when it arrived.
  */
 function skipReason(row: LoadedRow): string | null {
   if (!isCategorisableMessage(row.kind, row.direction)) return 'not an inbound reply';

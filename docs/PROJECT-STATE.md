@@ -6199,6 +6199,28 @@ still waiting for it` one whose outcome is not known yet.
     Playwright as a `pageerror`, not a console message, so a check listening
     only to the console reports a clean page.
 
+97. **A photo sent without a caption reads as the customer writing English.**
+    `displayText` (`lib/whatsapp/parse.ts`, `lib/meta/parse.ts`) stores a
+    caption-less photo, voice note or document as our own label — `[image]`,
+    `[voice note]`, `[2 attachments]` — so the console draws a bubble.
+    `requesterLocale` skipped a blank body and a reaction but not that, and
+    `preferredLocale` counted the label's Latin letters, so an Arabic customer
+    whose newest message was a photo was acknowledged out of hours, or answered
+    by an automation rule, in English. Its comment said a media message "carries
+    no text at all", and AGENTS.md repeated it; and with `contacts.locale` at
+    'en' on every contact there was no other answer to fall back on. On
+    2026-10-14, eleven tickets on the support channels stood that way, each
+    with Arabic earlier on the ticket: ten on WhatsApp, one on Facebook. With
+    the label skipped, ten read Arabic and the eleventh English, because that
+    customer's newest own words were English. The priority classifier already
+    refused the shape, so the rule moved out of it to
+    `lib/tickets/customer-text.ts` and gained a SQL twin built from the same
+    patterns (AGENTS.md has the convention). Two details of the twin are traps
+    of their own: Postgres's bare `btrim` strips only the space where `trim()`
+    strips twenty-five characters, so it is handed that set; and a pattern
+    reaches Postgres without its flags, so the edit's `.` relies on `s` in
+    JavaScript to match a line break as Postgres's always does.
+
 ### Tooling notes for this environment
 
 Supabase and Render MCP tools work and are the fastest way to check real state —
