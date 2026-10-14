@@ -1086,9 +1086,10 @@ is code:
   `GRAPH_VERSION` actually names, and treat a field missing from it as a
   finding rather than as an omission by the doc.
 
-- **Agents.** **11 accounts exist** as of 2026-09-20 (1 account_admin, 4 admins,
-  2 supervisors, 4 agents), up from 3, and 10 of them have signed in at least
-  once. **Seven `send_agent_invite` jobs died on 2026-09-03** with `the token …
+- **Agents.** **13 accounts exist** as of 2026-10-14 (1 account_admin, 4 admins,
+  2 supervisors, 6 agents), up from 3, and 12 of them have signed in at least
+  once; one agent account is deactivated, so 12 are active.
+  **Seven `send_agent_invite` jobs died on 2026-09-03** with `the token …
 cannot be unsealed — APP_SECRET may have been rotated`, so some of that
   onboarding did not go out by email; check nobody is still waiting on one before
   inviting the rest. `groups` (3 rows) still needs its membership — which is now load-bearing rather than
@@ -1097,9 +1098,9 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
   on the timeline.
 - ~~**Assignment is configured but off.**~~ **Switched on for `Support` on
   2026-09-02**, round robin; 161 conversations now carry an assignee. **The
-  roster is still 3 of 11 agents**, though, which is the thing to fix next here —
-  eight of the people who now have accounts are in no group, and auto-assignment
-  only ever considers members of the ticket's group. `Customer Care` and
+  roster is still 3 of the 12 active agents**, though, which is the thing to fix
+  next here — nine of the people who now have accounts are in no group, and
+  auto-assignment only ever considers members of the ticket's group. `Customer Care` and
   `Merchant Care` still have empty rosters and no channel points at them, so they
   route nothing until somebody decides what belongs in them.
 

@@ -112,9 +112,11 @@ export const agents = pgTable(
     acceptingChangedAt: timestamp('accepting_changed_at', { withTimezone: true }),
 
     /**
-     * How many open tickets this agent may hold at once under load-balanced
-     * assignment. Null falls through to the group's default, and then to
-     * uncapped — so a cap is something you opt into on either level.
+     * How many open tickets this agent may hold at once — under *every*
+     * strategy, not only load balancing: `filterCandidates` rejects a full agent
+     * before `assignConversation` consults the strategy at all, so a round-robin
+     * group skips them too. Null falls through to the group's default, and then
+     * to uncapped — so a cap is something you opt into on either level.
      */
     maxOpenTickets: integer('max_open_tickets'),
 
