@@ -96,6 +96,36 @@ describe('previewReducer', () => {
   });
 });
 
+describe('previewReducer, for files the thread loads by itself', () => {
+  const picture = { id: 'p', name: 'Picture, 86 KB', kind: 'image' as const, loadsItself: true };
+  const clip = { id: 'c', name: 'Video, 1 MB', kind: 'video' as const, loadsItself: true };
+
+  it('leaves a failure nobody asked for as the line on screen', () => {
+    // Every picture on the ticket failing together — Storage down — is not
+    // read out picture by picture as the ticket opens.
+    expect(run(fail(picture)).notice).toBeNull();
+    expect(run(fail(clip)).notice).toBeNull();
+    expect(loadOf(run(fail(picture)), picture.id)).toBe('failed');
+  });
+
+  it('announces a failure that answers "Try again"', () => {
+    expect(run(fail(picture), retry(picture), fail(picture)).notice?.text).toBe(
+      'Picture, 86 KB could not be shown here. Try again, or open the file.',
+    );
+  });
+
+  it('announces a player’s failure that follows play', () => {
+    const state = run({ type: 'settle', file: clip, load: 'failed', pressed: true });
+    expect(state.notice?.text).toMatch(/^Video, 1 MB could not be played/);
+  });
+
+  it('withdraws the notice once the retry loads', () => {
+    expect(
+      run(fail(picture), retry(picture), fail(picture), retry(picture), load(picture)).notice,
+    ).toBeNull();
+  });
+});
+
 describe('previewFile', () => {
   const stored = { id: 'f', filename: '1011360668584057.ogg', sizeBytes: 21_504 };
 
@@ -107,5 +137,23 @@ describe('previewFile', () => {
   it('names a picture, and a file shown only as a link, by its file name', () => {
     expect(previewFile({ ...stored, filename: 'IMG_0412.jpg' }, 'image').name).toBe('IMG_0412.jpg');
     expect(previewFile(stored, undefined).name).toBe('1011360668584057.ogg');
+  });
+
+  it('names a picture in the thread by what it is, as it has no chip to be named after', () => {
+    const photo = { ...stored, filename: '1002979522811778.jpg', sizeBytes: 88_064 };
+    expect(previewFile(photo, 'image', true)).toEqual({
+      id: 'f',
+      name: 'Picture, 86 KB',
+      kind: 'image',
+      loadsItself: true,
+    });
+  });
+
+  it('marks only what fetches unasked as loading by itself', () => {
+    expect(previewFile(stored, 'video', true).loadsItself).toBe(true);
+    // A voice note fetches nothing until play.
+    expect(previewFile(stored, 'audio', true).loadsItself).toBeUndefined();
+    expect(previewFile(stored, undefined, true).loadsItself).toBeUndefined();
+    expect(previewFile(stored, 'image').loadsItself).toBeUndefined();
   });
 });

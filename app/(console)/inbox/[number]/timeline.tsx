@@ -17,8 +17,9 @@ import {
   type SharedLocation,
 } from '@/lib/tickets/shared-location';
 import { readOnlyReason } from '@/lib/tickets/channel-policy';
+import { isMediaStandIn, mediaLooks } from '@/lib/tickets/message-media';
 import { deliveryOf, type MessageMeta, type Voice, voiceOf } from '@/lib/tickets/thread';
-import { AttachmentList } from './attachments';
+import { MessageFiles } from './attachments';
 import { CommentModeration } from './comment-moderation';
 import { SideConversationCard } from './side-conversations';
 
@@ -267,10 +268,15 @@ function MessageParts({
     today sends words and a pin in one message, but a support tool silently
     dropping a customer's sentence is a much worse failure than a redundant
     line, so the card is additive wherever there is real text.
+
+    A photo, a voice note or a document sent alone follows the same rule: its
+    `[image]` is left out once the file itself is drawn, and a caption never is.
   */
   const hasText = message.bodyHtml
     ? true
-    : message.bodyText.trim() !== '' && !(location && isLocationPlaceholder(message.bodyText));
+    : message.bodyText.trim() !== '' &&
+      !(location && isLocationPlaceholder(message.bodyText)) &&
+      !isMediaStandIn(message);
   if (hasText) parts.push('text');
   if (location) parts.push('location');
   if (message.attachments.length > 0) parts.push('files');
@@ -339,7 +345,7 @@ function MessageParts({
         ) : part === 'location' && location ? (
           <SharedLocationCard location={location} />
         ) : (
-          <AttachmentList files={message.attachments} />
+          <MessageFiles files={message.attachments} looks={mediaLooks(message)} />
         )}
       </ChatBubble>
     );

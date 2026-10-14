@@ -1,6 +1,6 @@
 /**
  * What a message's inline pictures are doing, and what the list's live region
- * says about them — `AttachmentList` in the inbox draws it.
+ * says about them — `AttachmentList` and `MessageFiles` in the inbox draw it.
  *
  * A reducer rather than three `useState`s and handlers that read them, because
  * every decision here depends on more than one of the three. A handler can only
@@ -29,8 +29,17 @@ export type Load = 'loading' | 'loaded' | 'failed';
  * A voice note's player is on the page from the start rather than opened from
  * its chip, so for this reducer it is always showing: its failure is announced
  * at once, where a closed picture's waits until it is opened.
+ *
+ * `loadsItself` marks a picture or a video in the ticket's thread, which is on
+ * the page from the start like a voice note but, unlike one, fetches without
+ * anybody pressing anything (see `settle`).
  */
-export type PreviewFile = { id: string; name: string; kind?: 'image' | 'audio' | 'video' };
+export type PreviewFile = {
+  id: string;
+  name: string;
+  kind?: 'image' | 'audio' | 'video';
+  loadsItself?: boolean;
+};
 
 /**
  * What a player is called aloud: by what it is, not by its file. WhatsApp sends
@@ -42,18 +51,37 @@ export function playerName(kind: 'audio' | 'video', sizeBytes: number): string {
   return `${kind === 'audio' ? 'Audio' : 'Video'}, ${formatBytes(sizeBytes)}`;
 }
 
-/** A file as this reducer knows it, named the way its control is. */
+/**
+ * What a picture drawn in the thread is called, for the same reason as a
+ * player: every photo in production is named for its media id or its message's,
+ * and in the thread no chip carries the name for it.
+ */
+export function pictureName(sizeBytes: number): string {
+  return `Picture, ${formatBytes(sizeBytes)}`;
+}
+
+/**
+ * A file as this reducer knows it, named the way its control is. `inline` is
+ * the thread, where a picture has no chip to be named after.
+ */
 export function previewFile(
   file: { id: string; filename: string; sizeBytes: number },
   kind: PreviewFile['kind'],
+  inline = false,
 ): PreviewFile {
   const name =
-    kind === 'audio' || kind === 'video' ? playerName(kind, file.sizeBytes) : file.filename;
-  return { id: file.id, name, kind };
+    kind === 'audio' || kind === 'video'
+      ? playerName(kind, file.sizeBytes)
+      : inline && kind === 'image'
+        ? pictureName(file.sizeBytes)
+        : file.filename;
+  return inline && (kind === 'image' || kind === 'video')
+    ? { id: file.id, name, kind, loadsItself: true }
+    : { id: file.id, name, kind };
 }
 
 const showing = (state: PreviewState, file: PreviewFile) =>
-  file.kind === 'audio' || state.showing[file.id] === true;
+  file.kind === 'audio' || file.loadsItself === true || state.showing[file.id] === true;
 
 export type PreviewState = {
   /**
@@ -77,7 +105,11 @@ export type PreviewState = {
 
 export type PreviewAction =
   | { type: 'toggle'; file: PreviewFile }
-  | { type: 'settle'; file: PreviewFile; load: 'loaded' | 'failed' }
+  /**
+   * `pressed` says a player's failure followed play or a seek — anything after
+   * its first metadata, which nothing fetches past without somebody asking.
+   */
+  | { type: 'settle'; file: PreviewFile; load: 'loaded' | 'failed'; pressed?: boolean }
   | { type: 'retry'; file: PreviewFile };
 
 export const initialPreviewState: PreviewState = { showing: {}, loads: {}, notice: null, seq: 0 };
@@ -104,7 +136,14 @@ export function previewReducer(state: PreviewState, action: PreviewAction): Prev
       if (action.load === 'loaded') return withdraw(next, file.id);
       // A failure behind a closed preview is told when it is opened, not now,
       // while the agent is looking at something else.
-      return showing(state, file) ? announce(next, file) : next;
+      if (!showing(state, file)) return next;
+      // A picture or video that loads by itself answers nothing the agent did,
+      // so its failure is left as the visible line it already is. Announced,
+      // a Storage outage would read out every picture on the ticket the moment
+      // it opened. Only a press is answered: "Try again", which is the one key
+      // that writes "loading", or play.
+      if (file.loadsItself && !action.pressed && state.loads[file.id] !== 'loading') return next;
+      return announce(next, file);
     }
 
     case 'retry':

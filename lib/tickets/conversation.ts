@@ -270,7 +270,12 @@ export async function getConversation(
         })
         .from(attachments)
         .innerJoin(messages, eq(messages.id, attachments.messageId))
-        .where(eq(messages.conversationId, row.conversation.id)),
+        .where(eq(messages.conversationId, row.conversation.id))
+        // The thread draws a message's pictures one under another, so an order
+        // Postgres is free to change between two renders would shuffle them on
+        // a live update. Stored order: the order an email's parts were in, and
+        // for Messenger's albums the order their downloads finished in.
+        .orderBy(asc(attachments.createdAt), asc(attachments.id)),
 
       db
         .select({
