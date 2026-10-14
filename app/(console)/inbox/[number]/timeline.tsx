@@ -16,10 +16,10 @@ import {
   readSharedLocation,
   type SharedLocation,
 } from '@/lib/tickets/shared-location';
-import { readOnlyReason } from '@/lib/tickets/channel-policy';
+import { drawsMediaInline, readOnlyReason } from '@/lib/tickets/channel-policy';
 import { isMediaStandIn, mediaLooks } from '@/lib/tickets/message-media';
 import { deliveryOf, type MessageMeta, type Voice, voiceOf } from '@/lib/tickets/thread';
-import { MessageFiles } from './attachments';
+import { AttachmentList, MessageFiles } from './attachments';
 import { CommentModeration } from './comment-moderation';
 import { SideConversationCard } from './side-conversations';
 
@@ -77,6 +77,7 @@ export function Timeline({
   canViewContact: boolean;
 }) {
   const readOnly = Boolean(readOnlyReason(conversation.channel));
+  const inlineMedia = drawsMediaInline(conversation.channel);
   const items: ReactNode[] = [];
   let day: string | null = null;
   const byId = new Map(conversation.messages.map((message) => [message.id, message]));
@@ -139,6 +140,7 @@ export function Timeline({
         at={entry.at}
         canModerate={canModerateComments && !readOnly}
         canViewContact={canViewContact}
+        inlineMedia={inlineMedia}
         reactions={
           message.reactions.length > 0 ? (
             <Reactions message={message} at={entry.at} byId={byId} />
@@ -241,12 +243,15 @@ function MessageParts({
   at,
   canModerate,
   canViewContact,
+  inlineMedia,
   reactions,
 }: {
   message: Message;
   at: Date;
   canModerate: boolean;
   canViewContact: boolean;
+  /** A chat's files are drawn as what they are; an email's stay attachments (`drawsMediaInline`). */
+  inlineMedia: boolean;
   /** On the last part: a reaction answers the message, not its caption or its photo. */
   reactions?: ReactNode;
 }) {
@@ -276,7 +281,7 @@ function MessageParts({
     ? true
     : message.bodyText.trim() !== '' &&
       !(location && isLocationPlaceholder(message.bodyText)) &&
-      !isMediaStandIn(message);
+      !(inlineMedia && isMediaStandIn(message));
   if (hasText) parts.push('text');
   if (location) parts.push('location');
   if (message.attachments.length > 0) parts.push('files');
@@ -344,8 +349,10 @@ function MessageParts({
           />
         ) : part === 'location' && location ? (
           <SharedLocationCard location={location} />
-        ) : (
+        ) : inlineMedia ? (
           <MessageFiles files={message.attachments} looks={mediaLooks(message)} />
+        ) : (
+          <AttachmentList files={message.attachments} />
         )}
       </ChatBubble>
     );

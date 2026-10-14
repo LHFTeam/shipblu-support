@@ -105,10 +105,7 @@ export type PreviewState = {
 
 export type PreviewAction =
   | { type: 'toggle'; file: PreviewFile }
-  /**
-   * `pressed` says a player's failure followed play or a seek — anything after
-   * its first metadata, which nothing fetches past without somebody asking.
-   */
+  /** `pressed` says a player's failure followed play or a seek on it. */
   | { type: 'settle'; file: PreviewFile; load: 'loaded' | 'failed'; pressed?: boolean }
   | { type: 'retry'; file: PreviewFile };
 

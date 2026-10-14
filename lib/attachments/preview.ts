@@ -93,3 +93,15 @@ const PLAYABLE = new Map<string, PlayableMedia>([
 export function playableMedia(contentType: string): PlayableMedia | null {
   return PLAYABLE.get(mimeEssence(contentType)) ?? null;
 }
+
+/**
+ * What a file is by the family of its type alone — a picture or a recording —
+ * whether or not the console can show or play it. For naming a file the thread
+ * cannot draw, never for deciding to draw one: a WhatsApp voice note recorded in
+ * AMR is still a voice note, and a link to it reading "Audio" says more than one
+ * reading the sixteen-digit media id it is stored under.
+ */
+export function mediaFamily(contentType: string): 'image' | 'audio' | 'video' | null {
+  const family = mimeEssence(contentType).split('/')[0];
+  return family === 'image' || family === 'audio' || family === 'video' ? family : null;
+}

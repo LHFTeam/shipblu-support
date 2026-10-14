@@ -11,10 +11,14 @@ import { isMediaStandIn, mediaLooks } from './message-media';
  * thread drawing a line it was meant to hide.
  */
 
-const FILE = { id: 'file-1' };
+type StoredFile = { id: string; contentType: string };
+const FILE: StoredFile = { id: 'file-1', contentType: 'image/jpeg' };
 
-/** A WhatsApp media message as `inboundRow` in `lib/tickets/ingest-whatsapp.ts` stores it. */
-function whatsAppRow(message: Record<string, unknown>, files = [FILE]) {
+/**
+ * A WhatsApp media message as `inboundRow` in `lib/tickets/ingest-whatsapp.ts`
+ * stores it, with the file `download_media` stores under the type WhatsApp gave.
+ */
+function whatsAppRow(message: Record<string, unknown>, files?: StoredFile[]) {
   const parsed = parseWebhook({
     object: 'whatsapp_business_account',
     entry: [
@@ -35,6 +39,9 @@ function whatsAppRow(message: Record<string, unknown>, files = [FILE]) {
       },
     ],
   }).messages[0]!;
+  const stored = files ?? [
+    { id: 'file-1', contentType: parsed.media?.mimeType ?? 'application/octet-stream' },
+  ];
 
   return {
     bodyText: parsed.text,
@@ -48,12 +55,12 @@ function whatsAppRow(message: Record<string, unknown>, files = [FILE]) {
               mimeType: parsed.media.mimeType,
               filename: parsed.media.filename,
               isVoice: parsed.media.isVoice,
-              downloaded: files.length > 0,
+              downloaded: stored.length > 0,
             },
           }
         : {}),
     },
-    attachments: files,
+    attachments: stored,
   };
 }
 
@@ -121,6 +128,30 @@ describe('isMediaStandIn', () => {
     expect(isMediaStandIn(row)).toBe(true);
   });
 
+  it('keeps a document’s name when the file is drawn as a picture or a recording', () => {
+    // A label photographed and sent as a document, saved under its waybill
+    // number: drawn as the picture, nothing else on screen carries that name.
+    const label = whatsAppRow({
+      type: 'document',
+      document: { id: '1', mime_type: 'image/jpeg', filename: 'AWB 5012345678.jpg' },
+    });
+    expect(label.bodyText).toBe('[document: AWB 5012345678.jpg]');
+    expect(isMediaStandIn(label)).toBe(false);
+
+    const memo = whatsAppRow({
+      type: 'document',
+      document: { id: '1', mime_type: 'audio/mpeg', filename: 'memo.mp3' },
+    });
+    expect(isMediaStandIn(memo)).toBe(false);
+
+    // With no name, there is nothing the words say that the picture does not.
+    const unnamed = whatsAppRow({
+      type: 'document',
+      document: { id: '1', mime_type: 'image/jpeg' },
+    });
+    expect(isMediaStandIn(unnamed)).toBe(true);
+  });
+
   it('recognises a business-app echo the same way, since it is stored the same way', () => {
     const row = whatsAppRow({ type: 'image', image: { id: '1' } });
     expect(isMediaStandIn({ ...row, meta: { ...row.meta, echo: true } })).toBe(true);
@@ -136,7 +167,10 @@ describe('isMediaStandIn', () => {
   );
 
   it('recognises a count once every file it counts has arrived', () => {
-    const row = metaRow({ attachments: [sent('image'), sent('image')] }, [FILE, { id: 'file-2' }]);
+    const row = metaRow({ attachments: [sent('image'), sent('image')] }, [
+      FILE,
+      { id: 'file-2', contentType: 'image/jpeg' },
+    ]);
     expect(row.bodyText).toBe('[2 attachments]');
     expect(isMediaStandIn(row)).toBe(true);
   });
@@ -253,7 +287,7 @@ describe('mediaLooks', () => {
   });
 
   it('says nothing when the files cannot be paired with what the sender said', () => {
-    const two = [FILE, { id: 'file-2' }];
+    const two = [FILE, { id: 'file-2', contentType: 'image/jpeg' }];
     expect(mediaLooks(metaRow({ attachments: [sent('audio'), sent('audio')] }, two)).size).toBe(0);
     // Two sent, one arrived: which one is not recorded anywhere the thread reads.
     expect(mediaLooks(metaRow({ attachments: [sent('audio'), sent('image')] }, [FILE])).size).toBe(

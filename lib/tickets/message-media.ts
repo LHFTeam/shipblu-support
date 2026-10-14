@@ -2,18 +2,20 @@
  * What the thread needs to know about a message's files beyond their content
  * type: whether its words only stand in for them, and how one should look.
  *
- * Deliberately importing nothing, for the reason `shared-location.ts` gives: it
- * is reached from the timeline, a client component, and a value import from a
- * module that touches `db/client` or `env()` drags the Postgres driver into the
- * browser bundle.
+ * Importing only what is client-safe, for the reason `shared-location.ts`
+ * gives: it is reached from the timeline, a client component, and a value
+ * import from a module that touches `db/client` or `env()` drags the Postgres
+ * driver into the browser bundle.
  */
+
+import { mediaFamily } from '@/lib/attachments/preview';
 
 /** The fields of a timeline message these answers read. */
 type MediaMessage = {
   bodyText: string;
   bodyHtml: string | null;
   meta: Record<string, unknown> | null;
-  attachments: readonly { id: string }[];
+  attachments: readonly { id: string; contentType: string }[];
 };
 
 /**
@@ -40,13 +42,17 @@ type MediaMessage = {
  *
  * Never when no file is drawn in its place: a download still running, one that
  * failed, and a copied chat's `[media]`, whose file the copy does not carry. The
- * words are then the only sign anything was sent.
+ * words are then the only sign anything was sent. Nor when the file is drawn
+ * without what the words say: a document's name (see `whatsAppStandIn`).
  */
 export function isMediaStandIn(message: MediaMessage): boolean {
   if (message.bodyHtml !== null || message.attachments.length === 0) return false;
   const text = message.bodyText.trim();
   const meta = message.meta ?? {};
-  return text === whatsAppStandIn(meta) || text === metaStandIn(meta, message.attachments.length);
+  return (
+    text === whatsAppStandIn(meta, message.attachments) ||
+    text === metaStandIn(meta, message.attachments.length)
+  );
 }
 
 /** How a file should look in the thread, where its content type cannot say. */
@@ -81,7 +87,10 @@ export function mediaLooks(message: Pick<MediaMessage, 'meta' | 'attachments'>) 
 }
 
 /** `displayText` in `lib/whatsapp/parse.ts`, for a media message with no caption. */
-function whatsAppStandIn(meta: Record<string, unknown>): string | null {
+function whatsAppStandIn(
+  meta: Record<string, unknown>,
+  files: MediaMessage['attachments'],
+): string | null {
   const media = isRecord(meta.media) ? meta.media : {};
 
   switch (meta.whatsappType) {
@@ -91,10 +100,18 @@ function whatsAppStandIn(meta: Record<string, unknown>): string | null {
       return `[${meta.whatsappType}]`;
     case 'audio':
       return media.isVoice === true ? '[voice note]' : '[audio]';
-    case 'document':
-      return typeof media.filename === 'string' && media.filename !== ''
-        ? `[document: ${media.filename}]`
-        : '[document]';
+    case 'document': {
+      const name =
+        typeof media.filename === 'string' && media.filename !== '' ? media.filename : null;
+      // A document's words carry the name its sender gave it — a photographed
+      // label saved under its waybill number, say — and only a link shows that
+      // name again. One that is a picture or a recording is drawn as one, under
+      // no name at all, so there the words are the only place the name is.
+      if (name !== null && files.some((file) => mediaFamily(file.contentType) !== null)) {
+        return null;
+      }
+      return name === null ? '[document]' : `[document: ${name}]`;
+    }
     default:
       return null;
   }

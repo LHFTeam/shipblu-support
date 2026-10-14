@@ -13,7 +13,12 @@ import {
   useSyncExternalStore,
 } from 'react';
 import { ChevronDownIcon, ChevronUpIcon, ImageIcon, PaperclipIcon } from '@/components/icons';
-import { isPreviewableImage, type PlayableMedia, playableMedia } from '@/lib/attachments/preview';
+import {
+  isPreviewableImage,
+  mediaFamily,
+  type PlayableMedia,
+  playableMedia,
+} from '@/lib/attachments/preview';
 import {
   initialPreviewState,
   type Load,
@@ -399,7 +404,7 @@ export function AttachmentList({
  *   is a signed URL minted per request, a new URL every time, so nothing caches
  *   one between visits: a ticket costs the pictures the agent scrolls to, not
  *   all of them — the largest bot transcript in production holds 34 photos,
- *   6.4 MB. Lazy also keeps React's server renderer from preloading every one.
+ *   6.4 MB.
  * - **The `<img>` is drawn in the browser only.** In the server's HTML a picture
  *   can load, or fail, before React has attached the listeners that settle it,
  *   and React replays neither event, so it would wait forever. The server draws
@@ -517,13 +522,16 @@ export function MessageFiles({
           className={shown.length > 0 ? 'mt-1.5 flex flex-wrap gap-1.5' : 'flex flex-wrap gap-1.5'}
         >
           {linked.map((file) => {
-            // A recording this browser cannot play is named like its player
-            // would be, not after the media id it is stored under; the server
-            // draws every recording this way until the browser has said.
-            const recording = playableMedia(file.contentType)?.kind;
+            // A recording this browser cannot play — an AMR voice note, or any
+            // recording before the browser has said — is named like its player
+            // would be, not after the media id it is stored under. Where its
+            // sender named it, as a document, the words above keep that name
+            // (`isMediaStandIn`).
+            const family =
+              looks?.get(file.id) === 'sound' ? 'audio' : mediaFamily(file.contentType);
             return (
               <li key={file.id} className={CHIP}>
-                {isPreviewableImage(file.contentType) || recording === 'video' ? (
+                {family === 'image' || family === 'video' ? (
                   <ImageIcon size={15} className="shrink-0 text-(--color-text-tertiary)" />
                 ) : (
                   <PaperclipIcon size={15} className="shrink-0 text-(--color-text-tertiary)" />
@@ -534,11 +542,7 @@ export function MessageFiles({
                   rel="noreferrer"
                   className="hover:underline"
                 >
-                  {recording === 'audio'
-                    ? 'Audio'
-                    : recording === 'video'
-                      ? 'Video'
-                      : file.filename}
+                  {family === 'audio' ? 'Audio' : family === 'video' ? 'Video' : file.filename}
                 </a>
                 <span className="text-(--color-text-tertiary) tabular-nums">
                   {formatBytes(file.sizeBytes)}
@@ -1016,7 +1020,7 @@ function useFreshMedia({
   onFail,
 }: {
   onReady: (media: HTMLMediaElement) => void;
-  /** `pressed`: the failure came after the first metadata (see `PreviewAction`). */
+  /** `pressed`: somebody had pressed play or moved the scrubber (see `PreviewAction`). */
   onFail: (pressed: boolean) => void;
 }) {
   const minted = useRef<{ wall: number; mono: number } | null>(null);
@@ -1029,6 +1033,8 @@ function useFreshMedia({
   const lastData = useRef<number | null>(null);
   /** When focus last left the player for nowhere. */
   const focusDropped = useRef<number | null>(null);
+  /** Whether play or a seek has been asked of it, for what a failure answers. */
+  const asked = useRef(false);
 
   const ageMs = () =>
     minted.current === null
@@ -1044,7 +1050,7 @@ function useFreshMedia({
     if (nothingFocused() && dropped !== null && performance.now() - dropped < DROPPED_FOCUS_MS) {
       media.focus({ preventScroll: true });
     }
-    onFail(ready.current);
+    onFail(asked.current);
   };
 
   const reload = (media: HTMLMediaElement, failed: boolean) => {
@@ -1127,6 +1133,7 @@ function useFreshMedia({
       }
     },
     onPlay: (event: MediaEvent) => {
+      asked.current = true;
       playing.current = true;
       pauseOthers(event.currentTarget);
       consider('play', event.currentTarget);
@@ -1147,6 +1154,7 @@ function useFreshMedia({
       }
     },
     onSeeking: (event: MediaEvent) => {
+      asked.current = true;
       consider('seeking', event.currentTarget);
     },
     onWaiting: (event: MediaEvent) => {

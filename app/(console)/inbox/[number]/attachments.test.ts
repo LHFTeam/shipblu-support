@@ -111,6 +111,16 @@ describe('MessageFiles', () => {
     expect(view.querySelector('li a')?.textContent).toBe('Video');
   });
 
+  it('names one no browser plays by what it is too, rather than by its media id', () => {
+    const amr = { ...note, filename: '1011360668584057.amr', contentType: 'audio/amr' };
+    expect(draw([amr]).querySelector('li a')?.textContent).toBe('Audio');
+  });
+
+  it('names a voice clip it cannot play as sound, though it arrives as a video', () => {
+    const view = draw([clip], new Map([[clip.id, 'sound']]));
+    expect(view.querySelector('li a')?.textContent).toBe('Audio');
+  });
+
   it('draws a video it can play at once, fetching only its metadata', () => {
     const video = draw([webm]).querySelector('video');
     expect(video?.getAttribute('preload')).toBe('metadata');

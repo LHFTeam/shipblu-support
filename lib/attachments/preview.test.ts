@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isPreviewableImage, playableMedia } from './preview';
+import { isPreviewableImage, mediaFamily, playableMedia } from './preview';
 
 describe('isPreviewableImage', () => {
   it('accepts what channels actually send photographs as', () => {
@@ -54,5 +54,20 @@ describe('playableMedia', () => {
     expect(playableMedia('video/3gpp')).toBeNull();
     expect(playableMedia('image/jpeg')).toBeNull();
     expect(playableMedia('__proto__')).toBeNull();
+  });
+});
+
+describe('mediaFamily', () => {
+  it('names a picture or a recording whether or not anything here can show it', () => {
+    expect(mediaFamily('image/heic')).toBe('image');
+    expect(mediaFamily('audio/amr')).toBe('audio');
+    expect(mediaFamily('video/3gpp')).toBe('video');
+    expect(mediaFamily('Video/MP4; codecs="avc1"')).toBe('video');
+  });
+
+  it('names nothing else', () => {
+    expect(mediaFamily('application/pdf')).toBeNull();
+    expect(mediaFamily('text/html; charset="utf-8"')).toBeNull();
+    expect(mediaFamily('')).toBeNull();
   });
 });
