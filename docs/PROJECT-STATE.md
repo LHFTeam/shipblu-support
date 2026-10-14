@@ -6159,6 +6159,20 @@ still waiting for it` one whose outcome is not known yet.
     through `wamidKey()` all the same — the reaction was the one nobody expected
     either.
 
+95. **React never tells a server-rendered `<img>` it has already loaded.**
+    _2026-10-14, drawing chat pictures inline._ React 19 attaches an `<img>`'s
+    `load` and `error` listeners when it hydrates the element and replays
+    neither (`prepareToHydrateHostInstance`, react-dom 19.2.8), so a picture in
+    the server's HTML that loads or fails before the page's script runs leaves
+    whatever waits on `onLoad`/`onError` waiting for good — a placeholder that
+    never clears, a failure line never drawn. A picture created on the client is
+    safe: React sets `src` after its other props and again at mount, so the
+    event always comes after the listener. `MessageFiles` therefore draws its
+    `<img>` only after hydration (`useOnClient`), inside a frame the server does
+    draw, so the focusable link is one element on both sides. Anything else
+    that settles state from an image's events needs the same, or reads
+    `complete` and `naturalWidth` in an effect.
+
 ### Tooling notes for this environment
 
 Supabase and Render MCP tools work and are the fastest way to check real state —

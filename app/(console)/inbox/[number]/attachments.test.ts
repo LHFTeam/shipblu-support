@@ -13,7 +13,7 @@ import { MessageFiles } from './attachments';
  * happy-dom plays nothing, so `canPlayType` is stubbed where a player is the
  * point, and a recording it is not asked about stays a link, as it does in a
  * browser that cannot play it. `.ts` with `createElement`, as
- * `components/chat.test.ts` explains.
+ * `components/use-action-form.test.ts` explains.
  */
 
 beforeAll(() => {
@@ -135,8 +135,30 @@ describe('MessageFiles', () => {
     expect(video?.getAttribute('aria-label')).toBe('Audio, 146 KB');
   });
 
-  it('keeps a sticker small', () => {
+  it('keeps a sticker small, and calls it one', () => {
     const view = draw([{ ...photo, contentType: 'image/webp' }], new Map([[photo.id, 'sticker']]));
     expect(view.querySelector('a')!.className).toContain('size-40');
+    expect(view.querySelector('img')?.getAttribute('alt')).toBe('Sticker, 86 KB');
+  });
+
+  it('leaves a failure nobody asked about as the line on screen', () => {
+    const view = draw([photo]);
+    act(() => {
+      view.querySelector('img')!.dispatchEvent(new Event('error'));
+    });
+    expect(view.textContent).toContain('Picture, 86 KB could not be shown here.');
+    expect(view.querySelector('[role=status]')?.textContent).toBe('');
+  });
+
+  it('says so when the picture the agent is on fails, and keeps focus with it', () => {
+    const view = draw([photo]);
+    act(() => view.querySelector('a')!.focus());
+    act(() => {
+      view.querySelector('img')!.dispatchEvent(new Event('error'));
+    });
+    expect(view.querySelector('[role=status]')?.textContent).toBe(
+      'Picture, 86 KB could not be shown here. Try again, or open the file.',
+    );
+    expect(document.activeElement?.tagName).toBe('FIGURE');
   });
 });

@@ -67,11 +67,13 @@ export type MediaLook = 'sticker' | 'sound';
  *   player can tell it has no picture only once it has fetched the file, so
  *   until then it was a black box the size of a video, collapsing to a bar the
  *   moment its metadata arrived. Knowing in advance lets it be drawn as the
- *   voice note it is from the start.
+ *   voice note it is from the start. A WhatsApp voice note is marked too, which
+ *   changes nothing: its type already says it is audio.
  *
- * Only for a message carrying exactly one file. The sender's list and the
- * stored files cannot otherwise be paired: Meta's are downloaded by one job
- * each, and nothing the thread reads records which entry a file came from.
+ * Only for a message carrying exactly one file. Meta's files are downloaded by
+ * one job each, and the entry each came from is stored (`content_id` is
+ * `meta:<index>`, `download_media`) but not selected for the thread, so with
+ * several files it cannot pair them.
  */
 export function mediaLooks(message: Pick<MediaMessage, 'meta' | 'attachments'>) {
   const looks = new Map<string, MediaLook>();

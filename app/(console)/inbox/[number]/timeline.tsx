@@ -235,8 +235,9 @@ type Part = 'text' | 'location' | 'files';
  * the receipt and everything about the message close it.
  *
  * Runs never join across messages, so every message keeps its own time and
- * receipt. Keyed per part, so a live update re-rendering the thread keeps an
- * opened picture open and a playing voice note playing.
+ * receipt. Keyed per part, so a live update re-rendering the thread neither
+ * fetches a picture again nor closes an opened one, and a playing voice note
+ * keeps playing.
  */
 function MessageParts({
   message,

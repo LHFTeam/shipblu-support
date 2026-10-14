@@ -679,6 +679,18 @@ in hand (`lib/whatsapp/reaction.ts`), held to the same answer by
 customer's last words — it was the inbox preview, the canned suggestion's anchor
 and the language automated replies went out in.
 
+**A media message's text can be a stand-in nobody wrote.** A file sent without
+a caption is stored with the words ingest wrote for it — `[image]`,
+`[voice note]`, `[document: awb.pdf]`, `[2 attachments]` (`displayText` in
+`lib/whatsapp/parse.ts` and `lib/meta/parse.ts`) — and they stay stored,
+because the inbox card, the subject and search need something to show. A chat's
+thread leaves one out only where `isMediaStandIn` (`lib/tickets/message-media.ts`)
+rebuilds it from the row's own type, voice flag and filename and the file is
+drawn in its place. A bracket regex would also hide a caption like
+`[urgent] where is my COD`, the `[story_mention]` that is the only sign of a
+story, and the name a document was sent under. Anything else asking what the
+customer _said_ has the same question to answer.
+
 **A coexistence number is live on the phone and on Cloud API at once**, and
 four rules keep the two sides from being read as each other. The copied
 history is a record, not traffic (`lib/tickets/ingest-whatsapp-history.ts`):

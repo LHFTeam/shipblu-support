@@ -141,7 +141,7 @@ describe('previewFile', () => {
 
   it('names a picture in the thread by what it is, as it has no chip to be named after', () => {
     const photo = { ...stored, filename: '1002979522811778.jpg', sizeBytes: 88_064 };
-    expect(previewFile(photo, 'image', true)).toEqual({
+    expect(previewFile(photo, 'image', { inline: true })).toEqual({
       id: 'f',
       name: 'Picture, 86 KB',
       kind: 'image',
@@ -149,11 +149,18 @@ describe('previewFile', () => {
     });
   });
 
+  it('names a sticker in the thread as one', () => {
+    const sticker = { ...stored, filename: '1056976047212813.webp', sizeBytes: 12_288 };
+    expect(previewFile(sticker, 'image', { inline: true, sticker: true }).name).toBe(
+      'Sticker, 12 KB',
+    );
+  });
+
   it('marks only what fetches unasked as loading by itself', () => {
-    expect(previewFile(stored, 'video', true).loadsItself).toBe(true);
+    expect(previewFile(stored, 'video', { inline: true }).loadsItself).toBe(true);
     // A voice note fetches nothing until play.
-    expect(previewFile(stored, 'audio', true).loadsItself).toBeUndefined();
-    expect(previewFile(stored, undefined, true).loadsItself).toBeUndefined();
+    expect(previewFile(stored, 'audio', { inline: true }).loadsItself).toBeUndefined();
+    expect(previewFile(stored, undefined, { inline: true }).loadsItself).toBeUndefined();
     expect(previewFile(stored, 'image').loadsItself).toBeUndefined();
   });
 });

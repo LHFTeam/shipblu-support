@@ -84,9 +84,10 @@ const CHIP =
   'inline-flex items-center gap-2 rounded-lg border border-(--color-border-subtle) bg-(--color-background-surface) px-3 py-2 text-xs text-(--color-text-primary)';
 
 /**
- * The files on one side conversation message: a row of chips, where a picture
- * opens under the row instead of in a new tab. The ticket's own thread draws
- * `MessageFiles` instead, which shows each file without a click.
+ * The files on a message that is not a chat's — an email or a portal ticket's,
+ * and every side conversation's: a row of chips, where a picture opens under the
+ * row instead of in a new tab. A chat's thread draws `MessageFiles` instead
+ * (`drawsMediaInline`), which shows each file without a click.
  *
  * In place rather than in a lightbox, because the timeline's order is its
  * information: the photograph of a crushed box belongs beside the sentence
@@ -102,15 +103,13 @@ const CHIP =
  *
  * Nothing is fetched until it is clicked. Every picture is a signed URL minted
  * per request by `/api/attachments/[id]`, so an eager thumbnail would be a
- * Storage round trip per image each time the card was drawn — and a hub's reply
- * is email, whose signature logos arrive as attachments exactly as its photos
- * do, so drawn eagerly every logo would sit in the card at a photo's size. (The
- * thread made the opposite trade for chat; `MessageFiles` says why.) A preview
- * stays mounted once opened, so hiding it with its chip
- * and showing it again costs nothing. A fresh `<img>` would ask the route again,
- * which mints another URL, unless the browser answered it from its list of
- * available images — which the HTML spec lets it empty at any time — so this
- * does not ask. Collapsing a whole side conversation thread is a reset instead,
+ * Storage round trip per image each time the message was drawn — and email
+ * carries its signature logos as attachments exactly as it carries its photos
+ * (`drawsMediaInline` says why that keeps email here). A preview stays mounted
+ * once opened, so hiding it with its chip and showing it again costs nothing. A
+ * fresh `<img>` would ask the route again, which mints another URL, unless the
+ * browser answered it from its list of available images — which the HTML spec
+ * lets it empty at any time — so this does not ask. Collapsing a whole side conversation thread is a reset instead,
  * as it already is for the reply the agent was typing there, so its pictures
  * start closed again.
  *
@@ -125,7 +124,7 @@ const CHIP =
  *   because listening is the whole of reading one. `preload="none"` keeps the
  *   promise above: every engine fetches nothing for it until play is pressed,
  *   so a thread of forty notes costs nothing until somebody listens. They are
- *   small (the largest in production is about 200 KB), so the first response
+ *   small (the largest in production is about 250 KB), so the first response
  *   carries the whole note.
  * - **A video opens from its chip**, like a picture, because it is not small —
  *   a WhatsApp video runs to tens of megabytes.
@@ -388,10 +387,10 @@ export function AttachmentList({
 }
 
 /**
- * The files on one message in the ticket's thread, each drawn as the one thing
- * it is: a picture as the picture, a voice note or a video as its player, and
- * only a file with nothing to show — a PDF, a spreadsheet, a format this
- * browser cannot play — as a link with its size.
+ * The files on one message in a chat's thread (`drawsMediaInline`), each drawn
+ * as the one thing it is: a picture as the picture, a voice note or a video as
+ * its player, and only a file with nothing to show — a PDF, a spreadsheet, a
+ * format this browser cannot play — as a link with its size.
  *
  * Nothing waits for a click, which is the opposite of `AttachmentList`. A chat
  * is read by looking at it, the way the customer's own messenger shows it, and
@@ -403,27 +402,33 @@ export function AttachmentList({
  * - **A picture is `loading="lazy"`**, fetched as it nears the pane's view. Each
  *   is a signed URL minted per request, a new URL every time, so nothing caches
  *   one between visits: a ticket costs the pictures the agent scrolls to, not
- *   all of them — the largest bot transcript in production holds 34 photos,
- *   6.4 MB.
+ *   all of them. On 2026-10-14 the most photographed ticket in production held
+ *   35 photos (3.6 MB) and the heaviest 26 (6.4 MB), both bot transcripts.
  * - **The `<img>` is drawn in the browser only.** In the server's HTML a picture
  *   can load, or fail, before React has attached the listeners that settle it,
  *   and React replays neither event, so it would wait forever. The server draws
  *   the frame, which is also the link, so the element is the same before and
  *   after.
- * - **The frame holds a picture's tallest size until it loads**, which a photo
- *   from a phone fills, so on a wide screen a photo arriving moves nothing below
- *   it. No dimensions are stored to do better, and Safari before 27 does no
- *   scroll anchoring to hide a picture growing above the agent.
- * - **A video fetches its metadata at once**, for its first frame: a few hundred
- *   kilobytes, and production has at most four videos on a ticket.
- * - **A voice note still fetches nothing until play.** So does a Messenger
- *   voice clip, which arrives as MP4 and would otherwise sit as a black box the
- *   size of a video until its metadata said it had no picture (`mediaLooks`).
+ * - **The frame holds a picture's tallest size until it loads**, so a picture
+ *   arriving keeps that height or shrinks, and never grows: a portrait photo
+ *   from a phone fills it exactly, and nothing below moves. A landscape one in
+ *   a narrow pane comes out shorter. No dimensions are stored to reserve the
+ *   real shape, and the iPhone Safari 26 agents use does no scroll anchoring to
+ *   hide a change above the one reading.
+ * - **A video fetches its metadata at once**, for its first frame and the shape
+ *   of its box. How much that costs is the browser's choice, up to the whole of
+ *   a small file; real videos are rare — on 2026-10-14 no ticket in production
+ *   held more than one.
+ * - **A voice note still fetches nothing until play.** So does a Facebook or
+ *   Instagram voice clip, which arrives as MP4 and would otherwise sit as a
+ *   black box the size of a video until its metadata said it had no picture
+ *   (`mediaLooks`).
  *
  * The rest is the list's: players drawn once the browser says it can play them,
  * one player sounding at a time, the failure line and its focus hand-overs, and
- * a live region — which here speaks only for a press, since a failure nobody
- * asked for is already on screen (see `previewReducer`).
+ * a live region — which here speaks only when a failure answers the agent: Try
+ * again, play or a seek, or focus on the file itself. A failure nobody asked
+ * for is already on screen (see `previewReducer`).
  */
 export function MessageFiles({
   files,
@@ -449,7 +454,10 @@ export function MessageFiles({
   const isSound = (file: Attachment) =>
     kindOf(file) === 'audio' || (kindOf(file) === 'video' && looks?.get(file.id) === 'sound');
   const asPreview = (file: Attachment) =>
-    previewFile(file, isSound(file) ? 'audio' : (kindOf(file) ?? undefined), true);
+    previewFile(file, isSound(file) ? 'audio' : (kindOf(file) ?? undefined), {
+      inline: true,
+      sticker: looks?.get(file.id) === 'sticker',
+    });
   const previewId = (file: Attachment) => previewIdFor(baseId, file.id);
   const figureOf = (file: Attachment) => document.getElementById(previewId(file));
 
@@ -461,12 +469,16 @@ export function MessageFiles({
   };
   const settle = (file: Attachment, load: 'loaded' | 'failed', pressed = false) => {
     const figure = figureOf(file);
-    if (load === 'failed' && figure?.contains(document.activeElement)) {
-      figure.focus({ preventScroll: true });
+    // Focus on the file when it fails is the agent at it: tabbing onto a
+    // picture is often what brought it in range to load. The figure focus moves
+    // to is named only for the file, so the notice is what says it failed.
+    const focused = figure?.contains(document.activeElement) ?? false;
+    if (load === 'failed' && focused) {
+      figure?.focus({ preventScroll: true });
     } else if (load === 'loaded' && figure && document.activeElement === figure) {
       figure.querySelector<HTMLElement>('a')?.focus({ preventScroll: true });
     }
-    dispatch({ type: 'settle', file: asPreview(file), load, pressed });
+    dispatch({ type: 'settle', file: asPreview(file), load, pressed: pressed || focused });
   };
 
   const shown = files.filter((file) => kindOf(file) !== null);
@@ -523,10 +535,11 @@ export function MessageFiles({
         >
           {linked.map((file) => {
             // A recording this browser cannot play — an AMR voice note, or any
-            // recording before the browser has said — is named like its player
-            // would be, not after the media id it is stored under. Where its
-            // sender named it, as a document, the words above keep that name
-            // (`isMediaStandIn`).
+            // recording before the browser has said — is named for what it is,
+            // not after the media id it is stored under; aloud with its size,
+            // as its player would be, so a thread of them is not a list of
+            // identical links. Where its sender named it, as a document, the
+            // words above keep that name (`isMediaStandIn`).
             const family =
               looks?.get(file.id) === 'sound' ? 'audio' : mediaFamily(file.contentType);
             return (
@@ -540,6 +553,11 @@ export function MessageFiles({
                   href={fileUrl(file)}
                   target="_blank"
                   rel="noreferrer"
+                  aria-label={
+                    family === 'audio' || family === 'video'
+                      ? playerName(family, file.sizeBytes)
+                      : undefined
+                  }
                   className="hover:underline"
                 >
                   {family === 'audio' ? 'Audio' : family === 'video' ? 'Video' : file.filename}
@@ -571,10 +589,11 @@ export function MessageFiles({
  * The frame is the same `<a>` on the server, while the picture loads and once it
  * has, so a live update re-rendering the thread never swaps the element an agent
  * may have focused. Until the picture has loaded the frame keeps its place at a
- * picture's tallest size and the `<img>` inside stays transparent, so a
- * half-decoded photo is not drawn cropped to the frame and then redrawn at its
- * own shape. A sticker keeps one small square throughout, as a messenger draws
- * one, rather than a photo's frame.
+ * picture's tallest size, showing the picture glyph the chips use — so it says
+ * what is coming when motion is reduced and nothing pulses — and the `<img>`
+ * inside stays transparent, so a half-decoded photo is not drawn stretched to
+ * the frame and then redrawn at its own shape. A sticker keeps one small square
+ * throughout, as a messenger draws one, rather than a photo's frame.
  *
  * "Try again" draws a new `<img>`, which asks the route again, for the reason
  * `ImagePreview` gives.
@@ -613,9 +632,12 @@ function Picture({
       className={
         loaded
           ? 'block max-w-full'
-          : `block ${frame} max-w-full rounded-lg bg-(--color-background-surface-sunken) motion-safe:animate-pulse`
+          : `grid ${frame} max-w-full place-items-center rounded-lg bg-(--color-background-surface-sunken) motion-safe:animate-pulse`
       }
     >
+      {loaded ? null : (
+        <ImageIcon size={24} className="col-start-1 row-start-1 text-(--color-text-tertiary)" />
+      )}
       {drawn ? (
         // Not next/image, for the reason `ImagePreview` gives.
         // eslint-disable-next-line @next/next/no-img-element
@@ -628,7 +650,7 @@ function Picture({
           onError={() => onSettle('failed')}
           className={
             !loaded
-              ? 'block size-full opacity-0'
+              ? 'col-start-1 row-start-1 block size-full opacity-0'
               : sticker
                 ? 'block size-40 max-w-full object-contain'
                 : 'block max-h-80 max-w-full cursor-zoom-in rounded-lg border border-(--color-border-subtle) bg-(--color-background-surface)'
@@ -640,16 +662,16 @@ function Picture({
 }
 
 /**
- * The frame every opened picture, video and voice note sits in.
+ * The frame every picture, video and voice note drawn in a message sits in.
  *
  * It takes focus (`tabIndex={-1}`, so never by Tab) for two hand-overs: "Try
  * again" parks focus on it before unmounting itself (see `retry`), and a
  * failure moves focus to it when the control that had it is gone (see
- * `settle`). A picture's figure is named after the file, so that focus lands on
- * something a screen reader can say while the picture loads. A player's is
- * named only while it holds the failure line: a working player carries its own
- * name, and focus moves straight on to it after a retry, so a figure named as
- * well would be the same words read twice.
+ * `settle`). A picture's figure is named as its control is (`previewFile`), so
+ * that focus lands on something a screen reader can say while the picture
+ * loads. A player's is named only while it holds the failure line: a working
+ * player carries its own name, and focus moves straight on to it after a retry,
+ * so a figure named as well would be the same words read twice.
  */
 function MediaFigure({
   id,
