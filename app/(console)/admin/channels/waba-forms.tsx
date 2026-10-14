@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Badge, Field, Button, ErrorText, Input, Toggle } from '@/components/ui';
+import { Badge, Field, Button, ErrorText, Input, Textarea, Toggle } from '@/components/ui';
 import type { CredentialStatus } from '@/lib/whatsapp/credential-status';
 import { DangerAction, Disclosure, EditorForm } from '../forms-shared';
 import { deleteWhatsAppAccount, saveWhatsAppAccount } from './actions';
@@ -35,6 +35,8 @@ export type WhatsAppAccountRow = {
   name: string;
   wabaId: string;
   tokenEnvVar: string | null;
+  /** Digits only, as stored: `20235691100`, or a phone number id. */
+  ignoredPhoneNumbers: string[];
   isDefault: boolean;
   isActive: boolean;
   lastSyncedAt: Date | null;
@@ -132,6 +134,30 @@ function Fields({
           />
         </Field>
       )}
+
+      <Field
+        label="Numbers to ignore"
+        explain={
+          <>
+            Business numbers on this account that a different messaging service answers. Nothing
+            about them is kept here: Meta still sends their messages, delivery receipts, reactions,
+            chat history and contacts to this app, and each one is dropped before anything is stored
+            — no contact, no ticket, no message — and taken out of the stored webhook too. A channel
+            set up for one of these numbers receives nothing. Conversations already stored from it
+            stay until they are purged. Applies from the next delivery after saving.
+          </>
+        }
+        hint="One per line: the full number with its country code, written as +20 2 3569 1100 or 20235691100. Spaces, dashes, brackets and the + are optional. Not the local form starting with 0 — 02 3569 1100 is refused. Meta’s phone number ID for the number works too."
+      >
+        <Textarea
+          name="ignoredPhoneNumbers"
+          rows={3}
+          defaultValue={account?.ignoredPhoneNumbers.join('\n') ?? ''}
+          placeholder={'+20 2 3569 1100\n+20 100 123 4567'}
+          autoComplete="off"
+          spellCheck={false}
+        />
+      </Field>
 
       <Toggle
         name="isDefault"
@@ -236,6 +262,12 @@ export function WhatsAppAccountEditor({
           {account.numbers.length === 0 ? 'no numbers yet' : `${account.numbers.join(', ')}`} ·{' '}
           {account.templateCount} template{account.templateCount === 1 ? '' : 's'}
         </p>
+
+        {account.ignoredPhoneNumbers.length > 0 ? (
+          <p className="mt-0.5 text-xs text-(--color-text-secondary)">
+            Ignoring {account.ignoredPhoneNumbers.join(', ')}
+          </p>
+        ) : null}
 
         {/* The credential's own line, in place of the variable's name: what it
             is, when it was stored and by whom, when it expires and which key

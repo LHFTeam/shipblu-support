@@ -659,6 +659,15 @@ unset `_PREVIOUS`; the dry run opens every envelope it would move, which is what
 proves the previous key is the one the rows were sealed under before anything
 depends on it.
 
+**An ignored business number is gone before the parser runs.**
+`whatsapp_accounts.ignored_phone_numbers` lists numbers on a WABA that another
+service answers, and `processWhatsAppWebhook` passes every delivery through
+`withoutIgnoredNumbers` first, writing what is left back over the stored
+payload. Keep the drop there rather than in an ingest path: each path files
+what it is handed somewhere — an unknown number falls back to the support
+channel, a reaction lands on the customer's existing ticket — so a guard in one
+is a leak in the next one written.
+
 **A WhatsApp reaction is stored as a message and is not one.** It arrives as
 `type: 'reaction'`, from the customer or echoed from our own number, and
 `parseWebhook` files it apart from both. `ingestWhatsAppReaction` puts the row on

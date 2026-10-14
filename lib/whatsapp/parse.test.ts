@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { displayText, parseTimestamp, parseWebhook } from './parse';
+import { displayText, parseTimestamp, parseWebhook, withoutIgnoredNumbers } from './parse';
 import type { NormalisedWebhook, WhatsAppWebhookPayload } from './types';
 
 function envelope(value: Record<string, unknown>): WhatsAppWebhookPayload {
@@ -1232,5 +1232,96 @@ describe('displayText: what a Business-app number adds', () => {
         },
       }),
     ).toBe('[edited a message: Tomorrow at 10]');
+  });
+});
+
+describe('withoutIgnoredNumbers', () => {
+  const change = (display: unknown, id: unknown, wamid: string) => ({
+    field: 'messages',
+    value: {
+      messaging_product: 'whatsapp',
+      metadata: { display_phone_number: display, phone_number_id: id },
+      messages: [{ from: '201001234567', id: wamid, type: 'text', text: { body: 'Hi' } }],
+      statuses: [{ id: `${wamid}.status`, status: 'read', recipient_id: '201001234567' }],
+    },
+  });
+  const delivery = (...entries: unknown[]) => ({
+    object: 'whatsapp_business_account',
+    entry: entries,
+  });
+  const entry = (...changes: unknown[]) => ({ id: '128772296801141', time: 1, changes });
+
+  it('takes out the change for an ignored number, its statuses with it, and keeps the rest', () => {
+    const payload = delivery(
+      entry(
+        change('20235691100', '128318316834446', 'wamid.other'),
+        change('20235691220', '838961722630554', 'wamid.ours'),
+      ),
+    );
+
+    const kept = withoutIgnoredNumbers(payload, new Set(['20235691100']));
+
+    expect(kept.dropped).toBe(1);
+    expect(kept.payload).toEqual(
+      delivery(entry(change('20235691220', '838961722630554', 'wamid.ours'))),
+    );
+    const parsed = parseWebhook(kept.payload);
+    expect(parsed.messages.map((m) => m.wamid)).toEqual(['wamid.ours']);
+    expect(parsed.statuses.map((s) => s.wamid)).toEqual(['wamid.ours.status']);
+  });
+
+  it('matches the display number however Meta formats it, and the phone number id', () => {
+    const formatted = delivery(entry(change('+20 2 3569 1100', '128318316834446', 'wamid.a')));
+    expect(withoutIgnoredNumbers(formatted, new Set(['20235691100'])).dropped).toBe(1);
+    expect(withoutIgnoredNumbers(formatted, new Set(['128318316834446'])).dropped).toBe(1);
+  });
+
+  it('drops an entry left with nothing, and leaves the original untouched', () => {
+    const payload = delivery(entry(change('20235691100', '128318316834446', 'wamid.other')));
+    const before = JSON.stringify(payload);
+
+    const kept = withoutIgnoredNumbers(payload, new Set(['20235691100']));
+
+    expect(kept.payload).toEqual(delivery());
+    expect(JSON.stringify(payload)).toBe(before);
+  });
+
+  it('takes out an account_update about the number, and keeps one about the WABA', () => {
+    const update = (body: Record<string, unknown>) => ({
+      field: 'account_update',
+      value: { event: 'PARTNER_REMOVED', ...body },
+    });
+    const payload = delivery(entry(update({ phone_number: '20235691100' }), update({})));
+
+    const kept = withoutIgnoredNumbers(payload, new Set(['20235691100']));
+
+    expect(kept.dropped).toBe(1);
+    expect(kept.payload).toEqual(delivery(entry(update({}))));
+  });
+
+  it('answers the same object when nothing is ignored or nothing matches', () => {
+    const payload = delivery(entry(change('20235691220', '838961722630554', 'wamid.ours')));
+    expect(withoutIgnoredNumbers(payload, new Set())).toEqual({ payload, dropped: 0 });
+    expect(withoutIgnoredNumbers(payload, new Set(['20235691100'])).payload).toBe(payload);
+  });
+
+  it('leaves what it cannot read where it was, without throwing', () => {
+    const ignored = new Set(['20235691100']);
+    for (const payload of [
+      null,
+      'nonsense',
+      { entry: 'not a list' },
+      delivery(null, { changes: 'x' }),
+      delivery(
+        entry(
+          null,
+          { value: 5 },
+          { value: { metadata: 'x' } },
+          change(20235691100, null, 'wamid.n'),
+        ),
+      ),
+    ]) {
+      expect(withoutIgnoredNumbers(payload, ignored)).toEqual({ payload, dropped: 0 });
+    }
   });
 });

@@ -4,11 +4,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { db } from '@/db/client';
 import {
   channels,
+  contactIdentities,
   conversations,
   jobs,
   messages,
   ticketStatuses,
   webhookEvents,
+  whatsappAccounts,
 } from '@/db/schema';
 import type { ClaimedJob } from '@/lib/queue';
 import { computeDay, earliestDay, reportingContext } from '@/lib/reports/rollup';
@@ -555,6 +557,132 @@ describe('processWhatsAppWebhook: a number on the WhatsApp Business app', () => 
       { id: 'wamid.answer', direction: 'outbound' },
       { id: 'wamid.thanks', direction: 'inbound' },
       { id: 'wamid.heart', direction: 'outbound' },
+    ]);
+  });
+});
+
+describe('processWhatsAppWebhook: a number another service answers', () => {
+  // The baseline's customer bot: a number on the same WABA as support, whose
+  // traffic Meta sends us because the subscription is per WABA.
+  const OTHER = { display: '20235691100', id: '128318316834446' };
+  const SUPPORT = { display: '20235691220', id: '838961722630554' };
+  const CUSTOMER = '201001234567';
+  const seconds = (iso: string) => String(DateTime.fromISO(iso).toSeconds());
+
+  const change = (number: { display: string; id: string }, body: Record<string, unknown>) => ({
+    field: 'messages',
+    value: {
+      messaging_product: 'whatsapp',
+      metadata: { display_phone_number: number.display, phone_number_id: number.id },
+      ...body,
+    },
+  });
+
+  const ask = (wamid: string, iso: string) => ({
+    contacts: [{ wa_id: CUSTOMER, profile: { name: 'Amira' } }],
+    messages: [
+      { from: CUSTOMER, id: wamid, timestamp: seconds(iso), type: 'text', text: { body: 'Hi' } },
+    ],
+  });
+
+  const delivery = (...changes: unknown[]) => ({
+    object: 'whatsapp_business_account',
+    entry: [{ id: '128772296801141', changes }],
+  });
+
+  async function ignore(numbers: string[]) {
+    await db.insert(whatsappAccounts).values({
+      name: 'WhatsApp',
+      wabaId: '128772296801141',
+      ignoredPhoneNumbers: numbers,
+    });
+  }
+
+  async function storedPayload(id: string) {
+    const [row] = await db
+      .select({ payload: webhookEvents.payload, processedAt: webhookEvents.processedAt })
+      .from(webhookEvents)
+      .where(eq(webhookEvents.id, id));
+    return row!;
+  }
+
+  beforeEach(async () => {
+    await db.insert(channels).values({
+      type: 'whatsapp',
+      name: 'WhatsApp Support',
+      config: { phoneNumberId: SUPPORT.id },
+    });
+  });
+
+  it('keeps nothing about the ignored number, even where it has a channel, and takes it out of the stored delivery', async () => {
+    await ignore([OTHER.display]);
+
+    const id = await deliver(
+      delivery(
+        change(OTHER, {
+          ...ask('wamid.other', '2026-10-08T09:00:00Z'),
+          statuses: [{ id: 'wamid.sent-by-them', status: 'read', recipient_id: CUSTOMER }],
+        }),
+        change(SUPPORT, ask('wamid.support', '2026-10-08T09:05:00Z')),
+      ),
+    );
+
+    expect(await db.select({ id: messages.channelMessageId }).from(messages)).toEqual([
+      { id: 'wamid.support' },
+    ]);
+    const event = await storedPayload(id);
+    expect(event.processedAt).not.toBeNull();
+    expect(JSON.stringify(event.payload)).not.toContain('wamid.other');
+    expect(JSON.stringify(event.payload)).not.toContain(OTHER.display);
+    expect(JSON.stringify(event.payload)).toContain('wamid.support');
+  });
+
+  it('drops a delivery that was only about the ignored number, matched by its phone number id', async () => {
+    await ignore([OTHER.id]);
+
+    const id = await deliver(delivery(change(OTHER, ask('wamid.other', '2026-10-08T09:00:00Z'))));
+
+    expect(await db.select().from(messages)).toEqual([]);
+    expect(await db.select().from(conversations)).toEqual([]);
+    expect(
+      await db.select().from(contactIdentities).where(eq(contactIdentities.identifier, CUSTOMER)),
+    ).toEqual([]);
+    const event = await storedPayload(id);
+    expect(event.processedAt).not.toBeNull();
+    expect(event.payload).toEqual({ object: 'whatsapp_business_account', entry: [] });
+  });
+
+  it('does not file a reaction sent to the ignored number on the customer’s support ticket', async () => {
+    await ignore([OTHER.display]);
+    await deliver(delivery(change(SUPPORT, ask('wamid.support', '2026-10-08T09:00:00Z'))));
+
+    await deliver(
+      delivery(
+        change(OTHER, {
+          contacts: [{ wa_id: CUSTOMER, profile: { name: 'Amira' } }],
+          messages: [
+            {
+              from: CUSTOMER,
+              id: 'wamid.react',
+              timestamp: seconds('2026-10-08T09:10:00Z'),
+              type: 'reaction',
+              reaction: { message_id: 'wamid.from-them', emoji: '👍' },
+            },
+          ],
+        }),
+      ),
+    );
+
+    expect(await db.select({ id: messages.channelMessageId }).from(messages)).toEqual([
+      { id: 'wamid.support' },
+    ]);
+  });
+
+  it('files the same delivery when no account ignores the number', async () => {
+    await deliver(delivery(change(OTHER, ask('wamid.other', '2026-10-08T09:00:00Z'))));
+
+    expect(await db.select({ id: messages.channelMessageId }).from(messages)).toEqual([
+      { id: 'wamid.other' },
     ]);
   });
 });

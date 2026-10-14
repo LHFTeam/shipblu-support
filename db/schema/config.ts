@@ -731,6 +731,21 @@ export const whatsappAccounts = pgTable(
     isActive: boolean('is_active').notNull().default(true),
 
     /**
+     * Business numbers on this WABA that another messaging service answers, so
+     * this app must neither show nor keep anything about them. Digits only:
+     * the international number without its `+` (`20235691100`), as Meta's
+     * `metadata.display_phone_number` reduces to — or Meta's phone number id,
+     * which matches as well. `parseIgnoredNumbers` is the only writer's gate.
+     *
+     * Checked against every WhatsApp delivery whichever account it arrived
+     * for, not only this one: a number belongs to one WABA, so the only thing
+     * scoping the match would add is a silent failure when the number was
+     * entered on the wrong card. `withoutIgnoredNumbers` in
+     * `lib/whatsapp/parse.ts` is where it applies.
+     */
+    ignoredPhoneNumbers: text('ignored_phone_numbers').array().notNull().default([]),
+
+    /**
      * Outcome of the last template sync. Kept on the row because a WABA that
      * has been connected but whose token cannot read it looks identical to a
      * working one on every screen — the failure is otherwise only in the cron

@@ -18,7 +18,8 @@ import {
   findCoexistenceChannel,
   recordContactSync,
 } from '@/lib/whatsapp/coexistence-state';
-import { parseWebhook } from '@/lib/whatsapp/parse';
+import { ignoredBusinessNumbers } from '@/lib/whatsapp/accounts';
+import { parseWebhook, withoutIgnoredNumbers } from '@/lib/whatsapp/parse';
 import { errorMessage } from '@/lib/errors';
 import { logger } from '@/lib/log';
 
@@ -57,7 +58,19 @@ export async function processWhatsAppWebhook(event: {
   payload: unknown;
   receivedAt: Date;
 }): Promise<void> {
-  const parsed = parseWebhook(event.payload);
+  // Before anything reads the delivery, and written back before anything can
+  // fail, so a retry parses what is left and the stored row never again holds
+  // the other service's customers (`withoutIgnoredNumbers`).
+  const kept = withoutIgnoredNumbers(event.payload, await ignoredBusinessNumbers());
+  if (kept.dropped > 0) {
+    await db
+      .update(webhookEvents)
+      .set({ payload: kept.payload })
+      .where(eq(webhookEvents.id, event.id));
+    log.info(`${event.id}: dropped ${kept.dropped} change(s) for ignored business numbers`);
+  }
+
+  const parsed = parseWebhook(kept.payload);
 
   if (parsed.errors.length) {
     log.warn(`account errors on ${event.id}: ${parsed.errors.join('; ')}`);
@@ -256,6 +269,10 @@ export async function processWhatsAppWebhook(event: {
       ? `, ${historyMessages} history message(s), ${contactsApplied} contact(s), ` +
         `${accountUpdates} account update(s), ${skipped} skipped`
       : '';
+
+  // A delivery that was only about ignored numbers has said all it will in the
+  // line above; a row of zeros under it would be one per delivery for nothing.
+  if (attempted === 0 && kept.dropped > 0) return;
 
   log.info(
     `${event.id}: ${ingested} message(s), ${echoed} echo(es), ` +

@@ -152,6 +152,74 @@ export function parseWebhook(payload: unknown): NormalisedWebhook {
 }
 
 /**
+ * The delivery with every change about an ignored business number taken out,
+ * and how many were.
+ *
+ * `whatsapp_accounts.ignored_phone_numbers` names numbers on a WABA that
+ * another messaging service answers. Meta still sends us everything about
+ * them, because a subscription is per WABA, not per number — and every path
+ * below files what it is handed somewhere: a message on a number with no
+ * channel row falls back to the support channel and opens a ticket, and a
+ * customer's reaction lands on whatever conversation that customer already
+ * has. So the drop happens here, before `parseWebhook` sees the delivery,
+ * rather than in each ingest path that would otherwise have to remember it;
+ * and the handler writes the result back over the stored payload, so the
+ * other service's customers are not kept for thirty days in `webhook_events`
+ * either.
+ *
+ * Per change, because that is the unit a number is named on: every change
+ * carries one `metadata`, and its statuses and errors name no number of their
+ * own. Matched on the display number reduced to digits, as the echo check
+ * below compares it, or on the phone number id, so pasting either works. An
+ * `account_update` has no metadata, only the number it is about in
+ * `phone_number` — and none at all when it is about the WABA, which is kept.
+ *
+ * Walked as `parseWebhook` walks it, and the same way round: anything this
+ * cannot read is left exactly where it was, for the parser to skip.
+ */
+export function withoutIgnoredNumbers(
+  payload: unknown,
+  ignored: ReadonlySet<string>,
+): { payload: unknown; dropped: number } {
+  if (ignored.size === 0 || !isRecord(payload) || !Array.isArray(payload.entry)) {
+    return { payload, dropped: 0 };
+  }
+
+  let dropped = 0;
+  const entry: unknown[] = [];
+
+  for (const item of payload.entry as unknown[]) {
+    if (!isRecord(item) || !Array.isArray(item.changes)) {
+      entry.push(item);
+      continue;
+    }
+    const changes = (item.changes as unknown[]).filter((change) => {
+      if (!aboutIgnoredNumber(change, ignored)) return true;
+      dropped += 1;
+      return false;
+    });
+    // An entry left with nothing in it goes too: its `id` is the WABA and its
+    // `time` when Meta sent it, which is all it would still be saying.
+    if (changes.length > 0 || item.changes.length === 0) entry.push({ ...item, changes });
+  }
+
+  return dropped === 0 ? { payload, dropped } : { payload: { ...payload, entry }, dropped };
+}
+
+function aboutIgnoredNumber(change: unknown, ignored: ReadonlySet<string>): boolean {
+  if (!isRecord(change) || !isRecord(change.value)) return false;
+  const value = change.value as WhatsAppValue;
+  const metadata: Record<string, unknown> = isRecord(value.metadata) ? value.metadata : {};
+
+  return [metadata.display_phone_number, metadata.phone_number_id, value.phone_number].some(
+    (candidate) => {
+      const key = digits(candidate);
+      return key !== null && ignored.has(key);
+    },
+  );
+}
+
+/**
  * A `history` change: chunks of copied chats, the business declining to share
  * them, or the file behind a copied placeholder.
  *

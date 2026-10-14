@@ -1,0 +1,1 @@
+ALTER TABLE "whatsapp_accounts" ADD COLUMN "ignored_phone_numbers" text[] DEFAULT '{}' NOT NULL;

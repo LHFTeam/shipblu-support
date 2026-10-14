@@ -344,6 +344,7 @@ describe('the business accounts the channels page publishes', () => {
     for (const row of rows) {
       expect(Object.keys(row).sort()).toEqual([
         'id',
+        'ignoredPhoneNumbers',
         'isActive',
         'isDefault',
         'lastSyncError',

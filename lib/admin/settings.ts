@@ -341,6 +341,7 @@ export function listAccountsForAdmin() {
       name: whatsappAccounts.name,
       wabaId: whatsappAccounts.wabaId,
       tokenEnvVar: whatsappAccounts.tokenEnvVar,
+      ignoredPhoneNumbers: whatsappAccounts.ignoredPhoneNumbers,
       isDefault: whatsappAccounts.isDefault,
       isActive: whatsappAccounts.isActive,
       lastSyncedAt: whatsappAccounts.lastSyncedAt,

@@ -110,6 +110,93 @@ export function parseTokenEnvVar(raw: string): TokenEnvVarResult {
   return { ok: true, value: name };
 }
 
+export type IgnoredNumbersResult = { ok: true; value: string[] } | { ok: false; error: string };
+
+/** Enough for every number a WABA can hold, with room to spare; past it is a paste gone wrong. */
+const MAX_IGNORED_NUMBERS = 100;
+
+/**
+ * Normalises the "numbers to ignore" box: one number per line (commas work
+ * too), stored as digits only — the international number without its `+`,
+ * which is what Meta's `display_phone_number` reduces to.
+ *
+ * Spelling is forgiven and the shape is not. Spaces, dashes, dots, brackets
+ * and a leading `+` are how people copy a number, so they are dropped; a
+ * letter means the line is a note or a name, and is refused rather than
+ * reduced to whatever digits it held. **A leading 0 is refused**, because it
+ * is the one mistake that looks right: `02 3569 1100` is the local spelling of
+ * `+20 2 3569 1100`, it would be stored as `0235691100`, and it would never
+ * match the `20235691100` Meta sends — the number would keep arriving while the
+ * screen said it was ignored. The same refusal catches an `00` dialling
+ * prefix.
+ *
+ * Meta's phone number id is accepted as well and matches on its own, which is
+ * why the ceiling is not E.164's fifteen: ids run to sixteen digits today, and
+ * one pasted by mistake would otherwise be refused or, worse, stored as a
+ * number that matches nothing.
+ */
+export function parseIgnoredNumbers(raw: string): IgnoredNumbersResult {
+  const numbers: string[] = [];
+
+  for (const line of raw.split(/[\r\n,]+/)) {
+    const written = line.trim();
+    if (!written) continue;
+
+    if (!/^[+\d\s().-]+$/.test(written)) {
+      return {
+        ok: false,
+        error: `“${written}” is not a phone number. Write one number per line, with its country code, e.g. +20 2 3569 1100.`,
+      };
+    }
+
+    const number = written.replace(/\D/g, '');
+    if (number.startsWith('0')) {
+      return {
+        ok: false,
+        error:
+          `“${written}” starts with 0. Write it with the country code in place of the ` +
+          `leading 0 — +20 2 3569 1100, not 02 3569 1100 or 0020 2 3569 1100.`,
+      };
+    }
+    if (number.length < 8 || number.length > 20) {
+      return {
+        ok: false,
+        error: `“${written}” has ${number.length} digits, which is not a whole phone number with its country code.`,
+      };
+    }
+
+    if (!numbers.includes(number)) numbers.push(number);
+  }
+
+  if (numbers.length > MAX_IGNORED_NUMBERS) {
+    return {
+      ok: false,
+      error: `At most ${MAX_IGNORED_NUMBERS} numbers can be ignored per account.`,
+    };
+  }
+
+  return { ok: true, value: numbers };
+}
+
+/**
+ * Every number any account says to ignore, as `withoutIgnoredNumbers` matches
+ * them — across all accounts, switched off or not.
+ *
+ * Switched off means "do not send through this WABA"; it says nothing about
+ * wanting another service's traffic back. And across accounts because a number
+ * belongs to one WABA, so a list on the wrong card would otherwise be a list
+ * that silently does nothing.
+ *
+ * Read once per delivery, unmemoised: a few rows, and a saved list then
+ * applies from the next delivery on, on the worker as well as the page.
+ */
+export async function ignoredBusinessNumbers(): Promise<Set<string>> {
+  const rows = await db
+    .select({ numbers: whatsappAccounts.ignoredPhoneNumbers })
+    .from(whatsappAccounts);
+  return new Set(rows.flatMap((row) => row.numbers));
+}
+
 /**
  * The account a number belongs to, with the fallback order spelled out.
  *

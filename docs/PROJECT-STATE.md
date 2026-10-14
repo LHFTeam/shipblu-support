@@ -1025,7 +1025,21 @@ is code:
   `plans/multiple-waba-connections.md`, and note the limit it states: every
   connected WABA has to sit under the same Meta app, because the app secret that
   verifies inbound webhooks is single-valued. The env vars
-  are the credentials; the rows are what the app routes on. A `portal` row is
+  are the credentials; the rows are what the app routes on. Each connection
+  also carries **numbers to ignore** — business numbers on its WABA that a
+  different messaging service answers. Meta subscribes per WABA, so their
+  traffic arrives here regardless, and without the list a number with no
+  channel row is filed on the support channel as a new ticket. Listed, every
+  change about it is taken out of the delivery before anything is parsed and
+  out of the stored `webhook_events` payload (`withoutIgnoredNumbers`). The
+  format is the full number with its country code — `+20 2 3569 1100` or
+  `20235691100`, stored as digits; a local `02…` is refused because it would
+  never match what Meta sends, and the phone number id is accepted too. Measured
+  2026-10-14, WABA `128772296801141` delivers for two numbers:
+  `20235691100` (id `128318316834446`, the `whatsapp_bot` row, ~680k
+  deliveries in 30 days) and `20235691220` (`WhatsApp Support`). Listing the
+  bot's number would end the bot mirror described in §1; the stored
+  conversations stay. A `portal` row is
   worth adding too: without one, tickets opened from the customer portal land
   with no default group, so nothing routes them. The `webchat` row **now exists**
   (measured 2026-08-31): it is the row whose default group decides which schedule

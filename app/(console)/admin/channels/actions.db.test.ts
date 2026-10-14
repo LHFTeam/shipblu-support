@@ -35,7 +35,8 @@ vi.mock('@/lib/auth/guard', () => ({
 }));
 vi.mock('next/cache', () => ({ revalidatePath: () => {} }));
 
-const { connectBusinessAppNumber, deleteWhatsAppAccount, saveChannel } = await import('./actions');
+const { connectBusinessAppNumber, deleteWhatsAppAccount, saveChannel, saveWhatsAppAccount } =
+  await import('./actions');
 
 withCleanDatabase();
 
@@ -88,6 +89,55 @@ async function accountExists(id: string) {
     .where(eq(whatsappAccounts.id, id));
   return rows.length === 1;
 }
+
+describe('saveWhatsAppAccount: numbers to ignore', () => {
+  async function ignoredOn(id: string) {
+    const [row] = await db
+      .select({ numbers: whatsappAccounts.ignoredPhoneNumbers })
+      .from(whatsappAccounts)
+      .where(eq(whatsappAccounts.id, id));
+    return row!.numbers;
+  }
+
+  it('stores what was typed as the digits Meta sends, beside a stored credential too', async () => {
+    const id = await account(WABA, 'ShipBlu');
+    await withStoredCredential(id, WABA);
+
+    const result = await saveWhatsAppAccount(
+      INITIAL,
+      form({
+        id,
+        name: 'ShipBlu',
+        wabaId: WABA,
+        isActive: 'on',
+        ignoredPhoneNumbers: '+20 2 3569 1100\n20235691100\n',
+      }),
+    );
+
+    expect(result.error).toBeNull();
+    expect(await ignoredOn(id)).toEqual(['20235691100']);
+
+    // An empty box clears the list.
+    await saveWhatsAppAccount(INITIAL, form({ id, name: 'ShipBlu', wabaId: WABA, isActive: 'on' }));
+    expect(await ignoredOn(id)).toEqual([]);
+  });
+
+  it('refuses a local number and changes nothing', async () => {
+    const id = await account(WABA, 'ShipBlu');
+    await db
+      .update(whatsappAccounts)
+      .set({ ignoredPhoneNumbers: ['20235691100'] })
+      .where(eq(whatsappAccounts.id, id));
+
+    const result = await saveWhatsAppAccount(
+      INITIAL,
+      form({ id, name: 'Renamed', wabaId: WABA, ignoredPhoneNumbers: '02 3569 1220' }),
+    );
+
+    expect(result.error).toContain('country code');
+    expect(await ignoredOn(id)).toEqual(['20235691100']);
+  });
+});
 
 describe('deleteWhatsAppAccount', () => {
   it('refuses to take a stored credential with it for somebody who may not connect numbers', async () => {

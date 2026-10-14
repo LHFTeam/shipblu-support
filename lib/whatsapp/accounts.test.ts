@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { setTestEnv, withTestEnv } from '@/lib/testing/env';
 import {
+  parseIgnoredNumbers,
   parseTokenEnvVar,
   resolveAccount,
   resolveCredentialSource,
@@ -88,6 +89,61 @@ describe('parseTokenEnvVar', () => {
   it('refuses anything that is not a variable name at all', () => {
     expect(parseTokenEnvVar('WHATSAPP_TOKEN_A B').ok).toBe(false);
     expect(parseTokenEnvVar('WHATSAPP_TOKEN_A;RM').ok).toBe(false);
+  });
+});
+
+describe('parseIgnoredNumbers', () => {
+  it('stores each number as the digits Meta sends, however it was typed', () => {
+    expect(parseIgnoredNumbers('+20 2 3569 1100\n20235691220\r\n(+20) 100-123.4567')).toEqual({
+      ok: true,
+      value: ['20235691100', '20235691220', '201001234567'],
+    });
+  });
+
+  it('treats blank lines, commas and repeats as nothing', () => {
+    expect(parseIgnoredNumbers('\n  +20 2 3569 1100, 20235691100\n\n')).toEqual({
+      ok: true,
+      value: ['20235691100'],
+    });
+    expect(parseIgnoredNumbers('   ')).toEqual({ ok: true, value: [] });
+  });
+
+  it('accepts a phone number id, which matches on its own', () => {
+    expect(parseIgnoredNumbers('1345390131993034')).toEqual({
+      ok: true,
+      value: ['1345390131993034'],
+    });
+  });
+
+  // The local spelling would be stored as 0235691100 and never match the
+  // 20235691100 Meta sends: the number would keep arriving while the screen
+  // said it was ignored.
+  it.each(['02 3569 1100', '0020 2 3569 1100', '010 0123 4567'])(
+    'refuses %s, which is missing its country code',
+    (written) => {
+      const result = parseIgnoredNumbers(`20235691220\n${written}`);
+      expect(result.ok).toBe(false);
+      expect(!result.ok && result.error).toContain(written);
+      expect(!result.ok && result.error).toContain('country code');
+    },
+  );
+
+  it('refuses a line that is not only a number rather than keeping its digits', () => {
+    const result = parseIgnoredNumbers('+20 2 3569 1100 (bot)');
+    expect(result.ok).toBe(false);
+    expect(!result.ok && result.error).toContain('+20 2 3569 1100 (bot)');
+  });
+
+  it('refuses too few digits and too many', () => {
+    expect(parseIgnoredNumbers('3569 110').ok).toBe(false);
+    expect(parseIgnoredNumbers('2'.repeat(21)).ok).toBe(false);
+    expect(parseIgnoredNumbers('2'.repeat(20)).ok).toBe(true);
+  });
+
+  it('refuses a list longer than any WABA holds', () => {
+    const many = Array.from({ length: 101 }, (_, i) => `2023569${String(i).padStart(4, '0')}`);
+    expect(parseIgnoredNumbers(many.join('\n')).ok).toBe(false);
+    expect(parseIgnoredNumbers(many.slice(0, 100).join('\n')).ok).toBe(true);
   });
 });
 

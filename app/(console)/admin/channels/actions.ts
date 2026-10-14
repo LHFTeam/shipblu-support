@@ -9,7 +9,7 @@ import { ok } from '@/lib/http/action-state';
 import { text, uuidField } from '@/lib/http/form-data';
 import { allow } from '@/lib/http/rate-limit';
 import { enqueue } from '@/lib/queue';
-import { parseTokenEnvVar } from '@/lib/whatsapp/accounts';
+import { parseIgnoredNumbers, parseTokenEnvVar } from '@/lib/whatsapp/accounts';
 import {
   canRequestSync,
   parseCoexistence,
@@ -75,6 +75,9 @@ export async function saveWhatsAppAccount(
   const token = parseTokenEnvVar(String(formData.get('tokenEnvVar') ?? ''));
   if (!token.ok) return { error: token.error };
 
+  const ignored = parseIgnoredNumbers(String(formData.get('ignoredPhoneNumbers') ?? ''));
+  if (!ignored.ok) return { error: ignored.error };
+
   const clash = await db
     .select({ id: whatsappAccounts.id })
     .from(whatsappAccounts)
@@ -89,6 +92,7 @@ export async function saveWhatsAppAccount(
     name,
     wabaId,
     tokenEnvVar: token.value,
+    ignoredPhoneNumbers: ignored.value,
     isDefault,
     isActive,
     updatedAt: new Date(),
