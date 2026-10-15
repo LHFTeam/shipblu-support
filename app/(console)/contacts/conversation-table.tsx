@@ -16,10 +16,13 @@ export function ConversationTable({
   conversations,
   emptyTitle,
   emptyHint,
+  now,
 }: {
   conversations: ConversationSummary[];
   emptyTitle: string;
   emptyHint?: string;
+  /** The page's render instant, so every relative time on it reads one clock. */
+  now: Date;
 }) {
   if (conversations.length === 0) {
     return <EmptyState title={emptyTitle} hint={emptyHint} />;
@@ -45,7 +48,7 @@ export function ConversationTable({
             {conversation.assigneeName ?? 'Unassigned'}
           </Cell>
           <Cell className="text-xs whitespace-nowrap text-(--color-text-tertiary)">
-            {formatRelative(conversation.lastMessageAt)}
+            {formatRelative(conversation.lastMessageAt, now)}
           </Cell>
         </Row>
       ))}

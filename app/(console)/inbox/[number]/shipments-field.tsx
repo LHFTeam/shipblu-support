@@ -4,10 +4,11 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { DetailsSection, Property, PropertyList } from '@/components/details-section';
 import { PlusIcon, ReturnIcon } from '@/components/icons';
+import { RelativeTime } from '@/components/relative-time';
 import { StatusBadge, Stepper } from '@/components/shipment-status';
 import { Tooltip } from '@/components/tooltip';
 import { Badge, Button, Input } from '@/components/ui';
-import { formatDateTime, formatRelative } from '@/lib/format';
+import { ago, formatDateTime } from '@/lib/format';
 import type { ConversationDetail } from '@/lib/tickets/conversation';
 import { describeRequesterRole } from '@/lib/shipments/roles';
 import {
@@ -46,6 +47,7 @@ export function ShipmentsField({ conversation }: { conversation: ConversationDet
       <ul className="mb-3 grid gap-2">
         {conversation.shipments.map((shipment) => {
           const card = shipmentCard(shipment);
+          const statusAt = shipment.syncState === 'synced' ? shipment.statusAt : null;
 
           return (
             <li
@@ -90,10 +92,12 @@ export function ShipmentsField({ conversation }: { conversation: ConversationDet
                 <Property
                   label="Updated"
                   value={
-                    shipment.syncState === 'synced' && shipment.statusAt ? (
-                      <Tooltip content={formatDateTime(shipment.statusAt)}>
-                        {formatRelative(shipment.statusAt)}
-                      </Tooltip>
+                    statusAt ? (
+                      <RelativeTime at={statusAt}>
+                        {(relative) => (
+                          <Tooltip content={formatDateTime(statusAt)}>{relative}</Tooltip>
+                        )}
+                      </RelativeTime>
                     ) : null
                   }
                 />
@@ -257,9 +261,11 @@ function RefreshShipmentButton({
 
         <span className="text-xs text-(--color-text-tertiary)">
           {lastSyncedAt ? (
-            <Tooltip content={formatDateTime(lastSyncedAt)}>
-              checked {formatRelative(lastSyncedAt)} ago
-            </Tooltip>
+            <RelativeTime at={lastSyncedAt}>
+              {(relative) => (
+                <Tooltip content={formatDateTime(lastSyncedAt)}>checked {ago(relative)}</Tooltip>
+              )}
+            </RelativeTime>
           ) : (
             'never checked'
           )}

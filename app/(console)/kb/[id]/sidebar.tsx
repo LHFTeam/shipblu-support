@@ -3,10 +3,11 @@
 import Link from 'next/link';
 import { useActionState } from 'react';
 import { useFormStatus } from 'react-dom';
+import { RelativeTime } from '@/components/relative-time';
 import { Badge, Button, ErrorText, Select } from '@/components/ui';
 import { ConfirmSubmit } from '@/components/confirm-submit';
 import { useActionForm } from '@/components/use-action-form';
-import { formatRelative, sentenceCase } from '@/lib/format';
+import { sentenceCase } from '@/lib/format';
 import type { ArticleVersion, TranslationGroup, TranslationOption } from '@/lib/kb/admin';
 import {
   deleteArticle,
@@ -196,7 +197,7 @@ export function ArticleSidebar({
                 <span className="text-(--color-text-secondary)">v{version.version}</span>
                 <span className="min-w-0 flex-1 truncate">{version.editedBy ?? 'Unknown'}</span>
                 <span className="text-(--color-text-tertiary)">
-                  {formatRelative(version.createdAt)}
+                  <RelativeTime at={version.createdAt} />
                 </span>
 
                 <form action={restoreAction}>

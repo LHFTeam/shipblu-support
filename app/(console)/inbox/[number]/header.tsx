@@ -5,8 +5,9 @@ import Link from 'next/link';
 import { Avatar } from '@/components/avatar';
 import { ChannelBadge } from '@/components/channel';
 import { ChevronLeftIcon } from '@/components/icons';
+import { RelativeTime } from '@/components/relative-time';
 import { Badge } from '@/components/ui';
-import { formatRelative } from '@/lib/format';
+import { ago } from '@/lib/format';
 import { answeredFromConsole } from '@/lib/tickets/channel-policy';
 import type { ConversationDetail } from '@/lib/tickets/conversation';
 import { ProfileRefresh } from './profile-refresh';
@@ -103,7 +104,9 @@ export function Header({
         </p>
 
         <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-(--color-text-secondary)">
-          <span>Opened {formatRelative(conversation.createdAt)} ago</span>
+          <RelativeTime at={conversation.createdAt}>
+            {(relative) => <span>Opened {ago(relative)}</span>}
+          </RelativeTime>
           {isComment ? <Badge tone="public">Public comment</Badge> : null}
           {/*
               Only where there is something to ask. A Messenger or Instagram

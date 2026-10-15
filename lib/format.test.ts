@@ -1,6 +1,6 @@
 import { DateTime } from 'luxon';
 import { describe, expect, it, vi } from 'vitest';
-import { formatDateTime, formatDay, formatTime, sentenceCase } from './format';
+import { ago, formatDateTime, formatDay, formatRelative, formatTime, sentenceCase } from './format';
 
 describe('sentenceCase', () => {
   it('capitalises the first letter and spaces every underscore', () => {
@@ -121,5 +121,54 @@ describe('formatDay / formatTime', () => {
   it('writes midnight as 00:00, never 24:00, and pads the hour', () => {
     expect(formatTime(cairo({ year: 2026, month: 3, day: 1, hour: 0, minute: 0 }))).toBe('00:00');
     expect(formatTime(cairo({ year: 2026, month: 3, day: 1, hour: 9, minute: 5 }))).toBe('09:05');
+  });
+});
+
+describe('formatRelative', () => {
+  const now = new Date('2026-10-15T12:00:00Z');
+  const ago = (ms: number) => formatRelative(new Date(now.getTime() - ms), now);
+  const MINUTE = 60_000;
+
+  it('counts against the clock it is given, not the one it runs under', () => {
+    // Whatever the machine's own clock says: that is the reading a server and
+    // a browser disagree about, and why the argument is required.
+    expect(formatRelative('2026-10-15T11:57:00Z', now)).toBe('3m');
+  });
+
+  it('steps from minutes to hours to days at each whole unit', () => {
+    expect(ago(59_999)).toBe('now');
+    expect(ago(MINUTE)).toBe('1m');
+    expect(ago(60 * MINUTE - 1)).toBe('59m');
+    expect(ago(60 * MINUTE)).toBe('1h');
+    expect(ago(24 * 60 * MINUTE)).toBe('1d');
+    expect(ago(29 * 24 * 60 * MINUTE)).toBe('29d');
+  });
+
+  it('writes the date itself from a month back', () => {
+    expect(ago(30 * 24 * 60 * MINUTE)).toBe('15 Sept 2026, 15:00');
+  });
+
+  it('reads an instant later than the clock as now, not as a negative count', () => {
+    // A row written after the clock reading it is compared with — a message
+    // that landed between a server render and the bucket it is drawn against.
+    expect(ago(-5 * MINUTE)).toBe('now');
+  });
+});
+
+describe('ago', () => {
+  it('ends a sentence with whatever formatRelative answered', () => {
+    expect(`Opened ${ago('3m')}`).toBe('Opened 3m ago');
+    expect(`Opened ${ago('2h')}`).toBe('Opened 2h ago');
+    expect(`Opened ${ago('29d')}`).toBe('Opened 29d ago');
+  });
+
+  it('says "just now" in the first minute, never "now ago"', () => {
+    expect(`checked ${ago('now')}`).toBe('checked just now');
+  });
+
+  it('leaves a date a date, never "<date> ago"', () => {
+    const now = new Date('2026-10-15T12:00:00Z');
+    const old = formatRelative('2026-07-03T11:02:00Z', now);
+    expect(`Opened ${ago(old)}`).toBe('Opened 3 Jul 2026, 14:02');
   });
 });

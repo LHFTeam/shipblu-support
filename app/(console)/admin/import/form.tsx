@@ -4,8 +4,9 @@ import { useActionState } from 'react';
 import { useFormStatus } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import { useEffect } from 'react';
+import { RelativeTime } from '@/components/relative-time';
 import { Badge, Button, ErrorText } from '@/components/ui';
-import { formatDateTime, formatRelative, sentenceCase } from '@/lib/format';
+import { ago, formatDateTime, sentenceCase } from '@/lib/format';
 import type { AdminState } from '../settings-shared';
 import { startFreshdeskImport } from './actions';
 
@@ -148,7 +149,9 @@ export function ImportForm({
                   ) : null}
                   {run.completedAt ? (
                     <span className="ms-auto text-xs text-(--color-text-tertiary)">
-                      finished {formatRelative(run.completedAt)}
+                      <RelativeTime at={run.completedAt}>
+                        {(relative) => `finished ${ago(relative)}`}
+                      </RelativeTime>
                     </span>
                   ) : null}
                 </div>

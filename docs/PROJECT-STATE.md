@@ -6183,16 +6183,23 @@ still waiting for it` one whose outcome is not known yet.
     hydration error and rebuilt the whole page in the browser, remounting
     everything on it — and nothing on screen said so, because the rebuilt page
     looks right. Every date format in `lib/format.ts` now joins the
-    formatter's fields with separators of its own (`fields()`), so a later
+    formatter's fields with separators of its own (`joined()`), so a later
     engine cannot bring it back through a format that agreed only by
     measurement. The field values themselves (month names, "Sept") measured the
-    same in both for all twelve months. Two things still draw on both sides
-    and can differ:
-    - `formatRelative` ("3m") reads the clock, so it differs whenever a minute
-      boundary falls between the server's render and hydration, or the
-      agent's clock is a minute off;
-    - the widget's opening hours (`formatOpens`, `en-GB` and `ar-EG`) are
-      still taken whole, and only measured the same.
+    same in both for all twelve months.
+
+    The relative times ("3m") had the same failure with a different cause: they
+    read the clock, so they differed whenever a minute boundary fell between
+    the server's render and hydration, or the agent's clock was a minute off.
+    `formatRelative` now takes the clock as a required argument. A server
+    component passes the instant it renders at; a client component renders
+    `<RelativeTime>` (`components/relative-time.tsx`), which draws nothing
+    until the page has hydrated and then counts on `useNow()`'s shared
+    half-minute clock, so a time on a page left open also stays current. Its
+    test hydrates across a minute boundary, beside a control that reads the
+    clock while rendering and is caught. One thing still draws on both sides
+    and can differ: the widget's opening hours (`formatOpens`, `en-GB` and
+    `ar-EG`), still taken whole and only measured the same.
 
     A new format drawn by a client component takes its fields the same way, or
     is drawn only after hydration. A recoverable hydration error reaches

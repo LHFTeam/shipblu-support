@@ -2,12 +2,13 @@
 
 import Link from 'next/link';
 import { useState } from 'react';
+import { RelativeTime } from '@/components/relative-time';
 import { ErrorText, Field, Input, SuccessText, Textarea, Toggle } from '@/components/ui';
 import { InfoTip } from '@/components/tooltip';
 import { SubmitButton } from '@/components/submit-button';
 import { useActionForm } from '@/components/use-action-form';
 import type { ActionState } from '@/lib/http/action-state';
-import { formatRelative } from '@/lib/format';
+import { ago } from '@/lib/format';
 import { DangerAction, Disclosure, EditorForm } from '../forms-shared';
 import { deleteCannedResponse, saveCannedResponse, saveCannedSuggestionSettings } from './actions';
 
@@ -158,9 +159,13 @@ export function SuggestionSwitchForm({
       ) : null}
 
       <p className="text-xs text-(--color-text-secondary)">
-        {changedAt
-          ? `Last changed ${formatRelative(changedAt)}${changedBy ? ` by ${changedBy}` : ''}. `
-          : 'Never switched on. '}
+        {changedAt ? (
+          <RelativeTime at={changedAt}>
+            {(relative) => `Last changed ${ago(relative)}${changedBy ? ` by ${changedBy}` : ''}. `}
+          </RelativeTime>
+        ) : (
+          'Never switched on. '
+        )}
         <Link href="/reports/canned-suggestions" className="underline">
           How the suggestions are doing
         </Link>
