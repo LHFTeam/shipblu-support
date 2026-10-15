@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { Avatar } from '@/components/avatar';
 import { ChannelBadge } from '@/components/channel';
 import { DetailsSection, Property, PropertyList } from '@/components/details-section';
-import { formatRelative } from '@/lib/format';
+import { RelativeTime } from '@/components/relative-time';
 import type { ConversationDetail } from '@/lib/tickets/conversation';
 import type { TicketFieldDef } from '@/lib/tickets/custom-fields';
 import type { CategoryOption, RootCauseOption } from '@/lib/categorise/queries';
@@ -209,7 +209,7 @@ export function Sidebar({
                         </span>{' '}
                         {describeEvent(event.type, event.data)}
                         <span className="ms-1 text-(--color-text-tertiary)">
-                          {formatRelative(event.createdAt)}
+                          <RelativeTime at={event.createdAt} />
                         </span>
                       </li>
                     ))}

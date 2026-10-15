@@ -103,9 +103,19 @@ export function formatTime(at: Date): string {
   return joined(time, at, ['hour', 'minute'], (part) => `${part.hour}:${part.minute}`);
 }
 
-/** "3m", "4h", "2d" — the inbox needs recency at a glance, not precision. */
-export function formatRelative(value: Date | string): string {
-  const elapsed = Date.now() - new Date(value).getTime();
+/**
+ * "3m", "4h", "2d" — the inbox needs recency at a glance, not precision.
+ *
+ * The clock is an argument, and a required one, because which clock is the
+ * whole question. A server component passes the instant it renders at. A
+ * client component draws on the server and again in the browser, a moment and
+ * possibly a minute boundary later, so it cannot read the clock during either:
+ * it renders `<RelativeTime>`, which formats against `useNow()` once the page
+ * has hydrated. Reading `Date.now()` in here made every caller's text depend on
+ * when it rendered, which is the hydration error §6.96 records.
+ */
+export function formatRelative(value: Date | string, now: Date): string {
+  const elapsed = now.getTime() - new Date(value).getTime();
   const minutes = Math.floor(elapsed / 60_000);
 
   if (minutes < 1) return 'now';

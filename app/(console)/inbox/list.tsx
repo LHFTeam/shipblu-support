@@ -7,11 +7,11 @@ import { AgentAvatar, Avatar } from '@/components/avatar';
 import { ChannelBadge, channelInfo } from '@/components/channel';
 import { ConversationRow } from '@/components/conversation-row';
 import { BookIcon, ReplyIcon } from '@/components/icons';
+import { RelativeTime } from '@/components/relative-time';
 import { SearchInput } from '@/components/search-input';
 import { useNow } from '@/components/use-now';
 import { Badge, Button, buttonClass, EmptyState, ErrorText, Select } from '@/components/ui';
 import type { ViewsPanelSection } from '@/components/views-panel';
-import { formatRelative } from '@/lib/format';
 import { DEFAULT_LOCALE } from '@/lib/kb/locale';
 import type { InboxRow } from '@/lib/tickets/inbox';
 import type { InboxFilters } from '@/lib/tickets/inbox-filters';
@@ -236,7 +236,7 @@ export function InboxList({
                 href={`/inbox/${row.number}?${params.toString()}`}
                 active={row.number === activeNumber}
                 name={row.requesterName ?? row.requesterHandle ?? 'Unknown'}
-                time={formatRelative(row.lastMessageAt)}
+                time={<RelativeTime at={row.lastMessageAt} />}
                 preview={headline}
                 secondary={secondary}
                 avatar={

@@ -71,7 +71,7 @@ export function AgentLoad({
                 <Badge tone={presenceTone(agent.presence)}>{sentenceCase(agent.presence)}</Badge>
                 {agent.lastSeenAt && agent.presence !== 'online' ? (
                   <span className="ms-2 text-xs text-(--color-text-secondary)">
-                    {formatRelative(agent.lastSeenAt)}
+                    {formatRelative(agent.lastSeenAt, now)}
                   </span>
                 ) : null}
               </Cell>

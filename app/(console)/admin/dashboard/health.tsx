@@ -4,7 +4,13 @@ import type { systemHealth } from '@/lib/reports/live';
 
 import { Section } from './section';
 
-export function Health({ health }: { health: Awaited<ReturnType<typeof systemHealth>> }) {
+export function Health({
+  health,
+  now,
+}: {
+  health: Awaited<ReturnType<typeof systemHealth>>;
+  now: Date;
+}) {
   return (
     <Section
       title="Behind the scenes"
@@ -16,7 +22,7 @@ export function Health({ health }: { health: Awaited<ReturnType<typeof systemHea
           value={health.jobsPending.toLocaleString('en-GB')}
           hint={
             health.oldestPendingSince
-              ? `Oldest queued ${formatRelative(health.oldestPendingSince)} ago · ${health.jobsProcessing} running`
+              ? `Oldest queued ${formatRelative(health.oldestPendingSince, now)} ago · ${health.jobsProcessing} running`
               : `${health.jobsProcessing} running`
           }
           tone={health.jobsPending > 100 ? 'caution' : undefined}
@@ -33,7 +39,7 @@ export function Health({ health }: { health: Awaited<ReturnType<typeof systemHea
           value={health.webhooksUnprocessed.toLocaleString('en-GB')}
           hint={
             health.oldestWebhookSince
-              ? `Oldest received ${formatRelative(health.oldestWebhookSince)} ago`
+              ? `Oldest received ${formatRelative(health.oldestWebhookSince, now)} ago`
               : 'Everything received has been handled'
           }
           tone={health.webhooksUnprocessed > 50 ? 'caution' : undefined}
@@ -43,7 +49,7 @@ export function Health({ health }: { health: Awaited<ReturnType<typeof systemHea
           value={health.lastRollupDay ?? '—'}
           hint={
             health.lastRollupAt
-              ? `That day's figures were written ${formatRelative(health.lastRollupAt)} ago`
+              ? `That day's figures were written ${formatRelative(health.lastRollupAt, now)} ago`
               : 'The nightly job has never run'
           }
           tone={health.lastRollupAt ? undefined : 'caution'}

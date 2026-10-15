@@ -49,6 +49,7 @@ export default async function ShipmentPage({ params }: { params: Promise<{ track
    * is looking at it.
    */
   const detail = await agentTrackingFor(trackingNumber);
+  const now = new Date();
 
   /*
    * Whether this parcel is on its way back, worked out the same way the customer
@@ -120,7 +121,7 @@ export default async function ShipmentPage({ params }: { params: Promise<{ track
               <RefreshShipmentButton
                 trackingNumber={shipment.trackingNumber}
                 lastSyncedAt={
-                  shipment.lastSyncedAt ? `${formatRelative(shipment.lastSyncedAt)} ago` : null
+                  shipment.lastSyncedAt ? `${formatRelative(shipment.lastSyncedAt, now)} ago` : null
                 }
               />
             </div>

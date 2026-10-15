@@ -30,6 +30,7 @@ export default async function TeamAvailabilityPage() {
   await requirePermission('agent.availability');
 
   const [team, policy] = await Promise.all([agentLoad(), loadPresencePolicy()]);
+  const now = new Date();
 
   const online = team.filter((agent) => agent.presence === 'online').length;
   const away = team.filter((agent) => agent.presence === 'away').length;
@@ -96,7 +97,7 @@ export default async function TeamAvailabilityPage() {
               </Cell>
               <Cell>
                 <span className="text-xs text-(--color-text-tertiary)">
-                  {agent.lastInputAt ? formatRelative(agent.lastInputAt) : '—'}
+                  {agent.lastInputAt ? formatRelative(agent.lastInputAt, now) : '—'}
                 </span>
               </Cell>
               <Cell>

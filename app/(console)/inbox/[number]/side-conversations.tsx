@@ -3,8 +3,9 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { HubIcon } from '@/components/icons';
+import { RelativeTime } from '@/components/relative-time';
 import { Badge, Button, ErrorText, Input, Label, Notice, Select, Textarea } from '@/components/ui';
-import { formatDateTime, formatRelative } from '@/lib/format';
+import { formatDateTime } from '@/lib/format';
 import type { PickerEntry, SideConversationView } from '@/lib/side-conversations/queries';
 import {
   blankSideSubject,
@@ -63,11 +64,17 @@ function NotVisible() {
 function SideState({ side, since }: { side: SideConversationView; since?: boolean }) {
   if (side.state === 'done') return <Badge tone="resolved">Done</Badge>;
   if (side.awaitingReply) {
-    return <Badge tone="hub-waiting">Awaiting reply · {formatRelative(side.lastMessageAt)}</Badge>;
+    return (
+      <Badge tone="hub-waiting">
+        Awaiting reply
+        <RelativeTime at={side.lastMessageAt}>{(ago) => ` · ${ago}`}</RelativeTime>
+      </Badge>
+    );
   }
   return (
     <Badge tone="hub-replied">
-      Replied{since ? ` · ${formatRelative(side.lastMessageAt)}` : ''}
+      Replied
+      {since ? <RelativeTime at={side.lastMessageAt}>{(ago) => ` · ${ago}`}</RelativeTime> : null}
     </Badge>
   );
 }

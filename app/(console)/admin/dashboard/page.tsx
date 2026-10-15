@@ -145,7 +145,7 @@ export default async function DashboardPage({
       <ChannelLoad channels={channels} />
 
       {/* --------------------------------------------------------------- Health */}
-      <Health health={health} />
+      <Health health={health} now={now} />
     </>
   );
 }

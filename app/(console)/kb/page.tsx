@@ -18,6 +18,7 @@ export default async function KbListPage({
 
   const filters = parseArticleFilters(await searchParams);
   const articles = await listArticlesForAdmin(agent.role, filters);
+  const now = new Date();
 
   // Both authoring entrances are `kb.edit`, which starts at supervisor, and both
   // targets bounce anybody else to `/inbox?error=forbidden`. That bounce is what
@@ -95,7 +96,7 @@ export default async function KbListPage({
                 {article.viewCount} views
               </span>
               <span className="w-20 text-end text-xs text-(--color-text-tertiary)">
-                {formatRelative(article.updatedAt)}
+                {formatRelative(article.updatedAt, now)}
               </span>
             </Link>
           </li>

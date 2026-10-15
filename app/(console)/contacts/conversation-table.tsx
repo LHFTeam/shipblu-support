@@ -24,6 +24,7 @@ export function ConversationTable({
   if (conversations.length === 0) {
     return <EmptyState title={emptyTitle} hint={emptyHint} />;
   }
+  const now = new Date();
 
   return (
     <Table head={['Ticket', 'Subject', 'Channel', 'Status', 'Assignee', 'Last activity']}>
@@ -45,7 +46,7 @@ export function ConversationTable({
             {conversation.assigneeName ?? 'Unassigned'}
           </Cell>
           <Cell className="text-xs whitespace-nowrap text-(--color-text-tertiary)">
-            {formatRelative(conversation.lastMessageAt)}
+            {formatRelative(conversation.lastMessageAt, now)}
           </Cell>
         </Row>
       ))}

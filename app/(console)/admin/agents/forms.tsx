@@ -11,8 +11,9 @@ import {
   Select,
   SuccessText,
 } from '@/components/ui';
+import { RelativeTime } from '@/components/relative-time';
 import { InfoTip, Tooltip } from '@/components/tooltip';
-import { formatRelative, sentenceCase } from '@/lib/format';
+import { sentenceCase } from '@/lib/format';
 import type { AdminState } from '../settings-shared';
 import { createInvite, savePresenceSettings, setAgentActive, setAgentCapacity } from './actions';
 import type { ActionState } from '@/lib/http/action-state';
@@ -255,9 +256,7 @@ export function PendingInviteLink({
  * the row read "seen now ago", and would have read "seen 3 Jul 2026, 14:02 ago"
  * for anyone who had been away long enough to be worth noticing.
  */
-function lastSeen(value: Date | string | null): string {
-  if (!value) return 'never signed in';
-  const relative = formatRelative(value);
+function lastSeen(relative: string): string {
   if (relative === 'now') return 'seen just now';
   return /^\d+[mhd]$/.test(relative) ? `seen ${relative} ago` : `seen ${relative}`;
 }
@@ -379,7 +378,11 @@ export function AgentRow({
         </form>
 
         <span className="shrink-0 text-xs text-(--color-text-tertiary)">
-          {lastSeen(agent.lastSeenAt)}
+          {agent.lastSeenAt ? (
+            <RelativeTime at={agent.lastSeenAt}>{lastSeen}</RelativeTime>
+          ) : (
+            'never signed in'
+          )}
         </span>
 
         <form action={action} className="ms-auto sm:ms-0">
