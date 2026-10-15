@@ -228,3 +228,28 @@ const WRITTEN_SUBJECT: readonly ConversationChannel[] = ['email', 'portal'];
 export function hasWrittenSubject(channel: string): boolean {
   return (WRITTEN_SUBJECT as readonly string[]).includes(channel);
 }
+
+/**
+ * Channels that are a chat, whose files the ticket's thread draws the way the
+ * customer's own messenger does: a photo as the photo, loaded without a click,
+ * and a voice note as its player (`MessageFiles`).
+ *
+ * Everywhere else a file stays an attachment to open (`AttachmentList`). An
+ * email's signature logos arrive as files exactly as its photos do, and the
+ * `cid:` references that would place them in the body are never rewritten
+ * (`lib/html/sanitize.ts`), so drawn eagerly every logo would stack under every
+ * mail at a photo's size; and a camera photo attached to a mail runs to
+ * megabytes. A named list, as `WRITTEN_SUBJECT` is, so a channel added later
+ * keeps the cautious behaviour until somebody decides otherwise.
+ */
+const CHAT_MEDIA: readonly ConversationChannel[] = [
+  'whatsapp',
+  'whatsapp_bot',
+  'facebook',
+  'instagram',
+  'webchat',
+];
+
+export function drawsMediaInline(channel: string): boolean {
+  return (CHAT_MEDIA as readonly string[]).includes(channel);
+}

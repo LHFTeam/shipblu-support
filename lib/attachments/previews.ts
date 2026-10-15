@@ -1,6 +1,6 @@
 /**
  * What a message's inline pictures are doing, and what the list's live region
- * says about them — `AttachmentList` in the inbox draws it.
+ * says about them — `AttachmentList` and `MessageFiles` in the inbox draw it.
  *
  * A reducer rather than three `useState`s and handlers that read them, because
  * every decision here depends on more than one of the three. A handler can only
@@ -21,39 +21,64 @@ export type Load = 'loading' | 'loaded' | 'failed';
  * file shown only as a link, which can neither fail nor be announced, and the
  * wording reads absent as a picture.
  *
- * `name` is what the file is called aloud — its file name for a picture, and
- * the player's own name ("Audio, 21 KB") for a voice note or a video, so the
- * notice about a player names the control the agent just pressed rather than
- * the sixteen-digit media id WhatsApp stores a note under.
+ * `name` is what the file is called aloud — its file name for a picture behind
+ * a chip, what it is ("Picture, 86 KB") for one drawn in the thread, and the
+ * player's own name ("Audio, 21 KB") for a voice note or a video, so the notice
+ * about a player names the control the agent just pressed rather than the
+ * sixteen-digit media id WhatsApp stores a note under.
  *
  * A voice note's player is on the page from the start rather than opened from
  * its chip, so for this reducer it is always showing: its failure is announced
  * at once, where a closed picture's waits until it is opened.
+ *
+ * `loadsItself` marks a picture or a video in a chat's thread, which is on the
+ * page from the start like a voice note but, unlike one, fetches without
+ * anybody pressing anything (see `settle`).
  */
-export type PreviewFile = { id: string; name: string; kind?: 'image' | 'audio' | 'video' };
+export type PreviewFile = {
+  id: string;
+  name: string;
+  kind?: 'image' | 'audio' | 'video';
+  loadsItself?: boolean;
+};
 
 /**
  * What a player is called aloud: by what it is, not by its file. WhatsApp sends
  * a voice note without a name, so it is stored as its media id — sixteen digits
- * — and every note in production would be read out as a number. The chip
- * beside it still carries the file name as its link text.
+ * — and every note in production would be read out as a number. In
+ * `AttachmentList` the chip beside it still carries the file name as its link
+ * text; the thread shows none.
  */
 export function playerName(kind: 'audio' | 'video', sizeBytes: number): string {
   return `${kind === 'audio' ? 'Audio' : 'Video'}, ${formatBytes(sizeBytes)}`;
 }
 
-/** A file as this reducer knows it, named the way its control is. */
+/**
+ * A file as this reducer knows it, named the way its control is.
+ *
+ * `inline` is a chat's thread, where a picture has no chip to be named after,
+ * so it is named for what it is, as a player is: every photo in production is
+ * stored under its media id or its message's. A sticker is called one, since
+ * the `[sticker]` that said so is not drawn there either.
+ */
 export function previewFile(
   file: { id: string; filename: string; sizeBytes: number },
   kind: PreviewFile['kind'],
+  { inline = false, sticker = false }: { inline?: boolean; sticker?: boolean } = {},
 ): PreviewFile {
   const name =
-    kind === 'audio' || kind === 'video' ? playerName(kind, file.sizeBytes) : file.filename;
-  return { id: file.id, name, kind };
+    kind === 'audio' || kind === 'video'
+      ? playerName(kind, file.sizeBytes)
+      : inline && kind === 'image'
+        ? `${sticker ? 'Sticker' : 'Picture'}, ${formatBytes(file.sizeBytes)}`
+        : file.filename;
+  return inline && (kind === 'image' || kind === 'video')
+    ? { id: file.id, name, kind, loadsItself: true }
+    : { id: file.id, name, kind };
 }
 
 const showing = (state: PreviewState, file: PreviewFile) =>
-  file.kind === 'audio' || state.showing[file.id] === true;
+  file.kind === 'audio' || file.loadsItself === true || state.showing[file.id] === true;
 
 export type PreviewState = {
   /**
@@ -73,14 +98,31 @@ export type PreviewState = {
    */
   notice: { fileId: string; text: string; seq: number } | null;
   seq: number;
+  /**
+   * Files "Try again" was pressed on and that have not settled since: the
+   * next settle answers the agent. Kept as its own fact rather than read off
+   * `loads`, where "loading" written for any other reason would make every
+   * self-loading picture's failure announce.
+   */
+  retried: Record<string, true>;
 };
 
 export type PreviewAction =
   | { type: 'toggle'; file: PreviewFile }
-  | { type: 'settle'; file: PreviewFile; load: 'loaded' | 'failed' }
+  /**
+   * `pressed` says the failure answers the agent: it followed play or a seek
+   * on a player, or focus was on the file when it came.
+   */
+  | { type: 'settle'; file: PreviewFile; load: 'loaded' | 'failed'; pressed?: boolean }
   | { type: 'retry'; file: PreviewFile };
 
-export const initialPreviewState: PreviewState = { showing: {}, loads: {}, notice: null, seq: 0 };
+export const initialPreviewState: PreviewState = {
+  showing: {},
+  loads: {},
+  notice: null,
+  seq: 0,
+  retried: {},
+};
 
 export function loadOf(state: PreviewState, id: string): Load {
   return state.loads[id] ?? 'loading';
@@ -100,21 +142,38 @@ export function previewReducer(state: PreviewState, action: PreviewAction): Prev
     }
 
     case 'settle': {
-      const next = { ...state, loads: { ...state.loads, [file.id]: action.load } };
+      const { [file.id]: retried, ...rest } = state.retried;
+      const next = { ...state, loads: { ...state.loads, [file.id]: action.load }, retried: rest };
       if (action.load === 'loaded') return withdraw(next, file.id);
       // A failure behind a closed preview is told when it is opened, not now,
       // while the agent is looking at something else.
-      return showing(state, file) ? announce(next, file) : next;
+      if (!showing(state, file)) return next;
+      // A picture or video that loads by itself answers nothing the agent did,
+      // so its failure is left as the visible line it already is. Announced,
+      // a Storage outage would read out every picture on the ticket the moment
+      // it opened. Only the agent is answered: "Try again", play or a seek, or
+      // focus on the file.
+      if (file.loadsItself && !action.pressed && !retried) return next;
+      return announce(next, file);
     }
 
     case 'retry':
-      return withdraw({ ...state, loads: { ...state.loads, [file.id]: 'loading' } }, file.id);
+      return withdraw(
+        {
+          ...state,
+          loads: { ...state.loads, [file.id]: 'loading' },
+          retried: { ...state.retried, [file.id]: true },
+        },
+        file.id,
+      );
   }
 }
 
 /**
  * Names the next steps as well as the failure: the controls sit under the whole
- * chip list, away from the chip that has focus, so nothing else says they exist.
+ * chip list, away from the chip that has focus — or, in the thread, inside the
+ * figure focus was parked on, whose name says nothing of them — so nothing else
+ * says they exist.
  */
 function announce(state: PreviewState, file: PreviewFile): PreviewState {
   const seq = state.seq + 1;

@@ -242,6 +242,29 @@ describe('parseMetaWebhook', () => {
     });
   });
 
+  it('keeps that a Messenger image is a sticker, which its type does not say', () => {
+    // The thumbs-up "like" arrives exactly so. The stand-in stays `[image]`:
+    // the flag is what tells the thread to draw it small.
+    const parsed = parse(
+      messengerPayload({
+        message: {
+          mid: 'm_like',
+          attachments: [
+            {
+              type: 'image',
+              payload: { url: 'https://cdn.example/like.png', sticker_id: 369239263222822 },
+            },
+          ],
+        },
+      }),
+    );
+
+    expect(parsed.messages[0]?.text).toBe('[image]');
+    expect(parsed.messages[0]?.attachments).toEqual([
+      { type: 'image', url: 'https://cdn.example/like.png', title: null, sticker: true },
+    ]);
+  });
+
   it('reads a Facebook comment and knows a top-level one from a reply', () => {
     const top = parse({
       object: 'page',

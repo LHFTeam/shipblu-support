@@ -16,9 +16,10 @@ import {
   readSharedLocation,
   type SharedLocation,
 } from '@/lib/tickets/shared-location';
-import { readOnlyReason } from '@/lib/tickets/channel-policy';
+import { drawsMediaInline, readOnlyReason } from '@/lib/tickets/channel-policy';
+import { isMediaStandIn, mediaLooks } from '@/lib/tickets/message-media';
 import { deliveryOf, type MessageMeta, type Voice, voiceOf } from '@/lib/tickets/thread';
-import { AttachmentList } from './attachments';
+import { AttachmentList, MessageFiles } from './attachments';
 import { CommentModeration } from './comment-moderation';
 import { SideConversationCard } from './side-conversations';
 
@@ -76,6 +77,7 @@ export function Timeline({
   canViewContact: boolean;
 }) {
   const readOnly = Boolean(readOnlyReason(conversation.channel));
+  const inlineMedia = drawsMediaInline(conversation.channel);
   const items: ReactNode[] = [];
   let day: string | null = null;
   const byId = new Map(conversation.messages.map((message) => [message.id, message]));
@@ -138,6 +140,7 @@ export function Timeline({
         at={entry.at}
         canModerate={canModerateComments && !readOnly}
         canViewContact={canViewContact}
+        inlineMedia={inlineMedia}
         reactions={
           message.reactions.length > 0 ? (
             <Reactions message={message} at={entry.at} byId={byId} />
@@ -232,20 +235,24 @@ type Part = 'text' | 'location' | 'files';
  * the receipt and everything about the message close it.
  *
  * Runs never join across messages, so every message keeps its own time and
- * receipt. Keyed per part, so a live update re-rendering the thread keeps an
- * opened picture open and a playing voice note playing.
+ * receipt. Keyed per part, so a live update re-rendering the thread neither
+ * fetches a picture again nor closes an opened one, and a playing voice note
+ * keeps playing.
  */
 function MessageParts({
   message,
   at,
   canModerate,
   canViewContact,
+  inlineMedia,
   reactions,
 }: {
   message: Message;
   at: Date;
   canModerate: boolean;
   canViewContact: boolean;
+  /** A chat's files are drawn as what they are; an email's stay attachments (`drawsMediaInline`). */
+  inlineMedia: boolean;
   /** On the last part: a reaction answers the message, not its caption or its photo. */
   reactions?: ReactNode;
 }) {
@@ -267,10 +274,15 @@ function MessageParts({
     today sends words and a pin in one message, but a support tool silently
     dropping a customer's sentence is a much worse failure than a redundant
     line, so the card is additive wherever there is real text.
+
+    A photo, a voice note or a document sent alone follows the same rule: its
+    `[image]` is left out once the file itself is drawn, and a caption never is.
   */
   const hasText = message.bodyHtml
     ? true
-    : message.bodyText.trim() !== '' && !(location && isLocationPlaceholder(message.bodyText));
+    : message.bodyText.trim() !== '' &&
+      !(location && isLocationPlaceholder(message.bodyText)) &&
+      !(inlineMedia && isMediaStandIn(message));
   if (hasText) parts.push('text');
   if (location) parts.push('location');
   if (message.attachments.length > 0) parts.push('files');
@@ -338,6 +350,8 @@ function MessageParts({
           />
         ) : part === 'location' && location ? (
           <SharedLocationCard location={location} />
+        ) : inlineMedia ? (
+          <MessageFiles files={message.attachments} looks={mediaLooks(message)} />
         ) : (
           <AttachmentList files={message.attachments} />
         )}

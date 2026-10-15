@@ -88,8 +88,9 @@ export function sanitiseEmailHtml(html: string, options: SanitiseOptions = {}): 
     // can carry text/html and become a script execution vector.
     allowedSchemes: ['http', 'https', 'mailto', 'tel'],
     allowedSchemesByTag: {
-      // cid: is how inline attachments are referenced; rewritten to a real URL
-      // after the attachment is stored.
+      // cid: is how an email references an inline part. Kept through
+      // sanitising, but nothing rewrites it to a URL yet, so such an image does
+      // not draw in the body (see `drawsMediaInline`).
       img: allowRemoteImages ? ['http', 'https', 'cid'] : ['cid'],
     },
     allowProtocolRelative: false,

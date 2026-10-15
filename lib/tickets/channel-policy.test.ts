@@ -6,6 +6,7 @@ import {
   consoleReplyNotice,
   consoleReplyReason,
   CONVERSATION_CHANNELS,
+  drawsMediaInline,
   hasWrittenSubject,
   hiddenChannels,
   isReadOnlyChannel,
@@ -149,4 +150,14 @@ describe('who can see the bot channel', () => {
 it('keeps a subject on the card only on the channels where somebody wrote one', () => {
   // Over every channel, so a new one is answered here rather than defaulting.
   expect(CONVERSATION_CHANNELS.filter(hasWrittenSubject)).toEqual(['email', 'portal']);
+});
+
+it('draws files inline only on a chat, so email and anything added later stay attachments', () => {
+  expect(CONVERSATION_CHANNELS.filter(drawsMediaInline)).toEqual([
+    'whatsapp',
+    'webchat',
+    'facebook',
+    'instagram',
+    'whatsapp_bot',
+  ]);
 });

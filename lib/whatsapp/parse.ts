@@ -1,3 +1,4 @@
+import { whatsAppMediaStandIn } from '@/lib/chat/stand-ins';
 import { mimeEssence } from '@/lib/http/mime';
 import { parseCoordinates } from '@/lib/tickets/shared-location';
 import type {
@@ -378,9 +379,10 @@ export function displayText(message: WhatsAppInboundMessage): string {
       const media = message[message.type as (typeof MEDIA_TYPES)[number]];
       const caption = trimmedOrNull(media?.caption);
       if (caption) return caption;
-      if (message.type === 'document' && media?.filename) return `[document: ${media.filename}]`;
-      if (message.type === 'audio' && media?.voice) return '[voice note]';
-      return `[${message.type}]`;
+      return whatsAppMediaStandIn(message.type as (typeof MEDIA_TYPES)[number], {
+        filename: media?.filename,
+        voice: media?.voice,
+      });
     }
 
     case 'location': {
