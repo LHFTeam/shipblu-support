@@ -31,7 +31,18 @@ export function formatDateTime(value: Date | string): string {
 let day: Intl.DateTimeFormat | undefined;
 let time: Intl.DateTimeFormat | undefined;
 
-/** "Saturday, 29 August 2026" — the day an instant falls on in Cairo. */
+/**
+ * "Saturday, 29 August 2026" — the day an instant falls on in Cairo.
+ *
+ * Put together from the formatter's parts rather than taken whole, because the
+ * punctuation between the parts is locale data, and the two ends of a render
+ * carry different copies of it: Node 22's ICU (CLDR 47) writes "Wednesday, 14
+ * October 2026" and Chromium 141's "Wednesday 14 October 2026". The timeline
+ * draws its day breaks on the server and again in the browser, so that comma
+ * was a hydration error on every ticket page, and React threw the server's
+ * HTML away and rebuilt the whole page in the browser. The names and numbers
+ * are the same in both; the separators are ours now.
+ */
 export function formatDay(at: Date): string {
   day ??= new Intl.DateTimeFormat('en-GB', {
     weekday: 'long',
@@ -40,7 +51,9 @@ export function formatDay(at: Date): string {
     year: 'numeric',
     timeZone: TEAM_TIME_ZONE,
   });
-  return day.format(at);
+  const part: Partial<Record<Intl.DateTimeFormatPartTypes, string>> = {};
+  for (const { type, value } of day.formatToParts(at)) part[type] = value;
+  return `${part.weekday}, ${part.day} ${part.month} ${part.year}`;
 }
 
 /** "09:05" — the Cairo wall-clock time of an instant, always two digits, never 24:00. */

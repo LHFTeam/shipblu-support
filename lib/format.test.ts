@@ -1,5 +1,5 @@
 import { DateTime } from 'luxon';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { formatDay, formatTime, sentenceCase } from './format';
 
 describe('sentenceCase', () => {
@@ -48,6 +48,47 @@ describe('formatDay / formatTime', () => {
     expect(formatDay(afterMidnight)).toBe('Friday, 16 January 2026');
     expect(formatTime(beforeMidnight)).toBe('23:59');
     expect(formatTime(afterMidnight)).toBe('00:05');
+  });
+
+  it('writes the same day whatever separators the engine’s locale data carries', () => {
+    // The day break is drawn on the server and again in the browser, so it has
+    // to read the same in both. Node 22's ICU puts a comma after the weekday
+    // and Chromium 141's does not. Each pass stands in for an engine whose data
+    // puts `separator` after the weekday, through both ways of asking it.
+    const proto = Intl.DateTimeFormat.prototype;
+    const parts = proto.formatToParts;
+    const format = Object.getOwnPropertyDescriptor(proto, 'format')!;
+    const at = cairo({ year: 2026, month: 10, day: 14, hour: 9, minute: 5 });
+    for (const separator of [', ', ' ']) {
+      const engine = function (this: Intl.DateTimeFormat, date?: Date | number) {
+        return parts
+          .call(this, date)
+          .map((part, index, all) =>
+            part.type === 'literal' && all[index - 1]?.type === 'weekday'
+              ? { ...part, value: separator }
+              : part,
+          );
+      };
+      vi.spyOn(proto, 'formatToParts').mockImplementation(engine);
+      // A getter in the specification, which TypeScript types as a method, so
+      // `vi.spyOn` cannot reach it.
+      Object.defineProperty(proto, 'format', {
+        configurable: true,
+        get(this: Intl.DateTimeFormat) {
+          return (date?: Date | number) =>
+            engine
+              .call(this, date)
+              .map((part) => part.value)
+              .join('');
+        },
+      });
+      try {
+        expect(formatDay(at)).toBe('Wednesday, 14 October 2026');
+      } finally {
+        vi.restoreAllMocks();
+        Object.defineProperty(proto, 'format', format);
+      }
+    }
   });
 
   it('writes midnight as 00:00, never 24:00, and pads the hour', () => {
