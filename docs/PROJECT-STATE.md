@@ -6203,15 +6203,22 @@ still waiting for it` one whose outcome is not known yet.
     test hydrates across a minute boundary, beside a control that reads the
     clock while rendering and is caught.
 
-    A new format drawn by a client component takes its fields the same way, or
-    is drawn only after hydration. The `client-dates` repo rule holds the
-    browser bundle to the first: a whole-string `Intl.DateTimeFormat` or a
-    `toLocale*String` in any module a client component reaches fails CI. Its
+    A new date drawn by a client component is formatted in `lib/format.ts`,
+    which joins its fields. Drawing a whole string only after hydration would
+    also avoid the mismatch, but is not an alternative here: the `client-dates`
+    repo rule cannot tell an effect from a render, so in any module a client
+    component reaches it refuses `Intl.DateTimeFormat` outside `lib/format.ts`
+    (its `formatToParts` too, which can rebuild the whole string), and the
+    engine's own date strings everywhere — `toLocale*String`, `toDateString`,
+    `Intl.RelativeTimeFormat`, luxon's `toRelative` and localized macros. Its
     first run found the widget and three help-centre formatters that rode into
     the bundle in `lib/kb/locale.ts` beside `t()`, drawn only by server pages;
-    those moved to `lib/kb/dates.ts`. A recoverable hydration error reaches
-    Playwright as a `pageerror`, not a console message, so a check listening
-    only to the console reports a clean page.
+    those moved to `lib/kb/dates.ts`, and the custom-field input's parts moved
+    into `lib/format.ts`. What it cannot see is a `Date` turned into text by
+    `String()` or a template literal, which needs the value's type. A
+    recoverable hydration error reaches Playwright as a `pageerror`, not a
+    console message, so a check listening only to the console reports a clean
+    page.
 
 97. **A photo sent without a caption reads as the customer writing English.**
     `displayText` (`lib/whatsapp/parse.ts`, `lib/meta/parse.ts`) stores a

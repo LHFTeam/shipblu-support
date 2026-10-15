@@ -4,9 +4,10 @@ import { many, runRule } from '../fixture.mjs';
 /**
  * A date drawn by a client component is drawn twice, by Node and by the
  * browser, and the punctuation of the engine's whole string is locale data
- * each ships its own copy of (§6.96). In the browser bundle a formatter is
- * built in `lib/format.ts`, which joins its fields, or chained straight into
- * `.formatToParts()`; the `toLocale*String` methods are refused outright.
+ * each ships its own copy of (§6.96). In the browser bundle `Intl.DateTimeFormat`
+ * lives only in `lib/format.ts`, which joins its fields; the engine's own date
+ * strings — `toLocale*String`, `toDateString`, luxon's relative words and
+ * localized macros — are refused everywhere, that module included.
  */
 
 /** Twenty harmless client components: the rule's floor. */
@@ -18,6 +19,15 @@ const CLIENTS = many(
 
 const client = (body, imports = '') =>
   `'use client';\n\n${imports}export function Opens({ at }: { at: Date }) {\n${body}\n}\n`;
+
+/** One line per case, each at the line the client's body starts on. */
+async function refusedLines(...lines) {
+  const found = await runRule('client-dates', {
+    ...CLIENTS,
+    'components/opens.tsx': client([...lines, '  return null;'].join('\n')),
+  });
+  return found.map((failure) => failure.where);
+}
 
 describe('client-dates', () => {
   it('passes a client component that formats through lib/format.ts', async () => {
@@ -45,7 +55,7 @@ describe('client-dates', () => {
     expect(found).toEqual([
       expect.objectContaining({
         where: 'components/opens.tsx:4',
-        message: expect.stringMatching(/whole string.*lib\/format\.ts/),
+        message: expect.stringMatching(/outside lib\/format\.ts.*punctuation/),
       }),
     ]);
   });
@@ -71,43 +81,93 @@ describe('client-dates', () => {
     ]);
   });
 
-  it('passes the formatter chained into its parts, which the caller joins', async () => {
+  it('follows a barrel, which brings every module it re-exports into the bundle', async () => {
     const found = await runRule('client-dates', {
       ...CLIENTS,
-      'components/opens.tsx': client(
-        "  const parts = new Intl.DateTimeFormat('en-GB', { hour: '2-digit' }).formatToParts(at);\n  return parts.map((part) => part.value).join('');",
-      ),
+      'lib/kb/index.ts':
+        "export const t = (key: string) => key;\nexport * from './dates';\nexport type { Shape } from './shape';\n",
+      'lib/kb/dates.ts':
+        "export function formatArticleDate(at: Date) {\n  return at.toLocaleDateString('en-GB');\n}\n",
+      // Type-only, so erased: nothing in it is in the bundle.
+      'lib/kb/shape.ts':
+        'export type Shape = { at: Date };\nexport const whole = (at: Date) => at.toLocaleString();\n',
+      'components/opens.tsx': client("  return t('opens');", "import { t } from '@/lib/kb';\n\n"),
     });
 
-    expect(found).toEqual([]);
+    expect(found).toEqual([
+      expect.objectContaining({
+        where: 'lib/kb/dates.ts:2',
+        message: expect.stringContaining(
+          'components/opens.tsx → lib/kb/index.ts → lib/kb/dates.ts',
+        ),
+      }),
+    ]);
   });
 
-  it('refuses a formatter kept in a variable, whatever it is later asked for', async () => {
-    const found = await runRule('client-dates', {
-      ...CLIENTS,
-      'components/opens.tsx': client(
-        "  const format = Intl.DateTimeFormat('en-GB', { hour: '2-digit' });\n  return format.formatToParts(at)[0]?.value;",
+  it('refuses a formatter chained into its parts, which can rebuild the whole string', async () => {
+    // Joined from the engine's own literals, this is `.format(at)` again; only
+    // reading what the caller keeps of the parts could tell, which is why the
+    // formatter lives in one module rather than being judged at each use.
+    expect(
+      await refusedLines(
+        "  new Intl.DateTimeFormat('en-GB', { dateStyle: 'long' }).formatToParts(at).map((p) => p.value).join('');",
       ),
-    });
-
-    expect(found).toEqual([expect.objectContaining({ where: 'components/opens.tsx:4' })]);
+    ).toEqual(['components/opens.tsx:4']);
   });
 
-  it('refuses the toLocale methods and a relative time worded by the engine', async () => {
-    const found = await runRule('client-dates', {
-      ...CLIENTS,
-      'components/opens.tsx': client(
-        [
-          "  const day = at.toLocaleDateString('en-GB');",
-          "  const time = at.toLocaleTimeString('en-GB');",
-          '  const both = at.toLocaleString();',
-          "  const ago = new Intl.RelativeTimeFormat('en').format(-3, 'minute');",
-          '  return [day, time, both, ago].join();',
-        ].join('\n'),
+  it('refuses the formatter however it is spelled', async () => {
+    expect(
+      await refusedLines(
+        "  Intl.DateTimeFormat('en-GB', { hour: '2-digit' });",
+        "  new globalThis.Intl.DateTimeFormat('en-GB').format(at);",
+        "  new Intl['DateTimeFormat']('en-GB').format(at);",
+        '  const { DateTimeFormat } = Intl;',
+        '  class Formatter extends Intl.DateTimeFormat {}',
+        "  Intl.DateTimeFormat.supportedLocalesOf(['ar-EG']);",
       ),
-    });
+    ).toEqual([
+      'components/opens.tsx:4',
+      'components/opens.tsx:5',
+      'components/opens.tsx:6',
+      'components/opens.tsx:7',
+      'components/opens.tsx:8',
+      'components/opens.tsx:9',
+    ]);
+  });
 
-    expect(found.map((failure) => failure.where)).toEqual([
+  it("refuses the engine's own date strings and relative words", async () => {
+    expect(
+      await refusedLines(
+        "  at.toLocaleDateString('en-GB');",
+        "  at.toLocaleTimeString('en-GB');",
+        '  at.toLocaleString();',
+        '  at.toDateString();',
+        '  at.toTimeString();',
+        "  new Intl.RelativeTimeFormat('en').format(-3, 'minute');",
+      ),
+    ).toEqual([
+      'components/opens.tsx:4',
+      'components/opens.tsx:5',
+      'components/opens.tsx:6',
+      'components/opens.tsx:7',
+      'components/opens.tsx:8',
+      'components/opens.tsx:9',
+    ]);
+  });
+
+  it('holds luxon to the same: no relative words, no localized macro', async () => {
+    expect(
+      await refusedLines(
+        '  DateTime.fromJSDate(at).toRelative();',
+        '  DateTime.fromJSDate(at).toRelativeCalendar();',
+        "  DateTime.fromJSDate(at).toFormat('DDD');",
+        "  DateTime.fromJSDate(at).toFormat('ccc, t');",
+        // Fields spelled out, with the separators in the pattern: joined.
+        '  DateTime.fromJSDate(at).toFormat("cccc \'at\' HH:mm");',
+        // Quoted text is literal in luxon, so a quoted 'D' is not a macro.
+        '  DateTime.fromJSDate(at).toFormat("\'Day\' d");',
+      ),
+    ).toEqual([
       'components/opens.tsx:4',
       'components/opens.tsx:5',
       'components/opens.tsx:6',
@@ -115,19 +175,37 @@ describe('client-dates', () => {
     ]);
   });
 
-  it('reads a type annotation, a comment and a string as what they are', async () => {
+  it('keeps the formatter in lib/format.ts and nothing else', async () => {
+    // The module that joins fields may build a formatter, but the engine's own
+    // strings are as wrong there as anywhere else in the bundle.
     const found = await runRule('client-dates', {
       ...CLIENTS,
+      'lib/format.ts': [
+        "const day = new Intl.DateTimeFormat('en-GB', { weekday: 'long' });",
+        'export const formatDay = (at: Date) => day.format(at);',
+        "export const formatShort = (at: Date) => at.toLocaleDateString('en-GB');",
+        "export const formatAgo = (n: number) => new Intl.RelativeTimeFormat('en').format(n, 'minute');",
+        '',
+      ].join('\n'),
       'components/opens.tsx': client(
-        [
-          '  // new Intl.DateTimeFormat().format(at) would differ between Node and the browser',
-          '  let format: Intl.DateTimeFormat | null = null;',
-          "  return format ? 'Intl.DateTimeFormat' : at.toISOString();",
-        ].join('\n'),
+        '  return formatDay(at) + formatShort(at) + formatAgo(3);',
+        "import { formatAgo, formatDay, formatShort } from '@/lib/format';\n\n",
       ),
     });
 
-    expect(found).toEqual([]);
+    expect(found.map((failure) => failure.where)).toEqual(['lib/format.ts:3', 'lib/format.ts:4']);
+  });
+
+  it('reads a type annotation, a comment and a string as what they are', async () => {
+    expect(
+      await refusedLines(
+        '  // new Intl.DateTimeFormat().format(at) would differ between Node and the browser',
+        '  let format: Intl.DateTimeFormat | null = null;',
+        '  type Options = Intl.DateTimeFormatOptions & { zone: typeof Intl.DateTimeFormat };',
+        '  interface Formatter extends Intl.DateTimeFormat {}',
+        "  const label = format ? 'Intl.DateTimeFormat' : at.toISOString();",
+      ),
+    ).toEqual([]);
   });
 
   it('leaves a module no client component reaches, and stops at a server action', async () => {
@@ -142,7 +220,7 @@ describe('client-dates', () => {
       // An action file the client calls: Next swaps it for a fetch.
       'app/actions.ts': `'use server';\n\n${whole}`,
       'components/opens.tsx': client(
-        '  return String(at);',
+        '  return at.toISOString();',
         "import { formatArticleDate } from '@/app/actions';\n\nvoid formatArticleDate;\n",
       ),
     });

@@ -104,6 +104,32 @@ export function formatTime(at: Date): string {
   return joined(time, at, ['hour', 'minute'], (part) => `${part.hour}:${part.minute}`);
 }
 
+let input: Intl.DateTimeFormat | undefined;
+
+/**
+ * "2026-10-14T09:05" — an instant as the Cairo wall clock a `datetime-local`
+ * input takes, which wants exactly `yyyy-MM-ddTHH:mm` where every locale's own
+ * rendering is something else. `h23` because `hour12: false` reads midnight as
+ * 24 in some ICU versions, which the input refuses.
+ */
+export function formatInputDateTime(at: Date): string {
+  input ??= new Intl.DateTimeFormat('en-GB', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+    timeZone: TEAM_TIME_ZONE,
+  });
+  return joined(
+    input,
+    at,
+    ['year', 'month', 'day', 'hour', 'minute'],
+    (part) => `${part.year}-${part.month}-${part.day}T${part.hour}:${part.minute}`,
+  );
+}
+
 /*
   The chat widget's "we reply from" time, in the visitor's language. The widget
   is drawn on the server and hydrated in whatever browser the visitor has —
@@ -123,19 +149,14 @@ export function formatOpens(at: Date | string, locale: Locale): string {
     hourCycle: locale === 'ar' ? 'h12' : 'h23',
     timeZone: TEAM_TIME_ZONE,
   }));
-  return locale === 'ar'
-    ? joined(
-        format,
-        new Date(at),
-        ['weekday', 'hour', 'minute', 'dayPeriod'],
-        (part) => `${part.weekday} ${part.hour}:${part.minute} ${part.dayPeriod}`,
-      )
-    : joined(
-        format,
-        new Date(at),
-        ['weekday', 'hour', 'minute'],
-        (part) => `${part.weekday} ${part.hour}:${part.minute}`,
-      );
+  const twelveHour = locale === 'ar';
+  return joined(
+    format,
+    new Date(at),
+    twelveHour ? ['weekday', 'hour', 'minute', 'dayPeriod'] : ['weekday', 'hour', 'minute'],
+    (part) =>
+      `${part.weekday} ${part.hour}:${part.minute}${twelveHour ? ` ${part.dayPeriod}` : ''}`,
+  );
 }
 
 /**

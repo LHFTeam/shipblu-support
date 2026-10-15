@@ -1,5 +1,5 @@
 import ts from 'typescript';
-import { fail, read, requireAtLeast, scannable } from '../lib.mjs';
+import { fail, lineOfNode, parseSource, requireAtLeast, scannable } from '../lib.mjs';
 
 /**
  * A form with a field a reset would move submits through `useActionForm`
@@ -35,23 +35,16 @@ export function checkFormsDoNotReset() {
 
   let forms = 0;
   for (const file of scannable.filter((f) => f.startsWith('app/') && f.endsWith('.tsx'))) {
-    const source = ts.createSourceFile(
-      file,
-      read(file),
-      ts.ScriptTarget.Latest,
-      true,
-      ts.ScriptKind.TSX,
-    );
+    const source = parseSource(file);
 
     const visit = (node) => {
       if (ts.isJsxElement(node) && nameOf(node.openingElement.tagName) === 'form') {
         forms++;
         const field = submitsThroughReact(node.openingElement) ? firstMovedField(node) : null;
         if (field) {
-          const { line } = source.getLineAndCharacterOfPosition(node.getStart(source));
           fail(
             rule,
-            `${file}:${line + 1}`,
+            `${file}:${lineOfNode(source, node)}`,
             `<form action={…}> holds a <${field}> that React's reset after a refused action would move — submit it through useActionForm, as <form {...form}> (AGENTS.md, §6.80)`,
           );
         }

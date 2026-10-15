@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync, statSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import ts from 'typescript';
 import { isolatedGitEnv } from './git-env.mjs';
 
 /**
@@ -172,6 +173,22 @@ export function resolveModule(spec, fromFile) {
  * `typeOnly` is the `import type` form, which the bundler erases.
  */
 export function moduleEdges(file) {
+  let edges = edgesOf.get(file);
+  if (!edges) edgesOf.set(file, (edges = readEdges(file)));
+  return edges;
+}
+
+/*
+  Both are read once per file per run. The bundle-walking rules ask them for
+  the same module once per entry point that reaches it — a hundred entries,
+  each re-reading and re-stripping the modules they share — and the answer
+  cannot change while the rules run. The fixture resets this module between
+  cases, so a cache never outlives the repository it read.
+*/
+const edgesOf = new Map();
+const directives = new Map();
+
+function readEdges(file) {
   const contents = stripComments(readFileSync(path.join(ROOT, file), 'utf8'));
   const edges = [];
 
@@ -213,18 +230,50 @@ export function moduleEdges(file) {
 
 /** The `'use client'` / `'use server'` directive a module declares, or null. */
 export function directiveOf(file) {
-  const head = stripComments(readFileSync(path.join(ROOT, file), 'utf8')).trimStart();
-  if (/^['"]use client['"]/.test(head)) return 'client';
-  if (/^['"]use server['"]/.test(head)) return 'server';
-  return null;
+  if (!directives.has(file)) {
+    const head = stripComments(readFileSync(path.join(ROOT, file), 'utf8')).trimStart();
+    directives.set(
+      file,
+      /^['"]use client['"]/.test(head)
+        ? 'client'
+        : /^['"]use server['"]/.test(head)
+          ? 'server'
+          : null,
+    );
+  }
+  return directives.get(file);
+}
+
+/**
+ * A module as the TypeScript compiler reads it, JSX or not by its extension.
+ *
+ * The rules that need more than a pattern read the syntax tree, for the reason
+ * `rules/dom-title.mjs` gives; this is the one place that says how.
+ */
+export function parseSource(file) {
+  return ts.createSourceFile(
+    file,
+    read(file),
+    ts.ScriptTarget.Latest,
+    true,
+    file.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
+  );
+}
+
+/** The 1-based line a node starts on, for an error message that points somewhere. */
+export function lineOfNode(source, node) {
+  return source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1;
 }
 
 /**
  * The modules a browser bundle takes from `file`, resolved: what a `'use
  * client'` entry point pulls in, one step at a time.
  *
- * Value imports only. `import type` is erased by tsc and followed by nobody,
- * and a re-export is not something the importer pulls into its own bundle.
+ * Value imports and value re-exports. `import type` and `export type … from`
+ * are erased by tsc and followed by nobody. A re-export is followed because a
+ * module in the bundle that re-exports another brings it in: an entry that
+ * takes one name from a barrel ships the module behind every `export … from`
+ * in it, so a barrel would otherwise be a way round both rules.
  *
  * A `'use server'` module is a boundary rather than a dependency: Next replaces
  * each export with a fetch to the server, so what it imports never reaches the
@@ -237,7 +286,7 @@ export function directiveOf(file) {
 export function bundledImports(file) {
   const targets = [];
   for (const edge of moduleEdges(file)) {
-    if (edge.kind !== 'import' || edge.typeOnly) continue;
+    if (edge.typeOnly) continue;
     const target = resolveModule(edge.spec, file);
     if (target === null || directiveOf(target) === 'server') continue;
     targets.push(target);

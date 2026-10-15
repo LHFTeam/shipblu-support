@@ -1,5 +1,5 @@
 import ts from 'typescript';
-import { fail, read, requireAtLeast, scannable } from '../lib.mjs';
+import { fail, lineOfNode, parseSource, requireAtLeast, scannable } from '../lib.mjs';
 
 /**
  * `title=` on a DOM element never appears on a phone, which is where the console
@@ -31,13 +31,7 @@ export function checkNoDomTitleAttribute() {
 
   let elements = 0;
   for (const file of scannable.filter((f) => f.endsWith('.tsx'))) {
-    const source = ts.createSourceFile(
-      file,
-      read(file),
-      ts.ScriptTarget.Latest,
-      true,
-      ts.ScriptKind.TSX,
-    );
+    const source = parseSource(file);
 
     const visit = (node) => {
       if (
@@ -48,10 +42,9 @@ export function checkNoDomTitleAttribute() {
         for (const attribute of node.attributes.properties) {
           if (!ts.isJsxAttribute(attribute) || !ts.isIdentifier(attribute.name)) continue;
           if (attribute.name.text !== 'title') continue;
-          const { line } = source.getLineAndCharacterOfPosition(attribute.getStart(source));
           fail(
             rule,
-            `${file}:${line + 1}`,
+            `${file}:${lineOfNode(source, attribute)}`,
             'title= on a DOM element never appears on a phone — use Tooltip or InfoTip from components/tooltip.tsx',
           );
         }
