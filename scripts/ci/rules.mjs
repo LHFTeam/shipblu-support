@@ -40,6 +40,7 @@ import { checkMigrationsNotHandEdited } from './rules/generated-files.mjs';
 import { checkFormSystemKeys } from './rules/form-system-keys.mjs';
 import { checkAutomatedRepliesDoNotCountAsAgentReplies } from './rules/automated-reply-boundary.mjs';
 import { checkClientBundleStaysOutOfTheDatabase } from './rules/client-bundle.mjs';
+import { checkClientDatesJoinTheirFields } from './rules/client-dates.mjs';
 import { checkNoDeadExports } from './rules/dead-exports.mjs';
 import { checkPagesDoNotImportTheDatabase } from './rules/page-db.mjs';
 import { checkFormsDoNotReset } from './rules/form-reset.mjs';
@@ -90,5 +91,6 @@ export const RULES = [
   ['form-system-keys', checkFormSystemKeys],
   ['automated-reply-boundary', checkAutomatedRepliesDoNotCountAsAgentReplies],
   ['client-bundle', checkClientBundleStaysOutOfTheDatabase],
+  ['client-dates', checkClientDatesJoinTheirFields],
   ['dead-exports', checkNoDeadExports],
 ];

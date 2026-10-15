@@ -220,6 +220,32 @@ export function directiveOf(file) {
 }
 
 /**
+ * The modules a browser bundle takes from `file`, resolved: what a `'use
+ * client'` entry point pulls in, one step at a time.
+ *
+ * Value imports only. `import type` is erased by tsc and followed by nobody,
+ * and a re-export is not something the importer pulls into its own bundle.
+ *
+ * A `'use server'` module is a boundary rather than a dependency: Next replaces
+ * each export with a fetch to the server, so what it imports never reaches the
+ * browser. Every client form in this repo imports its own actions file, and
+ * following that edge would report the whole console.
+ *
+ * Shared by the rules that walk the browser bundle, so they cannot disagree
+ * about what is in it.
+ */
+export function bundledImports(file) {
+  const targets = [];
+  for (const edge of moduleEdges(file)) {
+    if (edge.kind !== 'import' || edge.typeOnly) continue;
+    const target = resolveModule(edge.spec, file);
+    if (target === null || directiveOf(target) === 'server') continue;
+    targets.push(target);
+  }
+  return targets;
+}
+
+/**
  * The members of the `JobType` union in lib/queue/index.ts, or null when the
  * union cannot be found. Shared by the two rules that hold other files to it,
  * so they cannot disagree about which job types exist.

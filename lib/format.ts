@@ -7,6 +7,7 @@
  */
 
 import { TEAM_TIME_ZONE } from '@/lib/hours/zone';
+import type { Locale } from '@/lib/kb/locale';
 
 /**
  * An instant written from the fields a formatter reads off it, joined by
@@ -101,6 +102,40 @@ export function formatTime(at: Date): string {
     timeZone: TEAM_TIME_ZONE,
   });
   return joined(time, at, ['hour', 'minute'], (part) => `${part.hour}:${part.minute}`);
+}
+
+/*
+  The chat widget's "we reply from" time, in the visitor's language. The widget
+  is drawn on the server and hydrated in whatever browser the visitor has —
+  Safari and Firefox carry locale data of their own, not Chromium's — so it is
+  joined like the console's formats rather than taken whole. The hour cycle is
+  stated rather than left to the locale's default, which is locale data too:
+  Arabic reads the twelve-hour clock with ص/م, English the twenty-four-hour one.
+*/
+const opens: Partial<Record<Locale, Intl.DateTimeFormat>> = {};
+
+/** "Sun 09:00", "الأحد ٠٩:٠٠ ص" — when the team next answers, in Cairo. */
+export function formatOpens(at: Date | string, locale: Locale): string {
+  const format = (opens[locale] ??= new Intl.DateTimeFormat(locale === 'ar' ? 'ar-EG' : 'en-GB', {
+    weekday: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: locale === 'ar' ? 'h12' : 'h23',
+    timeZone: TEAM_TIME_ZONE,
+  }));
+  return locale === 'ar'
+    ? joined(
+        format,
+        new Date(at),
+        ['weekday', 'hour', 'minute', 'dayPeriod'],
+        (part) => `${part.weekday} ${part.hour}:${part.minute} ${part.dayPeriod}`,
+      )
+    : joined(
+        format,
+        new Date(at),
+        ['weekday', 'hour', 'minute'],
+        (part) => `${part.weekday} ${part.hour}:${part.minute}`,
+      );
 }
 
 /**

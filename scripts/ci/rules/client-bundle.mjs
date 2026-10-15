@@ -1,11 +1,4 @@
-import {
-  fail,
-  scannableSource,
-  resolveModule,
-  moduleEdges,
-  directiveOf,
-  requireAtLeast,
-} from '../lib.mjs';
+import { bundledImports, directiveOf, fail, requireAtLeast, scannableSource } from '../lib.mjs';
 
 // ---------------------------------------------------------------------------
 // The browser bundle: no client component reaches the database, however
@@ -52,20 +45,10 @@ export function checkClientBundleStaysOutOfTheDatabase() {
       const trail = queue.shift();
       const file = trail[trail.length - 1];
 
-      for (const edge of moduleEdges(file)) {
-        // Imports only, and value imports only: `import type` is erased, and a
-        // re-export is not something the entry pulls into its own bundle.
-        if (edge.kind !== 'import' || edge.typeOnly) continue;
-        const target = resolveModule(edge.spec, file);
-        if (target === null || seen.has(target)) continue;
+      // Value imports only, stopping at `'use server'` — `bundledImports` says why.
+      for (const target of bundledImports(file)) {
+        if (seen.has(target)) continue;
         seen.add(target);
-
-        // A `'use server'` module is a boundary rather than a dependency: Next
-        // replaces each export with a fetch to the server, so what it imports
-        // never reaches the browser. Every client form in this repo imports its
-        // own actions file, and following that edge would report the whole
-        // console.
-        if (directiveOf(target) === 'server') continue;
 
         const forbidden = FORBIDDEN.find(([prefix]) => target.startsWith(prefix));
         if (forbidden) {

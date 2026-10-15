@@ -6186,7 +6186,11 @@ still waiting for it` one whose outcome is not known yet.
     formatter's fields with separators of its own (`joined()`), so a later
     engine cannot bring it back through a format that agreed only by
     measurement. The field values themselves (month names, "Sept") measured the
-    same in both for all twelve months.
+    same in both for all twelve months. The chat widget's opening hours
+    (`formatOpens`, `en-GB` and `ar-EG`) were taken whole too, and hydrated in
+    every visitor's own browser, Safari and Firefox included; they are joined
+    there now, with each language's hour cycle stated rather than left to the
+    locale default.
 
     The relative times ("3m") had the same failure with a different cause: they
     read the clock, so they differed whenever a minute boundary fell between
@@ -6197,12 +6201,15 @@ still waiting for it` one whose outcome is not known yet.
     until the page has hydrated and then counts on `useNow()`'s shared
     half-minute clock, so a time on a page left open also stays current. Its
     test hydrates across a minute boundary, beside a control that reads the
-    clock while rendering and is caught. One thing still draws on both sides
-    and can differ: the widget's opening hours (`formatOpens`, `en-GB` and
-    `ar-EG`), still taken whole and only measured the same.
+    clock while rendering and is caught.
 
     A new format drawn by a client component takes its fields the same way, or
-    is drawn only after hydration. A recoverable hydration error reaches
+    is drawn only after hydration. The `client-dates` repo rule holds the
+    browser bundle to the first: a whole-string `Intl.DateTimeFormat` or a
+    `toLocale*String` in any module a client component reaches fails CI. Its
+    first run found the widget and three help-centre formatters that rode into
+    the bundle in `lib/kb/locale.ts` beside `t()`, drawn only by server pages;
+    those moved to `lib/kb/dates.ts`. A recoverable hydration error reaches
     Playwright as a `pageerror`, not a console message, so a check listening
     only to the console reports a clean page.
 
