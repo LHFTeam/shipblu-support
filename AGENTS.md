@@ -715,7 +715,7 @@ messages both TypeSafe questions send as context (`earlierMessages`) still carry
 labels, and so do the categorisers, which read every message rather than the
 last. A reader that forgets answers an Arabic customer in English for sending a
 photo of the damaged parcel, which the out-of-hours acknowledgement and the
-automation engine would have done (§6.96).
+automation engine would have done (§6.97).
 
 **A coexistence number is live on the phone and on Cloud API at once**, and
 four rules keep the two sides from being read as each other. The copied
