@@ -22,6 +22,7 @@ import type {
 import { windowState } from '@/lib/whatsapp/window';
 import { isReadOnlyChannel } from './channel-policy';
 import { findContactByIdentity, resolveContact } from './contacts';
+import { UNNAMED_SUBJECT } from './customer-text';
 import { latest } from './latest';
 import { findLiveConversation, findNewestConversation } from './live-conversation';
 import { reopenResolved } from './reopen';
@@ -776,6 +777,6 @@ export async function resolveWhatsAppChannel(
 /** First line, trimmed to something that fits a ticket list. */
 export function subjectFrom(text: string): string {
   const firstLine = text.split('\n')[0]?.trim() ?? '';
-  if (!firstLine) return 'WhatsApp conversation';
+  if (!firstLine) return UNNAMED_SUBJECT.whatsapp;
   return firstLine.length > 80 ? `${firstLine.slice(0, 77)}…` : firstLine;
 }

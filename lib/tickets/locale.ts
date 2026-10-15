@@ -104,28 +104,42 @@ export function preferredLocale(contactLocale: string, sample: string | null): '
  * the order `preferredLocale` applies anyway.
  */
 export async function requesterLocale(conversationId: string): Promise<'ar' | 'en'> {
-  const [contact, inbound] = await Promise.all([
+  const [contact, words] = await Promise.all([
     db
       .select({ locale: contacts.locale })
       .from(conversations)
       .leftJoin(contacts, eq(contacts.id, conversations.requesterContactId))
       .where(eq(conversations.id, conversationId))
       .limit(1),
-    db
-      .select({ bodyText: messages.bodyText })
-      .from(messages)
-      .where(
-        and(
-          eq(messages.conversationId, conversationId),
-          eq(messages.direction, 'inbound'),
-          eq(messages.kind, 'reply'),
-          carriesCustomerText(),
-          notReaction(),
-        ),
-      )
-      .orderBy(desc(messages.createdAt))
-      .limit(1),
+    newestCustomerWords(conversationId),
   ]);
 
-  return preferredLocale(contact[0]?.locale ?? 'en', inbound[0]?.bodyText ?? null);
+  return preferredLocale(contact[0]?.locale ?? 'en', words);
+}
+
+/**
+ * The newest thing the customer wrote on a ticket, by the rules above: the
+ * query's half of `lastCustomerWords`, which a ticket page runs over the
+ * timeline it holds. Also how a canned suggestion records the language the
+ * page showed, which is why it reads the whole ticket rather than the ten
+ * replies the suggestion is asked about: a run of photos would push the words
+ * the page read out of that window. Ties are broken by id, as the timeline
+ * breaks them.
+ */
+export async function newestCustomerWords(conversationId: string): Promise<string | null> {
+  const [row] = await db
+    .select({ bodyText: messages.bodyText })
+    .from(messages)
+    .where(
+      and(
+        eq(messages.conversationId, conversationId),
+        eq(messages.direction, 'inbound'),
+        eq(messages.kind, 'reply'),
+        carriesCustomerText(),
+        notReaction(),
+      ),
+    )
+    .orderBy(desc(messages.createdAt), desc(messages.id))
+    .limit(1);
+  return row?.bodyText ?? null;
 }

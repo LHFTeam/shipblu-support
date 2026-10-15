@@ -95,7 +95,8 @@ export default async function ConversationPage({
     customer's words before it, as `requesterLocale` does for a reply nobody
     watches go out. The subject is read the same way, because a chat
     ticket's subject is its opening message's first line, and one that opened
-    with a photo is called `[image]`.
+    with a photo is called `[image]` — or, with no first line, by a name ingest
+    gave it, such as `Instagram comment`.
 
     It is also what the composer's canned-response picker starts on, and it is
     handed over separately from the panel: the two are the same question asked
@@ -146,10 +147,12 @@ export default async function ConversationPage({
         : Promise.resolve([]),
       // Same reasoning: an agent who cannot start one has no picker to fill.
       canSideConversation ? listSideConversationRecipients() : Promise.resolve([]),
-      // `seedTerms` returns nothing when the ticket is a greeting or a photo,
-      // and `suggestForAgent` returns nothing for fewer than two terms — so a
-      // ticket with nothing to go on costs no query and renders no panel
-      // furniture, the same way the help centre's blocks remove themselves.
+      // `seedTerms` returns nothing when all the customer has written is a
+      // greeting, or nothing at all past our labels — a photo after words is
+      // searched by those words — and `suggestForAgent` returns nothing for
+      // fewer than two terms — so a ticket with nothing to go on costs no query
+      // and renders no panel furniture, the same way the help centre's blocks
+      // remove themselves.
       terms.length ? suggestForAgent(kbOrigin, agent.role, kbLocale, terms) : Promise.resolve([]),
       mayReply ? suggestionsLive() : Promise.resolve(false),
     ]);

@@ -7,7 +7,8 @@ import { detectLocale } from '@/lib/kb/language';
 import { logger } from '@/lib/log';
 import { answeredFromConsole } from '@/lib/tickets/channel-policy';
 import { loadConversation } from '@/lib/tickets/console-guards';
-import { hasCustomerText, subjectWords } from '@/lib/tickets/customer-text';
+import { subjectWords } from '@/lib/tickets/customer-text';
+import { newestCustomerWords } from '@/lib/tickets/locale';
 import { cannedVisibleTo, listCannedResponses } from '@/lib/tickets/lookups';
 import { sendsByEmail } from '@/lib/tickets/outbound';
 import { TypeSafeApiError, choiceAnswer, systemOne, typesafeModel } from '@/lib/typesafe/client';
@@ -111,10 +112,10 @@ export async function suggestFor(
   // Read as the ticket page reads them (`lastCustomerWords`, `subjectWords`),
   // since `customer_locale` is what the report splits on: our `[image]` would
   // file a photo from an Arabic customer under English, beside the Arabic the
-  // agent was looking at.
-  const newestCustomerText = history.messages.findLast(
-    (m) => m.from === 'customer' && hasCustomerText(m.text),
-  )?.text;
+  // agent was looking at. From the whole ticket, as the page reads it, not
+  // from the ten replies Jev is shown: a run of photos would push the words
+  // the page read out of those.
+  const newestCustomerText = await newestCustomerWords(conversationId);
 
   // Claim before calling. `on conflict do nothing` is the race guard: a second
   // request for the same anchor finds the row and waits for it, instead of

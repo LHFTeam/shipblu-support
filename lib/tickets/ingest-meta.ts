@@ -11,6 +11,7 @@ import type {
 import { enqueue } from '@/lib/queue';
 import { onCustomerReply } from '@/lib/sla';
 import { findContactByIdentity, needsChannelProfile, resolveContact } from './contacts';
+import { UNNAMED_SUBJECT } from './customer-text';
 import { latest } from './latest';
 import { afterInboundMessage, afterMessageStored } from './lifecycle';
 import { reopenResolved } from './reopen';
@@ -38,11 +39,6 @@ export type MetaIngestResult = {
   messageId: string;
   createdConversation: boolean;
   duplicate: boolean;
-};
-
-const PLATFORM_LABEL: Record<MetaPlatform, string> = {
-  facebook: 'Facebook',
-  instagram: 'Instagram',
 };
 
 // --- Direct messages --------------------------------------------------------
@@ -97,7 +93,7 @@ export async function ingestMetaMessage(
           statusId,
           // Neither platform has a subject. The first message is what makes the
           // ticket list scannable instead of a column of "Instagram".
-          subject: subjectFrom(message.text, PLATFORM_LABEL[message.platform]),
+          subject: subjectFrom(message.text, UNNAMED_SUBJECT[message.platform]),
           requesterContactId: contactId,
           groupId: channel?.defaultGroupId ?? null,
           lastMessageAt: message.sentAt,
@@ -219,7 +215,7 @@ export async function ingestMetaComment(comment: NormalisedComment): Promise<Met
           channel: comment.platform,
           channelId: channel?.id ?? null,
           statusId,
-          subject: subjectFrom(comment.text, `${PLATFORM_LABEL[comment.platform]} comment`),
+          subject: subjectFrom(comment.text, UNNAMED_SUBJECT[`${comment.platform}Comment`]),
           requesterContactId: contactId,
           groupId: channel?.defaultGroupId ?? null,
           externalId,

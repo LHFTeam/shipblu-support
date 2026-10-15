@@ -3,12 +3,14 @@ import { parseMetaWebhook } from '@/lib/meta/parse';
 import { displayText } from '@/lib/whatsapp/parse';
 import {
   PLACEHOLDER,
+  UNNAMED_SUBJECT,
   WHITESPACE,
   WRAPPED_LABEL,
   hasCustomerText,
   lastCustomerWords,
   subjectWords,
 } from './customer-text';
+import { subjectFrom } from './ingest-whatsapp';
 
 /**
  * Which stored messages are somebody's words. The query's half,
@@ -201,6 +203,50 @@ describe('subjectWords', () => {
     expect(subjectWords('[voice note]')).toBeNull();
     expect(subjectWords('[image]')).toBeNull();
     expect(subjectWords(null)).toBeNull();
+  });
+
+  // Made into a subject the way ingest makes one: the first line, cut to 80.
+  it('drops a wrapped label cut short of its bracket, and keeps words that only open like one', () => {
+    const base = { id: 'wamid.1', from: '201000000000', timestamp: '1' };
+    const pin = displayText({
+      ...base,
+      type: 'location',
+      location: {
+        latitude: 30.0284,
+        longitude: 31.4086,
+        name: 'ShipBlu Hub',
+        address: 'Cairo Festival City Mall, Ring Road, New Cairo, Cairo Governorate',
+      },
+    } as never);
+    const edit = displayText({
+      ...base,
+      type: 'edit',
+      edit: {
+        original_message_id: 'wamid.0',
+        message: { ...base, type: 'text', text: { body: 'بكرة الساعة 10\nمش النهارده' } },
+      },
+    } as never);
+    const document = displayText({
+      ...base,
+      type: 'document',
+      document: { id: '1', filename: `${'بوليصة الشحن '.repeat(8)}.pdf` },
+    } as never);
+
+    for (const label of [pin, edit, document]) {
+      const subject = subjectFrom(label);
+      expect(subject.endsWith(']'), subject).toBe(false);
+      expect(subjectWords(subject), subject).toBeNull();
+    }
+    expect(subjectWords('[urgent] where is my COD')).toBe('[urgent] where is my COD');
+    expect(subjectWords('[document] missing from my parcel')).toBe(
+      '[document] missing from my parcel',
+    );
+  });
+
+  it('drops the name ingest gives a ticket whose opening message has no first line', () => {
+    expect(subjectWords(subjectFrom(''))).toBeNull();
+    for (const name of Object.values(UNNAMED_SUBJECT)) expect(subjectWords(name), name).toBeNull();
+    expect(subjectWords('Facebook comment about my order')).toBe('Facebook comment about my order');
   });
 });
 

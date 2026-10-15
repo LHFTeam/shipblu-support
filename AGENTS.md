@@ -694,26 +694,28 @@ different question, with a different rule, below.
 **What the customer said looks past every label of ours, not only the stand-ins
 a thread hides.** Beside those, a WhatsApp edit, a document's file name and a
 pin's address arrive wrapped in a label, and a chat ticket's subject is its
-opening message's first line, so it can be a label too. A reader that only shows
-the latest message — the inbox preview — keeps the label; that is what it is
-for. Anything that picks one message as what the customer last said looks past
-it: `carriesCustomerText()` in a query (`lib/tickets/carries-customer-text.ts`),
-and over rows already in hand `hasCustomerText(bodyText)`,
-`lastCustomerWords(timeline)` and `subjectWords(subject)`
-(`lib/tickets/customer-text.ts`) — one set of patterns, held to one answer by
-`carries-customer-text.db.test.ts`. The rule is the whole message in brackets,
-so `[urgent] where is my COD` is words. It is not `isMediaStandIn`, on purpose.
-It is looser, because a story mention or a document's name says nothing for the
-customer though an agent needs to see it. And it needs no stored file, because
-the out-of-hours acknowledgement and the automations choose their language as
-the message is ingested, before its `download_media` job has normally stored
-one. The priority classifier's question, `requesterLocale`, the ticket page's
-knowledge panel and canned picker, and the language a canned suggestion is filed
-under use it. The earlier messages both TypeSafe questions send as context
-(`earlierMessages`) still carry labels, and so do the categorisers, which read
-every message rather than the last. A reader that forgets answers an Arabic
-customer in English for sending a photo of the damaged parcel, which the
-out-of-hours acknowledgement and the automation engine would have done (§6.96).
+opening message's first line, so it can be a label too — cut short of its
+bracket at 80 characters — or, with no first line, a name ingest gave it
+(`UNNAMED_SUBJECT`). A reader that only shows the latest message — the inbox
+preview — keeps the label; that is what it is for. Anything that picks one
+message as what the customer last said looks past it: `carriesCustomerText()` in
+a query (`lib/tickets/carries-customer-text.ts`), and over rows already in hand
+`hasCustomerText(bodyText)`, `lastCustomerWords(timeline)` and
+`subjectWords(subject)` (`lib/tickets/customer-text.ts`) — one set of patterns,
+held to one answer by `carries-customer-text.db.test.ts`. The rule is the whole
+message in brackets, so `[urgent] where is my COD` is words. It is not
+`isMediaStandIn`, on purpose. It is looser, because a story mention or a
+document's name says nothing for the customer though an agent needs to see it.
+And it needs no stored file, because the out-of-hours acknowledgement and the
+automations choose their language as the message is ingested, before its
+`download_media` job has normally stored one. The priority classifier's
+question, `requesterLocale`, the ticket page's knowledge panel and canned
+picker, and the language a canned suggestion is filed under use it. The earlier
+messages both TypeSafe questions send as context (`earlierMessages`) still carry
+labels, and so do the categorisers, which read every message rather than the
+last. A reader that forgets answers an Arabic customer in English for sending a
+photo of the damaged parcel, which the out-of-hours acknowledgement and the
+automation engine would have done (§6.96).
 
 **A coexistence number is live on the phone and on Cloud API at once**, and
 four rules keep the two sides from being read as each other. The copied

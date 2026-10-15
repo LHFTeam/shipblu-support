@@ -62,18 +62,42 @@ export function lastCustomerWords<
 }
 
 /**
- * A ticket's subject, unless it is our label.
+ * A ticket's subject, unless we wrote it.
  *
- * A chat ticket's subject is the first line of its opening message, so one that
- * opened with a photo or a story mention is called `[image]` or
- * `[story_mention]`: read as words, Latin letters in the language guess and, from
- * the second, a search for "story mention". A label longer than a subject is cut
- * before its closing bracket and still gets through; a pin with a long address,
- * mostly.
+ * A chat ticket's subject is the first line of its opening message, cut to 80
+ * characters, so one that opened with a photo or a story mention is called
+ * `[image]` or `[story_mention]`: read as words, Latin letters in the language
+ * guess and, from the second, a search for "story mention". A wrapped label is
+ * cut too, before its closing bracket — a pin with a long address, a document's
+ * long name, the first line of an edit — so one that opens like a wrapped label
+ * is ours whether or not it closes. And a ticket that arrives with nothing to
+ * name it by is named by ingest, in English (`UNNAMED_SUBJECT`): an Instagram
+ * comment made of a photo is `Instagram comment`, sixteen Latin letters beside
+ * the customer's three Arabic ones.
  */
 export function subjectWords(subject: string | null): string | null {
-  return subject !== null && hasCustomerText(subject) ? subject : null;
+  if (subject === null || !hasCustomerText(subject)) return null;
+  const text = subject.trim();
+  return CUT_LABEL.test(text) || UNNAMED.has(text) ? null : subject;
 }
+
+/**
+ * What ingest names a ticket that arrives with nothing to name it by: an email
+ * with no subject, or a chat whose opening message has no first line. Ingest
+ * writes from here and `subjectWords` refuses from here, so a name changed in
+ * one place is changed in both.
+ */
+export const UNNAMED_SUBJECT = {
+  email: '(no subject)',
+  webchat: 'Web chat',
+  whatsapp: 'WhatsApp conversation',
+  facebook: 'Facebook',
+  instagram: 'Instagram',
+  facebookComment: 'Facebook comment',
+  instagramComment: 'Instagram comment',
+} as const;
+
+const UNNAMED: ReadonlySet<string> = new Set(Object.values(UNNAMED_SUBJECT));
 
 /**
  * Our label for a message with no words: one line in brackets, closed once.
@@ -85,6 +109,9 @@ export function subjectWords(subject: string | null): string | null {
  * whose meaning there is the database locale's.
  */
 export const PLACEHOLDER = /^\[[^\]\n]*\]$/;
+
+/** The labels that wrap a string from elsewhere, by the words they open with. */
+const WRAPPED = '\\[(?:edited a message|document|location|unsupported message(?: type)?)';
 
 /**
  * A label wrapped round a string from elsewhere, recognised by how it opens:
@@ -99,8 +126,10 @@ export const PLACEHOLDER = /^\[[^\]\n]*\]$/;
  * flag, so `customer-text.test.ts` pins them — one Postgres never sees is a
  * difference between the twins.
  */
-export const WRAPPED_LABEL =
-  /^\[(?:edited a message|document|location|unsupported message(?: type)?)(?:(?:: | \().*)?\]$/s;
+export const WRAPPED_LABEL = new RegExp(`^${WRAPPED}(?:(?:: | \\().*)?\\]$`, 's');
+
+/** A wrapped label's opening, whether or not anything closes it. */
+const CUT_LABEL = new RegExp(`^${WRAPPED}(?:: | \\()`);
 
 /**
  * Exactly the characters `String.prototype.trim` removes, for the query's
