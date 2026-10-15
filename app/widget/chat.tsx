@@ -10,7 +10,7 @@ import { copyFor } from './copy';
 import { WidgetHome } from './home';
 import { WidgetThread, type OfflineDetails } from './thread';
 import type { ArticleLink, Message, WidgetView } from '@/lib/widget/types';
-import { TEAM_TIME_ZONE } from '@/lib/hours/zone';
+import { formatOpens } from '@/lib/format';
 import { postToHost, useHostBridge } from './use-host-bridge';
 import { useMessageStream } from './use-message-stream';
 import { useWidgetSession } from './use-widget-session';
@@ -400,12 +400,3 @@ export function WidgetChat({
 /* The design system's small ghost button, square: 32px around an 18px glyph. */
 const HEADER_BUTTON =
   'inline-flex size-8 shrink-0 items-center justify-center rounded-md text-(--color-text-primary) transition-colors hover:bg-(--color-background-hover) active:bg-(--color-background-pressed)';
-
-function formatOpens(iso: string, locale: Locale): string {
-  return new Intl.DateTimeFormat(locale === 'ar' ? 'ar-EG' : 'en-GB', {
-    weekday: 'short',
-    hour: '2-digit',
-    minute: '2-digit',
-    timeZone: TEAM_TIME_ZONE,
-  }).format(new Date(iso));
-}

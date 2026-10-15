@@ -1,5 +1,12 @@
 import ts from 'typescript';
-import { directiveOf, fail, read, requireAtLeast, resolveModule, scannable } from '../lib.mjs';
+import {
+  directiveOf,
+  fail,
+  parseSource,
+  requireAtLeast,
+  resolveModule,
+  scannable,
+} from '../lib.mjs';
 
 /**
  * A server action that answers success has revalidated first, on every branch
@@ -49,7 +56,7 @@ export function checkActionsRevalidate() {
       /^(app|lib)\/.*\.tsx?$/.test(f) && !/\.test\.tsx?$/.test(f) && directiveOf(f) === 'server',
   );
   for (const file of files) {
-    const source = parse(file);
+    const source = parseSource(file);
     const revalidates = revalidatingNames(file, source);
     const errorNullIsSuccess = !file.startsWith('app/help/');
 
@@ -81,10 +88,6 @@ export function checkActionsRevalidate() {
 
   // Today's actions answer success from about eighty places.
   requireAtLeast(rule, 'app/', successes, 30, "successful returns from 'use server' modules");
-}
-
-function parse(file) {
-  return ts.createSourceFile(file, read(file), ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
 }
 
 function isExported(node) {
@@ -177,7 +180,7 @@ function revalidatingNames(file, source) {
     if (NEXT[spec]) continue;
     const target = resolveModule(spec, file);
     if (!target || !/\.tsx?$/.test(target)) continue;
-    const helpers = parse(target);
+    const helpers = parseSource(target);
     const fn = topFunction(helpers, name);
     if (fn && revalidatesBeforeReturning(fn.body, new Set(nextNames(helpers, RETURNING)))) {
       names.add(local);

@@ -1,6 +1,14 @@
 import { DateTime } from 'luxon';
 import { describe, expect, it, vi } from 'vitest';
-import { ago, formatDateTime, formatDay, formatRelative, formatTime, sentenceCase } from './format';
+import {
+  ago,
+  formatDateTime,
+  formatDay,
+  formatOpens,
+  formatRelative,
+  formatTime,
+  sentenceCase,
+} from './format';
 
 describe('sentenceCase', () => {
   it('capitalises the first letter and spaces every underscore', () => {
@@ -88,6 +96,8 @@ describe('formatDay / formatTime', () => {
         expect(formatDay(at)).toBe('Wednesday, 14 October 2026');
         expect(formatDateTime(at)).toBe('14 Oct 2026, 09:05');
         expect(formatTime(at)).toBe('09:05');
+        expect(formatOpens(at, 'en')).toBe('Wed 09:05');
+        expect(formatOpens(at, 'ar')).toBe('الأربعاء ٠٩:٠٥ ص');
       } finally {
         vi.restoreAllMocks();
         Object.defineProperty(proto, 'format', format);
@@ -170,5 +180,47 @@ describe('ago', () => {
     const now = new Date('2026-10-15T12:00:00Z');
     const old = formatRelative('2026-07-03T11:02:00Z', now);
     expect(`Opened ${ago(old)}`).toBe('Opened 3 Jul 2026, 14:02');
+  });
+});
+
+describe('formatOpens', () => {
+  it('writes the next opening in the visitor’s language, in Cairo', () => {
+    const sunday = (hour: number, minute: number) =>
+      cairo({ year: 2026, month: 10, day: 18, hour, minute });
+    expect(formatOpens(sunday(9, 0), 'en')).toBe('Sun 09:00');
+    expect(formatOpens(sunday(16, 30), 'en')).toBe('Sun 16:30');
+    expect(formatOpens(sunday(9, 0), 'ar')).toBe('الأحد ٠٩:٠٠ ص');
+    expect(formatOpens(sunday(16, 30), 'ar')).toBe('الأحد ٠٤:٣٠ م');
+  });
+
+  it('keeps each language’s clock however the engine defaults', async () => {
+    // Twelve-hour in Arabic, so a few minutes past midnight is 12, with ص;
+    // twenty-four-hour in English, so it is 00. Stated in the formatter, not
+    // left to the locale's default, which is locale data like the separators.
+    // Node's defaults already agree, so this stands in for an engine whose
+    // defaults are the other way round: a formatter that stated nothing would
+    // take them and fail here.
+    const Engine = Intl.DateTimeFormat;
+    class FlippedDefaults extends Engine {
+      constructor(locale?: string | string[], options?: Intl.DateTimeFormatOptions) {
+        super(locale, { hourCycle: locale === 'ar-EG' ? 'h23' : 'h12', ...options });
+      }
+    }
+    const late = cairo({ year: 2026, month: 10, day: 18, hour: 0, minute: 5 });
+    Intl.DateTimeFormat = FlippedDefaults as typeof Intl.DateTimeFormat;
+    try {
+      // A fresh module, so its formatters are built under this engine rather
+      // than taken from the cache an earlier case filled.
+      vi.resetModules();
+      const { formatOpens: fresh } = await import('./format');
+      expect(fresh(late, 'ar')).toBe('الأحد ١٢:٠٥ ص');
+      expect(fresh(late, 'en')).toBe('Sun 00:05');
+    } finally {
+      Intl.DateTimeFormat = Engine;
+    }
+  });
+
+  it('takes the instant as the ISO string the widget is handed', () => {
+    expect(formatOpens('2026-10-18T06:00:00.000Z', 'en')).toBe('Sun 09:00');
   });
 });

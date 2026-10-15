@@ -15,7 +15,8 @@ import {
 } from '@/components/icons';
 import type { SupportAvailability } from '@/lib/kb/availability';
 import { formatOpening } from '@/lib/hours';
-import { formatArticleDate, t, tCount, type Locale } from '@/lib/kb/locale';
+import { formatArticleDate } from '@/lib/kb/dates';
+import { t, tCount, type Locale } from '@/lib/kb/locale';
 import type { CategoryPreview, DatedArticle, RankedArticle } from '@/lib/kb/queries';
 import { Container, Panel, SectionHeading } from './chrome';
 import { SearchBox } from './search-box';

@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
-import { formatTimestamp, t, type Locale, type StringKey } from '@/lib/kb/locale';
+import { formatTimestamp } from '@/lib/kb/dates';
+import { t, type Locale, type StringKey } from '@/lib/kb/locale';
 import {
   commentText,
   returnStatusLabel,

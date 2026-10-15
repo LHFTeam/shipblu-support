@@ -1198,6 +1198,17 @@ luxon and let the timezone database convert; never hand-convert fixtures. SLA
 clocks are working-time, resolved through `lib/hours/resolve.ts` by every
 consumer so a due date and the report measuring it cannot disagree.
 
+**A date a client component draws is joined from its fields.** It is written
+twice, by Node on the server and by the browser to hydrate, and the punctuation
+in an engine's whole string is locale data each ships its own copy of — a comma
+after the weekday made every ticket page a hydration error (§6.96). So in the
+browser bundle a date is formatted by `lib/format.ts`, the one module there
+that may build an `Intl.DateTimeFormat`, which joins the `formatToParts` fields
+with separators of its own; a server page's whole-string formatter lives where
+no client component can reach it (`lib/kb/dates.ts`). Drawing a whole string
+only after hydration is not the way round it: the `client-dates` repo rule holds
+all of this, and cannot tell an effect from a render.
+
 **An inbound email happened when it reached us.** Every instant its ingest
 writes (the new ticket's `created_at`, the message's, `last_message_at`,
 `last_customer_message_at`) is `webhook_events.received_at`, passed by

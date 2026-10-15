@@ -1,5 +1,5 @@
 import ts from 'typescript';
-import { fail, read, requireAtLeast, scannable } from '../lib.mjs';
+import { fail, lineOfNode, parseSource, requireAtLeast, scannable } from '../lib.mjs';
 
 /**
  * A button keeps the `type` it was rendered with, outside `ConfirmSubmit`.
@@ -52,15 +52,8 @@ export function checkButtonTypeIsFixed() {
 
   let buttons = 0;
   for (const file of scannable.filter((f) => f.endsWith('.tsx') && f !== exempt)) {
-    const source = ts.createSourceFile(
-      file,
-      read(file),
-      ts.ScriptTarget.Latest,
-      true,
-      ts.ScriptKind.TSX,
-    );
-    const at = (node) =>
-      `${file}:${source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1}`;
+    const source = parseSource(file);
+    const at = (node) => `${file}:${lineOfNode(source, node)}`;
 
     const visit = (node) => {
       const opening = openingOf(node);

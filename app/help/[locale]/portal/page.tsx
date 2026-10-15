@@ -1,7 +1,8 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { buttonClass } from '@/components/ui';
-import { formatArticleDate, isLocale, t } from '@/lib/kb/locale';
+import { formatArticleDate } from '@/lib/kb/dates';
+import { isLocale, t } from '@/lib/kb/locale';
 import { requireCustomer } from '@/lib/portal/guard';
 import { listTickets } from '@/lib/portal/tickets';
 import { EmptyNote, PageBody, PageHeader, Panel } from '../chrome';

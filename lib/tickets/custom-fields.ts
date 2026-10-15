@@ -17,7 +17,7 @@
  */
 
 import type { TicketFieldOption, TicketFieldValidation } from '@/db/schema/config';
-import { TEAM_TIME_ZONE } from '@/lib/hours/zone';
+import { formatInputDateTime } from '@/lib/format';
 
 export type TicketFieldType =
   | 'text'
@@ -137,26 +137,7 @@ export function formatForInput(def: TicketFieldDef, value: unknown): string {
     const at = new Date(value);
     if (Number.isNaN(at.getTime())) return '';
 
-    // `formatToParts` rather than a formatted string: `datetime-local` wants
-    // exactly `yyyy-MM-ddTHH:mm`, and every locale's own rendering of that is
-    // something else.
-    const parts = new Intl.DateTimeFormat('en-GB', {
-      timeZone: TEAM_TIME_ZONE,
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: false,
-    }).formatToParts(at);
-
-    const part = (type: Intl.DateTimeFormatPartTypes) =>
-      parts.find((entry) => entry.type === type)?.value ?? '';
-
-    // Midnight comes back as hour 24 in some ICU versions rather than 00.
-    const hour = part('hour') === '24' ? '00' : part('hour');
-
-    return `${part('year')}-${part('month')}-${part('day')}T${hour}:${part('minute')}`;
+    return formatInputDateTime(at);
   }
 
   if (def.type === 'checkbox') return value === true ? 'on' : '';
