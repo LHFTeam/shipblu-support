@@ -12,7 +12,7 @@ import { requesterLocale } from './locale';
 
 withCleanDatabase();
 
-async function ticket(channel: 'whatsapp' | 'email'): Promise<string> {
+async function ticket(channel: 'whatsapp' | 'facebook' | 'email'): Promise<string> {
   const [contact] = await db.insert(contacts).values({ name: 'Amira' }).returning();
   const [open] = await db
     .select({ id: ticketStatuses.id })
@@ -43,6 +43,146 @@ describe('requesterLocale', () => {
         direction: 'inbound',
         bodyText: '[reacted 🙏]',
         meta: { whatsappType: 'reaction' },
+        createdAt: new Date('2026-10-01T10:05:00Z'),
+      },
+    ]);
+
+    expect(await requesterLocale(id)).toBe('ar');
+  });
+
+  // A photo, a voice note or a document sent without a caption is stored as
+  // our own label, and its Latin letters would answer an Arabic customer in
+  // English for sending a photo of the damaged parcel.
+  const labels = [
+    { channel: 'whatsapp', bodyText: '[image]', meta: { whatsappType: 'image' } },
+    { channel: 'whatsapp', bodyText: '[voice note]', meta: { whatsappType: 'audio' } },
+    {
+      channel: 'facebook',
+      bodyText: '[2 attachments]',
+      meta: { metaKind: 'direct_message', platform: 'facebook' },
+    },
+  ] as const;
+
+  for (const label of labels) {
+    it(`reads the customer’s last words past our ${label.bodyText} on ${label.channel}`, async () => {
+      const id = await ticket(label.channel);
+      await db.insert(messages).values([
+        {
+          conversationId: id,
+          direction: 'inbound',
+          bodyText: 'الشحنة وصلت مكسورة',
+          createdAt: new Date('2026-10-01T10:00:00Z'),
+        },
+        {
+          conversationId: id,
+          direction: 'inbound',
+          bodyText: label.bodyText,
+          meta: label.meta,
+          createdAt: new Date('2026-10-01T10:01:00Z'),
+        },
+      ]);
+
+      expect(await requesterLocale(id)).toBe('ar');
+    });
+  }
+
+  // An edit's label holds the corrected words inside fourteen Latin letters of
+  // ours, which outvote a short Arabic correction. Over two lines, only
+  // `WRAPPED_LABEL` recognises it as ours.
+  it('reads past a WhatsApp edit to the message it corrects', async () => {
+    const id = await ticket('whatsapp');
+    await db.insert(messages).values([
+      {
+        conversationId: id,
+        direction: 'inbound',
+        bodyText: 'بكرة الساعة ٩',
+        meta: { whatsappType: 'text' },
+        createdAt: new Date('2026-10-01T10:00:00Z'),
+      },
+      {
+        conversationId: id,
+        direction: 'inbound',
+        bodyText: '[edited a message: بكرة\nالساعة 10]',
+        meta: { whatsappType: 'edit' },
+        createdAt: new Date('2026-10-01T10:02:00Z'),
+      },
+    ]);
+
+    expect(await requesterLocale(id)).toBe('ar');
+  });
+
+  // The newest words decide, not the first: a customer who wrote Arabic, then
+  // English, then sent a photo reads English. A query that found the oldest
+  // surviving message would pass every test above.
+  it('reads the newest of the customer’s words, not the first', async () => {
+    const id = await ticket('whatsapp');
+    await db.insert(messages).values([
+      {
+        conversationId: id,
+        direction: 'inbound',
+        bodyText: 'الشحنة وصلت مكسورة',
+        meta: { whatsappType: 'text' },
+        createdAt: new Date('2026-10-01T10:00:00Z'),
+      },
+      {
+        conversationId: id,
+        direction: 'inbound',
+        bodyText: 'the parcel arrived broken',
+        meta: { whatsappType: 'text' },
+        createdAt: new Date('2026-10-01T10:01:00Z'),
+      },
+      {
+        conversationId: id,
+        direction: 'inbound',
+        bodyText: '[image]',
+        meta: { whatsappType: 'image' },
+        createdAt: new Date('2026-10-01T10:02:00Z'),
+      },
+    ]);
+
+    expect(await requesterLocale(id)).toBe('en');
+  });
+
+  // A reaction is known by the type WhatsApp gave it, not by our spelling of
+  // its text, which the label rule would also refuse: here only `notReaction`
+  // stands between a thumbs-up and the customer's language.
+  it('reads past a reaction whatever its text', async () => {
+    const id = await ticket('whatsapp');
+    await db.insert(messages).values([
+      {
+        conversationId: id,
+        direction: 'inbound',
+        bodyText: 'فين شحنتي؟',
+        meta: { whatsappType: 'text' },
+        createdAt: new Date('2026-10-01T10:00:00Z'),
+      },
+      {
+        conversationId: id,
+        direction: 'inbound',
+        bodyText: 'thumbs up',
+        meta: { whatsappType: 'reaction' },
+        createdAt: new Date('2026-10-01T10:05:00Z'),
+      },
+    ]);
+
+    expect(await requesterLocale(id)).toBe('ar');
+  });
+
+  // Bare `btrim` strips only the space, so a body of line breaks was a message
+  // to the query and nothing to read for `preferredLocale`.
+  it('reads past a body that is nothing but whitespace', async () => {
+    const id = await ticket('email');
+    await db.insert(messages).values([
+      {
+        conversationId: id,
+        direction: 'inbound',
+        bodyText: 'الشحنة وصلت مكسورة',
+        createdAt: new Date('2026-10-01T10:00:00Z'),
+      },
+      {
+        conversationId: id,
+        direction: 'inbound',
+        bodyText: '\n\n',
         createdAt: new Date('2026-10-01T10:05:00Z'),
       },
     ]);

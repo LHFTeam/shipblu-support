@@ -10,6 +10,7 @@ import {
   ticketStatuses,
 } from '@/db/schema';
 import { preview } from '@/lib/html/sanitize';
+import { UNNAMED_SUBJECT } from '@/lib/tickets/customer-text';
 import { afterInboundMessage, afterMessageStored } from '@/lib/tickets/lifecycle';
 import { reopenResolved } from '@/lib/tickets/reopen';
 import { requireDefaultOpenStatusId } from '@/lib/tickets/statuses';
@@ -105,7 +106,7 @@ export async function appendVisitorMessage(
           statusId,
           // Chat has no subject line; the first message is the most useful
           // thing to show in a ticket list.
-          subject: preview(body, 80) || 'Web chat',
+          subject: preview(body, 80) || UNNAMED_SUBJECT.webchat,
           requesterContactId: contactId,
           groupId: channel?.defaultGroupId ?? null,
           lastMessageAt: now,

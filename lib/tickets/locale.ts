@@ -1,6 +1,7 @@
-import { and, desc, eq, sql } from 'drizzle-orm';
+import { and, desc, eq } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { contacts, conversations, messages } from '@/db/schema';
+import { carriesCustomerText } from './carries-customer-text';
 import { notReaction } from './not-reaction';
 
 /**
@@ -27,7 +28,7 @@ import { notReaction } from './not-reaction';
  * `contacts.locale` is `not null default 'en'`, so 'en' means either "this
  * person reads English" or "nobody has ever said" — the distinction
  * `lib/contacts/merge.ts` already draws, and nothing in the product sets the
- * column, so today every one of the 6,000-odd contacts reads as the second.
+ * column, so today every contact reads as the second.
  * Taking it at face value would answer an Arabic-first customer base in English
  * on every channel, which is the failure this project calls silent success: a
  * message goes out, a count goes up, and it is wrong in one direction only.
@@ -68,18 +69,33 @@ export function preferredLocale(contactLocale: string, sample: string | null): '
  * Four things narrow which message decides it, and each of them is a way the
  * answer went wrong:
  *
- * - **`reply` only.** A bounce, an out-of-office or one of our own system
- *   notices is written by a mail server or by us, not by the person we are
- *   about to write to.
- * - **Non-empty text.** `body_text` is `not null default ''` and a WhatsApp or
- *   Instagram media message carries no text at all, so an Arabic customer whose
- *   last message is a photo of the damaged parcel would otherwise fall through
- *   to the contact locale and be answered in English. `btrim` rather than `<>
- *   ''` because `preferredLocale` treats whitespace as nothing to read, and a
- *   row it would reject should not have been the row that decided.
+ * - **`reply` only.** One of our own system notices, like that attachment line,
+ *   is written by us, not by the person we are about to write to. A mail
+ *   server's bounce or out-of-office is not kept out by this: it arrives as
+ *   mail and is stored as a reply, flagged on `meta` (`isBounce`,
+ *   `isAutoReply`), and nothing here reads those flags yet.
+ * - **Words the customer wrote.** A media message is not blank: a photo, a
+ *   voice note or a document sent without a caption is stored with our own
+ *   English label — `[image]`, `[voice note]`, `[2 attachments]` — so the
+ *   console draws a bubble, and read as the customer's words its Latin letters
+ *   would answer an Arabic customer in English for sending a photo of the
+ *   damaged parcel. `carriesCustomerText()` passes over a label, and over a
+ *   body that is blank once trimmed, in which `preferredLocale` would find
+ *   nothing to read. It passes over a WhatsApp edit too, although that label
+ *   holds the customer's corrected words: they sit inside fourteen Latin
+ *   letters of ours, which outvote a short Arabic correction, and a correction
+ *   is in the language of the message it corrects, which the same person
+ *   already sent — on this ticket, unless the edit came after it closed and
+ *   opened one of its own, where nothing is left to read. A label is passed
+ *   over even when what it names is Arabic — a document's file name, the
+ *   address of a dropped pin — because neither was written to us. A ticket
+ *   holding nothing else falls to the contact's locale, which is 'en' for
+ *   every contact until something writes the column.
  * - **Not a WhatsApp reaction.** Its text is our own `[reacted 🙏]`, seven
  *   Latin letters and an emoji, so an Arabic customer who answered the agent's
- *   reply with a thumbs-up would be read as English from then on.
+ *   reply with a thumbs-up would be read as English from then on. The label
+ *   rule refuses that text as well; `notReaction()` stays because it reads the
+ *   type WhatsApp gave the row rather than our spelling of it.
  * - **The most recent one that survives those.** Not the first message on the
  *   ticket: somebody who opened in English and has been writing Arabic for
  *   three messages reads Arabic.
@@ -88,28 +104,42 @@ export function preferredLocale(contactLocale: string, sample: string | null): '
  * the order `preferredLocale` applies anyway.
  */
 export async function requesterLocale(conversationId: string): Promise<'ar' | 'en'> {
-  const [contact, inbound] = await Promise.all([
+  const [contact, words] = await Promise.all([
     db
       .select({ locale: contacts.locale })
       .from(conversations)
       .leftJoin(contacts, eq(contacts.id, conversations.requesterContactId))
       .where(eq(conversations.id, conversationId))
       .limit(1),
-    db
-      .select({ bodyText: messages.bodyText })
-      .from(messages)
-      .where(
-        and(
-          eq(messages.conversationId, conversationId),
-          eq(messages.direction, 'inbound'),
-          eq(messages.kind, 'reply'),
-          sql`btrim(${messages.bodyText}) <> ''`,
-          notReaction(),
-        ),
-      )
-      .orderBy(desc(messages.createdAt))
-      .limit(1),
+    newestCustomerWords(conversationId),
   ]);
 
-  return preferredLocale(contact[0]?.locale ?? 'en', inbound[0]?.bodyText ?? null);
+  return preferredLocale(contact[0]?.locale ?? 'en', words);
+}
+
+/**
+ * The newest thing the customer wrote on a ticket, by the rules above: the
+ * query's half of `lastCustomerWords`, which a ticket page runs over the
+ * timeline it holds. Also how a canned suggestion records the language the
+ * page showed, which is why it reads the whole ticket rather than the ten
+ * replies the suggestion is asked about: a run of photos would push the words
+ * the page read out of that window. Ties are broken by id, as the timeline
+ * breaks them.
+ */
+export async function newestCustomerWords(conversationId: string): Promise<string | null> {
+  const [row] = await db
+    .select({ bodyText: messages.bodyText })
+    .from(messages)
+    .where(
+      and(
+        eq(messages.conversationId, conversationId),
+        eq(messages.direction, 'inbound'),
+        eq(messages.kind, 'reply'),
+        carriesCustomerText(),
+        notReaction(),
+      ),
+    )
+    .orderBy(desc(messages.createdAt), desc(messages.id))
+    .limit(1);
+  return row?.bodyText ?? null;
 }

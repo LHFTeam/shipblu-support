@@ -6199,6 +6199,35 @@ still waiting for it` one whose outcome is not known yet.
     Playwright as a `pageerror`, not a console message, so a check listening
     only to the console reports a clean page.
 
+97. **A photo sent without a caption reads as the customer writing English.**
+    `displayText` (`lib/whatsapp/parse.ts`, `lib/meta/parse.ts`) stores a
+    caption-less photo, voice note or document as our own label — `[image]`,
+    `[voice note]`, `[2 attachments]` — so the console draws a bubble.
+    `requesterLocale` skipped a blank body and a reaction but not that, and
+    `preferredLocale` counted the label's Latin letters, so an Arabic customer
+    whose newest message was a photo would have been acknowledged out of hours,
+    or answered by an automation rule, in English. Neither ever was: the
+    out-of-hours rule sent five acknowledgements, all Arabic, on 2026-09-01 and
+    02 and has been off since, and no rule has ever sent a reply. Its comment
+    said a media message "carries no text at all", and AGENTS.md repeated it;
+    and with `contacts.locale` at 'en' on every contact there was no other
+    answer to fall back on. On
+    2026-10-14, 22 tickets on the support channels took their language from a
+    label (16 WhatsApp, 3 Facebook, 3 Instagram), not counting copied histories,
+    which no sender writes to. With labels skipped, 5 read Arabic and 6 read
+    English from the customer's own words, and 11 hold no words of the
+    customer's at all, so `contacts.locale` still answers them in English. The
+    priority classifier already refused the shape, so the rule moved out of it
+    to `lib/tickets/customer-text.ts` and gained a SQL twin built from the same
+    patterns (AGENTS.md has the convention). Two details of the twin are traps
+    of their own: Postgres's bare `btrim` strips only the space where `trim()`
+    strips twenty-five characters, so it is handed that set; and a pattern
+    reaches Postgres without its flags, so `WRAPPED_LABEL`'s `.` relies on `s`
+    in JavaScript to match a line break as Postgres's always does. The larger
+    gap of the same kind is still open: a message with no letters at all — a
+    phone or tracking number sent alone — reads English too, and on the same
+    day it decided 71 support-channel tickets, 58 of them with Arabic earlier.
+
 ### Tooling notes for this environment
 
 Supabase and Render MCP tools work and are the fastest way to check real state —

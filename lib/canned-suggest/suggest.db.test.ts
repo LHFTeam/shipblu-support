@@ -323,6 +323,48 @@ describe('suggestFor', () => {
     expect(row!.latencyMs).toBeGreaterThanOrEqual(0);
   });
 
+  // `customer_locale` is the language the ticket page showed the agent, and
+  // the page reads past our labels — in the subject too, which is the opening
+  // message's first line. Filed under the label instead, a photo from an Arabic
+  // customer counts against the English half of the report.
+  it('files the suggestion under the language the page read, past our labels', async () => {
+    const agent = await signedIn();
+    await switchOn(agent);
+    const id = await ticket('facebook', { subject: '[audio]' });
+    await say(id, '[audio]');
+    await say(id, 'فين الشحنة');
+    await say(id, '[image]');
+    await canned();
+    jev(NONE_KEY);
+
+    await suggestFor(agent, id);
+
+    const [row] = await rows();
+    expect(row?.customerLocale).toBe('ar');
+  });
+
+  // Jev is shown the newest ten replies; the page reads the whole ticket. A
+  // customer who has sent a run of photos since writing has pushed their words
+  // out of the first and not the second.
+  it('files the suggestion under words older than the replies Jev is shown', async () => {
+    const agent = await signedIn();
+    await switchOn(agent);
+    const id = await ticket('facebook');
+    await say(id, 'فين الشحنة');
+    for (let i = 0; i < 6; i++) {
+      await say(id, '[image]');
+      await say(id, 'Thank you, we are checking.', { direction: 'outbound' });
+    }
+    await canned();
+    jev(NONE_KEY);
+
+    await suggestFor(agent, id);
+
+    const [row] = await rows();
+    expect(row?.historyCount).toBe(10);
+    expect(row?.customerLocale).toBe('ar');
+  });
+
   it('answers the same newest message from the row, and a new one with a new call', async () => {
     const agent = await signedIn();
     await switchOn(agent);

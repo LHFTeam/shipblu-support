@@ -688,8 +688,34 @@ thread leaves one out only where `isMediaStandIn` (`lib/tickets/message-media.ts
 rebuilds it from the row's own type, voice flag and filename and the file is
 drawn in its place. A bracket regex would also hide a caption like
 `[urgent] where is my COD`, the `[story_mention]` that is the only sign of a
-story, and the name a document was sent under. Anything else asking what the
-customer _said_ has the same question to answer.
+story, and the name a document was sent under. What the customer _said_ is a
+different question, with a different rule, below.
+
+**What the customer said looks past every label of ours, not only the stand-ins
+a thread hides.** Beside those, a WhatsApp edit, a document's file name and a
+pin's address arrive wrapped in a label, and a chat ticket's subject is its
+opening message's first line, so it can be a label too — cut short of its
+bracket at 80 characters — or, with no first line, a name ingest gave it
+(`UNNAMED_SUBJECT`). A reader that only shows the latest message — the inbox
+preview — keeps the label; that is what it is for. Anything that picks one
+message as what the customer last said looks past it: `carriesCustomerText()` in
+a query (`lib/tickets/carries-customer-text.ts`), and over rows already in hand
+`hasCustomerText(bodyText)`, `lastCustomerWords(timeline)` and
+`subjectWords(subject)` (`lib/tickets/customer-text.ts`) — one set of patterns,
+held to one answer by `carries-customer-text.db.test.ts`. The rule is the whole
+message in brackets, so `[urgent] where is my COD` is words. It is not
+`isMediaStandIn`, on purpose. It is looser, because a story mention or a
+document's name says nothing for the customer though an agent needs to see it.
+And it needs no stored file, because the out-of-hours acknowledgement and the
+automations choose their language as the message is ingested, before its
+`download_media` job has normally stored one. The priority classifier's
+question, `requesterLocale`, the ticket page's knowledge panel and canned
+picker, and the language a canned suggestion is filed under use it. The earlier
+messages both TypeSafe questions send as context (`earlierMessages`) still carry
+labels, and so do the categorisers, which read every message rather than the
+last. A reader that forgets answers an Arabic customer in English for sending a
+photo of the damaged parcel, which the out-of-hours acknowledgement and the
+automation engine would have done (§6.97).
 
 **A coexistence number is live on the phone and on Cloud API at once**, and
 four rules keep the two sides from being read as each other. The copied
@@ -1127,10 +1153,11 @@ Two different questions decide the language, and they are not the same module.
 **Anything that writes to a customer unattended goes through
 `lib/tickets/locale.ts`** — the out-of-hours acknowledgement and an automation's
 canned reply both call `requesterLocale()`, which picks the most recent inbound
-`reply` carrying text and hands it to `preferredLocale()`. Each of those
-narrowings is a way the answer went wrong: the last inbound row of _any_ kind
-includes the English `system` notice we write when a form attachment fails, and
-a media message carries no text at all. A sender that reads the language off a
+`reply` carrying words the customer wrote, outside any label of ours, and hands
+it to `preferredLocale()`. Each of those narrowings closes a way the answer goes
+wrong: the last inbound row of _any_ kind includes the English `system` notice
+we write when a form attachment fails, and a photo sent without a caption is
+stored as our own English `[image]`. A sender that reads the language off a
 message it already happens to be holding is how the two came to disagree, so do
 not reintroduce that shortcut — one indexed query is the price of the invariant.
 
@@ -1141,8 +1168,8 @@ picker beside it cannot disagree. The two detectors differ at the margins —
 `detectLocale` calls text Arabic from a fifth of its letters, `preferredLocale`
 from a majority — and that is the right way round: one is a default an agent
 overrules with a click, the other has already been sent. Do not trust
-`contacts.locale` alone in either; nothing writes it, so all 6,000 contacts
-read as 'en'.
+`contacts.locale` alone in either; nothing writes it, so every contact reads as
+'en'.
 
 **The starter canned responses are content with rules, and the rules are
 tests.** `lib/tickets/canned-library.ts` holds them and `seed_canned_responses`

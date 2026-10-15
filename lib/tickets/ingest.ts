@@ -15,6 +15,7 @@ import type { InboundDelivery, ParsedInboundEmail } from '@/lib/email/types';
 import { ingestSideReply, resolveSideConversation } from '@/lib/side-conversations/ingest';
 import { buildAttachmentPath, uploadObject } from '@/lib/storage';
 import { resolveContact } from './contacts';
+import { UNNAMED_SUBJECT } from './customer-text';
 import { latest } from './latest';
 import { afterInboundMessage, afterMessageStored } from './lifecycle';
 import { reopenResolved } from './reopen';
@@ -162,7 +163,7 @@ export async function ingestInboundEmail(
           channel: 'email',
           channelId: emailChannel?.id ?? null,
           statusId,
-          subject: stripSubjectPrefixes(email.subject) || '(no subject)',
+          subject: stripSubjectPrefixes(email.subject) || UNNAMED_SUBJECT.email,
           requesterContactId: contactId,
           groupId: emailChannel?.defaultGroupId ?? null,
           // A bounce or autoresponder is filed but kept out of the working queue.
