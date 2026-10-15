@@ -8,6 +8,7 @@ import { InfoTip } from '@/components/tooltip';
 import { SubmitButton } from '@/components/submit-button';
 import { useActionForm } from '@/components/use-action-form';
 import type { ActionState } from '@/lib/http/action-state';
+import { ago } from '@/lib/format';
 import { DangerAction, Disclosure, EditorForm } from '../forms-shared';
 import { deleteCannedResponse, saveCannedResponse, saveCannedSuggestionSettings } from './actions';
 
@@ -160,7 +161,7 @@ export function SuggestionSwitchForm({
       <p className="text-xs text-(--color-text-secondary)">
         {changedAt ? (
           <RelativeTime at={changedAt}>
-            {(ago) => `Last changed ${ago}${changedBy ? ` by ${changedBy}` : ''}. `}
+            {(relative) => `Last changed ${ago(relative)}${changedBy ? ` by ${changedBy}` : ''}. `}
           </RelativeTime>
         ) : (
           'Never switched on. '

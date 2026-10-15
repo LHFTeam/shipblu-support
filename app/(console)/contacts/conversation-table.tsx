@@ -16,15 +16,17 @@ export function ConversationTable({
   conversations,
   emptyTitle,
   emptyHint,
+  now,
 }: {
   conversations: ConversationSummary[];
   emptyTitle: string;
   emptyHint?: string;
+  /** The page's render instant, so every relative time on it reads one clock. */
+  now: Date;
 }) {
   if (conversations.length === 0) {
     return <EmptyState title={emptyTitle} hint={emptyHint} />;
   }
-  const now = new Date();
 
   return (
     <Table head={['Ticket', 'Subject', 'Channel', 'Status', 'Assignee', 'Last activity']}>

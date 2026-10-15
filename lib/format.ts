@@ -130,6 +130,22 @@ export function formatRelative(value: Date | string, now: Date): string {
   return formatDateTime(value);
 }
 
+/**
+ * `formatRelative`'s answer as the end of a sentence: "3m ago", "just now", or
+ * the date itself.
+ *
+ * `formatRelative` answers "now" inside the first minute and an absolute date
+ * past a month, and neither takes the "ago" a duration does: a line built as
+ * `Opened ${relative} ago` read "Opened now ago" on every new ticket, and would
+ * read "Opened 3 Jul 2026, 14:02 ago" on one old enough to matter. Nor does a
+ * bare duration belong in a sentence — "Last changed 3m" reads as how long the
+ * change took. The inbox column keeps the bare shorthand; prose takes this.
+ */
+export function ago(relative: string): string {
+  if (relative === 'now') return 'just now';
+  return /^\d+[mhd]$/.test(relative) ? `${relative} ago` : relative;
+}
+
 export function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;

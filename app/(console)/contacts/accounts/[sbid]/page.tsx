@@ -132,6 +132,7 @@ export default async function ShippingAccountPage({
           conversations={conversations}
           emptyTitle="No conversations"
           emptyHint="Nothing visible to you names this account or comes from one of its people."
+          now={new Date()}
         />
       </section>
     </div>

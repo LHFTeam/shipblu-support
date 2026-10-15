@@ -1,6 +1,6 @@
 import { DateTime } from 'luxon';
 import { describe, expect, it, vi } from 'vitest';
-import { formatDateTime, formatDay, formatRelative, formatTime, sentenceCase } from './format';
+import { ago, formatDateTime, formatDay, formatRelative, formatTime, sentenceCase } from './format';
 
 describe('sentenceCase', () => {
   it('capitalises the first letter and spaces every underscore', () => {
@@ -152,5 +152,23 @@ describe('formatRelative', () => {
     // A row written after the clock reading it is compared with — a message
     // that landed between a server render and the bucket it is drawn against.
     expect(ago(-5 * MINUTE)).toBe('now');
+  });
+});
+
+describe('ago', () => {
+  it('ends a sentence with whatever formatRelative answered', () => {
+    expect(`Opened ${ago('3m')}`).toBe('Opened 3m ago');
+    expect(`Opened ${ago('2h')}`).toBe('Opened 2h ago');
+    expect(`Opened ${ago('29d')}`).toBe('Opened 29d ago');
+  });
+
+  it('says "just now" in the first minute, never "now ago"', () => {
+    expect(`checked ${ago('now')}`).toBe('checked just now');
+  });
+
+  it('leaves a date a date, never "<date> ago"', () => {
+    const now = new Date('2026-10-15T12:00:00Z');
+    const old = formatRelative('2026-07-03T11:02:00Z', now);
+    expect(`Opened ${ago(old)}`).toBe('Opened 3 Jul 2026, 14:02');
   });
 });

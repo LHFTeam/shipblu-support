@@ -4,7 +4,7 @@ import { Card, PageHeader } from '@/components/ui';
 import { requirePermission } from '@/lib/auth/guard';
 import { can } from '@/lib/auth/permissions';
 import { decodeSlugParam } from '@/lib/kb/slug';
-import { formatDateTime, formatRelative } from '@/lib/format';
+import { formatDateTime } from '@/lib/format';
 import { normaliseTrackingNumber } from '@/lib/shipments/format';
 import { agentTrackingFor } from '@/lib/shipments/lookup';
 import {
@@ -120,9 +120,7 @@ export default async function ShipmentPage({ params }: { params: Promise<{ track
             <div className="mt-1">
               <RefreshShipmentButton
                 trackingNumber={shipment.trackingNumber}
-                lastSyncedAt={
-                  shipment.lastSyncedAt ? `${formatRelative(shipment.lastSyncedAt, now)} ago` : null
-                }
+                lastSyncedAt={shipment.lastSyncedAt}
               />
             </div>
           </div>
@@ -285,6 +283,7 @@ export default async function ShipmentPage({ params }: { params: Promise<{ track
           conversations={conversations}
           emptyTitle="No conversations"
           emptyHint="Nothing visible to you is linked to this shipment."
+          now={now}
         />
       </section>
     </div>

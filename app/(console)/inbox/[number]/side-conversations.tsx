@@ -67,14 +67,16 @@ function SideState({ side, since }: { side: SideConversationView; since?: boolea
     return (
       <Badge tone="hub-waiting">
         Awaiting reply
-        <RelativeTime at={side.lastMessageAt}>{(ago) => ` · ${ago}`}</RelativeTime>
+        <RelativeTime at={side.lastMessageAt}>{(relative) => ` · ${relative}`}</RelativeTime>
       </Badge>
     );
   }
   return (
     <Badge tone="hub-replied">
       Replied
-      {since ? <RelativeTime at={side.lastMessageAt}>{(ago) => ` · ${ago}`}</RelativeTime> : null}
+      {since ? (
+        <RelativeTime at={side.lastMessageAt}>{(relative) => ` · ${relative}`}</RelativeTime>
+      ) : null}
     </Badge>
   );
 }

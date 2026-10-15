@@ -1,5 +1,5 @@
 import { Stat } from '@/components/charts';
-import { formatRelative } from '@/lib/format';
+import { ago, formatRelative } from '@/lib/format';
 import type { systemHealth } from '@/lib/reports/live';
 
 import { Section } from './section';
@@ -22,7 +22,7 @@ export function Health({
           value={health.jobsPending.toLocaleString('en-GB')}
           hint={
             health.oldestPendingSince
-              ? `Oldest queued ${formatRelative(health.oldestPendingSince, now)} ago · ${health.jobsProcessing} running`
+              ? `Oldest queued ${ago(formatRelative(health.oldestPendingSince, now))} · ${health.jobsProcessing} running`
               : `${health.jobsProcessing} running`
           }
           tone={health.jobsPending > 100 ? 'caution' : undefined}
@@ -39,7 +39,7 @@ export function Health({
           value={health.webhooksUnprocessed.toLocaleString('en-GB')}
           hint={
             health.oldestWebhookSince
-              ? `Oldest received ${formatRelative(health.oldestWebhookSince, now)} ago`
+              ? `Oldest received ${ago(formatRelative(health.oldestWebhookSince, now))}`
               : 'Everything received has been handled'
           }
           tone={health.webhooksUnprocessed > 50 ? 'caution' : undefined}
@@ -49,7 +49,7 @@ export function Health({
           value={health.lastRollupDay ?? '—'}
           hint={
             health.lastRollupAt
-              ? `That day's figures were written ${formatRelative(health.lastRollupAt, now)} ago`
+              ? `That day's figures were written ${ago(formatRelative(health.lastRollupAt, now))}`
               : 'The nightly job has never run'
           }
           tone={health.lastRollupAt ? undefined : 'caution'}

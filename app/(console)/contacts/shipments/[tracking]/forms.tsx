@@ -2,7 +2,9 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
+import { RelativeTime } from '@/components/relative-time';
 import { Button, ErrorText, Input } from '@/components/ui';
+import { ago } from '@/lib/format';
 import { refreshShipmentDetail, setShipmentParty, type ContactActionState } from '../../actions';
 
 const INITIAL: ContactActionState = { error: null };
@@ -120,9 +122,10 @@ export function RefreshShipmentButton({
   lastSyncedAt,
 }: {
   trackingNumber: string;
-  /** Pre-formatted by the server: this is a client component, and a raw Date
-      here would render one timezone on the server and another in the browser. */
-  lastSyncedAt: string | null;
+  /** The instant, not a phrase made from it on the server: a phrase is frozen at
+      render, where the ticket sidebar's twin keeps counting, and on a page left
+      open the two would disagree about the same parcel. */
+  lastSyncedAt: Date | string | null;
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -156,7 +159,13 @@ export function RefreshShipmentButton({
           {busy ? 'Fetching…' : 'Fetch latest'}
         </Button>
         <span className="text-xs text-(--color-text-tertiary)">
-          {lastSyncedAt ? `checked ${lastSyncedAt}` : 'never checked'}
+          {lastSyncedAt ? (
+            <RelativeTime at={lastSyncedAt}>
+              {(relative) => `checked ${ago(relative)}`}
+            </RelativeTime>
+          ) : (
+            'never checked'
+          )}
         </span>
       </div>
       {error ? <ErrorText inline>{error}</ErrorText> : null}

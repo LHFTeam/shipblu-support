@@ -238,6 +238,7 @@ export default async function ContactPage({
           conversations={conversations}
           emptyTitle="No conversations"
           emptyHint="Nothing this contact has written in about is visible to you."
+          now={new Date()}
         />
       </section>
 

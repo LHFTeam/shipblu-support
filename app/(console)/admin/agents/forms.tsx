@@ -13,7 +13,7 @@ import {
 } from '@/components/ui';
 import { RelativeTime } from '@/components/relative-time';
 import { InfoTip, Tooltip } from '@/components/tooltip';
-import { sentenceCase } from '@/lib/format';
+import { ago, sentenceCase } from '@/lib/format';
 import type { AdminState } from '../settings-shared';
 import { createInvite, savePresenceSettings, setAgentActive, setAgentCapacity } from './actions';
 import type { ActionState } from '@/lib/http/action-state';
@@ -250,17 +250,6 @@ export function PendingInviteLink({
   return <CopyInviteLink inviteUrl={inviteUrl} label={`Copy invite link for ${email}`} />;
 }
 
-/**
- * `formatRelative` answers "now" inside the first minute and an absolute date
- * past a month, and neither of those takes the "seen … ago" the durations do:
- * the row read "seen now ago", and would have read "seen 3 Jul 2026, 14:02 ago"
- * for anyone who had been away long enough to be worth noticing.
- */
-function lastSeen(relative: string): string {
-  if (relative === 'now') return 'seen just now';
-  return /^\d+[mhd]$/.test(relative) ? `seen ${relative} ago` : `seen ${relative}`;
-}
-
 /** Badge words are sentence case; the role and the availability are stored lower case. */
 
 export function AgentRow({
@@ -379,7 +368,9 @@ export function AgentRow({
 
         <span className="shrink-0 text-xs text-(--color-text-tertiary)">
           {agent.lastSeenAt ? (
-            <RelativeTime at={agent.lastSeenAt}>{lastSeen}</RelativeTime>
+            <RelativeTime at={agent.lastSeenAt}>
+              {(relative) => `seen ${ago(relative)}`}
+            </RelativeTime>
           ) : (
             'never signed in'
           )}

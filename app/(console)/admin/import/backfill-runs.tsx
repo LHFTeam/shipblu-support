@@ -5,7 +5,7 @@ import { useFormStatus } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import { RelativeTime } from '@/components/relative-time';
 import { Badge, Button } from '@/components/ui';
-import { formatDateTime, sentenceCase } from '@/lib/format';
+import { ago, formatDateTime, sentenceCase } from '@/lib/format';
 
 /**
  * The parts every backfill card shows the same way.
@@ -69,7 +69,9 @@ export function BackfillRuns({ runs, empty }: { runs: BackfillRun[]; empty: stri
                 ) : null}
                 {run.completedAt ? (
                   <span className="ms-auto text-xs text-(--color-text-tertiary)">
-                    <RelativeTime at={run.completedAt}>{(ago) => `finished ${ago}`}</RelativeTime>
+                    <RelativeTime at={run.completedAt}>
+                      {(relative) => `finished ${ago(relative)}`}
+                    </RelativeTime>
                   </span>
                 ) : null}
               </div>
