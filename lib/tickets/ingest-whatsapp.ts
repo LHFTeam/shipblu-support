@@ -13,6 +13,7 @@ import {
 import { parseCoexistence } from '@/lib/whatsapp/coexistence';
 import { lastInboundPhoneNumberId } from '@/lib/whatsapp/conversation';
 import { ACCESS_TOKEN_CODE, explainDeliveryError, type TokenOrigin } from '@/lib/whatsapp/errors';
+import { storedKind } from '@/lib/whatsapp/reaction';
 import type {
   NormalisedEcho,
   NormalisedInboundMessage,
@@ -177,7 +178,10 @@ export async function ingestWhatsAppMessage(
   return { ...stored, duplicate: false };
 }
 
-/** The row a customer's message is stored as — and their reaction, which is the same row. */
+/**
+ * The row a customer's message is stored as — and their reaction, which is the
+ * same row of its own kind (`storedKind`).
+ */
 function inboundRow(
   conversationId: string,
   contactId: string,
@@ -186,7 +190,7 @@ function inboundRow(
   return {
     conversationId,
     direction: 'inbound',
-    kind: 'reply',
+    kind: storedKind(message.type),
     authorContactId: contactId,
     bodyText: message.text,
     // No HTML on WhatsApp; the console renders bodyText and applies
@@ -402,7 +406,10 @@ function echoSender(channel: ResolvedChannel): 'bot' | 'business_app' | null {
   return channel.coexistence ? 'business_app' : null;
 }
 
-/** The row an echo is stored as — and the business's reaction, which is the same row. */
+/**
+ * The row an echo is stored as — and the business's reaction, which is the same
+ * row of its own kind (`storedKind`).
+ */
 function echoRow(
   conversationId: string,
   echo: NormalisedEcho,
@@ -411,7 +418,7 @@ function echoRow(
   return {
     conversationId,
     direction: 'outbound',
-    kind: 'reply',
+    kind: storedKind(echo.type),
     // No author on either side: no agent wrote it and the customer did not
     // send it. The channel is what tells the timeline to label it as the bot.
     bodyText: echo.text,
@@ -456,11 +463,11 @@ function echoRow(
  * A reaction, from the customer or from our side of the chat: stored, and
  * nothing else.
  *
- * Stored as the row its message or echo would have been — `meta.whatsappType`
- * and the whole delivery in `raw_body`, naming the reacted-to message as
- * `reaction.message_id` — so that the timeline can pair it with that message
- * from rows it already reads, with no backfill. The conversation it is filed on
- * is not otherwise touched.
+ * Stored as the row its message or echo would have been, as `kind:
+ * 'reaction'` — the whole delivery in `raw_body`, naming the reacted-to message
+ * as `reaction.message_id`, so that the timeline can pair it with that message
+ * from rows it already reads. The conversation it is filed on is not otherwise
+ * touched.
  *
  * The first two decisions are the ones `applyMetaInteraction` makes for a
  * Facebook or Instagram reaction, for the same reasons. The third is this

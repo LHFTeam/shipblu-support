@@ -1,9 +1,10 @@
-import { eq } from 'drizzle-orm';
+import { and, desc, eq } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { conversations, messages } from '@/db/schema';
 import { enqueue } from '@/lib/queue';
 import { onAgentReply } from '@/lib/sla';
 import { afterMessageStored } from '@/lib/tickets/lifecycle';
+import { notReaction } from '@/lib/tickets/not-reaction';
 import { carrierFor } from '@/lib/tickets/outbound';
 
 /** The row an agent's reply is stored as, less what every reply shares. */
@@ -72,4 +73,31 @@ export async function storeAgentReply(
   });
 
   return messageId;
+}
+
+/**
+ * The message a reply is threaded on: the provider's id for the customer's most
+ * recent message — the email's Message-ID, the wamid a WhatsApp reply quotes.
+ *
+ * A `reply`, so not a reaction, or the reply would be recorded as answering a
+ * thumbs-up; and not the notice a form writes when it could not keep a file,
+ * which is inbound too, has no id of its own, and would leave the reply
+ * threaded on nothing. Here rather than in the action so a test can reach it.
+ */
+export async function threadingParent(conversationId: string): Promise<string | null> {
+  const rows = await db
+    .select({ channelMessageId: messages.channelMessageId })
+    .from(messages)
+    .where(
+      and(
+        eq(messages.conversationId, conversationId),
+        eq(messages.direction, 'inbound'),
+        eq(messages.kind, 'reply'),
+        notReaction(),
+      ),
+    )
+    .orderBy(desc(messages.createdAt))
+    .limit(1);
+
+  return rows[0]?.channelMessageId ?? null;
 }

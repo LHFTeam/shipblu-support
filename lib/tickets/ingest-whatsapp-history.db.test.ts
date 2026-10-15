@@ -221,6 +221,36 @@ describe('ingestWhatsAppHistoryChunk', () => {
     });
   });
 
+  // The copy keeps the phone's reactions, and the import is drawn by the same
+  // timeline and read by the same readers as a live ticket.
+  it('stores a copied reaction as a reaction, from either side', async () => {
+    await coexistenceChannel();
+    const reaction = (emoji: string, target: string) => ({
+      type: 'reaction',
+      text: `[reacted ${emoji}]`,
+      raw: { reaction: { message_id: target, emoji } },
+    });
+    await ingestWhatsAppHistoryChunk(
+      chunk([
+        message('wamid.p1', PABLO, 'outbound', '2025-02-10T23:42:35Z'),
+        message('wamid.p2', PABLO, 'inbound', '2025-02-10T23:42:40Z'),
+        message('wamid.p3', PABLO, 'inbound', '2025-02-10T23:42:45Z', reaction('🙏', 'wamid.p1')),
+        message('wamid.p4', PABLO, 'outbound', '2025-02-10T23:42:50Z', reaction('❤️', 'wamid.p2')),
+      ]),
+      RECEIVED,
+    );
+
+    const [thread] = await imported();
+    expect(
+      (await messagesOf(thread!.id)).map((m) => [m.channelMessageId, m.direction, m.kind]),
+    ).toEqual([
+      ['wamid.p1', 'outbound', 'reply'],
+      ['wamid.p2', 'inbound', 'reply'],
+      ['wamid.p3', 'inbound', 'reaction'],
+      ['wamid.p4', 'outbound', 'reaction'],
+    ]);
+  });
+
   it('writes no ticket and no message the second time a chunk is processed', async () => {
     await coexistenceChannel();
     await ingestWhatsAppHistoryChunk(SAMPLE(), RECEIVED);

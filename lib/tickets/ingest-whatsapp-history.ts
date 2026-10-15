@@ -8,6 +8,7 @@ import {
   recordHistoryDeclined,
   recordHistoryProgress,
 } from '@/lib/whatsapp/coexistence-state';
+import { storedKind } from '@/lib/whatsapp/reaction';
 import type {
   NormalisedContactSync,
   NormalisedHistoryChunk,
@@ -249,7 +250,9 @@ function historyRow(
   return {
     conversationId,
     direction: message.direction,
-    kind: 'reply',
+    // The copy keeps the phone's reactions too, and they are no more anybody's
+    // words here than live (`storedKind`).
+    kind: storedKind(message.type),
     // The business's replies have no author: nobody here wrote them, and the
     // timeline labels them as the Business app, as it does a live echo.
     authorContactId: inbound ? contactId : null,

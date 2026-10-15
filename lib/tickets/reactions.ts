@@ -9,12 +9,13 @@ import { wamidKey } from '@/lib/whatsapp/wamid';
  * every 🙏 as a bubble saying `[reacted 🙏]`, a line below whatever it was
  * answering. It belongs on that message, as it does on the customer's phone.
  *
- * The row stays a row, and what it means for the ticket is the ingest's
- * business: `ingestWhatsAppReaction` moves no clock and reopens nothing, and
- * every reader of "the customer's last words" leaves it out through
- * `isReaction` / `notReaction`. This only decides where the console draws it,
- * and recognises a reaction by that same `isReaction`, so the thread and every
- * other reader agree on which rows are reactions.
+ * The row stays a row, of `kind: 'reaction'`, and what it means for the
+ * ticket is the ingest's business: `ingestWhatsAppReaction` moves no clock and
+ * reopens nothing, and every reader of "the customer's last words" leaves it
+ * out by asking for `kind = 'reply'`. This only decides where the console draws
+ * it, and recognises a reaction by `isReaction`, which also knows the rows
+ * stored before the kind existed — so the thread and every other reader agree
+ * on which rows are reactions.
  *
  * What a message shows is the latest reaction from each side, the way WhatsApp
  * shows it: reacting again replaces the earlier one, and a reaction with no
@@ -123,16 +124,18 @@ export function foldReactions(rows: readonly ReactionRow[]): ReactionFold {
  * as `reaction.message_id`. Reading it here needs no backfill and no second
  * place for the same fact to disagree with the first.
  *
- * Whether a row is a reaction is the tag's answer, not the payload's: a row
- * tagged as one whose payload cannot be read is still a reaction — drawn as a
- * line saying so — rather than falling back to a `[reacted 👍]` bubble or
- * being offered as something another reaction could land on.
+ * Whether a row is a reaction is the row's answer (`isReaction`), not the
+ * payload's: a reaction whose payload cannot be read is still a reaction —
+ * drawn as a line saying so — rather than falling back to a `[reacted 👍]`
+ * bubble or being offered as something another reaction could land on.
  */
-export function storedReaction(
-  meta: Record<string, unknown> | null,
-  rawBody: string | null,
-): StoredReaction | null {
-  if (!isReaction(meta)) return null;
+export function storedReaction(row: {
+  kind: string;
+  meta: Record<string, unknown> | null;
+  rawBody: string | null;
+}): StoredReaction | null {
+  if (!isReaction(row)) return null;
+  const { rawBody } = row;
   const unreadable = { targetWamid: null, emoji: null };
   if (!rawBody) return unreadable;
 

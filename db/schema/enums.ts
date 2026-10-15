@@ -27,8 +27,22 @@ export const directionEnum = pgEnum('direction', ['inbound', 'outbound']);
  * `note` is a private agent-only note; `system` is an automated entry such as
  * "SLA breached" or "merged from #123". Keeping all three in one table means the
  * conversation timeline is a single ordered query.
+ *
+ * `reaction` is a WhatsApp reaction — 🙏 on a reply, from either side — which
+ * the timeline draws on the message it names and which nobody *said*. Its own
+ * kind rather than a `reply` told apart by `meta`, so that a reader picking the
+ * customer's words with `kind = 'reply'`, the shape nearly every one of them is
+ * already written in, leaves it out without having to know it exists. Added
+ * last because a value cannot be removed (Postgres has no `DROP VALUE`), only
+ * left unused.
  */
-export const messageKindEnum = pgEnum('message_kind', ['reply', 'note', 'system', 'forward']);
+export const messageKindEnum = pgEnum('message_kind', [
+  'reply',
+  'note',
+  'system',
+  'forward',
+  'reaction',
+]);
 
 export const deliveryStatusEnum = pgEnum('delivery_status', [
   'pending',

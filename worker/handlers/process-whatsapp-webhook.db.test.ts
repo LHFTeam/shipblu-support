@@ -546,15 +546,19 @@ describe('processWhatsAppWebhook: a number on the WhatsApp Business app', () => 
     expect(await db.select().from(conversations)).toEqual([before]);
     expect(
       await db
-        .select({ id: messages.channelMessageId, direction: messages.direction })
+        .select({
+          id: messages.channelMessageId,
+          direction: messages.direction,
+          kind: messages.kind,
+        })
         .from(messages)
         .where(eq(messages.conversationId, ticket!.id))
         .orderBy(messages.createdAt),
     ).toEqual([
-      { id: 'wamid.ask', direction: 'inbound' },
-      { id: 'wamid.answer', direction: 'outbound' },
-      { id: 'wamid.thanks', direction: 'inbound' },
-      { id: 'wamid.heart', direction: 'outbound' },
+      { id: 'wamid.ask', direction: 'inbound', kind: 'reply' },
+      { id: 'wamid.answer', direction: 'outbound', kind: 'reply' },
+      { id: 'wamid.thanks', direction: 'inbound', kind: 'reaction' },
+      { id: 'wamid.heart', direction: 'outbound', kind: 'reaction' },
     ]);
   });
 });

@@ -1,6 +1,6 @@
 'use server';
 
-import { and, eq, desc } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { messages, whatsappTemplates } from '@/db/schema';
 import { requireAgent } from '@/lib/auth/guard';
@@ -14,8 +14,7 @@ import { afterMessageStored } from '@/lib/tickets/lifecycle';
 import { recordCannedUse } from '@/lib/tickets/canned-usage';
 import { recordSuggestionOutcome } from '@/lib/canned-suggest/outcome';
 import { isLocale } from '@/lib/kb/locale';
-import { storeAgentReply } from '@/lib/tickets/agent-reply';
-import { notReaction } from '@/lib/tickets/not-reaction';
+import { storeAgentReply, threadingParent } from '@/lib/tickets/agent-reply';
 import {
   buildTemplateComponents,
   renderTemplatePreview,
@@ -154,7 +153,7 @@ export async function sendReply(_state: ActionState, formData: FormData): Promis
   const isWebchat = conversation.channel === 'webchat';
   const html = isEmail ? sanitiseEmailHtml(textToHtml(body)) : null;
 
-  const parentMessageId = await lastInboundChannelMessageId(conversationId);
+  const parentMessageId = await threadingParent(conversationId);
 
   const messageId = await storeAgentReply(conversationId, conversation.channel, {
     authorAgentId: agent.id,
@@ -340,25 +339,4 @@ export async function sendTemplateReply(
 
   refresh(row.conversation.number);
   return ok();
-}
-
-/**
- * The parent for threading: the customer's most recent message — not a
- * reaction, or the reply would be recorded as answering a thumbs-up.
- */
-async function lastInboundChannelMessageId(conversationId: string): Promise<string | null> {
-  const rows = await db
-    .select({ channelMessageId: messages.channelMessageId })
-    .from(messages)
-    .where(
-      and(
-        eq(messages.conversationId, conversationId),
-        eq(messages.direction, 'inbound'),
-        notReaction(),
-      ),
-    )
-    .orderBy(desc(messages.createdAt))
-    .limit(1);
-
-  return rows[0]?.channelMessageId ?? null;
 }

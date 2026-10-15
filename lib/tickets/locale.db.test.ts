@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { db } from '@/db/client';
 import { contacts, conversations, messages, ticketStatuses } from '@/db/schema';
 import { withCleanDatabase } from '@/lib/testing/db';
+import { REACTION_SHAPES } from '@/lib/testing/reactions';
 import { requesterLocale } from './locale';
 
 /**
@@ -28,27 +29,31 @@ async function ticket(channel: 'whatsapp' | 'facebook' | 'email'): Promise<strin
 describe('requesterLocale', () => {
   // `[reacted 🙏]` is seven Latin letters: read as the customer's words, it
   // would answer an Arabic customer in English for thanking us.
-  it('reads the customer’s last words past a reaction', async () => {
-    const id = await ticket('whatsapp');
-    await db.insert(messages).values([
-      {
-        conversationId: id,
-        direction: 'inbound',
-        bodyText: 'فين شحنتي؟',
-        meta: { whatsappType: 'text' },
-        createdAt: new Date('2026-10-01T10:00:00Z'),
-      },
-      {
-        conversationId: id,
-        direction: 'inbound',
-        bodyText: '[reacted 🙏]',
-        meta: { whatsappType: 'reaction' },
-        createdAt: new Date('2026-10-01T10:05:00Z'),
-      },
-    ]);
+  it.each(REACTION_SHAPES)(
+    'reads the customer’s last words past a reaction ($shape)',
+    async ({ kind }) => {
+      const id = await ticket('whatsapp');
+      await db.insert(messages).values([
+        {
+          conversationId: id,
+          direction: 'inbound',
+          bodyText: 'فين شحنتي؟',
+          meta: { whatsappType: 'text' },
+          createdAt: new Date('2026-10-01T10:00:00Z'),
+        },
+        {
+          conversationId: id,
+          direction: 'inbound',
+          bodyText: '[reacted 🙏]',
+          kind,
+          meta: { whatsappType: 'reaction' },
+          createdAt: new Date('2026-10-01T10:05:00Z'),
+        },
+      ]);
 
-    expect(await requesterLocale(id)).toBe('ar');
-  });
+      expect(await requesterLocale(id)).toBe('ar');
+    },
+  );
 
   // A photo, a voice note or a document sent without a caption is stored as
   // our own label, and its Latin letters would answer an Arabic customer in

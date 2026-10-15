@@ -20,6 +20,7 @@ import { createTicket } from '@/lib/portal/tickets';
 import { applySlaOnCreate } from '@/lib/sla';
 import { stubFetch } from '@/lib/testing/fetch';
 import { withCleanDatabase } from '@/lib/testing/db';
+import { REACTION_SHAPES } from '@/lib/testing/reactions';
 import { holdNextTransaction } from '@/lib/testing/hold-transaction';
 import type { Priority } from '@/lib/tickets/vocabulary';
 import { enqueuePriorityClassification } from './enqueue';
@@ -320,28 +321,32 @@ describe('classifyMessagePriority: apply', () => {
 
   // On a coexistence number the business can write first, and the customer's
   // 👍 on that is filed before anything they say.
-  it('takes the first thing the customer wrote for the opening, not a reaction before it', async () => {
-    const id = await ticket({ channel: 'whatsapp' });
-    await inbound(id, '[reacted 👍]', {
-      meta: { whatsappType: 'reaction' },
-      createdAt: new Date(Date.now() - 2 * MINUTE),
-    });
-    const opening = await inbound(id, 'ازاي اغير عنوان التوصيل؟', {
-      createdAt: new Date(Date.now() - MINUTE),
-    });
-    const mock = answers('low', 0.9);
+  it.each(REACTION_SHAPES)(
+    'takes the first thing the customer wrote for the opening, not a reaction before it ($shape)',
+    async ({ kind }) => {
+      const id = await ticket({ channel: 'whatsapp' });
+      await inbound(id, '[reacted 👍]', {
+        kind,
+        meta: { whatsappType: 'reaction' },
+        createdAt: new Date(Date.now() - 2 * MINUTE),
+      });
+      const opening = await inbound(id, 'ازاي اغير عنوان التوصيل؟', {
+        createdAt: new Date(Date.now() - MINUTE),
+      });
+      const mock = answers('low', 0.9);
 
-    expect(await classifyMessagePriority(opening, { baseUrl: BASE })).toMatchObject({
-      outcome: 'applied',
-    });
-    expect(await priorityOf(id)).toBe('low');
+      expect(await classifyMessagePriority(opening, { baseUrl: BASE })).toMatchObject({
+        outcome: 'applied',
+      });
+      expect(await priorityOf(id)).toBe('low');
 
-    // Nor is it context: the customer had said nothing before.
-    const body = JSON.parse(String((mock.mock.calls[0]![1] as RequestInit).body)) as {
-      state: Record<string, unknown>;
-    };
-    expect(body.state).not.toHaveProperty('earlier_messages_from_the_same_customer');
-  });
+      // Nor is it context: the customer had said nothing before.
+      const body = JSON.parse(String((mock.mock.calls[0]![1] as RequestInit).body)) as {
+        state: Record<string, unknown>;
+      };
+      expect(body.state).not.toHaveProperty('earlier_messages_from_the_same_customer');
+    },
+  );
 
   it('lets the opening message lower though a later one, answered first, was refused', async () => {
     const id = await ticket();
@@ -724,19 +729,26 @@ describe('classifyMessagePriority: shadow, skips and failures', () => {
     expect(mock).not.toHaveBeenCalled();
   });
 
-  // Ingest no longer queues one, and a job run by hand still asks nothing:
-  // `[reacted 🙏]` is our placeholder, which `hasCustomerText` already refuses.
-  it('skips a WhatsApp reaction, whose text is ours', async () => {
-    const id = await ticket({ channel: 'whatsapp' });
-    const messageId = await inbound(id, '[reacted 🙏]', { meta: { whatsappType: 'reaction' } });
-    const mock = answers('urgent');
+  // Ingest no longer queues one, and a job run by hand still asks nothing: a
+  // reaction is not a `reply`, and one stored before it had a kind carries
+  // `[reacted 🙏]`, our placeholder, which `hasCustomerText` already refuses.
+  it.each(REACTION_SHAPES)(
+    'skips a WhatsApp reaction, whose text is ours ($shape)',
+    async ({ kind }) => {
+      const id = await ticket({ channel: 'whatsapp' });
+      const messageId = await inbound(id, '[reacted 🙏]', {
+        kind,
+        meta: { whatsappType: 'reaction' },
+      });
+      const mock = answers('urgent');
 
-    expect(await classifyMessagePriority(messageId, { baseUrl: BASE })).toEqual({
-      status: 'skipped',
-      reason: 'no text',
-    });
-    expect(mock).not.toHaveBeenCalled();
-  });
+      expect(await classifyMessagePriority(messageId, { baseUrl: BASE })).toEqual({
+        status: 'skipped',
+        reason: kind === 'reaction' ? 'not an inbound reply' : 'no text',
+      });
+      expect(mock).not.toHaveBeenCalled();
+    },
+  );
 
   it('skips a bounce on an existing ticket, whose text reads as urgent', async () => {
     const id = await ticket({ channel: 'email' });

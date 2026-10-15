@@ -19,7 +19,7 @@ import { env } from '@/lib/env';
 import { can } from '@/lib/auth/permissions';
 import { enqueue } from '@/lib/queue';
 import { holdEntry } from '@/lib/side-conversations/directory';
-import { quoteAnchor, sideSubject } from '@/lib/side-conversations/format';
+import { isQuotableAnchor, quoteAnchor, sideSubject } from '@/lib/side-conversations/format';
 import {
   normaliseAddress,
   parseAddressList,
@@ -27,7 +27,6 @@ import {
   refuseRecipients,
 } from '@/lib/side-conversations/guard';
 import { lastSideMessageId, loadSideConversation } from '@/lib/side-conversations/queries';
-import { isReaction } from '@/lib/whatsapp/reaction';
 import {
   applyStatusCategory,
   loadConversation,
@@ -357,6 +356,7 @@ async function quotedAnchorMessage(
   const rows = await db
     .select({
       bodyText: messages.bodyText,
+      direction: messages.direction,
       kind: messages.kind,
       meta: messages.meta,
       createdAt: messages.createdAt,
@@ -368,13 +368,11 @@ async function quotedAnchorMessage(
     .limit(1);
 
   const message = rows[0];
-  if (!message) return null;
-  // A private note is ours, not the customer's, and forwarding one to a hub
-  // under the heading "the customer wrote" would be a lie about who said it.
-  if (message.kind === 'note') return null;
-  // Nor is a reaction anything they wrote: the composer leaves it out, and the
-  // id is a form field.
-  if (isReaction(message.meta)) return null;
+  // The id is a form field, so it is held to the composer's own rule: anything
+  // else here — a private note, our reply, a form's notice, a reaction — would
+  // go to the hub under "the customer wrote", a claim about who said it that is
+  // false.
+  if (!message || !isQuotableAnchor(message)) return null;
 
   return quoteAnchor(message.contactName, message.bodyText, message.createdAt);
 }

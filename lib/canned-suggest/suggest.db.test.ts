@@ -17,6 +17,7 @@ import {
 import type { SessionAgent } from '@/lib/auth/session';
 import { resetEnvCache } from '@/lib/env';
 import { withCleanDatabase } from '@/lib/testing/db';
+import { REACTION_SHAPES } from '@/lib/testing/reactions';
 import { stubFetch } from '@/lib/testing/fetch';
 import { readHistory } from './history';
 import { NONE_KEY, REQUEST_VERSION } from './request';
@@ -205,34 +206,41 @@ describe('readHistory', () => {
     );
   });
 
-  it('leaves out a reaction from either side, so the question stays the anchor', async () => {
-    const agent = await signedIn();
-    const id = await ticket('whatsapp');
-    await say(id, 'Let me check', { direction: 'outbound', authorAgentId: agent.id });
-    const question = await say(id, 'فين الشحنة');
-    await say(id, '[reacted ❤️]', {
-      direction: 'outbound',
-      meta: { whatsappType: 'reaction', echo: true, echoSource: 'business_app' },
-    });
-    await say(id, '[reacted 🙏]', { meta: { whatsappType: 'reaction' } });
+  it.each(REACTION_SHAPES)(
+    'leaves out a reaction from either side, so the question stays the anchor ($shape)',
+    async ({ kind }) => {
+      const agent = await signedIn();
+      const id = await ticket('whatsapp');
+      await say(id, 'Let me check', { direction: 'outbound', authorAgentId: agent.id });
+      const question = await say(id, 'فين الشحنة');
+      await say(id, '[reacted ❤️]', {
+        direction: 'outbound',
+        kind,
+        meta: { whatsappType: 'reaction', echo: true, echoSource: 'business_app' },
+      });
+      await say(id, '[reacted 🙏]', { kind, meta: { whatsappType: 'reaction' } });
 
-    const history = await readHistory(id);
+      const history = await readHistory(id);
 
-    expect(history.messages).toEqual([
-      { from: 'support_agent', text: 'Let me check', attachments: 0 },
-      { from: 'customer', text: 'فين الشحنة', attachments: 0 },
-    ]);
-    expect(history.anchorMessageId).toBe(question);
-  });
+      expect(history.messages).toEqual([
+        { from: 'support_agent', text: 'Let me check', attachments: 0 },
+        { from: 'customer', text: 'فين الشحنة', attachments: 0 },
+      ]);
+      expect(history.anchorMessageId).toBe(question);
+    },
+  );
 
-  it('finds nothing to answer where the customer has only reacted', async () => {
-    const agent = await signedIn();
-    const id = await ticket('whatsapp');
-    await say(id, 'On its way', { direction: 'outbound', authorAgentId: agent.id });
-    await say(id, '[reacted 👍]', { meta: { whatsappType: 'reaction' } });
+  it.each(REACTION_SHAPES)(
+    'finds nothing to answer where the customer has only reacted ($shape)',
+    async ({ kind }) => {
+      const agent = await signedIn();
+      const id = await ticket('whatsapp');
+      await say(id, 'On its way', { direction: 'outbound', authorAgentId: agent.id });
+      await say(id, '[reacted 👍]', { kind, meta: { whatsappType: 'reaction' } });
 
-    expect(await readHistory(id)).toMatchObject({ hasInbound: false });
-  });
+      expect(await readHistory(id)).toMatchObject({ hasInbound: false });
+    },
+  );
 });
 
 describe('the switch', () => {

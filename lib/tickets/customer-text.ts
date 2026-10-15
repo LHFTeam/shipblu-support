@@ -56,7 +56,7 @@ export function lastCustomerWords<
     (message) =>
       message.direction === 'inbound' &&
       message.kind === 'reply' &&
-      !isReaction(message.meta) &&
+      !isReaction(message) &&
       hasCustomerText(message.bodyText),
   );
 }

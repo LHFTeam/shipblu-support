@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { db } from '@/db/client';
 import { contacts, conversations, messages, ticketStatuses } from '@/db/schema';
 import { withCleanDatabase } from '@/lib/testing/db';
+import { REACTION_SHAPES } from '@/lib/testing/reactions';
 import { todayByHour } from './live';
 
 /**
@@ -31,50 +32,56 @@ async function ticket(channel: 'whatsapp' | 'email'): Promise<string> {
 }
 
 describe('todayByHour', () => {
-  it('counts what was said, from either side, and neither side’s reactions', async () => {
-    const chat = await ticket('whatsapp');
-    const mail = await ticket('email');
-    const at = (time: string) => DateTime.fromISO(`2026-10-13T${time}`, { zone: ZONE }).toJSDate();
+  it.each(REACTION_SHAPES)(
+    'counts what was said, from either side, and neither side’s reactions ($shape)',
+    async ({ kind }) => {
+      const chat = await ticket('whatsapp');
+      const mail = await ticket('email');
+      const at = (time: string) =>
+        DateTime.fromISO(`2026-10-13T${time}`, { zone: ZONE }).toJSDate();
 
-    await db.insert(messages).values([
-      {
-        conversationId: chat,
-        direction: 'inbound',
-        bodyText: 'فين شحنتي؟',
-        meta: { whatsappType: 'text' },
-        createdAt: at('11:05'),
-      },
-      {
-        conversationId: chat,
-        direction: 'outbound',
-        bodyText: 'On its way',
-        meta: { sendKind: 'text' },
-        createdAt: at('11:10'),
-      },
-      {
-        conversationId: chat,
-        direction: 'inbound',
-        bodyText: '[reacted 🙏]',
-        meta: { whatsappType: 'reaction' },
-        createdAt: at('11:12'),
-      },
-      {
-        conversationId: chat,
-        direction: 'outbound',
-        bodyText: '[reacted ❤️]',
-        meta: { whatsappType: 'reaction', echo: true, echoSource: 'business_app' },
-        createdAt: at('11:15'),
-      },
-      // No `whatsappType` at all, as on every email: still traffic.
-      { conversationId: mail, direction: 'inbound', bodyText: 'Refund?', createdAt: at('11:20') },
-    ]);
+      await db.insert(messages).values([
+        {
+          conversationId: chat,
+          direction: 'inbound',
+          bodyText: 'فين شحنتي؟',
+          meta: { whatsappType: 'text' },
+          createdAt: at('11:05'),
+        },
+        {
+          conversationId: chat,
+          direction: 'outbound',
+          bodyText: 'On its way',
+          meta: { sendKind: 'text' },
+          createdAt: at('11:10'),
+        },
+        {
+          conversationId: chat,
+          direction: 'inbound',
+          bodyText: '[reacted 🙏]',
+          kind,
+          meta: { whatsappType: 'reaction' },
+          createdAt: at('11:12'),
+        },
+        {
+          conversationId: chat,
+          direction: 'outbound',
+          bodyText: '[reacted ❤️]',
+          kind,
+          meta: { whatsappType: 'reaction', echo: true, echoSource: 'business_app' },
+          createdAt: at('11:15'),
+        },
+        // No `whatsappType` at all, as on every email: still traffic.
+        { conversationId: mail, direction: 'inbound', bodyText: 'Refund?', createdAt: at('11:20') },
+      ]);
 
-    const hours = await todayByHour(ZONE, NOW.toJSDate());
+      const hours = await todayByHour(ZONE, NOW.toJSDate());
 
-    expect(hours.find((bucket) => bucket.hour === 11)).toEqual({
-      hour: 11,
-      inbound: 2,
-      outbound: 1,
-    });
-  });
+      expect(hours.find((bucket) => bucket.hour === 11)).toEqual({
+        hour: 11,
+        inbound: 2,
+        outbound: 1,
+      });
+    },
+  );
 });
