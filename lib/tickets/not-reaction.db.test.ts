@@ -1,7 +1,7 @@
 import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { db } from '@/db/client';
-import { contacts, conversations, messages, ticketStatuses } from '@/db/schema';
+import { contacts, conversations, messageKindEnum, messages, ticketStatuses } from '@/db/schema';
 import { withCleanDatabase } from '@/lib/testing/db';
 import { isReaction } from '@/lib/whatsapp/reaction';
 import { notReaction } from './not-reaction';
@@ -12,6 +12,9 @@ import { notReaction } from './not-reaction';
  * ticket page picks the composer's anchor with one and the server picks the
  * suggestion's with the other, so a row they disagree on is a suggestion that
  * never shows.
+ *
+ * Every kind against every shape of `meta`: a reaction is its kind, or — for
+ * the rows stored before it had one — a `reply` carrying the tag.
  */
 
 withCleanDatabase();
@@ -45,21 +48,29 @@ describe('notReaction and isReaction', () => {
     const rows = await db
       .insert(messages)
       .values(
-        METAS.map((meta, index) => ({
-          conversationId: conversation!.id,
-          direction: 'inbound' as const,
-          bodyText: `row ${index}`,
-          meta,
-        })),
+        messageKindEnum.enumValues.flatMap((kind) =>
+          METAS.map((meta, index) => ({
+            conversationId: conversation!.id,
+            direction: 'inbound' as const,
+            kind,
+            bodyText: `${kind} ${index}`,
+            meta,
+          })),
+        ),
       )
-      .returning({ id: messages.id, meta: messages.meta });
+      .returning({ id: messages.id, kind: messages.kind, meta: messages.meta });
 
     const kept = await db.select({ id: messages.id }).from(messages).where(notReaction());
 
     expect(new Set(kept.map((row) => row.id))).toEqual(
-      new Set(rows.filter((row) => !isReaction(row.meta)).map((row) => row.id)),
+      new Set(rows.filter((row) => !isReaction(row)).map((row) => row.id)),
     );
-    // And the rule is the one meant: two rows are reactions, the rest are not.
-    expect(rows.filter((row) => isReaction(row.meta))).toHaveLength(2);
+    // And the rule is the one meant: every `reaction` row, and of the rest the
+    // two carrying the tag — whatever their kind, which only `reply` ever is.
+    const reactions = rows.filter((row) => isReaction(row));
+    expect(reactions).toHaveLength(METAS.length + 2 * (messageKindEnum.enumValues.length - 1));
+    expect(reactions.filter((row) => row.kind !== 'reaction')).toHaveLength(
+      2 * (messageKindEnum.enumValues.length - 1),
+    );
   });
 });

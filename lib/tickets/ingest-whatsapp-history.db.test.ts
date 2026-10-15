@@ -221,6 +221,60 @@ describe('ingestWhatsAppHistoryChunk', () => {
     });
   });
 
+  // The copy keeps the phone's reactions, and the import is drawn by the same
+  // timeline and read by the same readers as a live ticket.
+  it('stores a copied reaction as a reaction, from either side', async () => {
+    await coexistenceChannel();
+    const reaction = (emoji: string, target: string) => ({
+      type: 'reaction',
+      text: `[reacted ${emoji}]`,
+      raw: { reaction: { message_id: target, emoji } },
+    });
+    await ingestWhatsAppHistoryChunk(
+      chunk([
+        message('wamid.p1', PABLO, 'outbound', '2025-02-10T23:42:35Z'),
+        message('wamid.p2', PABLO, 'inbound', '2025-02-10T23:42:40Z'),
+        message('wamid.p3', PABLO, 'inbound', '2025-02-10T23:42:45Z', reaction('🙏', 'wamid.p1')),
+        message('wamid.p4', PABLO, 'outbound', '2025-02-10T23:42:50Z', reaction('❤️', 'wamid.p2')),
+      ]),
+      RECEIVED,
+    );
+
+    const [thread] = await imported();
+    expect(
+      (await messagesOf(thread!.id)).map((m) => [m.channelMessageId, m.direction, m.kind]),
+    ).toEqual([
+      ['wamid.p1', 'outbound', 'reply'],
+      ['wamid.p2', 'inbound', 'reply'],
+      ['wamid.p3', 'inbound', 'reaction'],
+      ['wamid.p4', 'outbound', 'reaction'],
+    ]);
+  });
+
+  it('names a thread after what was said in it, never a reaction', async () => {
+    await coexistenceChannel();
+    const reaction = (emoji: string) => ({ type: 'reaction', text: `[reacted ${emoji}]` });
+    await ingestWhatsAppHistoryChunk(
+      chunk([
+        // The customer's first act is a 👍 on the business's message.
+        message('wamid.p1', PABLO, 'outbound', '2025-02-10T23:42:35Z', {
+          text: 'Your parcel is out for delivery',
+        }),
+        message('wamid.p2', PABLO, 'inbound', '2025-02-10T23:42:40Z', reaction('👍')),
+        message('wamid.p3', PABLO, 'inbound', '2025-02-10T23:42:45Z', { text: 'Thanks!' }),
+        // And a thread that is nothing but the business's ❤️.
+        message('wamid.r1', ROSA, 'outbound', '2025-02-10T23:42:50Z', reaction('❤️')),
+      ]),
+      RECEIVED,
+    );
+
+    const subjects = new Map(
+      (await imported()).map((thread) => [thread.externalId?.split(':').pop(), thread.subject]),
+    );
+    expect(subjects.get(PABLO)).toBe('Thanks!');
+    expect(subjects.get(ROSA)).toBe('WhatsApp conversation');
+  });
+
   it('writes no ticket and no message the second time a chunk is processed', async () => {
     await coexistenceChannel();
     await ingestWhatsAppHistoryChunk(SAMPLE(), RECEIVED);

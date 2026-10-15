@@ -365,12 +365,13 @@ export async function todayByHour(zone: string, now: Date = new Date()): Promise
       and(
         gte(messages.createdAt, from),
         lt(messages.createdAt, now),
-        ne(messages.kind, 'note'),
+        // Nor is a 🙏 on our reply demand, or the business's ❤️ back work.
+        notInArray(messages.kind, ['note', 'reaction']),
         notInArray(conversations.channel, readOnlyChannels()),
         // A copied chat history's last day lands with today's timestamps, and
         // is not today's traffic.
         ne(messages.sourceSystem, 'import'),
-        // Nor is a 🙏 on our reply demand, or the business's ❤️ back work.
+        // And one stored before reactions had a kind (`isReaction` says why).
         notReaction(),
       ),
     )

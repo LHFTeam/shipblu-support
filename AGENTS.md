@@ -663,21 +663,29 @@ depends on it.
 `type: 'reaction'`, from the customer or echoed from our own number, and
 `parseWebhook` files it apart from both. `ingestWhatsAppReaction` puts the row on
 the person's newest conversation, closed or not — nowhere, when that is a copied
-history — and changes nothing else — no
-clock, `last_message_at` included, no reopen, no ticket of its own, nothing
-downstream of a message — for the reasons `applyMetaInteraction` gives for a
-Facebook or Instagram reaction, though unlike that path it keeps a row. The
-row stays a `kind: 'reply'`, with the delivery in `raw_body` naming the
-message it is about, so the timeline draws it on that message
-(`lib/tickets/reactions.ts`) — and as a line of its own only when that message
-is not on the ticket; and so anything that
-picks "the latest message" or "what the customer last said" for what it says
-leaves reactions out: `notReaction()`
-in a query (`lib/tickets/not-reaction.ts`), `isReaction(meta)` over rows already
-in hand (`lib/whatsapp/reaction.ts`), held to the same answer by
-`not-reaction.db.test.ts`. A new reader that forgets shows a 👍 as the
-customer's last words — it was the inbox preview, the canned suggestion's anchor
-and the language automated replies went out in.
+history — and changes nothing else — no clock, `last_message_at` included, no
+reopen, no ticket of its own, nothing downstream of a message — for the reasons
+`applyMetaInteraction` gives for a Facebook or Instagram reaction, though unlike
+that path it keeps a row. The row is `kind: 'reaction'`, with the delivery in
+`raw_body` naming the message it is about, so the timeline draws it on that
+message (`lib/tickets/reactions.ts`) — and as a line of its own only when that
+message is not on the ticket. Every builder of a WhatsApp row, the copied
+history's included, takes the kind from `storedKind` (`lib/whatsapp/reaction.ts`):
+the column defaults to `reply`, so a builder that sets nothing files every 👍 as
+the customer's words. And anything that picks "the latest message" or "what the
+customer last said" for what it says picks it with `kind = 'reply'`, never by
+exclusion: `kind <> 'note'` lets a reaction through, and with it the notice a
+form writes when it could not keep a file, and so does a reader that asks only
+for `direction = 'inbound'`. Reactions stored before the kind existed are
+tagged `reply` rows, which `db/sql/007` moves on each web deploy while an old
+worker can still be writing them; until production holds none, each such reader
+also keeps `notReaction()` (`lib/tickets/not-reaction.ts`) or `isReaction()`,
+which know both shapes, and its reaction test runs over both
+(`REACTION_SHAPES`). A
+reader that gets it wrong shows a 👍 as the customer's last words — it was the
+inbox preview, the canned suggestion's anchor and the language automated
+replies went out in. A reader that needs reactions — the timeline — reads every
+kind, and says so where it does.
 
 **A media message's text can be a stand-in nobody wrote.** A file sent without
 a caption is stored with the words ingest wrote for it — `[image]`,

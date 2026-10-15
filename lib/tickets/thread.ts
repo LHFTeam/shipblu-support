@@ -21,7 +21,7 @@ import { lostReceiptNote } from '@/lib/whatsapp/receipts';
 /** The fields of a thread message these decisions read. */
 export type ThreadMessage = {
   direction: 'inbound' | 'outbound';
-  kind: 'reply' | 'note' | 'system' | 'forward';
+  kind: 'reply' | 'note' | 'system' | 'forward' | 'reaction';
   authorName: string | null;
   authorIsAgent: boolean;
   deliveryStatus: string;

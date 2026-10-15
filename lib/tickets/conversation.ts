@@ -42,7 +42,7 @@ import {
 export type TimelineMessage = {
   id: string;
   direction: 'inbound' | 'outbound';
-  kind: 'reply' | 'note' | 'system' | 'forward';
+  kind: 'reply' | 'note' | 'system' | 'forward' | 'reaction';
   bodyHtml: string | null;
   bodyText: string;
   authorName: string | null;
@@ -253,6 +253,10 @@ export async function getConversation(
         .from(messages)
         .leftJoin(agents, eq(agents.id, messages.authorAgentId))
         .leftJoin(contacts, eq(contacts.id, messages.authorContactId))
+        // Every kind, `reaction` included: the fold below draws a reaction on
+        // the message it names, and needs the row to. A `kind = 'reply'` here,
+        // the shape most readers of messages take, would leave every 🙏 off
+        // the thread.
         .where(eq(messages.conversationId, row.conversation.id))
         // The id settles two messages stamped with the same instant — a batch
         // sharing one `now`, or a provider's second-precision `sentAt` — so the
@@ -310,7 +314,7 @@ export async function getConversation(
       direction: entry.message.direction,
       authorContactId: entry.message.authorContactId,
       channelMessageId: entry.message.channelMessageId,
-      reaction: storedReaction(entry.message.meta, entry.message.rawBody),
+      reaction: storedReaction(entry.message),
     })),
   );
 

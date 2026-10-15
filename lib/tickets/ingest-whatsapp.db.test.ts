@@ -574,13 +574,13 @@ describe('ingestWhatsAppReaction', () => {
       firstResponseDueAt: expect.any(Date),
     });
 
-    // Stored as the message it arrived as, so the timeline can pair it with the
-    // message it names.
+    // Stored as the message it arrived as, of its own kind, so the timeline can
+    // pair it with the message it names and no reader takes it for words.
     const [, row] = await messagesOf(asked.conversationId);
     expect(row).toMatchObject({
       id: reacted.messageId,
       direction: 'inbound',
-      kind: 'reply',
+      kind: 'reaction',
       authorContactId: (await conversation(asked.conversationId)).requesterContactId,
       bodyText: '[reacted 🙏]',
       channelMessageId: 'wamid.reaction',
@@ -1134,6 +1134,7 @@ describe('ingestWhatsAppEcho on a number connected through coexistence', () => {
       const [, row] = await messagesOf(asked.conversationId);
       expect(row).toMatchObject({
         direction: 'outbound',
+        kind: 'reaction',
         authorAgentId: null,
         authorContactId: null,
         bodyText: '[reacted ❤️]',

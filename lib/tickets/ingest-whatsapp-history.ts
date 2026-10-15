@@ -8,6 +8,7 @@ import {
   recordHistoryDeclined,
   recordHistoryProgress,
 } from '@/lib/whatsapp/coexistence-state';
+import { storedKind } from '@/lib/whatsapp/reaction';
 import type {
   NormalisedContactSync,
   NormalisedHistoryChunk,
@@ -145,7 +146,12 @@ async function importThread(input: {
 
   return db.transaction(async (tx) => {
     const statusId = await requireResolvedStatusId(tx);
-    const opening = fresh.find((message) => message.direction === 'inbound') ?? fresh[0]!;
+    // Named after the first thing the customer said, or else the business: a
+    // copied 👍 is neither's words, and the subject keeps what the first chunk
+    // gave it, since a later chunk of the thread only conflicts. A thread of
+    // nothing but reactions takes `subjectFrom`'s placeholder.
+    const words = fresh.filter((message) => storedKind(message.type) === 'reply');
+    const opening = words.find((message) => message.direction === 'inbound') ?? words[0];
 
     const [inserted] = await tx
       .insert(conversations)
@@ -153,7 +159,7 @@ async function importThread(input: {
         channel: 'whatsapp',
         channelId: channel.id,
         statusId,
-        subject: subjectFrom(opening.text),
+        subject: subjectFrom(opening?.text ?? ''),
         requesterContactId: contactId,
         groupId: channel.defaultGroupId,
         lastMessageAt: newest,
@@ -249,7 +255,9 @@ function historyRow(
   return {
     conversationId,
     direction: message.direction,
-    kind: 'reply',
+    // The copy keeps the phone's reactions too, and they are no more anybody's
+    // words here than live (`storedKind`).
+    kind: storedKind(message.type),
     // The business's replies have no author: nobody here wrote them, and the
     // timeline labels them as the Business app, as it does a live echo.
     authorContactId: inbound ? contactId : null,

@@ -93,9 +93,8 @@ export function Composer({
   // reactions are left out on both sides, or a 🙏 after the question would move
   // this anchor off the one the server answered and hide its suggestion.
   const anchorMessageId =
-    conversation.messages.findLast(
-      (message) => message.kind === 'reply' && !isReaction(message.meta),
-    )?.id ?? null;
+    conversation.messages.findLast((message) => message.kind === 'reply' && !isReaction(message))
+      ?.id ?? null;
 
   const [requestedTab, setRequestedTab] = useState<Tab>('reply');
 

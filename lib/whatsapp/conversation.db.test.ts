@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { db } from '@/db/client';
 import { contacts, conversations, messages, ticketStatuses } from '@/db/schema';
 import { withCleanDatabase } from '@/lib/testing/db';
+import { REACTION_SHAPES } from '@/lib/testing/reactions';
 import { lastInboundPhoneNumberId, sendingNumberFor } from './conversation';
 
 /**
@@ -31,42 +32,50 @@ async function chat(): Promise<string> {
 }
 
 describe('sendingNumberFor', () => {
-  it('answers from the number the customer last wrote on, not the one they last reacted on', async () => {
-    const id = await chat();
-    await db.insert(messages).values([
-      {
-        conversationId: id,
-        direction: 'inbound',
-        bodyText: 'Where is it?',
-        meta: { whatsappType: 'text', phoneNumberId: NUMBER_A },
-        createdAt: new Date('2026-10-01T10:00:00Z'),
-      },
-      {
-        conversationId: id,
-        direction: 'inbound',
-        bodyText: '[reacted 👍]',
-        meta: { whatsappType: 'reaction', phoneNumberId: NUMBER_B },
-        createdAt: new Date('2026-10-01T10:05:00Z'),
-      },
-    ]);
+  it.each(REACTION_SHAPES)(
+    'answers from the number the customer last wrote on, not the one they last reacted on ($shape)',
+    async ({ kind }) => {
+      const id = await chat();
+      await db.insert(messages).values([
+        {
+          conversationId: id,
+          direction: 'inbound',
+          bodyText: 'Where is it?',
+          meta: { whatsappType: 'text', phoneNumberId: NUMBER_A },
+          createdAt: new Date('2026-10-01T10:00:00Z'),
+        },
+        {
+          conversationId: id,
+          direction: 'inbound',
+          bodyText: '[reacted 👍]',
+          kind,
+          meta: { whatsappType: 'reaction', phoneNumberId: NUMBER_B },
+          createdAt: new Date('2026-10-01T10:05:00Z'),
+        },
+      ]);
 
-    expect(await sendingNumberFor(id, null)).toBe(NUMBER_A);
-  });
+      expect(await sendingNumberFor(id, null)).toBe(NUMBER_A);
+    },
+  );
 
   // The same lookup explains a failed send (`applyWhatsAppStatus`), so the two
   // cannot disagree about which number the customer wrote to.
-  it('is the number a failed send is compared against, and says nothing without one', async () => {
-    const id = await chat();
-    expect(await lastInboundPhoneNumberId(id)).toBeNull();
+  it.each(REACTION_SHAPES)(
+    'is the number a failed send is compared against, and says nothing without one ($shape)',
+    async ({ kind }) => {
+      const id = await chat();
+      expect(await lastInboundPhoneNumberId(id)).toBeNull();
 
-    await db.insert(messages).values({
-      conversationId: id,
-      direction: 'inbound',
-      bodyText: '[reacted 👍]',
-      meta: { whatsappType: 'reaction', phoneNumberId: NUMBER_B },
-    });
-    expect(await lastInboundPhoneNumberId(id)).toBeNull();
-  });
+      await db.insert(messages).values({
+        conversationId: id,
+        direction: 'inbound',
+        bodyText: '[reacted 👍]',
+        kind,
+        meta: { whatsappType: 'reaction', phoneNumberId: NUMBER_B },
+      });
+      expect(await lastInboundPhoneNumberId(id)).toBeNull();
+    },
+  );
 
   it('still reads a number off a row that is not a WhatsApp message at all', async () => {
     const id = await chat();

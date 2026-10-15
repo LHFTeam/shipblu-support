@@ -9,11 +9,11 @@ import type { PickerEntry, SideConversationView } from '@/lib/side-conversations
 import {
   blankSideSubject,
   describeRecipient,
+  isQuotableAnchor,
   subjectPrefill,
   trackingPrefill,
 } from '@/lib/side-conversations/format';
 import type { ConversationDetail } from '@/lib/tickets/conversation';
-import { isReaction } from '@/lib/whatsapp/reaction';
 import { SubmitButton } from '@/components/submit-button';
 import { useActionForm, type FormHandlers } from '@/components/use-action-form';
 import { INITIAL, LOST_SEND } from './form-state';
@@ -318,14 +318,8 @@ function SideConversationDraft({
   const [recipientId, setRecipientId] = useState(recipients.length > 0 ? '' : 'other');
 
   // The last thing the customer actually said. Both the anchor the thread hangs
-  // off and, optionally, the text quoted into the question — so not a reaction,
-  // which would quote `[reacted 🙏]` to the hub as the customer's words.
-  const anchor = [...conversation.messages]
-    .reverse()
-    .find(
-      (message) =>
-        message.direction === 'inbound' && message.kind !== 'note' && !isReaction(message.meta),
-    );
+  // off and, optionally, the text quoted into the question.
+  const anchor = [...conversation.messages].reverse().find(isQuotableAnchor);
 
   const trackingNumbers = conversation.shipments.map((shipment) => shipment.trackingNumber);
 

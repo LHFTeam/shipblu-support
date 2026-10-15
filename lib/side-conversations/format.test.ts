@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { blankSideSubject, sideSubject, subjectPrefill } from './format';
+import { blankSideSubject, isQuotableAnchor, sideSubject, subjectPrefill } from './format';
 
 describe('sideSubject', () => {
   it('sends an untouched prefill as the tracking number alone', () => {
@@ -59,5 +59,26 @@ describe('subjectPrefill', () => {
   it('ignores an empty number rather than leading with nothing', () => {
     expect(subjectPrefill([''])).toBe('');
     expect(subjectPrefill(['', '1212121212121'])).toBe('1212121212121 || ');
+  });
+});
+
+describe('isQuotableAnchor', () => {
+  const said = { direction: 'inbound', kind: 'reply', meta: {} };
+
+  it('takes what the customer said', () => {
+    expect(isQuotableAnchor(said)).toBe(true);
+    expect(isQuotableAnchor({ ...said, meta: { whatsappType: 'text' } })).toBe(true);
+  });
+
+  // Each of these would reach the hub under "the customer wrote".
+  it('refuses everything else on the ticket', () => {
+    // Our own reply, and our private note.
+    expect(isQuotableAnchor({ ...said, direction: 'outbound' })).toBe(false);
+    expect(isQuotableAnchor({ ...said, kind: 'note' })).toBe(false);
+    // The notice a form writes, inbound, when it could not keep a file.
+    expect(isQuotableAnchor({ ...said, kind: 'system' })).toBe(false);
+    // A reaction, and one stored before reactions had a kind.
+    expect(isQuotableAnchor({ ...said, kind: 'reaction' })).toBe(false);
+    expect(isQuotableAnchor({ ...said, meta: { whatsappType: 'reaction' } })).toBe(false);
   });
 });

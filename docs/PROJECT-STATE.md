@@ -1681,13 +1681,44 @@ expires_at, inspected_at` — never `envelope`, and a null `expires_at` means
   whose native ticket before it may be closed and months old — it is not
   stored, and no contact is made. The
   readers that use "the latest message" or "the customer's last words" for what
-  it says leave reaction rows out through `isReaction` /
-  `notReaction` (`lib/whatsapp/reaction.ts`, `lib/tickets/not-reaction.ts`), so
-  a 👍 is never the inbox preview or its arrow, the canned suggestion's anchor,
-  the language an automated reply is written in, the number it is sent from,
+  it says leave reaction rows out, so a 👍 is never the inbox preview or its
+  arrow, the canned suggestion's anchor, the language an automated reply is
+  written in, the number it is sent from, the message a reply is threaded on,
   the customer's words quoted to a hub, a line in the portal, an hour's volume
   on the live report, the customer's opening message to the priority
   classifier or context sent to TypeSafe.
+
+  **On `main` since 2026-10-15 a reaction is its own kind,
+  `messages.kind = 'reaction'`** (migration 0035), rather than a `reply` told
+  apart by `meta.whatsappType`. The first version filtered by the tag, and its
+  first commit missed four readers that review found; three of them already asked
+  for `kind = 'reply'`, the shape nearly every reader of messages takes, which
+  now leaves a reaction out with nothing to remember. The other shapes did not
+  protect it — "inbound" alone, or "not a note" — and those readers ask for
+  `kind = 'reply'` now too, which also stops the notice a form writes when it
+  could not keep a file ("Could not store x.pdf — ask the customer to send it
+  again", inbound and `system`) being quoted to a hub as the customer's words.
+  The live, echo and copied-history builders all take the kind from
+  `storedKind`, and a copied thread is no longer named after a reaction.
+  `db/sql/007_message_kind_reaction.sql` moves the rows stored before — 1,232
+  in production on 2026-10-15, 1,162 of them the bot's — and runs on every
+  deploy, finding them through the trigram index on `body_text`: nothing
+  indexes the tag, and filtering on it alone took 6.5 seconds over the 219k
+  rows, against 1.3 seconds to scan the table on `kind` and 0.9 through the
+  index.
+
+  **It reaches production web first, and the worker only once the web
+  deploy's `db:migrate` has finished.** The worker is what stores reactions,
+  and before 0035 the database refuses the new value, so every reaction a new
+  worker stores fails — and not in a way that heals once the web deploy lands.
+  A reaction delivered beside anything that succeeds (a message, a status) is a
+  partial failure: recorded on `webhook_events.error`, the delivery marked
+  processed, never retried. One delivered alone is retried five times over
+  about five minutes and goes `dead`. A copied-history thread holding one fails
+  as a whole, every message in it, and Meta sends the history once per
+  onboarding. The readers are safe in any order: `notReaction()` compares the
+  kind as text, so it needs the value to exist nowhere, and the crons do not
+  store reactions.
 
   Meta's documentation says WhatsApp's customer service window opens when the
   customer "messages or calls" and does not say whether a reaction is a
@@ -1695,6 +1726,22 @@ expires_at, inspected_at` — never `envelope`, and a null `expires_at` means
   reaction does open the window, a thread whose only customer activity in 24
   hours is a reaction is refused a free-form reply that Meta would have taken,
   and needs a template.
+
+  **Left: the second half of the kind change.** An old worker stores
+  reactions as tagged `reply` rows until it is redeployed, and `db/sql/007`
+  moves those only at the next web deploy, so for now every reader also keeps
+  its tag check (`notReaction()`, `isReaction()`). Their reaction tests run over
+  both shapes (`REACTION_SHAPES` in `lib/testing/reactions.ts`), except the
+  categorise-ai backfill's filter, which has none. Once the worker runs the
+  change and
+  `select count(*) from messages where kind = 'reply' and meta->>'whatsappType' = 'reaction'`
+  answers 0 in production, the tag halves come out of both predicates, and with
+  them `REACTION_SHAPES` and the second shape in those tests, the tag rows of
+  `not-reaction.db.test.ts`, and the tagged-`reply` cases in
+  `lib/side-conversations/format.test.ts` and `lib/tickets/reactions.test.ts`,
+  which expect the tag to count. A `CHECK` in `db/sql` refusing a tagged `reply`
+  (added `NOT VALID`, then validated) would make a writer that forgot
+  `storedKind` fail loudly instead of filing a 👍 as the customer's words.
 
   **There are six dead `send_meta` rows now, not one.** The Instagram
   HUMAN_AGENT one from 2026-08-20, and five Facebook DMs on 23–24 August that

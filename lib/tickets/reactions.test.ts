@@ -124,34 +124,47 @@ describe('foldReactions', () => {
 
 describe('storedReaction', () => {
   const meta = { whatsappType: 'reaction' };
+  const reaction = (rawBody: string | null) => ({ kind: 'reaction', meta, rawBody });
 
   it('reads the target and emoji off the stored delivery', () => {
     const raw = JSON.stringify({
       type: 'reaction',
       reaction: { message_id: 'wamid.x', emoji: '🙏' },
     });
-    expect(storedReaction(meta, raw)).toEqual({ targetWamid: 'wamid.x', emoji: '🙏' });
+    expect(storedReaction(reaction(raw))).toEqual({ targetWamid: 'wamid.x', emoji: '🙏' });
   });
 
   it('reads a removal as an empty emoji', () => {
     const raw = JSON.stringify({ reaction: { message_id: 'wamid.x' } });
-    expect(storedReaction(meta, raw)).toEqual({ targetWamid: 'wamid.x', emoji: '' });
+    expect(storedReaction(reaction(raw))).toEqual({ targetWamid: 'wamid.x', emoji: '' });
   });
 
-  it('answers null for a row that is not tagged as a reaction', () => {
+  it('knows a reaction by its kind, and one stored before the kind by its tag', () => {
     const raw = JSON.stringify({ reaction: { message_id: 'wamid.x', emoji: '🙏' } });
-    expect(storedReaction({ whatsappType: 'text' }, raw)).toBeNull();
-    expect(storedReaction(null, raw)).toBeNull();
+    const read = { targetWamid: 'wamid.x', emoji: '🙏' };
+    expect(storedReaction({ kind: 'reaction', meta: {}, rawBody: raw })).toEqual(read);
+    expect(storedReaction({ kind: 'reaction', meta: null, rawBody: raw })).toEqual(read);
+    expect(storedReaction({ kind: 'reply', meta, rawBody: raw })).toEqual(read);
   });
 
-  it('keeps a tagged row a reaction when its payload cannot be read', () => {
+  it('answers null for a row that is neither', () => {
+    const raw = JSON.stringify({ reaction: { message_id: 'wamid.x', emoji: '🙏' } });
+    expect(
+      storedReaction({ kind: 'reply', meta: { whatsappType: 'text' }, rawBody: raw }),
+    ).toBeNull();
+    expect(storedReaction({ kind: 'reply', meta: null, rawBody: raw })).toBeNull();
+  });
+
+  it('keeps a reaction a reaction when its payload cannot be read', () => {
     // Null rather than "not a reaction": the row is still not something the
     // customer said, and must not come back as a `[reacted 👍]` bubble.
     const unreadable = { targetWamid: null, emoji: null };
-    expect(storedReaction(meta, null)).toEqual(unreadable);
-    expect(storedReaction(meta, '{not json')).toEqual(unreadable);
-    expect(storedReaction(meta, 'null')).toEqual(unreadable);
-    expect(storedReaction(meta, JSON.stringify({ reaction: { emoji: '🙏' } }))).toEqual(unreadable);
-    expect(storedReaction(meta, JSON.stringify({ message_id: 'wamid.x' }))).toEqual(unreadable);
+    expect(storedReaction(reaction(null))).toEqual(unreadable);
+    expect(storedReaction(reaction('{not json'))).toEqual(unreadable);
+    expect(storedReaction(reaction('null'))).toEqual(unreadable);
+    expect(storedReaction(reaction(JSON.stringify({ reaction: { emoji: '🙏' } })))).toEqual(
+      unreadable,
+    );
+    expect(storedReaction(reaction(JSON.stringify({ message_id: 'wamid.x' })))).toEqual(unreadable);
   });
 });

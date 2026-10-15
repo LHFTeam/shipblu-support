@@ -4,6 +4,7 @@ import { db } from '@/db/client';
 import { agents, contacts, conversations, messages, ticketStatuses } from '@/db/schema';
 import type { SessionAgent } from '@/lib/auth/session';
 import { withCleanDatabase } from '@/lib/testing/db';
+import { REACTION_SHAPES } from '@/lib/testing/reactions';
 import { getConversation } from './conversation';
 import { listInbox } from './inbox';
 import { PAGE_SIZE, parseFilters, parseInboxCursor } from './inbox-filters';
@@ -244,49 +245,54 @@ describe('listInbox', () => {
     expect(byId.get(outOfOffice)).toMatchObject({ lastFromUs: true, preview: 'Refunded' });
   });
 
-  it('skips a reaction from either side: it is nobody’s last word', async () => {
-    const agent = await admin();
-    const thanked = await ticket('whatsapp', null);
-    const hearted = await ticket('whatsapp', null);
-    const at = (minute: number) => new Date(Date.UTC(2026, 8, 1, 10, minute));
-    const reaction = { whatsappType: 'reaction' };
+  it.each(REACTION_SHAPES)(
+    'skips a reaction from either side: it is nobody’s last word ($shape)',
+    async ({ kind }) => {
+      const agent = await admin();
+      const thanked = await ticket('whatsapp', null);
+      const hearted = await ticket('whatsapp', null);
+      const at = (minute: number) => new Date(Date.UTC(2026, 8, 1, 10, minute));
+      const reaction = { whatsappType: 'reaction' };
 
-    await db.insert(messages).values([
-      // The customer's 🙏 on our answer leaves the arrow on our answer.
-      { conversationId: thanked, direction: 'inbound', bodyText: 'فين شحنتي؟', createdAt: at(0) },
-      {
-        conversationId: thanked,
-        direction: 'outbound',
-        bodyText: 'On its way',
-        authorAgentId: agent.id,
-        createdAt: at(1),
-      },
-      {
-        conversationId: thanked,
-        direction: 'inbound',
-        bodyText: '[reacted 🙏]',
-        meta: reaction,
-        createdAt: at(2),
-      },
+      await db.insert(messages).values([
+        // The customer's 🙏 on our answer leaves the arrow on our answer.
+        { conversationId: thanked, direction: 'inbound', bodyText: 'فين شحنتي؟', createdAt: at(0) },
+        {
+          conversationId: thanked,
+          direction: 'outbound',
+          bodyText: 'On its way',
+          authorAgentId: agent.id,
+          createdAt: at(1),
+        },
+        {
+          conversationId: thanked,
+          direction: 'inbound',
+          bodyText: '[reacted 🙏]',
+          kind,
+          meta: reaction,
+          createdAt: at(2),
+        },
 
-      // The business's ❤️ from the phone is not an answer, so the ticket still
-      // reads as the customer waiting on us.
-      { conversationId: hearted, direction: 'inbound', bodyText: 'Refund?', createdAt: at(0) },
-      {
-        conversationId: hearted,
-        direction: 'outbound',
-        bodyText: '[reacted ❤️]',
-        meta: { ...reaction, echo: true, echoSource: 'business_app' },
-        createdAt: at(1),
-      },
-    ]);
+        // The business's ❤️ from the phone is not an answer, so the ticket still
+        // reads as the customer waiting on us.
+        { conversationId: hearted, direction: 'inbound', bodyText: 'Refund?', createdAt: at(0) },
+        {
+          conversationId: hearted,
+          direction: 'outbound',
+          bodyText: '[reacted ❤️]',
+          kind,
+          meta: { ...reaction, echo: true, echoSource: 'business_app' },
+          createdAt: at(1),
+        },
+      ]);
 
-    const { rows } = await listInbox(agent, parseFilters({}));
-    const byId = new Map(rows.map((row) => [row.id, row]));
+      const { rows } = await listInbox(agent, parseFilters({}));
+      const byId = new Map(rows.map((row) => [row.id, row]));
 
-    expect(byId.get(thanked)).toMatchObject({ lastFromUs: true, preview: 'On its way' });
-    expect(byId.get(hearted)).toMatchObject({ lastFromUs: false, preview: 'Refund?' });
-  });
+      expect(byId.get(thanked)).toMatchObject({ lastFromUs: true, preview: 'On its way' });
+      expect(byId.get(hearted)).toMatchObject({ lastFromUs: false, preview: 'Refund?' });
+    },
+  );
 
   it('breaks a tie on created_at the way the ticket timeline does', async () => {
     const agent = await admin();

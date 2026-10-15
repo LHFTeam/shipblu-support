@@ -58,8 +58,9 @@ export async function sendingNumberFor(
  * the lookup could disagree about which inbound row is the customer's, and the
  * explanation would then blame the wrong number.
  *
- * Not a reaction: the number the customer last *wrote* on is the one whose
- * window `last_customer_message_at` measures, and a reaction moves neither.
+ * A `reply`, so not a reaction: the number the customer last *wrote* on is the
+ * one whose window `last_customer_message_at` measures, and a reaction moves
+ * neither.
  */
 export async function lastInboundPhoneNumberId(conversationId: string): Promise<string | null> {
   const [inbound] = await db
@@ -69,6 +70,7 @@ export async function lastInboundPhoneNumberId(conversationId: string): Promise<
       and(
         eq(messages.conversationId, conversationId),
         eq(messages.direction, 'inbound'),
+        eq(messages.kind, 'reply'),
         notReaction(),
       ),
     )
