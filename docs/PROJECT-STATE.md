@@ -6173,6 +6173,32 @@ still waiting for it` one whose outcome is not known yet.
     that settles state from an image's events needs the same, or reads
     `complete` and `naturalWidth` in an effect.
 
+96. **Node and the browser write the same date differently.** _2026-10-15._
+    `Intl.DateTimeFormat` takes its patterns, punctuation included, from the ICU
+    and CLDR data its runtime ships, and the two ends of a render are different
+    runtimes: Node 22.22 (ICU 77, CLDR 47) writes `en-GB`'s long day as
+    "Wednesday, 14 October 2026" and Chromium 141 as "Wednesday 14 October
+    2026". The ticket thread's day break is drawn by a client component, so on
+    every full load of every ticket React found the text changed, reported a
+    hydration error and rebuilt the whole page in the browser, remounting
+    everything on it — and nothing on screen said so, because the rebuilt page
+    looks right. Every date format in `lib/format.ts` now joins the
+    formatter's fields with separators of its own (`fields()`), so a later
+    engine cannot bring it back through a format that agreed only by
+    measurement. The field values themselves (month names, "Sept") measured the
+    same in both for all twelve months. Two things still draw on both sides
+    and can differ:
+    - `formatRelative` ("3m") reads the clock, so it differs whenever a minute
+      boundary falls between the server's render and hydration, or the
+      agent's clock is a minute off;
+    - the widget's opening hours (`formatOpens`, `en-GB` and `ar-EG`) are
+      still taken whole, and only measured the same.
+
+    A new format drawn by a client component takes its fields the same way, or
+    is drawn only after hydration. A recoverable hydration error reaches
+    Playwright as a `pageerror`, not a console message, so a check listening
+    only to the console reports a clean page.
+
 ### Tooling notes for this environment
 
 Supabase and Render MCP tools work and are the fastest way to check real state —
