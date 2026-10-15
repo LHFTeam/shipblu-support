@@ -93,9 +93,10 @@ export function preferredLocale(contactLocale: string, sample: string | null): '
  *   every contact until something writes the column.
  * - **Not a WhatsApp reaction.** Its text is our own `[reacted 🙏]`, seven
  *   Latin letters and an emoji, so an Arabic customer who answered the agent's
- *   reply with a thumbs-up would be read as English from then on. The label
- *   rule refuses that text as well; `notReaction()` stays because it reads the
- *   type WhatsApp gave the row rather than our spelling of it.
+ *   reply with a thumbs-up would be read as English from then on. It is
+ *   `kind = 'reaction'`, which `kind = 'reply'` leaves out, and the label rule
+ *   refuses its text as well; `notReaction()` catches the tagged `reply` rows
+ *   stored before reactions had a kind of their own.
  * - **The most recent one that survives those.** Not the first message on the
  *   ticket: somebody who opened in English and has been writing Arabic for
  *   three messages reads Arabic.
