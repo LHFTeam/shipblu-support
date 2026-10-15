@@ -9,10 +9,10 @@
 import { TEAM_TIME_ZONE } from '@/lib/hours/zone';
 
 /**
- * The fields of an instant as a formatter reads them, without the punctuation
- * between them.
+ * An instant written from the fields a formatter reads off it, joined by
+ * `join` rather than by the punctuation the formatter would put between them.
  *
- * Every format here is put together from these rather than taken whole,
+ * Every format here is put together this way rather than taken whole,
  * because the punctuation is locale data and the two ends of a render carry
  * different copies of it: Node 22's ICU (CLDR 47) writes `en-GB`'s long day as
  * "Wednesday, 14 October 2026" and Chromium 141's as "Wednesday 14 October
@@ -22,11 +22,21 @@ import { TEAM_TIME_ZONE } from '@/lib/hours/zone';
  * names and numbers are the engine's — those it has to supply — and the
  * separators are ours, so the next browser or Node release cannot bring the
  * rebuild back through a format that only agreed by measurement.
+ *
+ * An engine that leaves out a field `join` needs — a runtime built without the
+ * full locale data — gets its own whole string back: a mismatch the page can
+ * survive, where the word "undefined" in every day break would be a bug on
+ * screen.
  */
-function fields(format: Intl.DateTimeFormat, at: Date) {
+function joined<K extends Intl.DateTimeFormatPartTypes>(
+  format: Intl.DateTimeFormat,
+  at: Date,
+  needs: readonly K[],
+  join: (part: Record<K, string>) => string,
+): string {
   const part: Partial<Record<Intl.DateTimeFormatPartTypes, string>> = {};
   for (const { type, value } of format.formatToParts(at)) part[type] = value;
-  return part;
+  return needs.every((key) => part[key]) ? join(part as Record<K, string>) : format.format(at);
 }
 
 let dateTime: Intl.DateTimeFormat | undefined;
@@ -42,8 +52,12 @@ export function formatDateTime(value: Date | string): string {
     hourCycle: 'h23',
     timeZone: TEAM_TIME_ZONE,
   });
-  const part = fields(dateTime, new Date(value));
-  return `${part.day} ${part.month} ${part.year}, ${part.hour}:${part.minute}`;
+  return joined(
+    dateTime,
+    new Date(value),
+    ['day', 'month', 'year', 'hour', 'minute'],
+    (part) => `${part.day} ${part.month} ${part.year}, ${part.hour}:${part.minute}`,
+  );
 }
 
 /*
@@ -70,8 +84,12 @@ export function formatDay(at: Date): string {
     year: 'numeric',
     timeZone: TEAM_TIME_ZONE,
   });
-  const part = fields(day, at);
-  return `${part.weekday}, ${part.day} ${part.month} ${part.year}`;
+  return joined(
+    day,
+    at,
+    ['weekday', 'day', 'month', 'year'],
+    (part) => `${part.weekday}, ${part.day} ${part.month} ${part.year}`,
+  );
 }
 
 /** "09:05" — the Cairo wall-clock time of an instant, always two digits, never 24:00. */
@@ -82,8 +100,7 @@ export function formatTime(at: Date): string {
     hourCycle: 'h23',
     timeZone: TEAM_TIME_ZONE,
   });
-  const part = fields(time, at);
-  return `${part.hour}:${part.minute}`;
+  return joined(time, at, ['hour', 'minute'], (part) => `${part.hour}:${part.minute}`);
 }
 
 /** "3m", "4h", "2d" — the inbox needs recency at a glance, not precision. */

@@ -393,7 +393,8 @@ function Reactions({
         ? VOICE_GLYPH[voice.avatar]
         : null;
     const reactedAt = new Date(source.createdAt);
-    const sameDay = formatDay(reactedAt) === formatDay(at);
+    const reactedDay = formatDay(reactedAt);
+    const sameDay = reactedDay === formatDay(at);
 
     return (
       <Tooltip
@@ -403,7 +404,7 @@ function Reactions({
           <>
             <bdi>{voice.author}</bdi> reacted
             {' · '}
-            {sameDay ? null : `${formatDay(reactedAt)}, `}
+            {sameDay ? null : `${reactedDay}, `}
             <Time at={reactedAt} />
           </>
         }
