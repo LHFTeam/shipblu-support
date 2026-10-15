@@ -219,21 +219,7 @@ export function AttachmentList({
   };
 
   const settle = (file: Attachment, load: 'loaded' | 'failed') => {
-    const figure = figureOf(file);
-    if (load === 'failed' && figure?.contains(document.activeElement)) {
-      // The same rescue as `retry`, for the other thing a failure unmounts: the
-      // picture's own link, which Tab reaches while it is still loading — and
-      // reaches first after "Try again", so a second failure would otherwise
-      // drop focus exactly where the first one was caught.
-      figure.focus({ preventScroll: true });
-    } else if (load === 'loaded' && figure && document.activeElement === figure) {
-      // Focus parked on the figure by "Try again" moves on to the picture's
-      // link once it loads, so the next thing a screen reader says is what the
-      // retry produced — the figure's name alone does not say it worked. A
-      // player takes focus as soon as it mounts instead (see `Player`), because
-      // a voice note loads nothing until play is pressed.
-      figure.querySelector<HTMLElement>('a')?.focus({ preventScroll: true });
-    }
+    handOverFocus(figureOf(file), load);
     dispatch({ type: 'settle', file: asPreview(file), load });
   };
 
@@ -415,10 +401,9 @@ export function AttachmentList({
  *   a narrow pane comes out shorter. No dimensions are stored to reserve the
  *   real shape, and the iPhone Safari 26 agents use does no scroll anchoring to
  *   hide a change above the one reading.
- * - **A video fetches its metadata at once**, for its first frame and the shape
- *   of its box. How much that costs is the browser's choice, up to the whole of
- *   a small file; real videos are rare — on 2026-10-14 no ticket in production
- *   held more than one.
+ * - **A video fetches its metadata as it nears view**, for its first frame and
+ *   the shape of its box (see `Player`). How much that costs is the browser's
+ *   choice, up to the whole of a small file.
  * - **A voice note still fetches nothing until play.** So does a Facebook or
  *   Instagram voice clip, which arrives as MP4 and would otherwise sit as a
  *   black box the size of a video until its metadata said it had no picture
@@ -444,83 +429,80 @@ export function MessageFiles({
 
   if (files.length === 0) return null;
 
-  const kindOf = (file: Attachment): Kind => {
-    if (isPreviewableImage(file.contentType)) return 'image';
+  // What each file is drawn as, decided once per render.
+  const drawn = files.map((file) => {
     const media = playableMedia(file.contentType);
-    return media && onClient && canPlay(media) ? media.kind : null;
-  };
-  // Played by a video element when its container is one, but drawn, named and
-  // fetched as the voice note it is.
-  const isSound = (file: Attachment) =>
-    kindOf(file) === 'audio' || (kindOf(file) === 'video' && looks?.get(file.id) === 'sound');
-  const asPreview = (file: Attachment) =>
-    previewFile(file, isSound(file) ? 'audio' : (kindOf(file) ?? undefined), {
+    const kind: Kind = isPreviewableImage(file.contentType)
+      ? 'image'
+      : media && onClient && canPlay(media)
+        ? media.kind
+        : null;
+    const look = looks?.get(file.id);
+    // Played by a video element when its container is one, but drawn, named
+    // and fetched as the voice note it is.
+    const sound = kind === 'audio' || (kind === 'video' && look === 'sound');
+    const preview = previewFile(file, sound ? 'audio' : (kind ?? undefined), {
       inline: true,
-      sticker: looks?.get(file.id) === 'sticker',
+      sticker: look === 'sticker',
     });
-  const previewId = (file: Attachment) => previewIdFor(baseId, file.id);
-  const figureOf = (file: Attachment) => document.getElementById(previewId(file));
+    return { file, kind, look, sound, preview, id: previewIdFor(baseId, file.id) };
+  });
+  type Drawn = (typeof drawn)[number];
+  const shown = drawn.filter((entry): entry is Drawn & { kind: 'image' | 'audio' | 'video' } =>
+    Boolean(entry.kind),
+  );
+  const linked = drawn.filter((entry) => entry.kind === null);
 
-  // The same hand-overs as the list's `retry` and `settle`, which say why; with
-  // no reveal, because nothing here opens away from where it was pressed.
-  const retry = (file: Attachment) => {
-    figureOf(file)?.focus({ preventScroll: true });
-    dispatch({ type: 'retry', file: asPreview(file) });
+  // The same hand-overs as the list's, with no reveal, because nothing here
+  // opens away from where it was pressed.
+  const retry = ({ id, preview }: Drawn) => {
+    // "Try again" is about to unmount with the failure line; the figure stays.
+    document.getElementById(id)?.focus({ preventScroll: true });
+    dispatch({ type: 'retry', file: preview });
   };
-  const settle = (file: Attachment, load: 'loaded' | 'failed', pressed = false) => {
-    const figure = figureOf(file);
+  const settle = ({ id, preview }: Drawn, load: 'loaded' | 'failed', pressed = false) => {
     // Focus on the file when it fails is the agent at it: tabbing onto a
     // picture is often what brought it in range to load. The figure focus moves
     // to is named only for the file, so the notice is what says it failed.
-    const focused = figure?.contains(document.activeElement) ?? false;
-    if (load === 'failed' && focused) {
-      figure?.focus({ preventScroll: true });
-    } else if (load === 'loaded' && figure && document.activeElement === figure) {
-      figure.querySelector<HTMLElement>('a')?.focus({ preventScroll: true });
-    }
-    dispatch({ type: 'settle', file: asPreview(file), load, pressed: pressed || focused });
+    const focused = handOverFocus(document.getElementById(id), load);
+    dispatch({ type: 'settle', file: preview, load, pressed: pressed || focused });
   };
-
-  const shown = files.filter((file) => kindOf(file) !== null);
-  const linked = files.filter((file) => kindOf(file) === null);
 
   return (
     // Positioned for the live region, as the list is (PROJECT-STATE §6.81).
     <div className="relative">
       {shown.length > 0 ? (
         <div className="flex flex-col items-start gap-1.5">
-          {shown.map((file) => {
-            const kind = kindOf(file);
+          {shown.map((entry) => {
+            const { file, kind, preview } = entry;
             const load = loadOf(state, file.id);
-            const { name } = asPreview(file);
-            if (kind === null) return null;
 
             return (
               <MediaFigure
                 key={file.id}
-                id={previewId(file)}
-                label={kind === 'image' || load === 'failed' ? name : undefined}
+                id={entry.id}
+                label={kind === 'image' || load === 'failed' ? preview.name : undefined}
               >
                 {kind === 'image' ? (
                   <Picture
                     file={file}
-                    name={name}
-                    sticker={looks?.get(file.id) === 'sticker'}
+                    name={preview.name}
+                    sticker={entry.look === 'sticker'}
                     drawn={onClient}
                     load={load}
-                    onSettle={(next) => settle(file, next)}
-                    onRetry={() => retry(file)}
+                    onSettle={(next) => settle(entry, next)}
+                    onRetry={() => retry(entry)}
                   />
                 ) : (
                   <MediaPlayer
                     kind={kind}
                     file={file}
-                    name={name}
-                    sound={isSound(file)}
+                    name={preview.name}
+                    sound={entry.sound}
                     inline
                     load={load}
-                    onSettle={(next, pressed) => settle(file, next, pressed)}
-                    onRetry={() => retry(file)}
+                    onSettle={(next, pressed) => settle(entry, next, pressed)}
+                    onRetry={() => retry(entry)}
                   />
                 )}
               </MediaFigure>
@@ -533,15 +515,22 @@ export function MessageFiles({
         <ul
           className={shown.length > 0 ? 'mt-1.5 flex flex-wrap gap-1.5' : 'flex flex-wrap gap-1.5'}
         >
-          {linked.map((file) => {
-            // A recording this browser cannot play — an AMR voice note, or any
-            // recording before the browser has said — is named for what it is,
-            // not after the media id it is stored under; aloud with its size,
-            // as its player would be, so a thread of them is not a list of
-            // identical links. Where its sender named it, as a document, the
-            // words above keep that name (`isMediaStandIn`).
-            const family =
-              looks?.get(file.id) === 'sound' ? 'audio' : mediaFamily(file.contentType);
+          {linked.map(({ file, look }) => {
+            // A picture or a recording this thread cannot draw — a HEIC photo,
+            // an AMR voice note, or any recording before the browser has said —
+            // is named for what it is, not after the media id it is stored
+            // under; aloud with its size, as a player is, so a thread of them is
+            // not a list of identical links. Where its sender named it, as a
+            // document, the words above keep that name (`isMediaStandIn`).
+            const family = look === 'sound' ? 'audio' : mediaFamily(file.contentType);
+            const named =
+              family === 'audio'
+                ? 'Audio'
+                : family === 'video'
+                  ? 'Video'
+                  : family === 'image'
+                    ? 'Picture'
+                    : null;
             return (
               <li key={file.id} className={CHIP}>
                 {family === 'image' || family === 'video' ? (
@@ -553,14 +542,10 @@ export function MessageFiles({
                   href={fileUrl(file)}
                   target="_blank"
                   rel="noreferrer"
-                  aria-label={
-                    family === 'audio' || family === 'video'
-                      ? playerName(family, file.sizeBytes)
-                      : undefined
-                  }
+                  aria-label={named ? `${named}, ${formatBytes(file.sizeBytes)}` : undefined}
                   className="hover:underline"
                 >
-                  {family === 'audio' ? 'Audio' : family === 'video' ? 'Video' : file.filename}
+                  {named ?? file.filename}
                 </a>
                 <span className="text-(--color-text-tertiary) tabular-nums">
                   {formatBytes(file.sizeBytes)}
@@ -916,6 +901,29 @@ function Player({
     if (hidden) element.current?.pause();
   }, [hidden]);
 
+  // A video in the thread is drawn wherever it sits, and asks for its metadata
+  // — its first frame — only once it nears the pane's view, as a picture does:
+  // opening a ticket costs the videos the agent scrolls to. Opened from a chip
+  // it was asked for already. Changing `preload` from "none" starts the fetch
+  // it held back; a browser that waits for play instead loses only the frame.
+  const [near, setNear] = useState(
+    () => !inline || sound || typeof IntersectionObserver === 'undefined',
+  );
+  useEffect(() => {
+    const media = element.current;
+    if (near || !media) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (!entries.some((entry) => entry.isIntersecting)) return;
+        observer.disconnect();
+        setNear(true);
+      },
+      { root: scrollingAncestor(media), rootMargin: '100% 0px' },
+    );
+    observer.observe(media);
+    return () => observer.disconnect();
+  }, [near]);
+
   // Mounted by "Try again", which parked focus on the figure: hand it to the
   // new player, so a screen reader names what the retry produced. A voice note
   // fetches nothing until play, so waiting for it to load would wait forever.
@@ -950,7 +958,7 @@ function Player({
         src={fileUrl(file)}
         controls
         playsInline
-        preload={sound ? 'none' : 'metadata'}
+        preload={sound || !near ? 'none' : 'metadata'}
         aria-label={name}
         className={
           // A width of its own, not a share of the figure's: the figure shrinks
@@ -1202,6 +1210,43 @@ function useFreshMedia({
       if (!ready.current || !consider('error', media)) giveUp(media);
     },
   };
+}
+
+/**
+ * Moves focus off what a settling file is about to take away, for both lists,
+ * and answers whether focus was on the file at all.
+ *
+ * - **A failure** unmounts the picture's own link, which Tab reaches while it
+ *   is still loading — and reaches first after "Try again", so a second
+ *   failure would otherwise drop focus exactly where the first one was caught.
+ *   Focus goes to the figure, which stays; a screen reader whose focused node
+ *   vanishes loses its place in the ticket.
+ * - **A load** moves focus parked on the figure by "Try again" on to the
+ *   picture's link, so the next thing a screen reader says is what the retry
+ *   produced — the figure's name alone does not say it worked. A player takes
+ *   focus as soon as it mounts instead (see `Player`), because a voice note
+ *   loads nothing until play is pressed.
+ */
+function handOverFocus(figure: HTMLElement | null, load: 'loaded' | 'failed'): boolean {
+  if (!figure) return false;
+  const focused = figure.contains(document.activeElement);
+  if (load === 'failed' && focused) {
+    figure.focus({ preventScroll: true });
+  } else if (load === 'loaded' && document.activeElement === figure) {
+    figure.querySelector<HTMLElement>('a')?.focus({ preventScroll: true });
+  }
+  return focused;
+}
+
+/**
+ * The nearest ancestor set to scroll, which is what "near view" is measured
+ * against inside the ticket's pane; null for the page itself.
+ */
+function scrollingAncestor(element: HTMLElement): HTMLElement | null {
+  for (let node = element.parentElement; node; node = node.parentElement) {
+    if (/(auto|scroll)/.test(getComputedStyle(node).overflowY)) return node;
+  }
+  return null;
 }
 
 /** Focus has gone nowhere: nothing took it over. */

@@ -20,6 +20,7 @@ import { metaThreadStateFromMessage, type MetaThreadState } from '@/lib/meta/thr
 import type { CustomFieldValues } from './custom-fields';
 import { threadControlTakenAt } from './meta-thread';
 import { hiddenChannels } from './channel-policy';
+import { metaIndex } from './message-media';
 import {
   foldReactions,
   type PlacedReaction,
@@ -267,14 +268,15 @@ export async function getConversation(
           filename: attachments.filename,
           contentType: attachments.contentType,
           sizeBytes: attachments.sizeBytes,
+          contentId: attachments.contentId,
         })
         .from(attachments)
         .innerJoin(messages, eq(messages.id, attachments.messageId))
         .where(eq(messages.conversationId, row.conversation.id))
         // The thread draws a message's pictures one under another, so an order
         // Postgres is free to change between two renders would shuffle them on
-        // a live update. Stored order: the order an email's parts were in, and
-        // for Messenger's albums the order their downloads finished in.
+        // a live update. Stored order is the order an email's parts were in;
+        // a Messenger album is put in its sender's order below.
         .orderBy(asc(attachments.createdAt), asc(attachments.id)),
 
       db
@@ -311,6 +313,15 @@ export async function getConversation(
       reaction: storedReaction(entry.message.meta, entry.message.rawBody),
     })),
   );
+
+  // Each of a Messenger album's files is fetched by a job of its own, and the
+  // jobs finish in whatever order they finish, so the order they were stored in
+  // is not the order the customer sent them — before, after, the label. The
+  // index each was sent at is on the row. A stable sort, and every other file
+  // compares equal, so an email keeps its parts' order.
+  const sent = (file: (typeof files)[number]) =>
+    metaIndex(file.contentId) ?? Number.MAX_SAFE_INTEGER;
+  files.sort((a, b) => sent(a) - sent(b));
 
   const filesByMessage = new Map<string, ConversationDetail['messages'][number]['attachments']>();
   for (const file of files) {

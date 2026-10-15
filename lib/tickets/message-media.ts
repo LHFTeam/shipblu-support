@@ -9,6 +9,8 @@
  */
 
 import { mediaFamily } from '@/lib/attachments/preview';
+import { metaAttachmentsStandIn, whatsAppMediaStandIn } from '@/lib/chat/stand-ins';
+import { isRecord } from '@/lib/whatsapp/parse';
 
 /** The fields of a timeline message these answers read. */
 type MediaMessage = {
@@ -62,7 +64,8 @@ export type MediaLook = 'sticker' | 'sound';
  * What the sender said each file is, where it matters to how it is drawn.
  *
  * - **A sticker** is a 512px transparent WebP, indistinguishable by its type
- *   from a photo, and drawn at a photo's size it fills the thread.
+ *   from a photo, and drawn at a photo's size it fills the thread. Messenger's
+ *   arrive as `image` and are known by the flag the parser keeps for them.
  * - **Sound** is a Facebook or Instagram voice clip, which arrives as MP4. The
  *   player can tell it has no picture only once it has fetched the file, so
  *   until then it was a black box the size of a video, collapsing to a bar the
@@ -72,8 +75,8 @@ export type MediaLook = 'sticker' | 'sound';
  *
  * Only for a message carrying exactly one file. Meta's files are downloaded by
  * one job each, and the entry each came from is stored (`content_id` is
- * `meta:<index>`, `download_media`) but not selected for the thread, so with
- * several files it cannot pair them.
+ * `meta:<index>`, `download_media`) but not sent to the browser, so with
+ * several files the thread cannot pair them.
  */
 export function mediaLooks(message: Pick<MediaMessage, 'meta' | 'attachments'>) {
   const looks = new Map<string, MediaLook>();
@@ -81,73 +84,69 @@ export function mediaLooks(message: Pick<MediaMessage, 'meta' | 'attachments'>) 
   if (!only) return looks;
 
   const meta = message.meta ?? {};
-  const sent = metaAttachmentTypes(meta);
-  const kind = meta.whatsappType ?? (sent?.length === 1 ? sent[0] : undefined);
-  if (kind === 'sticker') looks.set(only.id, 'sticker');
-  if (kind === 'audio') looks.set(only.id, 'sound');
+  const sent = metaAttachments(meta);
+  const entry = sent?.length === 1 ? sent[0] : undefined;
+  const kind = meta.whatsappType ?? entry?.type;
+  if (kind === 'sticker' || entry?.sticker === true) looks.set(only.id, 'sticker');
+  else if (kind === 'audio') looks.set(only.id, 'sound');
   return looks;
 }
 
-/** `displayText` in `lib/whatsapp/parse.ts`, for a media message with no caption. */
+/**
+ * The index Meta's download job files an attachment under (`content_id`
+ * `meta:<index>`, `download_media`), which is the order its sender put it in;
+ * null for any other file.
+ */
+export function metaIndex(contentId: string | null): number | null {
+  const match = /^meta:(\d+)$/.exec(contentId ?? '');
+  return match ? Number(match[1]) : null;
+}
+
+const WHATSAPP_MEDIA = ['image', 'video', 'audio', 'document', 'sticker'] as const;
+
+/** What `displayText` in `lib/whatsapp/parse.ts` wrote for this row, had it no caption. */
 function whatsAppStandIn(
   meta: Record<string, unknown>,
   files: MediaMessage['attachments'],
 ): string | null {
+  const type = WHATSAPP_MEDIA.find((media) => media === meta.whatsappType);
+  if (!type) return null;
   const media = isRecord(meta.media) ? meta.media : {};
+  const filename = typeof media.filename === 'string' ? media.filename : null;
 
-  switch (meta.whatsappType) {
-    case 'image':
-    case 'video':
-    case 'sticker':
-      return `[${meta.whatsappType}]`;
-    case 'audio':
-      return media.isVoice === true ? '[voice note]' : '[audio]';
-    case 'document': {
-      const name =
-        typeof media.filename === 'string' && media.filename !== '' ? media.filename : null;
-      // A document's words carry the name its sender gave it — a photographed
-      // label saved under its waybill number, say — and only a link shows that
-      // name again. One that is a picture or a recording is drawn as one, under
-      // no name at all, so there the words are the only place the name is.
-      if (name !== null && files.some((file) => mediaFamily(file.contentType) !== null)) {
-        return null;
-      }
-      return name === null ? '[document]' : `[document: ${name}]`;
-    }
-    default:
-      return null;
+  // A document's words carry the name its sender gave it — a photographed
+  // label saved under its waybill number, say — and only a link shows that
+  // name again. One that is a picture or a recording is drawn as one, under no
+  // name at all, so there the words are the only place the name is.
+  if (type === 'document' && filename && files.some((file) => mediaFamily(file.contentType))) {
+    return null;
   }
+  return whatsAppMediaStandIn(type, { filename, voice: media.isVoice === true });
 }
 
 /**
- * The stand-ins `displayText` in `lib/meta/parse.ts` writes that only name the
- * kind of file. Every other type it can write — a share, a story, a story
- * mention, a reel — says where the file came from, and stays.
+ * The types whose stand-in only names the kind of file drawn below it. Every
+ * other type Meta can send — a share, a story, a story mention, a reel — says
+ * where the file came from, and a `file` is linked under a name its download
+ * job made up, so `[file]` is the only word saying what it is: those stay.
  */
-const META_PLAIN = new Set(['image', 'video', 'audio', 'file', 'sticker']);
+const META_PLAIN = new Set(['image', 'video', 'audio', 'sticker']);
 
-/** `displayText` in `lib/meta/parse.ts`, for a direct message with no text. */
+/** What `displayText` in `lib/meta/parse.ts` wrote for this row, had it no text. */
 function metaStandIn(meta: Record<string, unknown>, files: number): string | null {
-  const sent = metaAttachmentTypes(meta);
+  const sent = metaAttachments(meta);
   if (!sent) return null;
+  const types = sent.map((entry) => (typeof entry.type === 'string' ? entry.type : undefined));
 
-  if (sent.length === 1) {
-    const type = sent[0];
-    return typeof type === 'string' && META_PLAIN.has(type) ? `[${type}]` : null;
-  }
+  if (sent.length === 1 && !META_PLAIN.has(types[0] ?? '')) return null;
   // A count is only redundant once every file it counts is drawn: one that
   // never downloaded leaves the number as the only sign it was sent.
-  return sent.length > 1 && files === sent.length ? `[${sent.length} attachments]` : null;
+  if (sent.length > 1 && files !== sent.length) return null;
+  return metaAttachmentsStandIn(types) || null;
 }
 
-/** The types of a Facebook or Instagram direct message's attachments, in order. */
-function metaAttachmentTypes(meta: Record<string, unknown>): unknown[] | null {
+/** A Facebook or Instagram direct message's attachments as stored, in order. */
+function metaAttachments(meta: Record<string, unknown>): Record<string, unknown>[] | null {
   if (meta.metaKind !== 'direct_message' || !Array.isArray(meta.attachments)) return null;
-  return meta.attachments.map((attachment: unknown) =>
-    isRecord(attachment) ? attachment.type : undefined,
-  );
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
+  return meta.attachments.map((entry: unknown) => (isRecord(entry) ? entry : {}));
 }

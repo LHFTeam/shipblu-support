@@ -104,6 +104,13 @@ export type MetaAttachment = {
   type: 'image' | 'video' | 'audio' | 'file' | 'share' | 'story' | 'sticker' | 'unsupported';
   url: string | null;
   title: string | null;
+  /**
+   * Messenger sends a sticker — the thumbs-up "like" included — as an `image`
+   * with a `sticker_id`, so its type cannot say so. Kept as a flag rather than
+   * folded into `type`, because the stand-in written for it is `[image]` and
+   * the thread recognises that by this list's types (`isMediaStandIn`).
+   */
+  sticker?: true;
 };
 
 export type NormalisedDirectMessage = {

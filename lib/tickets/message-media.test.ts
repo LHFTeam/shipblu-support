@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { parseMetaWebhook } from '@/lib/meta/parse';
 import { parseWebhook } from '@/lib/whatsapp/parse';
-import { isMediaStandIn, mediaLooks } from './message-media';
+import { isMediaStandIn, mediaLooks, metaIndex } from './message-media';
 
 /**
  * The stand-ins are produced by the two parsers, and the thread recognises them
@@ -157,7 +157,7 @@ describe('isMediaStandIn', () => {
     expect(isMediaStandIn({ ...row, meta: { ...row.meta, echo: true } })).toBe(true);
   });
 
-  it.each(['image', 'video', 'audio', 'file', 'sticker'])(
+  it.each(['image', 'video', 'audio', 'sticker'])(
     'recognises the stand-in for one %s on Messenger',
     (type) => {
       const row = metaRow({ attachments: [sent(type)] });
@@ -198,8 +198,9 @@ describe('isMediaStandIn', () => {
     ).toBe(false);
   });
 
-  it('keeps words that say where a file came from', () => {
-    for (const type of ['story_mention', 'share', 'story', 'ig_reel', 'reel', 'fallback']) {
+  it('keeps words that say what a file is, or where it came from', () => {
+    // A `file` too: it is linked under a name its download job made up.
+    for (const type of ['file', 'story_mention', 'share', 'story', 'ig_reel', 'reel', 'fallback']) {
       const row = metaRow({ attachments: [sent(type)] });
       expect(row.bodyText).toBe(`[${type}]`);
       expect(isMediaStandIn(row)).toBe(false);
@@ -271,6 +272,15 @@ describe('mediaLooks', () => {
     expect(mediaLooks(row).get(FILE.id)).toBe('sticker');
   });
 
+  it('names a Messenger sticker, which arrives as an image', () => {
+    const like = metaRow({
+      attachments: [{ type: 'image', payload: { url: 'https://cdn.example/l', sticker_id: 3692 } }],
+    });
+    expect(like.bodyText).toBe('[image]');
+    expect(isMediaStandIn(like)).toBe(true);
+    expect(mediaLooks(like).get(FILE.id)).toBe('sticker');
+  });
+
   it('names a Messenger voice clip as sound, though it arrives as a video', () => {
     expect(mediaLooks(metaRow({ attachments: [sent('audio')] })).get(FILE.id)).toBe('sound');
     expect(mediaLooks(metaRow({ attachments: [sent('sticker')] })).get(FILE.id)).toBe('sticker');
@@ -294,5 +304,18 @@ describe('mediaLooks', () => {
       0,
     );
     expect(mediaLooks({ meta: { whatsappType: 'sticker' }, attachments: [] }).size).toBe(0);
+  });
+});
+
+describe('metaIndex', () => {
+  it('reads the place a Messenger file had in what its sender sent', () => {
+    expect(metaIndex('meta:0')).toBe(0);
+    expect(metaIndex('meta:10')).toBe(10);
+  });
+
+  it('reads nothing into any other file', () => {
+    expect(metaIndex(null)).toBeNull();
+    expect(metaIndex('<image001.png@01DA1B2C.3D4E5F60>')).toBeNull();
+    expect(metaIndex('meta:')).toBeNull();
   });
 });

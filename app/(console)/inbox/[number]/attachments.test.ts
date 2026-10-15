@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { MediaLook } from '@/lib/tickets/message-media';
 import { MessageFiles } from './attachments';
 
@@ -111,6 +111,13 @@ describe('MessageFiles', () => {
     expect(view.querySelector('li a')?.textContent).toBe('Video');
   });
 
+  it('names a picture it cannot show by what it is, rather than by its media id', () => {
+    const heic = { ...photo, filename: '1002979522811778.heic', contentType: 'image/heic' };
+    const link = draw([heic]).querySelector('li a');
+    expect(link?.textContent).toBe('Picture');
+    expect(link?.getAttribute('aria-label')).toBe('Picture, 86 KB');
+  });
+
   it('names one no browser plays by what it is too, rather than by its media id', () => {
     const amr = { ...note, filename: '1011360668584057.amr', contentType: 'audio/amr' };
     expect(draw([amr]).querySelector('li a')?.textContent).toBe('Audio');
@@ -121,10 +128,36 @@ describe('MessageFiles', () => {
     expect(view.querySelector('li a')?.textContent).toBe('Audio');
   });
 
-  it('draws a video it can play at once, fetching only its metadata', () => {
-    const video = draw([webm]).querySelector('video');
-    expect(video?.getAttribute('preload')).toBe('metadata');
-    expect(video?.className).toContain('max-h-80');
+  it('draws a video it can play at once, asking for its metadata only near view', () => {
+    const near: IntersectionObserverCallback[] = [];
+    vi.stubGlobal(
+      'IntersectionObserver',
+      class {
+        constructor(callback: IntersectionObserverCallback) {
+          near.push(callback);
+        }
+        observe() {}
+        disconnect() {}
+      },
+    );
+    try {
+      const video = draw([webm]).querySelector('video');
+      expect(video?.getAttribute('preload')).toBe('none');
+      expect(video?.className).toContain('max-h-80');
+
+      act(() => {
+        for (const callback of near) {
+          callback(
+            [{ isIntersecting: true } as IntersectionObserverEntry],
+            {} as IntersectionObserver,
+          );
+        }
+      });
+      expect(host.querySelector('video')).toBe(video);
+      expect(video?.getAttribute('preload')).toBe('metadata');
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it('draws a Messenger voice clip as a voice note: a bar, fetched on play, named as sound', () => {

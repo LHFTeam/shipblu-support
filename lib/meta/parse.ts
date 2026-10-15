@@ -1,3 +1,4 @@
+import { metaAttachmentsStandIn } from '@/lib/chat/stand-ins';
 import type { MetaConnection } from './connection';
 import type {
   MetaAttachment,
@@ -264,10 +265,7 @@ function displayText(
 
   if (message.is_unsupported) return '[unsupported message type]';
 
-  if (attachments.length === 1) return `[${attachments[0]?.type ?? 'attachment'}]`;
-  if (attachments.length > 1) return `[${attachments.length} attachments]`;
-
-  return '';
+  return metaAttachmentsStandIn(attachments.map((attachment) => attachment?.type));
 }
 
 /**
@@ -308,6 +306,7 @@ function normaliseAttachment(raw: MetaRawAttachment): MetaAttachment {
     type: type as MetaAttachment['type'],
     url: raw?.payload?.url ?? null,
     title: raw?.payload?.title ?? null,
+    ...(raw?.payload?.sticker_id != null ? { sticker: true as const } : {}),
   };
 }
 

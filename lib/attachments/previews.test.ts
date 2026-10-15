@@ -108,6 +108,13 @@ describe('previewReducer, for files the thread loads by itself', () => {
     expect(loadOf(run(fail(picture)), picture.id)).toBe('failed');
   });
 
+  it('takes only "Try again" as asking, not a picture that reads as loading', () => {
+    // Anything that seeds `loads` up front — on mount, on a reset — must not make
+    // every self-loading picture's failure speak during a Storage outage.
+    const seeded = { ...initialPreviewState, loads: { [picture.id]: 'loading' as const } };
+    expect(previewReducer(seeded, fail(picture)).notice).toBeNull();
+  });
+
   it('announces a failure that answers "Try again"', () => {
     expect(run(fail(picture), retry(picture), fail(picture)).notice?.text).toBe(
       'Picture, 86 KB could not be shown here. Try again, or open the file.',

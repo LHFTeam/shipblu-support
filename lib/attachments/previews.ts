@@ -98,6 +98,13 @@ export type PreviewState = {
    */
   notice: { fileId: string; text: string; seq: number } | null;
   seq: number;
+  /**
+   * Files "Try again" was pressed on and that have not settled since: the
+   * next settle answers the agent. Kept as its own fact rather than read off
+   * `loads`, where "loading" written for any other reason would make every
+   * self-loading picture's failure announce.
+   */
+  retried: Record<string, true>;
 };
 
 export type PreviewAction =
@@ -109,7 +116,13 @@ export type PreviewAction =
   | { type: 'settle'; file: PreviewFile; load: 'loaded' | 'failed'; pressed?: boolean }
   | { type: 'retry'; file: PreviewFile };
 
-export const initialPreviewState: PreviewState = { showing: {}, loads: {}, notice: null, seq: 0 };
+export const initialPreviewState: PreviewState = {
+  showing: {},
+  loads: {},
+  notice: null,
+  seq: 0,
+  retried: {},
+};
 
 export function loadOf(state: PreviewState, id: string): Load {
   return state.loads[id] ?? 'loading';
@@ -129,7 +142,8 @@ export function previewReducer(state: PreviewState, action: PreviewAction): Prev
     }
 
     case 'settle': {
-      const next = { ...state, loads: { ...state.loads, [file.id]: action.load } };
+      const { [file.id]: retried, ...rest } = state.retried;
+      const next = { ...state, loads: { ...state.loads, [file.id]: action.load }, retried: rest };
       if (action.load === 'loaded') return withdraw(next, file.id);
       // A failure behind a closed preview is told when it is opened, not now,
       // while the agent is looking at something else.
@@ -137,14 +151,21 @@ export function previewReducer(state: PreviewState, action: PreviewAction): Prev
       // A picture or video that loads by itself answers nothing the agent did,
       // so its failure is left as the visible line it already is. Announced,
       // a Storage outage would read out every picture on the ticket the moment
-      // it opened. Only the agent is answered: "Try again", which is the one
-      // key that writes "loading", play or a seek, or focus on the file.
-      if (file.loadsItself && !action.pressed && state.loads[file.id] !== 'loading') return next;
+      // it opened. Only the agent is answered: "Try again", play or a seek, or
+      // focus on the file.
+      if (file.loadsItself && !action.pressed && !retried) return next;
       return announce(next, file);
     }
 
     case 'retry':
-      return withdraw({ ...state, loads: { ...state.loads, [file.id]: 'loading' } }, file.id);
+      return withdraw(
+        {
+          ...state,
+          loads: { ...state.loads, [file.id]: 'loading' },
+          retried: { ...state.retried, [file.id]: true },
+        },
+        file.id,
+      );
   }
 }
 
