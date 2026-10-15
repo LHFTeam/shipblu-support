@@ -1,6 +1,6 @@
 import { DateTime } from 'luxon';
 import { describe, expect, it, vi } from 'vitest';
-import { formatDay, formatTime, sentenceCase } from './format';
+import { formatDateTime, formatDay, formatTime, sentenceCase } from './format';
 
 describe('sentenceCase', () => {
   it('capitalises the first letter and spaces every underscore', () => {
@@ -50,24 +50,20 @@ describe('formatDay / formatTime', () => {
     expect(formatTime(afterMidnight)).toBe('00:05');
   });
 
-  it('writes the same day whatever separators the engine’s locale data carries', () => {
-    // The day break is drawn on the server and again in the browser, so it has
-    // to read the same in both. Node 22's ICU puts a comma after the weekday
-    // and Chromium 141's does not. Each pass stands in for an engine whose data
-    // puts `separator` after the weekday, through both ways of asking it.
+  it('writes the same text whatever separators the engine’s locale data carries', () => {
+    // These are drawn on the server and again in the browser, so they have to
+    // read the same in both. Node 22's ICU puts a comma after the weekday and
+    // Chromium 141's does not. Each pass stands in for an engine whose data
+    // puts `separator` between the fields, through both ways of asking it.
     const proto = Intl.DateTimeFormat.prototype;
     const parts = proto.formatToParts;
     const format = Object.getOwnPropertyDescriptor(proto, 'format')!;
     const at = cairo({ year: 2026, month: 10, day: 14, hour: 9, minute: 5 });
-    for (const separator of [', ', ' ']) {
+    for (const separator of [', ', ' ', '|']) {
       const engine = function (this: Intl.DateTimeFormat, date?: Date | number) {
         return parts
           .call(this, date)
-          .map((part, index, all) =>
-            part.type === 'literal' && all[index - 1]?.type === 'weekday'
-              ? { ...part, value: separator }
-              : part,
-          );
+          .map((part) => (part.type === 'literal' ? { ...part, value: separator } : part));
       };
       vi.spyOn(proto, 'formatToParts').mockImplementation(engine);
       // A getter in the specification, which TypeScript types as a method, so
@@ -84,6 +80,8 @@ describe('formatDay / formatTime', () => {
       });
       try {
         expect(formatDay(at)).toBe('Wednesday, 14 October 2026');
+        expect(formatDateTime(at)).toBe('14 Oct 2026, 09:05');
+        expect(formatTime(at)).toBe('09:05');
       } finally {
         vi.restoreAllMocks();
         Object.defineProperty(proto, 'format', format);
