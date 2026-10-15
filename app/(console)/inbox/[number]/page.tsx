@@ -87,12 +87,13 @@ export default async function ConversationPage({
 
     The language comes from the script of what the customer actually wrote, not
     from `contacts.locale` — that column is written by nothing and reads 'en'
-    for all six thousand contacts, so trusting it would search the English
-    articles for every Arabic ticket in the system. Nor from our own label for a
-    photo or a voice note sent without a caption, which reads as English and
-    would search for "image": a ticket whose newest message is a photo opens on
-    the customer's words before it, as `requesterLocale` does for a reply
-    nobody watches go out. The subject is read the same way, because a chat
+    for every contact, so trusting it would search the English articles for
+    every Arabic ticket in the system. Nor from our own label for a photo or a
+    voice message sent without a caption: its letters are English, and a
+    one-word label sent the search back to the subject, a longer one searched
+    for our own words. A ticket whose newest message is a photo opens on the
+    customer's words before it, as `requesterLocale` does for a reply nobody
+    watches go out. The subject is read the same way, because a chat
     ticket's subject is its opening message's first line, and one that opened
     with a photo is called `[image]`.
 

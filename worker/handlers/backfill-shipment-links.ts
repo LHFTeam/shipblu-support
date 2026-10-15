@@ -54,11 +54,11 @@ export async function backfillShipmentLinks(job: ClaimedJob): Promise<void> {
   // Per channel, not just totalled.
   //
   // `body_text` is written by five different ingest paths with different quirks
-  // — Meta bodies can be empty when a message is media-only, the bot channel's
-  // transcripts have their own shape — so a single figure like "4,812 links
-  // created" would read as a clean run while hiding "zero from Instagram, ever".
-  // Channel is the dimension that can fail here, so channel is what this is cut
-  // by.
+  // — a media-only message is stored as our label (`[image]`), not empty, and
+  // the bot channel's transcripts have their own shape — so a single figure
+  // like "4,812 links created" would read as a clean run while hiding "zero
+  // from Instagram, ever". Channel is the dimension that can fail here, so
+  // channel is what this is cut by.
   const tallies = new Map<string, ChannelTally>();
   const failures: string[] = [];
 

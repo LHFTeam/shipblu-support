@@ -28,7 +28,7 @@ import { notReaction } from './not-reaction';
  * `contacts.locale` is `not null default 'en'`, so 'en' means either "this
  * person reads English" or "nobody has ever said" — the distinction
  * `lib/contacts/merge.ts` already draws, and nothing in the product sets the
- * column, so today every one of the 6,000-odd contacts reads as the second.
+ * column, so today every contact reads as the second.
  * Taking it at face value would answer an Arabic-first customer base in English
  * on every channel, which is the failure this project calls silent success: a
  * message goes out, a count goes up, and it is wrong in one direction only.

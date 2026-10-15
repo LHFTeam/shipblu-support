@@ -12,8 +12,9 @@ import { isReaction } from '@/lib/whatsapp/reaction';
  * that reads a customer's last words for what they say has to look past it: the
  * priority classifier would ask a model about `[image]`, `requesterLocale` would
  * answer an Arabic customer in English for sending a photo of the damaged
- * parcel, and the ticket page would open its knowledge panel on a search for
- * "image".
+ * parcel, and the ticket page would seed its knowledge panel from our words —
+ * a search for "story mention" — or, from a one-word label, fall back to the
+ * ticket's opening line rather than what the customer said last.
  *
  * A label is recognised by its shape, one line in brackets, rather than from a
  * list, so a label of the same shape added to either parser is refused without
@@ -21,7 +22,7 @@ import { isReaction } from '@/lib/whatsapp/reaction';
  * word in brackets, read as having sent no words at all. Four labels wrap a
  * string from elsewhere — a document's file name, a pin's name and address,
  * Meta's reason for refusing a message, an edit's new words — which may hold a
- * bracket or a line break of its own, so those are recognised by how they open
+ * `]` or a line break of its own, so those are recognised by how they open
  * instead (`WRAPPED_LABEL`).
  *
  * A WhatsApp edit is refused, whatever it says. Its label wraps the customer's
@@ -64,9 +65,11 @@ export function lastCustomerWords<
  * A ticket's subject, unless it is our label.
  *
  * A chat ticket's subject is the first line of its opening message, so one that
- * opened with a voice message is called `[audio]` — read as words, a search for
- * "audio". A label longer than a subject is cut before its closing bracket and
- * still gets through; a pin with a long address, mostly.
+ * opened with a photo or a story mention is called `[image]` or
+ * `[story_mention]`: read as words, Latin letters in the language guess and, from
+ * the second, a search for "story mention". A label longer than a subject is cut
+ * before its closing bracket and still gets through; a pin with a long address,
+ * mostly.
  */
 export function subjectWords(subject: string | null): string | null {
   return subject !== null && hasCustomerText(subject) ? subject : null;

@@ -333,9 +333,9 @@ type LoadedRow = {
  * keeps an autoresponder's time off the customer's clock — and a spam or
  * deleted ticket is not in anybody's queue.
  *
- * A message with no words of the customer's own is not asked about either:
- * our label for a caption-less photo, voice note or document, or a WhatsApp
- * edit (`hasCustomerText`). Asked about `[image]`, the model sees a message too
+ * A message whose text is ours rather than the customer's alone is not asked
+ * about either: our label for a caption-less photo, voice note or document, or
+ * a WhatsApp edit wrapped in one (`hasCustomerText`). Asked about `[image]`, the model sees a message too
  * short to judge and answers `low`, as the question's instructions tell it to;
  * on an opening message that lowers a ticket whose photo may well be of the
  * damaged parcel. The model cannot see the photo, so it is not asked about

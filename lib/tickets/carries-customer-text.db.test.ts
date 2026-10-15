@@ -64,7 +64,7 @@ const WORDS = [
   'ok',
   'الشحنة [اتفتحت]',
   '[urgent] where is my COD',
-  // A line break or a second bracket inside: not a label to either engine.
+  // A line break or a second `]` inside: not a label to either engine.
   '[one\ntwo]',
   '[one]two]',
   '[[image]]',
