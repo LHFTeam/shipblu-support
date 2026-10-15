@@ -196,6 +196,32 @@ describe('client-dates', () => {
     expect(found.map((failure) => failure.where)).toEqual(['lib/format.ts:3', 'lib/format.ts:4']);
   });
 
+  it('counts a relative time only in <RelativeTime>, which waits for hydration', async () => {
+    const found = await runRule('client-dates', {
+      ...CLIENTS,
+      'lib/format.ts':
+        'export function formatRelative(value: Date, now: Date) {\n  return `${now.getTime() - value.getTime()}`;\n}\n',
+      'components/relative-time.tsx':
+        "'use client';\n\nimport { formatRelative } from '@/lib/format';\n\nexport function RelativeTime({ at, now }: { at: Date; now: Date }) {\n  return formatRelative(at, now);\n}\n",
+      // A client component handed a clock it read itself: the server's and the
+      // browser's, a moment apart.
+      'components/opens.tsx': client(
+        '  return formatRelative(at, new Date());',
+        "import { formatRelative } from '@/lib/format';\n\n",
+      ),
+      // A server page reads its clock once, and only the server draws it.
+      'app/page.tsx':
+        "import { formatRelative } from '@/lib/format';\n\nexport default function Page() {\n  return formatRelative(new Date(0), new Date());\n}\n",
+    });
+
+    expect(found).toEqual([
+      expect.objectContaining({
+        where: 'components/opens.tsx:6',
+        message: expect.stringContaining('render <RelativeTime> from components/relative-time.tsx'),
+      }),
+    ]);
+  });
+
   it('reads a type annotation, a comment and a string as what they are', async () => {
     expect(
       await refusedLines(

@@ -46,6 +46,11 @@ import {
 //     data, and a `toFormat` pattern written as a literal may spell its fields
 //     out (`cccc HH:mm`) but not use a localized macro (`D`, `t`, `f`, `F` and
 //     their longer forms), which is the engine's whole string again.
+//   - `formatRelative` is called only from `components/relative-time.tsx`.
+//     It reads the clock it is handed, and a client component handing it
+//     `new Date()` reads that clock twice, on the server and again in the
+//     browser, a minute boundary apart often enough to matter;
+//     `<RelativeTime>` formats only once the page has hydrated.
 //
 // Module by module, not function by function: a whole-string formatter only a
 // server page calls is still refused if the module it sits in is in the
@@ -66,6 +71,9 @@ const OWNER = 'lib/format.ts';
 
 const CONFINED = 'DateTimeFormat';
 const REFUSED = 'RelativeTimeFormat';
+
+/** The one module in the bundle that may count a relative time, because it waits for hydration. */
+const CLOCK_READER = 'components/relative-time.tsx';
 
 const ENGINE_STRINGS = new Set([
   'toLocaleDateString',
@@ -119,7 +127,16 @@ export function checkClientDatesJoinTheirFields() {
       } else if (name === REFUSED) {
         report(
           node,
-          `uses Intl.RelativeTimeFormat${via}, whose wording is locale data the server and the browser can disagree about (§6.96) — use formatRelative in ${OWNER}`,
+          `uses Intl.RelativeTimeFormat${via}, whose wording is locale data the server and the browser can disagree about (§6.96) — render <RelativeTime> from ${CLOCK_READER}`,
+        );
+      } else if (
+        ts.isCallExpression(node) &&
+        calleeName(node.expression) === 'formatRelative' &&
+        file !== CLOCK_READER
+      ) {
+        report(
+          node,
+          `calls formatRelative${via}, so a client component reads the clock on the server and again in the browser, at two instants (§6.96) — render <RelativeTime> from ${CLOCK_READER}, which formats only once the page has hydrated`,
         );
       } else if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)) {
         const method = node.expression.name.text;
@@ -143,6 +160,13 @@ export function checkClientDatesJoinTheirFields() {
     };
     visit(source);
   }
+}
+
+/** The name a call is made through: `formatRelative(…)` or `format.formatRelative(…)`. */
+function calleeName(callee) {
+  if (ts.isIdentifier(callee)) return callee.text;
+  if (ts.isPropertyAccessExpression(callee)) return callee.name.text;
+  return null;
 }
 
 /**

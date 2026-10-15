@@ -6210,11 +6210,13 @@ still waiting for it` one whose outcome is not known yet.
     component reaches it refuses `Intl.DateTimeFormat` outside `lib/format.ts`
     (its `formatToParts` too, which can rebuild the whole string), and the
     engine's own date strings everywhere — `toLocale*String`, `toDateString`,
-    `Intl.RelativeTimeFormat`, luxon's `toRelative` and localized macros. Its
-    first run found the widget and three help-centre formatters that rode into
-    the bundle in `lib/kb/locale.ts` beside `t()`, drawn only by server pages;
-    those moved to `lib/kb/dates.ts`, and the custom-field input's parts moved
-    into `lib/format.ts`. What it cannot see is a `Date` turned into text by
+    `Intl.RelativeTimeFormat`, luxon's `toRelative` and localized macros — and
+    `formatRelative` anywhere but `<RelativeTime>`, since a client component
+    handing it `new Date()` reads the clock on both sides. Its first run found
+    the widget and three help-centre formatters that rode into the bundle in
+    `lib/kb/locale.ts` beside `t()`, drawn only by server pages; those moved to
+    `lib/kb/dates.ts`, and the custom-field input's parts moved into
+    `lib/format.ts`. What it cannot see is a `Date` turned into text by
     `String()` or a template literal, which needs the value's type. A
     recoverable hydration error reaches Playwright as a `pageerror`, not a
     console message, so a check listening only to the console reports a clean
