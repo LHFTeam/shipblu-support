@@ -146,7 +146,12 @@ async function importThread(input: {
 
   return db.transaction(async (tx) => {
     const statusId = await requireResolvedStatusId(tx);
-    const opening = fresh.find((message) => message.direction === 'inbound') ?? fresh[0]!;
+    // Named after the first thing the customer said, or else the business: a
+    // copied 👍 is neither's words, and the subject keeps what the first chunk
+    // gave it, since a later chunk of the thread only conflicts. A thread of
+    // nothing but reactions takes `subjectFrom`'s placeholder.
+    const words = fresh.filter((message) => storedKind(message.type) === 'reply');
+    const opening = words.find((message) => message.direction === 'inbound') ?? words[0];
 
     const [inserted] = await tx
       .insert(conversations)
@@ -154,7 +159,7 @@ async function importThread(input: {
         channel: 'whatsapp',
         channelId: channel.id,
         statusId,
-        subject: subjectFrom(opening.text),
+        subject: subjectFrom(opening?.text ?? ''),
         requesterContactId: contactId,
         groupId: channel.defaultGroupId,
         lastMessageAt: newest,

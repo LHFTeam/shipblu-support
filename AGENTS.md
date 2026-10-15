@@ -680,7 +680,8 @@ for `direction = 'inbound'`. Reactions stored before the kind existed are
 tagged `reply` rows, which `db/sql/007` moves on each web deploy while an old
 worker can still be writing them; until production holds none, each such reader
 also keeps `notReaction()` (`lib/tickets/not-reaction.ts`) or `isReaction()`,
-which know both shapes, and its test runs over both (`REACTION_SHAPES`). A
+which know both shapes, and its reaction test runs over both
+(`REACTION_SHAPES`). A
 reader that gets it wrong shows a 👍 as the customer's last words — it was the
 inbox preview, the canned suggestion's anchor and the language automated
 replies went out in. A reader that needs reactions — the timeline — reads every

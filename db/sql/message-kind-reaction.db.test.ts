@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { asc, eq, sql } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { db } from '@/db/client';
 import { contacts, conversations, messages, ticketStatuses } from '@/db/schema';
@@ -51,7 +51,10 @@ describe('007_message_kind_reaction.sql', () => {
       db
         .select({ bodyText: messages.bodyText, kind: messages.kind, meta: messages.meta })
         .from(messages)
-        .orderBy(asc(messages.bodyText));
+        // Byte order, which the list below is written in: the database's own
+        // collation is the cluster's locale, and under en_US.utf8 — CI's —
+        // brackets and spaces are ignored at the first level.
+        .orderBy(sql`${messages.bodyText} collate "C"`);
 
     await db.execute(sql.raw(backfill));
     const once = await kinds();

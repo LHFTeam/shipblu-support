@@ -80,9 +80,9 @@ export async function storeAgentReply(
  * recent message — the email's Message-ID, the wamid a WhatsApp reply quotes.
  *
  * A `reply`, so not a reaction, or the reply would be recorded as answering a
- * thumbs-up; and not the notice a form writes when it could not keep a file,
- * which is inbound too, has no id of its own, and would leave the reply
- * threaded on nothing. Here rather than in the action so a test can reach it.
+ * thumbs-up — nor any other row that is not the customer's words, like the
+ * inbound `system` notice a form writes when it could not keep a file. Here
+ * rather than in the action so a test can reach it.
  */
 export async function threadingParent(conversationId: string): Promise<string | null> {
   const rows = await db

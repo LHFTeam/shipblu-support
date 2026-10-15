@@ -1690,11 +1690,8 @@ expires_at, inspected_at` — never `envelope`, and a null `expires_at` means
 
   **On `main` since 2026-10-15 a reaction is its own kind,
   `messages.kind = 'reaction'`** (migration 0035), rather than a `reply` told
-  apart by `meta.whatsappType` — in production once the web services and then
-  the worker are deployed, in that order: a worker first would insert a kind
-  the database does not have yet, and every reaction would fail and be retried
-  until the web deploy added it. The first version filtered by the tag, and its first
-  commit missed four readers that review found; three of them already asked
+  apart by `meta.whatsappType`. The first version filtered by the tag, and its
+  first commit missed four readers that review found; three of them already asked
   for `kind = 'reply'`, the shape nearly every reader of messages takes, which
   now leaves a reaction out with nothing to remember. The other shapes did not
   protect it — "inbound" alone, or "not a note" — and those readers ask for
@@ -1702,11 +1699,26 @@ expires_at, inspected_at` — never `envelope`, and a null `expires_at` means
   could not keep a file ("Could not store x.pdf — ask the customer to send it
   again", inbound and `system`) being quoted to a hub as the customer's words.
   The live, echo and copied-history builders all take the kind from
-  `storedKind`. `db/sql/007_message_kind_reaction.sql` moves the rows stored
-  before — 1,232 in production on 2026-10-15, 1,162 of them the bot's — and
-  runs on every deploy, through the trigram index on `body_text` rather than
-  over `meta`: reading the tag off every row detoasted the table, 6.5 seconds
-  over 219k rows in production.
+  `storedKind`, and a copied thread is no longer named after a reaction.
+  `db/sql/007_message_kind_reaction.sql` moves the rows stored before — 1,232
+  in production on 2026-10-15, 1,162 of them the bot's — and runs on every
+  deploy, finding them through the trigram index on `body_text`: nothing
+  indexes the tag, and filtering on it alone took 6.5 seconds over the 219k
+  rows, against 1.3 seconds to scan the table on `kind` and 0.9 through the
+  index.
+
+  **It reaches production web first, and the worker only once the web
+  deploy's `db:migrate` has finished.** The worker is what stores reactions,
+  and before 0035 the database refuses the new value, so every reaction a new
+  worker stores fails — and not in a way that heals once the web deploy lands.
+  A reaction delivered beside anything that succeeds (a message, a status) is a
+  partial failure: recorded on `webhook_events.error`, the delivery marked
+  processed, never retried. One delivered alone is retried five times over
+  about five minutes and goes `dead`. A copied-history thread holding one fails
+  as a whole, every message in it, and Meta sends the history once per
+  onboarding. The readers are safe in any order: `notReaction()` compares the
+  kind as text, so it needs the value to exist nowhere, and the crons do not
+  store reactions.
 
   Meta's documentation says WhatsApp's customer service window opens when the
   customer "messages or calls" and does not say whether a reaction is a
@@ -1718,13 +1730,16 @@ expires_at, inspected_at` — never `envelope`, and a null `expires_at` means
   **Left: the second half of the kind change.** An old worker stores
   reactions as tagged `reply` rows until it is redeployed, and `db/sql/007`
   moves those only at the next web deploy, so for now every reader also keeps
-  its tag check (`notReaction()`, `isReaction()`), and their tests run over
-  both shapes (`REACTION_SHAPES` in `lib/testing/reactions.ts`). Once the worker
-  runs the change and
+  its tag check (`notReaction()`, `isReaction()`). Their reaction tests run over
+  both shapes (`REACTION_SHAPES` in `lib/testing/reactions.ts`), except the
+  categorise-ai backfill's filter, which has none. Once the worker runs the
+  change and
   `select count(*) from messages where kind = 'reply' and meta->>'whatsappType' = 'reaction'`
   answers 0 in production, the tag halves come out of both predicates, and with
-  them `REACTION_SHAPES`, the second shape in those tests and the tag rows of
-  `not-reaction.db.test.ts`. A `CHECK` in `db/sql` refusing a tagged `reply`
+  them `REACTION_SHAPES` and the second shape in those tests, the tag rows of
+  `not-reaction.db.test.ts`, and the tagged-`reply` cases in
+  `lib/side-conversations/format.test.ts` and `lib/tickets/reactions.test.ts`,
+  which expect the tag to count. A `CHECK` in `db/sql` refusing a tagged `reply`
   (added `NOT VALID`, then validated) would make a writer that forgot
   `storedKind` fail loudly instead of filing a 👍 as the customer's words.
 

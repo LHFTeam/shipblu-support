@@ -20,9 +20,9 @@ export function storedKind(whatsappType: string): 'reply' | 'reaction' {
  *
  * A reaction is kept as a row of its own, because the timeline reads it from
  * the row — and can pair it with the message it names, which `raw_body`
- * records. It is `kind: 'reaction'`, so a reader that picks the customer's
- * words by `kind = 'reply'` leaves it out already; this is for the readers that
- * pick by direction or by "not a note", and for the fold that draws it.
+ * records. It is `kind: 'reaction'`. A reader picking the customer's words
+ * asks for `kind = 'reply'`, which leaves it out, and asks this as well only
+ * for the tag below; the fold that draws reactions finds them with it.
  *
  * **The tag on `meta` still counts, for one release.** Rows stored before the
  * kind existed were `reply`, told apart only by `meta.whatsappType`.

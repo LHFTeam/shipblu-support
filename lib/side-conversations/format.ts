@@ -64,8 +64,8 @@ export function sideConversationFooter(conversationNumber: number): string {
  * `system`, and would reach the hub as the customer asking it to send the file
  * again; and a reaction would quote `[reacted 🙏]`. The composer picks its
  * anchor with this, and the action checks the id it is sent against it, so a
- * stale tab or a hand-made POST cannot quote what the composer would not have
- * offered.
+ * stale tab or a hand-made POST can quote only something the customer said on
+ * this ticket.
  */
 export function isQuotableAnchor(message: {
   direction: string;

@@ -13,17 +13,16 @@
 -- files run afterwards, each on its own, once the value has committed.
 --
 -- **Replayed on every deploy, and that is the point.** Only the web services
--- run `db:migrate`; the worker is deployed separately, and an old worker keeps
+-- run `db:migrate`; the worker is deployed after them, and an old worker keeps
 -- storing reactions as `reply` until it is. Each later deploy moves whatever it
--- wrote in between, so no row is left behind by the order things were deployed
--- in. Until the worker runs the new code, the readers still also check the tag
+-- wrote in between, so no row is left behind by the gap between the two. Until the worker runs the new code, the readers still also check the tag
 -- (`notReaction`, `isReaction`) for the same reason.
 --
--- **The body narrows the scan; the tag decides.** `meta` holds the whole Meta
--- record on every WhatsApp row, so reading the tag off all of them detoasts the
--- table: 6.5 seconds over 219k rows in production, on every deploy, growing.
--- `body_text LIKE '[reacted%'` is answered by `messages_body_trgm_idx` (001)
--- and reaches the same 1,232 rows in under a second. It cannot miss one,
+-- **The body narrows the scan; the tag decides.** Nothing indexes the tag, and
+-- filtering on it alone took 6.5 seconds over production's 219k rows — against
+-- 1.3 to scan the table on `kind` — on every deploy, and growing with the
+-- table. `body_text LIKE '[reacted%'` is answered by `messages_body_trgm_idx`
+-- (001) and reaches the same 1,232 rows in 0.9 seconds. It cannot miss one,
 -- because the only rows this file is for were written by code that no longer
 -- changes — ingest before this release, which stored every reaction, live or
 -- copied, as `displayText` renders one: `[reacted 🙏]`, or `[reacted]` for one

@@ -17,8 +17,9 @@ import { HISTORY_LIMIT, type HistoryAuthor, type HistoryMessage } from './reques
  * bookkeeping and a `forward` is a copy sent elsewhere; neither is the
  * conversation the next reply continues.
  *
- * Nor is a WhatsApp reaction, though it is stored as a reply. A 🙏 after the
- * customer's question would otherwise be the anchor — a fresh call, asked
+ * Nor is a WhatsApp reaction: it is `kind = 'reaction'`, and `notReaction()`
+ * here catches the tagged `reply` rows stored before it had a kind. A 🙏 after
+ * the customer's question would otherwise be the anchor — a fresh call, asked
  * whether `[reacted 🙏]` needs an answer, whose honest reply is `none` — and
  * would take one of the `HISTORY_LIMIT` places from something somebody said.
  */
