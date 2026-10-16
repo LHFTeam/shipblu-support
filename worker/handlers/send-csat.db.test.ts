@@ -18,10 +18,11 @@ import { withCleanDatabase } from '@/lib/testing/db';
 import { sendCsat } from './send-csat';
 
 /**
- * The survey job against real Postgres: every decision is a row, a second run
- * is harmless, the language is the customer's, and nothing is queued while the
- * switch is off. These are the three bugs the first survey ever sent had
- * (`plans/csat.md`), held here so they stay fixed.
+ * The survey job against real Postgres: every decision is a row, two runs for
+ * one ticket send one survey, a run stopped half-way is finished by the next,
+ * the language is the customer's, and nothing is queued while the switch is
+ * off. These are the bugs the first survey ever sent had (`plans/csat.md`),
+ * and the ones review found in the fix, held here so they stay fixed.
  */
 
 withCleanDatabase();
@@ -54,8 +55,10 @@ async function switchOn(overrides: Partial<Parameters<typeof saveCsatSettings>[0
 async function resolvedTicket(input: {
   channel: 'email' | 'webchat' | 'facebook' | 'whatsapp';
   email?: string | null;
+  /** The customer's one message; null for none; a media stand-in is words too here. */
   customerText?: string | null;
   status?: string;
+  externalId?: string;
 }) {
   const [contact] = await db
     .insert(contacts)
@@ -68,6 +71,7 @@ async function resolvedTicket(input: {
       statusId: await statusId(input.status ?? 'Resolved'),
       requesterContactId: contact!.id,
       lastCustomerMessageAt: new Date(),
+      externalId: input.externalId ?? null,
     })
     .returning({ id: conversations.id });
   if (input.customerText !== null) {
@@ -113,6 +117,13 @@ async function eventTypes(conversationId: string) {
   return rows.map((row) => row.type);
 }
 
+async function carrierJobs() {
+  return db
+    .select({ type: jobs.type, dedupeKey: jobs.dedupeKey })
+    .from(jobs)
+    .where(eq(jobs.type, 'send_email'));
+}
+
 describe('send_csat', () => {
   it('sends an email survey in the language the customer wrote, and records it', async () => {
     await switchOn();
@@ -141,12 +152,15 @@ describe('send_csat', () => {
     expect(message!.bodyHtml).toContain('<a href=');
     expect(message!.to).toEqual(['amira@example.test']);
 
-    const carriers = await db
-      .select({ type: jobs.type })
-      .from(jobs)
-      .where(and(eq(jobs.type, 'send_email')));
-    expect(carriers).toHaveLength(1);
+    expect(await carrierJobs()).toHaveLength(1);
     expect(await eventTypes(id)).toContain('csat_sent');
+
+    // Not the acknowledgement the rule engine looks for.
+    const [ticket] = await db
+      .select({ firstAutoRepliedAt: conversations.firstAutoRepliedAt })
+      .from(conversations)
+      .where(eq(conversations.id, id));
+    expect(ticket!.firstAutoRepliedAt).toBeNull();
   });
 
   it('records why there was no survey, on the ticket', async () => {
@@ -159,44 +173,57 @@ describe('send_csat', () => {
       customerText: null,
     });
     const whatsapp = await resolvedTicket({ channel: 'whatsapp' });
+    // A public comment thread: the survey would be posted on the post.
+    const comment = await resolvedTicket({
+      channel: 'facebook',
+      externalId: 'facebook:comment:123_456',
+    });
 
-    await sendCsat(job(noAddress));
-    await sendCsat(job(reopened));
-    await sendCsat(job(silent));
-    await sendCsat(job(whatsapp));
+    for (const id of [noAddress, reopened, silent, whatsapp, comment]) await sendCsat(job(id));
 
-    expect((await surveysOf(noAddress))[0]).toMatchObject({
-      status: 'skipped',
-      skipReason: 'no_address',
-    });
-    expect((await surveysOf(reopened))[0]).toMatchObject({
-      status: 'skipped',
-      skipReason: 'reopened',
-    });
-    expect((await surveysOf(silent))[0]).toMatchObject({
-      status: 'skipped',
-      skipReason: 'no_customer_message',
-    });
-    expect((await surveysOf(whatsapp))[0]).toMatchObject({
-      status: 'skipped',
-      skipReason: 'channel_off',
-    });
+    expect((await surveysOf(noAddress))[0]).toMatchObject({ skipReason: 'no_address' });
+    expect((await surveysOf(reopened))[0]).toMatchObject({ skipReason: 'reopened' });
+    expect((await surveysOf(silent))[0]).toMatchObject({ skipReason: 'no_customer_message' });
+    expect((await surveysOf(whatsapp))[0]).toMatchObject({ skipReason: 'channel_off' });
+    expect((await surveysOf(comment))[0]).toMatchObject({ skipReason: 'comment_thread' });
     expect(await eventTypes(noAddress)).toEqual(['csat_skipped']);
 
     // No survey row carries a message, so nothing was queued to any carrier.
     expect(await db.select({ id: jobs.id }).from(jobs)).toHaveLength(0);
   });
 
-  it('is harmless run twice, and surveys the ticket again only after the window', async () => {
+  it('counts a photo as the customer taking part', async () => {
+    await switchOn();
+    // What ingest stores for a photo sent without a caption: a label of ours,
+    // which the language rule looks past but which is still the customer
+    // writing in.
+    const id = await resolvedTicket({ channel: 'webchat', customerText: '[image]' });
+
+    await sendCsat(job(id));
+
+    expect((await surveysOf(id))[0]).toMatchObject({ status: 'sent', locale: 'en' });
+  });
+
+  it('sends one survey when two jobs for one ticket run together, and writes nothing for the other', async () => {
+    await switchOn();
+    const id = await resolvedTicket({ channel: 'email', email: 'a@b.test' });
+
+    await Promise.all([sendCsat(job(id)), sendCsat(job(id, 'manual')), sendCsat(job(id))]);
+
+    const rows = await surveysOf(id);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.status).toBe('sent');
+    expect(await carrierJobs()).toHaveLength(1);
+    expect(await eventTypes(id)).toEqual(['csat_sent']);
+  });
+
+  it('surveys the ticket again only after the window, retiring the unanswered one', async () => {
     await switchOn({ resurveyAfterDays: 14 });
     const id = await resolvedTicket({ channel: 'webchat' });
 
     await sendCsat(job(id));
     await sendCsat(job(id));
-
-    const rows = await surveysOf(id);
-    expect(rows.map((row) => row.status).sort()).toEqual(['sent', 'skipped']);
-    expect(rows.find((row) => row.status === 'skipped')!.skipReason).toBe('recently_surveyed');
+    expect(await surveysOf(id)).toHaveLength(1);
 
     // The first survey ages past the window, unanswered — as most are. The
     // next resolve is surveyed, and the old row steps aside rather than
@@ -209,6 +236,24 @@ describe('send_csat', () => {
     const after = await surveysOf(id);
     expect(after.filter((row) => row.status === 'sent')).toHaveLength(1);
     expect(after.filter((row) => row.status === 'expired')).toHaveLength(1);
+  });
+
+  it('finishes a run that was stopped between its commit and the carrier', async () => {
+    await switchOn();
+    const id = await resolvedTicket({ channel: 'email', email: 'a@b.test' });
+
+    await sendCsat(job(id));
+    // The worker died after the rows committed and before the job was queued.
+    await db.delete(jobs).where(eq(jobs.type, 'send_email'));
+
+    await sendCsat(job(id));
+
+    const [survey] = await surveysOf(id);
+    expect(survey!.status).toBe('sent');
+    expect(await surveysOf(id)).toHaveLength(1);
+    expect(await carrierJobs()).toEqual([
+      { type: 'send_email', dedupeKey: `send:${survey!.messageId}` },
+    ]);
   });
 
   it('honours the agent, the rule switch and the channel switches', async () => {
@@ -235,13 +280,13 @@ describe('send_csat', () => {
 
   it('queues nothing while the switch is off, and the delay the admin set when on', async () => {
     const id = await resolvedTicket({ channel: 'email', email: 'a@b.test' });
-    expect(await scheduleSurvey(id, 'agent')).toBe(false);
+    expect(await scheduleSurvey(id, 'agent')).toBe('off');
     expect(await db.select({ id: jobs.id }).from(jobs)).toHaveLength(0);
 
     await switchOn({ delayMinutes: 45 });
     const before = Date.now();
-    expect(await scheduleSurvey(id, 'agent')).toBe(true);
-    expect(await scheduleSurvey(id, 'manual')).toBe(true);
+    expect(await scheduleSurvey(id, 'agent')).toBe('queued');
+    expect(await scheduleSurvey(id, 'manual')).toBe('queued');
 
     const queued = await db
       .select({ runAt: jobs.runAt, payload: jobs.payload, dedupeKey: jobs.dedupeKey })

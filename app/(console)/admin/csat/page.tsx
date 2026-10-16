@@ -1,13 +1,10 @@
-import Link from 'next/link';
-import { Badge, Cell, PageHeader, Row, Table } from '@/components/ui';
-import { RelativeTime } from '@/components/relative-time';
+import { PageHeader } from '@/components/ui';
 import { requirePermission } from '@/lib/auth/guard';
 import { recentSurveys } from '@/lib/csat';
 import { loadCsatSettings } from '@/lib/csat/settings';
-import { describeSkip } from '@/lib/csat/skip-reasons';
-import { ago, channelLabel } from '@/lib/format';
 import { publicBaseUrl } from '@/lib/kb/site';
 import { SurveySettingsForm } from './forms';
+import { RecentSurveyList } from './recent-list';
 
 export const dynamic = 'force-dynamic';
 
@@ -47,47 +44,7 @@ export default async function CsatAdminPage() {
           <h2 className="mb-2 text-sm font-semibold text-(--color-text-secondary)">
             Recent decisions
           </h2>
-          <Table head={['Ticket', 'Channel', 'What happened', 'Rating', 'When']}>
-            {recent.map((row) => (
-              <Row key={row.id}>
-                <Cell>
-                  <Link href={`/inbox/${row.number}`} className="underline">
-                    #{row.number}
-                  </Link>
-                </Cell>
-                <Cell className="text-xs text-(--color-text-secondary)">
-                  {row.channel ? channelLabel(row.channel) : '—'}
-                </Cell>
-                <Cell className="text-xs">
-                  {row.status === 'skipped' ? (
-                    <>
-                      <Badge tone="neutral">Not sent</Badge>{' '}
-                      <span className="text-(--color-text-secondary)">
-                        {describeSkip(row.skipReason)}
-                      </span>
-                    </>
-                  ) : row.status === 'answered' ? (
-                    <Badge tone="success">Answered</Badge>
-                  ) : row.status === 'expired' ? (
-                    <Badge tone="neutral">Replaced by a newer survey</Badge>
-                  ) : (
-                    <Badge tone="info">
-                      Sent {row.delivery === 'email_link' ? 'by email' : 'as a message'}
-                    </Badge>
-                  )}
-                </Cell>
-                <Cell className="text-xs">{row.rating === null ? '—' : `${row.rating} / 5`}</Cell>
-                <Cell className="text-xs text-(--color-text-secondary)">
-                  <RelativeTime at={row.createdAt}>{(relative) => ago(relative)}</RelativeTime>
-                </Cell>
-              </Row>
-            ))}
-          </Table>
-          {recent.length === 0 ? (
-            <p className="mt-3 text-sm text-(--color-text-secondary)">
-              Nothing yet. A decision is recorded for every ticket resolved while surveys are on.
-            </p>
-          ) : null}
+          <RecentSurveyList rows={recent} />
         </section>
       </div>
     </>

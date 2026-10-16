@@ -1,6 +1,7 @@
 'use server';
 
 import { requirePermission } from '@/lib/auth/guard';
+import { MAX_DELAY_MINUTES, MAX_RESURVEY_DAYS } from '@/lib/csat/limits';
 import { saveCsatSettings, type CsatSettingsInput } from '@/lib/csat/settings';
 import { ok } from '@/lib/http/action-state';
 import { text } from '@/lib/http/form-data';
@@ -13,9 +14,6 @@ import { refresh, type SettingsState } from '../settings-shared';
  * only mean anything beside the switch they govern, and a page where half the
  * settings saved and half refused is a page the admin has to re-read.
  */
-
-const MAX_DELAY_MINUTES = 7 * 24 * 60;
-const MAX_RESURVEY_DAYS = 365;
 
 /** A whole number of units within bounds, or the sentence to refuse it with. */
 function bounded(raw: string, label: string, max: number): { value: number } | { error: string } {

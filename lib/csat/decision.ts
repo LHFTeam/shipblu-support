@@ -13,6 +13,12 @@ import type { SkipReason } from './skip-reasons';
  * an admin who switched surveys off should read "switched off" on every
  * ticket, not a different reason on each depending on which other check
  * happened to fire first.
+ *
+ * One thing is not decided here: whether the ticket already carries a survey
+ * inside the resurvey window. That is read under a lock on the ticket, at the
+ * moment the survey row is written (`sendSurvey`), because two jobs for one
+ * ticket can run at once and a check made before either writes lets both
+ * through.
  */
 
 /** Who asked for the survey: an agent resolving, a rule resolving, or the sidebar's "Send now". */
@@ -24,12 +30,23 @@ export type DecisionInput = {
   deletedAt: Date | null;
   isSpam: boolean;
   mergedIntoId: string | null;
-  /** Whether any inbound reply on the ticket carries words the customer wrote. */
-  hasCustomerWords: boolean;
+  /**
+   * Whether the customer sent anything on the ticket — words, a photo, a
+   * voice note. Not whether they wrote *words*: a customer who sent a photo of
+   * the damaged parcel took part, and the rule that looks past our media
+   * labels (`carriesCustomerText`) was written to pick a language, not to
+   * decide that.
+   */
+  hasCustomerMessage: boolean;
   suppressed: boolean;
   trigger: SurveyTrigger;
-  recentlySurveyed: boolean;
   contactEmail: string | null;
+  /**
+   * On Facebook and Instagram, whether the ticket is a public comment thread
+   * (`rootCommentId` found one). A survey there would be posted on the comment
+   * edge, link and all, for anybody reading the post to answer.
+   */
+  commentThread: boolean;
   /**
    * On Facebook and Instagram, whether an automated message can send right
    * now (`automatedReplyBlocked` answered null). Ignored elsewhere.
@@ -87,15 +104,13 @@ export function decideSurvey(input: DecisionInput, settings: CsatSettings): Deci
   if (input.readOnly) return { kind: 'skip', reason: 'read_only_channel' };
 
   // An agent-opened ticket the customer never answered has nothing to rate.
-  if (!input.hasCustomerWords) return { kind: 'skip', reason: 'no_customer_message' };
+  if (!input.hasCustomerMessage) return { kind: 'skip', reason: 'no_customer_message' };
 
   if (input.suppressed) return { kind: 'skip', reason: 'agent_suppressed' };
 
   if (input.trigger === 'rule' && !settings.surveyRuleResolved) {
     return { kind: 'skip', reason: 'rule_resolved' };
   }
-
-  if (input.recentlySurveyed) return { kind: 'skip', reason: 'recently_surveyed' };
 
   if (input.byEmail) {
     return input.contactEmail
@@ -104,6 +119,9 @@ export function decideSurvey(input: DecisionInput, settings: CsatSettings): Deci
   }
 
   if (input.channel === 'facebook' || input.channel === 'instagram') {
+    // Before the window: a comment thread has no window, which is exactly why
+    // `automatedReplyBlocked` lets it through — and why it must not be here.
+    if (input.commentThread) return { kind: 'skip', reason: 'comment_thread' };
     return input.metaWindowOpen
       ? { kind: 'send', delivery: 'text_link' }
       : { kind: 'skip', reason: 'window_closed' };

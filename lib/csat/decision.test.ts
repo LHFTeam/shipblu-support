@@ -5,7 +5,7 @@ import { UNSET_CSAT_SETTINGS, type CsatSettings } from './settings';
 /**
  * The order the reasons are reported in, and the delivery each channel gets.
  * The job writes whatever this answers, so a wrong branch here is a customer
- * surveyed twice or an admin reading the wrong reason on every ticket.
+ * surveyed in public or an admin reading the wrong reason on every ticket.
  */
 
 const ON: CsatSettings = {
@@ -21,11 +21,11 @@ function input(overrides: Partial<DecisionInput> = {}): DecisionInput {
     deletedAt: null,
     isSpam: false,
     mergedIntoId: null,
-    hasCustomerWords: true,
+    hasCustomerMessage: true,
     suppressed: false,
     trigger: 'agent',
-    recentlySurveyed: false,
     contactEmail: 'amira@example.test',
+    commentThread: false,
     metaWindowOpen: true,
     readOnly: false,
     byEmail: true,
@@ -52,10 +52,7 @@ describe('decideSurvey', () => {
         ...ON,
         channels: { ...ON.channels, webchat: false },
       }),
-    ).toEqual({
-      kind: 'skip',
-      reason: 'channel_off',
-    });
+    ).toEqual({ kind: 'skip', reason: 'channel_off' });
   });
 
   it('reports the reasons in the order a person would want them', () => {
@@ -63,17 +60,13 @@ describe('decideSurvey', () => {
       kind: 'skip',
       reason: 'reopened',
     });
-    expect(decideSurvey(input({ hasCustomerWords: false, suppressed: true }), ON)).toEqual({
+    expect(decideSurvey(input({ hasCustomerMessage: false, suppressed: true }), ON)).toEqual({
       kind: 'skip',
       reason: 'no_customer_message',
     });
-    expect(decideSurvey(input({ suppressed: true, recentlySurveyed: true }), ON)).toEqual({
+    expect(decideSurvey(input({ suppressed: true, contactEmail: null }), ON)).toEqual({
       kind: 'skip',
       reason: 'agent_suppressed',
-    });
-    expect(decideSurvey(input({ recentlySurveyed: true }), ON)).toEqual({
-      kind: 'skip',
-      reason: 'recently_surveyed',
     });
   });
 
@@ -117,6 +110,21 @@ describe('decideSurvey', () => {
     expect(
       decideSurvey(input({ channel: 'instagram', byEmail: false, metaWindowOpen: false }), ON),
     ).toEqual({ kind: 'skip', reason: 'window_closed' });
+  });
+
+  it('never surveys a public comment thread, whatever the window says', () => {
+    // `automatedReplyBlocked` lets a comment ticket through because it has no
+    // window — which is exactly why the survey, link and all, would be posted
+    // on the comment for anybody reading the post to answer.
+    expect(
+      decideSurvey(
+        input({ channel: 'facebook', byEmail: false, commentThread: true, metaWindowOpen: true }),
+        ON,
+      ),
+    ).toEqual({ kind: 'skip', reason: 'comment_thread' });
+    // And a comment thread is not an email ticket, so the email branch never
+    // reaches it; a comment ticket on email does not exist.
+    expect(decideSurvey(input({ commentThread: true }), ON).kind).toBe('send');
   });
 
   it('never surveys a channel the team does not write to', () => {

@@ -7,6 +7,10 @@
  * same reason three ways, and so the timeline's `describeEvent` — which keeps
  * clear of anything that would pull a database client into the browser bundle
  * — can still name the reason.
+ *
+ * "Surveyed recently" is deliberately not one: a ticket that already carries
+ * its survey needs no second row saying so, and the row it would sit on top
+ * of is the answer (`sendSurvey` in `lib/csat`).
  */
 export const SKIP_REASONS = {
   csat_off: 'surveys are switched off',
@@ -16,8 +20,8 @@ export const SKIP_REASONS = {
   no_customer_message: 'the customer never wrote on this ticket',
   agent_suppressed: 'an agent asked that this ticket not be surveyed',
   rule_resolved: 'a rule resolved it, and rule-resolved tickets are not surveyed',
-  recently_surveyed: 'the customer was surveyed about this ticket recently',
   no_address: 'there is no email address to send it to',
+  comment_thread: 'the conversation is a public comment thread, where a survey would be public too',
   window_closed: 'the messaging window had closed',
 } as const;
 

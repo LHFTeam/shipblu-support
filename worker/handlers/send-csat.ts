@@ -1,13 +1,19 @@
-import { eq } from 'drizzle-orm';
+import { and, eq, exists } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { contacts, conversations, messages, ticketStatuses } from '@/db/schema';
-import { attachMessage, recentlySurveyed, recordSent, recordSkip } from '@/lib/csat';
+import { recordSkip, sendSurvey, unsentSurveyMessage } from '@/lib/csat';
 import { decideSurvey, type SurveyTrigger } from '@/lib/csat/decision';
 import { loadCsatSettings } from '@/lib/csat/settings';
+import { rootCommentId } from '@/lib/meta/comments';
 import { isReadOnlyChannel } from '@/lib/tickets/channel-policy';
-import { newestCustomerWords, requesterLocale } from '@/lib/tickets/locale';
-import { automatedReplyBlocked, carrierFor, sendsByEmail } from '@/lib/tickets/outbound';
-import { enqueue, type ClaimedJob } from '@/lib/queue';
+import { newestCustomerWords, preferredLocale } from '@/lib/tickets/locale';
+import { notReaction } from '@/lib/tickets/not-reaction';
+import {
+  automatedReplyBlocked,
+  enqueueAutomatedDelivery,
+  sendsByEmail,
+} from '@/lib/tickets/outbound';
+import type { ClaimedJob } from '@/lib/queue';
 import { parseJobPayload } from '@/lib/queue/payloads';
 import { logger } from '@/lib/log';
 
@@ -26,9 +32,14 @@ const log = logger('send_csat');
  * and tested; this reads what it needs and writes what it decided.
  *
  * The job runs at least once, not exactly once (AGENTS.md, _The worker is a
- * pool_): a second run finds `recentlySurveyed` true and records that, and two
- * runs racing meet `csat_surveys_open_idx`.
+ * pool_), and two jobs for one ticket can run together. `sendSurvey` is where
+ * that is settled: under a lock on the ticket, a second survey inside the
+ * window is refused and nothing is written, and a run stopped after its rows
+ * committed is finished by the next one queueing the carrier it never did.
  */
+
+/** The survey's carrier priority: behind an acknowledgement, which a customer is waiting on. */
+const PRIORITY = 50;
 
 const TEXT = {
   en: (number: number, url: string) =>
@@ -66,6 +77,22 @@ export async function sendCsat(job: ClaimedJob): Promise<void> {
       externalId: conversations.externalId,
       statusCategory: ticketStatuses.category,
       contactEmail: contacts.primaryEmail,
+      contactLocale: contacts.locale,
+      // Whether the customer sent anything at all — a reaction aside, which is
+      // an acknowledgement of an answer rather than taking part.
+      hasCustomerMessage: exists(
+        db
+          .select({ id: messages.id })
+          .from(messages)
+          .where(
+            and(
+              eq(messages.conversationId, conversations.id),
+              eq(messages.direction, 'inbound'),
+              eq(messages.kind, 'reply'),
+              notReaction(),
+            ),
+          ),
+      ),
     })
     .from(conversations)
     .innerJoin(ticketStatuses, eq(ticketStatuses.id, conversations.statusId))
@@ -79,11 +106,6 @@ export async function sendCsat(job: ClaimedJob): Promise<void> {
   const settings = await loadCsatSettings();
   const isMeta = ticket.channel === 'facebook' || ticket.channel === 'instagram';
 
-  const [words, surveyed] = await Promise.all([
-    newestCustomerWords(conversationId),
-    recentlySurveyed(conversationId, settings.resurveyAfterDays),
-  ]);
-
   const decision = decideSurvey(
     {
       channel: ticket.channel,
@@ -91,11 +113,11 @@ export async function sendCsat(job: ClaimedJob): Promise<void> {
       deletedAt: ticket.deletedAt,
       isSpam: ticket.isSpam,
       mergedIntoId: ticket.mergedIntoId,
-      hasCustomerWords: words !== null,
+      hasCustomerMessage: Boolean(ticket.hasCustomerMessage),
       suppressed: ticket.csatSuppressed,
       trigger,
-      recentlySurveyed: surveyed,
       contactEmail: ticket.contactEmail,
+      commentThread: rootCommentId(ticket.externalId) !== null,
       // The third automated sender, through the same guard as the other two:
       // past 24 hours only `HUMAN_AGENT` sends on these platforms, and that tag
       // is reserved for a message a person wrote.
@@ -120,56 +142,43 @@ export async function sendCsat(job: ClaimedJob): Promise<void> {
     return;
   }
 
-  // The customer's own words, not `contacts.locale`, which nothing writes:
-  // read off the column, every survey went out in English (§6).
-  const locale = await requesterLocale(conversationId);
-  const survey = await recordSent(conversationId, locale, decision.delivery, snapshot);
-
-  const isEmail = decision.delivery === 'email_link';
-  const isWebchat = ticket.channel === 'webchat';
-
-  const inserted = await db
-    .insert(messages)
-    .values({
-      conversationId,
-      direction: 'outbound',
-      kind: 'reply',
-      bodyText: TEXT[locale](ticket.number, survey.url),
-      bodyHtml: isEmail ? HTML[locale](ticket.number, survey.url) : null,
-      toAddresses: isEmail && ticket.contactEmail ? [ticket.contactEmail] : [],
-      // Web chat has no carrier: the row is the delivery, and the widget's
-      // stream is already reading from it.
-      deliveryStatus: isWebchat ? 'delivered' : 'pending',
-      ...(isWebchat ? { deliveredAt: new Date() } : {}),
-      meta: { csatSurveyId: survey.id },
-    })
-    .returning({ id: messages.id });
-
-  const messageId = inserted[0]!.id;
-
-  // Deliberately not touching `lastAgentMessageAt`: a survey is not a reply to
-  // the customer, and counting it as one would flatter every response-time
-  // report by half an hour.
-  await db
-    .update(conversations)
-    .set({ lastMessageAt: new Date() })
-    .where(eq(conversations.id, conversationId));
-
-  await attachMessage(
-    { id: survey.id, conversationId, delivery: decision.delivery, locale },
-    messageId,
+  // The customer's own words, not `contacts.locale` alone, which nothing
+  // writes: read off the column, every survey went out in English (§6). The
+  // same two ingredients `requesterLocale()` combines, read here with the
+  // contact's column already in hand.
+  const locale = preferredLocale(
+    ticket.contactLocale ?? 'en',
+    await newestCustomerWords(conversationId),
   );
 
-  if (!isWebchat) {
-    // `carrierFor` rather than a second copy of the channel-to-job mapping: the
-    // copy here once read `whatsapp ? send_whatsapp : send_email`, so a survey
-    // on a Facebook ticket was queued as an email to a contact with no address.
-    await enqueue(
-      carrierFor(ticket.channel),
-      { messageId },
-      { priority: 50, dedupeKey: `send:${messageId}` },
-    );
+  const sent = await sendSurvey({
+    conversationId,
+    locale,
+    delivery: decision.delivery,
+    snapshot,
+    resurveyAfterDays: settings.resurveyAfterDays,
+    requesterEmail: ticket.contactEmail,
+    body: (url) => ({
+      text: TEXT[locale](ticket.number, url),
+      html: decision.delivery === 'email_link' ? HTML[locale](ticket.number, url) : null,
+    }),
+  });
+
+  if (!sent) {
+    // Surveyed inside the window already, by an earlier run or by the other of
+    // two jobs for one ticket. The one thing left to check is whether that run
+    // got as far as queueing the carrier.
+    const unsent = await unsentSurveyMessage(conversationId);
+    if (unsent) {
+      await enqueueAutomatedDelivery(ticket.channel, unsent, PRIORITY);
+      log.info(`#${ticket.number}: queued the carrier for a survey a stopped run left behind`);
+    } else {
+      log.info(`#${ticket.number}: surveyed inside the window already — nothing to do`);
+    }
+    return;
   }
+
+  await enqueueAutomatedDelivery(ticket.channel, sent.messageId, PRIORITY);
 
   log.info(`surveyed #${ticket.number} on ${ticket.channel} in ${locale}`);
 }

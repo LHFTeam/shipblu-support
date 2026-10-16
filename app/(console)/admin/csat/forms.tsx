@@ -6,6 +6,7 @@ import { InfoTip } from '@/components/tooltip';
 import { RelativeTime } from '@/components/relative-time';
 import { useActionForm } from '@/components/use-action-form';
 import { ago } from '@/lib/format';
+import { MAX_DELAY_MINUTES, MAX_RESURVEY_DAYS } from '@/lib/csat/limits';
 import type { CsatSettings } from '@/lib/csat/settings';
 import type { ActionState } from '@/lib/http/action-state';
 import { saveSurveySettings } from './actions';
@@ -75,7 +76,7 @@ export function SurveySettingsForm({ settings }: { settings: CsatSettings }) {
               name="delayMinutes"
               type="number"
               min={0}
-              max={10080}
+              max={MAX_DELAY_MINUTES}
               step={1}
               defaultValue={settings.delayMinutes}
             />
@@ -98,7 +99,7 @@ export function SurveySettingsForm({ settings }: { settings: CsatSettings }) {
               name="metaDelayMinutes"
               type="number"
               min={0}
-              max={10080}
+              max={MAX_DELAY_MINUTES}
               step={1}
               defaultValue={settings.metaDelayMinutes ?? ''}
               placeholder="same"
@@ -114,7 +115,7 @@ export function SurveySettingsForm({ settings }: { settings: CsatSettings }) {
               name="resurveyAfterDays"
               type="number"
               min={0}
-              max={365}
+              max={MAX_RESURVEY_DAYS}
               step={1}
               defaultValue={settings.resurveyAfterDays}
             />

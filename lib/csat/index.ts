@@ -1,11 +1,12 @@
-import { and, desc, eq, gt, inArray, isNull } from 'drizzle-orm';
+import { and, desc, eq, gt, inArray, isNull, notExists, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
-import { conversationEvents, conversations, csatSurveys } from '@/db/schema';
+import { conversationEvents, conversations, csatSurveys, jobs, messages } from '@/db/schema';
 import { generateToken, hashToken } from '@/lib/auth/tokens';
 import { publicBaseUrl } from '@/lib/kb/site';
 import { enqueue } from '@/lib/queue';
 import { logger } from '@/lib/log';
 import type { ConversationChannel } from '@/lib/tickets/channel-policy';
+import { writeAutomatedReply } from '@/lib/tickets/outbound';
 import type { SurveyTrigger } from './decision';
 import { loadCsatSettings } from './settings';
 import type { SkipReason } from './skip-reasons';
@@ -29,6 +30,8 @@ const log = logger('csat');
 /** Timeline actor for everything the survey machinery writes. */
 const ACTOR = 'csat';
 
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
 /**
  * Queues the survey for a ticket that just reached a resolved status.
  *
@@ -40,21 +43,20 @@ const ACTOR = 'csat';
  * **No dedupe key.** The key this used to carry (`csat:<conversationId>`) is
  * spent for good — `jobs_dedupe_idx` matches a job that completed months ago —
  * so a ticket reopened and resolved again was never surveyed twice, and the
- * resurvey window below was unreachable. The job is idempotent instead:
- * `recentlySurveyed` refuses a second survey inside the window, and
- * `csat_surveys_open_idx` makes two runs racing on one ticket a conflict rather
- * than two surveys.
+ * resurvey window was unreachable. The job is idempotent instead: `sendSurvey`
+ * refuses a second survey inside the window under a lock on the ticket.
  *
- * Returns whether a job was queued. Nothing is while the switch is off: a
- * ticket resolved while surveys were off is not surveyed when they come on.
+ * Nothing is queued while the switch is off: a ticket resolved while surveys
+ * were off is not surveyed when they come on. The answer says which, so the
+ * sidebar's "Send now" can tell the agent.
  */
 export async function scheduleSurvey(
   conversationId: string,
   trigger: SurveyTrigger,
-): Promise<boolean> {
+): Promise<'queued' | 'off' | 'unknown'> {
   try {
     const settings = await loadCsatSettings();
-    if (!settings.enabled) return false;
+    if (!settings.enabled) return 'off';
 
     const rows = await db
       .select({ channel: conversations.channel })
@@ -62,7 +64,7 @@ export async function scheduleSurvey(
       .where(eq(conversations.id, conversationId))
       .limit(1);
     const channel = rows[0]?.channel;
-    if (!channel) return false;
+    if (!channel) return 'unknown';
 
     const isMeta = channel === 'facebook' || channel === 'instagram';
     const delayMinutes =
@@ -75,30 +77,11 @@ export async function scheduleSurvey(
       { conversationId, trigger },
       { runAt: new Date(Date.now() + delayMinutes * 60_000), priority: 50 },
     );
-    return true;
+    return 'queued';
   } catch (error) {
     log.error(`could not schedule a survey for ${conversationId}`, error);
-    return false;
+    return 'unknown';
   }
-}
-
-/** True when this ticket was surveyed inside the resurvey window. */
-export async function recentlySurveyed(conversationId: string, days: number): Promise<boolean> {
-  const cutoff = new Date(Date.now() - days * 24 * 3_600_000);
-
-  const rows = await db
-    .select({ id: csatSurveys.id })
-    .from(csatSurveys)
-    .where(
-      and(
-        eq(csatSurveys.conversationId, conversationId),
-        inArray(csatSurveys.status, ['sent', 'answered', 'expired']),
-        gt(csatSurveys.sentAt, cutoff),
-      ),
-    )
-    .limit(1);
-
-  return rows.length > 0;
 }
 
 /** Who handled the ticket when the decision was taken, frozen on the row. */
@@ -114,89 +97,174 @@ export async function recordSkip(
   reason: SkipReason,
   snapshot: SurveySnapshot,
 ): Promise<void> {
-  await db.insert(csatSurveys).values({
-    conversationId,
-    status: 'skipped',
-    skipReason: reason,
-    agentId: snapshot.agentId,
-    groupId: snapshot.groupId,
-    channel: snapshot.channel,
-  });
+  await db.transaction(async (tx) => {
+    await tx.insert(csatSurveys).values({
+      conversationId,
+      status: 'skipped',
+      skipReason: reason,
+      agentId: snapshot.agentId,
+      groupId: snapshot.groupId,
+      channel: snapshot.channel,
+    });
 
-  await db.insert(conversationEvents).values({
-    conversationId,
-    type: 'csat_skipped',
-    actorLabel: ACTOR,
-    data: { reason },
+    await tx.insert(conversationEvents).values({
+      conversationId,
+      type: 'csat_skipped',
+      actorLabel: ACTOR,
+      data: { reason },
+    });
   });
 }
 
-export type NewSurvey = { id: string; url: string };
+/** True when this ticket carries a survey sent inside the resurvey window. */
+async function surveyedWithin(tx: Tx, conversationId: string, days: number): Promise<boolean> {
+  const cutoff = new Date(Date.now() - days * 24 * 3_600_000);
+
+  const rows = await tx
+    .select({ id: csatSurveys.id })
+    .from(csatSurveys)
+    .where(
+      and(
+        eq(csatSurveys.conversationId, conversationId),
+        inArray(csatSurveys.status, ['sent', 'answered', 'expired']),
+        gt(csatSurveys.sentAt, cutoff),
+      ),
+    )
+    .limit(1);
+
+  return rows.length > 0;
+}
+
+export type SurveySend = {
+  conversationId: string;
+  /** `ar` or `en`: what it goes out in. */
+  locale: 'ar' | 'en';
+  delivery: 'email_link' | 'text_link';
+  snapshot: SurveySnapshot;
+  /** `csat_settings.resurvey_after_days`, read by the job. */
+  resurveyAfterDays: number;
+  /** The requester's address, where the carrier is email. */
+  requesterEmail: string | null;
+  /** The message, given the link it will carry. */
+  body: (url: string) => { text: string; html: string | null };
+};
+
+export type SentSurvey = { surveyId: string; messageId: string };
 
 /**
- * Creates the survey row and returns the link to put in the message.
+ * Writes the survey and the message that carries it, as one transaction, and
+ * returns their ids — or null when the ticket already carries a survey inside
+ * the window, which is the whole of this module's idempotency:
  *
- * The raw token exists only in the returned URL — it is hashed on the way into
- * the database and never recoverable — so a survey link that gets lost cannot
- * be looked up and resent, only reissued.
+ * - **The ticket row is locked first.** Two jobs for one ticket — a resolve,
+ *   a reopen and a resolve seconds apart, or "Send now" pressed twice — run
+ *   at once in the worker pool, and a check made before either writes lets
+ *   both through. Behind the lock, the second reads the first's row.
+ * - **The survey, the message and the event commit together.** A worker
+ *   stopped between them, or a pool error on the way, left a `sent` row with
+ *   no message, which the retry counted as surveyed; the customer never got
+ *   it while the sidebar said it went. Only the carrier job is queued after
+ *   the commit (`enqueueAutomatedDelivery`), and it is keyed on the message,
+ *   so a retry can queue it again and queue nothing.
+ * - **The ticket's last survey, unanswered, is superseded.** Most are never
+ *   answered, so without this the next resolution would meet
+ *   `csat_surveys_open_idx` on the old row and the job would die. Its link
+ *   still records an answer if the customer gets round to it.
  *
- * Written before the message that carries it, because the message's `meta`
- * names the survey; `attachMessage` closes the loop once the message exists.
+ * The raw token exists only in the link — it is hashed on the way into the
+ * database and never recoverable — so a survey link that gets lost cannot be
+ * looked up and resent, only reissued.
  */
-export async function recordSent(
-  conversationId: string,
-  locale: 'ar' | 'en',
-  delivery: 'email_link' | 'text_link',
-  snapshot: SurveySnapshot,
-): Promise<NewSurvey> {
+export async function sendSurvey(send: SurveySend): Promise<SentSurvey | null> {
   const token = generateToken();
+  const url = `${publicBaseUrl()}/${send.locale}/csat/${token}`;
 
-  const id = await db.transaction(async (tx) => {
-    // The ticket's last survey, unanswered, is superseded by this one. Most
-    // surveys are never answered, so without this the next resolution would
-    // meet `csat_surveys_open_idx` on the old row and the job would die. Its
-    // link still records an answer if the customer gets round to it.
+  return db.transaction(async (tx) => {
+    await tx
+      .select({ id: conversations.id })
+      .from(conversations)
+      .where(eq(conversations.id, send.conversationId))
+      .for('update');
+
+    if (await surveyedWithin(tx, send.conversationId, send.resurveyAfterDays)) return null;
+
     await tx
       .update(csatSurveys)
       .set({ status: 'expired' })
-      .where(and(eq(csatSurveys.conversationId, conversationId), eq(csatSurveys.status, 'sent')));
+      .where(
+        and(eq(csatSurveys.conversationId, send.conversationId), eq(csatSurveys.status, 'sent')),
+      );
 
     const rows = await tx
       .insert(csatSurveys)
       .values({
-        conversationId,
+        conversationId: send.conversationId,
         status: 'sent',
         tokenHash: hashToken(token),
         // Snapshotted at send time: reassigning the ticket next week must not
         // silently move this score onto somebody else's record.
-        agentId: snapshot.agentId,
-        groupId: snapshot.groupId,
-        channel: snapshot.channel,
-        delivery,
-        locale,
+        agentId: send.snapshot.agentId,
+        groupId: send.snapshot.groupId,
+        channel: send.snapshot.channel,
+        delivery: send.delivery,
+        locale: send.locale,
         sentAt: new Date(),
       })
       .returning({ id: csatSurveys.id });
+    const surveyId = rows[0]!.id;
 
-    return rows[0]!.id;
+    const body = send.body(url);
+    const messageId = await writeAutomatedReply(
+      tx,
+      {
+        conversationId: send.conversationId,
+        channel: send.snapshot.channel,
+        requesterEmail: send.requesterEmail,
+        bodyText: body.text,
+        bodyHtml: body.html,
+        actorLabel: ACTOR,
+        eventType: 'csat_sent',
+        eventData: { surveyId, delivery: send.delivery, locale: send.locale },
+        meta: { csatSurveyId: surveyId },
+      },
+      // A survey is not the acknowledgement the rule engine looks for; the
+      // ticket is resolved, and a rule keyed off "already acknowledged" must
+      // not read one as that.
+      { stampFirstAutoReply: false },
+    );
+
+    await tx.update(csatSurveys).set({ messageId }).where(eq(csatSurveys.id, surveyId));
+
+    return { surveyId, messageId };
   });
-
-  return { id, url: `${publicBaseUrl()}/${locale}/csat/${token}` };
 }
 
-/** Names the outbound row that carried the survey, and tells the timeline it went. */
-export async function attachMessage(
-  survey: { id: string; conversationId: string; delivery: string; locale: string },
-  messageId: string,
-): Promise<void> {
-  await db.update(csatSurveys).set({ messageId }).where(eq(csatSurveys.id, survey.id));
+/**
+ * A survey this ticket carries whose message never got a carrier job: the
+ * run that wrote it was stopped between its commit and the enqueue. The job
+ * queues the carrier for it and nothing else.
+ */
+export async function unsentSurveyMessage(conversationId: string): Promise<string | null> {
+  const rows = await db
+    .select({ messageId: messages.id })
+    .from(csatSurveys)
+    .innerJoin(messages, eq(messages.id, csatSurveys.messageId))
+    .where(
+      and(
+        eq(csatSurveys.conversationId, conversationId),
+        eq(csatSurveys.status, 'sent'),
+        eq(messages.deliveryStatus, 'pending'),
+        notExists(
+          db
+            .select({ one: sql`1` })
+            .from(jobs)
+            .where(eq(jobs.dedupeKey, sql`'send:' || ${messages.id}::text`)),
+        ),
+      ),
+    )
+    .limit(1);
 
-  await db.insert(conversationEvents).values({
-    conversationId: survey.conversationId,
-    type: 'csat_sent',
-    actorLabel: ACTOR,
-    data: { surveyId: survey.id, messageId, delivery: survey.delivery, locale: survey.locale },
-  });
+  return rows[0]?.messageId ?? null;
 }
 
 export type SurveyView = {
@@ -309,6 +377,11 @@ const SUMMARY = {
   respondedAt: csatSurveys.respondedAt,
 };
 
+/**
+ * The newest row is the newest decision: a second job inside the window
+ * writes nothing (`sendSurvey`), so a survey that went out is not buried
+ * under a note saying it already had.
+ */
 export async function latestSurvey(conversationId: string): Promise<SurveySummary | null> {
   const rows = await db
     .select(SUMMARY)

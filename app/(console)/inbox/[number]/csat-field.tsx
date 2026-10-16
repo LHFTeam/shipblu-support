@@ -37,7 +37,14 @@ export function SatisfactionField({
   const suppression = useFieldAction(setSurveySuppression);
   const send = useFieldAction(sendSurveyNow);
   // Queued is not sent: the job decides, and the timeline shows what it decided.
-  const [queued, setQueued] = useState(false);
+  // Remembered against the decision on screen when the button was pressed, so
+  // it clears itself the moment a new decision lands and the page re-renders
+  // with it; until then the button is gone, so waiting cannot queue a second
+  // job. Derived rather than reset in an effect, which would set state from a
+  // render.
+  const [queuedOn, setQueuedOn] = useState<string | null>(null);
+  const shown = survey?.id ?? 'none';
+  const queued = queuedOn === shown;
 
   const resolved = statusCategory === 'resolved' || statusCategory === 'closed';
   const outstanding = survey?.status === 'sent' || survey?.status === 'answered';
@@ -99,7 +106,7 @@ export function SatisfactionField({
             {suppressed ? 'Allow a survey' : 'Don’t survey this ticket'}
           </Button>
 
-          {resolved && !suppressed && !outstanding ? (
+          {resolved && !suppressed && !outstanding && !queued ? (
             <Button
               type="button"
               variant="secondary"
@@ -107,7 +114,7 @@ export function SatisfactionField({
               disabled={send.pending}
               onClick={() =>
                 void send.run({ conversationId }).then((result) => {
-                  if (!result.error) setQueued(true);
+                  if (!result.error) setQueuedOn(shown);
                 })
               }
             >

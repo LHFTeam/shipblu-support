@@ -27,7 +27,6 @@ import {
 } from '@/lib/tickets/console-guards';
 import { changeStatus } from '@/lib/tickets/status';
 import { scheduleSurvey, setSurveySuppressed } from '@/lib/csat';
-import { loadCsatSettings } from '@/lib/csat/settings';
 import type { ActionState } from './action-state';
 
 // --- Ticket properties ------------------------------------------------------
@@ -368,12 +367,12 @@ export async function setSurveySuppression(
  *
  * Queued, not sent: `send_csat` makes every check the scheduled survey makes,
  * so this cannot reach a customer the automatic one would not, and the outcome
- * lands on the timeline the same way. Behind `ticket.close`, the population
- * that resolves tickets.
+ * lands on the timeline the same way. Open to any agent who can see the
+ * ticket, as the suppression toggle is: agents resolve tickets, and a control
+ * offered to a role it always refuses is worse than none.
  */
 export async function sendSurveyNow(_state: ActionState, formData: FormData): Promise<ActionState> {
   const agent = await requireAgent();
-  if (!can(agent, 'ticket.close')) return { error: 'You cannot send surveys' };
 
   const conversationId = String(formData.get('conversationId') ?? '');
   const row = await loadConversation(agent, conversationId);
@@ -383,12 +382,10 @@ export async function sendSurveyNow(_state: ActionState, formData: FormData): Pr
     return { error: 'Only a resolved ticket can be surveyed' };
   }
 
-  const settings = await loadCsatSettings();
-  if (!settings.enabled) return { error: 'Surveys are switched off' };
-
-  const queued = await scheduleSurvey(conversationId, 'manual');
-  if (!queued) return { error: 'The survey could not be queued' };
+  const outcome = await scheduleSurvey(conversationId, 'manual');
+  if (outcome === 'off') return { error: 'Surveys are switched off' };
+  if (outcome !== 'queued') return { error: 'The survey could not be queued' };
 
   refresh(row.conversation.number);
-  return { ...ok(), message: 'Survey queued; the outcome will show here in a minute.' };
+  return ok();
 }
