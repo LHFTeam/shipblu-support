@@ -116,10 +116,6 @@ const STRINGS = {
     pageError: 'This page could not be loaded.',
     pageErrorHint: 'Something went wrong on our side. Try again in a moment.',
     tryAgain: 'Try again',
-    csatQuestion: 'How did we do?',
-    csatCommentPrompt: 'Anything you would like to add? (optional)',
-    csatThanks: 'Thank you.',
-    csatRecorded: 'Your feedback has been passed to the team.',
     csatAlreadyAnswered: 'You have already answered this survey.',
     // The five ratings, worst first, as words rather than faces: a face is an
     // emoji the design system does not draw, and its meaning is a guess.
@@ -306,10 +302,6 @@ const STRINGS = {
     pageError: 'تعذّر تحميل هذه الصفحة.',
     pageErrorHint: 'حدث خطأ من جهتنا. يمكن لحضرتك المحاولة مرة أخرى بعد قليل.',
     tryAgain: 'إعادة المحاولة',
-    csatQuestion: 'كيف كانت تجربة حضرتك مع الدعم؟',
-    csatCommentPrompt: 'هل هناك ما تودّ حضرتك إضافته؟ (اختياري)',
-    csatThanks: 'شكرًا لحضرتك.',
-    csatRecorded: 'تم إرسال رأيك إلى الفريق.',
     csatAlreadyAnswered: 'لقد أجبت على هذا الاستطلاع بالفعل.',
     csatRating1: 'سيئة جدًا',
     csatRating2: 'سيئة',

@@ -21,6 +21,7 @@ import {
   EMPTY_WORDING_PAIR,
   ratingLabels,
   resolveWording,
+  toWordingPair,
   WORDING_FIELDS,
   WORDING_LIMITS,
   wordingColumn,
@@ -263,7 +264,7 @@ function RuleFields({
 
         <Field
           label="Channel"
-          explain="Scope the wording to one channel. Facebook’s card has the tightest limits, which every rule is held to anyway, because a rule with no channel reaches Facebook too."
+          explain="Scope the wording to one channel. Facebook’s card has the tightest limits, which every rule is held to anyway, because a rule with no channel reaches Facebook too. Customer portal is a scope of its own here: its surveys go by email, but an Email rule does not reach them — the same as the out-of-hours reply."
         >
           <Select name="channel" defaultValue={rule?.channel ?? ''}>
             <option value="">Every channel</option>
@@ -305,24 +306,11 @@ function RuleFields({
 
 /** The built-in wording as a pair, for a rule that starts as a copy of it. */
 function builtInPair(): WordingPair {
-  const pair = {} as WordingPair;
-  for (const field of WORDING_FIELDS) {
-    for (const locale of ['ar', 'en'] as const) {
-      pair[wordingColumn(field, locale)] = DEFAULT_WORDING[locale][field];
-    }
-  }
-  return pair;
+  return toWordingPair((field, locale) => DEFAULT_WORDING[locale][field]);
 }
 
 function pick(rule: WordingRule): WordingPair {
-  const pair = {} as WordingPair;
-  for (const field of WORDING_FIELDS) {
-    for (const locale of ['ar', 'en'] as const) {
-      const column = wordingColumn(field, locale);
-      pair[column] = rule[column];
-    }
-  }
-  return pair;
+  return toWordingPair((field, locale) => rule[wordingColumn(field, locale)]);
 }
 
 export function NewWordingRule({ groups }: { groups: Group[] }) {

@@ -8,12 +8,7 @@ import { surveyEmail } from '@/lib/csat/email';
 import { MAX_DELAY_MINUTES, MAX_RESURVEY_DAYS, MIN_RESURVEY_DAYS } from '@/lib/csat/limits';
 import { wordingForRule } from '@/lib/csat/rules';
 import { saveCsatSettings, type CsatSettingsInput } from '@/lib/csat/settings';
-import {
-  WORDING_FIELDS,
-  wordingColumn,
-  wordingProblems,
-  type WordingPair,
-} from '@/lib/csat/wording';
+import { toWordingPair, wordingColumn, wordingProblems } from '@/lib/csat/wording';
 import { enqueueNotificationEmail } from '@/lib/email/notify';
 import { ok } from '@/lib/http/action-state';
 import { text, uuidField } from '@/lib/http/form-data';
@@ -136,13 +131,7 @@ export async function saveWordingRule(
     if (!group[0]) return { error: 'That group no longer exists' };
   }
 
-  const pair = {} as WordingPair;
-  for (const field of WORDING_FIELDS) {
-    for (const locale of ['ar', 'en'] as const) {
-      const column = wordingColumn(field, locale);
-      pair[column] = text(formData, column);
-    }
-  }
+  const pair = toWordingPair((field, locale) => text(formData, wordingColumn(field, locale)));
 
   // The limits are Meta's and a wording that saves must be one that sends;
   // the form counted against the same table as the admin typed, so this is

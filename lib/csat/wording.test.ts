@@ -4,9 +4,11 @@ import {
   DEFAULT_WORDING,
   EMPTY_WORDING_PAIR,
   pickWordingRule,
+  preselectedRating,
   ratingUrl,
   resolveWording,
   surveyText,
+  toWordingPair,
   wordingLength,
   wordingProblem,
   wordingProblems,
@@ -68,6 +70,21 @@ describe('resolveWording', () => {
   });
 });
 
+describe('toWordingPair', () => {
+  it('fills every column, each from its own field and language', () => {
+    const pair = toWordingPair((field, locale) => `${field}:${locale}`);
+    expect(Object.keys(pair).sort()).toEqual(Object.keys(EMPTY_WORDING_PAIR).sort());
+    expect(pair.questionAr).toBe('question:ar');
+    expect(pair.commentPromptEn).toBe('commentPrompt:en');
+    expect(
+      resolveWording(
+        toWordingPair((f, l) => DEFAULT_WORDING[l][f]),
+        'ar',
+      ),
+    ).toEqual(DEFAULT_WORDING.ar);
+  });
+});
+
 describe('pickWordingRule', () => {
   const rule = (groupId: string | null, channel: string | null, isActive = true) => ({
     groupId,
@@ -107,6 +124,17 @@ describe('surveyEmail and surveyText', () => {
     expect(ratingUrl('https://help.test/en/csat/preview?rule=r1', 3)).toBe(
       'https://help.test/en/csat/preview?rule=r1&rating=3',
     );
+  });
+
+  it('reads back on the page the rating each of the five links names, and nothing else', () => {
+    for (const rating of [1, 2, 3, 4, 5]) {
+      const link = new URL(ratingUrl('https://help.test/en/csat/tok', rating));
+      expect(preselectedRating(link.searchParams.get('rating') ?? undefined)).toBe(rating);
+    }
+    for (const raw of [undefined, '', '0', '6', '2.5', 'abc']) {
+      expect(preselectedRating(raw)).toBeNull();
+    }
+    expect(preselectedRating(['4', '2'])).toBe(4);
   });
 
   it('writes the message form as first line, question, link', () => {

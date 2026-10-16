@@ -66,7 +66,7 @@ export const DEFAULT_WORDING: Record<WordingLocale, Wording> = {
     intro: 'Your ticket is resolved.',
     subtitle: 'It takes ten seconds to tell us how it went.',
     button: 'Send',
-    commentPrompt: 'Anything you would like to add?',
+    commentPrompt: 'Anything you would like to add? (optional)',
     thanks: 'Thank you. Your feedback has been passed to the team.',
   },
   ar: {
@@ -74,7 +74,7 @@ export const DEFAULT_WORDING: Record<WordingLocale, Wording> = {
     intro: 'تم حل طلب حضرتك.',
     subtitle: 'رأي حضرتك يستغرق عشر ثوانٍ فقط.',
     button: 'إرسال',
-    commentPrompt: 'هل هناك ما تودّ حضرتك إضافته؟',
+    commentPrompt: 'هل هناك ما تودّ حضرتك إضافته؟ (اختياري)',
     thanks: 'شكرًا لحضرتك. تم إرسال رأيك إلى الفريق.',
   },
 };
@@ -97,6 +97,23 @@ export const EMPTY_WORDING_PAIR: WordingPair = {
 /** The column name a field's string sits in, for one language. */
 export function wordingColumn(field: WordingField, locale: WordingLocale): keyof WordingPair {
   return `${field}${locale === 'ar' ? 'Ar' : 'En'}` as keyof WordingPair;
+}
+
+/**
+ * A pair built one string at a time — from the built-in wording, a rule row
+ * or a submitted form — so the loop over fields and languages, and the cast
+ * that has to come with it, are written once.
+ */
+export function toWordingPair(
+  value: (field: WordingField, locale: WordingLocale) => string,
+): WordingPair {
+  const pair = {} as WordingPair;
+  for (const field of WORDING_FIELDS) {
+    for (const locale of ['ar', 'en'] as const) {
+      pair[wordingColumn(field, locale)] = value(field, locale);
+    }
+  }
+  return pair;
 }
 
 /** Code points, which is what Meta counts. */
@@ -202,6 +219,12 @@ export function ratingLabels(locale: Locale): [string, string, string, string, s
 /** The link that lands on the page with that rating already chosen. */
 export function ratingUrl(surveyUrl: string, rating: number): string {
   return `${surveyUrl}${surveyUrl.includes('?') ? '&' : '?'}rating=${rating}`;
+}
+
+/** `?rating=n` read back off one of those links, or null for a bare link or anything else. */
+export function preselectedRating(raw: string | string[] | undefined): number | null {
+  const value = Number(Array.isArray(raw) ? raw[0] : raw);
+  return Number.isInteger(value) && value >= 1 && value <= 5 ? value : null;
 }
 
 /**

@@ -2,6 +2,7 @@ import { notFound } from 'next/navigation';
 import type { Metadata } from 'next';
 import { surveyByToken } from '@/lib/csat';
 import { wordingForRule } from '@/lib/csat/rules';
+import { preselectedRating } from '@/lib/csat/wording';
 import { isLocale, t } from '@/lib/kb/locale';
 import { PageBody, Panel } from '../../chrome';
 import { SurveyForm } from './form';
@@ -10,12 +11,6 @@ export const dynamic = 'force-dynamic';
 
 // A survey link is personal and single-use; it has no business in an index.
 export const metadata: Metadata = { robots: { index: false, follow: false } };
-
-/** `?rating=n` from one of the email's five links, or null for a bare link. */
-export function preselectedRating(raw: string | string[] | undefined): number | null {
-  const value = Number(Array.isArray(raw) ? raw[0] : raw);
-  return Number.isInteger(value) && value >= 1 && value <= 5 ? value : null;
-}
 
 /**
  * The page a customer lands on from a satisfaction survey link.

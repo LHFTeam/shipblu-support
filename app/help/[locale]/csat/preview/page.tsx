@@ -1,10 +1,10 @@
 import { notFound } from 'next/navigation';
 import type { Metadata } from 'next';
 import { wordingForRule } from '@/lib/csat/rules';
+import { preselectedRating } from '@/lib/csat/wording';
 import { isUuid } from '@/lib/http/uuid';
 import { isLocale } from '@/lib/kb/locale';
 import { PageBody } from '../../chrome';
-import { preselectedRating } from '../[token]/page';
 import { SurveyForm } from '../[token]/form';
 
 export const dynamic = 'force-dynamic';
