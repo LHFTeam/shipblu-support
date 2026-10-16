@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { Button } from '@/components/ui';
 import { RelativeTime } from '@/components/relative-time';
 import { DetailsSection } from '@/components/details-section';
-import type { SurveySummary } from '@/lib/csat';
+import type { TicketSurveyState } from '@/lib/csat';
 import { describeSkip } from '@/lib/csat/skip-reasons';
 import { ago } from '@/lib/format';
 import { sendSurveyNow, setSurveySuppression } from '../../ticket-actions';
@@ -27,13 +27,14 @@ export function SatisfactionField({
   conversationId,
   statusCategory,
   suppressed,
-  survey,
+  survey: state,
 }: {
   conversationId: string;
   statusCategory: string;
   suppressed: boolean;
-  survey: SurveySummary | null;
+  survey: TicketSurveyState;
 }) {
+  const { survey, skip } = state;
   const suppression = useFieldAction(setSurveySuppression);
   const send = useFieldAction(sendSurveyNow);
   // Queued is not sent: the job decides, and the timeline shows what it decided.
@@ -43,11 +44,14 @@ export function SatisfactionField({
   // job. Derived rather than reset in an effect, which would set state from a
   // render.
   const [queuedOn, setQueuedOn] = useState<string | null>(null);
-  const shown = survey?.id ?? 'none';
+  const shown = `${survey?.id ?? 'none'}:${skip?.createdAt.toISOString() ?? ''}`;
   const queued = queuedOn === shown;
 
   const resolved = statusCategory === 'resolved' || statusCategory === 'closed';
-  const outstanding = survey?.status === 'sent' || survey?.status === 'answered';
+  // A survey on its way or answered, with no later decision against another:
+  // nothing to send now. After a later skip the button comes back, and the
+  // job answers it on the ticket — "surveyed recently" included.
+  const outstanding = skip === null && (survey?.status === 'sent' || survey?.status === 'answered');
 
   return (
     <DetailsSection collapsible={false} title="Satisfaction">
@@ -77,7 +81,7 @@ export function SatisfactionField({
               </blockquote>
             ) : null}
           </>
-        ) : survey.status === 'sent' || survey.status === 'expired' ? (
+        ) : (
           <p>
             Survey sent{' '}
             {survey.sentAt ? (
@@ -85,9 +89,16 @@ export function SatisfactionField({
             ) : null}
             , no answer yet.
           </p>
-        ) : (
-          <p>Not surveyed: {describeSkip(survey.skipReason)}.</p>
         )}
+
+        {skip ? (
+          <p>
+            {survey ? 'Not surveyed again' : 'Not surveyed'}
+            <RelativeTime at={skip.createdAt}>
+              {(relative) => ` ${ago(relative)}`}
+            </RelativeTime>: {describeSkip(skip.reason)}.
+          </p>
+        ) : null}
 
         {suppressed ? (
           <p className="text-(--color-text-primary)">This ticket will not be surveyed.</p>

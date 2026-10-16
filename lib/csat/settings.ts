@@ -14,9 +14,10 @@ const log = logger('csat');
  * once (`forget` after the save) and the worker within the TTL. Switching off
  * is the rollback, so thirty seconds is also how long the rollback takes.
  *
- * No row is a fresh install and reads as off with every channel off. A failed
- * read also reads as off, uncached, so the next request tries again — and the
- * job records `csat_off` rather than sending on a guess.
+ * No row is a fresh install and reads as off with every channel off. On a
+ * page a failed read also reads as off, uncached, so the next request tries
+ * again; the job and the sidebar's "Send now" read through `readCsatSettings`,
+ * which throws instead, because "off" written on a ticket outlives a hiccup.
  */
 
 const CACHE_TTL_MS = 30_000;
@@ -55,51 +56,60 @@ export const UNSET_CSAT_SETTINGS: CsatSettings = {
 
 let cached: { at: number; value: CsatSettings } | null = null;
 
+/**
+ * The settings as the row holds them, now, or the error the read raised.
+ *
+ * For the job and the sidebar's "Send now": a read that failed must fail
+ * them, so the queue retries, rather than answer "off" — which the job would
+ * record on the ticket as a reason, in a row that outlives the hiccup.
+ */
+export async function readCsatSettings(): Promise<CsatSettings> {
+  const rows = await db
+    .select({
+      enabled: csatSettings.enabled,
+      delayMinutes: csatSettings.delayMinutes,
+      metaDelayMinutes: csatSettings.metaDelayMinutes,
+      resurveyAfterDays: csatSettings.resurveyAfterDays,
+      surveyEmail: csatSettings.surveyEmail,
+      surveyWebchat: csatSettings.surveyWebchat,
+      surveyFacebook: csatSettings.surveyFacebook,
+      surveyInstagram: csatSettings.surveyInstagram,
+      surveyApi: csatSettings.surveyApi,
+      surveyRuleResolved: csatSettings.surveyRuleResolved,
+      changedAt: csatSettings.updatedAt,
+      changedBy: agents.name,
+    })
+    .from(csatSettings)
+    .leftJoin(agents, eq(agents.id, csatSettings.updatedByAgentId))
+    .where(eq(csatSettings.id, 1))
+    .limit(1);
+
+  const row = rows[0];
+  if (!row) return UNSET_CSAT_SETTINGS;
+  return {
+    enabled: row.enabled,
+    delayMinutes: row.delayMinutes,
+    metaDelayMinutes: row.metaDelayMinutes,
+    resurveyAfterDays: row.resurveyAfterDays,
+    channels: {
+      email: row.surveyEmail,
+      webchat: row.surveyWebchat,
+      facebook: row.surveyFacebook,
+      instagram: row.surveyInstagram,
+      api: row.surveyApi,
+    },
+    surveyRuleResolved: row.surveyRuleResolved,
+    changedAt: row.changedAt,
+    changedBy: row.changedBy,
+  };
+}
+
+/** The settings for a page, memoised; a failed read reads as off, uncached. */
 export async function loadCsatSettings(): Promise<CsatSettings> {
   if (cached && Date.now() - cached.at < CACHE_TTL_MS) return cached.value;
 
   try {
-    const rows = await db
-      .select({
-        enabled: csatSettings.enabled,
-        delayMinutes: csatSettings.delayMinutes,
-        metaDelayMinutes: csatSettings.metaDelayMinutes,
-        resurveyAfterDays: csatSettings.resurveyAfterDays,
-        surveyEmail: csatSettings.surveyEmail,
-        surveyWebchat: csatSettings.surveyWebchat,
-        surveyFacebook: csatSettings.surveyFacebook,
-        surveyInstagram: csatSettings.surveyInstagram,
-        surveyApi: csatSettings.surveyApi,
-        surveyRuleResolved: csatSettings.surveyRuleResolved,
-        changedAt: csatSettings.updatedAt,
-        changedBy: agents.name,
-      })
-      .from(csatSettings)
-      .leftJoin(agents, eq(agents.id, csatSettings.updatedByAgentId))
-      .where(eq(csatSettings.id, 1))
-      .limit(1);
-
-    const row = rows[0];
-    const value: CsatSettings = row
-      ? {
-          enabled: row.enabled,
-          delayMinutes: row.delayMinutes,
-          metaDelayMinutes: row.metaDelayMinutes,
-          resurveyAfterDays: row.resurveyAfterDays,
-          channels: {
-            email: row.surveyEmail,
-            webchat: row.surveyWebchat,
-            facebook: row.surveyFacebook,
-            instagram: row.surveyInstagram,
-            api: row.surveyApi,
-          },
-          surveyRuleResolved: row.surveyRuleResolved,
-          changedAt: row.changedAt,
-          changedBy: row.changedBy,
-        }
-      : UNSET_CSAT_SETTINGS;
-
-    cached = { at: Date.now(), value };
+    cached = { at: Date.now(), value: await readCsatSettings() };
   } catch (error) {
     log.error('could not read the survey settings, treating them as off', error);
     return UNSET_CSAT_SETTINGS;

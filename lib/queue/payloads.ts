@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { SURVEY_TRIGGERS } from '@/lib/csat/decision';
 import { LOCALES } from '@/lib/kb/locale';
 import { RERUNNABLE_STEPS } from '@/db/schema';
 import { PermanentJobError, type ClaimedJob, type JobType } from '@/lib/queue';
@@ -59,7 +60,7 @@ export const JOB_PAYLOADS = {
   // job cannot tell a rule's resolve from an agent's off the row.
   send_csat: z.object({
     conversationId: z.string().min(1),
-    trigger: z.enum(['agent', 'rule', 'manual']).optional(),
+    trigger: z.enum(SURVEY_TRIGGERS).optional(),
   }),
   // Facebook and Instagram hand over a URL, WhatsApp an id to exchange for one.
   // The WhatsApp half names no source, so a Meta payload that lost its URL

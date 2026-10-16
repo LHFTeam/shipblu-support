@@ -13,7 +13,7 @@ import {
 } from '@/db/schema';
 import { allLimited } from '@/lib/concurrency';
 import { formName } from '@/lib/forms/naming';
-import { latestSurvey, type SurveySummary } from '@/lib/csat';
+import { ticketSurveyState, type TicketSurveyState } from '@/lib/csat';
 import type { SessionAgent } from '@/lib/auth/session';
 import { can } from '@/lib/auth/permissions';
 import { configuredAccountId } from '@/lib/meta/client';
@@ -109,8 +109,8 @@ export type ConversationDetail = {
   reopenCount: number;
   /** An agent asked that this ticket not be surveyed. */
   csatSuppressed: boolean;
-  /** The newest survey decision on the ticket, for the sidebar. */
-  survey: SurveySummary | null;
+  /** The ticket's newest survey, and a later decision not to send one, for the sidebar. */
+  survey: TicketSurveyState;
   /**
    * Whether a Facebook or Instagram reply can be delivered at all — which is a
    * separate question from whether the messaging window is still open, and the
@@ -310,7 +310,7 @@ export async function getConversation(
       () => sideConversationsForConversation(row.conversation.id),
       () => categoriesForConversation(row.conversation.id),
       () => threadControlTakenAt(row.conversation.id),
-      () => latestSurvey(row.conversation.id),
+      () => ticketSurveyState(row.conversation.id),
     ]);
 
   // Paired here rather than in the browser: the target is only named in the

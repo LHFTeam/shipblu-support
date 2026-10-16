@@ -53,7 +53,7 @@ async function switchOn(overrides: Partial<Parameters<typeof saveCsatSettings>[0
 }
 
 async function resolvedTicket(input: {
-  channel: 'email' | 'webchat' | 'facebook' | 'whatsapp';
+  channel: 'email' | 'webchat' | 'facebook' | 'whatsapp' | 'whatsapp_bot';
   email?: string | null;
   /** The customer's one message; null for none; a media stand-in is words too here. */
   customerText?: string | null;
@@ -173,20 +173,26 @@ describe('send_csat', () => {
       customerText: null,
     });
     const whatsapp = await resolvedTicket({ channel: 'whatsapp' });
+    const bot = await resolvedTicket({ channel: 'whatsapp_bot' });
     // A public comment thread: the survey would be posted on the post.
     const comment = await resolvedTicket({
       channel: 'facebook',
       externalId: 'facebook:comment:123_456',
     });
 
-    for (const id of [noAddress, reopened, silent, whatsapp, comment]) await sendCsat(job(id));
+    for (const id of [noAddress, reopened, silent, whatsapp, bot, comment]) await sendCsat(job(id));
 
     expect((await surveysOf(noAddress))[0]).toMatchObject({ skipReason: 'no_address' });
     expect((await surveysOf(reopened))[0]).toMatchObject({ skipReason: 'reopened' });
     expect((await surveysOf(silent))[0]).toMatchObject({ skipReason: 'no_customer_message' });
-    expect((await surveysOf(whatsapp))[0]).toMatchObject({ skipReason: 'channel_off' });
+    expect((await surveysOf(whatsapp))[0]).toMatchObject({ skipReason: 'channel_unsupported' });
+    expect((await surveysOf(bot))[0]).toMatchObject({ skipReason: 'read_only_channel' });
     expect((await surveysOf(comment))[0]).toMatchObject({ skipReason: 'comment_thread' });
     expect(await eventTypes(noAddress)).toEqual(['csat_skipped']);
+
+    // The same reason again within the day is the earlier row's, not a second.
+    await sendCsat(job(noAddress));
+    expect(await surveysOf(noAddress)).toHaveLength(1);
 
     // No survey row carries a message, so nothing was queued to any carrier.
     expect(await db.select({ id: jobs.id }).from(jobs)).toHaveLength(0);
@@ -204,11 +210,23 @@ describe('send_csat', () => {
     expect((await surveysOf(id))[0]).toMatchObject({ status: 'sent', locale: 'en' });
   });
 
+  it('answers an agent who pressed "Send now" on a surveyed ticket, on the ticket', async () => {
+    await switchOn();
+    const id = await resolvedTicket({ channel: 'webchat' });
+
+    await sendCsat(job(id));
+    await sendCsat(job(id, 'manual'));
+
+    const rows = await surveysOf(id);
+    expect(rows.map((row) => row.status).sort()).toEqual(['sent', 'skipped']);
+    expect(rows.find((row) => row.status === 'skipped')!.skipReason).toBe('recently_surveyed');
+  });
+
   it('sends one survey when two jobs for one ticket run together, and writes nothing for the other', async () => {
     await switchOn();
     const id = await resolvedTicket({ channel: 'email', email: 'a@b.test' });
 
-    await Promise.all([sendCsat(job(id)), sendCsat(job(id, 'manual')), sendCsat(job(id))]);
+    await Promise.all([sendCsat(job(id)), sendCsat(job(id)), sendCsat(job(id))]);
 
     const rows = await surveysOf(id);
     expect(rows).toHaveLength(1);
@@ -283,6 +301,18 @@ describe('send_csat', () => {
     expect(await scheduleSurvey(id, 'agent')).toBe('off');
     expect(await db.select({ id: jobs.id }).from(jobs)).toHaveLength(0);
 
+    // On, but the channel is off, or has no switch at all: no job either.
+    await switchOn({
+      delayMinutes: 45,
+      channels: { ...UNSET_CSAT_SETTINGS.channels, webchat: true },
+    });
+    expect(await scheduleSurvey(id, 'agent')).toBe('channel_off');
+    expect(await scheduleSurvey(await resolvedTicket({ channel: 'whatsapp' }), 'agent')).toBe(
+      'channel_unsupported',
+    );
+    expect(await db.select({ id: jobs.id }).from(jobs)).toHaveLength(0);
+
+    await db.delete(agents);
     await switchOn({ delayMinutes: 45 });
     const before = Date.now();
     expect(await scheduleSurvey(id, 'agent')).toBe('queued');

@@ -1,14 +1,21 @@
 import { and, desc, eq, gt, inArray, isNull, notExists, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
-import { conversationEvents, conversations, csatSurveys, jobs, messages } from '@/db/schema';
+import {
+  conversationEvents,
+  conversations,
+  csatSurveys,
+  jobs,
+  messages,
+  ticketStatuses,
+} from '@/db/schema';
 import { generateToken, hashToken } from '@/lib/auth/tokens';
 import { publicBaseUrl } from '@/lib/kb/site';
 import { enqueue } from '@/lib/queue';
 import { logger } from '@/lib/log';
 import type { ConversationChannel } from '@/lib/tickets/channel-policy';
 import { writeAutomatedReply } from '@/lib/tickets/outbound';
-import type { SurveyTrigger } from './decision';
-import { loadCsatSettings } from './settings';
+import { channelSwitch, type SurveyTrigger } from './decision';
+import { readCsatSettings } from './settings';
 import type { SkipReason } from './skip-reasons';
 
 const log = logger('csat');
@@ -46,16 +53,21 @@ type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
  * resurvey window was unreachable. The job is idempotent instead: `sendSurvey`
  * refuses a second survey inside the window under a lock on the ticket.
  *
- * Nothing is queued while the switch is off: a ticket resolved while surveys
- * were off is not surveyed when they come on. The answer says which, so the
- * sidebar's "Send now" can tell the agent.
+ * Nothing is queued while the switch is off, or for a channel that is off or
+ * has no switch: a ticket resolved then is not surveyed when the switch comes
+ * on, and a WhatsApp resolution does not cost a job, a row and a timeline
+ * event for a fixed answer. The answer says which, so the sidebar's "Send
+ * now" can tell the agent. A settings read that fails is `unknown`, never
+ * `off`: the agent is told nothing could be queued, not that a switch is off.
  */
+export type ScheduleOutcome = 'queued' | 'off' | 'channel_off' | 'channel_unsupported' | 'unknown';
+
 export async function scheduleSurvey(
   conversationId: string,
   trigger: SurveyTrigger,
-): Promise<'queued' | 'off' | 'unknown'> {
+): Promise<ScheduleOutcome> {
   try {
-    const settings = await loadCsatSettings();
+    const settings = await readCsatSettings();
     if (!settings.enabled) return 'off';
 
     const rows = await db
@@ -65,6 +77,10 @@ export async function scheduleSurvey(
       .limit(1);
     const channel = rows[0]?.channel;
     if (!channel) return 'unknown';
+
+    const key = channelSwitch(channel);
+    if (key === null) return 'channel_unsupported';
+    if (!settings.channels[key]) return 'channel_off';
 
     const isMeta = channel === 'facebook' || channel === 'instagram';
     const delayMinutes =
@@ -91,13 +107,44 @@ export type SurveySnapshot = {
   channel: ConversationChannel;
 };
 
-/** Records that no survey went out, and why, where the agent who resolved the ticket will see it. */
+/**
+ * Records that no survey went out, and why, where the agent who resolved the
+ * ticket will see it. Returns whether a row was written.
+ *
+ * Under the ticket lock, and once: an agent toggling a ticket resolved, open
+ * and resolved again while tidying their queue runs the job twice, and two
+ * rows saying the same thing an hour apart tell nobody anything. The same
+ * reason within a day is the earlier row's; a different reason, or the same
+ * one a day later, is a new decision.
+ */
+const SAME_SKIP_WITHIN_MS = 24 * 3_600_000;
+
 export async function recordSkip(
   conversationId: string,
   reason: SkipReason,
   snapshot: SurveySnapshot,
-): Promise<void> {
-  await db.transaction(async (tx) => {
+): Promise<boolean> {
+  return db.transaction(async (tx) => {
+    await lockTicket(tx, conversationId);
+
+    const [newest] = await tx
+      .select({
+        status: csatSurveys.status,
+        skipReason: csatSurveys.skipReason,
+        createdAt: csatSurveys.createdAt,
+      })
+      .from(csatSurveys)
+      .where(eq(csatSurveys.conversationId, conversationId))
+      .orderBy(desc(csatSurveys.createdAt), desc(csatSurveys.id))
+      .limit(1);
+    if (
+      newest?.status === 'skipped' &&
+      newest.skipReason === reason &&
+      Date.now() - newest.createdAt.getTime() < SAME_SKIP_WITHIN_MS
+    ) {
+      return false;
+    }
+
     await tx.insert(csatSurveys).values({
       conversationId,
       status: 'skipped',
@@ -113,12 +160,25 @@ export async function recordSkip(
       actorLabel: ACTOR,
       data: { reason },
     });
+
+    return true;
   });
+}
+
+/** The row lock every write on a ticket's surveys takes first, so two jobs for one ticket queue behind each other. */
+async function lockTicket(tx: Tx, conversationId: string): Promise<void> {
+  await tx
+    .select({ id: conversations.id })
+    .from(conversations)
+    .where(eq(conversations.id, conversationId))
+    .for('update');
 }
 
 /** True when this ticket carries a survey sent inside the resurvey window. */
 async function surveyedWithin(tx: Tx, conversationId: string, days: number): Promise<boolean> {
-  const cutoff = new Date(Date.now() - days * 24 * 3_600_000);
+  // Never below a day, whatever the row says (`MIN_RESURVEY_DAYS`): at zero
+  // the window is empty and every job for a ticket sends.
+  const cutoff = new Date(Date.now() - Math.max(1, days) * 24 * 3_600_000);
 
   const rows = await tx
     .select({ id: csatSurveys.id })
@@ -149,17 +209,26 @@ export type SurveySend = {
   body: (url: string) => { text: string; html: string | null };
 };
 
-export type SentSurvey = { surveyId: string; messageId: string };
+export type SendOutcome =
+  | { kind: 'sent'; surveyId: string; messageId: string }
+  /** The ticket already carries a survey inside the window; nothing was written. */
+  | { kind: 'surveyed' }
+  /** The ticket changed under the job since it decided; the reason is the job's to record. */
+  | { kind: 'skip'; reason: 'reopened' | 'agent_suppressed' }
+  /** The ticket is gone. */
+  | { kind: 'drop' };
 
 /**
  * Writes the survey and the message that carries it, as one transaction, and
- * returns their ids — or null when the ticket already carries a survey inside
- * the window, which is the whole of this module's idempotency:
+ * says what happened — which is the whole of this module's idempotency:
  *
- * - **The ticket row is locked first.** Two jobs for one ticket — a resolve,
- *   a reopen and a resolve seconds apart, or "Send now" pressed twice — run
- *   at once in the worker pool, and a check made before either writes lets
- *   both through. Behind the lock, the second reads the first's row.
+ * - **The ticket row is locked first, and the decision's facts re-read behind
+ *   it.** Two jobs for one ticket — a resolve, a reopen and a resolve seconds
+ *   apart, or "Send now" pressed twice — run at once in the worker pool, and a
+ *   check made before either writes lets both through. And a customer whose
+ *   reply reopened the ticket between the job's read and this write is the
+ *   case the delay exists for, so the status and the agent's flag are read
+ *   again here, where nothing can change them until the commit.
  * - **The survey, the message and the event commit together.** A worker
  *   stopped between them, or a pool error on the way, left a `sent` row with
  *   no message, which the retry counted as surveyed; the customer never got
@@ -175,18 +244,35 @@ export type SentSurvey = { surveyId: string; messageId: string };
  * database and never recoverable — so a survey link that gets lost cannot be
  * looked up and resent, only reissued.
  */
-export async function sendSurvey(send: SurveySend): Promise<SentSurvey | null> {
+export async function sendSurvey(send: SurveySend): Promise<SendOutcome> {
   const token = generateToken();
   const url = `${publicBaseUrl()}/${send.locale}/csat/${token}`;
 
   return db.transaction(async (tx) => {
-    await tx
-      .select({ id: conversations.id })
-      .from(conversations)
-      .where(eq(conversations.id, send.conversationId))
-      .for('update');
+    await lockTicket(tx, send.conversationId);
 
-    if (await surveyedWithin(tx, send.conversationId, send.resurveyAfterDays)) return null;
+    const [ticket] = await tx
+      .select({
+        deletedAt: conversations.deletedAt,
+        isSpam: conversations.isSpam,
+        mergedIntoId: conversations.mergedIntoId,
+        csatSuppressed: conversations.csatSuppressed,
+        statusCategory: ticketStatuses.category,
+      })
+      .from(conversations)
+      .innerJoin(ticketStatuses, eq(ticketStatuses.id, conversations.statusId))
+      .where(eq(conversations.id, send.conversationId))
+      .limit(1);
+    if (!ticket || ticket.deletedAt || ticket.isSpam || ticket.mergedIntoId)
+      return { kind: 'drop' };
+    if (ticket.statusCategory !== 'resolved' && ticket.statusCategory !== 'closed') {
+      return { kind: 'skip', reason: 'reopened' };
+    }
+    if (ticket.csatSuppressed) return { kind: 'skip', reason: 'agent_suppressed' };
+
+    if (await surveyedWithin(tx, send.conversationId, send.resurveyAfterDays)) {
+      return { kind: 'surveyed' };
+    }
 
     await tx
       .update(csatSurveys)
@@ -235,7 +321,7 @@ export async function sendSurvey(send: SurveySend): Promise<SentSurvey | null> {
 
     await tx.update(csatSurveys).set({ messageId }).where(eq(csatSurveys.id, surveyId));
 
-    return { surveyId, messageId };
+    return { kind: 'sent', surveyId, messageId };
   });
 }
 
@@ -378,19 +464,45 @@ const SUMMARY = {
 };
 
 /**
- * The newest row is the newest decision: a second job inside the window
- * writes nothing (`sendSurvey`), so a survey that went out is not buried
- * under a note saying it already had.
+ * What the sidebar shows: the ticket's newest survey — sent, answered or
+ * superseded — and, when a later decision not to send one came after it, that
+ * decision. Two things rather than the newest row, because a `skipped` row
+ * written after an answered survey (the ticket reopened and was resolved
+ * again inside the window) must not bury the customer's rating.
  */
-export async function latestSurvey(conversationId: string): Promise<SurveySummary | null> {
-  const rows = await db
+export type TicketSurveyState = {
+  survey: SurveySummary | null;
+  /** A decision not to survey, newer than `survey`. */
+  skip: { reason: string | null; createdAt: Date } | null;
+};
+
+export async function ticketSurveyState(conversationId: string): Promise<TicketSurveyState> {
+  const [survey] = await db
     .select(SUMMARY)
     .from(csatSurveys)
-    .where(eq(csatSurveys.conversationId, conversationId))
+    .where(
+      and(
+        eq(csatSurveys.conversationId, conversationId),
+        inArray(csatSurveys.status, ['sent', 'answered', 'expired']),
+      ),
+    )
     .orderBy(desc(csatSurveys.createdAt), desc(csatSurveys.id))
     .limit(1);
 
-  return rows[0] ?? null;
+  const [skip] = await db
+    .select({ reason: csatSurveys.skipReason, createdAt: csatSurveys.createdAt })
+    .from(csatSurveys)
+    .where(
+      and(
+        eq(csatSurveys.conversationId, conversationId),
+        eq(csatSurveys.status, 'skipped'),
+        survey ? gt(csatSurveys.createdAt, survey.createdAt) : undefined,
+      ),
+    )
+    .orderBy(desc(csatSurveys.createdAt), desc(csatSurveys.id))
+    .limit(1);
+
+  return { survey: survey ?? null, skip: skip ?? null };
 }
 
 /** One row of the admin page's recent list: the summary plus which ticket it was. */

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { channelSurveyed, decideSurvey, type DecisionInput } from './decision';
+import { channelSurveyed, channelSwitch, decideSurvey, type DecisionInput } from './decision';
 import { UNSET_CSAT_SETTINGS, type CsatSettings } from './settings';
 
 /**
@@ -55,8 +55,24 @@ describe('decideSurvey', () => {
     ).toEqual({ kind: 'skip', reason: 'channel_off' });
   });
 
+  it('names a channel nobody writes to before any switch, and one with no switch after it', () => {
+    // The bot's conversations are another service's whatever the switch says.
+    expect(
+      decideSurvey(
+        input({ channel: 'whatsapp_bot', byEmail: false, readOnly: true }),
+        UNSET_CSAT_SETTINGS,
+      ),
+    ).toEqual({ kind: 'skip', reason: 'read_only_channel' });
+    // WhatsApp has no switch to be off: "off for this channel" would send an
+    // admin looking for a toggle that does not exist.
+    expect(decideSurvey(input({ channel: 'whatsapp', byEmail: false }), ON)).toEqual({
+      kind: 'skip',
+      reason: 'channel_unsupported',
+    });
+  });
+
   it('reports the reasons in the order a person would want them', () => {
-    expect(decideSurvey(input({ statusCategory: 'open', readOnly: true }), ON)).toEqual({
+    expect(decideSurvey(input({ statusCategory: 'open', hasCustomerMessage: false }), ON)).toEqual({
       kind: 'skip',
       reason: 'reopened',
     });
@@ -126,16 +142,6 @@ describe('decideSurvey', () => {
     // reaches it; a comment ticket on email does not exist.
     expect(decideSurvey(input({ commentThread: true }), ON).kind).toBe('send');
   });
-
-  it('never surveys a channel the team does not write to', () => {
-    expect(decideSurvey(input({ channel: 'whatsapp', byEmail: false }), ON)).toEqual({
-      kind: 'skip',
-      reason: 'channel_off',
-    });
-    expect(
-      decideSurvey(input({ channel: 'whatsapp_bot', byEmail: false, readOnly: true }), ON),
-    ).toEqual({ kind: 'skip', reason: 'channel_off' });
-  });
 });
 
 describe('channelSurveyed', () => {
@@ -155,5 +161,7 @@ describe('channelSurveyed', () => {
     expect(channelSurveyed(only('webchat'), 'portal')).toBe(false);
     expect(channelSurveyed(ON, 'whatsapp')).toBe(false);
     expect(channelSurveyed(ON, 'whatsapp_bot')).toBe(false);
+    expect(channelSwitch('portal')).toBe('email');
+    expect(channelSwitch('whatsapp')).toBeNull();
   });
 });

@@ -103,14 +103,20 @@ export function preferredLocale(contactLocale: string, sample: string | null): '
  * No usable message at all falls through to the contact's own locale, which is
  * the order `preferredLocale` applies anyway.
  */
-export async function requesterLocale(conversationId: string): Promise<'ar' | 'en'> {
+export async function requesterLocale(
+  conversationId: string,
+  /** The requester's `contacts.locale` when the caller already read it, so it is not read twice. */
+  contactLocale?: string | null,
+): Promise<'ar' | 'en'> {
   const [contact, words] = await Promise.all([
-    db
-      .select({ locale: contacts.locale })
-      .from(conversations)
-      .leftJoin(contacts, eq(contacts.id, conversations.requesterContactId))
-      .where(eq(conversations.id, conversationId))
-      .limit(1),
+    contactLocale === undefined
+      ? db
+          .select({ locale: contacts.locale })
+          .from(conversations)
+          .leftJoin(contacts, eq(contacts.id, conversations.requesterContactId))
+          .where(eq(conversations.id, conversationId))
+          .limit(1)
+      : Promise.resolve([{ locale: contactLocale }]),
     newestCustomerWords(conversationId),
   ]);
 

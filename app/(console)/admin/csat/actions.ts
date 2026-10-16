@@ -1,7 +1,7 @@
 'use server';
 
 import { requirePermission } from '@/lib/auth/guard';
-import { MAX_DELAY_MINUTES, MAX_RESURVEY_DAYS } from '@/lib/csat/limits';
+import { MAX_DELAY_MINUTES, MAX_RESURVEY_DAYS, MIN_RESURVEY_DAYS } from '@/lib/csat/limits';
 import { saveCsatSettings, type CsatSettingsInput } from '@/lib/csat/settings';
 import { ok } from '@/lib/http/action-state';
 import { text } from '@/lib/http/form-data';
@@ -16,11 +16,17 @@ import { refresh, type SettingsState } from '../settings-shared';
  */
 
 /** A whole number of units within bounds, or the sentence to refuse it with. */
-function bounded(raw: string, label: string, max: number): { value: number } | { error: string } {
+function bounded(
+  raw: string,
+  label: string,
+  max: number,
+  min = 0,
+): { value: number } | { error: string } {
   const value = Number(raw);
   if (!raw || !Number.isInteger(value) || value < 0) {
     return { error: `${label} has to be a whole number.` };
   }
+  if (value < min) return { error: `${label} has to be at least ${min}.` };
   if (value > max) return { error: `${label} can be at most ${max}.` };
   return { value };
 }
@@ -44,6 +50,7 @@ export async function saveSurveySettings(
     text(formData, 'resurveyAfterDays'),
     'The resurvey window',
     MAX_RESURVEY_DAYS,
+    MIN_RESURVEY_DAYS,
   );
   if ('error' in resurvey) return { error: resurvey.error };
 

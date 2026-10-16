@@ -384,6 +384,8 @@ export async function sendSurveyNow(_state: ActionState, formData: FormData): Pr
 
   const outcome = await scheduleSurvey(conversationId, 'manual');
   if (outcome === 'off') return { error: 'Surveys are switched off' };
+  if (outcome === 'channel_off') return { error: 'Surveys are off for this channel' };
+  if (outcome === 'channel_unsupported') return { error: 'Surveys are not sent on this channel' };
   if (outcome !== 'queued') return { error: 'The survey could not be queued' };
 
   refresh(row.conversation.number);

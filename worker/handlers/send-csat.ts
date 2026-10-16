@@ -3,10 +3,10 @@ import { db } from '@/db/client';
 import { contacts, conversations, messages, ticketStatuses } from '@/db/schema';
 import { recordSkip, sendSurvey, unsentSurveyMessage } from '@/lib/csat';
 import { decideSurvey, type SurveyTrigger } from '@/lib/csat/decision';
-import { loadCsatSettings } from '@/lib/csat/settings';
+import { readCsatSettings } from '@/lib/csat/settings';
 import { rootCommentId } from '@/lib/meta/comments';
 import { isReadOnlyChannel } from '@/lib/tickets/channel-policy';
-import { newestCustomerWords, preferredLocale } from '@/lib/tickets/locale';
+import { requesterLocale } from '@/lib/tickets/locale';
 import { notReaction } from '@/lib/tickets/not-reaction';
 import {
   automatedReplyBlocked,
@@ -103,7 +103,9 @@ export async function sendCsat(job: ClaimedJob): Promise<void> {
   const ticket = rows[0];
   if (!ticket) return;
 
-  const settings = await loadCsatSettings();
+  // A read that fails fails the job, so the queue retries: "off" written on
+  // the ticket would outlive the hiccup.
+  const settings = await readCsatSettings();
   const isMeta = ticket.channel === 'facebook' || ticket.channel === 'instagram';
 
   const decision = decideSurvey(
@@ -144,12 +146,9 @@ export async function sendCsat(job: ClaimedJob): Promise<void> {
 
   // The customer's own words, not `contacts.locale` alone, which nothing
   // writes: read off the column, every survey went out in English (§6). The
-  // same two ingredients `requesterLocale()` combines, read here with the
-  // contact's column already in hand.
-  const locale = preferredLocale(
-    ticket.contactLocale ?? 'en',
-    await newestCustomerWords(conversationId),
-  );
+  // one door every unattended sender uses, handed the contact's column it
+  // already read so it is not read twice.
+  const locale = await requesterLocale(conversationId, ticket.contactLocale);
 
   const sent = await sendSurvey({
     conversationId,
@@ -164,14 +163,28 @@ export async function sendCsat(job: ClaimedJob): Promise<void> {
     }),
   });
 
-  if (!sent) {
+  if (sent.kind === 'drop') return;
+
+  if (sent.kind === 'skip') {
+    // The ticket changed under the job between its read and the locked write.
+    await recordSkip(conversationId, sent.reason, snapshot);
+    log.info(`#${ticket.number}: no survey — ${sent.reason}`);
+    return;
+  }
+
+  if (sent.kind === 'surveyed') {
     // Surveyed inside the window already, by an earlier run or by the other of
     // two jobs for one ticket. The one thing left to check is whether that run
-    // got as far as queueing the carrier.
+    // got as far as queueing the carrier. A scheduled duplicate then writes
+    // nothing — the survey it would sit on top of is the answer — but an agent
+    // who pressed "Send now" is owed one, on the ticket.
     const unsent = await unsentSurveyMessage(conversationId);
     if (unsent) {
       await enqueueAutomatedDelivery(ticket.channel, unsent, PRIORITY);
       log.info(`#${ticket.number}: queued the carrier for a survey a stopped run left behind`);
+    } else if (trigger === 'manual') {
+      await recordSkip(conversationId, 'recently_surveyed', snapshot);
+      log.info(`#${ticket.number}: surveyed inside the window already — told the agent`);
     } else {
       log.info(`#${ticket.number}: surveyed inside the window already — nothing to do`);
     }
