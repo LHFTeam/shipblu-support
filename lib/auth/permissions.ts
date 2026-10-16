@@ -209,6 +209,16 @@ export const PERMISSIONS = [
    * somebody who only wanted to reword a question.
    */
   'admin.forms',
+  /**
+   * The satisfaction survey: the switch, its timing, which channels, and the
+   * wording customers read after every resolved ticket.
+   *
+   * Separate from `admin.automations`, which it would otherwise sit under,
+   * because a survey reaches customers in the company's own voice. Somebody
+   * allowed to edit routing rules is not thereby somebody who should rewrite
+   * what the company says after every ticket.
+   */
+  'admin.csat',
   'admin.billing',
 ] as const;
 
@@ -268,6 +278,7 @@ const ADMIN: Permission[] = [
   'admin.fields',
   'admin.categories',
   'admin.forms',
+  'admin.csat',
 ];
 
 const ACCOUNT_ADMIN: Permission[] = [...ADMIN, 'admin.billing'];

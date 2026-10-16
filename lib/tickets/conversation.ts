@@ -11,7 +11,9 @@ import {
   ticketForms,
   ticketStatuses,
 } from '@/db/schema';
+import { allLimited } from '@/lib/concurrency';
 import { formName } from '@/lib/forms/naming';
+import { latestSurvey, type SurveySummary } from '@/lib/csat';
 import type { SessionAgent } from '@/lib/auth/session';
 import { can } from '@/lib/auth/permissions';
 import { configuredAccountId } from '@/lib/meta/client';
@@ -105,6 +107,10 @@ export type ConversationDetail = {
   lastCustomerMessageAt: Date | null;
   createdAt: Date;
   reopenCount: number;
+  /** An agent asked that this ticket not be surveyed. */
+  csatSuppressed: boolean;
+  /** The newest survey decision on the ticket, for the sidebar. */
+  survey: SurveySummary | null;
   /**
    * Whether a Facebook or Instagram reply can be delivered at all — which is a
    * separate question from whether the messaging window is still open, and the
@@ -238,67 +244,73 @@ export async function getConversation(
     .limit(1);
   const unverifiedSubmitter = unverified.length > 0;
 
-  const [timeline, files, events, shipments, accounts, sides, categories, controlTakenAt] =
-    await Promise.all([
-      db
-        .select({
-          message: messages,
-          agentName: agents.name,
-          agentColor: agents.avatarColor,
-          agentAvatarUrl: agents.avatarUrl,
-          contactName: contacts.name,
-          contactAvatarPath: contacts.avatarPath,
-          contactDeletedAt: contacts.deletedAt,
-        })
-        .from(messages)
-        .leftJoin(agents, eq(agents.id, messages.authorAgentId))
-        .leftJoin(contacts, eq(contacts.id, messages.authorContactId))
-        .where(eq(messages.conversationId, row.conversation.id))
-        // The id settles two messages stamped with the same instant — a batch
-        // sharing one `now`, or a provider's second-precision `sentAt` — so the
-        // timeline's last message is the one the inbox card previews
-        // (`lastVisibleMessage` in lib/tickets/inbox.ts breaks the tie the same
-        // way). Without it Postgres returns equal rows in whatever order it likes.
-        .orderBy(asc(messages.createdAt), asc(messages.id)),
+  const [timeline, files, events, shipments, accounts, sides, categories, controlTakenAt, survey] =
+    // Nine reads, on a pool of eight places: four at a time, so one ticket page
+    // cannot hold the whole pool (AGENTS.md, Database).
+    await allLimited(4, [
+      () =>
+        db
+          .select({
+            message: messages,
+            agentName: agents.name,
+            agentColor: agents.avatarColor,
+            agentAvatarUrl: agents.avatarUrl,
+            contactName: contacts.name,
+            contactAvatarPath: contacts.avatarPath,
+            contactDeletedAt: contacts.deletedAt,
+          })
+          .from(messages)
+          .leftJoin(agents, eq(agents.id, messages.authorAgentId))
+          .leftJoin(contacts, eq(contacts.id, messages.authorContactId))
+          .where(eq(messages.conversationId, row.conversation.id))
+          // The id settles two messages stamped with the same instant — a batch
+          // sharing one `now`, or a provider's second-precision `sentAt` — so the
+          // timeline's last message is the one the inbox card previews
+          // (`lastVisibleMessage` in lib/tickets/inbox.ts breaks the tie the same
+          // way). Without it Postgres returns equal rows in whatever order it likes.
+          .orderBy(asc(messages.createdAt), asc(messages.id)),
 
-      db
-        .select({
-          id: attachments.id,
-          messageId: attachments.messageId,
-          filename: attachments.filename,
-          contentType: attachments.contentType,
-          sizeBytes: attachments.sizeBytes,
-          contentId: attachments.contentId,
-        })
-        .from(attachments)
-        .innerJoin(messages, eq(messages.id, attachments.messageId))
-        .where(eq(messages.conversationId, row.conversation.id))
-        // The thread draws a message's pictures one under another, so an order
-        // Postgres is free to change between two renders would shuffle them on
-        // a live update. Stored order is the order an email's parts were in;
-        // a Messenger album is put in its sender's order below.
-        .orderBy(asc(attachments.createdAt), asc(attachments.id)),
+      () =>
+        db
+          .select({
+            id: attachments.id,
+            messageId: attachments.messageId,
+            filename: attachments.filename,
+            contentType: attachments.contentType,
+            sizeBytes: attachments.sizeBytes,
+            contentId: attachments.contentId,
+          })
+          .from(attachments)
+          .innerJoin(messages, eq(messages.id, attachments.messageId))
+          .where(eq(messages.conversationId, row.conversation.id))
+          // The thread draws a message's pictures one under another, so an order
+          // Postgres is free to change between two renders would shuffle them on
+          // a live update. Stored order is the order an email's parts were in;
+          // a Messenger album is put in its sender's order below.
+          .orderBy(asc(attachments.createdAt), asc(attachments.id)),
 
-      db
-        .select({
-          id: conversationEvents.id,
-          type: conversationEvents.type,
-          actorName: agents.name,
-          actorLabel: conversationEvents.actorLabel,
-          data: conversationEvents.data,
-          createdAt: conversationEvents.createdAt,
-        })
-        .from(conversationEvents)
-        .leftJoin(agents, eq(agents.id, conversationEvents.actorAgentId))
-        .where(eq(conversationEvents.conversationId, row.conversation.id))
-        .orderBy(desc(conversationEvents.createdAt))
-        .limit(50),
+      () =>
+        db
+          .select({
+            id: conversationEvents.id,
+            type: conversationEvents.type,
+            actorName: agents.name,
+            actorLabel: conversationEvents.actorLabel,
+            data: conversationEvents.data,
+            createdAt: conversationEvents.createdAt,
+          })
+          .from(conversationEvents)
+          .leftJoin(agents, eq(agents.id, conversationEvents.actorAgentId))
+          .where(eq(conversationEvents.conversationId, row.conversation.id))
+          .orderBy(desc(conversationEvents.createdAt))
+          .limit(50),
 
-      shipmentsForConversation(row.conversation.id, row.conversation.requesterContactId),
-      shippingAccountsForConversation(row.conversation.id),
-      sideConversationsForConversation(row.conversation.id),
-      categoriesForConversation(row.conversation.id),
-      threadControlTakenAt(row.conversation.id),
+      () => shipmentsForConversation(row.conversation.id, row.conversation.requesterContactId),
+      () => shippingAccountsForConversation(row.conversation.id),
+      () => sideConversationsForConversation(row.conversation.id),
+      () => categoriesForConversation(row.conversation.id),
+      () => threadControlTakenAt(row.conversation.id),
+      () => latestSurvey(row.conversation.id),
     ]);
 
   // Paired here rather than in the browser: the target is only named in the
@@ -408,6 +420,8 @@ export async function getConversation(
     lastCustomerMessageAt: row.conversation.lastCustomerMessageAt,
     createdAt: row.conversation.createdAt,
     reopenCount: row.conversation.reopenCount,
+    csatSuppressed: row.conversation.csatSuppressed,
+    survey,
     messages: timeline.map((entry) => ({
       id: entry.message.id,
       direction: entry.message.direction,

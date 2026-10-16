@@ -26,6 +26,7 @@ import {
   refuseIfNoRootCause,
 } from '@/lib/tickets/console-guards';
 import { changeStatus } from '@/lib/tickets/status';
+import { scheduleSurvey, setSurveySuppressed } from '@/lib/csat';
 import type { ActionState } from './action-state';
 
 // --- Ticket properties ------------------------------------------------------
@@ -328,4 +329,63 @@ export async function purgeTicket(_state: ActionState, formData: FormData): Prom
   // effect could navigate away. A redirect from the action makes the response
   // carry the inbox instead. It throws, so it stays last and outside any try.
   redirect('/inbox');
+}
+
+// --- Satisfaction survey ----------------------------------------------------
+
+/**
+ * "Don't survey this ticket", and its undo.
+ *
+ * Any agent who can see the ticket may set it: the harm it prevents — a survey
+ * to a colleague, a furious customer, a test — is one the agent on the ticket
+ * knows about and nobody else does. The flag is read when the survey job runs,
+ * so it works until the moment the survey goes out.
+ */
+export async function setSurveySuppression(
+  _state: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const agent = await requireAgent();
+
+  const conversationId = String(formData.get('conversationId') ?? '');
+  const row = await loadConversation(agent, conversationId);
+  if (!row) return { error: 'Ticket not found' };
+
+  const suppressed = formData.get('suppressed') === 'on';
+  if (row.conversation.csatSuppressed === suppressed) {
+    refresh(row.conversation.number);
+    return ok();
+  }
+
+  await setSurveySuppressed(conversationId, agent.id, suppressed);
+  refresh(row.conversation.number);
+  return ok();
+}
+
+/**
+ * Queues the survey for a resolved ticket now rather than after the delay.
+ *
+ * Queued, not sent: `send_csat` makes every check the scheduled survey makes,
+ * so this cannot reach a customer the automatic one would not, and the outcome
+ * lands on the timeline the same way. Open to any agent who can see the
+ * ticket, as the suppression toggle is: agents resolve tickets, and a control
+ * offered to a role it always refuses is worse than none.
+ */
+export async function sendSurveyNow(_state: ActionState, formData: FormData): Promise<ActionState> {
+  const agent = await requireAgent();
+
+  const conversationId = String(formData.get('conversationId') ?? '');
+  const row = await loadConversation(agent, conversationId);
+  if (!row) return { error: 'Ticket not found' };
+
+  if (row.statusCategory !== 'resolved' && row.statusCategory !== 'closed') {
+    return { error: 'Only a resolved ticket can be surveyed' };
+  }
+
+  const outcome = await scheduleSurvey(conversationId, 'manual');
+  if (outcome === 'off') return { error: 'Surveys are switched off' };
+  if (outcome !== 'queued') return { error: 'The survey could not be queued' };
+
+  refresh(row.conversation.number);
+  return ok();
 }

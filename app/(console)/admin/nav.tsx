@@ -36,6 +36,7 @@ const SECTIONS: { title: string; links: { href: string; label: string }[] }[] = 
       { href: '/admin/automations', label: 'Automations' },
       { href: '/admin/hours', label: 'Business hours' },
       { href: '/admin/auto-responses', label: 'Out-of-hours replies' },
+      { href: '/admin/csat', label: 'Satisfaction surveys' },
     ],
   },
   {

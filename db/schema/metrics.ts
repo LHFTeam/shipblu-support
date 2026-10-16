@@ -1,5 +1,6 @@
 import { sql } from 'drizzle-orm';
 import {
+  boolean,
   date,
   index,
   integer,
@@ -10,9 +11,17 @@ import {
   uuid,
 } from 'drizzle-orm/pg-core';
 import { agents, groups } from './agents';
-import { conversations } from './conversations';
-import { channelEnum, rootCauseOwnerEnum } from './enums';
+import { conversations, messages } from './conversations';
+import { channelEnum, csatDeliveryEnum, csatStatusEnum, rootCauseOwnerEnum } from './enums';
 
+/**
+ * One row per time the system decided whether to ask a customer how it went.
+ *
+ * A `sent` row is the survey; a `skipped` row says why there was none, which
+ * is the only place that question has an answer and what lets a report say
+ * how many resolutions were surveyed. The decision is `send_csat`'s, read by
+ * the ticket sidebar, the admin page's recent list and the rollup.
+ */
 export const csatSurveys = pgTable(
   'csat_surveys',
   {
@@ -21,16 +30,36 @@ export const csatSurveys = pgTable(
       .notNull()
       .references(() => conversations.id, { onDelete: 'cascade' }),
 
-    /** SHA-256 of the token embedded in the survey link. */
-    tokenHash: text('token_hash').notNull(),
+    status: csatStatusEnum('status').notNull().default('sent'),
+    /** Why there was no survey; null unless `skipped`. A `SkipReason` (`lib/csat/skip-reasons.ts`). */
+    skipReason: text('skip_reason'),
+
+    /**
+     * SHA-256 of the token embedded in the survey link. Null on a skipped row,
+     * which never had a link; a survey answered in a chat card or a Messenger
+     * sheet will need none either.
+     */
+    tokenHash: text('token_hash'),
 
     /** 1–5. Null until the customer responds. */
     rating: integer('rating'),
     comment: text('comment'),
 
-    /** Snapshotted at send time so later reassignment doesn't rewrite history. */
+    /**
+     * Snapshotted at send time so later reassignment doesn't rewrite history.
+     * The channel too: a ticket merged elsewhere keeps the channel it was
+     * surveyed on. Null only on the one row written before the column existed.
+     */
     agentId: uuid('agent_id').references(() => agents.id, { onDelete: 'set null' }),
     groupId: uuid('group_id').references(() => groups.id, { onDelete: 'set null' }),
+    channel: channelEnum('channel'),
+
+    /** How it reached the customer; null when it did not. */
+    delivery: csatDeliveryEnum('delivery'),
+    /** `ar` or `en`, what it went out in. */
+    locale: text('locale'),
+    /** The outbound row that carried it, so the timeline and the sidebar agree on what was sent. */
+    messageId: uuid('message_id').references(() => messages.id, { onDelete: 'set null' }),
 
     sentAt: timestamp('sent_at', { withTimezone: true }),
     respondedAt: timestamp('responded_at', { withTimezone: true }),
@@ -40,8 +69,53 @@ export const csatSurveys = pgTable(
     uniqueIndex('csat_surveys_token_idx').on(t.tokenHash),
     index('csat_surveys_conversation_idx').on(t.conversationId),
     index('csat_surveys_responded_idx').on(t.respondedAt),
+    index('csat_surveys_created_idx').on(t.createdAt),
+    // The job enqueues without a dedupe key and is idempotent instead, so two
+    // runs racing on one ticket meet here rather than sending two surveys.
+    uniqueIndex('csat_surveys_open_idx')
+      .on(t.conversationId)
+      .where(sql`${t.status} = 'sent'`),
   ],
 );
+
+/**
+ * The survey switch and its numbers: one row, `id = 1`, read through a
+ * thirty-second memo (`lib/csat/settings.ts`). No row is a fresh install and
+ * reads as off, with every channel off — the plan's "nothing goes out until
+ * an admin says which channels". Not `presence_policy`'s shape only because
+ * there is more than a pair of windows here.
+ */
+export const csatSettings = pgTable('csat_settings', {
+  id: integer('id').primaryKey().default(1),
+  enabled: boolean('enabled').notNull().default(false),
+
+  /** Resolve → send. The grace in which a customer's "one more thing" reopens the ticket instead. */
+  delayMinutes: integer('delay_minutes').notNull().default(30),
+  /**
+   * The same for Facebook and Instagram only, or null for `delayMinutes`. A
+   * Meta survey only sends inside the messaging window, which the default
+   * half hour can outlive; the report's skip reasons are what says so.
+   */
+  metaDelayMinutes: integer('meta_delay_minutes'),
+  /** Don't survey the same ticket twice inside this many days. */
+  resurveyAfterDays: integer('resurvey_after_days').notNull().default(14),
+
+  // One switch per deliverable channel. `portal` rides email's; WhatsApp has
+  // none, for the reason `plans/csat.md` gives.
+  surveyEmail: boolean('survey_email').notNull().default(false),
+  surveyWebchat: boolean('survey_webchat').notNull().default(false),
+  surveyFacebook: boolean('survey_facebook').notNull().default(false),
+  surveyInstagram: boolean('survey_instagram').notNull().default(false),
+  surveyApi: boolean('survey_api').notNull().default(false),
+
+  /** Whether a ticket an automation rule resolved is surveyed as one an agent resolved is. */
+  surveyRuleResolved: boolean('survey_rule_resolved').notNull().default(true),
+
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedByAgentId: uuid('updated_by_agent_id').references(() => agents.id, {
+    onDelete: 'set null',
+  }),
+});
 
 /**
  * Nightly rollups. Dashboards read only from here, so reporting never runs live

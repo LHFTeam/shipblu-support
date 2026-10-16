@@ -110,8 +110,35 @@ export type AutomatedReply = {
   meta?: Record<string, unknown>;
 };
 
-/** The new message's id, for the caller's log and follow-up writes. */
-export async function deliverAutomatedReply(reply: AutomatedReply): Promise<string> {
+/**
+ * Anything that can run the writes: the pool, or a transaction a caller holds
+ * open so the message commits with the row that explains it (the survey's).
+ */
+type Executor = Pick<typeof db, 'insert' | 'update'>;
+
+export type AutomatedReplyOptions = {
+  /**
+   * Whether this message counts as the acknowledgement the rule engine looks
+   * for (`firstAutoRepliedAt`). On for the two senders that acknowledge; off
+   * for the survey, which is sent after the ticket is resolved and must not
+   * make a "has been acknowledged" rule read a survey as the acknowledgement.
+   */
+  stampFirstAutoReply?: boolean;
+  /** The carrier job's priority. 20 for an acknowledgement; the survey takes 50. */
+  priority?: number;
+};
+
+/**
+ * Writes the message, moves the thread and records the event, on the executor
+ * it is given, and returns the new message's id. The carrier is queued apart
+ * (`enqueueAutomatedDelivery`), because a job is enqueued only after the rows
+ * it acts on commit — and a caller holding a transaction decides when that is.
+ */
+export async function writeAutomatedReply(
+  on: Executor,
+  reply: AutomatedReply,
+  { stampFirstAutoReply = true }: AutomatedReplyOptions = {},
+): Promise<string> {
   // Asked of the carrier rather than of the channel name, because `send_email`
   // is what carries `portal` and anything unrecognised as well as `email` — and
   // it is the carrier that decides whether an HTML part and a recipient are
@@ -127,7 +154,7 @@ export async function deliverAutomatedReply(reply: AutomatedReply): Promise<stri
 
   const now = new Date();
 
-  const inserted = await db
+  const inserted = await on
     .insert(messages)
     .values({
       conversationId: reply.conversationId,
@@ -145,7 +172,7 @@ export async function deliverAutomatedReply(reply: AutomatedReply): Promise<stri
 
   const messageId = inserted[0]!.id;
 
-  await db
+  await on
     .update(conversations)
     .set({
       lastMessageAt: now,
@@ -162,21 +189,45 @@ export async function deliverAutomatedReply(reply: AutomatedReply): Promise<stri
       // was written, so a time-based rule wrote it again on its next sweep.
       // Unseen only because production had no rule that replies and the
       // out-of-hours reply switched off (§6.84).
-      firstAutoRepliedAt: firstAt(conversations.firstAutoRepliedAt, now),
+      ...(stampFirstAutoReply
+        ? { firstAutoRepliedAt: firstAt(conversations.firstAutoRepliedAt, now) }
+        : {}),
     })
     .where(eq(conversations.id, reply.conversationId));
 
-  await db.insert(conversationEvents).values({
+  await on.insert(conversationEvents).values({
     conversationId: reply.conversationId,
     type: reply.eventType,
     actorLabel: reply.actorLabel,
     data: { messageId, ...(reply.eventData ?? {}) },
   });
 
-  if (!isWebchat) {
-    await enqueue(job, { messageId }, { priority: 20, dedupeKey: `send:${messageId}` });
-  }
+  return messageId;
+}
 
+/**
+ * Queues the carrier for a message `writeAutomatedReply` wrote, once it has
+ * committed. Nothing on web chat, where the row is the delivery. Keyed on the
+ * message, which is once-ever for it, so a caller that is not sure whether it
+ * already queued this one — a job run again after its rows committed — can
+ * call it again and queue nothing.
+ */
+export async function enqueueAutomatedDelivery(
+  channel: string,
+  messageId: string,
+  priority = 20,
+): Promise<void> {
+  if (channel === 'webchat') return;
+  await enqueue(carrierFor(channel), { messageId }, { priority, dedupeKey: `send:${messageId}` });
+}
+
+/** The new message's id, for the caller's log and follow-up writes. */
+export async function deliverAutomatedReply(
+  reply: AutomatedReply,
+  options: AutomatedReplyOptions = {},
+): Promise<string> {
+  const messageId = await writeAutomatedReply(db, reply, options);
+  await enqueueAutomatedDelivery(reply.channel, messageId, options.priority);
   return messageId;
 }
 
