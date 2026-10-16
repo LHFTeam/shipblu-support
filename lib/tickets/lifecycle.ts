@@ -125,7 +125,7 @@ async function autoAssign(conversationId: string): Promise<void> {
  * instead of a satisfaction survey.
  */
 export async function afterTicketResolved(conversationId: string): Promise<void> {
-  await scheduleSurvey(conversationId);
+  await scheduleSurvey(conversationId, 'agent');
 }
 
 /**

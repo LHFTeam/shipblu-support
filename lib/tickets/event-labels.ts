@@ -1,9 +1,12 @@
+import { describeSkip } from '@/lib/csat/skip-reasons';
+
 /**
  * The sentence a ticket's timeline prints for each `conversation_events` row.
  *
  * Pure wording, so it lives in `lib/` with tests beside it rather than inside
- * the ticket page's client component. It imports nothing, which keeps it safe
- * for the browser bundle that renders the timeline.
+ * the ticket page's client component. It imports nothing but the survey's
+ * skip-reason list, itself pure, which keeps it safe for the browser bundle
+ * that renders the timeline.
  */
 
 const SKIP_REASONS: Record<string, string> = {
@@ -195,6 +198,22 @@ export function describeEvent(type: string, data: Record<string, unknown>): stri
       return data.rootCauseKey
         ? `recorded the cause as ${String(data.rootCauseKey)}`
         : 'cleared the recorded cause';
+
+    // The survey's four decisions. Without cases these read "csat skipped" and
+    // "csat received" — the type with its underscores swapped — and drop the
+    // reason and the score, which are the whole content of the event.
+    case 'csat_sent':
+      return `sent a satisfaction survey ${data.delivery === 'email_link' ? 'by email' : 'as a message'}`;
+    case 'csat_skipped':
+      return `did not send a satisfaction survey: ${describeSkip(data.reason)}`;
+    case 'csat_received':
+      return typeof data.rating === 'number'
+        ? `rated the support ${data.rating} / 5`
+        : 'rated the support';
+    case 'csat_suppressed':
+      return 'asked that this ticket not be surveyed';
+    case 'csat_unsuppressed':
+      return 'allowed a satisfaction survey on this ticket again';
 
     default:
       return type.replace(/_/g, ' ');

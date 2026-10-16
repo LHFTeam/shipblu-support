@@ -163,10 +163,18 @@ async function countFor(tx: typeof db, conversationIds: string[]): Promise<Purge
         .select({ n: count() })
         .from(sideConversationMessages)
         .where(inArray(sideConversationMessages.sideConversationId, sideIds)),
+      // Answered ones only: the table also holds every survey that went out
+      // unanswered and every decision not to send one, and the panel's word
+      // is "responses".
       tx
         .select({ n: count() })
         .from(csatSurveys)
-        .where(inArray(csatSurveys.conversationId, conversationIds)),
+        .where(
+          and(
+            inArray(csatSurveys.conversationId, conversationIds),
+            eq(csatSurveys.status, 'answered'),
+          ),
+        ),
       tx
         .select({ n: count() })
         .from(attachments)

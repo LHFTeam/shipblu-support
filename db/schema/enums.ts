@@ -335,3 +335,24 @@ export const rootCauseOwnerEnum = pgEnum('root_cause_owner', [
  * a judgement about how far it moved.
  */
 export const suggestionEditEnum = pgEnum('suggestion_edit', ['unchanged', 'extended', 'reworded']);
+
+/**
+ * What became of one satisfaction survey decision.
+ *
+ * A `skipped` row is as much a record as a `sent` one: it is the only place
+ * "why was this customer not asked?" has an answer, and the only way a report
+ * can say how many resolutions were surveyed. `expired` is a survey a newer
+ * one replaced — most are never answered, and the next resolution must not
+ * meet the open-survey index on the old row — and, later, one whose link or
+ * Messenger card lapsed. Values are added as the stage that needs them lands
+ * (`plans/csat.md`); Postgres cannot drop one.
+ */
+export const csatStatusEnum = pgEnum('csat_status', ['sent', 'answered', 'skipped', 'expired']);
+
+/**
+ * How a survey reached the customer. `email_link` is the help-centre link in a
+ * mail; `text_link` the same link in a plain message — web chat, and a Meta
+ * direct message inside its window. The Messenger template, Instagram's quick
+ * replies and the myBlu pull are added by the stages that build them.
+ */
+export const csatDeliveryEnum = pgEnum('csat_delivery', ['email_link', 'text_link']);

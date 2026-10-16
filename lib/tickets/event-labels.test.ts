@@ -8,6 +8,24 @@ import { describeEvent } from './event-labels';
  */
 
 describe('describeEvent', () => {
+  it('says what the survey did, and why it did nothing', () => {
+    expect(describeEvent('csat_sent', { delivery: 'email_link' })).toBe(
+      'sent a satisfaction survey by email',
+    );
+    expect(describeEvent('csat_sent', { delivery: 'text_link' })).toBe(
+      'sent a satisfaction survey as a message',
+    );
+    expect(describeEvent('csat_skipped', { reason: 'agent_suppressed' })).toBe(
+      'did not send a satisfaction survey: an agent asked that this ticket not be surveyed',
+    );
+    // A reason written by a later version, read by this one, still makes a sentence.
+    expect(describeEvent('csat_skipped', { reason: 'expired' })).toBe(
+      'did not send a satisfaction survey: for a reason this version does not know',
+    );
+    expect(describeEvent('csat_received', { rating: 4 })).toBe('rated the support 4 / 5');
+    expect(describeEvent('csat_received', {})).toBe('rated the support');
+  });
+
   it('names the claimed address, and the client address only when there is one', () => {
     expect(describeEvent('unverified_submitter', { email: 'a@b.test', ip: '203.0.113.9' })).toBe(
       'submitted without signing in, as a@b.test from 203.0.113.9',

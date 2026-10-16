@@ -16,6 +16,7 @@ import { SideConversationsField } from './side-conversations';
 import { CustomFields, FieldSelect, SidebarField, TagField } from './ticket-fields';
 import { ShipmentsField, ShippingAccountsField } from './shipments-field';
 import { CategoriesField } from './categories-field';
+import { SatisfactionField } from './csat-field';
 import { DetailsTabs } from './details-tabs';
 import { describeEvent } from '@/lib/tickets/event-labels';
 
@@ -195,6 +196,13 @@ export function Sidebar({
                 >
                   <SideConversationsField sides={conversation.sideConversations} />
                 </DetailsSection>
+
+                <SatisfactionField
+                  conversationId={conversation.id}
+                  statusCategory={conversation.statusCategory}
+                  suppressed={conversation.csatSuppressed}
+                  survey={conversation.survey}
+                />
 
                 <DetailsSection
                   collapsible={false}
