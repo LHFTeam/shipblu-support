@@ -261,8 +261,14 @@ describe('send_csat', () => {
     const id = await resolvedTicket({ channel: 'email', email: 'a@b.test' });
 
     await sendCsat(job(id));
-    // The worker died after the rows committed and before the job was queued.
+    // The worker died after the rows committed and before the job was queued —
+    // and the customer wrote back in the meantime, reopening the ticket. The
+    // survey they were already sent still goes.
     await db.delete(jobs).where(eq(jobs.type, 'send_email'));
+    await db
+      .update(conversations)
+      .set({ statusId: await statusId('Open') })
+      .where(eq(conversations.id, id));
 
     await sendCsat(job(id));
 
@@ -284,15 +290,28 @@ describe('send_csat', () => {
       .update(conversations)
       .set({ csatSuppressed: true })
       .where(eq(conversations.id, suppressed));
+    // Who resolved is read off the row: a rule leaves `resolved_by_agent_id`
+    // null, an agent writes their id. The trigger on the job says nothing.
     const byRule = await resolvedTicket({ channel: 'email', email: 'a@b.test' });
+    const byAgent = await resolvedTicket({ channel: 'email', email: 'a@b.test' });
+    const [agent] = await db
+      .select({ id: agents.id })
+      .from(agents)
+      .where(eq(agents.email, 'admin@shipblu.test'));
+    await db
+      .update(conversations)
+      .set({ resolvedByAgentId: agent!.id })
+      .where(eq(conversations.id, byAgent));
     const chat = await resolvedTicket({ channel: 'webchat' });
 
     await sendCsat(job(suppressed));
-    await sendCsat(job(byRule, 'rule'));
+    await sendCsat(job(byRule, 'agent'));
+    await sendCsat(job(byAgent, 'rule'));
     await sendCsat(job(chat));
 
     expect((await surveysOf(suppressed))[0]).toMatchObject({ skipReason: 'agent_suppressed' });
     expect((await surveysOf(byRule))[0]).toMatchObject({ skipReason: 'rule_resolved' });
+    expect((await surveysOf(byAgent))[0]).toMatchObject({ status: 'sent' });
     expect((await surveysOf(chat))[0]).toMatchObject({ skipReason: 'channel_off' });
   });
 

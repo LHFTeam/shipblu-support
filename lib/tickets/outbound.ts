@@ -124,8 +124,6 @@ export type AutomatedReplyOptions = {
    * make a "has been acknowledged" rule read a survey as the acknowledgement.
    */
   stampFirstAutoReply?: boolean;
-  /** The carrier job's priority. 20 for an acknowledgement; the survey takes 50. */
-  priority?: number;
 };
 
 /**
@@ -221,13 +219,14 @@ export async function enqueueAutomatedDelivery(
   await enqueue(carrierFor(channel), { messageId }, { priority, dedupeKey: `send:${messageId}` });
 }
 
-/** The new message's id, for the caller's log and follow-up writes. */
-export async function deliverAutomatedReply(
-  reply: AutomatedReply,
-  options: AutomatedReplyOptions = {},
-): Promise<string> {
-  const messageId = await writeAutomatedReply(db, reply, options);
-  await enqueueAutomatedDelivery(reply.channel, messageId, options.priority);
+/**
+ * The two acknowledging senders' door: the write on the pool, then the
+ * carrier at an acknowledgement's priority. The survey takes the two halves
+ * itself, inside its own transaction and at its own priority.
+ */
+export async function deliverAutomatedReply(reply: AutomatedReply): Promise<string> {
+  const messageId = await writeAutomatedReply(db, reply);
+  await enqueueAutomatedDelivery(reply.channel, messageId);
   return messageId;
 }
 

@@ -21,7 +21,11 @@ import type { SkipReason } from './skip-reasons';
  * re-reads both under a lock on the ticket row.
  */
 
-/** Who asked for the survey: an agent resolving, a rule resolving, or the sidebar's "Send now". */
+/**
+ * Who asked for the survey: a resolve, by an agent or a rule, or the
+ * sidebar's "Send now". It decides the delay and whether a duplicate is
+ * answered on the ticket; who resolved the ticket is read off the row.
+ */
 export const SURVEY_TRIGGERS = ['agent', 'rule', 'manual'] as const;
 export type SurveyTrigger = (typeof SURVEY_TRIGGERS)[number];
 
@@ -41,7 +45,16 @@ export type DecisionInput = {
   hasCustomerMessage: boolean;
   suppressed: boolean;
   trigger: SurveyTrigger;
-  contactEmail: string | null;
+  /**
+   * Whether a rule, not a person, resolved the ticket — read off the row
+   * (`resolved_by_agent_id` is null for a rule's resolve) rather than off
+   * who queued the job, because a ticket resolved by an agent, reopened and
+   * re-resolved by a rule inside the delay has two jobs with two triggers and
+   * one truth.
+   */
+  resolvedByRule: boolean;
+  /** `lacksEmailRecipient`: written as an email, with nowhere to send it. */
+  lacksRecipient: boolean;
   /**
    * On Facebook and Instagram, whether the ticket is a public comment thread
    * (`rootCommentId` found one). A survey there would be posted on the comment
@@ -116,14 +129,14 @@ export function decideSurvey(input: DecisionInput, settings: CsatSettings): Deci
 
   if (input.suppressed) return { kind: 'skip', reason: 'agent_suppressed' };
 
-  if (input.trigger === 'rule' && !settings.surveyRuleResolved) {
+  if (input.resolvedByRule && !settings.surveyRuleResolved) {
     return { kind: 'skip', reason: 'rule_resolved' };
   }
 
   if (input.byEmail) {
-    return input.contactEmail
-      ? { kind: 'send', delivery: 'email_link' }
-      : { kind: 'skip', reason: 'no_address' };
+    return input.lacksRecipient
+      ? { kind: 'skip', reason: 'no_address' }
+      : { kind: 'send', delivery: 'email_link' };
   }
 
   if (input.channel === 'facebook' || input.channel === 'instagram') {

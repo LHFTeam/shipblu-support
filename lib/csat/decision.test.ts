@@ -24,7 +24,8 @@ function input(overrides: Partial<DecisionInput> = {}): DecisionInput {
     hasCustomerMessage: true,
     suppressed: false,
     trigger: 'agent',
-    contactEmail: 'amira@example.test',
+    resolvedByRule: false,
+    lacksRecipient: false,
     commentThread: false,
     metaWindowOpen: true,
     readOnly: false,
@@ -80,7 +81,7 @@ describe('decideSurvey', () => {
       kind: 'skip',
       reason: 'no_customer_message',
     });
-    expect(decideSurvey(input({ suppressed: true, contactEmail: null }), ON)).toEqual({
+    expect(decideSurvey(input({ suppressed: true, lacksRecipient: true }), ON)).toEqual({
       kind: 'skip',
       reason: 'agent_suppressed',
     });
@@ -94,13 +95,18 @@ describe('decideSurvey', () => {
   });
 
   it('leaves a rule-resolved ticket alone only when the admin said so', () => {
-    expect(decideSurvey(input({ trigger: 'rule' }), ON).kind).toBe('send');
-    expect(decideSurvey(input({ trigger: 'rule' }), { ...ON, surveyRuleResolved: false })).toEqual({
-      kind: 'skip',
-      reason: 'rule_resolved',
-    });
+    // Read off the row, not off who queued the job: the trigger says nothing.
+    expect(decideSurvey(input({ resolvedByRule: true }), ON).kind).toBe('send');
+    expect(
+      decideSurvey(input({ resolvedByRule: true, trigger: 'agent' }), {
+        ...ON,
+        surveyRuleResolved: false,
+      }),
+    ).toEqual({ kind: 'skip', reason: 'rule_resolved' });
     // The switch is about rules; an agent's resolve is unaffected by it.
-    expect(decideSurvey(input(), { ...ON, surveyRuleResolved: false }).kind).toBe('send');
+    expect(
+      decideSurvey(input({ trigger: 'rule' }), { ...ON, surveyRuleResolved: false }).kind,
+    ).toBe('send');
   });
 
   it('writes an email where the carrier is email, and skips when there is nowhere to send it', () => {
@@ -108,7 +114,7 @@ describe('decideSurvey', () => {
       kind: 'send',
       delivery: 'email_link',
     });
-    expect(decideSurvey(input({ channel: 'api', contactEmail: null }), ON)).toEqual({
+    expect(decideSurvey(input({ channel: 'api', lacksRecipient: true }), ON)).toEqual({
       kind: 'skip',
       reason: 'no_address',
     });

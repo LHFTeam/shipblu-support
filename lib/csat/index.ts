@@ -464,11 +464,14 @@ const SUMMARY = {
 };
 
 /**
- * What the sidebar shows: the ticket's newest survey — sent, answered or
- * superseded — and, when a later decision not to send one came after it, that
- * decision. Two things rather than the newest row, because a `skipped` row
- * written after an answered survey (the ticket reopened and was resolved
- * again inside the window) must not bury the customer's rating.
+ * What the sidebar shows: the ticket's survey — the newest answered one, else
+ * the newest sent or superseded one — and, when a decision not to send
+ * another came after it, that decision. Two things rather than the newest
+ * row, because a `skipped` row written after an answered survey (the ticket
+ * reopened and was resolved again inside the window) must not bury the
+ * customer's rating; and the answered one first, because a customer who
+ * answers a superseded link has still rated the ticket, and a newer survey
+ * "no answer yet" on top of that rating hides it.
  */
 export type TicketSurveyState = {
   survey: SurveySummary | null;
@@ -477,32 +480,28 @@ export type TicketSurveyState = {
 };
 
 export async function ticketSurveyState(conversationId: string): Promise<TicketSurveyState> {
-  const [survey] = await db
+  // One statement: the survey, then the skips after it, ordered so the first
+  // row is the survey and the second — if any — the newest later skip.
+  const rows = await db
     .select(SUMMARY)
     .from(csatSurveys)
-    .where(
-      and(
-        eq(csatSurveys.conversationId, conversationId),
-        inArray(csatSurveys.status, ['sent', 'answered', 'expired']),
-      ),
-    )
-    .orderBy(desc(csatSurveys.createdAt), desc(csatSurveys.id))
-    .limit(1);
+    .where(eq(csatSurveys.conversationId, conversationId))
+    .orderBy(
+      sql`case when ${csatSurveys.status} = 'answered' then 0 when ${csatSurveys.status} = 'skipped' then 2 else 1 end`,
+      desc(csatSurveys.createdAt),
+      desc(csatSurveys.id),
+    );
 
-  const [skip] = await db
-    .select({ reason: csatSurveys.skipReason, createdAt: csatSurveys.createdAt })
-    .from(csatSurveys)
-    .where(
-      and(
-        eq(csatSurveys.conversationId, conversationId),
-        eq(csatSurveys.status, 'skipped'),
-        survey ? gt(csatSurveys.createdAt, survey.createdAt) : undefined,
-      ),
-    )
-    .orderBy(desc(csatSurveys.createdAt), desc(csatSurveys.id))
-    .limit(1);
+  const survey = rows.find((row) => row.status !== 'skipped') ?? null;
+  const skip =
+    rows.find(
+      (row) => row.status === 'skipped' && (survey === null || row.createdAt > survey.createdAt),
+    ) ?? null;
 
-  return { survey: survey ?? null, skip: skip ?? null };
+  return {
+    survey,
+    skip: skip ? { reason: skip.skipReason, createdAt: skip.createdAt } : null,
+  };
 }
 
 /** One row of the admin page's recent list: the summary plus which ticket it was. */

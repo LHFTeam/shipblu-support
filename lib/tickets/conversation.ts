@@ -245,9 +245,10 @@ export async function getConversation(
   const unverifiedSubmitter = unverified.length > 0;
 
   const [timeline, files, events, shipments, accounts, sides, categories, controlTakenAt, survey] =
-    // Nine reads, on a pool of eight places: four at a time, so one ticket page
-    // cannot hold the whole pool (AGENTS.md, Database).
-    await allLimited(4, [
+    // Nine reads on a pool of eight places: at most the pool at once, so one
+    // ticket page can fill it but never queue behind itself (AGENTS.md,
+    // Database) — one wave, as before, plus the ninth.
+    await allLimited(8, [
       () =>
         db
           .select({

@@ -11,6 +11,7 @@ import { notReaction } from '@/lib/tickets/not-reaction';
 import {
   automatedReplyBlocked,
   enqueueAutomatedDelivery,
+  lacksEmailRecipient,
   sendsByEmail,
 } from '@/lib/tickets/outbound';
 import type { ClaimedJob } from '@/lib/queue';
@@ -71,6 +72,7 @@ export async function sendCsat(job: ClaimedJob): Promise<void> {
       mergedIntoId: conversations.mergedIntoId,
       csatSuppressed: conversations.csatSuppressed,
       assigneeAgentId: conversations.assigneeAgentId,
+      resolvedByAgentId: conversations.resolvedByAgentId,
       groupId: conversations.groupId,
       lastCustomerMessageAt: conversations.lastCustomerMessageAt,
       // Read by `automatedReplyBlocked`, to tell a comment ticket from a DM.
@@ -103,6 +105,17 @@ export async function sendCsat(job: ClaimedJob): Promise<void> {
   const ticket = rows[0];
   if (!ticket) return;
 
+  // Before deciding anything: a run that committed its survey and was stopped
+  // before queueing the carrier owes that carrier whatever has happened to
+  // the ticket since — a reopen in between is no reason to leave a survey the
+  // customer was already sent sitting `pending` for good.
+  const owed = await unsentSurveyMessage(conversationId);
+  if (owed) {
+    await enqueueAutomatedDelivery(ticket.channel, owed, PRIORITY);
+    log.info(`#${ticket.number}: queued the carrier for a survey a stopped run left behind`);
+    return;
+  }
+
   // A read that fails fails the job, so the queue retries: "off" written on
   // the ticket would outlive the hiccup.
   const settings = await readCsatSettings();
@@ -118,7 +131,8 @@ export async function sendCsat(job: ClaimedJob): Promise<void> {
       hasCustomerMessage: Boolean(ticket.hasCustomerMessage),
       suppressed: ticket.csatSuppressed,
       trigger,
-      contactEmail: ticket.contactEmail,
+      resolvedByRule: ticket.resolvedByAgentId === null,
+      lacksRecipient: lacksEmailRecipient(ticket.channel, ticket.contactEmail),
       commentThread: rootCommentId(ticket.externalId) !== null,
       // The third automated sender, through the same guard as the other two:
       // past 24 hours only `HUMAN_AGENT` sends on these platforms, and that tag
@@ -174,15 +188,11 @@ export async function sendCsat(job: ClaimedJob): Promise<void> {
 
   if (sent.kind === 'surveyed') {
     // Surveyed inside the window already, by an earlier run or by the other of
-    // two jobs for one ticket. The one thing left to check is whether that run
-    // got as far as queueing the carrier. A scheduled duplicate then writes
-    // nothing — the survey it would sit on top of is the answer — but an agent
-    // who pressed "Send now" is owed one, on the ticket.
-    const unsent = await unsentSurveyMessage(conversationId);
-    if (unsent) {
-      await enqueueAutomatedDelivery(ticket.channel, unsent, PRIORITY);
-      log.info(`#${ticket.number}: queued the carrier for a survey a stopped run left behind`);
-    } else if (trigger === 'manual') {
+    // two jobs for one ticket — and the other job's carrier, if it was still
+    // owed, was queued above. A scheduled duplicate writes nothing: the survey
+    // it would sit on top of is the answer. An agent who pressed "Send now" is
+    // owed one, on the ticket.
+    if (trigger === 'manual') {
       await recordSkip(conversationId, 'recently_surveyed', snapshot);
       log.info(`#${ticket.number}: surveyed inside the window already — told the agent`);
     } else {
