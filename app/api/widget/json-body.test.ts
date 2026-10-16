@@ -17,6 +17,7 @@ const registerVisitor = vi.fn(async () => ({ contactId: 'contact-new' }));
 const appendVisitorMessage = vi.fn(async () => ({ conversationId: 'conversation-1' }));
 const attachVisitorDetails = vi.fn(async () => undefined);
 const applyVisitorIdentity = vi.fn(async () => 'applied');
+const answerSurvey = vi.fn(async (): Promise<number | null> => 4);
 
 vi.mock('@/lib/widget/session', () => ({
   resolveVisitor,
@@ -29,6 +30,7 @@ vi.mock('@/lib/widget/session', () => ({
 vi.mock('@/lib/widget/conversation', () => ({
   appendVisitorMessage,
   attachVisitorDetails,
+  answerSurvey,
   listMessages: async () => [],
 }));
 vi.mock('@/lib/widget/identify', () => ({
@@ -37,6 +39,7 @@ vi.mock('@/lib/widget/identify', () => ({
 }));
 
 const contact = await import('./contact/route');
+const csat = await import('./csat/route');
 const identify = await import('./identify/route');
 const message = await import('./message/route');
 const session = await import('./session/route');
@@ -61,10 +64,12 @@ beforeEach(() => {
   appendVisitorMessage.mockClear();
   attachVisitorDetails.mockClear();
   applyVisitorIdentity.mockClear();
+  answerSurvey.mockClear();
 });
 
 const REFUSING = [
   { route: 'contact', POST: contact.POST },
+  { route: 'csat', POST: csat.POST },
   { route: 'identify', POST: identify.POST },
   { route: 'message', POST: message.POST },
 ];
@@ -129,6 +134,44 @@ describe('a usable widget body', () => {
     // No live conversation in this test, so the route refuses at the step after
     // the body has been read and the details parsed.
     expect(await response.text()).toBe('{"error":"no conversation"}');
+  });
+});
+
+describe('POST /api/widget/csat', () => {
+  const SURVEY = '6f1d2c3b-4a5e-4f60-8a71-92b3c4d5e6f7';
+
+  it('answers for the visitor the token names, with the comment as text or not at all', async () => {
+    const response = await csat.POST(
+      post(JSON.stringify({ token: 'known', surveyId: SURVEY, rating: 4, comment: ' quick ' })),
+    );
+
+    expect(await response.text()).toBe('{"rating":4}');
+    expect(answerSurvey).toHaveBeenCalledWith('contact-1', SURVEY, 4, ' quick ');
+
+    await csat.POST(
+      post(JSON.stringify({ token: 'known', surveyId: SURVEY, rating: 2, comment: 7 })),
+    );
+    expect(answerSurvey).toHaveBeenLastCalledWith('contact-1', SURVEY, 2, null);
+  });
+
+  it("answers a survey that is not the visitor's as it answers one that does not exist", async () => {
+    answerSurvey.mockResolvedValueOnce(null);
+    const response = await csat.POST(
+      post(JSON.stringify({ token: 'known', surveyId: SURVEY, rating: 5 })),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe('{"rating":null}');
+  });
+
+  it('refuses a survey id that is not a uuid before it reaches a query, and a missing rating', async () => {
+    const bad = await csat.POST(post(JSON.stringify({ token: 'known', surveyId: 'x', rating: 3 })));
+    expect(bad.status).toBe(400);
+    expect(await bad.text()).toBe('{"error":"no survey"}');
+
+    const unrated = await csat.POST(post(JSON.stringify({ token: 'known', surveyId: SURVEY })));
+    expect(await unrated.text()).toBe('{"error":"no rating"}');
+    expect(answerSurvey).not.toHaveBeenCalled();
   });
 });
 

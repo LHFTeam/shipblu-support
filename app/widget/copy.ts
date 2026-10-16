@@ -45,6 +45,9 @@ export const COPY = {
     detailsSaved: 'Thanks — we will get back to you.',
     detailsMissing: 'Leave an email address or a phone number so we can reply.',
     detailsInvalid: 'That does not look like an email address or a phone number.',
+
+    surveyClosed: 'This survey has closed.',
+    surveyFailed: 'That did not go through. Try again.',
   },
   ar: {
     heading: 'دعم شيب بلو',
@@ -73,6 +76,9 @@ export const COPY = {
     detailsSaved: 'شكرًا — سنعاود التواصل مع حضرتك.',
     detailsMissing: 'البريد الإلكتروني أو رقم الهاتف مطلوب حتى نتمكن من الرد.',
     detailsInvalid: 'هذا لا يبدو بريدًا إلكترونيًا أو رقم هاتف صحيحًا.',
+
+    surveyClosed: 'تم إغلاق هذا الاستطلاع.',
+    surveyFailed: 'لم يتم الإرسال. يمكن لحضرتك المحاولة مرة أخرى.',
   },
 } as const;
 

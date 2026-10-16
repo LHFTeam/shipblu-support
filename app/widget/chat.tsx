@@ -8,6 +8,7 @@ import { WIDGET_SAYS } from '@/lib/widget/protocol';
 import { WidgetArticle } from './article';
 import { copyFor } from './copy';
 import { WidgetHome } from './home';
+import type { SurveyResult } from './survey-card';
 import { WidgetThread, type OfflineDetails } from './thread';
 import type { ArticleLink, Message, WidgetView } from '@/lib/widget/types';
 import { formatOpens } from '@/lib/format';
@@ -247,6 +248,7 @@ export function WidgetChat({
       authorName: null,
       body,
       createdAt: new Date().toISOString(),
+      survey: null,
     };
     setMessages((current) => [...current, optimistic]);
 
@@ -295,6 +297,35 @@ export function WidgetChat({
       return false;
     }
   }
+
+  /**
+   * An answer from a survey card, for the session whose transcript drew it —
+   * the ref, not `ensureSession`, because a card is only ever on screen once a
+   * session is. The rating the survey holds afterwards, null when there was
+   * nothing to answer, or false when it did not go through — including a
+   * session replaced while it was on the wire, whose card is the previous
+   * person's and is about to go.
+   */
+  const answerSurvey = useCallback(
+    async (surveyId: string, rating: number, comment: string | null): Promise<SurveyResult> => {
+      const active = activeToken.current;
+      if (!active) return false;
+
+      try {
+        const response = await fetch('/api/widget/csat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token: active, surveyId, rating, comment }),
+        });
+        if (!response.ok || activeToken.current !== active) return false;
+        const data = (await response.json()) as { rating?: unknown };
+        return typeof data.rating === 'number' ? data.rating : null;
+      } catch {
+        return false;
+      }
+    },
+    [],
+  );
 
   // --- Chrome --------------------------------------------------------------
 
@@ -390,6 +421,7 @@ export function WidgetChat({
               return active ? saveDetails(active, details) : false;
             }}
             onOpenArticle={openArticle}
+            onAnswerSurvey={answerSurvey}
           />
         </div>
       ) : null}

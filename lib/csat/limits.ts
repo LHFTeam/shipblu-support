@@ -12,3 +12,10 @@
 export const MAX_DELAY_MINUTES = 7 * 24 * 60;
 export const MIN_RESURVEY_DAYS = 1;
 export const MAX_RESURVEY_DAYS = 365;
+
+/**
+ * The longest comment kept, in characters. The routes cut what they are sent
+ * to it and the chat card's box stops there, so the visitor sees where the
+ * end is rather than finding their last sentence gone.
+ */
+export const MAX_COMMENT = 2000;

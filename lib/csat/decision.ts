@@ -1,3 +1,4 @@
+import type { SurveyDelivery } from './delivery';
 import type { CsatChannels, CsatSettings } from './settings';
 import type { SkipReason } from './skip-reasons';
 
@@ -73,7 +74,7 @@ export type DecisionInput = {
 };
 
 export type Decision =
-  | { kind: 'send'; delivery: 'email_link' | 'text_link' }
+  | { kind: 'send'; delivery: SurveyDelivery }
   | { kind: 'skip'; reason: SkipReason }
   /** The ticket is gone — deleted, spam, merged away — and nothing is written. */
   | { kind: 'drop' };
@@ -124,6 +125,13 @@ export function decideSurvey(input: DecisionInput, settings: CsatSettings): Deci
     return { kind: 'skip', reason: 'reopened' };
   }
 
+  // A closed chat is not the visitor's any more: the widget opens a fresh one
+  // in its place (`findLiveConversation`), so a card written onto this one is
+  // a survey nobody can see, recorded as sent.
+  if (input.channel === 'webchat' && input.statusCategory === 'closed') {
+    return { kind: 'skip', reason: 'chat_closed' };
+  }
+
   // An agent-opened ticket the customer never answered has nothing to rate.
   if (!input.hasCustomerMessage) return { kind: 'skip', reason: 'no_customer_message' };
 
@@ -148,6 +156,8 @@ export function decideSurvey(input: DecisionInput, settings: CsatSettings): Deci
       : { kind: 'skip', reason: 'window_closed' };
   }
 
-  // Web chat: the row is the delivery.
-  return { kind: 'send', delivery: 'text_link' };
+  // Web chat: the row is the delivery, and the widget draws it as a card the
+  // visitor answers without leaving the chat. The message keeps the link, for
+  // the console's timeline and for a widget loaded before the card existed.
+  return { kind: 'send', delivery: 'widget_card' };
 }

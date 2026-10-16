@@ -118,18 +118,18 @@ customer sees.
 `csat_surveys` becomes the record of every time the system decided whether to
 ask, and every row says what happened:
 
-| Column          | Change                                                                                                                                                                                                                                                                                                                                                                    |
-| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `status`        | new enum `csat_status`: `sent`, `answered`, `skipped`, `expired` — all four from stage 1, `expired` being a survey a newer one superseded; a later stage that lets a link or a Messenger card lapse writes the same value, and adds no enum value, since Postgres cannot drop one                                                                                         |
-| `skip_reason`   | new, text, null unless `skipped`: `reopened`, `read_only_channel`, `no_address`, `window_closed`, `agent_suppressed`, `contact_opted_out`, `rule_resolved`, `no_customer_message`, `channel_off`, `csat_off`, `comment_thread`, `no_privacy_url`. Not "surveyed recently": a ticket already carrying its survey needs no second row saying so, and that row is the answer |
-| `channel`       | new, `channel` enum, snapshotted like `agent_id` — a merged ticket keeps the channel it was surveyed on                                                                                                                                                                                                                                                                   |
-| `delivery`      | new enum `csat_delivery`: `email_link` and `text_link` (stage 1 — the link in a mail, and in a plain message on web chat or inside a Meta window); `widget_card`, `meta_template`, `meta_quick_reply`, `api_pull` and `whatsapp_template` join it as their stages land                                                                                                    |
-| `locale`        | new, `ar` / `en`, what it went out in                                                                                                                                                                                                                                                                                                                                     |
-| `message_id`    | new, the outbound `messages` row that carried it, null for `api_pull` and `skipped`                                                                                                                                                                                                                                                                                       |
-| `rule_id`       | new, the `csat_rules` row whose wording it used, `set null` on delete                                                                                                                                                                                                                                                                                                     |
-| `answer_source` | new, null until answered: `page`, `widget`, `meta_feedback`, `meta_quick_reply`, `api`                                                                                                                                                                                                                                                                                    |
-| `expires_at`    | new; the template's `expires_in_days` for Meta, the link's life elsewhere                                                                                                                                                                                                                                                                                                 |
-| `token_hash`    | **nullable**: a skipped row never had a link, and a widget or Meta survey needs none                                                                                                                                                                                                                                                                                      |
+| Column          | Change                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `status`        | new enum `csat_status`: `sent`, `answered`, `skipped`, `expired` — all four from stage 1, `expired` being a survey a newer one superseded; a later stage that lets a link or a Messenger card lapse writes the same value, and adds no enum value, since Postgres cannot drop one                                                                                                                                                                                                    |
+| `skip_reason`   | new, text, null unless `skipped`: `reopened`, `read_only_channel`, `no_address`, `window_closed`, `agent_suppressed`, `contact_opted_out`, `rule_resolved`, `no_customer_message`, `channel_off`, `csat_off`, `comment_thread`, `no_privacy_url`, and `chat_closed` (stage 3: a web chat closed before its survey went out, which no widget can open again). Not "surveyed recently": a ticket already carrying its survey needs no second row saying so, and that row is the answer |
+| `channel`       | new, `channel` enum, snapshotted like `agent_id` — a merged ticket keeps the channel it was surveyed on                                                                                                                                                                                                                                                                                                                                                                              |
+| `delivery`      | new enum `csat_delivery`: `email_link` and `text_link` (stage 1 — the link in a mail, and in a plain message on web chat or inside a Meta window); `widget_card`, `meta_template`, `meta_quick_reply`, `api_pull` and `whatsapp_template` join it as their stages land                                                                                                                                                                                                               |
+| `locale`        | new, `ar` / `en`, what it went out in                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `message_id`    | new, the outbound `messages` row that carried it, null for `api_pull` and `skipped`                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `rule_id`       | new, the `csat_rules` row whose wording it used, `set null` on delete                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `answer_source` | new, null until answered: `page`, `widget` (stage 3, the enum `csat_answer_source`), then `meta_feedback`, `meta_quick_reply`, `api` as their stages land                                                                                                                                                                                                                                                                                                                            |
+| `expires_at`    | new; the template's `expires_in_days` for Meta, the link's life elsewhere                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `token_hash`    | **nullable**: a skipped row never had a link, and a widget or Meta survey needs none                                                                                                                                                                                                                                                                                                                                                                                                 |
 
 A skipped row is cheap and it is the whole answer to item 6: the ticket's
 timeline shows "not surveyed — the customer opted out", and the report can
@@ -244,9 +244,11 @@ agent sees the decision where they resolved the ticket.
 feedback handler, the quick-reply handler and the API route all call it. First
 answer wins (`responded_at is null`), a later comment attaches to an answered
 row whose comment is empty, anything else is ignored — the existing rules, kept
-because they were right. It writes `csat_received` with `{rating, source}`, and
-`describeEvent` gets the case it never had: "rated the support 4 / 5 (from
-Messenger)".
+because they were right. Keyed by the survey's id rather than a token, so it
+also refuses what a token never reached: a `skipped` row had no survey to
+answer. It writes `csat_received` with `{rating, source}`, and `describeEvent`
+gets the case it never had: "rated the support 4 / 5 in the chat widget" (stage
+3; "on the survey page" for the link).
 
 ## Delivery, channel by channel
 
@@ -269,16 +271,42 @@ threads onto the ticket, as any reply does.
 
 The survey row is still an outbound `reply` message, because the widget's
 stream already reads those and the console timeline draws it, but the widget
-draws it as a **card**, not a line of text with a link. `listMessages` carries
-`survey: { id, rating, expired }` for a message whose `meta.csatSurveyId` is
-set, resolved server-side so the hash never leaves the database. The card
-shows the question, five buttons, then the comment box and the thanks line.
-The visitor needs no link token: their session token is already the credential
-that reads this conversation, and `POST /api/widget/csat {token, surveyId,
-rating, comment}` resolves the visitor through `resolveVisitor()` and checks the
-survey belongs to one of that contact's conversations before `recordAnswer`.
-Rate-limited in memory like the other widget routes. The text body keeps the
-link, for an embedded widget on an old snippet and for the console.
+draws it as a **card**, not a line of text with a link — `delivery:
+widget_card`. `listMessages` carries `survey` on a message whose survey row
+names it (`csat_surveys.message_id`, joined in the transcript's one
+statement): `{ id, rating, expired, locale }` and the strings the card prints
+— the intro, the question, the five labels, the comment prompt, the button,
+the thanks — resolved on the server from the rule the survey went out with,
+in the language it went out in, so the card holds no wording logic and can
+sit under a widget in the other language. The card carries no token; the
+message's body still holds the link, which is the visitor's own and what a
+widget loaded before the card existed draws.
+
+The card shows the question and five buttons, then the comment box and the
+thanks line. The visitor needs no link token: their session token is already
+the credential that reads this conversation, and `POST /api/widget/csat
+{token, surveyId, rating, comment}` resolves the visitor through
+`resolveVisitor()` and checks the survey is on one of that contact's web chat
+conversations before `recordAnswer`. Rate-limited in memory like the other
+widget routes. Three things settled in the building:
+
+- **The route answers with the rating the survey holds afterwards.** First
+  answer wins, so a card whose first post lost its reply would otherwise draw
+  a second tap the server never kept. That reveals nothing: it is the
+  visitor's own survey. One that is not theirs, one that does not exist and
+  one that is closed all answer `{"rating":null}` alike.
+- **A superseded survey is drawn closed, and the widget's door refuses it.**
+  Two live scales for one ticket in one thread is a question asked twice; the
+  link in its body still takes an answer, as every superseded link does.
+- **A chat closed before its survey went out is `skipped: chat_closed`.** The
+  widget opens a fresh conversation in place of a closed one, so a card
+  written there is one nobody can see, recorded as sent. Checked in the
+  decision and again under the lock. A survey sent while the chat was
+  resolved and closed later (the three-day rule) lapses with the chat.
+
+The admin page's "Chat card" preview is this card, with its answers handed
+straight back and recorded nowhere, so the preview cannot drift from what a
+visitor sees.
 
 ### Facebook — the Customer Feedback Template
 

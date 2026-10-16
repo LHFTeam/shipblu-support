@@ -15,6 +15,8 @@ import { logger } from '@/lib/log';
 import type { ConversationChannel } from '@/lib/tickets/channel-policy';
 import { writeAutomatedReply } from '@/lib/tickets/outbound';
 import { channelSwitch, type SurveyTrigger } from './decision';
+import type { AnswerSource, SurveyDelivery } from './delivery';
+import { MAX_COMMENT } from './limits';
 import { readCsatSettings } from './settings';
 import type { SkipReason } from './skip-reasons';
 
@@ -199,7 +201,7 @@ export type SurveySend = {
   conversationId: string;
   /** `ar` or `en`: what it goes out in. */
   locale: 'ar' | 'en';
-  delivery: 'email_link' | 'text_link';
+  delivery: SurveyDelivery;
   snapshot: SurveySnapshot;
   /** `csat_settings.resurvey_after_days`, read by the job. */
   resurveyAfterDays: number;
@@ -216,7 +218,7 @@ export type SendOutcome =
   /** The ticket already carries a survey inside the window; nothing was written. */
   | { kind: 'surveyed' }
   /** The ticket changed under the job since it decided; the reason is the job's to record. */
-  | { kind: 'skip'; reason: 'reopened' | 'agent_suppressed' }
+  | { kind: 'skip'; reason: 'reopened' | 'chat_closed' | 'agent_suppressed' }
   /** The ticket is gone. */
   | { kind: 'drop' };
 
@@ -269,6 +271,11 @@ export async function sendSurvey(send: SurveySend): Promise<SendOutcome> {
       return { kind: 'drop' };
     if (ticket.statusCategory !== 'resolved' && ticket.statusCategory !== 'closed') {
       return { kind: 'skip', reason: 'reopened' };
+    }
+    // `decideSurvey`'s rule, again behind the lock: closed in between, a chat
+    // is one the visitor can no longer open.
+    if (send.snapshot.channel === 'webchat' && ticket.statusCategory === 'closed') {
+      return { kind: 'skip', reason: 'chat_closed' };
     }
     if (ticket.csatSuppressed) return { kind: 'skip', reason: 'agent_suppressed' };
 
@@ -383,39 +390,55 @@ export async function surveyByToken(token: string): Promise<SurveyView | null> {
   return rows[0] ?? null;
 }
 
-export const MAX_COMMENT = 2000;
-
 export type ResponseOutcome = 'recorded' | 'comment_added' | 'ignored';
 
 /**
- * Records a response.
+ * Records an answer, whichever door it came through — the page a link opens,
+ * or the card in the chat widget — so the rules below are one function's and
+ * no door can answer them differently. The caller has already established
+ * that whoever is answering may: the page by the token in its link, the widget
+ * by the visitor's own session.
  *
- * The score and the comment arrive as two requests, because the form saves the
- * rating the moment it is clicked — most people answer the number and leave,
- * and making them press Send afterwards is how a survey loses the responses it
- * did get. So this handles both:
+ * The score and the comment arrive as two requests, because both doors save
+ * the rating the moment it is chosen — most people answer the number and
+ * leave, and making them press Send afterwards is how a survey loses the
+ * responses it did get. So this handles both:
  *
- * - No answer yet: the rating is recorded. First answer wins, enforced by
- *   requiring `responded_at` to still be null, so a link forwarded to a
- *   colleague cannot overwrite what the customer said.
+ * - No answer yet: the rating is recorded, with where it came from. First
+ *   answer wins, enforced by requiring `responded_at` to still be null, so a
+ *   link forwarded to a colleague cannot overwrite what the customer said.
+ *   A superseded survey still takes one, as its link always did; a skipped
+ *   row never does, because there was no survey to answer.
  * - Already answered, comment still empty: the comment is attached without
  *   touching the score. That is the same customer finishing their sentence.
  * - Anything else: ignored.
  */
-export async function recordResponse(
-  token: string,
+export async function recordAnswer(
+  surveyId: string,
   rating: number,
   comment: string | null,
+  source: AnswerSource,
 ): Promise<ResponseOutcome> {
   if (!Number.isInteger(rating) || rating < 1 || rating > 5) return 'ignored';
 
-  const tokenHash = hashToken(token);
   const trimmed = comment ? comment.trim().slice(0, MAX_COMMENT) || null : null;
 
   const rated = await db
     .update(csatSurveys)
-    .set({ status: 'answered', rating, comment: trimmed, respondedAt: new Date() })
-    .where(and(eq(csatSurveys.tokenHash, tokenHash), isNull(csatSurveys.respondedAt)))
+    .set({
+      status: 'answered',
+      rating,
+      comment: trimmed,
+      respondedAt: new Date(),
+      answerSource: source,
+    })
+    .where(
+      and(
+        eq(csatSurveys.id, surveyId),
+        inArray(csatSurveys.status, ['sent', 'expired']),
+        isNull(csatSurveys.respondedAt),
+      ),
+    )
     .returning({ id: csatSurveys.id, conversationId: csatSurveys.conversationId });
 
   if (rated[0]) {
@@ -425,7 +448,7 @@ export async function recordResponse(
       conversationId: rated[0].conversationId,
       type: 'csat_received',
       actorLabel: ACTOR,
-      data: { rating },
+      data: { rating, source },
     });
 
     return 'recorded';
@@ -436,7 +459,13 @@ export async function recordResponse(
   const commented = await db
     .update(csatSurveys)
     .set({ comment: trimmed })
-    .where(and(eq(csatSurveys.tokenHash, tokenHash), isNull(csatSurveys.comment)))
+    .where(
+      and(
+        eq(csatSurveys.id, surveyId),
+        eq(csatSurveys.status, 'answered'),
+        isNull(csatSurveys.comment),
+      ),
+    )
     .returning({ id: csatSurveys.id });
 
   return commented[0] ? 'comment_added' : 'ignored';

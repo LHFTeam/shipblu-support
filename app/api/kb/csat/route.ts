@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
-import { MAX_COMMENT, recordResponse } from '@/lib/csat';
+import { recordAnswer, surveyByToken } from '@/lib/csat';
+import { MAX_COMMENT } from '@/lib/csat/limits';
 import { readJsonBody } from '@/lib/http/json-body';
 import { allow, clientIp } from '@/lib/http/rate-limit';
 
@@ -48,7 +49,8 @@ export async function POST(request: Request) {
   // that distinguishes "unknown token" from "already answered" is an oracle for
   // whoever is trying tokens, and the customer has nothing to do differently
   // either way.
-  await recordResponse(body.token, body.rating, comment);
+  const survey = await surveyByToken(body.token);
+  if (survey) await recordAnswer(survey.id, body.rating, comment, 'page');
 
   return new NextResponse(null, { status: 204 });
 }

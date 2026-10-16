@@ -351,8 +351,19 @@ export const csatStatusEnum = pgEnum('csat_status', ['sent', 'answered', 'skippe
 
 /**
  * How a survey reached the customer. `email_link` is the help-centre link in a
- * mail; `text_link` the same link in a plain message — web chat, and a Meta
- * direct message inside its window. The Messenger template, Instagram's quick
- * replies and the myBlu pull are added by the stages that build them.
+ * mail; `text_link` the same link in a plain message, which is how a Meta
+ * direct message inside its window carries it, and how web chat did before
+ * `widget_card`: the same message, drawn by the widget as a card the visitor
+ * answers in the chat. The Messenger template, Instagram's quick replies and
+ * the myBlu pull are added by the stages that build them.
  */
-export const csatDeliveryEnum = pgEnum('csat_delivery', ['email_link', 'text_link']);
+export const csatDeliveryEnum = pgEnum('csat_delivery', ['email_link', 'text_link', 'widget_card']);
+
+/**
+ * Which door an answer came through: the help-centre page a link opens, or
+ * the card in the chat widget. The answer is the same 1–5 either way; this is
+ * so the timeline can say where it came from, and so a report can tell a
+ * channel's response rate from how its survey was drawn. Messenger's feedback
+ * sheet, Instagram's quick replies and the myBlu API join as their stages land.
+ */
+export const csatAnswerSourceEnum = pgEnum('csat_answer_source', ['page', 'widget']);

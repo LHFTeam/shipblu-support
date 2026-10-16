@@ -87,11 +87,14 @@ describe('decideSurvey', () => {
     });
   });
 
-  it('surveys a closed ticket as a resolved one', () => {
+  it('surveys a closed ticket as a resolved one, except a chat nobody can open again', () => {
     expect(decideSurvey(input({ statusCategory: 'closed' }), ON)).toEqual({
       kind: 'send',
       delivery: 'email_link',
     });
+    expect(
+      decideSurvey(input({ channel: 'webchat', byEmail: false, statusCategory: 'closed' }), ON),
+    ).toEqual({ kind: 'skip', reason: 'chat_closed' });
   });
 
   it('leaves a rule-resolved ticket alone only when the admin said so', () => {
@@ -120,10 +123,10 @@ describe('decideSurvey', () => {
     });
   });
 
-  it('sends a message on web chat, and on Meta only inside the window', () => {
+  it('sends a card on web chat, and a message on Meta only inside the window', () => {
     expect(decideSurvey(input({ channel: 'webchat', byEmail: false }), ON)).toEqual({
       kind: 'send',
-      delivery: 'text_link',
+      delivery: 'widget_card',
     });
     expect(decideSurvey(input({ channel: 'facebook', byEmail: false }), ON)).toEqual({
       kind: 'send',

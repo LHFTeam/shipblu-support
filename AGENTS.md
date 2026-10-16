@@ -99,6 +99,11 @@ npm run lint:strict
 node scripts/ci/repo-rules.mjs
 ```
 
+`repo-rules.mjs` reads the tree through `git ls-files`, so a file you have not
+`git add`ed is invisible to every rule: a new route importing a new module reads
+as `dead-exports` on the module, and a new page that breaks a rule passes. Stage
+new files before you run it.
+
 `lint:strict` is `eslint.strict.config.mjs`: the type-aware rules — floating and
 misused promises, `await` on a non-promise, a switch that no longer covers its
 union — over `lib/`, `worker/` and `app/`. They are kept out of `lint` because

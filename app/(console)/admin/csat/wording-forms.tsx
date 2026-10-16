@@ -4,7 +4,6 @@ import { useState } from 'react';
 import {
   Badge,
   Button,
-  buttonClass,
   ErrorText,
   Field,
   Input,
@@ -32,6 +31,7 @@ import {
   type WordingPair,
 } from '@/lib/csat/wording';
 import type { ActionState } from '@/lib/http/action-state';
+import { SurveyCard } from '../../../widget/survey-card';
 import { DangerAction, Disclosure, EditorForm } from '../forms-shared';
 import { deleteWordingRule, saveWordingRule, sendTestSurvey } from './actions';
 
@@ -146,6 +146,11 @@ const EXPLAIN: Record<WordingField, string> = {
  * draws that one, so the preview shows what goes in each slot rather than
  * pretending to draw it.
  */
+/** The preview card's answer: the rating it was given, kept nowhere. */
+async function previewAnswer(_surveyId: string, rating: number): Promise<number> {
+  return rating;
+}
+
 export function WordingPreview({ pair, locale }: { pair: WordingPair; locale: WordingLocale }) {
   const wording = resolveWording(pair, locale);
   const labels = ratingLabels(locale);
@@ -172,27 +177,37 @@ export function WordingPreview({ pair, locale }: { pair: WordingPair; locale: Wo
         </p>
       </div>
 
-      <div className="rounded-lg border border-(--color-border-subtle) p-3 text-sm">
-        <p className="mb-2 text-2xs font-semibold tracking-wide text-(--color-text-tertiary) uppercase">
+      {/*
+        The widget's own card rather than a drawing of it, so the preview cannot
+        come to disagree with what a visitor sees. Its answers go nowhere: a tap
+        is handed straight back as the rating kept, so the comment step and the
+        thanks can be clicked through. Keyed on the language, so switching it
+        starts the card over.
+      */}
+      <div className="flex flex-col gap-2 rounded-lg border border-(--color-border-subtle) p-3 text-sm">
+        <p className="text-2xs font-semibold tracking-wide text-(--color-text-tertiary) uppercase">
           Chat card
         </p>
-        <p className="text-(--color-text-secondary)">{wording.intro}</p>
-        <p className="font-semibold">{wording.question}</p>
-        <p className="mt-2 flex flex-wrap gap-1">
-          {labels.map((label) => (
-            <span
-              key={label}
-              className="rounded-md border border-(--color-border-default) px-2 py-1 text-xs"
-            >
-              {label}
-            </span>
-          ))}
+        <SurveyCard
+          key={locale}
+          survey={{
+            id: 'preview',
+            rating: null,
+            expired: false,
+            locale,
+            intro: wording.intro,
+            question: wording.question,
+            labels,
+            commentPrompt: wording.commentPrompt,
+            button: wording.button,
+            thanks: wording.thanks,
+          }}
+          onAnswer={previewAnswer}
+        />
+        {/* The console's own words, in the preview's direction otherwise. */}
+        <p dir="ltr" className="text-2xs text-(--color-text-tertiary)">
+          Tap a rating to see the rest. Nothing is recorded.
         </p>
-        <p className="mt-2 text-xs text-(--color-text-secondary)">{wording.commentPrompt}</p>
-        <p className="mt-1">
-          <span className={buttonClass({ variant: 'primary', size: 'sm' })}>{wording.button}</span>
-        </p>
-        <p className="mt-2 text-xs text-(--color-text-secondary)">{wording.thanks}</p>
       </div>
 
       <div className="rounded-lg border border-(--color-border-subtle) p-3 text-sm">
