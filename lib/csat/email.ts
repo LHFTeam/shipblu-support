@@ -14,7 +14,9 @@ import { ratingLabels, ratingUrl, type Wording, type WordingLocale } from './wor
  *
  * Minimal HTML through `emailShell`, for the reason it gives: every client
  * renders it the same. The links are bordered anchors rather than buttons,
- * which webmail clients strip the styling from.
+ * which webmail clients strip the styling from. The shell's direction is the
+ * customer's language, for alignment; each paragraph resolves its own, since
+ * a line that fell back to the other language reads backwards otherwise.
  */
 export function surveyEmail(
   wording: Wording,
@@ -44,9 +46,12 @@ export function surveyEmail(
 
   const html = emailShell(
     [
-      wording.intro ? `<p>${escapeHtml(wording.intro)}</p>` : '',
-      wording.subtitle ? `<p>${escapeHtml(wording.subtitle)}</p>` : '',
-      `<p style="font-weight:600">${escapeHtml(wording.question)}</p>`,
+      // `dir="auto"` per paragraph: a rule written in one language falls back
+      // per field, so an Arabic customer's mail can carry an English line, and
+      // laid out right-to-left its full stop lands at the front of it.
+      wording.intro ? `<p dir="auto">${escapeHtml(wording.intro)}</p>` : '',
+      wording.subtitle ? `<p dir="auto">${escapeHtml(wording.subtitle)}</p>` : '',
+      `<p dir="auto" style="font-weight:600">${escapeHtml(wording.question)}</p>`,
       `<p>${links}</p>`,
     ].filter(Boolean),
     { dir, lang: locale },

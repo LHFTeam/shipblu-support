@@ -15,10 +15,11 @@ export const metadata: Metadata = { robots: { index: false, follow: false } };
  * Where the links in an admin's test email land: the survey page as a
  * customer would see it, for a wording rule, recording nothing.
  *
- * Public, like the page it previews — the only thing it shows is the wording,
- * which every surveyed customer is shown — and keyed on the rule's id, which
- * is a uuid, so there is nothing to enumerate. An id that names no rule shows
- * the built-in wording, the same answer a survey whose rule was deleted gets.
+ * Public, like the page it previews — the only thing it shows is a rule's
+ * wording, active or not, since an admin's test is as often of a draft as of
+ * what goes out — and keyed on the rule's id, which is a uuid, so there is
+ * nothing to enumerate. An id that names no rule shows the built-in wording,
+ * the same answer a survey whose rule was deleted gets.
  */
 export default async function CsatPreviewPage({
   params,

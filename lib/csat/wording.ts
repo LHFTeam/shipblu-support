@@ -165,7 +165,9 @@ export type WordingScope = { groupId: string | null; channel: string | null };
 /**
  * The rule for a ticket: the most specific active one, a channel beating a
  * group and both beating either — the scoring `lib/auto-response/resolve.ts`
- * gives for the out-of-hours reply, and for the reasons given there.
+ * gives for the out-of-hours reply, and for the reasons given there. Two
+ * rules can never tie: a score names a scope, and `csat_rules_scope_key`
+ * allows one row per scope.
  */
 export function pickWordingRule<R extends WordingScope & { isActive: boolean }>(
   rules: R[],

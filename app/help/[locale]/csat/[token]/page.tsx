@@ -2,7 +2,7 @@ import { notFound } from 'next/navigation';
 import type { Metadata } from 'next';
 import { surveyByToken } from '@/lib/csat';
 import { wordingForRule } from '@/lib/csat/rules';
-import { isLocale } from '@/lib/kb/locale';
+import { isLocale, t } from '@/lib/kb/locale';
 import { PageBody, Panel } from '../../chrome';
 import { SurveyForm } from './form';
 
@@ -54,9 +54,7 @@ export default async function CsatPage({
         <Panel className="mx-auto max-w-[600px] p-7">
           <h1 className="text-2xl font-bold text-(--color-text-primary)">{wording.thanks}</h1>
           <p className="mt-2 text-sm text-(--color-text-secondary)">
-            {locale === 'ar'
-              ? 'لقد أجبت على هذا الاستطلاع بالفعل.'
-              : 'You have already answered this survey.'}
+            {t(locale, 'csatAlreadyAnswered')}
           </p>
         </Panel>
       </PageBody>

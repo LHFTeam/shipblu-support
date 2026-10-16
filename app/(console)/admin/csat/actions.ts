@@ -174,7 +174,14 @@ export async function saveWordingRule(
   if (clash[0]) return { error: 'A rule already covers that group and channel — edit it instead' };
 
   if (id) {
-    await db.update(csatRules).set(values).where(eq(csatRules.id, id));
+    // The id arrives in a form field; a rule deleted in another tab is a
+    // stale form, not a save that quietly wrote nothing.
+    const updated = await db
+      .update(csatRules)
+      .set(values)
+      .where(eq(csatRules.id, id))
+      .returning({ id: csatRules.id });
+    if (!updated[0]) return { error: 'That wording no longer exists — reload the page' };
   } else {
     await db.insert(csatRules).values(values);
   }

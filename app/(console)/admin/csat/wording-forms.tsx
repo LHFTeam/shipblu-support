@@ -4,6 +4,7 @@ import { useState } from 'react';
 import {
   Badge,
   Button,
+  buttonClass,
   ErrorText,
   Field,
   Input,
@@ -188,9 +189,7 @@ export function WordingPreview({ pair, locale }: { pair: WordingPair; locale: Wo
         </p>
         <p className="mt-2 text-xs text-(--color-text-secondary)">{wording.commentPrompt}</p>
         <p className="mt-1">
-          <span className="rounded-md bg-(--color-action-primary-default) px-2 py-1 text-xs text-white">
-            {wording.button}
-          </span>
+          <span className={buttonClass({ variant: 'primary', size: 'sm' })}>{wording.button}</span>
         </p>
         <p className="mt-2 text-xs text-(--color-text-secondary)">{wording.thanks}</p>
       </div>
@@ -230,9 +229,18 @@ export function WordingPreview({ pair, locale }: { pair: WordingPair; locale: Wo
   );
 }
 
-function RuleFields({ rule, groups }: { rule?: WordingRule; groups: Group[] }) {
+function RuleFields({
+  rule,
+  groups,
+  prefill = false,
+}: {
+  rule?: WordingRule;
+  groups: Group[];
+  /** Start from the built-in strings rather than empty: "Customise" edits what goes out today. */
+  prefill?: boolean;
+}) {
   const [pair, setPair] = useState<WordingPair>(() =>
-    rule ? pick(rule) : { ...EMPTY_WORDING_PAIR },
+    rule ? pick(rule) : prefill ? builtInPair() : { ...EMPTY_WORDING_PAIR },
   );
   const [previewLocale, setPreviewLocale] = useState<WordingLocale>('ar');
 
@@ -293,6 +301,17 @@ function RuleFields({ rule, groups }: { rule?: WordingRule; groups: Group[] }) {
       />
     </>
   );
+}
+
+/** The built-in wording as a pair, for a rule that starts as a copy of it. */
+function builtInPair(): WordingPair {
+  const pair = {} as WordingPair;
+  for (const field of WORDING_FIELDS) {
+    for (const locale of ['ar', 'en'] as const) {
+      pair[wordingColumn(field, locale)] = DEFAULT_WORDING[locale][field];
+    }
+  }
+  return pair;
 }
 
 function pick(rule: WordingRule): WordingPair {
@@ -361,7 +380,14 @@ export function WordingRuleEditor({ rule, groups }: { rule: WordingRule; groups:
 }
 
 /** The built-in wording, shown as the row that answers when no rule does. */
-export function BuiltInWording({ groups }: { groups: Group[] }) {
+export function BuiltInWording({
+  groups,
+  customisable,
+}: {
+  groups: Group[];
+  /** False while a switched-off every-group, every-channel rule holds that scope: edit that one instead. */
+  customisable: boolean;
+}) {
   const [editing, setEditing] = useState(false);
   const [locale, setLocale] = useState<WordingLocale>('ar');
 
@@ -372,7 +398,7 @@ export function BuiltInWording({ groups }: { groups: Group[] }) {
         submitLabel="Create wording"
         onSaved={() => setEditing(false)}
       >
-        <RuleFields groups={groups} />
+        <RuleFields groups={groups} prefill />
       </EditorForm>
     );
   }
@@ -405,9 +431,11 @@ export function BuiltInWording({ groups }: { groups: Group[] }) {
           >
             {locale === 'ar' ? 'Show English' : 'Show Arabic'}
           </Button>
-          <Button variant="secondary" size="sm" onClick={() => setEditing(true)}>
-            Customise
-          </Button>
+          {customisable ? (
+            <Button variant="secondary" size="sm" onClick={() => setEditing(true)}>
+              Customise
+            </Button>
+          ) : null}
         </div>
       </div>
       <WordingPreview pair={EMPTY_WORDING_PAIR} locale={locale} />
@@ -422,7 +450,15 @@ const TEST_INITIAL: ActionState = { error: null };
  * admin's own and is not a field: a form that mails any address is a form
  * that mails a customer.
  */
-export function SendTestForm({ rules, email }: { rules: WordingRule[]; email: string }) {
+export function SendTestForm({
+  rules,
+  groups,
+  email,
+}: {
+  rules: WordingRule[];
+  groups: Group[];
+  email: string;
+}) {
   const { state, form } = useActionForm(sendTestSurvey, TEST_INITIAL);
 
   return (
@@ -433,7 +469,8 @@ export function SendTestForm({ rules, email }: { rules: WordingRule[]; email: st
             <option value="">Built in</option>
             {rules.map((rule) => (
               <option key={rule.id} value={rule.id}>
-                {channelLabel(rule.channel)} · {rule.groupId ? 'one group' : 'every group'}
+                {channelLabel(rule.channel)} ·{' '}
+                {groups.find((group) => group.id === rule.groupId)?.name ?? 'Every group'}
               </option>
             ))}
           </Select>

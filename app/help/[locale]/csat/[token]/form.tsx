@@ -39,9 +39,6 @@ export function SurveyForm({
   preview?: boolean;
 }) {
   const [rating, setRating] = useState<number | null>(preselected);
-  // Whether the rating on screen has reached the server: false for a
-  // preselected one until the customer taps.
-  const [posted, setPosted] = useState(false);
   const [comment, setComment] = useState('');
   const [saved, setSaved] = useState(false);
   const labels = ratingLabels(locale);
@@ -85,7 +82,6 @@ export function SurveyForm({
               aria-pressed={rating === value}
               onClick={() => {
                 setRating(value);
-                setPosted(true);
                 void send(value, null);
               }}
               className={`min-h-[42px] rounded-md border px-3 py-2.5 text-sm font-medium transition-colors ${
@@ -114,9 +110,11 @@ export function SurveyForm({
           <Button
             className="mt-1"
             onClick={() => {
-              // A preselected rating that was never tapped goes with the
-              // comment, so the one tap on this button is the whole answer.
-              void send(rating, comment.trim() || (posted ? null : ''));
+              // A preselected rating that was never tapped goes with this,
+              // comment or not: the route records a rating it has not seen and
+              // attaches a comment to one it has, so the one tap on this
+              // button is the whole answer either way.
+              void send(rating, comment.trim() || null);
               setSaved(true);
             }}
           >

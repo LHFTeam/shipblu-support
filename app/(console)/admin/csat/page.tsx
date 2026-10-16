@@ -31,7 +31,12 @@ export default async function CsatAdminPage() {
     listWordingRules(),
     listGroupNames(),
   ]);
-  const hasDefaultRule = rules.some((rule) => rule.groupId === null && rule.channel === null);
+  // The built-in wording answers whenever no *active* every-group, every-channel
+  // rule does, so that is when its card is shown; a switched-off default rule
+  // still holds the scope, so "Customise" (which creates one) is offered only
+  // when no default row exists at all.
+  const defaultRule = rules.find((rule) => rule.groupId === null && rule.channel === null);
+  const builtInAnswers = !defaultRule?.isActive;
 
   return (
     <>
@@ -59,18 +64,18 @@ export default async function CsatAdminPage() {
             wins: a channel beats a group, and a rule naming both beats either. The limits are
             Messenger&rsquo;s, held on every rule, so a wording that saves is one that sends.
           </p>
-          {hasDefaultRule ? null : (
+          {builtInAnswers ? (
             <Card>
-              <BuiltInWording groups={groups} />
+              <BuiltInWording groups={groups} customisable={defaultRule === undefined} />
             </Card>
-          )}
+          ) : null}
           {rules.map((rule) => (
             <Card key={rule.id}>
               <WordingRuleEditor rule={rule} groups={groups} />
             </Card>
           ))}
           <Card>
-            <SendTestForm rules={rules} email={admin.email} />
+            <SendTestForm rules={rules} groups={groups} email={admin.email} />
           </Card>
         </section>
 

@@ -166,6 +166,8 @@ describe('send_csat', () => {
 
   it('sends the admin’s wording for the ticket’s channel, and remembers which', async () => {
     await switchOn();
+    // Two rules, so the test proves the ticket's channel picked the email one.
+    await db.insert(csatRules).values({ channel: 'webchat', questionEn: 'Chat only' });
     const [rule] = await db
       .insert(csatRules)
       .values({
@@ -191,6 +193,7 @@ describe('send_csat', () => {
     // first line is the rule's English, and the five links carry the rating.
     expect(message!.bodyText).toContain('From the team');
     expect(message!.bodyText).toContain('كيف كان الدعم اليوم؟');
+    expect(message!.bodyText).not.toContain('Chat only');
     expect(message!.bodyHtml).toContain('?rating=5');
     expect(message!.bodyHtml).toContain('?rating=1');
   });

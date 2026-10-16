@@ -516,7 +516,7 @@ case; the sidebar section with the suppression toggle. Verified by a
 against Postgres, and by resolving one email ticket on production with the
 switch on and watching the row, the job and the mail.
 
-**2. Wording and the email.** `csat_rules`, the seed, the admin wording
+**2. Wording and the email.** `csat_rules`, the built-in wording, the admin wording
 section with preview and limits, the five-link email, the pre-selected landing
 page, "send a test". `csat/wording.test.ts` holds the limits.
 
