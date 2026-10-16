@@ -240,7 +240,7 @@ async function applyAction(action: Action, ticket: TicketRow, ruleName: string):
       await onStatusChanged(conversationId, status.stopsSlaClock);
       // A rule that resolves a ticket should survey the customer exactly as an
       // agent resolving it by hand does.
-      if (action.category === 'resolved') await scheduleSurvey(conversationId);
+      if (action.category === 'resolved') await scheduleSurvey(conversationId, 'rule');
       return;
     }
 

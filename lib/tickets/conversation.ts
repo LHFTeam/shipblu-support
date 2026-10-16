@@ -12,6 +12,7 @@ import {
   ticketStatuses,
 } from '@/db/schema';
 import { formName } from '@/lib/forms/naming';
+import { latestSurvey, type SurveySummary } from '@/lib/csat';
 import type { SessionAgent } from '@/lib/auth/session';
 import { can } from '@/lib/auth/permissions';
 import { configuredAccountId } from '@/lib/meta/client';
@@ -105,6 +106,10 @@ export type ConversationDetail = {
   lastCustomerMessageAt: Date | null;
   createdAt: Date;
   reopenCount: number;
+  /** An agent asked that this ticket not be surveyed. */
+  csatSuppressed: boolean;
+  /** The newest survey decision on the ticket, for the sidebar. */
+  survey: SurveySummary | null;
   /**
    * Whether a Facebook or Instagram reply can be delivered at all — which is a
    * separate question from whether the messaging window is still open, and the
@@ -238,7 +243,7 @@ export async function getConversation(
     .limit(1);
   const unverifiedSubmitter = unverified.length > 0;
 
-  const [timeline, files, events, shipments, accounts, sides, categories, controlTakenAt] =
+  const [timeline, files, events, shipments, accounts, sides, categories, controlTakenAt, survey] =
     await Promise.all([
       db
         .select({
@@ -299,6 +304,7 @@ export async function getConversation(
       sideConversationsForConversation(row.conversation.id),
       categoriesForConversation(row.conversation.id),
       threadControlTakenAt(row.conversation.id),
+      latestSurvey(row.conversation.id),
     ]);
 
   // Paired here rather than in the browser: the target is only named in the
@@ -408,6 +414,8 @@ export async function getConversation(
     lastCustomerMessageAt: row.conversation.lastCustomerMessageAt,
     createdAt: row.conversation.createdAt,
     reopenCount: row.conversation.reopenCount,
+    csatSuppressed: row.conversation.csatSuppressed,
+    survey,
     messages: timeline.map((entry) => ({
       id: entry.message.id,
       direction: entry.message.direction,

@@ -2091,12 +2091,12 @@ message bodies — the same reasoning as the deliberately tiny `pg_notify` paylo
   6,244 when this was written, so the cost of the workaround is growing), and `lib/contacts/merge.ts` already
   documents why that is not the same as knowing: `'en'` means either "reads
   English" or "nobody has ever said". Anything that picks a language off it is
-  answering an Arabic-first customer base in English — **CSAT surveys are doing
-  that today** (`worker/handlers/send-csat.ts` reads the column directly). Two
+  answering an Arabic-first customer base in English — **CSAT surveys did
+  that until 2026-10-16** (`worker/handlers/send-csat.ts` read the column
+  directly; it now goes through `requesterLocale()` like the other two). Three
   senders work around it by reading the script of the customer's own message —
-  the out-of-hours reply and, since canned responses became bilingual, the
-  canned reply an automation rule sends — through `preferredLocale()` in
-  `lib/tickets/locale.ts`. That is a workaround and not the fix, and it is now
+  the out-of-hours reply, the canned reply an automation rule sends and the
+  survey — through `preferredLocale()` in `lib/tickets/locale.ts`. That is a workaround and not the fix, and it is now
   in one module precisely so the next sender does not invent a third answer. The
   fix is to set the column at ingest — the widget and the portal both know the
   locale from the URL they were opened on, and a WhatsApp or email contact can

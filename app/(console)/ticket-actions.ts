@@ -26,6 +26,8 @@ import {
   refuseIfNoRootCause,
 } from '@/lib/tickets/console-guards';
 import { changeStatus } from '@/lib/tickets/status';
+import { scheduleSurvey, setSurveySuppressed } from '@/lib/csat';
+import { loadCsatSettings } from '@/lib/csat/settings';
 import type { ActionState } from './action-state';
 
 // --- Ticket properties ------------------------------------------------------
@@ -328,4 +330,65 @@ export async function purgeTicket(_state: ActionState, formData: FormData): Prom
   // effect could navigate away. A redirect from the action makes the response
   // carry the inbox instead. It throws, so it stays last and outside any try.
   redirect('/inbox');
+}
+
+// --- Satisfaction survey ----------------------------------------------------
+
+/**
+ * "Don't survey this ticket", and its undo.
+ *
+ * Any agent who can see the ticket may set it: the harm it prevents — a survey
+ * to a colleague, a furious customer, a test — is one the agent on the ticket
+ * knows about and nobody else does. The flag is read when the survey job runs,
+ * so it works until the moment the survey goes out.
+ */
+export async function setSurveySuppression(
+  _state: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const agent = await requireAgent();
+
+  const conversationId = String(formData.get('conversationId') ?? '');
+  const row = await loadConversation(agent, conversationId);
+  if (!row) return { error: 'Ticket not found' };
+
+  const suppressed = formData.get('suppressed') === 'on';
+  if (row.conversation.csatSuppressed === suppressed) {
+    refresh(row.conversation.number);
+    return ok();
+  }
+
+  await setSurveySuppressed(conversationId, agent.id, suppressed);
+  refresh(row.conversation.number);
+  return ok();
+}
+
+/**
+ * Queues the survey for a resolved ticket now rather than after the delay.
+ *
+ * Queued, not sent: `send_csat` makes every check the scheduled survey makes,
+ * so this cannot reach a customer the automatic one would not, and the outcome
+ * lands on the timeline the same way. Behind `ticket.close`, the population
+ * that resolves tickets.
+ */
+export async function sendSurveyNow(_state: ActionState, formData: FormData): Promise<ActionState> {
+  const agent = await requireAgent();
+  if (!can(agent, 'ticket.close')) return { error: 'You cannot send surveys' };
+
+  const conversationId = String(formData.get('conversationId') ?? '');
+  const row = await loadConversation(agent, conversationId);
+  if (!row) return { error: 'Ticket not found' };
+
+  if (row.statusCategory !== 'resolved' && row.statusCategory !== 'closed') {
+    return { error: 'Only a resolved ticket can be surveyed' };
+  }
+
+  const settings = await loadCsatSettings();
+  if (!settings.enabled) return { error: 'Surveys are switched off' };
+
+  const queued = await scheduleSurvey(conversationId, 'manual');
+  if (!queued) return { error: 'The survey could not be queued' };
+
+  refresh(row.conversation.number);
+  return { ...ok(), message: 'Survey queued; the outcome will show here in a minute.' };
 }

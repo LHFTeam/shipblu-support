@@ -1,14 +1,12 @@
 import { eq } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { contacts, conversations, messages, ticketStatuses } from '@/db/schema';
-import { createSurvey, recentlySurveyed } from '@/lib/csat';
+import { attachMessage, recentlySurveyed, recordSent, recordSkip } from '@/lib/csat';
+import { decideSurvey, type SurveyTrigger } from '@/lib/csat/decision';
+import { loadCsatSettings } from '@/lib/csat/settings';
 import { isReadOnlyChannel } from '@/lib/tickets/channel-policy';
-import {
-  automatedReplyBlocked,
-  carrierFor,
-  lacksEmailRecipient,
-  sendsByEmail,
-} from '@/lib/tickets/outbound';
+import { newestCustomerWords, requesterLocale } from '@/lib/tickets/locale';
+import { automatedReplyBlocked, carrierFor, sendsByEmail } from '@/lib/tickets/outbound';
 import { enqueue, type ClaimedJob } from '@/lib/queue';
 import { parseJobPayload } from '@/lib/queue/payloads';
 import { logger } from '@/lib/log';
@@ -16,13 +14,20 @@ import { logger } from '@/lib/log';
 const log = logger('send_csat');
 
 /**
- * Sends one satisfaction survey, half an hour after a ticket was resolved.
+ * Sends one satisfaction survey, a while after a ticket was resolved.
  *
  * Enqueued per ticket rather than swept: the trigger is a specific event with a
  * specific delay, and a queued job with a `runAt` says that directly.
  *
- * Everything it checks is re-checked here rather than at enqueue time, because
- * half an hour is long enough for all of it to have changed.
+ * Everything it checks is read here rather than at enqueue time, because the
+ * delay is long enough for all of it to have changed — and every outcome is a
+ * row (`lib/csat`), so "why was this customer not asked?" is answered on the
+ * ticket rather than in this log. The decision itself is `decideSurvey`, pure
+ * and tested; this reads what it needs and writes what it decided.
+ *
+ * The job runs at least once, not exactly once (AGENTS.md, _The worker is a
+ * pool_): a second run finds `recentlySurveyed` true and records that, and two
+ * runs racing meet `csat_surveys_open_idx`.
  */
 
 const TEXT = {
@@ -40,7 +45,10 @@ const HTML = {
 };
 
 export async function sendCsat(job: ClaimedJob): Promise<void> {
-  const { conversationId } = parseJobPayload(job, 'send_csat');
+  const payload = parseJobPayload(job, 'send_csat');
+  const { conversationId } = payload;
+  // Rows queued before the trigger existed were an agent's resolve.
+  const trigger: SurveyTrigger = payload.trigger ?? 'agent';
 
   const rows = await db
     .select({
@@ -49,6 +57,8 @@ export async function sendCsat(job: ClaimedJob): Promise<void> {
       channel: conversations.channel,
       isSpam: conversations.isSpam,
       deletedAt: conversations.deletedAt,
+      mergedIntoId: conversations.mergedIntoId,
+      csatSuppressed: conversations.csatSuppressed,
       assigneeAgentId: conversations.assigneeAgentId,
       groupId: conversations.groupId,
       lastCustomerMessageAt: conversations.lastCustomerMessageAt,
@@ -56,7 +66,6 @@ export async function sendCsat(job: ClaimedJob): Promise<void> {
       externalId: conversations.externalId,
       statusCategory: ticketStatuses.category,
       contactEmail: contacts.primaryEmail,
-      contactLocale: contacts.locale,
     })
     .from(conversations)
     .innerJoin(ticketStatuses, eq(ticketStatuses.id, conversations.statusId))
@@ -67,58 +76,57 @@ export async function sendCsat(job: ClaimedJob): Promise<void> {
   const ticket = rows[0];
   if (!ticket) return;
 
-  // The customer came back and reopened it in the last half hour: they want an
-  // answer, not a survey. The next resolution will schedule a new one.
-  if (ticket.statusCategory !== 'resolved' && ticket.statusCategory !== 'closed') {
-    log.info(`#${ticket.number} is open again — no survey`);
-    return;
-  }
+  const settings = await loadCsatSettings();
+  const isMeta = ticket.channel === 'facebook' || ticket.channel === 'instagram';
 
-  if (ticket.deletedAt || ticket.isSpam) return;
+  const [words, surveyed] = await Promise.all([
+    newestCustomerWords(conversationId),
+    recentlySurveyed(conversationId, settings.resurveyAfterDays),
+  ]);
 
-  // A read-only channel is a record of a conversation the team never had. Asking
-  // the customer to rate our support on the strength of it would be asking about
-  // someone else's work — and the survey would go out from a number they have
-  // not been talking to.
-  if (isReadOnlyChannel(ticket.channel)) {
-    log.info(`#${ticket.number} is on a read-only channel — no survey`);
-    return;
-  }
+  const decision = decideSurvey(
+    {
+      channel: ticket.channel,
+      statusCategory: ticket.statusCategory,
+      deletedAt: ticket.deletedAt,
+      isSpam: ticket.isSpam,
+      mergedIntoId: ticket.mergedIntoId,
+      hasCustomerWords: words !== null,
+      suppressed: ticket.csatSuppressed,
+      trigger,
+      recentlySurveyed: surveyed,
+      contactEmail: ticket.contactEmail,
+      // The third automated sender, through the same guard as the other two:
+      // past 24 hours only `HUMAN_AGENT` sends on these platforms, and that tag
+      // is reserved for a message a person wrote.
+      metaWindowOpen: isMeta ? automatedReplyBlocked(ticket) === null : false,
+      readOnly: isReadOnlyChannel(ticket.channel),
+      byEmail: sendsByEmail(ticket.channel),
+    },
+    settings,
+  );
 
-  if (await recentlySurveyed(conversationId)) {
-    log.info(`#${ticket.number} was surveyed recently — skipping`);
-    return;
-  }
-
-  // A portal ticket is surveyed by email too, so its survey is written as one —
-  // with the linked HTML body and the address — and skipped, like an email
-  // ticket's, when there is no address to send it to rather than failing in the
-  // worker five times.
-  const isEmail = sendsByEmail(ticket.channel);
-  const isWebchat = ticket.channel === 'webchat';
-
-  if (lacksEmailRecipient(ticket.channel, ticket.contactEmail)) {
-    log.info(`#${ticket.number} has no email address to survey`);
-    return;
-  }
-
-  // The third automated sender, through the same guard as the other two. It used
-  // to carry its own WhatsApp-only copy, which said nothing about Facebook or
-  // Instagram — where a survey half an hour after a resolve is routinely outside
-  // the 24-hour window, and where the only thing that would carry it is
-  // `HUMAN_AGENT`, a tag reserved for a message a person wrote. A survey is not
-  // worth spending a WhatsApp template on either.
-  const blocked = automatedReplyBlocked(ticket);
-  if (blocked) {
-    log.info(`#${ticket.number}: no survey — ${blocked}`);
-    return;
-  }
-
-  const locale = ticket.contactLocale === 'ar' ? 'ar' : 'en';
-  const survey = await createSurvey(conversationId, locale, {
+  const snapshot = {
     agentId: ticket.assigneeAgentId,
     groupId: ticket.groupId,
-  });
+    channel: ticket.channel,
+  };
+
+  if (decision.kind === 'drop') return;
+
+  if (decision.kind === 'skip') {
+    await recordSkip(conversationId, decision.reason, snapshot);
+    log.info(`#${ticket.number}: no survey — ${decision.reason}`);
+    return;
+  }
+
+  // The customer's own words, not `contacts.locale`, which nothing writes:
+  // read off the column, every survey went out in English (§6).
+  const locale = await requesterLocale(conversationId);
+  const survey = await recordSent(conversationId, locale, decision.delivery, snapshot);
+
+  const isEmail = decision.delivery === 'email_link';
+  const isWebchat = ticket.channel === 'webchat';
 
   const inserted = await db
     .insert(messages)
@@ -129,6 +137,8 @@ export async function sendCsat(job: ClaimedJob): Promise<void> {
       bodyText: TEXT[locale](ticket.number, survey.url),
       bodyHtml: isEmail ? HTML[locale](ticket.number, survey.url) : null,
       toAddresses: isEmail && ticket.contactEmail ? [ticket.contactEmail] : [],
+      // Web chat has no carrier: the row is the delivery, and the widget's
+      // stream is already reading from it.
       deliveryStatus: isWebchat ? 'delivered' : 'pending',
       ...(isWebchat ? { deliveredAt: new Date() } : {}),
       meta: { csatSurveyId: survey.id },
@@ -145,13 +155,15 @@ export async function sendCsat(job: ClaimedJob): Promise<void> {
     .set({ lastMessageAt: new Date() })
     .where(eq(conversations.id, conversationId));
 
+  await attachMessage(
+    { id: survey.id, conversationId, delivery: decision.delivery, locale },
+    messageId,
+  );
+
   if (!isWebchat) {
-    // `carrierFor` rather than a second copy of the channel-to-job mapping. The
-    // copy here read `whatsapp ? send_whatsapp : send_email`, so a survey on a
-    // Facebook or Instagram ticket was queued as an email to a contact who
-    // usually has no address — it failed in the worker rather than anywhere
-    // anybody was looking, which is the exact bug the shared function was
-    // written to end for the other two senders.
+    // `carrierFor` rather than a second copy of the channel-to-job mapping: the
+    // copy here once read `whatsapp ? send_whatsapp : send_email`, so a survey
+    // on a Facebook ticket was queued as an email to a contact with no address.
     await enqueue(
       carrierFor(ticket.channel),
       { messageId },
@@ -159,5 +171,5 @@ export async function sendCsat(job: ClaimedJob): Promise<void> {
     );
   }
 
-  log.info(`surveyed #${ticket.number} on ${ticket.channel}`);
+  log.info(`surveyed #${ticket.number} on ${ticket.channel} in ${locale}`);
 }

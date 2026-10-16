@@ -210,6 +210,14 @@ export const conversations = pgTable(
     /** Number of times the ticket has moved back out of a resolved status. */
     reopenCount: integer('reopen_count').notNull().default(0),
 
+    /**
+     * An agent asked that this ticket not be surveyed: the customer is a
+     * colleague, or furious, or the ticket was a test. Read by `send_csat` at
+     * send time rather than at resolve, so it works until the moment the
+     * survey goes out, and recorded on the timeline as `csat_suppressed`.
+     */
+    csatSuppressed: boolean('csat_suppressed').notNull().default(false),
+
     // --- Relationships ---------------------------------------------------
     parentId: uuid('parent_id').references((): AnyPgColumn => conversations.id, {
       onDelete: 'set null',

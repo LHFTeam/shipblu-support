@@ -54,7 +54,13 @@ export const JOB_PAYLOADS = {
   // dropped into a run that writes. A uuid because the id goes straight into a
   // query, where a malformed one is 22P02.
   classify_priority: z.strictObject({ messageId: z.uuid() }),
-  send_csat: z.object({ conversationId: z.string().min(1) }),
+  // `trigger` says who asked — an agent, a rule, or the sidebar's "Send now" —
+  // because the admin may switch off surveys for rule-resolved tickets, and the
+  // job cannot tell a rule's resolve from an agent's off the row.
+  send_csat: z.object({
+    conversationId: z.string().min(1),
+    trigger: z.enum(['agent', 'rule', 'manual']).optional(),
+  }),
   // Facebook and Instagram hand over a URL, WhatsApp an id to exchange for one.
   // The WhatsApp half names no source, so a Meta payload that lost its URL
   // matches neither half rather than being read as WhatsApp media.
