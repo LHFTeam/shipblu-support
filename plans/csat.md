@@ -167,9 +167,12 @@ the rollback and takes thirty seconds to reach the fleet.
 The same two nullable columns as `auto_responses` — `group_id`, `channel` —
 with the same resolution (most specific wins, both beat one, a channel beats a
 group) and the same `unique nulls not distinct (group_id, channel)` identity,
-for the reasons `plans/out-of-hours-auto-response.md` gives. A default row
-(`null, null`) is seeded with today's two sentences so the feature works the
-moment the switch goes on.
+for the reasons `plans/out-of-hours-auto-response.md` gives. No row matching
+is the built-in wording in `lib/csat/wording.ts` — today's sentences, in code
+rather than seeded as a row, so there is one copy of them, the switch works
+before anybody has written a word, and a deleted rule falls back to something
+rather than to nothing. The admin page shows the built-in as the row that
+answers when none does, with "Customise" opening a rule pre-filled from it.
 
 Every customer-facing string is an `*_ar` / `*_en` pair, both `not null default
 ''`, one required, either covering the other (AGENTS.md, _Bilingual_):
@@ -425,10 +428,12 @@ Sections, top to bottom, every control an `InfoTip` away from its reason:
 6. **Recent surveys.** The last fifty rows live from `csat_surveys` — ticket,
    channel, delivery, status, skip reason, rating — because the first thing an
    admin does after switching it on is wait half an hour and look.
-7. **Send a test.** A button that emails the current wording to the signed-in
-   admin's own address through `send_email`, as a survey row flagged `test`
-   that the rollup ignores. The one way to see the email in a real client
-   without resolving a real ticket.
+7. **Send a test.** A button that emails a rule's wording, in one language, to
+   the signed-in admin's own address through the ticket-less email job
+   (`send_notification_email`) — no survey row, so nothing for the rollup to
+   ignore — with its five links landing on `/{locale}/csat/preview`, the survey
+   page as a customer sees it, recording nothing. The one way to see the email
+   in a real client without resolving a real ticket.
 
 Actions follow the repo shape: `requirePermission('admin.csat')`, write,
 `revalidatePath`, `SettingsState`; the wording save validates through

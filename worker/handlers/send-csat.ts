@@ -2,6 +2,9 @@ import { and, eq, exists } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { contacts, conversations, messages, ticketStatuses } from '@/db/schema';
 import { recordSkip, sendSurvey, unsentSurveyMessage } from '@/lib/csat';
+import { surveyEmail } from '@/lib/csat/email';
+import { wordingForTicket } from '@/lib/csat/rules';
+import { surveyText } from '@/lib/csat/wording';
 import { decideSurvey, type SurveyTrigger } from '@/lib/csat/decision';
 import { readCsatSettings } from '@/lib/csat/settings';
 import { rootCommentId } from '@/lib/meta/comments';
@@ -41,20 +44,6 @@ const log = logger('send_csat');
 
 /** The survey's carrier priority: behind an acknowledgement, which a customer is waiting on. */
 const PRIORITY = 50;
-
-const TEXT = {
-  en: (number: number, url: string) =>
-    `How did we do with ticket #${number}? It takes ten seconds to tell us: ${url}`,
-  ar: (number: number, url: string) =>
-    `كيف كان تعاملنا مع طلبك رقم ${number}؟ رأيك يستغرق عشر ثوانٍ فقط: ${url}`,
-};
-
-const HTML = {
-  en: (number: number, url: string) =>
-    `<p>How did we do with ticket #${number}?</p><p><a href="${url}">Rate our support</a> — it takes ten seconds.</p>`,
-  ar: (number: number, url: string) =>
-    `<p>كيف كان تعاملنا مع طلبك رقم ${number}؟</p><p><a href="${url}">قيّم خدمتنا</a> — الأمر يستغرق عشر ثوانٍ.</p>`,
-};
 
 export async function sendCsat(job: ClaimedJob): Promise<void> {
   const payload = parseJobPayload(job, 'send_csat');
@@ -164,17 +153,27 @@ export async function sendCsat(job: ClaimedJob): Promise<void> {
   // already read so it is not read twice.
   const locale = await requesterLocale(conversationId, ticket.contactLocale);
 
+  // The admin's wording for this ticket's group and channel, or the built-in.
+  const { ruleId, wording } = await wordingForTicket(
+    { groupId: ticket.groupId, channel: ticket.channel },
+    locale,
+  );
+
   const sent = await sendSurvey({
     conversationId,
     locale,
     delivery: decision.delivery,
     snapshot,
     resurveyAfterDays: settings.resurveyAfterDays,
+    ruleId,
     requesterEmail: ticket.contactEmail,
-    body: (url) => ({
-      text: TEXT[locale](ticket.number, url),
-      html: decision.delivery === 'email_link' ? HTML[locale](ticket.number, url) : null,
-    }),
+    body: (url) => {
+      if (decision.delivery === 'email_link') {
+        const email = surveyEmail(wording, locale, url);
+        return { text: email.text, html: email.html };
+      }
+      return { text: surveyText(wording, url), html: null };
+    },
   });
 
   if (sent.kind === 'drop') return;

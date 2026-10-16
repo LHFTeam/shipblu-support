@@ -203,6 +203,8 @@ export type SurveySend = {
   snapshot: SurveySnapshot;
   /** `csat_settings.resurvey_after_days`, read by the job. */
   resurveyAfterDays: number;
+  /** The wording rule it goes out with, for the page to ask the same question. */
+  ruleId: string | null;
   /** The requester's address, where the carrier is email. */
   requesterEmail: string | null;
   /** The message, given the link it will carry. */
@@ -294,6 +296,7 @@ export async function sendSurvey(send: SurveySend): Promise<SendOutcome> {
         channel: send.snapshot.channel,
         delivery: send.delivery,
         locale: send.locale,
+        ruleId: send.ruleId,
         sentAt: new Date(),
       })
       .returning({ id: csatSurveys.id });
@@ -358,6 +361,8 @@ export type SurveyView = {
   conversationId: string;
   rating: number | null;
   respondedAt: Date | null;
+  /** The wording it went out with; null for the built-in. */
+  ruleId: string | null;
 };
 
 export async function surveyByToken(token: string): Promise<SurveyView | null> {
@@ -369,6 +374,7 @@ export async function surveyByToken(token: string): Promise<SurveyView | null> {
       conversationId: csatSurveys.conversationId,
       rating: csatSurveys.rating,
       respondedAt: csatSurveys.respondedAt,
+      ruleId: csatSurveys.ruleId,
     })
     .from(csatSurveys)
     .where(eq(csatSurveys.tokenHash, hashToken(token)))

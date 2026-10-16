@@ -1,10 +1,13 @@
-import { PageHeader } from '@/components/ui';
+import { Card, PageHeader } from '@/components/ui';
+import { listGroupNames } from '@/lib/admin/settings';
 import { requirePermission } from '@/lib/auth/guard';
 import { recentSurveys } from '@/lib/csat';
+import { listWordingRules } from '@/lib/csat/rules';
 import { loadCsatSettings } from '@/lib/csat/settings';
 import { publicBaseUrl } from '@/lib/kb/site';
 import { SurveySettingsForm } from './forms';
 import { RecentSurveyList } from './recent-list';
+import { BuiltInWording, NewWordingRule, SendTestForm, WordingRuleEditor } from './wording-forms';
 
 export const dynamic = 'force-dynamic';
 
@@ -20,9 +23,15 @@ const RECENT = 50;
  * brings them here.
  */
 export default async function CsatAdminPage() {
-  await requirePermission('admin.csat');
+  const admin = await requirePermission('admin.csat');
 
-  const [settings, recent] = await Promise.all([loadCsatSettings(), recentSurveys(RECENT)]);
+  const [settings, recent, rules, groups] = await Promise.all([
+    loadCsatSettings(),
+    recentSurveys(RECENT),
+    listWordingRules(),
+    listGroupNames(),
+  ]);
+  const hasDefaultRule = rules.some((rule) => rule.groupId === null && rule.channel === null);
 
   return (
     <>
@@ -39,6 +48,31 @@ export default async function CsatAdminPage() {
           unset, <code>APP_URL</code>. A host that does not serve this app is a dead link in every
           survey.
         </p>
+
+        <section className="flex flex-col gap-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className="text-sm font-semibold text-(--color-text-secondary)">Wording</h2>
+            <NewWordingRule groups={groups} />
+          </div>
+          <p className="text-xs text-(--color-text-secondary)">
+            What the survey says, per group and channel, in both languages. The most specific rule
+            wins: a channel beats a group, and a rule naming both beats either. The limits are
+            Messenger&rsquo;s, held on every rule, so a wording that saves is one that sends.
+          </p>
+          {hasDefaultRule ? null : (
+            <Card>
+              <BuiltInWording groups={groups} />
+            </Card>
+          )}
+          {rules.map((rule) => (
+            <Card key={rule.id}>
+              <WordingRuleEditor rule={rule} groups={groups} />
+            </Card>
+          ))}
+          <Card>
+            <SendTestForm rules={rules} email={admin.email} />
+          </Card>
+        </section>
 
         <section>
           <h2 className="mb-2 text-sm font-semibold text-(--color-text-secondary)">

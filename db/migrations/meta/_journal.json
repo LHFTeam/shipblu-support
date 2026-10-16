@@ -253,6 +253,13 @@
       "when": 1792162324872,
       "tag": "0035_steady_spirit",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1792165103631,
+      "tag": "0036_rare_spot",
+      "breakpoints": true
     }
   ]
 }

@@ -6,6 +6,7 @@ import {
   contacts,
   conversationEvents,
   conversations,
+  csatRules,
   csatSurveys,
   jobs,
   messages,
@@ -161,6 +162,37 @@ describe('send_csat', () => {
       .from(conversations)
       .where(eq(conversations.id, id));
     expect(ticket!.firstAutoRepliedAt).toBeNull();
+  });
+
+  it('sends the admin’s wording for the ticket’s channel, and remembers which', async () => {
+    await switchOn();
+    const [rule] = await db
+      .insert(csatRules)
+      .values({
+        channel: 'email',
+        questionAr: 'كيف كان الدعم اليوم؟',
+        introEn: 'From the team',
+      })
+      .returning({ id: csatRules.id });
+    const id = await resolvedTicket({ channel: 'email', email: 'a@b.test', customerText: 'hello' });
+
+    await sendCsat(job(id));
+
+    const [survey] = await db
+      .select({ ruleId: csatSurveys.ruleId, messageId: csatSurveys.messageId })
+      .from(csatSurveys)
+      .where(eq(csatSurveys.conversationId, id));
+    expect(survey!.ruleId).toBe(rule!.id);
+    const [message] = await db
+      .select({ bodyText: messages.bodyText, bodyHtml: messages.bodyHtml })
+      .from(messages)
+      .where(eq(messages.id, survey!.messageId!));
+    // English customer: the question falls back to the rule's Arabic, the
+    // first line is the rule's English, and the five links carry the rating.
+    expect(message!.bodyText).toContain('From the team');
+    expect(message!.bodyText).toContain('كيف كان الدعم اليوم؟');
+    expect(message!.bodyHtml).toContain('?rating=5');
+    expect(message!.bodyHtml).toContain('?rating=1');
   });
 
   it('records why there was no survey, on the ticket', async () => {
