@@ -108,6 +108,45 @@ describe('SurveyCard', () => {
     expect(text()).not.toContain('That did not go through');
   });
 
+  it('announces a failure, and drops it once there is nothing left to try again', async () => {
+    // The rating goes in; the comment does not; the visitor gives up on it.
+    mount(survey(), [4, false]);
+    await click(ratingButton('Good'));
+    const box = host!.querySelector('textarea')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(
+        box,
+        'Slow',
+      );
+      box.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await click(ratingButton(DEFAULT_WORDING.en.button));
+    expect(host!.querySelector('[role=alert]')?.textContent).toContain('That did not go through');
+
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(box, '');
+      box.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await click(ratingButton(DEFAULT_WORDING.en.button));
+    expect(text()).toContain(DEFAULT_WORDING.en.thanks);
+    expect(text()).not.toContain('That did not go through');
+  });
+
+  it('drops a failure when the transcript shows the rating went in after all', async () => {
+    const onAnswer = vi.fn(async (): Promise<SurveyResult> => false);
+    host = document.createElement('div');
+    document.body.append(host);
+    root = createRoot(host);
+    act(() => root!.render(createElement(SurveyCard, { survey: survey(), onAnswer })));
+    await click(ratingButton('Great'));
+    expect(text()).toContain('That did not go through');
+
+    // The reply was lost, the rating was kept, and the next push says so.
+    act(() => root!.render(createElement(SurveyCard, { survey: survey({ rating: 5 }), onAnswer })));
+    expect(text()).toContain(DEFAULT_WORDING.en.thanks);
+    expect(text()).not.toContain('That did not go through');
+  });
+
   it('draws the rating the server kept, not a second tap after a lost reply', async () => {
     // The first tap's reply was lost; the server holds its 5, and answers the
     // second tap with it.

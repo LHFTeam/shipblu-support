@@ -106,6 +106,7 @@ export function SurveyCard({
     const text = comment.trim();
     // Nothing to add is an answer too, and the rating is already in.
     if (!text) {
+      setFailed(false);
       setStep('done');
       return;
     }
@@ -206,7 +207,17 @@ export function SurveyCard({
         </div>
       ) : null}
 
-      {failed ? <ErrorText inline>{copy.surveyFailed}</ErrorText> : null}
+      {/*
+        Only while there is something to try again, and announced: a rating
+        that did not go through leaves a screen reader's user on a button that
+        went quiet, which sounds exactly like one that worked. Mounted with the
+        sentence, so each failure is read out afresh.
+      */}
+      {failed && !done && !closed ? (
+        <p role="alert">
+          <ErrorText inline>{copy.surveyFailed}</ErrorText>
+        </p>
+      ) : null}
     </div>
   );
 }

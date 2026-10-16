@@ -302,7 +302,9 @@ widget routes. Three things settled in the building:
   widget opens a fresh conversation in place of a closed one, so a card
   written there is one nobody can see, recorded as sent. Checked in the
   decision and again under the lock. A survey sent while the chat was
-  resolved and closed later (the three-day rule) lapses with the chat.
+  resolved and closed later (the three-day rule) stays `sent`: the card goes
+  out of reach with the chat, and the row is not marked `expired`, which is
+  the `expires_at` stage's to write.
 
 The admin page's "Chat card" preview is this card, with its answers handed
 straight back and recorded nowhere, so the preview cannot drift from what a
