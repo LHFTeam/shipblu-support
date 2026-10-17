@@ -139,6 +139,43 @@ Two things about the body are decided rather than copied:
   reasoning is in `lib/meta/send.ts`; do not tidy the halves into consistency
   without a live round trip.
 
+#### The satisfaction survey's two bodies
+
+The same `POST /{account-id}/messages`, with a body built and tested beside
+`send.ts` rather than by `directMessageRequest()`, and sent through
+`sendMessageRequest()`. `send_meta` reads which from the message row's
+`sendKind`, written by `send_csat` (`lib/csat/meta-survey.ts`):
+
+- **`feedback_template`** — Messenger's customer feedback card
+  (`lib/meta/feedback-template.ts`): one `csat` question, five stars answered
+  `"1"`–`"5"`, a free-form follow-up, `business_privacy.url` (required; the
+  admin page holds it) and `expires_in_days` 1–7. The question id is
+  `csat_<survey uuid without hyphens>`, because Meta refuses a hyphen in one, and
+  it is how the answer finds its row. Inside 24 hours it goes as `RESPONSE`;
+  past them, up to seven days after the customer's last message, with
+  `messaging_type: MESSAGE_TAG` and `tag: CUSTOMER_FEEDBACK` — a tag valid on
+  this card and nothing else, so `feedbackTemplateTag()` is a function of its
+  own beside `messagingTag()`. Messenger only. Meta marks the card "in
+  development"; a refusal of the card — a permanent one at once, code 1
+  (`isUnknownError`) on the queue's last try, and never one about the
+  customer, such as `551` or another app holding the thread
+  (`isRecipientRefusal`) — is kept on `csat_settings` for the admin page and,
+  inside 24 hours, the survey goes as the next body instead. A card that goes
+  out clears it; until then, and for a day at most, a survey due past the 24
+  hours is skipped `card_refused` rather than sent to fail.
+- **`quick_reply_survey`** — the question with five `quick_replies`
+  (`lib/meta/quick-reply-survey.ts`), titles at most 20 characters, payload
+  `csat:<survey uuid>:<1-5>`, on `directMessageRequest()`'s in-window body.
+  Instagram's survey on both connections, and Facebook's fallback and its
+  survey while no privacy link is set. Inside 24
+  hours only: no tag carries a quick reply past them. Meta does not draw quick
+  replies on desktop.
+
+The answers come back on §6's webhook: the card's as a `messaging_feedback`
+event (§3's Page field list carries it), a tap as a `messages` event whose
+`message.quick_reply.payload` is ours — which `parseMetaWebhook` files as an
+answer and never as a message (`recordMetaFeedback`, `lib/csat/meta-feedback.ts`).
+
 ### 2.2 Take thread control
 
 `POST /{page-id}/take_thread_control`, body from `takeThreadControlRequest()`.
@@ -336,11 +373,11 @@ every write.
 The field lists are properties of this codebase rather than something typed at a
 shell prompt against production:
 
-| Object                      | Fields                                                                                   |
-| --------------------------- | ---------------------------------------------------------------------------------------- |
-| `whatsapp_business_account` | `messages`, `history`, `smb_app_state_sync`, `smb_message_echoes`, `account_update`      |
-| `instagram`                 | `messages`, `comments`, `messaging_postbacks`, `messaging_referral`, `message_reactions` |
-| `page`                      | `messages`, `feed`, `messaging_postbacks`, `messaging_referrals`, `message_reactions`    |
+| Object                      | Fields                                                                                                      |
+| --------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `whatsapp_business_account` | `messages`, `history`, `smb_app_state_sync`, `smb_message_echoes`, `account_update`                         |
+| `instagram`                 | `messages`, `comments`, `messaging_postbacks`, `messaging_referral`, `message_reactions`                    |
+| `page`                      | `messages`, `feed`, `messaging_postbacks`, `messaging_referrals`, `message_reactions`, `messaging_feedback` |
 
 Two differences in that table are load-bearing. Facebook has **no comments
 field** — `feed` carries comments, likes, shares and post edits together,

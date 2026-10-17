@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { MetaApiError } from './client';
-import { explainMetaModerationError, explainMetaSendError, MetaSendRefusal } from './errors';
+import {
+  explainMetaModerationError,
+  explainMetaSendError,
+  isRecipientRefusal,
+  MetaSendRefusal,
+} from './errors';
 
 const UNKNOWN = 'An unknown error has occurred.';
 
@@ -146,6 +151,32 @@ describe('explainMetaSendError', () => {
     expect(explained).toContain('holds control');
     // The tag explanation is the wrong one here and must not appear.
     expect(explained).not.toContain('App Review');
+  });
+
+  it('keeps a refused feedback card to Meta’s words, with none of a reply’s or a comment’s leads', () => {
+    // What the admin page prints under "Messenger last refused the feedback
+    // card": a paragraph ruling out the causes of a refused *reply*, or one
+    // about a deleted comment or a comment permission, would point the admin
+    // away from the template Meta may have taken back.
+    const card = {
+      platform: 'facebook',
+      connection: 'facebook_page',
+      sendKind: 'feedback_card',
+    } as const;
+    const refusals = [
+      refusal(1),
+      new MetaApiError('Unsupported post request.', 400, 100, 33, false, null, 'AaBb'),
+      new MetaApiError('(#200) Permissions error', 403, 200, null, false, null, 'AT9Pvg'),
+    ];
+    for (const error of refusals) {
+      for (const tag of ['RESPONSE', 'CUSTOMER_FEEDBACK'] as const) {
+        // Meta's sentence and the reference under it, and nothing between.
+        expect(explainMetaSendError(error, { ...card, tag }).split('\n\n')).toEqual([
+          error.message,
+          expect.stringMatching(/^\(Meta: code /),
+        ]);
+      }
+    }
   });
 
   /*
@@ -594,5 +625,53 @@ describe('thread control', () => {
       sendKind: 'private_reply',
     });
     expect(direct).not.toContain('INSTAGRAM_ACCESS_TOKEN');
+  });
+});
+
+describe('isRecipientRefusal', () => {
+  it('tells a refusal about the customer from a refusal of what was sent', () => {
+    const refusal = (code: number | null, subcode: number | null = null) =>
+      isRecipientRefusal(new MetaApiError('refused', 400, code, subcode, false), 'RESPONSE');
+    // Blocked the Page, the window closed (a code in the table, a subcode on
+    // the wire), another app holds the thread.
+    expect(refusal(551)).toBe(true);
+    expect(refusal(10, 1545041)).toBe(true);
+    expect(refusal(1545041)).toBe(true);
+    expect(refusal(10, 2018300)).toBe(true);
+    // No such user, not receiving our messages, outside the allowed window.
+    expect(refusal(100, 2018001)).toBe(true);
+    expect(refusal(10, 2018108)).toBe(true);
+    expect(refusal(10, 2018278)).toBe(true);
+    expect(refusal(551, 1545041)).toBe(true);
+    // An invalid request, or a permission: about what was sent, or by whom.
+    expect(refusal(100)).toBe(false);
+    expect(refusal(10)).toBe(false);
+    expect(refusal(null)).toBe(false);
+  });
+
+  it('reads a window refusal of the card’s own tag as the card’s', () => {
+    // Inside the seven days the tag allows — `feedbackTemplateTag` counts them
+    // — so the window Meta means is the tag's on this card, not the customer's.
+    const outside = new MetaApiError('refused', 400, 10, 2018278, false);
+    expect(isRecipientRefusal(outside, 'CUSTOMER_FEEDBACK')).toBe(false);
+    expect(isRecipientRefusal(outside, 'RESPONSE')).toBe(true);
+    // The table's own window code, on its own, reads the same way.
+    const closed = new MetaApiError('refused', 400, 1545041, null, false);
+    expect(isRecipientRefusal(closed, 'CUSTOMER_FEEDBACK')).toBe(false);
+    expect(isRecipientRefusal(closed, 'RESPONSE')).toBe(true);
+    // A refusal whose code says it is about the customer is theirs whatever
+    // the card carried.
+    for (const [code, subcode] of [
+      [551, 1545041],
+      [10, 2018108],
+      [100, 2018001],
+    ] as const) {
+      expect(
+        isRecipientRefusal(
+          new MetaApiError('refused', 400, code, subcode, false),
+          'CUSTOMER_FEEDBACK',
+        ),
+      ).toBe(true);
+    }
   });
 });

@@ -30,19 +30,30 @@ export type WordingLimit = {
   label: string;
   /** Meta's minimum, where it has one; an empty string is always allowed (it falls back). */
   min: number | null;
-  /** Meta's maximum, or null where the string never reaches Meta. */
+  /**
+   * The most it may be, in code points: Meta's maximum for a field of
+   * Messenger's card, and for the thanks a length that reads as a thanks.
+   */
   max: number | null;
+  /**
+   * The most it may be in UTF-8 bytes, where a message's limit is counted in
+   * them: the thanks is sent on its own as a message after a tapped rating,
+   * and Instagram refuses a message over 1,000 bytes. Code points cannot hold
+   * that — an Arabic letter is two bytes, an emoji four — so 300 of them can
+   * be 1,200.
+   */
+  maxBytes: number | null;
   /** Whether Meta refuses a URL in it. */
   noUrl: boolean;
 };
 
 export const WORDING_LIMITS: Record<WordingField, WordingLimit> = {
-  question: { label: 'The question', min: 5, max: 85, noUrl: true },
-  intro: { label: 'First line', min: null, max: 65, noUrl: true },
-  subtitle: { label: 'Second line', min: null, max: 80, noUrl: true },
-  button: { label: 'Button', min: null, max: 20, noUrl: true },
-  commentPrompt: { label: 'Comment prompt', min: null, max: 65, noUrl: true },
-  thanks: { label: 'Thanks', min: null, max: null, noUrl: false },
+  question: { label: 'The question', min: 5, max: 85, maxBytes: null, noUrl: true },
+  intro: { label: 'First line', min: null, max: 65, maxBytes: null, noUrl: true },
+  subtitle: { label: 'Second line', min: null, max: 80, maxBytes: null, noUrl: true },
+  button: { label: 'Button', min: null, max: 20, maxBytes: null, noUrl: true },
+  commentPrompt: { label: 'Comment prompt', min: null, max: 65, maxBytes: null, noUrl: true },
+  thanks: { label: 'Thanks', min: null, max: 300, maxBytes: 1000, noUrl: false },
 };
 
 /** One language's worth of a rule's strings. */
@@ -139,6 +150,9 @@ export function wordingProblem(field: WordingField, value: string): string | nul
   if (limit.max !== null && length > limit.max) {
     return `${limit.label} can be at most ${limit.max} characters`;
   }
+  if (limit.maxBytes !== null && new TextEncoder().encode(trimmed).length > limit.maxBytes) {
+    return `${limit.label} is too long to send on Instagram, which counts an emoji as several characters`;
+  }
   if (limit.min !== null && length < limit.min) {
     return `${limit.label} has to be at least ${limit.min} characters`;
   }
@@ -228,9 +242,10 @@ export function preselectedRating(raw: string | string[] | undefined): number | 
 }
 
 /**
- * The survey as a plain message — web chat, and a Meta direct message inside
- * its window: the first line, the question, the link.
+ * The survey as a plain message — web chat's text under its card, and the
+ * prompt Meta's rating buttons sit under: the first line, the question, and
+ * the link where the delivery carries one.
  */
-export function surveyText(wording: Wording, url: string): string {
+export function surveyText(wording: Wording, url: string | null): string {
   return [wording.intro, wording.question, url].filter(Boolean).join('\n');
 }

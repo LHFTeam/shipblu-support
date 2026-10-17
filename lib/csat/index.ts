@@ -1,6 +1,12 @@
-import { and, desc, eq, gt, inArray, isNull } from 'drizzle-orm';
+import { and, desc, eq, gt, inArray, isNull, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
-import { conversationEvents, conversations, csatSurveys, ticketStatuses } from '@/db/schema';
+import {
+  conversationEvents,
+  conversations,
+  csatSurveys,
+  messages,
+  ticketStatuses,
+} from '@/db/schema';
 import { generateToken, hashToken } from '@/lib/auth/tokens';
 import { publicBaseUrl } from '@/lib/kb/site';
 import { enqueue } from '@/lib/queue';
@@ -13,7 +19,8 @@ import {
   type SurveyAvailability,
   type SurveyTrigger,
 } from './decision';
-import type { AnswerSource, SurveyDelivery } from './delivery';
+import { carriesLink, type AnswerSource, type SurveyDelivery } from './delivery';
+import type { SurveyMessageMeta } from './meta-survey';
 import { MAX_COMMENT } from './limits';
 import { loadCsatSettings, readCsatSettings } from './settings';
 import type { SkipReason } from './skip-reasons';
@@ -243,8 +250,16 @@ export type SurveySend = {
   ruleId: string | null;
   /** The requester's address, where the carrier is email. */
   requesterEmail: string | null;
-  /** The message, given the link it will carry. */
-  body: (url: string) => { text: string; html: string | null };
+  /**
+   * The message, given the link it will carry — none on Meta's two
+   * deliveries (`carriesLink`), whose answer comes back on Meta's own
+   * webhook — and anything its carrier needs on the row besides the text.
+   */
+  body: (url: string | null) => {
+    text: string;
+    html: string | null;
+    meta?: Record<string, unknown>;
+  };
 };
 
 export type SendOutcome =
@@ -287,8 +302,10 @@ export type SendOutcome =
  * looked up and resent, only reissued.
  */
 export async function sendSurvey(send: SurveySend): Promise<SendOutcome> {
-  const token = generateToken();
-  const url = `${publicBaseUrl()}/${send.locale}/csat/${token}`;
+  // No link where nothing would carry it: a token nobody holds is a hash
+  // with no door, and `token_hash` is nullable for exactly this.
+  const token = carriesLink(send.delivery) ? generateToken() : null;
+  const url = token ? `${publicBaseUrl()}/${send.locale}/csat/${token}` : null;
 
   return db.transaction(async (tx) => {
     await lockTicket(tx, send.conversationId);
@@ -334,7 +351,7 @@ export async function sendSurvey(send: SurveySend): Promise<SendOutcome> {
       .values({
         conversationId: send.conversationId,
         status: 'sent',
-        tokenHash: hashToken(token),
+        tokenHash: token ? hashToken(token) : null,
         // Snapshotted at send time: reassigning the ticket next week must not
         // silently move this score onto somebody else's record.
         agentId: send.snapshot.agentId,
@@ -360,7 +377,10 @@ export async function sendSurvey(send: SurveySend): Promise<SendOutcome> {
         actorLabel: ACTOR,
         eventType: 'csat_sent',
         eventData: { surveyId, delivery: send.delivery, locale: send.locale },
-        meta: { csatSurveyId: surveyId },
+        meta: { ...body.meta, csatSurveyId: surveyId } satisfies Pick<
+          SurveyMessageMeta,
+          'csatSurveyId'
+        >,
       },
       // A survey is not the acknowledgement the rule engine looks for; the
       // ticket is resolved, and a rule keyed off "already acknowledged" must
@@ -372,6 +392,40 @@ export async function sendSurvey(send: SurveySend): Promise<SendOutcome> {
     await enqueueAutomatedDelivery(send.snapshot.channel, messageId, CARRIER_PRIORITY, tx);
 
     return { kind: 'sent', surveyId, messageId };
+  });
+}
+
+/**
+ * Messenger refused its feedback card for this survey, and the carrier is
+ * sending it as quick replies instead (`send_meta`): the row, the message and
+ * the timeline say so. The message's `sendKind` is what a retry of the
+ * carrier reads, so it moves in the same transaction as the delivery the
+ * sidebar reads, and the timeline's line is written once, by whichever run
+ * moved the row.
+ */
+export async function fallBackToQuickReplies(surveyId: string, messageId: string): Promise<void> {
+  await db.transaction(async (tx) => {
+    const moved = await tx
+      .update(csatSurveys)
+      .set({ delivery: 'meta_quick_reply' })
+      .where(and(eq(csatSurveys.id, surveyId), eq(csatSurveys.delivery, 'meta_template')))
+      .returning({ conversationId: csatSurveys.conversationId });
+
+    await tx
+      .update(messages)
+      .set({
+        meta: sql`jsonb_set(${messages.meta}, '{sendKind}', '"quick_reply_survey"'::jsonb)`,
+      })
+      .where(eq(messages.id, messageId));
+
+    if (moved[0]) {
+      await tx.insert(conversationEvents).values({
+        conversationId: moved[0].conversationId,
+        type: 'csat_fell_back',
+        actorLabel: ACTOR,
+        data: { surveyId, delivery: 'meta_quick_reply' },
+      });
+    }
   });
 }
 

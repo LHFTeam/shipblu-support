@@ -51,8 +51,20 @@ export type MetaMessagingEvent = {
     is_echo?: boolean;
     is_deleted?: boolean;
     is_unsupported?: boolean;
+    /** Set when the customer tapped one of our quick replies: its `payload`, and the title as `text`. */
+    quick_reply?: { payload?: string };
   };
   postback?: { mid?: string; title?: string; payload?: string; referral?: MetaReferral };
+  /** An answer to Messenger's customer feedback card (`lib/meta/feedback-template.ts`). */
+  messaging_feedback?: {
+    feedback_screens?: {
+      screen_id?: number;
+      questions?: Record<
+        string,
+        { type?: string; payload?: string; follow_up?: { type?: string; payload?: string } }
+      >;
+    }[];
+  };
   reaction?: { mid?: string; action?: string; emoji?: string; reaction?: string };
   /**
    * How the customer arrived: an m.me link carrying `ref`, a Click-to-Messenger
@@ -223,11 +235,44 @@ export type NormalisedInteraction = {
   standby: boolean;
 };
 
+/**
+ * An answer to a satisfaction survey: Messenger's feedback card, or one of
+ * the survey's quick replies tapped.
+ *
+ * Normalised apart from messages for the reasons an interaction is, and more
+ * so: a tapped "Great" filed as an inbound reply would reopen the resolved
+ * ticket, restart its next-response clock, be categorised, become its inbox
+ * preview and choose the language of the next automated reply — the
+ * discipline reactions taught (§6.94). It carries the survey it answers,
+ * which is all `recordMetaFeedback` needs besides who sent it.
+ */
+export type NormalisedFeedback = {
+  platform: MetaPlatform;
+  connection: MetaConnection | null;
+  /** Page-scoped id of whoever answered; it must be the ticket's requester. */
+  from: string;
+  /** The page or account it was answered on, as a message records it. */
+  accountId: string | null;
+  /**
+   * It arrived in the handover protocol's `standby` array: another app held
+   * the thread on that connection, so a reply sent over it would be refused
+   * (`metaThreadState` decides whether ours goes over it).
+   */
+  standby: boolean;
+  surveyId: string;
+  /** 1–5. */
+  rating: number;
+  /** The card's free-form follow-up, when one was written. */
+  comment: string | null;
+  source: 'meta_feedback' | 'meta_quick_reply';
+};
+
 export type NormalisedMetaWebhook = {
   messages: NormalisedDirectMessage[];
   comments: NormalisedComment[];
   receipts: NormalisedReceipt[];
   interactions: NormalisedInteraction[];
+  feedbacks: NormalisedFeedback[];
   /** Echoes of our own outbound messages, counted but never ingested. */
   echoes: number;
   /**

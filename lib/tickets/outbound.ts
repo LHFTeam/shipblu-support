@@ -2,7 +2,7 @@ import { eq } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { conversationEvents, conversations, messages } from '@/db/schema';
 import { rootCommentId } from '@/lib/meta/comments';
-import { metaWindowState } from '@/lib/meta/window';
+import { feedbackTemplateTag, metaWindowState } from '@/lib/meta/window';
 import { enqueue } from '@/lib/queue';
 import { isReadOnlyChannel } from '@/lib/tickets/channel-policy';
 import { firstAt } from '@/lib/tickets/latest';
@@ -52,6 +52,13 @@ import { windowState as whatsappWindowState } from '@/lib/whatsapp/window';
  *                        rule's, and this closes at 24 hours rather than at
  *                        seven days.
  *
+ * With one exception, which is Meta's own and is asked for by name:
+ * Messenger's customer feedback card (`kind: 'feedback_template'`) carries a
+ * tag of its own, `CUSTOMER_FEEDBACK`, valid on that card and nothing else,
+ * up to seven days after the customer's last message (`feedbackTemplateTag`).
+ * The survey is the only sender that writes one. On Instagram, which has no
+ * such card, the kind changes nothing.
+ *
  * **A Meta comment ticket has no messaging window and is never blocked here.**
  * It is answered by posting to the comment edge, which `send_meta` reaches
  * before it ever consults the clock, so blocking one on the customer's last
@@ -76,6 +83,7 @@ export function automatedReplyBlocked(
     lastCustomerMessageAt: Date | null;
   },
   now: Date = new Date(),
+  kind: 'message' | 'feedback_template' = 'message',
 ): string | null {
   if (ticket.channel === 'whatsapp') {
     return whatsappWindowState(ticket.lastCustomerMessageAt, now).isOpen
@@ -86,7 +94,15 @@ export function automatedReplyBlocked(
   if (ticket.channel === 'facebook' || ticket.channel === 'instagram') {
     if (rootCommentId(ticket.externalId)) return null;
 
-    return metaWindowState(ticket.lastCustomerMessageAt, now).isOpen
+    const window = metaWindowState(ticket.lastCustomerMessageAt, now);
+    if (kind === 'feedback_template' && ticket.channel === 'facebook') {
+      return feedbackTemplateTag(window)
+        ? null
+        : "seven days have passed since the customer's last message, and past them " +
+            'not even the feedback card sends';
+    }
+
+    return window.isOpen
       ? null
       : 'the 24-hour window is closed, and past it only HUMAN_AGENT sends — a tag ' +
           'reserved for a message a person wrote';

@@ -1,6 +1,7 @@
 import { eq } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { webhookEvents } from '@/db/schema';
+import { recordMetaFeedback } from '@/lib/csat/meta-feedback';
 import type { MetaConnection } from '@/lib/meta/connection';
 import { parseMetaWebhook } from '@/lib/meta/parse';
 import {
@@ -39,8 +40,11 @@ export async function processMetaWebhook(event: {
   let comments = 0;
   let receipts = 0;
   let interactions = 0;
-  // Interactions that found no live ticket, or had already been recorded. They
-  // did nothing, so they must not count toward `attempted` below.
+  let answers = 0;
+  // Interactions that found no live ticket, or had already been recorded, and
+  // survey answers that recorded nothing — a second copy, an unknown survey,
+  // somebody other than the requester. They did nothing, so they must not
+  // count toward `attempted` below.
   let skipped = 0;
 
   for (const message of parsed.messages) {
@@ -83,6 +87,20 @@ export async function processMetaWebhook(event: {
     }
   }
 
+  for (const feedback of parsed.feedbacks) {
+    try {
+      const outcome = await recordMetaFeedback(feedback);
+      if (outcome === 'recorded' || outcome === 'comment_added') answers += 1;
+      else skipped += 1;
+      log.info(
+        `${feedback.platform} survey answer (${feedback.source}, ${feedback.rating}) ` +
+          `from ${feedback.from} → ${outcome}`,
+      );
+    } catch (error) {
+      failures.push(`survey answer: ${errorMessage(error)}`);
+    }
+  }
+
   for (const receipt of parsed.receipts) {
     try {
       receipts += await applyMetaReceipt(receipt);
@@ -101,7 +119,8 @@ export async function processMetaWebhook(event: {
     parsed.messages.length +
     parsed.comments.length +
     parsed.receipts.length +
-    parsed.interactions.length -
+    parsed.interactions.length +
+    parsed.feedbacks.length -
     skipped;
 
   if (failures.length > 0 && failures.length === attempted) {
@@ -119,7 +138,8 @@ export async function processMetaWebhook(event: {
   log.info(
     `${event.id} via ${event.connection ?? 'an unrecorded connection'}: ` +
       `${messages} message(s), ${comments} comment(s), ${receipts} receipt(s), ` +
-      `${interactions} interaction(s) (${skipped} skipped), ${parsed.echoes} echo(es) ignored, ` +
+      `${interactions} interaction(s), ${answers} survey answer(s) (${skipped} skipped), ` +
+      `${parsed.echoes} echo(es) ignored, ` +
       `${parsed.emptyCards} empty card(s) ignored`,
   );
 }

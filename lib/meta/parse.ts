@@ -1,5 +1,7 @@
 import { metaAttachmentsStandIn } from '@/lib/chat/stand-ins';
 import type { MetaConnection } from './connection';
+import { surveyIdFromQuestionId } from './feedback-template';
+import { readQuickReplyPayload } from './quick-reply-survey';
 import type {
   MetaAttachment,
   MetaChange,
@@ -10,14 +12,16 @@ import type {
   MetaReferral,
   MetaWebhookPayload,
   NormalisedComment,
+  NormalisedFeedback,
   NormalisedInteraction,
   NormalisedMetaWebhook,
   NormalisedReceipt,
 } from './types';
 
 /**
- * Flattens a Meta webhook batch into direct messages, comments, receipts and the
- * interactions that open a messaging window without being messages.
+ * Flattens a Meta webhook batch into direct messages, comments, receipts, the
+ * interactions that open a messaging window without being messages, and the
+ * answers to a satisfaction survey.
  *
  * Nothing here throws. A payload we cannot read becomes an empty result,
  * because throwing makes Meta redeliver the whole batch — including the parts
@@ -44,6 +48,7 @@ export function parseMetaWebhook(
     comments: [],
     receipts: [],
     interactions: [],
+    feedbacks: [],
     echoes: 0,
     emptyCards: 0,
   };
@@ -105,6 +110,14 @@ function readMessagingEvent(
 
   const message = event.message;
 
+  // Messenger's feedback card answers on an event of its own, with no
+  // message on it — so before the interactions, which would read it as
+  // nothing and drop it.
+  if (event.messaging_feedback) {
+    result.feedbacks.push(...readCardFeedback(event, platform, connection, accountId, standby));
+    return;
+  }
+
   // Everything the customer can do to a thread *without* writing in it. Below
   // the receipts and above the message guard that used to be the end of this
   // function and dropped every one of them: Meta's messaging policy counts a
@@ -132,6 +145,28 @@ function readMessagingEvent(
 
   // A deleted message has no content to file and no id worth threading on.
   if (message.is_deleted) return;
+
+  // A tapped survey button arrives as a message whose text is the button's
+  // title; the payload is what says it was an answer. Filed as one and never
+  // as a message — see `NormalisedFeedback`. A quick reply that is not ours
+  // is somebody's words like any other.
+  const answer = readQuickReplyPayload(message.quick_reply?.payload);
+  if (answer) {
+    if (event.sender?.id) {
+      result.feedbacks.push({
+        platform,
+        connection,
+        from: event.sender.id,
+        accountId: event.recipient?.id ?? accountId,
+        standby,
+        surveyId: answer.surveyId,
+        rating: answer.rating,
+        comment: null,
+        source: 'meta_quick_reply',
+      });
+    }
+    return;
+  }
 
   const received = Array.isArray(message.attachments) ? message.attachments : [];
   const attachments = received.filter((attachment) => !isEmptyCard(attachment));
@@ -240,6 +275,52 @@ function readInteraction(
   }
 
   return null;
+}
+
+/**
+ * The answers on one `messaging_feedback` event: each question of ours —
+ * the card asks one — with a score of 1–5, and the follow-up if the customer
+ * wrote one. A question id that is not a survey's, or a score outside the
+ * scale, is not an answer this app asked for and is dropped.
+ */
+function readCardFeedback(
+  event: MetaMessagingEvent,
+  platform: MetaPlatform,
+  connection: MetaConnection | null,
+  accountId: string | null,
+  standby: boolean,
+): NormalisedFeedback[] {
+  const from = event.sender?.id;
+  if (!from) return [];
+
+  // An array by the reference, and checked as one: a delivery shaped any other
+  // way is not ours to read, and `for…of` over an object would throw out of
+  // the parser and take the rest of the batch with it.
+  const screens = event.messaging_feedback?.feedback_screens;
+  const answers: NormalisedFeedback[] = [];
+  for (const screen of Array.isArray(screens) ? screens : []) {
+    if (!isObject(screen) || !isObject(screen.questions)) continue;
+    for (const [id, question] of Object.entries(screen.questions)) {
+      const surveyId = surveyIdFromQuestionId(id);
+      if (!surveyId || !isObject(question)) continue;
+      const rating = Number(question.payload);
+      if (!Number.isInteger(rating) || rating < 1 || rating > 5) continue;
+      const comment =
+        typeof question.follow_up?.payload === 'string' ? question.follow_up.payload.trim() : '';
+      answers.push({
+        platform,
+        connection,
+        from,
+        accountId: event.recipient?.id ?? accountId,
+        standby,
+        surveyId,
+        rating,
+        comment: comment || null,
+        source: 'meta_feedback',
+      });
+    }
+  }
+  return answers;
 }
 
 /** An arrival route, in the terms an agent reading the ticket would use. */

@@ -31,7 +31,16 @@ describe('wordingProblem', () => {
     // An emoji is two UTF-16 units and one character to Meta.
     expect(wordingLength('👍'.repeat(20))).toBe(20);
     expect(wordingProblem('button', '👍'.repeat(20))).toBeNull();
-    expect(wordingProblem('thanks', 'x'.repeat(500))).toBeNull();
+    // The thanks goes out alone as an Instagram message after a tapped
+    // rating, and Instagram counts bytes: 300 Arabic letters are 600 of them,
+    // and the character count is what refuses the 301st.
+    expect(wordingProblem('thanks', 'ش'.repeat(300))).toBeNull();
+    expect(wordingProblem('thanks', 'ش'.repeat(301))).toMatch(/at most 300/);
+    // An emoji is four, so the byte count binds first: 250 send, 251 do not,
+    // where the character count alone let 300 through.
+    expect(wordingProblem('thanks', '🙏'.repeat(250))).toBeNull();
+    expect(Buffer.byteLength('🙏'.repeat(250))).toBe(1000);
+    expect(wordingProblem('thanks', '🙏'.repeat(251))).toMatch(/too long to send on Instagram/);
   });
 
   it('wants a question of at least five characters, and never a link', () => {

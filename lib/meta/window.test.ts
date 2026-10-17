@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { describeWindow, messagingTag, metaWindowState } from './window';
+import { describeWindow, feedbackTemplateTag, messagingTag, metaWindowState } from './window';
 
 const NOW = new Date('2026-08-19T12:00:00Z');
 const ago = (ms: number) => new Date(NOW.getTime() - ms);
@@ -84,5 +84,17 @@ describe('messagingTag and who wrote the message', () => {
     const state = metaWindowState(ago(8 * DAY), NOW);
     expect(messagingTag(state, 'human')).toBeNull();
     expect(messagingTag(state, 'automated')).toBeNull();
+  });
+});
+
+describe('feedbackTemplateTag', () => {
+  it('gives Messenger’s feedback card its own tag for the seven days, and nothing after', () => {
+    expect(feedbackTemplateTag(metaWindowState(ago(2 * HOUR), NOW))).toBe('RESPONSE');
+    // Where an automated message has nothing to send with: the card does.
+    const yesterday = metaWindowState(ago(3 * DAY), NOW);
+    expect(messagingTag(yesterday, 'automated')).toBeNull();
+    expect(feedbackTemplateTag(yesterday)).toBe('CUSTOMER_FEEDBACK');
+    expect(feedbackTemplateTag(metaWindowState(ago(8 * DAY), NOW))).toBeNull();
+    expect(feedbackTemplateTag(metaWindowState(null, NOW))).toBeNull();
   });
 });

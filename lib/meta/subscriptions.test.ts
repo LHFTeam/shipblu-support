@@ -304,7 +304,12 @@ describe('planPageSubscription', () => {
       REQUIRED_PAGE_FIELDS,
     );
 
-    expect(plan.adding).toEqual(['feed', 'messaging_referrals', 'message_reactions']);
+    expect(plan.adding).toEqual([
+      'feed',
+      'messaging_referrals',
+      'message_reactions',
+      'messaging_feedback',
+    ]);
     expect(plan.merged.slice(0, 2)).toEqual(['messages', 'messaging_postbacks']);
     // The field already installed survives, and is not added twice. Writing only
     // what this codebase knows about would silently unsubscribe whatever else
@@ -329,6 +334,7 @@ describe('planPageSubscription', () => {
       'messaging_postbacks',
       'messaging_referrals',
       'message_reactions',
+      'messaging_feedback',
     ]);
   });
 
@@ -342,6 +348,7 @@ describe('planPageSubscription', () => {
       'messaging_postbacks',
       'messaging_referrals',
       'message_reactions',
+      'messaging_feedback',
     ]);
   });
 
@@ -350,7 +357,14 @@ describe('planPageSubscription', () => {
     // has to be reachable rather than a write that reorders the list.
     const plan = planPageSubscription(
       PAGE,
-      ['messages', 'feed', 'messaging_postbacks', 'messaging_referrals', 'message_reactions'],
+      [
+        'messages',
+        'feed',
+        'messaging_postbacks',
+        'messaging_referrals',
+        'message_reactions',
+        'messaging_feedback',
+      ],
       REQUIRED_PAGE_FIELDS,
     );
 
@@ -361,6 +375,7 @@ describe('planPageSubscription', () => {
       'messaging_postbacks',
       'messaging_referrals',
       'message_reactions',
+      'messaging_feedback',
     ]);
   });
 

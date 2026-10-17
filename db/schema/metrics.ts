@@ -132,6 +132,24 @@ export const csatSettings = pgTable('csat_settings', {
   /** Whether a ticket an automation rule resolved is surveyed as one an agent resolved is. */
   surveyRuleResolved: boolean('survey_rule_resolved').notNull().default(true),
 
+  /**
+   * Messenger's feedback card requires a link to the business's privacy
+   * policy (`business_privacy.url`) and Graph refuses the card without one,
+   * so a Facebook ticket is not surveyed while this is null — the ticket says
+   * so, rather than carrying a card that failed.
+   */
+  privacyUrl: text('privacy_url'),
+  /** How long Messenger keeps the card answerable: Meta's `expires_in_days`, 1–7. */
+  metaExpiresInDays: integer('meta_expires_in_days').notNull().default(3),
+  /**
+   * What Graph said the last time it refused the feedback card, and when.
+   * Meta marks the card "in development", so the day it is withdrawn is a
+   * refusal on a worker's job; written here, it is a sentence on the admin
+   * page instead (§6.27), and those surveys go as quick replies meanwhile.
+   */
+  lastTemplateRefusal: text('last_template_refusal'),
+  lastTemplateRefusalAt: timestamp('last_template_refusal_at', { withTimezone: true }),
+
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   updatedByAgentId: uuid('updated_by_agent_id').references(() => agents.id, {
     onDelete: 'set null',

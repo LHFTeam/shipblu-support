@@ -1,12 +1,18 @@
 'use client';
 
-import { ErrorText, Field, Input, SuccessText, Toggle } from '@/components/ui';
+import { ErrorText, Field, Input, Notice, SuccessText, Toggle } from '@/components/ui';
 import { SubmitButton } from '@/components/submit-button';
 import { InfoTip } from '@/components/tooltip';
 import { RelativeTime } from '@/components/relative-time';
 import { useActionForm } from '@/components/use-action-form';
 import { ago } from '@/lib/format';
-import { MAX_DELAY_MINUTES, MAX_RESURVEY_DAYS, MIN_RESURVEY_DAYS } from '@/lib/csat/limits';
+import {
+  MAX_DELAY_MINUTES,
+  MAX_META_EXPIRY_DAYS,
+  MAX_RESURVEY_DAYS,
+  MIN_META_EXPIRY_DAYS,
+  MIN_RESURVEY_DAYS,
+} from '@/lib/csat/limits';
 import type { CsatSettings } from '@/lib/csat/settings';
 import type { ActionState } from '@/lib/http/action-state';
 import { saveSurveySettings } from './actions';
@@ -90,10 +96,11 @@ export function SurveySettingsForm({ settings }: { settings: CsatSettings }) {
             hint="Minutes. Empty to use the same delay."
             explain={
               <>
-                A survey on these channels can only be sent while Meta&rsquo;s 24-hour messaging
-                window is open, counted from the customer&rsquo;s last message. A ticket resolved
-                late in that window can miss it at the default delay; the recent list below says so
-                when it happens.
+                Instagram&rsquo;s rating buttons, and Facebook&rsquo;s when Messenger refuses its
+                card, can only be sent while Meta&rsquo;s 24-hour messaging window is open, counted
+                from the customer&rsquo;s last message; Messenger&rsquo;s own card has seven days. A
+                ticket resolved late in the 24 hours can miss them at the default delay; the recent
+                list below says so when it happens.
               </>
             }
           >
@@ -122,6 +129,28 @@ export function SurveySettingsForm({ settings }: { settings: CsatSettings }) {
               defaultValue={settings.resurveyAfterDays}
             />
           </Field>
+
+          <Field
+            className="sm:w-56"
+            label="Messenger card open for"
+            hint="Days, 1 to 7."
+            explain={
+              <>
+                How long the customer can still answer Messenger&rsquo;s feedback card after it
+                arrives. Meta allows one to seven days; after that the card can no longer be
+                answered.
+              </>
+            }
+          >
+            <Input
+              name="metaExpiresInDays"
+              type="number"
+              min={MIN_META_EXPIRY_DAYS}
+              max={MAX_META_EXPIRY_DAYS}
+              step={1}
+              defaultValue={settings.metaExpiresInDays}
+            />
+          </Field>
         </div>
       </section>
 
@@ -136,19 +165,52 @@ export function SurveySettingsForm({ settings }: { settings: CsatSettings }) {
         <Toggle
           name="surveyWebchat"
           label="Web chat"
-          hint="A link in the chat."
+          hint="A card in the chat, answered without leaving it."
           defaultChecked={settings.channels.webchat}
         />
         <Toggle
           name="surveyFacebook"
           label="Facebook"
-          hint="A link in a Messenger message, only while the 24-hour window is open."
+          hint="Messenger’s own feedback card, up to 7 days after the customer last wrote, with the privacy link below. Without one, rating buttons inside the 24 hours."
           defaultChecked={settings.channels.facebook}
         />
+        <div className="flex flex-col gap-2 ps-6">
+          <Field
+            label="Privacy policy link"
+            hint="Shown on Messenger’s card, which needs one."
+            explain={
+              <>
+                Meta will not send its feedback card without a link to the business&rsquo;s privacy
+                policy. Until one is set, Facebook tickets are surveyed with rating buttons instead,
+                which only send inside the 24 hours after the customer last wrote.
+              </>
+            }
+          >
+            <Input
+              name="privacyUrl"
+              type="url"
+              inputMode="url"
+              dir="ltr"
+              placeholder="https://"
+              defaultValue={settings.privacyUrl ?? ''}
+            />
+          </Field>
+          {settings.lastTemplateRefusal ? (
+            <Notice tone="warning" icon>
+              <RelativeTime at={settings.lastTemplateRefusal.at}>
+                {(relative) => `Messenger last refused the feedback card ${ago(relative)}:`}
+              </RelativeTime>{' '}
+              <span className="whitespace-pre-line">{settings.lastTemplateRefusal.text}</span> For a
+              day after it, or until a card goes out, a survey due more than 24 hours after the
+              customer’s last message is skipped. One due within them still gets the card where a
+              privacy link is set, and rating buttons if Messenger refuses it again.
+            </Notice>
+          ) : null}
+        </div>
         <Toggle
           name="surveyInstagram"
           label="Instagram"
-          hint="A link in a direct message, only while the 24-hour window is open."
+          hint="Five rating buttons under the question, only while the 24-hour window is open."
           defaultChecked={settings.channels.instagram}
         />
         <Toggle

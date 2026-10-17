@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  cardRefusalStands,
   channelSurveyed,
   channelSwitch,
   decideSurvey,
@@ -18,6 +19,7 @@ const ON: CsatSettings = {
   ...UNSET_CSAT_SETTINGS,
   enabled: true,
   channels: { email: true, webchat: true, facebook: true, instagram: true, api: true },
+  privacyUrl: 'https://shipblu.com/privacy',
 };
 
 function input(overrides: Partial<DecisionInput> = {}): DecisionInput {
@@ -33,6 +35,8 @@ function input(overrides: Partial<DecisionInput> = {}): DecisionInput {
     lacksRecipient: false,
     commentThread: false,
     metaWindowOpen: true,
+    feedbackWindowOpen: true,
+    cardRefused: false,
     readOnly: false,
     byEmail: true,
     ...overrides,
@@ -133,18 +137,103 @@ describe('decideSurvey', () => {
     });
   });
 
-  it('sends a card on web chat, and a message on Meta only inside the window', () => {
+  it('sends a card on web chat', () => {
     expect(decideSurvey(input({ channel: 'webchat', byEmail: false }), ON)).toEqual({
       kind: 'send',
       delivery: 'widget_card',
     });
-    expect(decideSurvey(input({ channel: 'facebook', byEmail: false }), ON)).toEqual({
+  });
+
+  it("sends Messenger's card for the seven days its tag allows, and buttons without a privacy link", () => {
+    const facebook = (overrides: Partial<DecisionInput> = {}) =>
+      input({ channel: 'facebook', byEmail: false, ...overrides });
+
+    expect(decideSurvey(facebook(), ON)).toEqual({ kind: 'send', delivery: 'meta_template' });
+    // Past the 24 hours, inside the seven days: the card's own tag carries it.
+    expect(decideSurvey(facebook({ metaWindowOpen: false }), ON)).toEqual({
       kind: 'send',
-      delivery: 'text_link',
+      delivery: 'meta_template',
     });
     expect(
-      decideSurvey(input({ channel: 'instagram', byEmail: false, metaWindowOpen: false }), ON),
+      decideSurvey(facebook({ metaWindowOpen: false, feedbackWindowOpen: false }), ON),
     ).toEqual({ kind: 'skip', reason: 'window_closed' });
+
+    // Graph refuses the card without the link, so none is written: inside the
+    // 24 hours the survey goes as rating buttons, which need no link; past
+    // them the missing link is the reason, because with one the card would
+    // have gone; and past the seven days, the window is.
+    const noLink = { ...ON, privacyUrl: null };
+    expect(decideSurvey(facebook(), noLink)).toEqual({
+      kind: 'send',
+      delivery: 'meta_quick_reply',
+    });
+    expect(decideSurvey(facebook({ metaWindowOpen: false }), noLink)).toEqual({
+      kind: 'skip',
+      reason: 'no_privacy_url',
+    });
+    expect(
+      decideSurvey(facebook({ metaWindowOpen: false, feedbackWindowOpen: false }), noLink),
+    ).toEqual({ kind: 'skip', reason: 'window_closed' });
+  });
+
+  it('tries a card Messenger last refused only where the buttons can follow it', () => {
+    const facebook = (overrides: Partial<DecisionInput> = {}) =>
+      input({ channel: 'facebook', byEmail: false, cardRefused: true, ...overrides });
+
+    // Inside the 24 hours: the card still goes, falls back to buttons if it is
+    // refused again, and clears the refusal if it is not.
+    expect(decideSurvey(facebook(), ON)).toEqual({ kind: 'send', delivery: 'meta_template' });
+    // Past them nothing would carry it, so nothing is written to fail.
+    expect(decideSurvey(facebook({ metaWindowOpen: false }), ON)).toEqual({
+      kind: 'skip',
+      reason: 'card_refused',
+    });
+    // A missing link says more than a refusal, and a closed window more than either.
+    expect(decideSurvey(facebook({ metaWindowOpen: false }), { ...ON, privacyUrl: null })).toEqual({
+      kind: 'skip',
+      reason: 'no_privacy_url',
+    });
+    expect(
+      decideSurvey(facebook({ metaWindowOpen: false, feedbackWindowOpen: false }), ON),
+    ).toEqual({ kind: 'skip', reason: 'window_closed' });
+    // Instagram has no card to have been refused: past the 24 hours its reason
+    // is the window, whatever Messenger last said.
+    expect(
+      decideSurvey(
+        input({ channel: 'instagram', byEmail: false, cardRefused: true, metaWindowOpen: false }),
+        ON,
+      ),
+    ).toEqual({ kind: 'skip', reason: 'window_closed' });
+  });
+
+  it('lets a refusal stand for a day, so a survey past the 24 hours tries the card again', () => {
+    const now = new Date('2026-10-17T12:00:00Z');
+    const refusal = (hoursAgo: number) => ({
+      text: '(#100) Unsupported post request.',
+      at: new Date(now.getTime() - hoursAgo * 3_600_000),
+    });
+    expect(cardRefusalStands(null, now)).toBe(false);
+    expect(cardRefusalStands(refusal(1), now)).toBe(true);
+    expect(cardRefusalStands(refusal(23.9), now)).toBe(true);
+    // With a Meta delay of a day or more no card is ever sent inside the 24
+    // hours to clear it; lapsing is what keeps Facebook from going quiet for good.
+    expect(cardRefusalStands(refusal(24), now)).toBe(false);
+  });
+
+  it('sends quick replies on Instagram only inside the 24 hours, whatever the card could do', () => {
+    const instagram = (overrides: Partial<DecisionInput> = {}) =>
+      input({ channel: 'instagram', byEmail: false, ...overrides });
+
+    expect(decideSurvey(instagram(), ON)).toEqual({ kind: 'send', delivery: 'meta_quick_reply' });
+    // Instagram has no card, so the card's seven days are no reason to send.
+    expect(
+      decideSurvey(instagram({ metaWindowOpen: false, feedbackWindowOpen: true }), ON),
+    ).toEqual({ kind: 'skip', reason: 'window_closed' });
+    // Nor does it need the privacy link the card does.
+    expect(decideSurvey(instagram(), { ...ON, privacyUrl: null })).toEqual({
+      kind: 'send',
+      delivery: 'meta_quick_reply',
+    });
   });
 
   it('never surveys a public comment thread, whatever the window says', () => {

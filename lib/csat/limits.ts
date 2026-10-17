@@ -1,3 +1,5 @@
+import { MAX_EXPIRES_IN_DAYS, MIN_EXPIRES_IN_DAYS } from '@/lib/meta/feedback-template';
+
 /**
  * The bounds on the survey's numbers, shared by the admin form's native
  * validation and the action that refuses what the browser let through. Two
@@ -10,6 +12,9 @@
  * a "Send now" beside it — would survey the customer again.
  */
 export const MAX_DELAY_MINUTES = 7 * 24 * 60;
+/** Messenger's `expires_in_days`, from beside the request that sends it. */
+export const MIN_META_EXPIRY_DAYS = MIN_EXPIRES_IN_DAYS;
+export const MAX_META_EXPIRY_DAYS = MAX_EXPIRES_IN_DAYS;
 export const MIN_RESURVEY_DAYS = 1;
 export const MAX_RESURVEY_DAYS = 365;
 
@@ -19,3 +24,18 @@ export const MAX_RESURVEY_DAYS = 365;
  * end is rather than finding their last sentence gone.
  */
 export const MAX_COMMENT = 2000;
+
+/**
+ * The privacy link Messenger's card carries, or the sentence to refuse it
+ * with. A full `https://` address: Meta shows it to the customer as the
+ * business's privacy policy, and a relative path or a typo has nowhere to go.
+ */
+export function privacyUrlProblem(value: string): string | null {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return 'The privacy link has to be a full address, starting https://.';
+  }
+  return url.protocol === 'https:' ? null : 'The privacy link has to start https://.';
+}

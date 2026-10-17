@@ -31,6 +31,22 @@ describe('describeEvent', () => {
     expect(describeEvent('csat_received', { rating: 2, source: 'page' })).toBe(
       'rated the support 2 / 5 on the survey page',
     );
+    expect(describeEvent('csat_sent', { delivery: 'meta_template' })).toBe(
+      'sent a satisfaction survey as Messenger’s feedback card',
+    );
+    expect(describeEvent('csat_received', { rating: 5, source: 'meta_feedback' })).toBe(
+      'rated the support 5 / 5 on Messenger’s feedback card',
+    );
+    expect(describeEvent('csat_received', { rating: 3, source: 'meta_quick_reply' })).toBe(
+      'rated the support 3 / 5 with a rating button in the conversation',
+    );
+    expect(describeEvent('csat_fell_back', { delivery: 'meta_quick_reply' })).toBe(
+      'switched the satisfaction survey to rating buttons: Messenger refused its feedback card',
+    );
+    expect(describeEvent('csat_thanked', {})).toBe('thanked the customer for their rating');
+    expect(describeEvent('csat_skipped', { reason: 'no_privacy_url' })).toBe(
+      'did not send a satisfaction survey: past the 24 hours only Messenger’s survey card sends, and it needs a privacy policy link that is not set',
+    );
     // Recorded before the event carried a source.
     expect(describeEvent('csat_received', { rating: 4 })).toBe('rated the support 4 / 5');
     expect(describeEvent('csat_received', {})).toBe('rated the support');

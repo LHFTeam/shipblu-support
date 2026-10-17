@@ -65,9 +65,22 @@ export type DecisionInput = {
   commentThread: boolean;
   /**
    * On Facebook and Instagram, whether an automated message can send right
-   * now (`automatedReplyBlocked` answered null). Ignored elsewhere.
+   * now (`automatedReplyBlocked` answered null): Instagram's quick replies
+   * go inside this or not at all. Ignored elsewhere.
    */
   metaWindowOpen: boolean;
+  /**
+   * On Facebook, whether Messenger's feedback card can send right now —
+   * the same question asked for the card, which has seven days rather than
+   * one (`automatedReplyBlocked(…, 'feedback_template')`). Ignored elsewhere.
+   */
+  feedbackWindowOpen: boolean;
+  /**
+   * Whether Messenger's last refusal of the card still stands
+   * (`cardRefusalStands`): recorded, not cleared by a card that went out
+   * since, and not yet a day old. Ignored off Facebook.
+   */
+  cardRefused: boolean;
   /** Whether the channel is one nobody on the team writes to (`isReadOnlyChannel`). */
   readOnly: boolean;
   /** Whether a message on this channel is written as an email (`sendsByEmail`). */
@@ -109,6 +122,26 @@ export function channelSwitch(channel: string): keyof CsatChannels | null {
  */
 export function isClosedChat(channel: string, statusCategory: string): boolean {
   return channel === 'webchat' && statusCategory === 'closed';
+}
+
+/**
+ * How long a refusal of Messenger's card keeps it from being sent past the
+ * 24 hours. A card that goes out clears the refusal, but only one sent inside
+ * them can find that out safely — and with a Meta delay of a day or more, or
+ * a team that resolves late, no scheduled survey ever is, so a refusal that
+ * stood until then would skip every Facebook survey for good. A day bounds
+ * that: after it the next survey tries the card, and a card still refused
+ * costs the surveys decided in the few minutes before it is refused again —
+ * the queue's retries — once a day, rather than all of them.
+ */
+export const CARD_REFUSAL_STANDS_MS = 24 * 3_600_000;
+
+/** `DecisionInput.cardRefused`, from the settings row and the job's one instant. */
+export function cardRefusalStands(
+  refusal: CsatSettings['lastTemplateRefusal'],
+  now: Date,
+): boolean {
+  return refusal !== null && now.getTime() - refusal.at.getTime() < CARD_REFUSAL_STANDS_MS;
 }
 
 /** Whether the admin has surveys on for this channel; false for one with no switch. */
@@ -182,8 +215,41 @@ export function decideSurvey(input: DecisionInput, settings: CsatSettings): Deci
     // Before the window: a comment thread has no window, which is exactly why
     // `automatedReplyBlocked` lets it through — and why it must not be here.
     if (input.commentThread) return { kind: 'skip', reason: 'comment_thread' };
+
+    if (input.channel === 'facebook') {
+      // Messenger's own survey card, for the seven days its tag allows — which
+      // Graph refuses without a privacy link. With none, the 24 hours still
+      // take the rating buttons Instagram gets, which need no link.
+      //
+      // A card Messenger refused recently (`cardRefused`) is still tried
+      // inside the 24 hours, where a refusal falls back to those buttons on
+      // the same row — and where a card that goes out takes the refusal
+      // down. Past them nothing would carry the survey if the card were
+      // refused again, so it is not written: a row recorded as sent whose
+      // message could only fail would count as unanswered and hold the
+      // ticket's resurvey window shut for nothing.
+      const cardSends =
+        Boolean(settings.privacyUrl) &&
+        input.feedbackWindowOpen &&
+        (input.metaWindowOpen || !input.cardRefused);
+      if (cardSends) return { kind: 'send', delivery: 'meta_template' };
+      if (input.metaWindowOpen) return { kind: 'send', delivery: 'meta_quick_reply' };
+      // Past the 24 hours: the reason the card did not go, the window first
+      // because nothing an admin does reopens it.
+      return {
+        kind: 'skip',
+        reason: !input.feedbackWindowOpen
+          ? 'window_closed'
+          : !settings.privacyUrl
+            ? 'no_privacy_url'
+            : 'card_refused',
+      };
+    }
+
+    // Instagram has no card; five quick replies under the question, which
+    // no tag carries past the 24 hours.
     return input.metaWindowOpen
-      ? { kind: 'send', delivery: 'text_link' }
+      ? { kind: 'send', delivery: 'meta_quick_reply' }
       : { kind: 'skip', reason: 'window_closed' };
   }
 

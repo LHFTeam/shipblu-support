@@ -98,8 +98,11 @@ customer sees.
   fallback on refusal, and the admin page shows the last refusal.
 - **The template needs a privacy policy URL** (`business_privacy.url`,
   required). There is no privacy page on the help centre today. Default: a
-  URL field on the admin page, and the Facebook channel stays off until it is
-  filled in — the page says so rather than sending a template Graph rejects.
+  URL field on the admin page, and no card without it — the page says so
+  rather than sending a template Graph rejects. _Built:_ Facebook still gets
+  the rating buttons inside the 24 hours, which need no link, and is skipped
+  `no_privacy_url` only past them; keeping the whole channel off read on the
+  ticket as a missing link where the buttons would have gone.
 - **Should a `closed` status survey too?** Only `resolved` does today, and a
   ticket an automation closes after a week of silence was resolved a week
   earlier. Default: `resolved` only, unchanged.
@@ -118,18 +121,18 @@ customer sees.
 `csat_surveys` becomes the record of every time the system decided whether to
 ask, and every row says what happened:
 
-| Column          | Change                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `status`        | new enum `csat_status`: `sent`, `answered`, `skipped`, `expired` — all four from stage 1, `expired` being a survey a newer one superseded; a later stage that lets a link or a Messenger card lapse writes the same value, and adds no enum value, since Postgres cannot drop one                                                                                                                                                                                                    |
-| `skip_reason`   | new, text, null unless `skipped`: `reopened`, `read_only_channel`, `no_address`, `window_closed`, `agent_suppressed`, `contact_opted_out`, `rule_resolved`, `no_customer_message`, `channel_off`, `csat_off`, `comment_thread`, `no_privacy_url`, and `chat_closed` (stage 3: a web chat closed before its survey went out, which no widget can open again). Not "surveyed recently": a ticket already carrying its survey needs no second row saying so, and that row is the answer |
-| `channel`       | new, `channel` enum, snapshotted like `agent_id` — a merged ticket keeps the channel it was surveyed on                                                                                                                                                                                                                                                                                                                                                                              |
-| `delivery`      | new enum `csat_delivery`: `email_link` and `text_link` (stage 1 — the link in a mail, and in a plain message on web chat or inside a Meta window); `widget_card`, `meta_template`, `meta_quick_reply`, `api_pull` and `whatsapp_template` join it as their stages land                                                                                                                                                                                                               |
-| `locale`        | new, `ar` / `en`, what it went out in                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| `message_id`    | new, the outbound `messages` row that carried it, null for `api_pull` and `skipped`                                                                                                                                                                                                                                                                                                                                                                                                  |
-| `rule_id`       | new, the `csat_rules` row whose wording it used, `set null` on delete                                                                                                                                                                                                                                                                                                                                                                                                                |
-| `answer_source` | new, null until answered: `page`, `widget` (stage 3, the enum `csat_answer_source`), then `meta_feedback`, `meta_quick_reply`, `api` as their stages land                                                                                                                                                                                                                                                                                                                            |
-| `expires_at`    | new; the template's `expires_in_days` for Meta, the link's life elsewhere                                                                                                                                                                                                                                                                                                                                                                                                            |
-| `token_hash`    | **nullable**: a skipped row never had a link, and a widget or Meta survey needs none                                                                                                                                                                                                                                                                                                                                                                                                 |
+| Column          | Change                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `status`        | new enum `csat_status`: `sent`, `answered`, `skipped`, `expired` — all four from stage 1, `expired` being a survey a newer one superseded; a later stage that lets a link or a Messenger card lapse writes the same value, and adds no enum value, since Postgres cannot drop one                                                                                                                                                                                                                    |
+| `skip_reason`   | new, text, null unless `skipped`: `reopened`, `read_only_channel`, `no_address`, `window_closed`, `agent_suppressed`, `contact_opted_out`, `rule_resolved`, `no_customer_message`, `channel_off`, `csat_off`, `comment_thread`, `no_privacy_url`, `card_refused`, and `chat_closed` (stage 3: a web chat closed before its survey went out, which no widget can open again). Not "surveyed recently": a ticket already carrying its survey needs no second row saying so, and that row is the answer |
+| `channel`       | new, `channel` enum, snapshotted like `agent_id` — a merged ticket keeps the channel it was surveyed on                                                                                                                                                                                                                                                                                                                                                                                              |
+| `delivery`      | new enum `csat_delivery`: `email_link` and `text_link` (stage 1 — the link in a mail, and in a plain message on web chat or inside a Meta window); `widget_card`, `meta_template`, `meta_quick_reply`, `api_pull` and `whatsapp_template` join it as their stages land                                                                                                                                                                                                                               |
+| `locale`        | new, `ar` / `en`, what it went out in                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `message_id`    | new, the outbound `messages` row that carried it, null for `api_pull` and `skipped`                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `rule_id`       | new, the `csat_rules` row whose wording it used, `set null` on delete                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `answer_source` | new, null until answered: `page`, `widget` (stage 3, the enum `csat_answer_source`), then `meta_feedback`, `meta_quick_reply`, `api` as their stages land                                                                                                                                                                                                                                                                                                                                            |
+| `expires_at`    | new; the template's `expires_in_days` for Meta, the link's life elsewhere                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `token_hash`    | **nullable**: a skipped row never had a link, and a widget or Meta survey needs none                                                                                                                                                                                                                                                                                                                                                                                                                 |
 
 A skipped row is cheap and it is the whole answer to item 6: the ticket's
 timeline shows "not surveyed — the customer opted out", and the report can
@@ -137,7 +140,7 @@ print "surveyed 41 of 66 resolutions" and a table of why not. The nightly
 `cleanup` job expires `sent` rows past `expires_at`.
 
 **The rating stays a 1–5 integer whatever carried it.** Messenger's `csat`
-question with `score_option: one_to_five` posts `"1"`–`"5"`; a quick reply
+question with `score_option: five_stars` posts `"1"`–`"5"`; a quick reply
 carries its number in the payload; the page, the widget and the API post the
 number. One scale means `rollup_metrics` and every column already drawn from
 it need no new arithmetic, only new counts.
@@ -151,19 +154,19 @@ rollback — reaches the next resolve at once. Only the ticket sidebar reads the
 thirty-second memo (`loadCsatSettings`), where a failed read is reported as not
 known rather than as off.
 
-| Field                               | Default | What it does                                                                      |
-| ----------------------------------- | ------- | --------------------------------------------------------------------------------- |
-| `enabled`                           | false   | Nothing is scheduled while off; a ticket resolved while off is not surveyed later |
-| `delay_minutes`                     | 30      | Resolve → send, the reopen grace `SURVEY_DELAY_MS` is today                       |
-| `meta_delay_minutes`                | null    | The same, for Facebook and Instagram only; null means `delay_minutes`             |
-| `resurvey_after_days`               | 14      | `RESURVEY_AFTER_DAYS`, configurable                                               |
-| `channels`                          | all off | One boolean per deliverable channel: email, webchat, facebook, instagram, api     |
-| `survey_rule_resolved`              | true    | Whether an automation's resolve schedules a survey                                |
-| `meta_expires_in_days`              | 3       | Meta's `expires_in_days`, 1–7                                                     |
-| `privacy_url`                       | null    | Meta's `business_privacy.url`; Facebook stays off while null                      |
-| `api_email_fallback`                | false   | Whether an `api` ticket whose contact has an address is also emailed              |
-| `last_template_refusal`             | null    | What Graph last said when it refused the Facebook template, shown on the page     |
-| `updated_at`, `updated_by_agent_id` |         | Who flipped it last, shown on the page                                            |
+| Field                               | Default | What it does                                                                                                                                       |
+| ----------------------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `enabled`                           | false   | Nothing is scheduled while off; a ticket resolved while off is not surveyed later                                                                  |
+| `delay_minutes`                     | 30      | Resolve → send, the reopen grace `SURVEY_DELAY_MS` is today                                                                                        |
+| `meta_delay_minutes`                | null    | The same, for Facebook and Instagram only; null means `delay_minutes`                                                                              |
+| `resurvey_after_days`               | 14      | `RESURVEY_AFTER_DAYS`, configurable                                                                                                                |
+| `channels`                          | all off | One boolean per deliverable channel: email, webchat, facebook, instagram, api                                                                      |
+| `survey_rule_resolved`              | true    | Whether an automation's resolve schedules a survey                                                                                                 |
+| `meta_expires_in_days`              | 3       | Meta's `expires_in_days`, 1–7                                                                                                                      |
+| `privacy_url`                       | null    | Meta's `business_privacy.url`; no card while null, the buttons inside 24h instead                                                                  |
+| `api_email_fallback`                | false   | Whether an `api` ticket whose contact has an address is also emailed                                                                               |
+| `last_template_refusal`             | null    | What Graph last said when it refused the Facebook template, shown on the page; for a day after it, a survey due past 24h is skipped `card_refused` |
+| `updated_at`, `updated_by_agent_id` |         | Who flipped it last, shown on the page                                                                                                             |
 
 ### `csat_rules` — the wording, scoped like the out-of-hours reply
 
@@ -180,14 +183,14 @@ answers when none does, with "Customise" opening a rule pre-filled from it.
 Every customer-facing string is an `*_ar` / `*_en` pair, both `not null default
 ''`, one required, either covering the other (AGENTS.md, _Bilingual_):
 
-| Pair             | Used as                                                                                               | Meta limit   |
-| ---------------- | ----------------------------------------------------------------------------------------------------- | ------------ |
-| `question`       | the email's heading, the widget card's question, Messenger's `question.title`, the quick-reply prompt | 5–85, no URL |
-| `intro`          | Messenger's `title`; the email's first line; the widget card's lead                                   | ≤ 65, no URL |
-| `subtitle`       | Messenger's `subtitle`; the email's second line                                                       | ≤ 80, no URL |
-| `button`         | Messenger's `button_title`; the email's and widget's confirm button                                   | ≤ 20, no URL |
-| `comment_prompt` | the follow-up's `placeholder`; the comment box's label                                                | ≤ 65, no URL |
-| `thanks`         | after an answer, on the page and the card                                                             | —            |
+| Pair             | Used as                                                                                                                                                                                  | Meta limit                            |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------- |
+| `question`       | the email's heading, the widget card's question, Messenger's `question.title`, the quick-reply prompt                                                                                    | 5–85, no URL                          |
+| `intro`          | Messenger's `title`; the email's first line; the widget card's lead                                                                                                                      | ≤ 65, no URL                          |
+| `subtitle`       | Messenger's `subtitle`; the email's second line                                                                                                                                          | ≤ 80, no URL                          |
+| `button`         | the page's and the widget card's confirm button (stage 4: Messenger's `button_title` is its own, "Rate our support" / «تقييم الخدمة», because it opens the question rather than sending) | ≤ 20, no URL                          |
+| `comment_prompt` | the follow-up's `placeholder`; the comment box's label                                                                                                                                   | ≤ 65, no URL                          |
+| `thanks`         | after an answer, on the page and the card; and, on its own, the message after a tapped rating (stage 4)                                                                                  | ≤ 300, inside Instagram's 1,000 bytes |
 
 The limits are Meta's and they are enforced on every rule, not only one scoped
 to Facebook: a group rule with no channel applies to Facebook tickets too, and a
@@ -346,6 +349,13 @@ knowledge:
   against the reference shape, for the reason `send.ts`'s header gives: a wrong
   shape is invisible in Graph's answer. `send_meta` gains a `feedback_template`
   send kind; the row's `meta` carries the survey id.
+  _Built (stage 4):_ the card's words, the privacy link, the expiry and the
+  five labels are frozen onto the message's `meta` by `send_csat`
+  (`lib/csat/meta-survey.ts`), so the carrier reads the row and nothing else.
+  The scale is `score_option: five_stars`, not `one_to_five`: the reference
+  spells the numeric option two ways (`one_to_five`, `1_to_5`) and gives
+  `five_stars` as both its example and its default, and a value Graph does not
+  know is a refused card. Meta survey rows carry no token (`carriesLink`).
 - **`automatedReplyBlocked` learns a second tag.** The `HUMAN_AGENT` rule is
   untouched — the survey is not a person's message and never carries that tag.
   But `CUSTOMER_FEEDBACK` is Meta's own sanctioned way to send exactly this
@@ -354,6 +364,11 @@ knowledge:
   24 hours as today. `messagingTag()` returns `CUSTOMER_FEEDBACK` for that kind
   past 24 hours, with `messaging_type: MESSAGE_TAG`, and refuses rather than
   sends past 7 days (`skipped: window_closed`).
+  _Built:_ as `feedbackTemplateTag()` beside `messagingTag()` rather than a
+  third case in it — each tag past 24 hours is valid on exactly one kind of
+  message, and two functions make putting either on the other a type error.
+  The guard's kind is a third argument, `automatedReplyBlocked(ticket, now,
+'feedback_template')`, and the job measures both windows at one instant.
 - **`messaging_feedback` joins `REQUIRED_PAGE_FIELDS`** in
   `lib/meta/subscriptions.ts`, `parseWebhook` reads it into a new
   `feedbacks: NormalisedFeedback[]` array beside `interactions` — not as a
@@ -374,6 +389,43 @@ survey instead if the 24-hour window is still open. The template is marked "in
 development"; the fallback is what keeps Facebook surveyed the day it is
 removed.
 
+_Built:_ the refusal is kept on `csat_settings` (`last_template_refusal`,
+`_at`) and printed on Facebook's row of the admin page; the survey row's
+delivery moves to `meta_quick_reply`, the message's `sendKind` with it (so a
+retry goes straight to the buttons), and a `csat_fell_back` event says so on
+the timeline. Refused that way, the card is explained as itself (`sendKind:
+'feedback_card'`), not with the paragraphs a refused reply or comment gets.
+
+What counts as the card refused: a permanent refusal at once; and on the
+queue's last try "An unknown error has occurred" (`isUnknownError`, code 1),
+because that is how Graph answers most refusals and a card withdrawn that way
+would otherwise be retried to `dead` on every survey. Graph down (code 2, a
+bare 5xx) and a rate limit outlasting the retries are not the card's. Nor are
+a dead token, a refusal this app made itself, and a refusal about the
+customer (`isRecipientRefusal`: `551`, `2018001`, `2018108`, another app
+holding the thread, and the window refusals `1545041` and `2018278` — those
+two only on a send without `CUSTOMER_FEEDBACK`, whose seven days
+`feedbackTemplateTag` already counts, so a window refusal of the tagged card
+is the card's). Those would refuse anything sent there, and fail the row as
+any refused send.
+
+A card that goes out clears the last refusal. While one stands, a survey due
+inside the 24 hours still tries the card — a refusal falls back to the
+buttons — and one due past them is skipped `card_refused` rather than written
+as sent with a message that could only fail, which would count as unanswered
+and hold the resurvey window shut. The refusal stands for a day
+(`CARD_REFUSAL_STANDS_MS`): with a Meta delay of a day or more no scheduled
+survey tries the card inside the 24 hours to clear it, and a refusal that
+never lapsed would skip every Facebook survey for good.
+
+Without a privacy link, Facebook is surveyed with the buttons inside the 24
+hours and skipped `no_privacy_url` past them, where only the card could have
+gone; the admin page says so beside the field rather than refusing to save.
+
+Expiry is Meta's: a lapsed card cannot be answered, so no `expires_at` is
+written yet, and `recordAnswer` still takes a late answer to a superseded row
+as every door does.
+
 ### Instagram — quick replies inside the window
 
 No feedback template and no `messaging_feedback` on Instagram, on either
@@ -391,7 +443,11 @@ categorised, be the inbox preview and the language the next automated reply
 went out in. The comment is asked for only after the rating, as a second plain
 message ("Anything to add? Just reply here."), and whatever the customer types
 next is an ordinary inbound message — on a resolved ticket, that reopens it,
-which is right: a customer with more to say has more to say.
+which is right: a customer with more to say has more to say. _Changed in
+review:_ the second message is the thanks alone. An invitation to comment is
+mostly answered with "thanks!", which reopened the ticket into the queue as
+new demand and never reached `csat_surveys.comment`; a customer with more to
+say still writes, and still reopens it. A quick-reply answer has no comment.
 
 Quick replies send only inside the 24-hour window, and no tag extends them. A
 survey that reaches its `runAt` with the window closed is `skipped:
@@ -402,6 +458,19 @@ the two Meta channels.
 Quick replies are also Facebook's fallback (previous section), built by the
 same `lib/meta/quick-reply-survey.ts` with `messaging_type: RESPONSE`, through
 the platform split `send.ts` already keeps.
+
+_Built:_ the second message is the rule's thanks, written only for the first answer
+— the other Instagram connection's copy of the same tap records nothing and
+thanks nobody — and only while the 24 hours since the customer's last
+_message_ are open: the tap is an answer, not a message, so it moves neither
+the window nor the clock here. Nor on a ticket since deleted, marked spam or
+merged away, nor when the tap arrived in `standby` on the connection the
+thanks would go out over (`metaThreadState`): another app took the thread
+after the survey went, and the thanks would sit failed on the timeline. The
+rule's thanks is held to 1,000 bytes as well as 300 characters, Instagram's
+limit for a message, which 300 emoji would pass. Meta does not draw quick replies on desktop
+Instagram; a customer reading there sees the question without its buttons,
+and an answer typed instead is an ordinary message.
 
 ### myBlu — the `api` channel
 

@@ -30,9 +30,15 @@ export type MetaSendContext = {
    * both with the same sentence.
    */
   connection: MetaConnection;
-  sendKind: 'dm' | 'comment_reply' | 'private_reply';
-  /** The tag a direct message went out with, when it was a direct message. */
-  tag?: 'RESPONSE' | 'HUMAN_AGENT' | null;
+  /**
+   * The survey's quick replies are a `dm` here: they go where one goes and are
+   * refused for the same reasons. Messenger's feedback card is not — a refusal
+   * of it is as likely to be Meta's of the template as anything about the
+   * thread, so none of a plain reply's diagnoses are appended to it.
+   */
+  sendKind: 'dm' | 'comment_reply' | 'private_reply' | 'feedback_card';
+  /** The tag a direct message or the feedback card went out with. */
+  tag?: 'RESPONSE' | 'HUMAN_AGENT' | 'CUSTOMER_FEEDBACK' | null;
 };
 
 /**
@@ -142,7 +148,7 @@ export function explainMetaSendError(error: MetaApiError, context: MetaSendConte
     return withReference(`${base}\n\n${handoverExplanation(context)}`, error, context.connection);
   }
 
-  if (context.sendKind !== 'dm' && isCommentPermissionRefusal(error)) {
+  if (isCommentSend(context) && isCommentPermissionRefusal(error)) {
     return withReference(
       `${base}\n\n${commentPermissionExplanation(context)}`,
       error,
@@ -150,7 +156,7 @@ export function explainMetaSendError(error: MetaApiError, context: MetaSendConte
     );
   }
 
-  if (context.sendKind !== 'dm' && isCommentTargetRefusal(error)) {
+  if (isCommentSend(context) && isCommentTargetRefusal(error)) {
     return withReference(
       `${base}\n\n${commentTargetExplanation(context)}`,
       error,
@@ -173,8 +179,29 @@ export function explainMetaSendError(error: MetaApiError, context: MetaSendConte
   return withReference(base, error, context.connection);
 }
 
+/** A reply on the comment edge, or a private reply to a comment: the sends a comment can refuse. */
+function isCommentSend(context: MetaSendContext): boolean {
+  return context.sendKind === 'comment_reply' || context.sendKind === 'private_reply';
+}
+
 function isUnspecified(error: MetaApiError): boolean {
   return error.code === null || UNSPECIFIED_CODES.has(error.code);
+}
+
+/**
+ * "An unknown error has occurred." — code 1, Graph's refusal that gives no
+ * reason, and the one transient answer `send_meta` counts as the feedback
+ * card refused on the queue's last try, because it is how Graph answers most
+ * refusals and so most likely how it answers a withdrawn card.
+ *
+ * Code 1 alone. Code 2 is Graph saying it is down, a 5xx with no code is the
+ * same or a refusal whose body never arrived (`graph()` in the client), and a
+ * rate limit is about how much we sent: none of them is about the card, and
+ * counted as its refusal one short outage would skip a day of surveys
+ * (`cardRefusalStands`).
+ */
+export function isUnknownError(error: MetaApiError): boolean {
+  return error.code === 1;
 }
 
 /**
@@ -271,6 +298,50 @@ const HANDOVER_SUBCODE = 2018300;
 
 function isHandoverRefusal(error: MetaApiError): boolean {
   return error.subcode === HANDOVER_SUBCODE;
+}
+
+/**
+ * Graph refused a send because of who it was addressed to, not what it was —
+ * the question the survey asks of a refused feedback card: did Messenger
+ * refuse *the card*, or would it have refused anything sent here?
+ *
+ * The Send API's own error codes for the recipient: the customer blocked the
+ * Page or is otherwise unreachable (`551`, sent with subcode `1545041`); no
+ * such user (`100` / `2018001`); not receiving messages from us (`10` /
+ * `2018108`); and another app holding the thread (`10` / `2018300`, read out
+ * of a log). Keyed on the subcode wherever there is one, because `100` and
+ * `10` are also how Graph refuses a malformed request and a missing
+ * permission — which *are* the card's.
+ *
+ * And the two window refusals: `1545041` on its own, which the send-messages
+ * page's table lists as a code meaning "messaging window closed", and
+ * `10` / `2018278`, outside the allowed window (the sentence
+ * `isHumanAgentRefusal`'s note quotes).
+ *
+ * All but the last are from the Send API reference's error table rather than
+ * a log, against this file's habit, because here the cost of a guess runs
+ * the other way: a refusal about the customer read as the card's is a false
+ * alarm on the admin page and every later Facebook survey skipped for it.
+ *
+ * A window refusal is the customer's only for a send carrying no tag of the
+ * card's own. Past the 24 hours the card goes with `CUSTOMER_FEEDBACK`, inside
+ * the seven days `feedbackTemplateTag` already counts, so a window refusal
+ * there says Meta did not take that tag on the card — the card's refusal.
+ * `551` with `1545041` under it is the customer's whatever the tag: the code
+ * says who.
+ */
+const RECIPIENT_CODES = new Set([551]);
+const RECIPIENT_SUBCODES = new Set([2018001, 2018108]);
+const WINDOW_CODES = new Set([1545041, 2018278]);
+
+export function isRecipientRefusal(error: MetaApiError, tag: MetaSendContext['tag']): boolean {
+  if (error.code !== null && RECIPIENT_CODES.has(error.code)) return true;
+  if (error.subcode !== null && RECIPIENT_SUBCODES.has(error.subcode)) return true;
+  if (isHandoverRefusal(error)) return true;
+  const windowClosed =
+    (error.code !== null && WINDOW_CODES.has(error.code)) ||
+    (error.subcode !== null && WINDOW_CODES.has(error.subcode));
+  return windowClosed && tag !== 'CUSTOMER_FEEDBACK';
 }
 
 /**
