@@ -136,10 +136,6 @@ export function decideSurvey(input: DecisionInput, settings: CsatSettings): Deci
     return { kind: 'skip', reason: 'reopened' };
   }
 
-  if (isClosedChat(input.channel, input.statusCategory)) {
-    return { kind: 'skip', reason: 'chat_closed' };
-  }
-
   // An agent-opened ticket the customer never answered has nothing to rate.
   if (!input.hasCustomerMessage) return { kind: 'skip', reason: 'no_customer_message' };
 
@@ -167,5 +163,11 @@ export function decideSurvey(input: DecisionInput, settings: CsatSettings): Deci
   // Web chat: the row is the delivery, and the widget draws it as a card the
   // visitor answers without leaving the chat. The message keeps the link, for
   // the console's timeline and for a widget loaded before the card existed.
-  return { kind: 'send', delivery: 'widget_card' };
+  // A closed chat is a delivery that cannot happen, like an address that is
+  // not there or a window that has shut, so it is said here with them —
+  // after the agent's and the rule's reasons, which say more about the ticket
+  // than which conversation the widget happens to show.
+  return isClosedChat(input.channel, input.statusCategory)
+    ? { kind: 'skip', reason: 'chat_closed' }
+    : { kind: 'send', delivery: 'widget_card' };
 }

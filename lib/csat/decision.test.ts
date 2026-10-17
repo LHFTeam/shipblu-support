@@ -92,9 +92,18 @@ describe('decideSurvey', () => {
       kind: 'send',
       delivery: 'email_link',
     });
-    expect(
-      decideSurvey(input({ channel: 'webchat', byEmail: false, statusCategory: 'closed' }), ON),
-    ).toEqual({ kind: 'skip', reason: 'chat_closed' });
+    const closedChat = input({ channel: 'webchat', byEmail: false, statusCategory: 'closed' });
+    expect(decideSurvey(closedChat, ON)).toEqual({ kind: 'skip', reason: 'chat_closed' });
+    // A delivery reason, so the ticket's own reasons come first: an agent who
+    // asked that it not be surveyed is the answer, and the report counts it.
+    expect(decideSurvey({ ...closedChat, suppressed: true }, ON)).toEqual({
+      kind: 'skip',
+      reason: 'agent_suppressed',
+    });
+    expect(decideSurvey({ ...closedChat, hasCustomerMessage: false }, ON)).toEqual({
+      kind: 'skip',
+      reason: 'no_customer_message',
+    });
   });
 
   it('leaves a rule-resolved ticket alone only when the admin said so', () => {

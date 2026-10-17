@@ -272,12 +272,13 @@ export async function sendSurvey(send: SurveySend): Promise<SendOutcome> {
     if (ticket.statusCategory !== 'resolved' && ticket.statusCategory !== 'closed') {
       return { kind: 'skip', reason: 'reopened' };
     }
-    // `decideSurvey`'s rule, again behind the lock: closed in between, a chat
-    // is one the visitor can no longer open.
+    if (ticket.csatSuppressed) return { kind: 'skip', reason: 'agent_suppressed' };
+    // `decideSurvey`'s rule, again behind the lock and in its order — after
+    // the agent's flag: closed in between, a chat is one the visitor can no
+    // longer open.
     if (isClosedChat(send.snapshot.channel, ticket.statusCategory)) {
       return { kind: 'skip', reason: 'chat_closed' };
     }
-    if (ticket.csatSuppressed) return { kind: 'skip', reason: 'agent_suppressed' };
 
     if (await surveyedWithin(tx, send.conversationId, send.resurveyAfterDays)) {
       return { kind: 'surveyed' };

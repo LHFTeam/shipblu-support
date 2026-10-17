@@ -4,6 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_WORDING, ratingLabels } from '@/lib/csat/wording';
 import type { WidgetSurvey } from '@/lib/widget/types';
+import { copyFor } from './copy';
 import { SurveyCard, type SurveyResult } from './survey-card';
 
 /**
@@ -90,6 +91,27 @@ describe('SurveyCard', () => {
 
     expect(onAnswer).toHaveBeenLastCalledWith('survey-1', 4, 'Quick');
     expect(text()).toContain(DEFAULT_WORDING.en.thanks);
+    expect(host!.querySelector('textarea')).toBeNull();
+  });
+
+  it('says the survey closed, not thanks, when the server had nowhere to keep the comment', async () => {
+    // The chat went between the rating and the comment: the route answers
+    // `{rating: null}`, and nothing stored the words the visitor typed.
+    mount(survey(), [4, null]);
+
+    await click(ratingButton('Good'));
+    const box = host!.querySelector('textarea')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(
+        box,
+        'Quick',
+      );
+      box.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await click(ratingButton(DEFAULT_WORDING.en.button));
+
+    expect(text()).not.toContain(DEFAULT_WORDING.en.thanks);
+    expect(text()).toContain(copyFor('en').surveyClosed);
     expect(host!.querySelector('textarea')).toBeNull();
   });
 

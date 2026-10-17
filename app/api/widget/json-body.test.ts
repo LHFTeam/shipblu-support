@@ -164,13 +164,22 @@ describe('POST /api/widget/csat', () => {
     expect(await response.text()).toBe('{"rating":null}');
   });
 
-  it('refuses a survey id that is not a uuid before it reaches a query, and a missing rating', async () => {
+  it('refuses a survey id that is not a uuid before it reaches a query, and a rating off the scale', async () => {
     const bad = await csat.POST(post(JSON.stringify({ token: 'known', surveyId: 'x', rating: 3 })));
     expect(bad.status).toBe(400);
     expect(await bad.text()).toBe('{"error":"no survey"}');
 
     const unrated = await csat.POST(post(JSON.stringify({ token: 'known', surveyId: SURVEY })));
     expect(await unrated.text()).toBe('{"error":"no rating"}');
+    // Off the scale is refused here, not answered `{"rating":null}`, which
+    // the card reads as a survey that has closed.
+    for (const rating of [0, 6, 4.5]) {
+      const off = await csat.POST(
+        post(JSON.stringify({ token: 'known', surveyId: SURVEY, rating })),
+      );
+      expect(off.status).toBe(400);
+      expect(await off.text()).toBe('{"error":"no rating"}');
+    }
     expect(answerSurvey).not.toHaveBeenCalled();
   });
 });

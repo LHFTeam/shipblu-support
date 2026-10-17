@@ -301,7 +301,10 @@ widget routes. Three things settled in the building:
 - **A chat closed before its survey went out is `skipped: chat_closed`.** The
   widget opens a fresh conversation in place of a closed one, so a card
   written there is one nobody can see, recorded as sent. Checked in the
-  decision and again under the lock. A survey sent while the chat was
+  decision and again under the lock, as a delivery reason — after the agent's
+  and the rule's, so a suppressed ticket still says so. The seeded rule closes
+  a resolved chat at 72 hours, so a delay that long leaves web chat
+  unsurveyed; the delay's explanation on the admin page says so. A survey sent while the chat was
   resolved and closed later (the three-day rule) stays `sent`: the card goes
   out of reach with the chat, and the row is not marked `expired`, which is
   the `expires_at` stage's to write.

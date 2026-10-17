@@ -80,7 +80,9 @@ export function SurveyCard({
   // Answered on an earlier visit, or in another tab: the thanks and the
   // rating it was given, without a comment box this card never opened.
   const answeredElsewhere = kept === null && pending === null && survey.rating !== null;
-  const closed = (survey.expired || shut) && rating === null;
+  // Superseded and never rated, or found closed by the server — at the
+  // rating, or at the comment, when the chat went between the two.
+  const closed = shut || (survey.expired && rating === null);
 
   async function rate(value: number) {
     if (busy || rating !== null) return;
@@ -115,6 +117,9 @@ export function SurveyCard({
     setFailed(false);
     const result = await onAnswer(survey.id, rating, text);
     if (result === false) setFailed(true);
+    // Nothing on the server to keep it with any more: said as closed, rather
+    // than thanking the visitor for a comment nobody stored.
+    else if (result === null) setShut(true);
     else setStep('done');
     setBusy(false);
   }
@@ -125,9 +130,11 @@ export function SurveyCard({
     <div
       dir={direction(survey.locale)}
       lang={survey.locale}
-      className="flex w-72 max-w-full flex-col gap-3 rounded-bubble border border-(--color-border-subtle) bg-(--color-background-surface) px-(--bubble-pad-x) py-3 font-conversation text-sm text-(--color-text-primary)"
+      className="flex w-72 max-w-full flex-col gap-3 rounded-bubble border border-(--color-border-subtle) bg-(--color-background-surface) px-(--bubble-pad-x) py-3 text-sm text-(--color-text-primary)"
     >
-      <div className="flex flex-col gap-0.5">
+      {/* The message's words take the conversation's face, as a bubble's do;
+          the buttons and our own lines keep the surface's (AGENTS.md). */}
+      <div className="flex flex-col gap-0.5 font-conversation">
         {survey.intro ? (
           <p dir="auto" className="text-xs text-(--color-text-secondary)">
             {survey.intro}
@@ -170,7 +177,7 @@ export function SurveyCard({
         </div>
       )}
 
-      {step === 'comment' ? (
+      {step === 'comment' && !closed ? (
         <div ref={next} className="flex flex-col gap-2">
           <label htmlFor={commentId} dir="auto" className="text-xs text-(--color-text-secondary)">
             {survey.commentPrompt}
@@ -184,7 +191,7 @@ export function SurveyCard({
             dir="auto"
             /* 16px, for the reason `field.ts` gives: Safari zooms on a smaller
                field the moment it takes focus. */
-            className={`${WIDGET_FIELD} resize-none px-3 py-2`}
+            className={`${WIDGET_FIELD} resize-none px-3 py-2 font-conversation`}
           />
           <Button
             onClick={() => void finish()}
@@ -202,7 +209,9 @@ export function SurveyCard({
         <div ref={next}>
           <p role="status" className="flex items-start gap-1.5 text-(--color-feedback-success-fg)">
             <CheckIcon size={16} className="mt-0.5 shrink-0" />
-            <span dir="auto">{survey.thanks}</span>
+            <span dir="auto" className="font-conversation">
+              {survey.thanks}
+            </span>
           </p>
         </div>
       ) : null}

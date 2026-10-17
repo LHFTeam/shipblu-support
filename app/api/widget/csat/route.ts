@@ -48,14 +48,17 @@ export async function POST(request: Request) {
   // Checked before it reaches a query: Postgres answers a malformed uuid with
   // an error, not with no rows.
   if (!isUuid(body.surveyId)) return NextResponse.json({ error: 'no survey' }, { status: 400 });
-  if (typeof body.rating !== 'number') {
+  // The scale, checked here rather than left to `recordAnswer`, which ignores
+  // anything off it: ignored, the card would be told the survey had closed.
+  const rating = body.rating;
+  if (typeof rating !== 'number' || !Number.isInteger(rating) || rating < 1 || rating > 5) {
     return NextResponse.json({ error: 'no rating' }, { status: 400 });
   }
 
   // As sent: `recordAnswer` trims it and cuts it to length, once, for every door.
   const comment = typeof body.comment === 'string' ? body.comment : null;
 
-  const stored = await answerSurvey(contactId, body.surveyId, body.rating, comment);
+  const stored = await answerSurvey(contactId, body.surveyId, rating, comment);
 
   return NextResponse.json({ rating: stored });
 }
