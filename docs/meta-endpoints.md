@@ -156,8 +156,8 @@ The same `POST /{account-id}/messages`, with a body built and tested beside
   `messaging_type: MESSAGE_TAG` and `tag: CUSTOMER_FEEDBACK` — a tag valid on
   this card and nothing else, so `feedbackTemplateTag()` is a function of its
   own beside `messagingTag()`. Messenger only. Meta marks the card "in
-  development"; a refusal of the card — a permanent one at once, one that names
-  nothing (`isUnspecified`) on the queue's last try, and never one about the
+  development"; a refusal of the card — a permanent one at once, code 1
+  (`isUnknownError`) on the queue's last try, and never one about the
   customer, such as `551` or another app holding the thread
   (`isRecipientRefusal`) — is kept on `csat_settings` for the admin page and,
   inside 24 hours, the survey goes as the next body instead. A card that goes

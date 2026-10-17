@@ -196,10 +196,14 @@ describe('decideSurvey', () => {
     expect(
       decideSurvey(facebook({ metaWindowOpen: false, feedbackWindowOpen: false }), ON),
     ).toEqual({ kind: 'skip', reason: 'window_closed' });
-    // Instagram has no card to have been refused.
+    // Instagram has no card to have been refused: past the 24 hours its reason
+    // is the window, whatever Messenger last said.
     expect(
-      decideSurvey(input({ channel: 'instagram', byEmail: false, cardRefused: true }), ON),
-    ).toEqual({ kind: 'send', delivery: 'meta_quick_reply' });
+      decideSurvey(
+        input({ channel: 'instagram', byEmail: false, cardRefused: true, metaWindowOpen: false }),
+        ON,
+      ),
+    ).toEqual({ kind: 'skip', reason: 'window_closed' });
   });
 
   it('lets a refusal stand for a day, so a survey past the 24 hours tries the card again', () => {

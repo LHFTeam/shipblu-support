@@ -232,7 +232,7 @@ describe('send_meta, for a survey card', () => {
     await settingsOn();
     const survey = await cardSurvey(HOUR);
     // What Graph says to most refusals, a withdrawn card's quite possibly.
-    const unknown = () => new MetaApiError('An unknown error has occurred.', 500, 2, null, true);
+    const unknown = () => new MetaApiError('An unknown error has occurred.', 500, 1, null, true);
 
     graph.sendMessageRequest.mockRejectedValueOnce(unknown());
     await expect(sendMeta(job(survey.messageId))).rejects.toThrow('An unknown error');
@@ -267,12 +267,12 @@ describe('send_meta, for a survey card', () => {
     expect(after.refusal).not.toContain('24-hour window');
   });
 
-  it('does not count a rate limit on the last try as the card refused', async () => {
+  it('does not count Graph being down or a rate limit on the last try as the card refused', async () => {
     await settingsOn();
-    const survey = await cardSurvey(HOUR);
-    // Transient, and outlasting every retry — but about how much we sent, not
-    // what: nothing to put on the admin page, and no reason to skip later surveys.
-    graph.sendMessageRequest.mockRejectedValueOnce(
+    // Transient, and outlasting every retry — but about Graph, or about how
+    // much we sent, not about the card: nothing to put on the admin page, and
+    // no reason to skip a day of later surveys.
+    const answers = [
       new MetaApiError(
         '(#613) Calls to this api have exceeded the rate limit.',
         400,
@@ -280,18 +280,32 @@ describe('send_meta, for a survey card', () => {
         null,
         true,
       ),
-    );
+      new MetaApiError('Service temporarily unavailable', 503, 2, null, true),
+      // A refusal whose body never arrived (`graph()` in the client).
+      new MetaApiError(
+        'Graph API refused with 429, and its reason never arrived',
+        429,
+        null,
+        null,
+        true,
+      ),
+    ];
+    for (const answer of answers) {
+      graph.sendMessageRequest.mockReset();
+      const survey = await cardSurvey(HOUR);
+      graph.sendMessageRequest.mockRejectedValueOnce(answer);
 
-    await expect(sendMeta(job(survey.messageId, { attempts: 5, maxAttempts: 5 }))).rejects.toThrow(
-      'rate limit',
-    );
-    expect(requests()).toHaveLength(1);
-    expect(await state(survey)).toMatchObject({
-      message: { status: 'failed' },
-      delivery: 'meta_template',
-      refusal: null,
-      fellBack: 0,
-    });
+      await expect(
+        sendMeta(job(survey.messageId, { attempts: 5, maxAttempts: 5 })),
+      ).rejects.toThrow(answer.message);
+      expect(requests()).toHaveLength(1);
+      expect(await state(survey)).toMatchObject({
+        message: { status: 'failed' },
+        delivery: 'meta_template',
+        refusal: null,
+        fellBack: 0,
+      });
+    }
   });
 
   it('counts a window refusal of the card’s own tag as the card’s', async () => {

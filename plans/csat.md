@@ -393,32 +393,35 @@ _Built:_ the refusal is kept on `csat_settings` (`last_template_refusal`,
 `_at`) and printed on Facebook's row of the admin page; the survey row's
 delivery moves to `meta_quick_reply`, the message's `sendKind` with it (so a
 retry goes straight to the buttons), and a `csat_fell_back` event says so on
-the timeline. A permanent refusal of the card falls back at once; a transient
-answer — Graph's unspecified codes and its 5xx among them — is the queue's to
-retry as the card, and counts as the card refused on the queue's last try,
-because "an unknown error has occurred" is how Graph answers most refusals. A
-dead token, a refusal this app made itself and a refusal about the customer
-(`551`/`1545041`, `2018001`, `2018108`, `2018278`, another app holding the
-thread: `isRecipientRefusal`) would refuse anything sent there, so they are
-not something the card did, and fail the row as any refused send. A card that
-goes out clears the last refusal. While one stands, a survey due inside the 24
-hours still tries the card — a refusal falls back to the buttons, and a card
-that goes out is what clears it — and one due past them is skipped
-`card_refused` rather than written as sent with a message that could only
-fail, which would count as unanswered and hold the resurvey window shut. The
-refusal stands for a day (`CARD_REFUSAL_STANDS_MS`): with a Meta delay of a
-day or more no card is ever tried inside the 24 hours to clear it, and a
-refusal that never lapsed would skip every Facebook survey for good. On the
-queue's last try only an answer that names nothing (`isUnspecified`) counts
-as the card refused — a rate limit that outlasts the retries is not — and
-`2018278` (outside the window) is the card's when it carried
-`CUSTOMER_FEEDBACK`, whose seven days `feedbackTemplateTag` already counts.
-Refused that way, the card is explained as itself (`sendKind:
+the timeline. Refused that way, the card is explained as itself (`sendKind:
 'feedback_card'`), not with the paragraphs a refused reply or comment gets.
-Without a privacy link, Facebook is surveyed
-with the buttons inside the 24 hours and skipped `no_privacy_url` past them,
-where only the card could have gone; the admin page says so beside the field
-rather than refusing to save.
+
+What counts as the card refused: a permanent refusal at once; and on the
+queue's last try "An unknown error has occurred" (`isUnknownError`, code 1),
+because that is how Graph answers most refusals and a card withdrawn that way
+would otherwise be retried to `dead` on every survey. Graph down (code 2, a
+bare 5xx) and a rate limit outlasting the retries are not the card's. Nor are
+a dead token, a refusal this app made itself, and a refusal about the
+customer (`isRecipientRefusal`: `551`, `2018001`, `2018108`, another app
+holding the thread, and the window refusals `1545041` and `2018278` — those
+two only on a send without `CUSTOMER_FEEDBACK`, whose seven days
+`feedbackTemplateTag` already counts, so a window refusal of the tagged card
+is the card's). Those would refuse anything sent there, and fail the row as
+any refused send.
+
+A card that goes out clears the last refusal. While one stands, a survey due
+inside the 24 hours still tries the card — a refusal falls back to the
+buttons — and one due past them is skipped `card_refused` rather than written
+as sent with a message that could only fail, which would count as unanswered
+and hold the resurvey window shut. The refusal stands for a day
+(`CARD_REFUSAL_STANDS_MS`): with a Meta delay of a day or more no scheduled
+survey tries the card inside the 24 hours to clear it, and a refusal that
+never lapsed would skip every Facebook survey for good.
+
+Without a privacy link, Facebook is surveyed with the buttons inside the 24
+hours and skipped `no_privacy_url` past them, where only the card could have
+gone; the admin page says so beside the field rather than refusing to save.
+
 Expiry is Meta's: a lapsed card cannot be answered, so no `expires_at` is
 written yet, and `recordAnswer` still takes a late answer to a superseded row
 as every door does.

@@ -655,12 +655,23 @@ describe('isRecipientRefusal', () => {
     const outside = new MetaApiError('refused', 400, 10, 2018278, false);
     expect(isRecipientRefusal(outside, 'CUSTOMER_FEEDBACK')).toBe(false);
     expect(isRecipientRefusal(outside, 'RESPONSE')).toBe(true);
-    // A refusal about the customer is theirs whatever the card carried.
-    expect(
-      isRecipientRefusal(
-        new MetaApiError('refused', 400, 551, 1545041, false),
-        'CUSTOMER_FEEDBACK',
-      ),
-    ).toBe(true);
+    // The table's own window code, on its own, reads the same way.
+    const closed = new MetaApiError('refused', 400, 1545041, null, false);
+    expect(isRecipientRefusal(closed, 'CUSTOMER_FEEDBACK')).toBe(false);
+    expect(isRecipientRefusal(closed, 'RESPONSE')).toBe(true);
+    // A refusal whose code says it is about the customer is theirs whatever
+    // the card carried.
+    for (const [code, subcode] of [
+      [551, 1545041],
+      [10, 2018108],
+      [100, 2018001],
+    ] as const) {
+      expect(
+        isRecipientRefusal(
+          new MetaApiError('refused', 400, code, subcode, false),
+          'CUSTOMER_FEEDBACK',
+        ),
+      ).toBe(true);
+    }
   });
 });

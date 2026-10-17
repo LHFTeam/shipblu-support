@@ -128,10 +128,11 @@ export function isClosedChat(channel: string, statusCategory: string): boolean {
  * How long a refusal of Messenger's card keeps it from being sent past the
  * 24 hours. A card that goes out clears the refusal, but only one sent inside
  * them can find that out safely — and with a Meta delay of a day or more, or
- * a team that resolves late, none ever is, so a refusal that stood until then
- * would skip every Facebook survey for good. A day bounds that: after it the
- * next survey tries the card, and a card still refused costs one failed
- * survey a day rather than all of them.
+ * a team that resolves late, no scheduled survey ever is, so a refusal that
+ * stood until then would skip every Facebook survey for good. A day bounds
+ * that: after it the next survey tries the card, and a card still refused
+ * costs the surveys decided in the few minutes before it is refused again —
+ * the queue's retries — once a day, rather than all of them.
  */
 export const CARD_REFUSAL_STANDS_MS = 24 * 3_600_000;
 

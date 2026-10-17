@@ -99,7 +99,8 @@ export async function recordMetaFeedback(feedback: NormalisedFeedback): Promise<
  * Nor where the tap says the thread is not ours to answer. It is the newest
  * thing the customer did, and it carries the handover protocol's `standby`
  * like a message would: another app took the thread after the survey went
- * out. `send_meta` would refuse the thanks, and a reply the customer was
+ * out. Graph would refuse the thanks — `send_meta` reads thread control off
+ * the stored messages, and the tap is not one — and a reply the customer was
  * never going to see would sit failed on a resolved ticket. Asked of
  * `metaThreadState`, which holds a standby only against the connection the
  * reply goes out over — so a Page delivery in standby does not stop a thanks
