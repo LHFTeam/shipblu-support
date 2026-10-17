@@ -20,6 +20,7 @@ import { ratingLabels } from '@/lib/csat/wording';
 import { channelLabel, formatDateTime } from '@/lib/format';
 import {
   countedThrough,
+  daysUncounted,
   firstSend,
   latestComments,
   liveSurveys,
@@ -33,6 +34,7 @@ import {
   byChannel,
   byGroup,
   daily,
+  lastWholeDay,
   ratedCount,
   ratingCounts,
   perDay,
@@ -47,10 +49,9 @@ import {
 } from '@/lib/reports/queries';
 import { rangeIn, reportingContext } from '@/lib/reports/rollup';
 import { RangeNav } from '../range-nav';
+import { daysFrom, RANGES } from './ranges';
 
 export const dynamic = 'force-dynamic';
-
-const RANGES = [7, 30, 90] as const;
 
 /**
  * Customer satisfaction: what the surveys said, how many were answered, and
@@ -75,10 +76,7 @@ export default async function CsatReportPage({
   if (!can(agent, 'report.view')) notFound();
   const namesAgents = can(agent, 'report.agents');
 
-  const { days: requested } = await searchParams;
-  const days = RANGES.includes(Number(requested) as (typeof RANGES)[number])
-    ? Number(requested)
-    : 30;
+  const days = daysFrom((await searchParams).days);
 
   // One window, in the team's zone, for every query and for the dates printed
   // above them (§6.54). The figures are the rollup's, which ends yesterday at
@@ -88,20 +86,28 @@ export default async function CsatReportPage({
   const range = rangeIn(zone, days);
   const window = { ...range, zone };
 
-  const [rolledUp, comments] = await allLimited(2, [
-    () => rolledUpDays(range),
-    () => latestComments(window),
+  const [lastWhole, comments] = await allLimited(2, [
+    () => lastWholeDay(window),
+    () => latestComments(window, namesAgents),
   ] as const);
 
-  // Every figure, the trend, and the live reads checked against them stop on
+  // Every figure, the trend, and the live reads checked against them end on
   // the last day the rollup can be counted on to have computed — not on
   // yesterday, which is not in the figures for the hours between the team's
-  // midnight and the nightly run, and not on the rollup's newest row, which
-  // is the last day anybody worked. One window for all of them, so a day
-  // cannot be in the figures and not in the check, or the other way round.
-  const through = countedThrough(window, rolledUp);
+  // midnight and the nightly run. One end for all of them, so a day cannot be
+  // in the figures and not in the check, or the other way round.
+  const through = countedThrough(window, lastWhole);
   const counted = { from: range.from, to: through };
-  const countedWindow = { ...counted, zone };
+  // Over the counted days too, so the notice's "days of figures" counts the
+  // days the figures hold, and not a rolled-up yesterday they stop before.
+  const rolledUp = await rolledUpDays(counted);
+  const startsLate = rolledUp.first !== null && rolledUp.first > range.from;
+  // The live reads start where the figures' rows do. A day before the
+  // rolled-up history was never rolled up at all, which the first notice
+  // already says; read live, its sends would be named a second time, for the
+  // wrong reason. The figures there are rows that do not exist, so starting
+  // them later would change nothing but the trend's first bar.
+  const countedWindow = { from: startsLate ? rolledUp.first! : range.from, to: through, zone };
 
   // A few at a time rather than all at once: a report page holding every
   // place in the pool for its render is the §6.91 freeze waiting to happen.
@@ -117,7 +123,6 @@ export default async function CsatReportPage({
       () => firstSend(zone),
     ] as const);
 
-  const startsLate = rolledUp.first !== null && rolledUp.first > range.from;
   // Only when it says something the notice above does not: surveys starting
   // after the rollup's history did, inside this window.
   const surveysStartLate =
@@ -125,15 +130,21 @@ export default async function CsatReportPage({
     firstSent > range.from &&
     (rolledUp.first === null || firstSent > rolledUp.first);
   // Sends and decisions against the rollup has not counted, day by day: a
-  // night the job did not run, or a day rolled up before the survey columns
-  // existed, whose counts read 0 until it is computed again. The figures
-  // below are short by this much, and the page says so rather than reading
+  // day rolled up before the survey columns existed, whose counts read 0
+  // until it is computed again, or a day no run computed whole, behind a
+  // later one that was. The figures below are short by this much, and the page says so rather than reading
   // them as none. It does not say to recompute: over a day older than three,
   // that is not safe yet (`docs/PROJECT-STATE.md` §6.98).
   const missing = uncounted(liveDays, series);
   // Answers on days rolled up before the distribution was kept: in the
   // average, and in nothing beside it.
   const unsplit = unsplitAnswers(series);
+  // The rollup's own lag, said when it is more than tonight's run explains:
+  // ending on the newest day computed whole, the page would otherwise show a
+  // stalled rollup only as an older date in its header. With no day of the
+  // window computed, every figure would read as none, so none is shown.
+  const behind = daysUncounted(window, through);
+  const noFigures = through < range.from;
 
   const labels = ratingLabels('en');
   const shares = ratingShares(summary);
@@ -152,7 +163,7 @@ export default async function CsatReportPage({
     <div className="app-scroll h-full overflow-y-auto p-4 sm:p-6">
       <PageHeader
         title="Customer satisfaction"
-        description={`${range.from} to ${range.to}, in ${zone}. Rolled up nightly: the figures run to ${through >= range.from ? through : 'no day in this window yet'}; the comments, read live, to now.`}
+        description={`${range.from} to ${range.to}, in ${zone}. Rolled up nightly: the figures run to ${noFigures ? 'no day in this window' : through}; the comments, read live, to now.`}
         actions={
           <div className="flex flex-wrap items-center gap-3">
             <RangeNav
@@ -177,6 +188,14 @@ export default async function CsatReportPage({
       />
 
       <div className="mb-6 max-w-2xl space-y-2">
+        {behind > 1 ? (
+          <Notice tone="warning" icon>
+            <b>The nightly rollup has computed no day after {through}.</b>{' '}
+            {noFigures
+              ? 'No day of this window is in the figures, so none are shown; the comments below are read live.'
+              : `The ${behind} days since are in no figure below, and the comments run past them.`}
+          </Notice>
+        ) : null}
         {startsLate ? (
           <Notice tone="info" icon>
             This window opens on {range.from}, but the rolled-up history{' '}
@@ -197,8 +216,9 @@ export default async function CsatReportPage({
               missing.sent + missing.skipped,
               missing.days.map((day) => day.day),
             )}{' '}
-            the nightly rollup has no survey counts for — rolled up before it kept them, or a night
-            it did not run — so the figures below, and every rate divided by them, leave them out.
+            whose rolled-up figures do not count them — rolled up before survey counts were kept, or
+            missed by the nightly run — so the figures below, and every rate divided by them, leave
+            them out.
           </Notice>
         ) : null}
         {unsplit.answers > 0 ? (
@@ -227,135 +247,143 @@ export default async function CsatReportPage({
         />
       ) : (
         <>
-          <section className="mb-8 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-            <Stat
-              label="Average"
-              explain="Mean rating out of 5 across the surveys answered in this window, on the day they were answered. A rating belongs to whoever handled the ticket when the survey went out."
-              value={average === null ? '—' : average.toFixed(1)}
-              hint={`${count(summary.csatResponseCount, 'answer')}`}
-            />
-            <Stat
-              label="Rated 4 or 5"
-              explain="The share of this window's answers that were a 4 or a 5, beside the share that were a 1 or a 2. A 3 is neither."
-              value={percent(shares.positive)}
-              hint={`${percent(shares.negative)} rated 1 or 2`}
-            />
-            <Stat
-              label="Response rate"
-              explain="Answers in this window over surveys sent in it. A rate, not a cohort: a survey answered weeks after it went out counts in the week it was answered, so a short window can read above 100%. Answers on a day rolled up before survey counts were kept are left out, since that day's sends were not counted either."
-              value={percent(responseRate(summary))}
-              hint={`${answered.toLocaleString('en-GB')} answered of ${summary.csatSentCount.toLocaleString('en-GB')} sent`}
-            />
-            <Stat
-              label="Surveys sent"
-              explain="Surveys that went out in this window, including those since replaced by a newer survey on the same ticket. The decisions not to send one are counted under “Why not surveyed”."
-              value={summary.csatSentCount.toLocaleString('en-GB')}
-              hint={`${summary.csatSkippedCount.toLocaleString('en-GB')} decided against`}
-            />
-            <Stat
-              label="Resolutions surveyed"
-              explain="Surveys sent in this window over tickets resolved in it. A survey follows its resolve by the delay, so the window's edges do not hold exactly the same tickets; and a ticket on a channel nobody surveys, or resolved with surveys switched off, counts as resolved and in nothing else. A ticket resolved in a day's first hours and closed by the three-day rule can drop out of that day's resolved count, so this can read a little high."
-              value={percent(surveyedRate(summary))}
-              hint={`${summary.csatSentCount.toLocaleString('en-GB')} sent of ${summary.ticketsResolved.toLocaleString('en-GB')} resolved`}
-            />
-          </section>
-
-          <Section
-            title="How they rated"
-            hint="Every answer in the window, by the step chosen. An average hides a week of ones and fives; this does not."
-          >
-            {answered > 0 ? (
-              <Card className="max-w-2xl">
-                <RatingBars
-                  counts={ratingCounts(summary)}
-                  labels={labels}
-                  caption={`How the ${answered} answers in this window rated, from 5 down to 1`}
+          {noFigures ? null : (
+            <>
+              <section className="mb-8 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+                <Stat
+                  label="Average"
+                  explain="Mean rating out of 5 across the surveys answered in this window, on the day they were answered. A rating belongs to whoever handled the ticket when the survey went out."
+                  value={average === null ? '—' : average.toFixed(1)}
+                  hint={`${count(summary.csatResponseCount, 'answer')}`}
                 />
-              </Card>
-            ) : (
-              <Quiet>No answers in this window.</Quiet>
-            )}
-          </Section>
+                <Stat
+                  label="Rated 4 or 5"
+                  explain="The share of this window's answers that were a 4 or a 5, beside the share that were a 1 or a 2. A 3 is neither."
+                  value={percent(shares.positive)}
+                  hint={`${percent(shares.negative)} rated 1 or 2`}
+                />
+                <Stat
+                  label="Response rate"
+                  explain="Answers in this window over surveys sent in it. A rate, not a cohort: a survey answered weeks after it went out counts in the week it was answered, so a short window can read above 100%. Answers on a day rolled up before survey counts were kept are left out, since that day's sends were not counted either."
+                  value={percent(responseRate(summary))}
+                  hint={`${answered.toLocaleString('en-GB')} answered of ${summary.csatSentCount.toLocaleString('en-GB')} sent`}
+                />
+                <Stat
+                  label="Surveys sent"
+                  explain="Surveys that went out in this window, including those since replaced by a newer survey on the same ticket. The decisions not to send one are counted under “Why not surveyed”."
+                  value={summary.csatSentCount.toLocaleString('en-GB')}
+                  hint={`${summary.csatSkippedCount.toLocaleString('en-GB')} decided against`}
+                />
+                <Stat
+                  label="Resolutions surveyed"
+                  explain="Surveys sent in this window over tickets resolved in it. A survey follows its resolve by the delay, so the window's edges do not hold exactly the same tickets; and a ticket on a channel nobody surveys, or resolved with surveys switched off, counts as resolved and in nothing else. A ticket resolved in a day's first hours and closed by the three-day rule can drop out of that day's resolved count, so this can read a little high."
+                  value={percent(surveyedRate(summary))}
+                  hint={`${summary.csatSentCount.toLocaleString('en-GB')} sent of ${summary.ticketsResolved.toLocaleString('en-GB')} resolved`}
+                />
+              </section>
 
-          <Breakdown
-            title="By channel"
-            hint="The channel each survey was asked on."
-            rows={channelRows.filter(hasSurveysOrResolutions)}
-            mark={(row) => <ChannelBadge channel={row.label} />}
-            label={(row) => channelLabel(row.label)}
-          />
-          <Breakdown
-            title="By group"
-            hint="The group the ticket was in when its survey went out."
-            rows={groupRows.filter(hasSurveysOrResolutions)}
-          />
-          {namesAgents ? (
-            <Breakdown
-              title="By agent"
-              hint="The agent the ticket was assigned to when its survey went out. A resolution counts against whoever held the ticket when its day was rolled up, so a ticket reassigned in between counts its survey and its resolve against different people."
-              rows={agentRows.filter(hasSurveysOrResolutions)}
-            />
-          ) : null}
+              <Section
+                title="How they rated"
+                hint="Every answer in the window, by the step chosen. An average hides a week of ones and fives; this does not."
+              >
+                {answered > 0 ? (
+                  <Card className="max-w-2xl">
+                    <RatingBars
+                      counts={ratingCounts(summary)}
+                      labels={labels}
+                      caption={`How the ${answered} answers in this window rated, from 5 down to 1`}
+                    />
+                  </Card>
+                ) : (
+                  <Quiet>No answers in this window.</Quiet>
+                )}
+              </Section>
 
-          <Section title="By day" hint="Surveys sent and answered on each day of the window.">
-            {surveyedDays.length > 0 ? (
-              <>
-                <Card className="mb-3">
-                  <Columns
-                    caption={`Surveys sent and answered on each day from ${counted.from} to ${counted.to}`}
-                    labels={trend.map((point) => point.label)}
-                    series={[
-                      {
-                        label: 'Sent',
-                        values: trend.map((point) => point.sent),
-                        color: 'var(--color-series-1)',
-                      },
-                      {
-                        label: 'Answered',
-                        values: trend.map((point) => point.answered),
-                        color: 'var(--color-series-2)',
-                      },
-                    ]}
-                    tickEvery={trend.length <= 7 ? 1 : trend.length <= 30 ? 5 : 10}
-                  />
-                </Card>
-                <Table
-                  head={['Day', 'Sent', 'Answered', 'Response rate', 'Average', 'Rated 4 or 5']}
-                >
-                  {surveyedDays.map((day) => (
-                    <Row key={day.day}>
-                      <Cell>{day.day}</Cell>
-                      <Cell>{day.csatSentCount.toLocaleString('en-GB')}</Cell>
-                      <Cell>{day.csatResponseCount.toLocaleString('en-GB')}</Cell>
-                      <Cell>{percent(responseRate(day))}</Cell>
-                      <Cell>{rating(day)}</Cell>
-                      <Cell>{percent(ratingShares(day).positive)}</Cell>
-                    </Row>
-                  ))}
-                </Table>
-              </>
-            ) : (
-              <Quiet>No surveys were sent or answered on the window&rsquo;s rolled-up days.</Quiet>
-            )}
-          </Section>
+              <Breakdown
+                title="By channel"
+                hint="The channel each survey was asked on."
+                rows={channelRows.filter(hasSurveysOrResolutions)}
+                mark={(row) => <ChannelBadge channel={row.label} />}
+                label={(row) => channelLabel(row.label)}
+              />
+              <Breakdown
+                title="By group"
+                hint="The group the ticket was in when its survey went out. A resolution counts in the group the ticket was in when its day was rolled up, so a ticket moved in between counts its survey and its resolve in different groups."
+                rows={groupRows.filter(hasSurveysOrResolutions)}
+              />
+              {namesAgents ? (
+                <Breakdown
+                  title="By agent"
+                  hint="The agent the ticket was assigned to when its survey went out. A resolution counts against whoever held the ticket when its day was rolled up, so a ticket reassigned in between counts its survey and its resolve against different people."
+                  rows={agentRows.filter(hasSurveysOrResolutions)}
+                />
+              ) : null}
 
-          <Section
-            title="Why not surveyed"
-            hint="Each time a resolved ticket was decided against, by reason, over the days the figures above cover. One ticket can be decided against more than once — reopened and resolved again, or sent by hand — and surveyed after. A ticket resolved while surveys or its channel were switched off, or on a channel nobody surveys, is turned away before a decision is written, so it is in neither this table nor the sends."
-          >
-            {reasons.length > 0 ? (
-              <Table head={['Reason', 'Decisions']}>
-                {reasons.map((reason) => (
-                  <Row key={reason.reason}>
-                    <Cell className="first-letter:uppercase">{reason.label}</Cell>
-                    <Cell>{reason.count.toLocaleString('en-GB')}</Cell>
-                  </Row>
-                ))}
-              </Table>
-            ) : (
-              <Quiet>No resolved ticket in this window was decided against.</Quiet>
-            )}
-          </Section>
+              <Section title="By day" hint="Surveys sent and answered on each day of the window.">
+                {surveyedDays.length > 0 ? (
+                  <>
+                    <Card className="mb-3">
+                      <Columns
+                        caption={`Surveys sent and answered on each day from ${counted.from} to ${counted.to}`}
+                        labels={trend.map((point) => point.label)}
+                        series={[
+                          {
+                            label: 'Sent',
+                            values: trend.map((point) => point.sent),
+                            color: 'var(--color-series-1)',
+                          },
+                          {
+                            label: 'Answered',
+                            values: trend.map((point) => point.answered),
+                            color: 'var(--color-series-2)',
+                          },
+                        ]}
+                        tickEvery={trend.length <= 7 ? 1 : trend.length <= 30 ? 5 : 10}
+                      />
+                    </Card>
+                    <Table
+                      head={['Day', 'Sent', 'Answered', 'Response rate', 'Average', 'Rated 4 or 5']}
+                    >
+                      {surveyedDays.map((day) => (
+                        <Row key={day.day}>
+                          <Cell>{day.day}</Cell>
+                          <Cell>{day.csatSentCount.toLocaleString('en-GB')}</Cell>
+                          <Cell>{day.csatResponseCount.toLocaleString('en-GB')}</Cell>
+                          <Cell>{percent(responseRate(day))}</Cell>
+                          <Cell>{rating(day)}</Cell>
+                          <Cell>{percent(ratingShares(day).positive)}</Cell>
+                        </Row>
+                      ))}
+                    </Table>
+                  </>
+                ) : (
+                  <Quiet>
+                    No surveys were sent or answered on the window&rsquo;s rolled-up days.
+                  </Quiet>
+                )}
+              </Section>
+
+              <Section
+                title="Why not surveyed"
+                hint="Each time a resolved ticket was decided against, by reason, over the days the figures above cover. One ticket can be decided against more than once — reopened and resolved again, or sent by hand — and surveyed after. A ticket resolved while surveys or its channel were switched off, or on a channel nobody surveys, is turned away before a decision is written, so it is in neither this table nor the sends."
+              >
+                {reasons.length > 0 ? (
+                  <Table head={['Reason', 'Decisions']}>
+                    {reasons.map((reason) => (
+                      <Row key={reason.reason}>
+                        <Cell className="first-letter:uppercase">{reason.label}</Cell>
+                        <Cell>{reason.count.toLocaleString('en-GB')}</Cell>
+                      </Row>
+                    ))}
+                  </Table>
+                ) : (
+                  <Quiet>
+                    No resolved ticket was decided against on the days the figures cover.
+                  </Quiet>
+                )}
+              </Section>
+            </>
+          )}
 
           <Section
             title="Comments"

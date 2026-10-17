@@ -624,9 +624,10 @@ the columns existed. And it is **not safe over days older than three** until
 "Resolutions surveyed" denominator among them — without every ticket closed
 since. Instead the page counts the window's sends and decisions against live,
 day by day (`liveSurveys`), and where a day's row holds fewer it says how
-many are missing and on which days rather than reading them as none, and the
-CSV carries the same days as `not_rolled_up` rows; it also says when the
-first survey is younger than the window.
+many are missing and on which days rather than reading them as none. The
+CSV carries those days as `not_rolled_up` rows, and the days before the
+rolled-up history too, since it has no notice to say where that begins; the
+page also says when the first survey is younger than the window.
 
 The page is `app/(console)/reports/csat/`, its live reads
 `lib/reports/csat-queries.ts`, on the rollup's keys and its
@@ -635,21 +636,34 @@ the created, first-response and resolution reads carry; the survey read
 lacked it, so a
 ticket deleted or marked spam after its survey kept counting against
 resolutions that did not. The figures, the trend, "Why not surveyed" and the
-live counts all stop on one day, `countedThrough`: yesterday once tonight's
-run has happened, the day before until then, so none of them holds a day the
-others do not; the comments run to now. The run is seen in the three days
-it rewrites, every row of them written since the team's midnight; the
-rollup's
-newest row alone cannot say it, because an empty day writes no row — read
-as the last day rolled up, it named the last day anybody worked, and a quiet
-week read as a rollup that had stopped. The breakdowns keep a row with
+live counts all end on one day, `countedThrough`: the newest day the rollup
+has computed whole, which is yesterday once tonight's run has reached it,
+the day before until then, and further back after a night the run did not
+happen, so none of them holds a day after it that the others do not; the comments run to
+now. That is a fact the run now records: `rollup_days` holds each day
+`rollup_metrics` computed and when its reads began, written in the day's own
+transaction whether or not the day had work, and a day is whole once it was
+computed after it ended (`lastWholeDay`). `metrics_daily` alone cannot say
+it, because an empty day writes no row: its newest row named the last day
+anybody worked, so a quiet week read as a rollup that had stopped, and the
+`computed_at` of the three days' rows let a hand run over one of them pass
+for the whole run. Nor can `jobs`, which the cron never writes
+(`worker/run-job.ts`). Until a run of this version has written the table,
+the page falls back to the day before yesterday. The page does not check a day before the rolled-up history live, and
+says instead that the history begins later; the CSV lists that day's sends
+and decisions against as `not_rolled_up`. When the rollup has fallen
+further behind than tonight's run explains, the page says so, and shows no
+figures when it has computed no day of the window; the CSV's first row
+says where its figures end. The breakdowns keep a row with
 resolutions and no surveys, the one line that shows a channel switched
 off. Skips are counted as decisions, not tickets: one ticket
 can be decided against twice and surveyed after. The
 agent table, the agent beside each comment, and the CSV's agent rows are
 behind `report.agents`; the rest, `report.view`. Per agent, "resolutions
 surveyed" divides the agent a survey named by the agent who held the ticket
-when its resolve's day was rolled up, and the table says so. The distribution is `RatingBars`, five
+when its resolve's day was rolled up, and per group the same way, and both
+tables say so. A comment is listed only with a rating on the 1–5 scale, the
+rollup's definition of one, and its agent is read only for `report.agents`. The distribution is `RatingBars`, five
 bars on a diverging red–grey–blue scale (`--color-rating-1`…`5`, checked with
 the dataviz validator), each carrying its count and share, since the grey
 midpoint is under 3:1 on white. The three tiles' hint is `responsesHint`:

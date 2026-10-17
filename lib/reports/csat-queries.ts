@@ -1,11 +1,10 @@
-import { and, desc, eq, isNotNull, sql, type Column, type SQL } from 'drizzle-orm';
+import { and, between, desc, eq, isNotNull, sql, type Column } from 'drizzle-orm';
 import { DateTime } from 'luxon';
 import { db } from '@/db/client';
 import { agents, conversations, csatSurveys } from '@/db/schema';
 import { describeSkip } from '@/lib/csat/skip-reasons';
-import type { Range } from './category-queries';
 import type { Totals } from './queries';
-import { surveyedConversation } from './rollup';
+import { surveyedConversation, within, type ReportWindow } from './rollup';
 
 /**
  * The satisfaction report's live reads: what the rollup cannot hold.
@@ -22,18 +21,6 @@ import { surveyedConversation } from './rollup';
  * and keys a survey on the timestamp the rollup does for the same fact, so the
  * live sections and the figures above them describe one set of surveys.
  */
-
-export type ReportWindow = Range & { zone: string };
-
-/**
- * A timestamptz falls on one of the window's days, in the team's zone — the
- * `rangeIn()` rule, never the database's `current_date`, which is UTC's
- * (`docs/PROJECT-STATE.md` §6.52).
- */
-function within(column: Column, window: ReportWindow): SQL {
-  return sql`${column} >= (${window.from}::date)::timestamp at time zone ${window.zone}
-    and ${column} < ((${window.to}::date + 1))::timestamp at time zone ${window.zone}`;
-}
 
 export type SkipCount = { reason: string; label: string; count: number };
 
@@ -73,7 +60,10 @@ export type SurveyComment = {
   rating: number;
   comment: string;
   channel: string;
-  /** Who the survey was about, or null when nobody was assigned. */
+  /**
+   * Who the survey was about, or null when nobody was assigned — and always
+   * null for a viewer without `report.agents`, for whom it is never read.
+   */
   agent: string | null;
   /** The ticket's number, for the link to it. */
   number: number;
@@ -86,12 +76,20 @@ export const COMMENT_LIMIT = 50;
  * The newest answers in the window that came with words, rating and all.
  *
  * Keyed on `responded_at`, the timestamp the rollup files an answer under, so a
- * comment is listed in the window whose figures its rating is part of. A
- * comment added later to an answer already made (`recordAnswer`) carries the
- * answer's instant, which is the one it belongs with.
+ * comment is listed on the day its rating is counted — once that day is
+ * rolled up; the list runs to now, past the figures. A comment added later to
+ * an answer already made (`recordAnswer`) carries the answer's instant, which
+ * is the one it belongs with.
+ *
+ * The agent is joined only for a viewer who may see who handled a ticket
+ * (`report.agents`): without it the name is never read, so no later change
+ * to the page can draw it.
  */
-export async function latestComments(window: ReportWindow): Promise<SurveyComment[]> {
-  const rows = await db
+export async function latestComments(
+  window: ReportWindow,
+  namesAgents: boolean,
+): Promise<SurveyComment[]> {
+  const query = db
     .select({
       id: csatSurveys.id,
       respondedAt: csatSurveys.respondedAt,
@@ -99,15 +97,23 @@ export async function latestComments(window: ReportWindow): Promise<SurveyCommen
       comment: csatSurveys.comment,
       // The survey's own channel, as the rollup counts it (`computeDay`).
       channel: sql<string>`coalesce(${csatSurveys.channel}, ${conversations.channel})`,
-      agent: sql<string | null>`coalesce(${agents.name}, ${agents.email})`,
+      agent: namesAgents
+        ? sql<string | null>`coalesce(${agents.name}, ${agents.email})`
+        : sql<string | null>`null`,
       number: conversations.number,
     })
     .from(csatSurveys)
     .innerJoin(conversations, eq(conversations.id, csatSurveys.conversationId))
-    .leftJoin(agents, eq(agents.id, csatSurveys.agentId))
+    .$dynamic();
+
+  const rows = await (
+    namesAgents ? query.leftJoin(agents, eq(agents.id, csatSurveys.agentId)) : query
+  )
     .where(
       and(
-        isNotNull(csatSurveys.rating),
+        // A rating as the rollup defines one, 1 to 5: the list shows each
+        // beside its comment, and the scale has no step for one off it.
+        between(csatSurveys.rating, 1, 5),
         isNotNull(csatSurveys.respondedAt),
         // `recordAnswer`, the one door, trims a comment and stores a blank one
         // as null — so null is the whole test, and no `btrim` here to disagree
@@ -130,36 +136,40 @@ export async function latestComments(window: ReportWindow): Promise<SurveyCommen
 
 /**
  * The last day the page can count on the rollup having computed, and so the
- * end of every figure on it and of every live read checked against them.
+ * end of every figure on it and of every live read checked against them: the
+ * newest day it has computed whole (`lastWholeDay`).
  *
- * Yesterday once tonight's run has happened, the day before until then — the
- * cron is 00:00 UTC, two or three hours into the team's day, so the day
- * before yesterday has always had its run by the time anybody reads this.
- * Tonight's run is seen in the three days it rewrites: when every row among
- * them was written since the team's midnight (`rolledUpDays().recomputedAt`
- * is the oldest), the run happened, whether or not yesterday had anything
- * in it. The newest row was the first answer, and it is not one: an empty
- * day writes no row, so it named the last day anybody worked, and a quiet
- * week read as a rollup that had stopped. Nor is the newest write: a hand
- * run over one of the three days after midnight would pass for the whole
- * run. With three quiet days behind it there is nothing to see, and the page
- * stops a day early — a day with nothing in it — where stopping on a
- * yesterday the rollup has not reached would draw it as zeros and report
- * its sends as missing.
+ * That is yesterday once tonight's run has reached it — the cron is 00:00
+ * UTC, two or three hours into the team's day — the day before until then,
+ * and further back after a night the run did not happen, rather than a day
+ * it has not computed drawn as zeros. `rollup_days` holds a day the rollup
+ * computed whether or not it had anything in it, so a quiet yesterday counts
+ * once the run has reached it, and a hand run over another day cannot pass
+ * for it. A day computed by hand while it was still going is not whole, nor
+ * is one whose reads began before its midnight and committed after it.
  *
- * A row for today, which only `rollup_metrics day=<today>` by hand can write,
- * is outside the three days and counts for nothing; a partial row for
- * yesterday written yesterday that way is older than the midnight it is
- * measured against.
+ * Until a run of this version has written the table there is no such day,
+ * and the page falls back to the day before yesterday, which the nightly run
+ * reaches on the night after it ends: a day short, until the next run.
  */
-export function countedThrough(
-  window: ReportWindow,
-  rolledUp: { recomputedAt: Date | null },
-): string {
-  const today = DateTime.fromISO(window.to, { zone: window.zone });
-  const ranTonight =
-    rolledUp.recomputedAt !== null && rolledUp.recomputedAt >= today.startOf('day').toJSDate();
-  return today.minus({ days: ranTonight ? 1 : 2 }).toISODate()!;
+export function countedThrough(window: ReportWindow, lastWhole: string | null): string {
+  return (
+    lastWhole ?? DateTime.fromISO(window.to, { zone: window.zone }).minus({ days: 2 }).toISODate()!
+  );
+}
+
+/**
+ * The days between the last one the figures count and today, neither
+ * included: 0 once tonight's run has reached yesterday, 1 before it, and
+ * more only when the rollup has fallen behind — the page says so then, since
+ * the end it prints is otherwise the only sign.
+ */
+export function daysUncounted(window: ReportWindow, through: string): number {
+  const today = DateTime.fromISO(window.to, { zone: 'utc' });
+  return Math.max(
+    0,
+    Math.round(today.diff(DateTime.fromISO(through, { zone: 'utc' }), 'days').days) - 1,
+  );
 }
 
 export type LiveDay = { day: string; sent: number; skipped: number };
@@ -168,51 +178,49 @@ export type LiveDay = { day: string; sent: number; skipped: number };
  * The surveys sent and the decisions against on each day of a window, counted
  * from `csat_surveys` — what the page checks the rollup against.
  *
- * The rollup can be short of the surveys for two reasons that look the same
- * from its side: a night the job did not run, and a day rolled up before
- * survey counts were kept, whose columns read 0 until it is computed again.
+ * The rollup can be short of the surveys for reasons that look the same from
+ * its side: a day rolled up before survey counts were kept, whose columns
+ * read 0 until it is computed again, and a day no run computed whole,
+ * behind a later one that was. One drift it cannot tell from those: after
+ * the team's time zone changes, a day rolled up in the old zone holds a
+ * send the new zone files on the day beside it, which reads as missing
+ * there though the totals hold it.
  * Counting the same surveys live, on the same days and the same timestamps,
  * is the one way the page can tell "none were sent" from "none were counted"
  * and say which. Per day, not one total for the window: a day where the
  * rollup still counts a survey since purged (`lib/admin/purge-summary.ts`)
  * would otherwise cancel a day it is missing one.
  *
- * Two reads, each served by an index on its timestamp, grouped by position:
- * the zone is a parameter, and Postgres cannot see that the select's and a
- * `group by`'s are the same one.
+ * One statement, two reads joined by `union all`, each served by the index on
+ * its own timestamp — a send is a fact of its `sent_at`, a decision against
+ * of its `created_at`, so the two cannot be one scan keyed on either — and
+ * grouped outside them, where the zone is no longer a parameter.
  */
 export async function liveSurveys(window: ReportWindow): Promise<LiveDay[]> {
   const dayOf = dayIn(window.zone);
 
-  const sent = await db
-    .select({ day: dayOf(csatSurveys.sentAt), count: sql<number>`count(*)::int` })
-    .from(csatSurveys)
-    .innerJoin(conversations, eq(conversations.id, csatSurveys.conversationId))
-    .where(and(within(csatSurveys.sentAt, window), surveyedConversation()))
-    .groupBy(sql`1`);
+  const rows = await db.execute<LiveDay>(sql`
+    select day,
+           count(*) filter (where fact = 'sent')::int as sent,
+           count(*) filter (where fact = 'skipped')::int as skipped
+    from (
+      select ${dayOf(csatSurveys.sentAt)} as day, 'sent' as fact
+      from ${csatSurveys}
+      join ${conversations} on ${conversations.id} = ${csatSurveys.conversationId}
+      where ${within(csatSurveys.sentAt, window)} and ${surveyedConversation()}
+      union all
+      select ${dayOf(csatSurveys.createdAt)}, 'skipped'
+      from ${csatSurveys}
+      join ${conversations} on ${conversations.id} = ${csatSurveys.conversationId}
+      where ${eq(csatSurveys.status, 'skipped')}
+        and ${within(csatSurveys.createdAt, window)}
+        and ${surveyedConversation()}
+    ) facts
+    group by day
+    order by day
+  `);
 
-  const skipped = await db
-    .select({ day: dayOf(csatSurveys.createdAt), count: sql<number>`count(*)::int` })
-    .from(csatSurveys)
-    .innerJoin(conversations, eq(conversations.id, csatSurveys.conversationId))
-    .where(
-      and(
-        eq(csatSurveys.status, 'skipped'),
-        within(csatSurveys.createdAt, window),
-        surveyedConversation(),
-      ),
-    )
-    .groupBy(sql`1`);
-
-  const days = new Map<string, LiveDay>();
-  for (const row of sent) days.set(row.day, { day: row.day, sent: row.count, skipped: 0 });
-  for (const row of skipped) {
-    const day = days.get(row.day);
-    if (day) day.skipped = row.count;
-    else days.set(row.day, { day: row.day, sent: 0, skipped: row.count });
-  }
-
-  return [...days.values()].sort((a, b) => a.day.localeCompare(b.day));
+  return rows.map((row) => ({ day: row.day, sent: row.sent, skipped: row.skipped }));
 }
 
 /**

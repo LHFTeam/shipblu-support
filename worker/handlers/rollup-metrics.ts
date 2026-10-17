@@ -5,6 +5,7 @@ import {
   agentMetricsDaily,
   categoryMetricsDaily,
   metricsDaily,
+  rollupDays,
   rootCauseMetricsDaily,
 } from '@/db/schema';
 import type { ClaimedJob } from '@/lib/queue';
@@ -161,6 +162,10 @@ export async function rollupMetrics(job?: ClaimedJob): Promise<void> {
   let inconsistent = 0;
 
   for (const day of plan.days) {
+    // When the day's reads began, which is what `rollup_days` records: a run
+    // stamped when it committed could read before the day ended and still
+    // pass for one that read it whole.
+    const startedAt = new Date();
     const slices = await computeDay(day, context);
     const rows = asRows(day, slices);
     const agentRows = withActivity(await computeAgentDay(day, context));
@@ -179,6 +184,21 @@ export async function rollupMetrics(job?: ClaimedJob): Promise<void> {
     // append-only and owned elsewhere, which is exactly why the backlog is
     // sampled hourly by its own job rather than counted here.
     await db.transaction(async (tx) => {
+      // That the day was computed, in the same transaction as its rows, so a
+      // report never reads the day as done before they are there. Written
+      // for an empty day too, which is the point: its rows below are none,
+      // and "nothing happened" and "not computed yet" read the same from
+      // them. First, because its row lock is what puts two rebuilds of one
+      // day in order: a second waits here until the first commits, and its
+      // deletes then see the first's rows. Without it, both deletes miss the
+      // other's inserts — nothing unique stops a slice that is mostly NULLs —
+      // and the day keeps both runs' rows. The last to commit leaves its own
+      // instant beside its own rows.
+      await tx
+        .insert(rollupDays)
+        .values({ day, computedAt: startedAt })
+        .onConflictDoUpdate({ target: rollupDays.day, set: { computedAt: startedAt } });
+
       await tx.delete(metricsDaily).where(eq(metricsDaily.day, day));
       if (rows.length) await tx.insert(metricsDaily).values(rows);
 

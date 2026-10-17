@@ -1,5 +1,18 @@
 import { DateTime } from 'luxon';
-import { and, eq, gte, isNull, lt, ne, notInArray, or, sql, type Column } from 'drizzle-orm';
+import {
+  and,
+  eq,
+  gte,
+  isNull,
+  lt,
+  ne,
+  notInArray,
+  or,
+  sql,
+  type Column,
+  type SQL,
+  type SQLWrapper,
+} from 'drizzle-orm';
 import { db } from '@/db/client';
 import { conversationEvents, conversations, csatSurveys, metricsDaily } from '@/db/schema';
 import { businessMinutesBetween, type HoursConfig } from '@/lib/hours';
@@ -92,6 +105,21 @@ export function rangeIn(zone: string, days: number): { from: string; to: string 
     from: today.minus({ days: days - 1 }).toISODate()!,
     to: today.toISODate()!,
   };
+}
+
+/** A `rangeIn()` window, with the zone its two dates are days in. */
+export type ReportWindow = { from: string; to: string; zone: string };
+
+/**
+ * A timestamptz falls on one of the window's days, in the team's zone: the
+ * `rangeIn()` rule for a live read, never the database's `current_date`,
+ * which is UTC's (`docs/PROJECT-STATE.md` §6.52). Each edge is a date's
+ * midnight in the zone, so a DST change moves it with the clock, and the
+ * end is the midnight after `to`, exclusive.
+ */
+export function within(column: SQLWrapper, window: ReportWindow): SQL {
+  return sql`${column} >= (${window.from}::date)::timestamp at time zone ${window.zone}
+    and ${column} < ((${window.to}::date + 1))::timestamp at time zone ${window.zone}`;
 }
 
 /**

@@ -1,9 +1,10 @@
 import { DateTime } from 'luxon';
-import { and, between, eq, isNotNull, isNull, lte, sql } from 'drizzle-orm';
+import { and, between, eq, isNotNull, isNull, lt, lte, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
-import { agents, groups, metricsDaily } from '@/db/schema';
+import { share } from '@/lib/charts/scale';
+import { agents, groups, metricsDaily, rollupDays } from '@/db/schema';
 import type { Range } from './category-queries';
-import { RATING_COLUMNS } from './rollup';
+import { RATING_COLUMNS, type ReportWindow } from './rollup';
 
 /**
  * Read models for the reports page.
@@ -167,30 +168,12 @@ export async function daily(range: Range): Promise<(Totals & { day: string })[]>
  * holiday or a quiet Friday, and the page would say the history begins there
  * when a wider range reaches further back. `days` stays the count inside the
  * window. Read from the totals slice, the one every figure on the page sums.
- *
- * `last` is the newest day with a row: the newest day anybody worked that
- * the rollup has reached, which is not the newest day it has reached, since
- * an empty day leaves no row. `recomputedAt` is the oldest write among the
- * rows of the three days before `to` — the days the nightly run rewrites —
- * which sees a run over a quiet yesterday that `last` cannot, and which a
- * hand run over one of the three, or a partial row written yesterday, cannot
- * pass for a whole run. `countedThrough` (`csat-queries.ts`) reads it.
  */
-export async function rolledUpDays(range: Range): Promise<{
-  first: string | null;
-  last: string | null;
-  days: number;
-  recomputedAt: Date | null;
-}> {
+export async function rolledUpDays(range: Range): Promise<{ first: string | null; days: number }> {
   const [row] = await db
     .select({
       first: sql<string | null>`min(${metricsDaily.day})::text`,
-      last: sql<string | null>`max(${metricsDaily.day})::text`,
       days: sql<number>`(count(distinct ${metricsDaily.day}) filter (where ${metricsDaily.day} >= ${range.from}::date))::int`,
-      recomputedAt:
-        sql<Date | null>`min(${metricsDaily.computedAt}) filter (where ${metricsDaily.day} between ${range.to}::date - 3 and ${range.to}::date - 1)`.mapWith(
-          metricsDaily.computedAt,
-        ),
     })
     .from(metricsDaily)
     .where(
@@ -202,12 +185,28 @@ export async function rolledUpDays(range: Range): Promise<{
       ),
     );
 
-  return {
-    first: row?.first ?? null,
-    last: row?.last ?? null,
-    days: row?.days ?? 0,
-    recomputedAt: row?.recomputedAt ?? null,
-  };
+  return { first: row?.first ?? null, days: row?.days ?? 0 };
+}
+
+/**
+ * The newest day before `to` the rollup has computed whole: the newest in
+ * `rollup_days` whose computation began after the day ended, in the team's
+ * zone. Yesterday once tonight's run has reached it, whether or not anything
+ * happened on it; the day before until then; further back after a night the
+ * run did not happen. Null while no run since the table existed has computed
+ * a day whole. `countedThrough` (`csat-queries.ts`) reads it.
+ */
+export async function lastWholeDay(window: ReportWindow): Promise<string | null> {
+  const [row] = await db
+    .select({ day: sql<string | null>`max(${rollupDays.day})::text` })
+    .from(rollupDays)
+    .where(
+      and(
+        lt(rollupDays.day, sql`${window.to}::date`),
+        sql`${rollupDays.computedAt} >= (${rollupDays.day} + 1)::timestamp at time zone ${window.zone}`,
+      ),
+    );
+  return row?.day ?? null;
 }
 
 /**
@@ -257,11 +256,6 @@ export function metPercentage(met: number, breached: number): number | null {
 
 export function averageRating(sum: number, count: number): number | null {
   return count > 0 ? Math.round((sum / count) * 10) / 10 : null;
-}
-
-/** A whole percentage of `of`, or null when there is nothing to divide by. */
-function share(part: number, of: number): number | null {
-  return of > 0 ? Math.round((part / of) * 100) : null;
 }
 
 type RatingColumns = Pick<Totals, (typeof RATING_COLUMNS)[number]>;
@@ -352,9 +346,8 @@ export function ratingShares(row: RatingColumns): {
   positive: number | null;
   negative: number | null;
 } {
-  const counts = ratingCounts(row);
-  const [one, two, , four, five] = counts;
-  const counted = counts.reduce((sum, count) => sum + count, 0);
+  const [one, two, , four, five] = ratingCounts(row);
+  const counted = ratedCount(row);
   return { positive: share(four + five, counted), negative: share(one + two, counted) };
 }
 

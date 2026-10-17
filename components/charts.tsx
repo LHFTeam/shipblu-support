@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { InfoTip } from './tooltip';
-import { bands, barWidths, compact, linePath, niceCeiling, split } from '@/lib/charts/scale';
+import { bands, barWidths, compact, linePath, niceCeiling, share, split } from '@/lib/charts/scale';
 
 /**
  * The two chart shapes the dashboard needs.
@@ -296,7 +296,7 @@ export function RatingBars({
           const count = counts[step]!;
           // A step somebody chose never reads as 0%, beside a bar drawn to
           // say it is there, and a step short of every answer never as 100%.
-          const rounded = total > 0 ? Math.round((count / total) * 100) : 0;
+          const rounded = share(count, total) ?? 0;
           const percent =
             count > 0 && rounded === 0 ? '<1' : count < total && rounded === 100 ? '>99' : rounded;
           return (

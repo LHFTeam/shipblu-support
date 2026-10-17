@@ -11,15 +11,14 @@ import {
   ratingCounts,
   ratingShares,
   responseRate,
-  rolledUpDays,
   surveyedRate,
+  lastWholeDay,
   type Totals,
 } from '@/lib/reports/queries';
 import { rangeIn, reportingContext } from '@/lib/reports/rollup';
+import { daysFrom } from '../ranges';
 
 export const dynamic = 'force-dynamic';
-
-const RANGES = [7, 30, 90];
 
 /**
  * The satisfaction report as a spreadsheet: one row per channel, group, agent
@@ -34,7 +33,11 @@ const RANGES = [7, 30, 90];
  * (`countedThrough`), and with the page's warning in its own rows: a
  * `not_rolled_up` row for each day holding sends or decisions against that
  * the figures do not, so a file opened without the page cannot read a 0
- * there as none sent.
+ * there as none sent. Every day of the window is checked, those before the
+ * rolled-up history included, which the page leaves to its own notice: the
+ * file has no notice, and those rows are how it says so. For the same reason
+ * its first row says where the figures end (`rolled_up_through`), which a
+ * stalled rollup can put before the window opens.
  *
  * Re-checks the permission itself, as the agents export does: a route handler
  * is reachable by URL. The agent rows only for `report.agents`, as on the
@@ -44,14 +47,13 @@ export async function GET(request: Request) {
   const agent = await requireAgent();
   if (!can(agent, 'report.view')) return new Response('not found', { status: 404 });
 
-  const requested = Number(new URL(request.url).searchParams.get('days'));
-  const days = RANGES.includes(requested) ? requested : 30;
+  const days = daysFrom(new URL(request.url).searchParams.get('days'));
 
   const { zone } = await reportingContext();
   const range = rangeIn(zone, days);
   const counted = {
     from: range.from,
-    to: countedThrough({ ...range, zone }, await rolledUpDays(range)),
+    to: countedThrough({ ...range, zone }, await lastWholeDay({ ...range, zone })),
   };
 
   // One at a time: an export is not waited on the way a page is, and four
@@ -63,6 +65,7 @@ export async function GET(request: Request) {
   const missing = uncounted(await liveSurveys({ ...counted, zone }), series);
 
   const rows: unknown[][] = [
+    ['rolled_up_through', counted.to, ...HEADER.slice(2).map(() => '')],
     ...channels.map((row) => figures('channel', row.label, row)),
     ...groups.map((row) => figures('group', row.label, row)),
     ...agents.map((row) => figures('agent', row.label, row)),
@@ -71,7 +74,10 @@ export async function GET(request: Request) {
   ];
 
   return new Response(csvFile(HEADER, rows), {
-    headers: csvHeaders(`customer-satisfaction-${counted.from}-to-${counted.to}.csv`),
+    // Named for the days it covers, or for the window when it covers none.
+    headers: csvHeaders(
+      `customer-satisfaction-${counted.from}-to-${counted.to < counted.from ? range.to : counted.to}.csv`,
+    ),
   });
 }
 

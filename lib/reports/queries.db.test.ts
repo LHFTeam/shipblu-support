@@ -1,8 +1,10 @@
+import { eq } from 'drizzle-orm';
+import { DateTime } from 'luxon';
 import { describe, expect, it } from 'vitest';
 import { db } from '@/db/client';
-import { metricsDaily } from '@/db/schema';
+import { metricsDaily, rollupDays } from '@/db/schema';
 import { withCleanDatabase } from '@/lib/testing/db';
-import { byChannel, daily, rolledUpDays, totals } from './queries';
+import { byChannel, daily, lastWholeDay, rolledUpDays, totals } from './queries';
 
 /**
  * The reports overview's window. The queries used to turn a day count into a
@@ -12,6 +14,8 @@ import { byChannel, daily, rolledUpDays, totals } from './queries';
  */
 
 withCleanDatabase();
+
+const ZONE = 'Africa/Cairo';
 
 async function day(value: string, ticketsCreated: number) {
   await db.insert(metricsDaily).values({ day: value, ticketsCreated });
@@ -41,25 +45,16 @@ describe('the reports window', () => {
 
     expect(await rolledUpDays({ from: '2026-09-01', to: '2026-09-30' })).toEqual({
       first: '2026-09-24',
-      last: '2026-09-25',
       days: 2,
-      recomputedAt: null,
     });
     expect(await rolledUpDays({ from: '2026-10-01', to: '2026-10-07' })).toEqual({
       first: '2026-09-24',
-      last: '2026-09-25',
       days: 0,
-      recomputedAt: null,
     });
     expect(await rolledUpDays({ from: '2026-09-01', to: '2026-09-20' })).toEqual({
       first: null,
-      last: null,
       days: 0,
-      recomputedAt: null,
     });
-    // The newest day rolled up so far, never one after the window: what a
-    // live read checked against the figures stops at.
-    expect((await rolledUpDays({ from: '2026-09-20', to: '2026-09-24' })).last).toBe('2026-09-24');
   });
 
   // A day nobody worked has no row. A window opening on one must not report
@@ -74,35 +69,41 @@ describe('the reports window', () => {
     const range = { from: '2026-08-20', to: '2026-08-25' };
     const rolledUp = await rolledUpDays(range);
 
-    expect(rolledUp).toEqual({
-      first: '2026-08-18',
-      last: '2026-08-23',
-      days: 2,
-      recomputedAt: expect.any(Date),
-    });
+    expect(rolledUp).toEqual({ first: '2026-08-18', days: 2 });
     expect(rolledUp.first! > range.from).toBe(false);
   });
 
-  it('says when every row of the three days the nightly run rewrites was written', async () => {
-    const written = (on: string, iso: string) =>
-      db.insert(metricsDaily).values({ day: on, ticketsCreated: 1, computedAt: new Date(iso) });
-    const window = { from: '2026-09-18', to: '2026-10-17' };
+  it('names the newest day computed after it ended, in the team’s zone, before the window’s end', async () => {
+    const at = (local: string) => DateTime.fromISO(local, { zone: ZONE }).toJSDate();
+    const computed = (day: string, local: string) =>
+      db.insert(rollupDays).values({ day, computedAt: at(local) });
+    const window = { from: '2026-09-18', to: '2026-10-17', zone: ZONE };
+    expect(await lastWholeDay(window)).toBeNull();
 
-    // Tonight's run, at 00:00 UTC on the 17th, rewrote the 14th and 15th;
-    // nobody worked on the 16th. The 13th is before the three days, and a
-    // partial row for today, written by hand, is after them.
-    await written('2026-10-13', '2026-10-15T00:00:05Z');
-    await written('2026-10-14', '2026-10-17T00:00:05Z');
-    await written('2026-10-15', '2026-10-17T00:00:06Z');
-    await written('2026-10-17', '2026-10-17T09:00:00Z');
-    expect((await rolledUpDays(window)).recomputedAt).toEqual(new Date('2026-10-17T00:00:05Z'));
+    // Last night's run reached the 15th; a hand run of the 16th at 18:00
+    // that day read a day still going, and a hand run of today is today's.
+    await computed('2026-10-14', '2026-10-15T02:00');
+    await computed('2026-10-15', '2026-10-16T02:00');
+    await computed('2026-10-16', '2026-10-16T18:00');
+    await computed('2026-10-17', '2026-10-17T09:00');
+    expect(await lastWholeDay(window)).toBe('2026-10-15');
 
-    // Before tonight's run, one of the three rewritten by hand after the
-    // team's midnight is not the run: the oldest is still last night's.
-    await db.delete(metricsDaily);
-    await written('2026-10-14', '2026-10-16T00:00:05Z');
-    await written('2026-10-15', '2026-10-16T22:00:00Z');
-    expect((await rolledUpDays(window)).recomputedAt).toEqual(new Date('2026-10-16T00:00:05Z'));
+    // Tonight's run began at 00:30 in Cairo: still the 16th in UTC, and after
+    // the team's midnight, so the 16th was over.
+    await db.delete(rollupDays).where(eq(rollupDays.day, '2026-10-16'));
+    await computed('2026-10-16', '2026-10-17T00:30');
+    expect(await lastWholeDay(window)).toBe('2026-10-16');
+
+    // Begun at 23:30 on the 16th, it is not.
+    await db.delete(rollupDays).where(eq(rollupDays.day, '2026-10-16'));
+    await computed('2026-10-16', '2026-10-16T23:30');
+    expect(await lastWholeDay(window)).toBe('2026-10-15');
+
+    // A night the run did not happen leaves no record, and the newest whole
+    // day is further back.
+    await db.delete(rollupDays).where(eq(rollupDays.day, '2026-10-15'));
+    await db.delete(rollupDays).where(eq(rollupDays.day, '2026-10-16'));
+    expect(await lastWholeDay(window)).toBe('2026-10-14');
   });
 });
 

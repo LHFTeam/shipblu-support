@@ -4,13 +4,8 @@ import { describe, expect, it } from 'vitest';
 import { db } from '@/db/client';
 import { agents, contacts, conversations, csatSurveys, ticketStatuses } from '@/db/schema';
 import { withCleanDatabase } from '@/lib/testing/db';
-import {
-  firstSend,
-  latestComments,
-  liveSurveys,
-  skipReasons,
-  type ReportWindow,
-} from './csat-queries';
+import { firstSend, latestComments, liveSurveys, skipReasons } from './csat-queries';
+import type { ReportWindow } from './rollup';
 
 /**
  * The satisfaction report's live reads, against real Postgres: each keys a
@@ -113,8 +108,15 @@ describe('latestComments', () => {
       { status: 'answered', rating: 1, comment: 'bot', respondedAt: at('2026-10-12T10:00') },
       'whatsapp_bot',
     );
+    // A rating off the scale, which no figure on the page counts.
+    await survey({
+      status: 'answered',
+      rating: 7,
+      comment: 'Off the scale',
+      respondedAt: at('2026-10-12T11:00'),
+    });
 
-    const comments = await latestComments(WINDOW);
+    const comments = await latestComments(WINDOW, true);
     expect(
       comments.map(({ number, rating, comment, channel, agent }) => ({
         number,
@@ -136,6 +138,23 @@ describe('latestComments', () => {
     expect(comments[0]!.respondedAt).toEqual(at('2026-10-13T21:00'));
   });
 
+  it('names nobody for a viewer who may not see who handled a ticket', async () => {
+    const [mona] = await db
+      .insert(agents)
+      .values({ name: 'Mona', email: 'mona@shipblu.test', role: 'agent' })
+      .returning({ id: agents.id });
+    await survey({
+      status: 'answered',
+      agentId: mona!.id,
+      rating: 2,
+      comment: 'The courier never called.',
+      respondedAt: at('2026-10-12T09:00'),
+    });
+
+    expect((await latestComments(WINDOW, false)).map((row) => row.agent)).toEqual([null]);
+    expect((await latestComments(WINDOW, true)).map((row) => row.agent)).toEqual(['Mona']);
+  });
+
   it('files a comment under the survey’s own channel, and the ticket’s only where it has none', async () => {
     await survey(
       {
@@ -147,7 +166,7 @@ describe('latestComments', () => {
       },
       'facebook',
     );
-    expect((await latestComments(WINDOW)).map((row) => row.channel)).toEqual(['facebook']);
+    expect((await latestComments(WINDOW, true)).map((row) => row.channel)).toEqual(['facebook']);
   });
 });
 
@@ -225,7 +244,7 @@ describe('a ticket since deleted or marked spam', () => {
     await gone({ deletedAt: at('2026-10-15T09:00') });
     await gone({ isSpam: true });
 
-    expect(await latestComments(WINDOW)).toEqual([]);
+    expect(await latestComments(WINDOW, true)).toEqual([]);
     expect(await liveSurveys(WINDOW)).toEqual([]);
     expect(await skipReasons(WINDOW)).toEqual([]);
     expect(await firstSend(ZONE)).toBeNull();

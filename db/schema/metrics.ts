@@ -274,6 +274,29 @@ export const metricsDaily = pgTable(
 );
 
 /**
+ * Each day `rollup_metrics` has computed, and when the computation whose rows
+ * are there began: one row per day, written in the day's own transaction
+ * whether or not anything happened on it.
+ *
+ * `metrics_daily` cannot say this. `computeDay` writes no row for an empty
+ * day, so its rows answer "which days had work". A report asking "has last
+ * night's run reached yesterday?" of them is reading traffic: a quiet
+ * yesterday looks like a run that never happened, and a hand run over the day
+ * before can pass for one that did. Here a day computed by any run since this
+ * table existed is present, and a `computed_at` after the day's end says its
+ * reads all began once it was over: it was computed whole. Not the `jobs`
+ * table either: the nightly cron runs its handler directly
+ * (`worker/run-job.ts`), so a run leaves no `jobs` row behind.
+ *
+ * Rewritten by every recompute, and derived like the rows it describes:
+ * losing it costs the reports some lag, until the next run.
+ */
+export const rollupDays = pgTable('rollup_days', {
+  day: date('day').primaryKey(),
+  computedAt: timestamp('computed_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
  * Measured handling time: how long an agent actually had a ticket in front of
  * them.
  *

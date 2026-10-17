@@ -281,6 +281,13 @@
       "when": 1792243748680,
       "tag": "0039_warm_beyonder",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1792258361003,
+      "tag": "0040_clean_black_knight",
+      "breakpoints": true
     }
   ]
 }

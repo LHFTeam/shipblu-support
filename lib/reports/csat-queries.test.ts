@@ -1,39 +1,38 @@
-import { DateTime } from 'luxon';
 import { describe, expect, it } from 'vitest';
-import { countedThrough, uncounted } from './csat-queries';
+import { countedThrough, daysUncounted, uncounted } from './csat-queries';
 
 const WINDOW = { from: '2026-09-18', to: '2026-10-17', zone: 'Africa/Cairo' };
-const at = (local: string) => DateTime.fromISO(local, { zone: WINDOW.zone }).toJSDate();
-// The oldest write among the rows of the three days the nightly run rewrites.
-const rolled = (recomputedAt: Date | null) => ({ recomputedAt });
 
+// Which day counts as computed whole is `lastWholeDay`'s, against real
+// Postgres (`queries.db.test.ts`); this is what the page does with it.
 describe('countedThrough', () => {
-  it('ends on yesterday once tonight’s run has rewritten the three days', () => {
-    expect(countedThrough(WINDOW, rolled(at('2026-10-17T03:00')))).toBe('2026-10-16');
+  it('ends on the newest day the rollup computed whole', () => {
+    expect(countedThrough(WINDOW, '2026-10-16')).toBe('2026-10-16');
+    // After a night the run did not happen, further back rather than on a
+    // day it has not computed.
+    expect(countedThrough(WINDOW, '2026-10-14')).toBe('2026-10-14');
   });
 
-  it('ends the day before until then, rather than drawing yesterday as a day of zeros', () => {
-    // The newest of them is from last night's run, at 03:00 on the 16th.
-    expect(countedThrough(WINDOW, rolled(at('2026-10-16T03:00')))).toBe('2026-10-15');
-  });
-
-  it('is measured from the team’s midnight, not the database’s', () => {
-    // 00:30 in Cairo on the 17th is still the 16th in UTC, and after the
-    // team's midnight: a run then is tonight's.
-    expect(countedThrough(WINDOW, rolled(at('2026-10-17T00:30')))).toBe('2026-10-16');
-    expect(countedThrough(WINDOW, rolled(at('2026-10-16T23:30')))).toBe('2026-10-15');
-  });
-
-  it('stops a day early when the three days hold nothing to see', () => {
-    // A quiet stretch: the runs happened and wrote nothing, so the page
-    // stops on a day it can vouch for rather than one it cannot.
-    expect(countedThrough(WINDOW, rolled(null))).toBe('2026-10-15');
+  it('falls back to the day before yesterday until a run has written the record', () => {
+    expect(countedThrough(WINDOW, null)).toBe('2026-10-15');
   });
 
   it('is calendar arithmetic, so a month boundary is a day like any other', () => {
-    const november = { ...WINDOW, from: '2026-10-01', to: '2026-11-01' };
-    expect(countedThrough(november, rolled(at('2026-11-01T03:00')))).toBe('2026-10-31');
-    expect(countedThrough(november, rolled(null))).toBe('2026-10-30');
+    expect(countedThrough({ ...WINDOW, from: '2026-10-01', to: '2026-11-01' }, null)).toBe(
+      '2026-10-30',
+    );
+  });
+});
+
+describe('daysUncounted', () => {
+  it('is 0 once tonight’s run has reached yesterday, and 1 before it', () => {
+    expect(daysUncounted(WINDOW, '2026-10-16')).toBe(0);
+    expect(daysUncounted(WINDOW, '2026-10-15')).toBe(1);
+  });
+
+  it('counts the days a stalled rollup has not reached, across a month boundary', () => {
+    expect(daysUncounted(WINDOW, '2026-10-06')).toBe(10);
+    expect(daysUncounted({ ...WINDOW, to: '2026-11-02' }, '2026-10-30')).toBe(2);
   });
 });
 

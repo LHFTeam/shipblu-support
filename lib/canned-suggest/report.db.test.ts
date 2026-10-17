@@ -19,9 +19,9 @@ import {
   confusions,
   coverage,
   headline,
-  type ReportWindow,
 } from './report';
 import { NONE_KEY, REQUEST_VERSION } from './request';
+import type { ReportWindow } from '@/lib/reports/rollup';
 
 /**
  * The report's figures against one fixture per outcome a suggestion can have,

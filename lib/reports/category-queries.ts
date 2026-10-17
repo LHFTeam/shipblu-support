@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { CAUSE_REQUIRED_AREAS } from '@/lib/categorise/taxonomy';
+import { within } from './rollup';
 
 /**
  * Reading the category and cause rollups.
@@ -304,10 +305,7 @@ export async function causeCoverage(
     from conversations c
     join conversation_categories cc
       on cc.conversation_id = c.id and cc.is_primary
-    where coalesce(c.resolved_at, c.root_cause_set_at)
-            >= (${range.from}::date)::timestamp at time zone ${zone}
-      and coalesce(c.resolved_at, c.root_cause_set_at)
-            < ((${range.to}::date + 1))::timestamp at time zone ${zone}
+    where ${within(sql`coalesce(c.resolved_at, c.root_cause_set_at)`, { ...range, zone })}
       and c.deleted_at is null
       and split_part(cc.category_key, '.', 1) in (${areas})
   `);
