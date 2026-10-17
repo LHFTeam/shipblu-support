@@ -199,6 +199,7 @@ export function Sidebar({
 
                 <SatisfactionField
                   conversationId={conversation.id}
+                  channel={conversation.channel}
                   statusCategory={conversation.statusCategory}
                   suppressed={conversation.csatSuppressed}
                   survey={conversation.survey}

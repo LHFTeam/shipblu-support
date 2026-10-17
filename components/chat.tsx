@@ -38,6 +38,12 @@ export type ChatBubbleProps = {
   wide?: boolean;
   /** Shown on the first bubble of a run. */
   author?: ReactNode;
+  /**
+   * The bot glyph beside the author, for a part nobody wrote that is not drawn
+   * as a `bot` bubble — the survey card, an `attachment`. `kind: 'bot'` draws
+   * it already; the glyph is about who wrote it, not how it is drawn.
+   */
+  automated?: boolean;
   /** After the author, e.g. `<Badge tone="note">Private note</Badge>`. */
   badge?: ReactNode;
   /**
@@ -132,6 +138,7 @@ export function ChatBubble({
   group = 'single',
   wide = false,
   author,
+  automated = false,
   badge,
   avatar,
   time,
@@ -178,7 +185,7 @@ export function ChatBubble({
             }`}
           >
             {kind === 'note' ? <LockIcon size={13} className="shrink-0" /> : null}
-            {kind === 'bot' ? <BotIcon size={14} className="shrink-0" /> : null}
+            {kind === 'bot' || automated ? <BotIcon size={14} className="shrink-0" /> : null}
             {author ? <span dir="auto">{author}</span> : null}
             {badge}
           </div>

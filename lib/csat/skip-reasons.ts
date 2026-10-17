@@ -18,6 +18,7 @@ export const SKIP_REASONS = {
   channel_off: 'surveys are off for this channel',
   channel_unsupported: 'surveys are not sent on this channel',
   reopened: 'the ticket was reopened before the survey went out',
+  chat_closed: 'the chat was closed, so the visitor could no longer see a survey in it',
   read_only_channel: 'the conversation belongs to another service',
   no_customer_message: 'the customer never wrote on this ticket',
   agent_suppressed: 'an agent asked that this ticket not be surveyed',

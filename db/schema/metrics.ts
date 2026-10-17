@@ -14,7 +14,13 @@ import {
 } from 'drizzle-orm/pg-core';
 import { agents, groups } from './agents';
 import { conversations, messages } from './conversations';
-import { channelEnum, csatDeliveryEnum, csatStatusEnum, rootCauseOwnerEnum } from './enums';
+import {
+  channelEnum,
+  csatAnswerSourceEnum,
+  csatDeliveryEnum,
+  csatStatusEnum,
+  rootCauseOwnerEnum,
+} from './enums';
 
 /**
  * One row per time the system decided whether to ask a customer how it went.
@@ -72,6 +78,12 @@ export const csatSurveys = pgTable(
 
     sentAt: timestamp('sent_at', { withTimezone: true }),
     respondedAt: timestamp('responded_at', { withTimezone: true }),
+    /**
+     * Which door the answer came through (`csat_answer_source`). Null until
+     * there is an answer, and on one recorded before the column existed — all
+     * of which came through the page, and none of which production holds.
+     */
+    answerSource: csatAnswerSourceEnum('answer_source'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [

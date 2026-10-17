@@ -1,4 +1,4 @@
-import { and, asc, eq } from 'drizzle-orm';
+import { and, asc, eq, isNull } from 'drizzle-orm';
 import { db } from '@/db/client';
 import {
   agents,
@@ -6,15 +6,20 @@ import {
   contacts,
   conversationEvents,
   conversations,
+  csatSurveys,
   messages,
   ticketStatuses,
 } from '@/db/schema';
+import { recordAnswer } from '@/lib/csat';
+import { wordingRulesById } from '@/lib/csat/rules';
+import { ratingLabels, resolveWording, type WordingPair } from '@/lib/csat/wording';
 import { preview } from '@/lib/html/sanitize';
 import { UNNAMED_SUBJECT } from '@/lib/tickets/customer-text';
 import { afterInboundMessage, afterMessageStored } from '@/lib/tickets/lifecycle';
 import { reopenResolved } from '@/lib/tickets/reopen';
 import { requireDefaultOpenStatusId } from '@/lib/tickets/statuses';
 import type { VisitorDetails } from './contact';
+import type { Message, WidgetSurvey } from './types';
 import { recordIdentityOnConversation } from './identify';
 import { findLiveConversation, webchatChannel } from './session';
 
@@ -27,15 +32,27 @@ import { findLiveConversation, webchatChannel } from './session';
  * visitor read someone else's chat by guessing.
  */
 
-export type WidgetMessage = {
-  id: string;
-  from: 'visitor' | 'agent' | 'system';
-  authorName: string | null;
-  body: string;
-  createdAt: string;
-};
+/** The shape is `lib/widget/types.ts`'s, which the browser can name without the driver. */
+export type WidgetMessage = Message;
 
-/** Private notes are excluded here, not filtered in the UI. */
+/**
+ * Private notes are excluded here, not filtered in the UI.
+ *
+ * A message that carries a satisfaction survey comes with the survey, so the
+ * thread can draw it as a card: its state, and the wording of the rule it
+ * went out with, in the language it was sent in, resolved here so the card
+ * holds no wording logic of its own. The rule as it reads now, as the survey
+ * page reads it: an admin who rewords a rule rewords its open surveys, while
+ * the message's body keeps the sentence it was sent with — the price of not
+ * copying six strings onto every survey row. The card carries no token. The message's body still holds
+ * the survey's link — the visitor's own, and what a widget loaded before the
+ * card existed draws — so this is not a way of keeping the link from the
+ * browser, only of not needing it there.
+ *
+ * One statement for the transcript and its surveys, and one more for wording
+ * rules only when a survey names one: this runs on every push to every open
+ * widget.
+ */
 export async function listMessages(conversationId: string): Promise<WidgetMessage[]> {
   const rows = await db
     .select({
@@ -45,9 +62,23 @@ export async function listMessages(conversationId: string): Promise<WidgetMessag
       bodyText: messages.bodyText,
       createdAt: messages.createdAt,
       agentName: agents.name,
+      surveyId: csatSurveys.id,
+      surveyStatus: csatSurveys.status,
+      surveyRating: csatSurveys.rating,
+      surveyLocale: csatSurveys.locale,
+      surveyRuleId: csatSurveys.ruleId,
     })
     .from(messages)
     .leftJoin(agents, eq(agents.id, messages.authorAgentId))
+    // On the conversation as well as the message, so the join is served by
+    // the surveys' conversation index rather than a scan for each row.
+    .leftJoin(
+      csatSurveys,
+      and(
+        eq(csatSurveys.messageId, messages.id),
+        eq(csatSurveys.conversationId, messages.conversationId),
+      ),
+    )
     .where(
       and(
         eq(messages.conversationId, conversationId),
@@ -60,13 +91,98 @@ export async function listMessages(conversationId: string): Promise<WidgetMessag
     .orderBy(asc(messages.createdAt))
     .limit(200);
 
+  const ruleIds = [...new Set(rows.flatMap((row) => (row.surveyRuleId ? [row.surveyRuleId] : [])))];
+  const rules = await wordingRulesById(ruleIds);
+
   return rows.map((row) => ({
     id: row.id,
     from: row.direction === 'inbound' ? 'visitor' : row.agentName ? 'agent' : 'system',
     authorName: row.agentName,
     body: row.bodyText,
     createdAt: row.createdAt.toISOString(),
+    survey: row.surveyId
+      ? surveyCard(
+          {
+            id: row.surveyId,
+            status: row.surveyStatus,
+            rating: row.surveyRating,
+            locale: row.surveyLocale,
+          },
+          row.surveyRuleId ? (rules.get(row.surveyRuleId) ?? null) : null,
+        )
+      : null,
   }));
+}
+
+function surveyCard(
+  survey: { id: string; status: string | null; rating: number | null; locale: string | null },
+  rule: WordingPair | null,
+): WidgetSurvey {
+  // Every survey since stage 1 records its language; Arabic, the front door,
+  // for one that somehow does not. A rule since deleted is the built-in
+  // wording it was a variation of, as on the survey page.
+  const locale = survey.locale === 'en' ? 'en' : 'ar';
+  const wording = resolveWording(rule, locale);
+  return {
+    id: survey.id,
+    rating: survey.rating,
+    expired: survey.status === 'expired' && survey.rating === null,
+    locale,
+    intro: wording.intro,
+    question: wording.question,
+    labels: ratingLabels(locale),
+    commentPrompt: wording.commentPrompt,
+    button: wording.button,
+    thanks: wording.thanks,
+  };
+}
+
+/**
+ * Records a visitor's answer from the survey card, if the survey is theirs to
+ * answer, and returns the rating it holds afterwards.
+ *
+ * The visitor's session is the credential here, as it is for reading the
+ * chat: the survey must sit on one of the web chat conversations of the
+ * contact their token resolved to, so a survey id from anywhere else — a
+ * guess, another visitor's — answers nothing. Nor does one a newer survey
+ * superseded: the card draws that one closed, and a door that took what the
+ * card refuses would be a second opinion. Everything else is `recordAnswer`'s,
+ * the one door every answer goes through.
+ *
+ * The rating returned is the stored one, which is the visitor's own or an
+ * earlier answer's — first answer wins — so a card whose first post lost its
+ * reply shows what was kept rather than its second tap. Null when there was
+ * nothing here for this visitor to answer.
+ */
+export async function answerSurvey(
+  contactId: string,
+  surveyId: string,
+  rating: number,
+  comment: string | null,
+): Promise<number | null> {
+  const [owned] = await db
+    .select({ status: csatSurveys.status })
+    .from(csatSurveys)
+    .innerJoin(conversations, eq(conversations.id, csatSurveys.conversationId))
+    .where(
+      and(
+        eq(csatSurveys.id, surveyId),
+        eq(conversations.requesterContactId, contactId),
+        eq(conversations.channel, 'webchat'),
+        isNull(conversations.deletedAt),
+      ),
+    )
+    .limit(1);
+  if (!owned || (owned.status !== 'sent' && owned.status !== 'answered')) return null;
+
+  await recordAnswer(surveyId, rating, comment, 'widget');
+
+  const [after] = await db
+    .select({ rating: csatSurveys.rating })
+    .from(csatSurveys)
+    .where(eq(csatSurveys.id, surveyId))
+    .limit(1);
+  return after?.rating ?? null;
 }
 
 export type AppendResult = {

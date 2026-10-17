@@ -87,10 +87,22 @@ describe('decideSurvey', () => {
     });
   });
 
-  it('surveys a closed ticket as a resolved one', () => {
+  it('surveys a closed ticket as a resolved one, except a chat nobody can open again', () => {
     expect(decideSurvey(input({ statusCategory: 'closed' }), ON)).toEqual({
       kind: 'send',
       delivery: 'email_link',
+    });
+    const closedChat = input({ channel: 'webchat', byEmail: false, statusCategory: 'closed' });
+    expect(decideSurvey(closedChat, ON)).toEqual({ kind: 'skip', reason: 'chat_closed' });
+    // A delivery reason, so the ticket's own reasons come first: an agent who
+    // asked that it not be surveyed is the answer, and the report counts it.
+    expect(decideSurvey({ ...closedChat, suppressed: true }, ON)).toEqual({
+      kind: 'skip',
+      reason: 'agent_suppressed',
+    });
+    expect(decideSurvey({ ...closedChat, hasCustomerMessage: false }, ON)).toEqual({
+      kind: 'skip',
+      reason: 'no_customer_message',
     });
   });
 
@@ -120,10 +132,10 @@ describe('decideSurvey', () => {
     });
   });
 
-  it('sends a message on web chat, and on Meta only inside the window', () => {
+  it('sends a card on web chat, and a message on Meta only inside the window', () => {
     expect(decideSurvey(input({ channel: 'webchat', byEmail: false }), ON)).toEqual({
       kind: 'send',
-      delivery: 'text_link',
+      delivery: 'widget_card',
     });
     expect(decideSurvey(input({ channel: 'facebook', byEmail: false }), ON)).toEqual({
       kind: 'send',

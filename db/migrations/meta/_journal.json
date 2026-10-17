@@ -260,6 +260,13 @@
       "when": 1792165103631,
       "tag": "0036_rare_spot",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1792186568680,
+      "tag": "0037_puzzling_stephen_strange",
+      "breakpoints": true
     }
   ]
 }

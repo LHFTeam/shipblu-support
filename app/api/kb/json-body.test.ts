@@ -11,7 +11,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
  * Every refusal here is an empty 400, so all of them are pinned as that.
  */
 
-const recordResponse = vi.fn(async () => undefined);
+const recordAnswer = vi.fn(async () => 'recorded' as const);
+const surveyByToken = vi.fn(async (token: string) =>
+  token === 't'
+    ? { id: 'survey-1', conversationId: 'c', rating: null, respondedAt: null, ruleId: null }
+    : null,
+);
 const recordArticleView = vi.fn(async () => undefined);
 const select = vi.fn(() => {
   throw new Error('the database was reached');
@@ -19,7 +24,8 @@ const select = vi.fn(() => {
 
 vi.mock('@/lib/csat', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/csat')>()),
-  recordResponse,
+  recordAnswer,
+  surveyByToken,
 }));
 vi.mock('@/lib/kb/queries', () => ({ recordArticleView }));
 vi.mock('@/db/client', () => ({ db: { select } }));
@@ -50,7 +56,8 @@ async function refused(response: Response): Promise<void> {
 }
 
 beforeEach(() => {
-  recordResponse.mockClear();
+  recordAnswer.mockClear();
+  surveyByToken.mockClear();
   recordArticleView.mockClear();
   select.mockClear();
 });
@@ -95,7 +102,7 @@ describe.each(ROUTES)('POST /api/kb/$route', ({ POST, unusable }) => {
     for (const body of unusable) {
       await refused(await POST(post(JSON.stringify(body))));
     }
-    expect(recordResponse).not.toHaveBeenCalled();
+    expect(recordAnswer).not.toHaveBeenCalled();
     expect(recordArticleView).not.toHaveBeenCalled();
     expect(select).not.toHaveBeenCalled();
   });
@@ -106,13 +113,21 @@ describe('a usable body', () => {
     const response = await csat.POST(post(JSON.stringify({ token: 't', rating: 4, comment: 5 })));
 
     expect(response.status).toBe(204);
-    expect(recordResponse).toHaveBeenCalledWith('t', 4, null);
+    expect(recordAnswer).toHaveBeenCalledWith('survey-1', 4, null, 'page');
   });
 
   it('records a rating with its comment', async () => {
     await csat.POST(post(JSON.stringify({ token: 't', rating: 2, comment: ' slow ' })));
 
-    expect(recordResponse).toHaveBeenCalledWith('t', 2, ' slow ');
+    expect(recordAnswer).toHaveBeenCalledWith('survey-1', 2, ' slow ', 'page');
+  });
+
+  it('answers an unknown token exactly as it answers a known one, and records nothing', async () => {
+    const response = await csat.POST(post(JSON.stringify({ token: 'nobody', rating: 5 })));
+
+    expect(response.status).toBe(204);
+    expect(await response.text()).toBe('');
+    expect(recordAnswer).not.toHaveBeenCalled();
   });
 
   it('takes feedback with a comment that is not text as far as the database', async () => {

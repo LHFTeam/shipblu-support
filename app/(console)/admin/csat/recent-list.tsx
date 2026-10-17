@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { Badge, Cell, Row, Table } from '@/components/ui';
 import { RelativeTime } from '@/components/relative-time';
 import type { RecentSurvey } from '@/lib/csat';
+import { describeDelivery } from '@/lib/csat/delivery';
 import { describeSkip } from '@/lib/csat/skip-reasons';
 import { ago, channelLabel } from '@/lib/format';
 
@@ -42,9 +43,7 @@ export function RecentSurveyList({ rows }: { rows: RecentSurvey[] }) {
               ) : row.status === 'expired' ? (
                 <Badge tone="neutral">Replaced by a newer survey</Badge>
               ) : (
-                <Badge tone="info">
-                  Sent {row.delivery === 'email_link' ? 'by email' : 'as a message'}
-                </Badge>
+                <Badge tone="info">Sent {describeDelivery(row.delivery)}</Badge>
               )}
             </Cell>
             <Cell className="text-xs">{row.rating === null ? '—' : `${row.rating} / 5`}</Cell>
