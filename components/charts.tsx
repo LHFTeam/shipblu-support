@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { InfoTip } from './tooltip';
-import { bands, compact, linePath, niceCeiling, split } from '@/lib/charts/scale';
+import { bands, barWidths, compact, linePath, niceCeiling, share, split } from '@/lib/charts/scale';
 
 /**
  * The two chart shapes the dashboard needs.
@@ -245,6 +245,88 @@ export function Meter({
     >
       <div className="h-full rounded-full" style={{ width: `${value ?? 0}%`, background: color }} />
     </div>
+  );
+}
+
+/** The five steps' colours, worst first: the diverging scale in `globals.css`. */
+const RATING_COLORS = [
+  'var(--color-rating-1)',
+  'var(--color-rating-2)',
+  'var(--color-rating-3)',
+  'var(--color-rating-4)',
+  'var(--color-rating-5)',
+] as const;
+
+/**
+ * How a set of 1–5 answers split: one bar a step, the best at the top.
+ *
+ * Five bars rather than the average alone, because an average of 3.0 over a
+ * week of ones and fives is the one number that hides the problem. Coloured by
+ * the step, because here the step is the category — a diverging scale, red
+ * below the grey midpoint and blue above it — and every bar carries its count
+ * and its share of the whole as text, so no figure is reachable only by
+ * reading a colour.
+ *
+ * One grid for the five rows (`subgrid`), not one each: a row whose count is
+ * wider would otherwise shrink its own track, and a bar's width is a share of
+ * its track, so the bars would stop being comparable.
+ *
+ * HTML rather than SVG, unlike the charts above: the labels are words, and an
+ * SVG's text shrinks with the drawing on a phone, where text in the page's own
+ * flow stays the size it was set at.
+ */
+export function RatingBars({
+  counts,
+  labels,
+  caption,
+}: {
+  /** Answers on each step, 1 to 5. */
+  counts: readonly [number, number, number, number, number];
+  /** Each step's name, 1 to 5. */
+  labels: readonly [string, string, string, string, string];
+  caption: string;
+}) {
+  const total = counts.reduce((sum, count) => sum + count, 0);
+  const widths = barWidths(counts);
+
+  return (
+    <figure>
+      <ol className="grid grid-cols-[minmax(0,7.5rem)_minmax(0,1fr)_auto] gap-x-3 gap-y-2">
+        {[4, 3, 2, 1, 0].map((step) => {
+          const count = counts[step]!;
+          // A step somebody chose never reads as 0%, beside a bar drawn to
+          // say it is there, and a step short of every answer never as 100%.
+          const rounded = share(count, total) ?? 0;
+          const percent =
+            count > 0 && rounded === 0 ? '<1' : count < total && rounded === 100 ? '>99' : rounded;
+          return (
+            <li key={step} className="col-span-3 grid grid-cols-subgrid items-center text-xs">
+              <span className="truncate text-(--color-text-secondary)">
+                {step + 1} · {labels[step]}
+              </span>
+              <span aria-hidden className="block h-3">
+                {/* A step somebody chose stays visible however few chose it:
+                    a two-pixel bar for one answer among hundreds says that
+                    it is there, where a sub-pixel one says nothing. */}
+                <span
+                  className="block h-full rounded-e-[4px]"
+                  style={{
+                    width: `${widths[step]}%`,
+                    minWidth: count > 0 ? '2px' : undefined,
+                    background: RATING_COLORS[step],
+                  }}
+                />
+              </span>
+              <span className="text-end">
+                {count.toLocaleString('en-GB')}
+                <span className="text-(--color-text-secondary)"> · {percent}%</span>
+              </span>
+            </li>
+          );
+        })}
+      </ol>
+      <figcaption className="sr-only">{caption}</figcaption>
+    </figure>
   );
 }
 

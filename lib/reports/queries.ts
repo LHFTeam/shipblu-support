@@ -1,7 +1,10 @@
-import { and, between, eq, isNotNull, isNull, lte, sql } from 'drizzle-orm';
+import { DateTime } from 'luxon';
+import { and, between, eq, isNotNull, isNull, lt, lte, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
-import { agents, groups, metricsDaily } from '@/db/schema';
+import { share } from '@/lib/charts/scale';
+import { agents, groups, metricsDaily, rollupDays } from '@/db/schema';
 import type { Range } from './category-queries';
+import { RATING_COLUMNS, type ReportWindow } from './rollup';
 
 /**
  * Read models for the reports page.
@@ -26,6 +29,13 @@ export type Totals = {
   slaResolutionBreached: number;
   csatRatingSum: number;
   csatResponseCount: number;
+  csatSentCount: number;
+  csatSkippedCount: number;
+  csatRating1: number;
+  csatRating2: number;
+  csatRating3: number;
+  csatRating4: number;
+  csatRating5: number;
 };
 
 const SUMS = {
@@ -42,6 +52,13 @@ const SUMS = {
   slaResolutionBreached: sql<number>`coalesce(sum(${metricsDaily.slaResolutionBreached}), 0)::int`,
   csatRatingSum: sql<number>`coalesce(sum(${metricsDaily.csatRatingSum}), 0)::int`,
   csatResponseCount: sql<number>`coalesce(sum(${metricsDaily.csatResponseCount}), 0)::int`,
+  csatSentCount: sql<number>`coalesce(sum(${metricsDaily.csatSentCount}), 0)::int`,
+  csatSkippedCount: sql<number>`coalesce(sum(${metricsDaily.csatSkippedCount}), 0)::int`,
+  csatRating1: sql<number>`coalesce(sum(${metricsDaily.csatRating1}), 0)::int`,
+  csatRating2: sql<number>`coalesce(sum(${metricsDaily.csatRating2}), 0)::int`,
+  csatRating3: sql<number>`coalesce(sum(${metricsDaily.csatRating3}), 0)::int`,
+  csatRating4: sql<number>`coalesce(sum(${metricsDaily.csatRating4}), 0)::int`,
+  csatRating5: sql<number>`coalesce(sum(${metricsDaily.csatRating5}), 0)::int`,
 };
 
 /**
@@ -172,6 +189,27 @@ export async function rolledUpDays(range: Range): Promise<{ first: string | null
 }
 
 /**
+ * The newest day before `to` the rollup has computed whole: the newest in
+ * `rollup_days` whose computation began after the day ended, in the team's
+ * zone. Yesterday once tonight's run has reached it, whether or not anything
+ * happened on it; the day before until then; further back after a night the
+ * run did not happen. Null while no run since the table existed has computed
+ * a day whole. `countedThrough` (`csat-queries.ts`) reads it.
+ */
+export async function lastWholeDay(window: ReportWindow): Promise<string | null> {
+  const [row] = await db
+    .select({ day: sql<string | null>`max(${rollupDays.day})::text` })
+    .from(rollupDays)
+    .where(
+      and(
+        lt(rollupDays.day, sql`${window.to}::date`),
+        sql`${rollupDays.computedAt} >= (${rollupDays.day} + 1)::timestamp at time zone ${window.zone}`,
+      ),
+    );
+  return row?.day ?? null;
+}
+
+/**
  * `bigint` sums come back from postgres.js as strings, because a bigint does
  * not always fit a JavaScript number. These are seconds, so they always do —
  * but the string has to be converted or every average silently becomes NaN.
@@ -193,6 +231,13 @@ function normalise(row: Partial<Record<keyof Totals, unknown>> | undefined): Tot
     slaResolutionBreached: value('slaResolutionBreached'),
     csatRatingSum: value('csatRatingSum'),
     csatResponseCount: value('csatResponseCount'),
+    csatSentCount: value('csatSentCount'),
+    csatSkippedCount: value('csatSkippedCount'),
+    csatRating1: value('csatRating1'),
+    csatRating2: value('csatRating2'),
+    csatRating3: value('csatRating3'),
+    csatRating4: value('csatRating4'),
+    csatRating5: value('csatRating5'),
   };
 }
 
@@ -211,6 +256,137 @@ export function metPercentage(met: number, breached: number): number | null {
 
 export function averageRating(sum: number, count: number): number | null {
   return count > 0 ? Math.round((sum / count) * 10) / 10 : null;
+}
+
+type RatingColumns = Pick<Totals, (typeof RATING_COLUMNS)[number]>;
+
+/**
+ * The answers the distribution holds: every answer on a day rolled up since
+ * survey counts were kept, and none on a day rolled up before. Those older
+ * days keep their answers in `csat_response_count` alone, beside a send count
+ * of 0 that means "not counted", not "none sent" — so anything that sets
+ * answers against sends counts these, never `csat_response_count`.
+ */
+export function ratedCount(row: RatingColumns): number {
+  return ratingCounts(row).reduce((sum, count) => sum + count, 0);
+}
+
+/**
+ * Answers in the window over surveys sent in it. A rate, not a cohort: a link
+ * answered three weeks after it went out counts in the week it was answered,
+ * so a short window that caught the answers to a busier one before it can
+ * read above 100%, and says so rather than being clipped.
+ *
+ * Over `ratedCount`, so a window reaching back to days rolled up before
+ * survey counts were kept divides only the days that kept both: their
+ * answers over nothing read as 200%.
+ */
+export function responseRate(row: Pick<Totals, 'csatSentCount'> & RatingColumns) {
+  return share(ratedCount(row), row.csatSentCount);
+}
+
+/**
+ * The line under a CSAT tile: how many answers its average is over, and what
+ * share of the window's surveys they are — the response rate is what says
+ * whether an average of 4.6 is the team or the dozen customers who answered.
+ * The rate is left off when nothing was sent, rather than printed as 0%, and
+ * when the window holds answers from before survey counts were kept: it is
+ * then the rate of fewer answers than the count beside it names, and the
+ * satisfaction report is where that is said.
+ */
+export function responsesHint(
+  row: Pick<Totals, 'csatResponseCount' | 'csatSentCount'> & RatingColumns,
+): string {
+  const answers = `${row.csatResponseCount.toLocaleString('en-GB')} response${row.csatResponseCount === 1 ? '' : 's'}`;
+  const rate = responseRate(row);
+  return rate === null || ratedCount(row) !== row.csatResponseCount
+    ? answers
+    : `${answers} · ${rate}% of ${row.csatSentCount.toLocaleString('en-GB')} sent`;
+}
+
+/**
+ * The answers the average counts and the distribution does not, and the days
+ * they are on: days rolled up before survey counts were kept, which hold an
+ * answer count and a rating sum and nothing else. The page says so, or the
+ * average and the bars beside it describe different answers without a word.
+ */
+export function unsplitAnswers(
+  rows: (Pick<Totals, 'csatResponseCount'> & RatingColumns & { day: string })[],
+): { answers: number; days: string[] } {
+  const days = rows.filter((row) => row.csatResponseCount > ratedCount(row));
+  return {
+    answers: days.reduce((sum, row) => sum + row.csatResponseCount - ratedCount(row), 0),
+    days: days.map((row) => row.day),
+  };
+}
+
+/**
+ * Surveys sent over tickets resolved, in the same window — how much of the
+ * work was asked about at all. Also a rate: a survey goes out a delay after
+ * its resolve, so the two edges of a window do not hold exactly the same
+ * tickets.
+ */
+export function surveyedRate(row: Pick<Totals, 'csatSentCount' | 'ticketsResolved'>) {
+  return share(row.csatSentCount, row.ticketsResolved);
+}
+
+/** The answers on each step of the scale, 1 to 5, from the rollup's own list of the columns. */
+export function ratingCounts(row: RatingColumns): [number, number, number, number, number] {
+  const [one, two, three, four, five] = RATING_COLUMNS;
+  return [row[one], row[two], row[three], row[four], row[five]];
+}
+
+/**
+ * The share of the distribution at 4–5 and at 1–2. Out of the distribution
+ * rather than `csat_response_count`: the two are the same answers on every day
+ * rolled up since the distribution existed, and on a day rolled up before it
+ * only the distribution's own total says how many answers it describes.
+ */
+export function ratingShares(row: RatingColumns): {
+  positive: number | null;
+  negative: number | null;
+} {
+  const [one, two, , four, five] = ratingCounts(row);
+  const counted = ratedCount(row);
+  return { positive: share(four + five, counted), negative: share(one + two, counted) };
+}
+
+/**
+ * Every day from `from` to `to`, both included, as the `YYYY-MM-DD` strings
+ * the rollup keys on — for a series that has to show the days with no row as
+ * days, not skip them. Calendar arithmetic on the dates themselves, never
+ * through a `Date`, which would put each one at midnight UTC (AGENTS.md).
+ */
+export function windowDays(range: Range): string[] {
+  const days: string[] = [];
+  const last = DateTime.fromISO(range.to, { zone: 'utc' });
+  for (
+    let day = DateTime.fromISO(range.from, { zone: 'utc' });
+    day.isValid && day <= last;
+    day = day.plus({ days: 1 })
+  ) {
+    days.push(day.toISODate()!);
+  }
+  return days;
+}
+
+/**
+ * One point per day of `range`, each with its rolled-up row or none — the
+ * series every chart over the rollup draws. A day with no row is a real
+ * observation, a holiday or a weekend, and dropping it would slide every
+ * later bar leftwards, quietly turning a six-day gap into a continuous line;
+ * and one helper means every chart labels its days the same way.
+ */
+export function perDay<T extends { day: string }>(
+  range: Range,
+  rows: T[],
+): { day: string; label: string; row: T | undefined }[] {
+  const byDay = new Map(rows.map((row) => [row.day, row]));
+  return windowDays(range).map((day) => ({
+    day,
+    label: DateTime.fromISO(day, { zone: 'utc' }).toFormat('d/M'),
+    row: byDay.get(day),
+  }));
 }
 
 /** "1h 20m", "45s" — a duration a person can read at a glance. */

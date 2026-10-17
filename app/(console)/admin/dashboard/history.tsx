@@ -6,6 +6,7 @@ import {
   averageSeconds,
   formatDuration,
   metPercentage,
+  responsesHint,
   type totals,
 } from '@/lib/reports/queries';
 
@@ -20,12 +21,19 @@ export function History({
   trend,
   window,
   firstResponseSla,
+  canViewReports,
 }: {
   days: number;
   hasHistory: boolean;
   trend: Point[];
   window: Awaited<ReturnType<typeof totals>>;
   firstResponseSla: number | null;
+  /**
+   * The dashboard is `admin.agents`, the reports `report.view`, and the two
+   * part company on an account given one by hand without the other: no link
+   * to a page that answers 404.
+   */
+  canViewReports: boolean;
 }) {
   return (
     <Section
@@ -100,24 +108,33 @@ export function History({
             </Stat>
             <Stat
               label="CSAT"
-              explain="Mean rating out of 5 across the surveys answered in this window. Surveys sent and never answered are not counted, and a score belongs to whoever handled the ticket at the time rather than to whoever owns it now."
+              explain="Mean rating out of 5 across the surveys answered in this window. Surveys sent and never answered are not counted, and a score belongs to whoever handled the ticket at the time rather than to whoever owns it now. The share beside the count is answers over surveys sent in the same days: a rate, not a cohort, so an answer to an older survey counts on the day it arrived."
               value={
                 averageRating(window.csatRatingSum, window.csatResponseCount)?.toFixed(1) ?? '—'
               }
-              hint={`${window.csatResponseCount.toLocaleString('en-GB')} response${window.csatResponseCount === 1 ? '' : 's'} · ${window.ticketsReopened.toLocaleString('en-GB')} reopened`}
+              hint={`${responsesHint(window)} · ${window.ticketsReopened.toLocaleString('en-GB')} reopened`}
             />
           </div>
 
-          <p className="mt-2 text-xs text-(--color-text-secondary)">
-            Cuts by agent, group and channel live in{' '}
-            <Link
-              href={`/reports?days=${days}`}
-              className="text-(--color-text-link) hover:text-(--color-text-link-hover) hover:underline"
-            >
-              Reports
-            </Link>
-            .
-          </p>
+          {canViewReports ? (
+            <p className="mt-2 text-xs text-(--color-text-secondary)">
+              Cuts by agent, group and channel live in{' '}
+              <Link
+                href={`/reports?days=${days}`}
+                className="text-(--color-text-link) hover:text-(--color-text-link-hover) hover:underline"
+              >
+                Reports
+              </Link>
+              ; how customers rated the work, and what they wrote, in{' '}
+              <Link
+                href={`/reports/csat?days=${days}`}
+                className="text-(--color-text-link) hover:text-(--color-text-link-hover) hover:underline"
+              >
+                Customer satisfaction
+              </Link>
+              .
+            </p>
+          ) : null}
         </>
       )}
     </Section>

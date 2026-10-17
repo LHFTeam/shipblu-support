@@ -91,6 +91,10 @@ export const csatSurveys = pgTable(
     index('csat_surveys_conversation_idx').on(t.conversationId),
     index('csat_surveys_responded_idx').on(t.respondedAt),
     index('csat_surveys_created_idx').on(t.createdAt),
+    // The rollup's sent count reads a day of `sent_at`, and the report's live
+    // check a window of it and its first row: none of which the two indexes
+    // above can serve.
+    index('csat_surveys_sent_idx').on(t.sentAt),
     // The job enqueues without a dedupe key and is idempotent instead, so two
     // runs racing on one ticket meet here rather than sending two surveys.
     uniqueIndex('csat_surveys_open_idx')
@@ -244,6 +248,23 @@ export const metricsDaily = pgTable(
     csatRatingSum: integer('csat_rating_sum').notNull().default(0),
     csatResponseCount: integer('csat_response_count').notNull().default(0),
 
+    /**
+     * Surveys on the day, each keyed on the one timestamp that never moves
+     * once written — `csat_surveys.status` does (`sent` → `expired` →
+     * `answered`), so a count keyed on it would change with every answer.
+     * Sent on `sent_at`, which an expired or answered survey keeps: it was
+     * sent. Skipped on `created_at`, the decision's own instant. The five
+     * ratings on `responded_at`, like the two columns above, so the
+     * distribution and the average are one set of answers.
+     */
+    csatSentCount: integer('csat_sent_count').notNull().default(0),
+    csatSkippedCount: integer('csat_skipped_count').notNull().default(0),
+    csatRating1: integer('csat_rating_1').notNull().default(0),
+    csatRating2: integer('csat_rating_2').notNull().default(0),
+    csatRating3: integer('csat_rating_3').notNull().default(0),
+    csatRating4: integer('csat_rating_4').notNull().default(0),
+    csatRating5: integer('csat_rating_5').notNull().default(0),
+
     computedAt: timestamp('computed_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
@@ -251,6 +272,29 @@ export const metricsDaily = pgTable(
     index('metrics_daily_day_idx').on(t.day),
   ],
 );
+
+/**
+ * Each day `rollup_metrics` has computed, and when the computation whose rows
+ * are there began: one row per day, written in the day's own transaction
+ * whether or not anything happened on it.
+ *
+ * `metrics_daily` cannot say this. `computeDay` writes no row for an empty
+ * day, so its rows answer "which days had work". A report asking "has last
+ * night's run reached yesterday?" of them is reading traffic: a quiet
+ * yesterday looks like a run that never happened, and a hand run over the day
+ * before can pass for one that did. Here a day computed by any run since this
+ * table existed is present, and a `computed_at` after the day's end says its
+ * reads all began once it was over: it was computed whole. Not the `jobs`
+ * table either: the nightly cron runs its handler directly
+ * (`worker/run-job.ts`), so a run leaves no `jobs` row behind.
+ *
+ * Rewritten by every recompute, and derived like the rows it describes:
+ * losing it costs the reports some lag, until the next run.
+ */
+export const rollupDays = pgTable('rollup_days', {
+  day: date('day').primaryKey(),
+  computedAt: timestamp('computed_at', { withTimezone: true }).notNull().defaultNow(),
+});
 
 /**
  * Measured handling time: how long an agent actually had a ticket in front of
@@ -466,8 +510,12 @@ export const agentMetricsDaily = pgTable(
  * next door. The page sums whichever channels it is showing.
  *
  * **Everything here is recomputable**, which is what makes a delete-and-insert
- * rebuild safe: `conversations.created_at` and `resolved_at` are immutable, and
- * `conversation_categories.first_seen_at` is append-only. The column that must
+ * rebuild safe: `conversations.created_at` is immutable and
+ * `conversation_categories.first_seen_at` is append-only. A cause is dated by
+ * `coalesce(resolved_at, root_cause_set_at)`, so the close that clears
+ * `resolved_at` does not lose it, but a rebuild after the close files it on the
+ * day the cause was set rather than the day it was resolved
+ * (`docs/PROJECT-STATE.md` §6.98). The column that must
  * never be added is "suggestions still open at day end" — that is current state,
  * and a rebuild would write today's answer onto an old date. It would only
  * surface on the third night, when the recompute window reaches back, which is

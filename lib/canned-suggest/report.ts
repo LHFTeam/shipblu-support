@@ -1,5 +1,6 @@
-import { sql, type SQL } from 'drizzle-orm';
+import { sql } from 'drizzle-orm';
 import { db } from '@/db/client';
+import { within, type ReportWindow } from '@/lib/reports/rollup';
 import { readOnlyChannels } from '@/lib/tickets/channel-policy';
 import { NONE_KEY } from './request';
 
@@ -22,14 +23,6 @@ import { NONE_KEY } from './request';
  * `rangeIn()` rule: a pair of dates and the zone they are dates in, never the
  * database's `current_date`.
  */
-
-export type ReportWindow = { from: string; to: string; zone: string };
-
-/** `created_at` falls on one of the window's days, in the team's zone. */
-function within(column: SQL, window: ReportWindow): SQL {
-  return sql`${column} >= (${window.from}::date)::timestamp at time zone ${window.zone}
-    and ${column} < ((${window.to}::date + 1))::timestamp at time zone ${window.zone}`;
-}
 
 const SUGGESTED = sql`cs.choice is not null and cs.choice <> ${NONE_KEY}`;
 

@@ -2301,16 +2301,13 @@ message bodies — the same reasoning as the deliberately tiny `pg_notify` paylo
   Repaired. `rollup_metrics` now takes a range (`{"from","to"}`, `{"days":N}`)
   and rebuilds those days from the source tables, and every write asserts that
   the totals row equals the sum of its channel rows — the invariant the bug
-  broke — failing the run if it does not. To rebuild history after any future
-  change to the figures, enqueue a job row rather than waiting for the nightly:
-
-  ```sql
-  insert into jobs (type, payload) values ('rollup_metrics', '{"days": 90}');
-  ```
-
-  The running worker claims it within seconds. `npm run job -- rollup_metrics`
-  cannot carry a payload (`run-job.ts` passes `{}`), so the queue is the route
-  for anything other than the default three-day window.
+  broke — failing the run if it does not. To rebuild history after a change
+  to the figures, `npm run job -- rollup_metrics days=90` (or `from=…`,
+  `to=…`, `day=…`) runs it now: `run-job.ts` takes trailing `key=value` pairs
+  as the payload, and the payload's schema refuses a mistyped key. **Read §6.98
+  first**: rebuilding a day older than about three days rewrites its
+  resolution counts without every ticket closed since, so a backfill is not
+  free until that is fixed.
 
 - **Connections are left mid-transaction by the pooler. Reaped, not solved.**
   Backends appear as `state=active` + `wait_event=ClientRead` with an open
@@ -6250,6 +6247,41 @@ still waiting for it` one whose outcome is not known yet.
     gap of the same kind is still open: a message with no letters at all — a
     phone or tracking number sent alone — reads English too, and on the same
     day it decided 71 support-channel tickets, 58 of them with Arabic earlier.
+
+98. **Recomputing an old day drops every resolution closed since.**
+    _2026-10-17, found while building the satisfaction report (stage 5 of
+    `plans/csat.md`)._ `changeStatus` and the automation's `set_status` write
+    `resolved_at: category === 'resolved' ? now : null`, so moving a resolved
+    ticket on to Closed clears it — and the seeded rule closes every resolved
+    ticket after 72 hours. On production that day, all 11 closed tickets had
+    no `resolved_at`. `computeDay` counts a day's resolutions (and their
+    resolution time and SLA) from `resolved_at`, and `computeAgentDay` its
+    per-agent ones, so a rebuild of a day older than its tickets' closing
+    writes those columns without them; the nightly three-day recompute mostly
+    finishes with a day before its tickets close, which is why the history
+    looks right. Mostly, not always: day D's last recompute is the run at
+    00:00 UTC on D+3, two or three hours into the team's day, and the rule
+    closes 72 hours after the resolve — so a ticket resolved in D's first two
+    or three hours is closed before that run and drops out of D for good.
+    Its survey stays counted, so "Resolutions surveyed" on `/reports/csat`
+    reads high by those, and a small group or channel can pass 100%. Any `rollup_metrics` over older days — §5's repair, or the
+    backfill the survey columns would otherwise want — quietly lowers every
+    resolved figure it touches. The comments in `rollup-metrics.ts` and on
+    `category_metrics_daily` called `resolved_at` immutable; they no longer
+    do. The cause report loses nothing but can move: it dates a cause by
+    `coalesce(resolved_at, root_cause_set_at)`, so after the close a rebuild
+    files it on the day the cause was set — at or before the resolve, days
+    before it after a reopen — rather than the day it was resolved. Not
+    fixed here, because the fix is not a report change — keeping `resolved_at`
+    when a _resolved_ ticket closes (never setting it for one closed straight
+    from Open, which `conversations.root_cause_set_at`'s comment explains)
+    touches the SLA clocks and the sweep that read it, and the 11 tickets need
+    their instants back from their `status_changed` events. Until then, run no
+    backfill over days older than three. The survey columns need none on
+    production today: it holds one survey, sent 2026-08-31 and never
+    answered, and `/reports/csat` says when a window's sends or decisions
+    against are not in its figures, and on which days, rather than reading
+    them as none.
 
 ### Tooling notes for this environment
 

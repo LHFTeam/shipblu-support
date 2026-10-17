@@ -1,8 +1,10 @@
+import { eq } from 'drizzle-orm';
+import { DateTime } from 'luxon';
 import { describe, expect, it } from 'vitest';
 import { db } from '@/db/client';
-import { metricsDaily } from '@/db/schema';
+import { metricsDaily, rollupDays } from '@/db/schema';
 import { withCleanDatabase } from '@/lib/testing/db';
-import { daily, rolledUpDays, totals } from './queries';
+import { byChannel, daily, lastWholeDay, rolledUpDays, totals } from './queries';
 
 /**
  * The reports overview's window. The queries used to turn a day count into a
@@ -12,6 +14,8 @@ import { daily, rolledUpDays, totals } from './queries';
  */
 
 withCleanDatabase();
+
+const ZONE = 'Africa/Cairo';
 
 async function day(value: string, ticketsCreated: number) {
   await db.insert(metricsDaily).values({ day: value, ticketsCreated });
@@ -67,5 +71,73 @@ describe('the reports window', () => {
 
     expect(rolledUp).toEqual({ first: '2026-08-18', days: 2 });
     expect(rolledUp.first! > range.from).toBe(false);
+  });
+
+  it('names the newest day computed after it ended, in the team’s zone, before the window’s end', async () => {
+    const at = (local: string) => DateTime.fromISO(local, { zone: ZONE }).toJSDate();
+    const computed = (day: string, local: string) =>
+      db.insert(rollupDays).values({ day, computedAt: at(local) });
+    const window = { from: '2026-09-18', to: '2026-10-17', zone: ZONE };
+    expect(await lastWholeDay(window)).toBeNull();
+
+    // Last night's run reached the 15th; a hand run of the 16th at 18:00
+    // that day read a day still going, and a hand run of today is today's.
+    await computed('2026-10-14', '2026-10-15T02:00');
+    await computed('2026-10-15', '2026-10-16T02:00');
+    await computed('2026-10-16', '2026-10-16T18:00');
+    await computed('2026-10-17', '2026-10-17T09:00');
+    expect(await lastWholeDay(window)).toBe('2026-10-15');
+
+    // Tonight's run began at 00:30 in Cairo: still the 16th in UTC, and after
+    // the team's midnight, so the 16th was over.
+    await db.delete(rollupDays).where(eq(rollupDays.day, '2026-10-16'));
+    await computed('2026-10-16', '2026-10-17T00:30');
+    expect(await lastWholeDay(window)).toBe('2026-10-16');
+
+    // Begun at 23:30 on the 16th, it is not.
+    await db.delete(rollupDays).where(eq(rollupDays.day, '2026-10-16'));
+    await computed('2026-10-16', '2026-10-16T23:30');
+    expect(await lastWholeDay(window)).toBe('2026-10-15');
+
+    // A night the run did not happen leaves no record, and the newest whole
+    // day is further back.
+    await db.delete(rollupDays).where(eq(rollupDays.day, '2026-10-15'));
+    await db.delete(rollupDays).where(eq(rollupDays.day, '2026-10-16'));
+    expect(await lastWholeDay(window)).toBe('2026-10-14');
+  });
+});
+
+describe('the survey columns', () => {
+  it('sums the sends, the skips and each step of the scale over the window', async () => {
+    const surveys = {
+      csatSentCount: 4,
+      csatSkippedCount: 1,
+      csatRating1: 1,
+      csatRating4: 1,
+      csatRating5: 2,
+      csatResponseCount: 4,
+      csatRatingSum: 15,
+    };
+    await db.insert(metricsDaily).values([
+      { day: '2026-10-12', ...surveys },
+      { day: '2026-10-13', ...surveys, csatRating4: 0, csatRating5: 3 },
+      { day: '2026-10-13', channel: 'email', ...surveys },
+      // Outside the window.
+      { day: '2026-10-14', ...surveys },
+    ]);
+
+    expect(await totals({ from: '2026-10-12', to: '2026-10-13' })).toMatchObject({
+      csatSentCount: 8,
+      csatSkippedCount: 2,
+      csatRating1: 2,
+      csatRating2: 0,
+      csatRating3: 0,
+      csatRating4: 1,
+      csatRating5: 5,
+      csatResponseCount: 8,
+    });
+    expect(await byChannel({ from: '2026-10-12', to: '2026-10-13' })).toMatchObject([
+      { label: 'email', csatSentCount: 4, csatRating5: 2 },
+    ]);
   });
 });

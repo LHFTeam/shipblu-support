@@ -90,6 +90,30 @@ export function linePath(values: number[], width: number, height: number, max?: 
     .join(' ');
 }
 
+/**
+ * Each value as a share of the largest, 0–100, for bars that share one track.
+ *
+ * Of the largest rather than of the total, so the longest bar fills its track
+ * and the rest are read against it — five bars of a distribution measured
+ * against the whole would leave most of every track empty. The share of the
+ * total is printed beside each bar instead, where it can be read exactly.
+ */
+export function barWidths(values: readonly number[]): number[] {
+  const peak = Math.max(0, ...values);
+  return values.map((value) => (peak > 0 ? (Math.max(0, value) / peak) * 100 : 0));
+}
+
+/**
+ * A whole percentage of `of`, or null when there is nothing to divide by:
+ * the rounding the satisfaction report's rates and a bar's printed share
+ * both start from. `RatingBars` then labels a step someone chose that rounds
+ * to 0 as "<1", and one short of every answer that rounds to 100 as ">99",
+ * which a rate does not.
+ */
+export function share(part: number, of: number): number | null {
+  return of > 0 ? Math.round((part / of) * 100) : null;
+}
+
 /** "1,284", "12.9K", "1.2M" — a stat tile has room for four characters. */
 export function compact(value: number): string {
   if (Math.abs(value) < 10_000) return value.toLocaleString('en-GB');

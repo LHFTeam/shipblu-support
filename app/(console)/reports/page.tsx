@@ -15,6 +15,7 @@ import {
   daily,
   formatDuration,
   metPercentage,
+  responsesHint,
   rolledUpDays,
   totals,
   type Row as ReportRow,
@@ -118,6 +119,16 @@ export default async function ReportsPage({
             >
               Suggested responses
             </Link>
+            {/*
+              `report.view` too: what customers said of the work is this page's
+              CSAT tile, cut every way it can be and with the words beside it.
+            */}
+            <Link
+              href={`/reports/csat?days=${days}`}
+              className={buttonClass({ variant: 'secondary', size: 'sm' })}
+            >
+              Customer satisfaction
+            </Link>
           </>
         }
       />
@@ -172,7 +183,17 @@ export default async function ReportsPage({
               value={
                 averageRating(summary.csatRatingSum, summary.csatResponseCount)?.toFixed(1) ?? '—'
               }
-              hint={`${summary.csatResponseCount} response${summary.csatResponseCount === 1 ? '' : 's'}`}
+              hint={
+                <>
+                  {responsesHint(summary)} ·{' '}
+                  <Link
+                    href={`/reports/csat?days=${days}`}
+                    className="text-(--color-text-link) hover:text-(--color-text-link-hover) hover:underline"
+                  >
+                    Details
+                  </Link>
+                </>
+              }
             />
             <Stat label="Reopened" value={summary.ticketsReopened.toLocaleString()} />
           </section>

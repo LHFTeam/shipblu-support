@@ -604,6 +604,79 @@ other pages. Sections:
 `/reports`, `/reports/agents` and the dashboard keep their CSAT columns and
 gain the response rate in the hint, and a link to the new page from the tile.
 
+_Built:_ the seven columns as tabled, from one read of a day's surveys in
+`computeDay`, each fact on its own timestamp. Every CSAT column, the two old
+ones included, now takes the survey's own `channel`, and the ticket's only
+for the one row written before surveys had one, which would otherwise sit in
+the totals and in no channel and fail `reconciles` — which now checks the new
+counts too. A rating off the 1–5 scale counts nowhere, so the average and the
+bars describe the same answers.
+
+No backfill was run, and none is needed on production, which holds one
+survey (sent 2026-08-31, never answered). The backfill "the plan ships with"
+is the existing job (`npm run job -- rollup_metrics days=…`), and two things
+about it changed on the way. An answer is filed on its own `responded_at`,
+which is always recent when it arrives, so the nightly three-day recompute
+already catches a late one; the backfill is only for days rolled up before
+the columns existed. And it is **not safe over days older than three** until
+`docs/PROJECT-STATE.md` §6.98 is fixed: closing a resolved ticket clears
+`resolved_at`, so rebuilding an old day rewrites its resolution counts — the
+"Resolutions surveyed" denominator among them — without every ticket closed
+since. Instead the page counts the window's sends and decisions against live,
+day by day (`liveSurveys`), and where a day's row holds fewer it says how
+many are missing and on which days rather than reading them as none. The
+CSV carries those days as `not_rolled_up` rows, and the days before the
+rolled-up history too, since it has no notice to say where that begins; the
+page also says when the first survey is younger than the window.
+
+The page is `app/(console)/reports/csat/`, its live reads
+`lib/reports/csat-queries.ts`, on the rollup's keys and its
+`surveyedConversation()` — worked, and neither deleted nor spam, the filter
+the created, first-response and resolution reads carry; the survey read
+lacked it, so a
+ticket deleted or marked spam after its survey kept counting against
+resolutions that did not. The figures, the trend, "Why not surveyed" and the
+live counts all end on one day, `countedThrough`: the newest day the rollup
+has computed whole, which is yesterday once tonight's run has reached it,
+the day before until then, and further back after a night the run did not
+happen, so none of them holds a day after it that the others do not; the comments run to
+now. That is a fact the run now records: `rollup_days` holds each day
+`rollup_metrics` computed and when its reads began, written in the day's own
+transaction whether or not the day had work, and a day is whole once it was
+computed after it ended (`lastWholeDay`). `metrics_daily` alone cannot say
+it, because an empty day writes no row: its newest row named the last day
+anybody worked, so a quiet week read as a rollup that had stopped, and the
+`computed_at` of the three days' rows let a hand run over one of them pass
+for the whole run. Nor can `jobs`, which the cron never writes
+(`worker/run-job.ts`). Until a run of this version has written the table,
+the page falls back to the day before yesterday. The page does not check a day before the rolled-up history live, and
+says instead that the history begins later; the CSV lists that day's sends
+and decisions against as `not_rolled_up`. When the rollup has fallen
+further behind than tonight's run explains, the page says so, and shows no
+figures when it has computed no day of the window; the CSV's first row
+says where its figures end. The breakdowns keep a row with
+resolutions and no surveys, the one line that shows a channel switched
+off. Skips are counted as decisions, not tickets: one ticket
+can be decided against twice and surveyed after. The
+agent table, the agent beside each comment, and the CSV's agent rows are
+behind `report.agents`; the rest, `report.view`. Per agent, "resolutions
+surveyed" divides the agent a survey named by the agent who held the ticket
+when its resolve's day was rolled up, and per group the same way, and both
+tables say so. A comment is listed only with a rating on the 1–5 scale, the
+rollup's definition of one, and its agent is read only for `report.agents`. The distribution is `RatingBars`, five
+bars on a diverging red–grey–blue scale (`--color-rating-1`…`5`, checked with
+the dataviz validator), each carrying its count and share, since the grey
+midpoint is under 3:1 on white. The three tiles' hint is `responsesHint`:
+"12 responses · 40% of 30 sent", the rate left off when nothing was sent;
+`/reports/agents` links to the page only for a holder of `report.view`.
+Every response rate divides the answers in the distribution (`ratedCount`),
+never `csat_response_count`: a day rolled up before survey counts were kept
+holds its answers' count and sum but no split and no sends, so its answers
+over the newer days' sends read as 200%. The hint leaves the rate off for a
+window holding such answers, and the page says which days they are on
+(`unsplitAnswers`) — on production none can exist unless surveys are
+switched on and answered more than three days before this ships.
+
 ## Stages
 
 Each is one pull request, verified before the next starts; the first stands on
