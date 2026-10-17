@@ -217,7 +217,9 @@ export function describeEvent(type: string, data: Record<string, unknown>): stri
     case 'csat_thanked':
       return 'thanked the customer for their rating';
     case 'csat_fell_back':
-      return 'sent the satisfaction survey as rating buttons instead: Messenger refused its feedback card';
+      // Written before the buttons are sent, so it says what was decided; the
+      // message's own delivery badge says whether they went.
+      return 'switched the satisfaction survey to rating buttons: Messenger refused its feedback card';
     case 'csat_suppressed':
       return 'asked that this ticket not be surveyed';
     case 'csat_unsuppressed':

@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { and, eq, isNotNull } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { agents, csatSettings } from '@/db/schema';
 import { logger } from '@/lib/log';
@@ -188,4 +188,16 @@ export async function recordTemplateRefusal(text: string): Promise<void> {
     .update(csatSettings)
     .set({ lastTemplateRefusal: text.slice(0, 2000), lastTemplateRefusalAt: new Date() })
     .where(eq(csatSettings.id, 1));
+}
+
+/**
+ * Messenger took the card: the last refusal is history, and the admin page's
+ * warning comes down. One indexed write that changes nothing in the steady
+ * state, where there is no refusal to clear.
+ */
+export async function clearTemplateRefusal(): Promise<void> {
+  await db
+    .update(csatSettings)
+    .set({ lastTemplateRefusal: null, lastTemplateRefusalAt: null })
+    .where(and(eq(csatSettings.id, 1), isNotNull(csatSettings.lastTemplateRefusal)));
 }

@@ -41,7 +41,7 @@ describe('describeEvent', () => {
       'rated the support 3 / 5 with a rating button in the conversation',
     );
     expect(describeEvent('csat_fell_back', { delivery: 'meta_quick_reply' })).toBe(
-      'sent the satisfaction survey as rating buttons instead: Messenger refused its feedback card',
+      'switched the satisfaction survey to rating buttons: Messenger refused its feedback card',
     );
     expect(describeEvent('csat_thanked', {})).toBe('thanked the customer for their rating');
     expect(describeEvent('csat_skipped', { reason: 'no_privacy_url' })).toBe(

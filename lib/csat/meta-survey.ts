@@ -16,6 +16,18 @@ import { ratingLabels, surveyText, type Wording, type WordingLocale } from './wo
  * words, what the timeline shows for it.
  */
 
+/**
+ * The card's button, which opens Messenger's question sheet — the sheet has
+ * its own Submit. Not the rule's `button`, which is the page's and the chat
+ * card's confirm ("Send"): on the card it would read as sending something it
+ * does not. Within Meta's 20 characters, and a noun in Arabic rather than an
+ * imperative, as everything the customer reads here is.
+ */
+const CARD_BUTTON: Record<WordingLocale, string> = {
+  en: 'Rate our support',
+  ar: 'تقييم الخدمة',
+};
+
 /** What `send_meta` reads off a survey message's `meta`. */
 export type MetaSurveyMeta =
   | { sendKind: 'feedback_template'; card: FeedbackCard; labels: RatingLabels }
@@ -46,7 +58,7 @@ export function metaSurveyMessage(
       card: {
         title: wording.intro,
         subtitle: wording.subtitle,
-        button: wording.button,
+        button: CARD_BUTTON[locale],
         question: wording.question,
         placeholder: wording.commentPrompt,
         privacyUrl: settings.privacyUrl,

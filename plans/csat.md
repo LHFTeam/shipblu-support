@@ -177,14 +177,14 @@ answers when none does, with "Customise" opening a rule pre-filled from it.
 Every customer-facing string is an `*_ar` / `*_en` pair, both `not null default
 ''`, one required, either covering the other (AGENTS.md, _Bilingual_):
 
-| Pair             | Used as                                                                                               | Meta limit   |
-| ---------------- | ----------------------------------------------------------------------------------------------------- | ------------ |
-| `question`       | the email's heading, the widget card's question, Messenger's `question.title`, the quick-reply prompt | 5–85, no URL |
-| `intro`          | Messenger's `title`; the email's first line; the widget card's lead                                   | ≤ 65, no URL |
-| `subtitle`       | Messenger's `subtitle`; the email's second line                                                       | ≤ 80, no URL |
-| `button`         | Messenger's `button_title`; the email's and widget's confirm button                                   | ≤ 20, no URL |
-| `comment_prompt` | the follow-up's `placeholder`; the comment box's label                                                | ≤ 65, no URL |
-| `thanks`         | after an answer, on the page and the card                                                             | —            |
+| Pair             | Used as                                                                                                                                                                                  | Meta limit                            |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------- |
+| `question`       | the email's heading, the widget card's question, Messenger's `question.title`, the quick-reply prompt                                                                                    | 5–85, no URL                          |
+| `intro`          | Messenger's `title`; the email's first line; the widget card's lead                                                                                                                      | ≤ 65, no URL                          |
+| `subtitle`       | Messenger's `subtitle`; the email's second line                                                                                                                                          | ≤ 80, no URL                          |
+| `button`         | the page's and the widget card's confirm button (stage 4: Messenger's `button_title` is its own, "Rate our support" / «تقييم الخدمة», because it opens the question rather than sending) | ≤ 20, no URL                          |
+| `comment_prompt` | the follow-up's `placeholder`; the comment box's label                                                                                                                                   | ≤ 65, no URL                          |
+| `thanks`         | after an answer, on the page and the card; and, with "Anything to add?", the message after a tapped rating (stage 4)                                                                     | ≤ 300, inside Instagram's 1,000 bytes |
 
 The limits are Meta's and they are enforced on every rule, not only one scoped
 to Facebook: a group rule with no channel applies to Facebook tickets too, and a
@@ -387,8 +387,11 @@ delivery moves to `meta_quick_reply`, the message's `sendKind` with it (so a
 retry goes straight to the buttons), and a `csat_fell_back` event says so on
 the timeline. Only a permanent refusal of the card falls back: a transient
 answer — Graph's unspecified codes among them — is the queue's to retry as the
-card, and a dead token or a refusal this app made itself is not something the
-card did. The admin page will not save Facebook switched on without a privacy
+card; a dead token, a refusal this app made itself and a refusal about the
+customer (`551`, the window, another app holding the thread:
+`isRecipientRefusal`) would refuse anything sent there, so they are not
+something the card did, and fail the row as any refused send. A card that goes
+out clears the last refusal. The admin page will not save Facebook switched on without a privacy
 link, and the job still skips `no_privacy_url` if it meets one missing.
 Expiry is Meta's: a lapsed card cannot be answered, so no `expires_at` is
 written yet, and `recordAnswer` still takes a late answer to a superseded row

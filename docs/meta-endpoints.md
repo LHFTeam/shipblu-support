@@ -156,8 +156,10 @@ The same `POST /{account-id}/messages`, with a body built and tested beside
   `messaging_type: MESSAGE_TAG` and `tag: CUSTOMER_FEEDBACK` — a tag valid on
   this card and nothing else, so `feedbackTemplateTag()` is a function of its
   own beside `messagingTag()`. Messenger only. Meta marks the card "in
-  development"; a permanent refusal is kept on `csat_settings` for the admin
-  page and, inside 24 hours, the survey goes as the next body instead.
+  development"; a permanent refusal of the card — not one about the customer, such
+  as `551` or another app holding the thread (`isRecipientRefusal`) — is kept on
+  `csat_settings` for the admin page and, inside 24 hours, the survey goes as the
+  next body instead. A card that goes out clears it.
 - **`quick_reply_survey`** — the question with five `quick_replies`
   (`lib/meta/quick-reply-survey.ts`), titles at most 20 characters, payload
   `csat:<survey uuid>:<1-5>`, on `directMessageRequest()`'s in-window body.

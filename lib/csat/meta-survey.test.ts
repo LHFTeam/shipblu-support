@@ -20,7 +20,8 @@ describe('metaSurveyMessage', () => {
       card: {
         title: DEFAULT_WORDING.ar.intro,
         subtitle: DEFAULT_WORDING.ar.subtitle,
-        button: DEFAULT_WORDING.ar.button,
+        // Messenger's button opens the question; the rule's is a confirm.
+        button: 'تقييم الخدمة',
         question: DEFAULT_WORDING.ar.question,
         placeholder: DEFAULT_WORDING.ar.commentPrompt,
         privacyUrl: SETTINGS.privacyUrl,

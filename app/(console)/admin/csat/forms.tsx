@@ -96,10 +96,11 @@ export function SurveySettingsForm({ settings }: { settings: CsatSettings }) {
             hint="Minutes. Empty to use the same delay."
             explain={
               <>
-                A survey on these channels can only be sent while Meta&rsquo;s 24-hour messaging
-                window is open, counted from the customer&rsquo;s last message. A ticket resolved
-                late in that window can miss it at the default delay; the recent list below says so
-                when it happens.
+                Instagram&rsquo;s rating buttons, and Facebook&rsquo;s when Messenger refuses its
+                card, can only be sent while Meta&rsquo;s 24-hour messaging window is open, counted
+                from the customer&rsquo;s last message; Messenger&rsquo;s own card has seven days. A
+                ticket resolved late in the 24 hours can miss them at the default delay; the recent
+                list below says so when it happens.
               </>
             }
           >

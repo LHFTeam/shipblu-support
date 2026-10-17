@@ -87,7 +87,7 @@ function WordingFields({
             hint={
               limit.max === null
                 ? 'Any length.'
-                : `Up to ${limit.max} characters${limit.min ? `, at least ${limit.min}` : ''}; no links.`
+                : `Up to ${limit.max} characters${limit.min ? `, at least ${limit.min}` : ''}${limit.noUrl ? '; no links' : ''}.`
             }
             explain={EXPLAIN[field]}
           >
@@ -135,9 +135,10 @@ const EXPLAIN: Record<WordingField, string> = {
     'The first line of the email and the chat card, and the title of Messenger’s card. Leave it empty to use the built-in line.',
   subtitle: 'The second line of the email, and the subtitle of Messenger’s card.',
   button:
-    'The button that sends the answer on the page and the card, and the button on Messenger’s card.',
+    'The button that sends the answer on the survey page and the chat card. Messenger’s card has a button of its own, which opens the question rather than sending anything.',
   commentPrompt: 'The label above the comment box; the placeholder of Messenger’s follow-up.',
-  thanks: 'Shown after the customer answers. Never reaches Meta, so it has no limit.',
+  thanks:
+    'Shown after the customer answers, and sent as a message after a rating button is tapped on Instagram or Facebook, so it is kept short enough for one.',
 };
 
 /** The preview card's answer: the rating it was given, kept nowhere. */

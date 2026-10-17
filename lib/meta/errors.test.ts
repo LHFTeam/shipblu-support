@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { MetaApiError } from './client';
-import { explainMetaModerationError, explainMetaSendError, MetaSendRefusal } from './errors';
+import {
+  explainMetaModerationError,
+  explainMetaSendError,
+  isRecipientRefusal,
+  MetaSendRefusal,
+} from './errors';
 
 const UNKNOWN = 'An unknown error has occurred.';
 
@@ -594,5 +599,22 @@ describe('thread control', () => {
       sendKind: 'private_reply',
     });
     expect(direct).not.toContain('INSTAGRAM_ACCESS_TOKEN');
+  });
+});
+
+describe('isRecipientRefusal', () => {
+  it('tells a refusal about the customer from a refusal of what was sent', () => {
+    const refusal = (code: number | null, subcode: number | null = null) =>
+      isRecipientRefusal(new MetaApiError('refused', 400, code, subcode, false));
+    // Blocked the Page, the window closed (a code in the table, a subcode on
+    // the wire), another app holds the thread.
+    expect(refusal(551)).toBe(true);
+    expect(refusal(10, 1545041)).toBe(true);
+    expect(refusal(1545041)).toBe(true);
+    expect(refusal(10, 2018300)).toBe(true);
+    // An invalid request, or a permission: about what was sent, or by whom.
+    expect(refusal(100)).toBe(false);
+    expect(refusal(10)).toBe(false);
+    expect(refusal(null)).toBe(false);
   });
 });

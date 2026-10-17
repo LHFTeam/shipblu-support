@@ -275,6 +275,28 @@ function isHandoverRefusal(error: MetaApiError): boolean {
 }
 
 /**
+ * Graph refused a send because of who it was addressed to, not what it was:
+ * the customer blocked the Page or is otherwise unreachable (`551`), their
+ * window has closed (`1545041`, listed in the same table as a code and sent
+ * by Graph as a subcode, so read as either), or another app holds the thread.
+ * All three are documented in the Messenger send API's error table, or read
+ * out of a log for the handover, and none says anything about the message —
+ * which is the question the survey asks of a refused feedback card: did
+ * Messenger refuse *the card*, or would it have refused anything sent here?
+ */
+const RECIPIENT_CODES = new Set([551]);
+const WINDOW_CLOSED = 1545041;
+
+export function isRecipientRefusal(error: MetaApiError): boolean {
+  return (
+    (error.code !== null && RECIPIENT_CODES.has(error.code)) ||
+    error.code === WINDOW_CLOSED ||
+    error.subcode === WINDOW_CLOSED ||
+    isHandoverRefusal(error)
+  );
+}
+
+/**
  * What to do about thread control, which is nothing this deployment can fix on
  * its own.
  *

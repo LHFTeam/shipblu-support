@@ -2,7 +2,7 @@ import { and, desc, eq, ne } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { conversations, messages } from '@/db/schema';
 import { fallBackToQuickReplies } from '@/lib/csat';
-import { recordTemplateRefusal } from '@/lib/csat/settings';
+import { clearTemplateRefusal, recordTemplateRefusal } from '@/lib/csat/settings';
 import {
   ACCESS_TOKEN_CODE,
   MetaApiError,
@@ -13,7 +13,12 @@ import {
 } from '@/lib/meta/client';
 import { commentReplyTarget } from '@/lib/meta/comments';
 import { metaConnection, type MetaConnection } from '@/lib/meta/connection';
-import { explainMetaSendError, MetaSendRefusal, type MetaSendContext } from '@/lib/meta/errors';
+import {
+  explainMetaSendError,
+  isRecipientRefusal,
+  MetaSendRefusal,
+  type MetaSendContext,
+} from '@/lib/meta/errors';
 import { feedbackTemplateRequest, type FeedbackCard } from '@/lib/meta/feedback-template';
 import { quickReplySurveyRequest, type RatingLabels } from '@/lib/meta/quick-reply-survey';
 import type { MetaPlatform } from '@/lib/meta/types';
@@ -273,10 +278,16 @@ async function deliver(
  * row instead. Past them nothing else sends, and the row fails with Graph's
  * own sentence, as any refused send does.
  *
- * Only a refusal of *this request* falls back. A transient answer, the
- * unspecified codes among them, is the queue's to retry as the card; and a
- * dead token, or a refusal this app made itself, fails every send the same
- * way and is not something the card did.
+ * Only a refusal of *the card* falls back. A transient answer, the
+ * unspecified codes among them, is the queue's to retry as the card. A dead
+ * token, a refusal this app made itself, and a refusal about the recipient —
+ * a customer who blocked the Page, a thread another app holds
+ * (`isRecipientRefusal`) — would refuse anything sent here: kept on the
+ * settings row, the admin page would read a blocked customer as Meta
+ * withdrawing the card, and the buttons sent in its place would be refused
+ * the same way. Those fail the row as any refused send does. A card that does
+ * go out clears the last refusal, so the page's warning means "refusing now"
+ * and not "refused once".
  */
 async function deliverFeedbackCard(
   row: Row,
@@ -303,19 +314,20 @@ async function deliverFeedbackCard(
     );
   }
 
+  let result;
   try {
-    const result = await sendMessageRequest(
+    result = await sendMessageRequest(
       'facebook',
       feedbackTemplateRequest({ recipientId, surveyId: meta.csatSurveyId, card: meta.card, tag }),
     );
-    return result.messageId;
   } catch (error) {
     if (
       !(error instanceof MetaApiError) ||
       error instanceof MetaSendRefusal ||
       error.isTransient ||
       error.status === 0 ||
-      error.code === ACCESS_TOKEN_CODE
+      error.code === ACCESS_TOKEN_CODE ||
+      isRecipientRefusal(error)
     ) {
       throw error;
     }
@@ -339,6 +351,16 @@ async function deliverFeedbackCard(
 
     return sendQuickReplySurvey('facebook', recipientId, row, meta);
   }
+
+  // Outside the send's `try`, and swallowed: the card has gone, and a failure
+  // to take a stale warning down must neither send the buttons as well nor
+  // fail the job, whose retry would send the customer a second card.
+  try {
+    await clearTemplateRefusal();
+  } catch (error) {
+    log.warn(`${row.message.id}: could not clear the last card refusal`, error);
+  }
+  return result.messageId;
 }
 
 async function sendQuickReplySurvey(

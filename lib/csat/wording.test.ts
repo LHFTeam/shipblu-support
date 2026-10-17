@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { surveyEmail } from './email';
+import { quickReplyThanks } from './meta-survey';
 import {
   DEFAULT_WORDING,
   EMPTY_WORDING_PAIR,
@@ -31,7 +32,13 @@ describe('wordingProblem', () => {
     // An emoji is two UTF-16 units and one character to Meta.
     expect(wordingLength('👍'.repeat(20))).toBe(20);
     expect(wordingProblem('button', '👍'.repeat(20))).toBeNull();
-    expect(wordingProblem('thanks', 'x'.repeat(500))).toBeNull();
+    // The thanks goes out as an Instagram message after a tapped rating, with
+    // a line after it: 300 Arabic letters and that line stay inside 1,000 bytes.
+    expect(wordingProblem('thanks', 'ش'.repeat(300))).toBeNull();
+    expect(wordingProblem('thanks', 'ش'.repeat(301))).toMatch(/at most 300/);
+    expect(
+      Buffer.byteLength(quickReplyThanks({ ...DEFAULT_WORDING.ar, thanks: 'ش'.repeat(300) }, 'ar')),
+    ).toBeLessThanOrEqual(1000);
   });
 
   it('wants a question of at least five characters, and never a link', () => {

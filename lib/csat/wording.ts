@@ -30,7 +30,12 @@ export type WordingLimit = {
   label: string;
   /** Meta's minimum, where it has one; an empty string is always allowed (it falls back). */
   min: number | null;
-  /** Meta's maximum, or null where the string never reaches Meta. */
+  /**
+   * The most it may be: Meta's maximum for a field of Messenger's card, and
+   * for the thanks — sent as a message after a tapped rating — a cap that
+   * keeps it, with the line sent after it, inside Instagram's 1,000-byte
+   * message even in Arabic, two bytes a letter.
+   */
   max: number | null;
   /** Whether Meta refuses a URL in it. */
   noUrl: boolean;
@@ -42,7 +47,7 @@ export const WORDING_LIMITS: Record<WordingField, WordingLimit> = {
   subtitle: { label: 'Second line', min: null, max: 80, noUrl: true },
   button: { label: 'Button', min: null, max: 20, noUrl: true },
   commentPrompt: { label: 'Comment prompt', min: null, max: 65, noUrl: true },
-  thanks: { label: 'Thanks', min: null, max: null, noUrl: false },
+  thanks: { label: 'Thanks', min: null, max: 300, noUrl: false },
 };
 
 /** One language's worth of a rule's strings. */

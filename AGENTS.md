@@ -540,15 +540,25 @@ unapproved usage risks messaging restrictions on the app. So `messagingTag(state
 author)` takes the author as a required argument, `send_meta` derives it from
 `messages.author_agent_id` rather than from the job payload — the column
 recording the person is the only thing that can substantiate the claim — and
-`automatedReplyBlocked` in `lib/tickets/outbound.ts` stops **all three** automated
-senders — the automation engine, the out-of-hours acknowledgement and the CSAT
-survey — at **24 hours** on `facebook` and `instagram`, not at seven days. The
-seven days belong to a human. It is shared with WhatsApp's template rule because
-a guard only some of the senders apply is not a guard, and it refuses before the
-row is written: delivery refuses it too, but by then the customer's timeline
-carries a reply that permanently failed. Route a new automated sender through it
-and through `carrierFor`, which is the same lesson twice — `send_csat` kept
-private copies of both and so surveyed Facebook tickets by email.
+`automatedReplyBlocked` in `lib/tickets/outbound.ts` stops **every** automated
+sender — the automation engine, the out-of-hours acknowledgement, the CSAT
+survey and the survey's thanks after a tapped rating — at **24 hours** on
+`facebook` and `instagram`, not at seven days. The seven days belong to a human.
+It is shared with WhatsApp's template rule because a guard only some of the
+senders apply is not a guard, and it refuses before the row is written:
+delivery refuses it too, but by then the customer's timeline carries a reply
+that permanently failed. Route a new automated sender through it and through
+`carrierFor`, which is the same lesson twice — `send_csat` kept private copies
+of both and so surveyed Facebook tickets by email.
+
+**One exception, and it is Meta's, asked for by name.** Messenger's customer
+feedback card has a tag of its own, `CUSTOMER_FEEDBACK`, valid on that card and
+nothing else, for seven days after the customer's last message. So the survey
+asks `automatedReplyBlocked(ticket, now, 'feedback_template')`, and `send_meta`
+tags the card through `feedbackTemplateTag`, a function beside `messagingTag`
+rather than a case in it: `HUMAN_AGENT` on the card and `CUSTOMER_FEEDBACK` on
+anything else are then type errors, not branches to get right. Nothing else may
+pass that kind; on Instagram, which has no card, it changes nothing.
 
 Two things it must be given rather than guess. **A Meta comment ticket has no
 messaging window**: it is answered on the comment edge, which `send_meta` reaches
