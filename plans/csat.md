@@ -628,8 +628,11 @@ them as none; it also says when the first survey is younger than the window.
 
 The page is `app/(console)/reports/csat/`, its live reads
 `lib/reports/csat-queries.ts`, on the rollup's keys and its
-`workedConversation()`. "Why not surveyed" ends yesterday, like the figures,
-so its total agrees with the tile above it; the comments run to now. The
+`workedConversation()`. "Why not surveyed" and the live count of sends stop
+on the last day the rollup holds — yesterday once the nightly run is done,
+the day before until then — so they agree with the figures above them; the
+comments run to now. Skips are counted as decisions, not tickets: one ticket
+can be decided against twice and surveyed after. The
 agent table, the agent beside each comment, and the CSV's agent rows are
 behind `report.agents`; the rest, `report.view`. Per agent, "resolutions
 surveyed" divides the agent a survey named by the agent who holds the

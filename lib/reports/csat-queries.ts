@@ -133,22 +133,32 @@ export async function latestComments(window: ReportWindow): Promise<SurveyCommen
  * from its side: a night the job did not run, and a day rolled up before
  * survey counts were kept, whose columns read 0 until it is computed again.
  * Counting the same surveys live, on the same days, is the one way the page
- * can tell "none were sent" from "none were counted" and say which. `first`
- * has no lower bound, for the reason `rolledUpDays` gives.
+ * can tell "none were sent" from "none were counted" and say which.
+ *
+ * Two reads, each served by `csat_surveys_sent_idx`: the window's count with
+ * the window in its `where`, and the first send as the first row in `sent_at`
+ * order rather than a `min()` — over a join, Postgres reads every row for a
+ * `min()`, and this would be the one query on the page that grew with the
+ * archive. `first` has no lower bound, for the reason `rolledUpDays` gives.
  */
 export async function sentSurveys(
   window: ReportWindow,
 ): Promise<{ sent: number; first: string | null }> {
-  const [row] = await db
+  const [counted] = await db
+    .select({ sent: sql<number>`count(*)::int` })
+    .from(csatSurveys)
+    .innerJoin(conversations, eq(conversations.id, csatSurveys.conversationId))
+    .where(and(within(csatSurveys.sentAt, window), workedConversation()));
+
+  const [earliest] = await db
     .select({
-      sent: sql<number>`(count(*) filter (where ${within(csatSurveys.sentAt, window)}))::int`,
-      first: sql<
-        string | null
-      >`(min(${csatSurveys.sentAt}) at time zone ${window.zone})::date::text`,
+      first: sql<string>`(${csatSurveys.sentAt} at time zone ${window.zone})::date::text`,
     })
     .from(csatSurveys)
     .innerJoin(conversations, eq(conversations.id, csatSurveys.conversationId))
-    .where(and(isNotNull(csatSurveys.sentAt), workedConversation()));
+    .where(and(isNotNull(csatSurveys.sentAt), workedConversation()))
+    .orderBy(csatSurveys.sentAt)
+    .limit(1);
 
-  return { sent: row?.sent ?? 0, first: row?.first ?? null };
+  return { sent: counted?.sent ?? 0, first: earliest?.first ?? null };
 }

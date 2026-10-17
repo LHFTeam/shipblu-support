@@ -41,16 +41,22 @@ describe('the reports window', () => {
 
     expect(await rolledUpDays({ from: '2026-09-01', to: '2026-09-30' })).toEqual({
       first: '2026-09-24',
+      last: '2026-09-25',
       days: 2,
     });
     expect(await rolledUpDays({ from: '2026-10-01', to: '2026-10-07' })).toEqual({
       first: '2026-09-24',
+      last: '2026-09-25',
       days: 0,
     });
     expect(await rolledUpDays({ from: '2026-09-01', to: '2026-09-20' })).toEqual({
       first: null,
+      last: null,
       days: 0,
     });
+    // The newest day rolled up so far, never one after the window: what a
+    // live read checked against the figures stops at.
+    expect((await rolledUpDays({ from: '2026-09-20', to: '2026-09-24' })).last).toBe('2026-09-24');
   });
 
   // A day nobody worked has no row. A window opening on one must not report
@@ -65,7 +71,7 @@ describe('the reports window', () => {
     const range = { from: '2026-08-20', to: '2026-08-25' };
     const rolledUp = await rolledUpDays(range);
 
-    expect(rolledUp).toEqual({ first: '2026-08-18', days: 2 });
+    expect(rolledUp).toEqual({ first: '2026-08-18', last: '2026-08-23', days: 2 });
     expect(rolledUp.first! > range.from).toBe(false);
   });
 });

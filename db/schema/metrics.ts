@@ -91,8 +91,9 @@ export const csatSurveys = pgTable(
     index('csat_surveys_conversation_idx').on(t.conversationId),
     index('csat_surveys_responded_idx').on(t.respondedAt),
     index('csat_surveys_created_idx').on(t.createdAt),
-    // The rollup's sent count and the report's live check both read a day of
-    // `sent_at`, which the two indexes above cannot serve.
+    // The rollup's sent count reads a day of `sent_at`, and the report's live
+    // check a window of it and its first row: none of which the two indexes
+    // above can serve.
     index('csat_surveys_sent_idx').on(t.sentAt),
     // The job enqueues without a dedupe key and is idempotent instead, so two
     // runs racing on one ticket meet here rather than sending two surveys.
@@ -486,10 +487,12 @@ export const agentMetricsDaily = pgTable(
  * next door. The page sums whichever channels it is showing.
  *
  * **Everything here is recomputable**, which is what makes a delete-and-insert
- * rebuild safe: `conversations.created_at` is immutable,
- * `conversation_categories.first_seen_at` is append-only, and a cause is dated
- * by `coalesce(resolved_at, root_cause_set_at)`, which outlives the close that
- * clears `resolved_at` (`docs/PROJECT-STATE.md` §6.98). The column that must
+ * rebuild safe: `conversations.created_at` is immutable and
+ * `conversation_categories.first_seen_at` is append-only. A cause is dated by
+ * `coalesce(resolved_at, root_cause_set_at)`, so the close that clears
+ * `resolved_at` does not lose it, but a rebuild after the close files it on the
+ * day the cause was set rather than the day it was resolved
+ * (`docs/PROJECT-STATE.md` §6.98). The column that must
  * never be added is "suggestions still open at day end" — that is current state,
  * and a rebuild would write today's answer onto an old date. It would only
  * surface on the third night, when the recompute window reaches back, which is

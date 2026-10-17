@@ -166,11 +166,19 @@ export async function daily(range: Range): Promise<(Totals & { day: string })[]>
  * holiday or a quiet Friday, and the page would say the history begins there
  * when a wider range reaches further back. `days` stays the count inside the
  * window. Read from the totals slice, the one every figure on the page sums.
+ *
+ * `last` is the newest day rolled up so far: yesterday once tonight's run has
+ * happened, the day before until then (the cron is 00:00 UTC, two or three
+ * hours into the team's day). A live read checked against the figures stops
+ * there, or it counts a day the figures do not have yet.
  */
-export async function rolledUpDays(range: Range): Promise<{ first: string | null; days: number }> {
+export async function rolledUpDays(
+  range: Range,
+): Promise<{ first: string | null; last: string | null; days: number }> {
   const [row] = await db
     .select({
       first: sql<string | null>`min(${metricsDaily.day})::text`,
+      last: sql<string | null>`max(${metricsDaily.day})::text`,
       days: sql<number>`(count(distinct ${metricsDaily.day}) filter (where ${metricsDaily.day} >= ${range.from}::date))::int`,
     })
     .from(metricsDaily)
@@ -183,7 +191,7 @@ export async function rolledUpDays(range: Range): Promise<{ first: string | null
       ),
     );
 
-  return { first: row?.first ?? null, days: row?.days ?? 0 };
+  return { first: row?.first ?? null, last: row?.last ?? null, days: row?.days ?? 0 };
 }
 
 /**

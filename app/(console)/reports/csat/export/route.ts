@@ -86,7 +86,9 @@ const HEADER = [
   'kind',
   'label',
   'surveys_sent',
-  'not_surveyed',
+  // Decisions, not tickets: one ticket can be decided against twice, and
+  // surveyed after.
+  'decided_against',
   'answered',
   'rated_1',
   'rated_2',

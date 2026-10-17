@@ -77,36 +77,59 @@ export default async function CsatReportPage({
     : 30;
 
   // One window, in the team's zone, for every query and for the dates printed
-  // above them (§6.54). The rollup stops at yesterday, and so do the live
-  // reads with a figure above them to agree with — the sends it is checked
-  // against, and the skips the "not surveyed" tile counts. The comments run to
-  // now: they total nothing on the page, and today's are the ones to read.
+  // above them (§6.54). The figures are the rollup's, which ends yesterday at
+  // best; the comments run to now, since they total nothing on the page and
+  // today's are the ones to read.
   const { zone } = await reportingContext();
   const range = rangeIn(zone, days);
-  const rolledThrough = DateTime.fromISO(range.to).minus({ days: 1 }).toISODate()!;
+  const yesterday = DateTime.fromISO(range.to).minus({ days: 1 }).toISODate()!;
   const window = { ...range, zone };
-  const rolledWindow = { ...window, to: rolledThrough };
 
-  // A few at a time rather than all nine at once: a report page holding every
+  // A few at a time rather than all at once: a report page holding every
   // place in the pool for its render is the §6.91 freeze waiting to happen.
-  const [summary, channelRows, groupRows, agentRows, series, rolledUp, reasons, comments, live] =
-    await allLimited(3, [
+  const [summary, channelRows, groupRows, agentRows, series, rolledUp, comments] = await allLimited(
+    3,
+    [
       () => totals(range),
       () => byChannel(range),
       () => byGroup(range),
       () => (namesAgents ? byAgent(range) : Promise.resolve([])),
       () => daily(range),
       () => rolledUpDays(range),
-      () => skipReasons(rolledWindow),
       () => latestComments(window),
-      () => sentSurveys(rolledWindow),
-    ] as const);
+    ] as const,
+  );
+
+  // The live reads with a figure above them to agree with — the sends the
+  // rollup is checked against, and the skips its tile counts — stop on the
+  // last day the rollup holds, not on yesterday: for the hours between the
+  // team's midnight and the nightly run, yesterday is not in the figures yet,
+  // and counting it live would report a gap that is only the clock.
+  const countedThrough =
+    rolledUp.last === null
+      ? DateTime.fromISO(range.from).minus({ days: 1 }).toISODate()!
+      : rolledUp.last < yesterday
+        ? rolledUp.last
+        : yesterday;
+  const countedWindow = { ...window, to: countedThrough };
+  const [reasons, live] = await allLimited(2, [
+    () => skipReasons(countedWindow),
+    () => sentSurveys(countedWindow),
+  ] as const);
 
   const startsLate = rolledUp.first !== null && rolledUp.first > range.from;
-  const surveysStartLate = live.first !== null && live.first > range.from;
-  // Sends the rollup has not counted: a night the job did not run, or a day
-  // rolled up before the survey columns existed, whose counts read 0 until it
-  // is computed again. Either way the figures below are short by this many.
+  // Only when it says something the notice above does not: surveys starting
+  // after the rollup's history did, inside this window.
+  const surveysStartLate =
+    live.first !== null &&
+    live.first > range.from &&
+    (rolledUp.first === null || live.first > rolledUp.first);
+  // Sends the rollup has not counted, on days it has rolled up: a night the
+  // job did not run, or a day rolled up before the survey columns existed,
+  // whose counts read 0 until it is computed again. Either way the figures
+  // below are short by this many, and the page says so rather than reading
+  // them as none. It does not say to recompute: over a day older than three,
+  // that is not safe yet (`docs/PROJECT-STATE.md` §6.98).
   const uncounted = Math.max(0, live.sent - summary.csatSentCount);
 
   const labels = ratingLabels('en');
@@ -115,7 +138,7 @@ export default async function CsatReportPage({
   const answered = ratingCounts(summary).reduce((sum, count) => sum + count, 0);
 
   const byDay = new Map(series.map((day) => [day.day, day]));
-  const trend = windowDays({ from: range.from, to: rolledThrough }).map((day) => ({
+  const trend = windowDays({ from: range.from, to: yesterday }).map((day) => ({
     day,
     label: DateTime.fromISO(day).toFormat('d/M'),
     sent: byDay.get(day)?.csatSentCount ?? 0,
@@ -127,7 +150,7 @@ export default async function CsatReportPage({
     <div className="app-scroll h-full overflow-y-auto p-4 sm:p-6">
       <PageHeader
         title="Customer satisfaction"
-        description={`${range.from} to ${range.to}, in ${zone}. Rolled up nightly — today is not included yet, except in the comments, which are read live.`}
+        description={`${range.from} to ${range.to}, in ${zone}. Rolled up nightly: the figures run to ${rolledUp.last && rolledUp.last >= range.from ? rolledUp.last : 'no day in this window yet'}; the comments, read live, to now.`}
         actions={
           <div className="flex flex-wrap items-center gap-3">
             <RangeNav
@@ -161,8 +184,8 @@ export default async function CsatReportPage({
         ) : null}
         {surveysStartLate ? (
           <Notice tone="info" icon>
-            The first survey went out on <b>{live.first}</b>, after this window opens; the days
-            before it have nothing to report.
+            The first survey went out on <b>{live.first}</b>, after this window opens, so the days
+            before it hold no surveys sent or answered.
           </Notice>
         ) : null}
         {uncounted > 0 ? (
@@ -171,14 +194,20 @@ export default async function CsatReportPage({
               {uncounted} {uncounted === 1 ? 'survey' : 'surveys'} sent in this window{' '}
               {uncounted === 1 ? 'is' : 'are'} not in the figures below.
             </b>{' '}
-            {uncounted === 1 ? 'It went' : 'They went'} out on a day the nightly rollup has not
-            counted surveys for — a night it did not run, or a day rolled up before it kept survey
-            counts. Recomputing those days counts {uncounted === 1 ? 'it' : 'them'}.
+            {uncounted === 1 ? 'It went' : 'They went'} out on a day the nightly rollup has no
+            survey counts for — one rolled up before it kept them, or a night it did not run — so
+            the sends, and every rate divided by them, leave {uncounted === 1 ? 'it' : 'them'} out.
           </Notice>
         ) : null}
       </div>
 
-      {live.first === null && answered === 0 ? (
+      {/* Nothing at all: not a send, an answer or a decision against. A
+          window of skips alone is a page, whose "Why not surveyed" is the one
+          section that explains why nothing went out. */}
+      {live.first === null &&
+      answered === 0 &&
+      summary.csatSkippedCount === 0 &&
+      reasons.length === 0 ? (
         <EmptyState
           title="No surveys yet"
           hint="Nothing has been sent. Surveys are switched on, and their wording set, at Admin → Satisfaction surveys."
@@ -206,9 +235,9 @@ export default async function CsatReportPage({
             />
             <Stat
               label="Surveys sent"
-              explain="Surveys that went out in this window, including those since replaced by a newer survey on the same ticket. Tickets decided against are counted under “Why not surveyed”."
+              explain="Surveys that went out in this window, including those since replaced by a newer survey on the same ticket. The decisions not to send one are counted under “Why not surveyed”."
               value={summary.csatSentCount.toLocaleString('en-GB')}
-              hint={`${count(summary.csatSkippedCount, 'ticket')} not surveyed`}
+              hint={`${summary.csatSkippedCount.toLocaleString('en-GB')} decided against`}
             />
             <Stat
               label="Resolutions surveyed"
@@ -250,7 +279,7 @@ export default async function CsatReportPage({
           {namesAgents ? (
             <Breakdown
               title="By agent"
-              hint="The agent the ticket was assigned to when its survey went out. Resolutions are the agent's current tickets, so a ticket reassigned since counts its survey and its resolve against different people."
+              hint="The agent the ticket was assigned to when its survey went out. A resolution counts against whoever held the ticket when its day was rolled up, so a ticket reassigned in between counts its survey and its resolve against different people."
               rows={agentRows.filter(hasSurveys)}
             />
           ) : null}
@@ -260,7 +289,7 @@ export default async function CsatReportPage({
               <>
                 <Card className="mb-3">
                   <Columns
-                    caption={`Surveys sent and answered on each of the window's ${trend.length} rolled-up days`}
+                    caption={`Surveys sent and answered on each of the window's ${trend.length} days up to yesterday`}
                     labels={trend.map((point) => point.label)}
                     series={[
                       {
@@ -299,10 +328,10 @@ export default async function CsatReportPage({
 
           <Section
             title="Why not surveyed"
-            hint="Resolved tickets the survey decided against, by reason, over the days the figures above cover. A ticket resolved while surveys or its channel were switched off, or on a channel nobody surveys, is turned away before a reason is written, so it is in neither this table nor the sends."
+            hint="Each time a resolved ticket was decided against, by reason, over the days the figures above cover. One ticket can be decided against more than once — reopened and resolved again, or sent by hand — and surveyed after. A ticket resolved while surveys or its channel were switched off, or on a channel nobody surveys, is turned away before a decision is written, so it is in neither this table nor the sends."
           >
             {reasons.length > 0 ? (
-              <Table head={['Reason', 'Tickets']}>
+              <Table head={['Reason', 'Decisions']}>
                 {reasons.map((reason) => (
                   <Row key={reason.reason}>
                     <Cell className="first-letter:uppercase">{reason.label}</Cell>
@@ -340,7 +369,7 @@ export default async function CsatReportPage({
                     {namesAgents ? <Cell>{row.agent ?? '—'}</Cell> : null}
                     {/* The customer's own words, in whichever direction they
                         wrote them. */}
-                    <Cell className="min-w-64 whitespace-pre-line">
+                    <Cell className="min-w-64 whitespace-pre-line [overflow-wrap:anywhere]">
                       <span dir="auto">{row.comment}</span>
                     </Cell>
                     <Cell>

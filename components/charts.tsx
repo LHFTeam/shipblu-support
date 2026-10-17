@@ -262,10 +262,14 @@ const RATING_COLORS = [
  *
  * Five bars rather than the average alone, because an average of 3.0 over a
  * week of ones and fives is the one number that hides the problem. Coloured by
- * the step — the one place a bar's colour follows its value, because here the
- * value is the category: it is a diverging scale, red below the grey midpoint
- * and blue above it — and every bar carries its count and its share of the
- * whole as text, so no figure is reachable only by reading a colour.
+ * the step, because here the step is the category — a diverging scale, red
+ * below the grey midpoint and blue above it — and every bar carries its count
+ * and its share of the whole as text, so no figure is reachable only by
+ * reading a colour.
+ *
+ * One grid for the five rows (`subgrid`), not one each: a row whose count is
+ * wider would otherwise shrink its own track, and a bar's width is a share of
+ * its track, so the bars would stop being comparable.
  *
  * HTML rather than SVG, unlike the charts above: the labels are words, and an
  * SVG's text shrinks with the drawing on a phone, where text in the page's own
@@ -287,15 +291,12 @@ export function RatingBars({
 
   return (
     <figure>
-      <ol className="space-y-2">
+      <ol className="grid grid-cols-[minmax(0,7.5rem)_minmax(0,1fr)_auto] gap-x-3 gap-y-2">
         {[4, 3, 2, 1, 0].map((step) => {
           const count = counts[step]!;
           const percent = total > 0 ? Math.round((count / total) * 100) : 0;
           return (
-            <li
-              key={step}
-              className="grid grid-cols-[minmax(0,7.5rem)_minmax(0,1fr)_minmax(4.5rem,auto)] items-center gap-3 text-xs"
-            >
+            <li key={step} className="col-span-3 grid grid-cols-subgrid items-center text-xs">
               <span className="truncate text-(--color-text-secondary)">
                 {step + 1} · {labels[step]}
               </span>

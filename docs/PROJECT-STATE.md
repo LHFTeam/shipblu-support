@@ -6263,8 +6263,10 @@ still waiting for it` one whose outcome is not known yet.
     backfill the survey columns would otherwise want — quietly lowers every
     resolved figure it touches. The comments in `rollup-metrics.ts` and on
     `category_metrics_daily` called `resolved_at` immutable; they no longer
-    do. The cause report is unaffected: it dates a cause by
-    `coalesce(resolved_at, root_cause_set_at)`, which outlives the close. Not
+    do. The cause report loses nothing but can move: it dates a cause by
+    `coalesce(resolved_at, root_cause_set_at)`, so after the close a rebuild
+    files it on the day the cause was set — at or before the resolve, days
+    before it after a reopen — rather than the day it was resolved. Not
     fixed here, because the fix is not a report change — keeping `resolved_at`
     when a _resolved_ ticket closes (never setting it for one closed straight
     from Open, which `conversations.root_cause_set_at`'s comment explains)
