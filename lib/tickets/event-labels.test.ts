@@ -45,7 +45,7 @@ describe('describeEvent', () => {
     );
     expect(describeEvent('csat_thanked', {})).toBe('thanked the customer for their rating');
     expect(describeEvent('csat_skipped', { reason: 'no_privacy_url' })).toBe(
-      'did not send a satisfaction survey: Messenger’s survey card needs a privacy policy link, and none is set',
+      'did not send a satisfaction survey: past the 24 hours only Messenger’s survey card sends, and it needs a privacy policy link that is not set',
     );
     // Recorded before the event carried a source.
     expect(describeEvent('csat_received', { rating: 4 })).toBe('rated the support 4 / 5');

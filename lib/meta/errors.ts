@@ -275,23 +275,29 @@ function isHandoverRefusal(error: MetaApiError): boolean {
 }
 
 /**
- * Graph refused a send because of who it was addressed to, not what it was:
- * the customer blocked the Page or is otherwise unreachable (`551`), their
- * window has closed (`1545041`, listed in the same table as a code and sent
- * by Graph as a subcode, so read as either), or another app holds the thread.
- * All three are documented in the Messenger send API's error table, or read
- * out of a log for the handover, and none says anything about the message —
- * which is the question the survey asks of a refused feedback card: did
- * Messenger refuse *the card*, or would it have refused anything sent here?
+ * Graph refused a send because of who it was addressed to, not what it was —
+ * the question the survey asks of a refused feedback card: did Messenger
+ * refuse *the card*, or would it have refused anything sent here?
+ *
+ * The Send API's own error codes for the recipient: the customer blocked the
+ * Page or is otherwise unreachable (`551`, sent with subcode `1545041`, which
+ * the send-messages page's table lists on its own as "messaging window
+ * closed" — either reading is about the customer, so either is matched);
+ * no such user (`100` / `2018001`); not receiving messages from us
+ * (`10` / `2018108`); outside the allowed window (`10` / `2018278`, the
+ * sentence `isHumanAgentRefusal`'s note quotes); and another app holding
+ * the thread (`10` / `2018300`, read out of a log). Keyed on the subcode
+ * wherever there is one, because `100` and `10` are also how Graph refuses a
+ * malformed request and a missing permission — which *are* the card's.
  */
 const RECIPIENT_CODES = new Set([551]);
-const WINDOW_CLOSED = 1545041;
+const RECIPIENT_SUBCODES = new Set([1545041, 2018001, 2018108, 2018278]);
 
 export function isRecipientRefusal(error: MetaApiError): boolean {
   return (
     (error.code !== null && RECIPIENT_CODES.has(error.code)) ||
-    error.code === WINDOW_CLOSED ||
-    error.subcode === WINDOW_CLOSED ||
+    (error.code !== null && RECIPIENT_SUBCODES.has(error.code)) ||
+    (error.subcode !== null && RECIPIENT_SUBCODES.has(error.subcode)) ||
     isHandoverRefusal(error)
   );
 }

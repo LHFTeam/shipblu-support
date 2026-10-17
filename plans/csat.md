@@ -390,14 +390,18 @@ _Built:_ the refusal is kept on `csat_settings` (`last_template_refusal`,
 `_at`) and printed on Facebook's row of the admin page; the survey row's
 delivery moves to `meta_quick_reply`, the message's `sendKind` with it (so a
 retry goes straight to the buttons), and a `csat_fell_back` event says so on
-the timeline. Only a permanent refusal of the card falls back: a transient
-answer — Graph's unspecified codes among them — is the queue's to retry as the
-card; a dead token, a refusal this app made itself and a refusal about the
-customer (`551`, the window, another app holding the thread:
-`isRecipientRefusal`) would refuse anything sent there, so they are not
-something the card did, and fail the row as any refused send. A card that goes
-out clears the last refusal. The admin page will not save Facebook switched on without a privacy
-link, and the job still skips `no_privacy_url` if it meets one missing.
+the timeline. A permanent refusal of the card falls back at once; a transient
+answer — Graph's unspecified codes and its 5xx among them — is the queue's to
+retry as the card, and counts as the card refused on the queue's last try,
+because "an unknown error has occurred" is how Graph answers most refusals. A
+dead token, a refusal this app made itself and a refusal about the customer
+(`551`/`1545041`, `2018001`, `2018108`, `2018278`, another app holding the
+thread: `isRecipientRefusal`) would refuse anything sent there, so they are
+not something the card did, and fail the row as any refused send. A card that
+goes out clears the last refusal. Without a privacy link, Facebook is surveyed
+with the buttons inside the 24 hours and skipped `no_privacy_url` past them,
+where only the card could have gone; the admin page says so beside the field
+rather than refusing to save.
 Expiry is Meta's: a lapsed card cannot be answered, so no `expires_at` is
 written yet, and `recordAnswer` still takes a late answer to a superseded row
 as every door does.

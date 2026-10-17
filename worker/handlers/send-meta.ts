@@ -29,7 +29,7 @@ import {
   type MetaSendAuthor,
   type MetaWindowState,
 } from '@/lib/meta/window';
-import type { ClaimedJob } from '@/lib/queue';
+import { isFinalAttempt, type ClaimedJob } from '@/lib/queue';
 import { parseJobPayload } from '@/lib/queue/payloads';
 import { alreadySent } from './already-sent';
 import { subjectGone } from './subject-gone';
@@ -86,7 +86,12 @@ type SendMeta = {
  * send is a direct message to the explanation — it goes where one goes, and
  * is refused for the same reasons.
  */
-type Attempt = { sendKind: SendKind; tag: MetaSendContext['tag'] };
+type Attempt = {
+  sendKind: SendKind;
+  tag: MetaSendContext['tag'];
+  /** The queue's last try at this message (`isFinalAttempt`): no retry comes after it. */
+  final: boolean;
+};
 
 export async function sendMeta(job: ClaimedJob): Promise<void> {
   const { messageId } = parseJobPayload(job, 'send_meta');
@@ -112,7 +117,7 @@ export async function sendMeta(job: ClaimedJob): Promise<void> {
   }
 
   const sendKind = meta.sendKind ?? (await inferSendKind(row.conversation.id));
-  const attempt: Attempt = { sendKind, tag: null };
+  const attempt: Attempt = { sendKind, tag: null, final: isFinalAttempt(job) };
 
   // Which host and credential this goes out with. Resolved once here so the log
   // line, the failure explanation and the request itself cannot disagree about
@@ -279,7 +284,11 @@ async function deliver(
  * own sentence, as any refused send does.
  *
  * Only a refusal of *the card* falls back. A transient answer, the
- * unspecified codes among them, is the queue's to retry as the card. A dead
+ * unspecified codes and Graph's 5xx among them, is the queue's to retry as
+ * the card — until the queue's last try, where it counts as the card refused:
+ * "An unknown error has occurred" is the shape Graph gives most refusals,
+ * and a card withdrawn that way would otherwise be retried to `dead` on every
+ * Facebook survey, with no warning on the page and the 24 hours spent. A dead
  * token, a refusal this app made itself, and a refusal about the recipient —
  * a customer who blocked the Page, a thread another app holds
  * (`isRecipientRefusal`) — would refuse anything sent here: kept on the
@@ -324,7 +333,7 @@ async function deliverFeedbackCard(
     if (
       !(error instanceof MetaApiError) ||
       error instanceof MetaSendRefusal ||
-      error.isTransient ||
+      (error.isTransient && !attempt.final) ||
       error.status === 0 ||
       error.code === ACCESS_TOKEN_CODE ||
       isRecipientRefusal(error)

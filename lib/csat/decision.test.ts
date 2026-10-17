@@ -142,7 +142,7 @@ describe('decideSurvey', () => {
     });
   });
 
-  it("sends Messenger's card for the seven days its tag allows, and only with a privacy link", () => {
+  it("sends Messenger's card for the seven days its tag allows, and buttons without a privacy link", () => {
     const facebook = (overrides: Partial<DecisionInput> = {}) =>
       input({ channel: 'facebook', byEmail: false, ...overrides });
 
@@ -156,15 +156,22 @@ describe('decideSurvey', () => {
       decideSurvey(facebook({ metaWindowOpen: false, feedbackWindowOpen: false }), ON),
     ).toEqual({ kind: 'skip', reason: 'window_closed' });
 
-    // Graph refuses the card without the link, so no card is written; and
-    // the missing link is said before the window, because it is the admin's
-    // and the same on every ticket.
+    // Graph refuses the card without the link, so none is written: inside the
+    // 24 hours the survey goes as rating buttons, which need no link; past
+    // them the missing link is the reason, because with one the card would
+    // have gone; and past the seven days, the window is.
     const noLink = { ...ON, privacyUrl: null };
-    expect(decideSurvey(facebook(), noLink)).toEqual({ kind: 'skip', reason: 'no_privacy_url' });
-    expect(decideSurvey(facebook({ feedbackWindowOpen: false }), noLink)).toEqual({
+    expect(decideSurvey(facebook(), noLink)).toEqual({
+      kind: 'send',
+      delivery: 'meta_quick_reply',
+    });
+    expect(decideSurvey(facebook({ metaWindowOpen: false }), noLink)).toEqual({
       kind: 'skip',
       reason: 'no_privacy_url',
     });
+    expect(
+      decideSurvey(facebook({ metaWindowOpen: false, feedbackWindowOpen: false }), noLink),
+    ).toEqual({ kind: 'skip', reason: 'window_closed' });
   });
 
   it('sends quick replies on Instagram only inside the 24 hours, whatever the card could do', () => {

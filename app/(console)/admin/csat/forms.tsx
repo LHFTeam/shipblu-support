@@ -171,17 +171,18 @@ export function SurveySettingsForm({ settings }: { settings: CsatSettings }) {
         <Toggle
           name="surveyFacebook"
           label="Facebook"
-          hint="Messenger’s own feedback card, up to 7 days after the customer last wrote. Needs the privacy link below."
+          hint="Messenger’s own feedback card, up to 7 days after the customer last wrote, with the privacy link below. Without one, rating buttons inside the 24 hours."
           defaultChecked={settings.channels.facebook}
         />
         <div className="flex flex-col gap-2 ps-6">
           <Field
             label="Privacy policy link"
-            hint="Shown on Messenger’s card. Required for Facebook surveys."
+            hint="Shown on Messenger’s card, which needs one."
             explain={
               <>
                 Meta will not send its feedback card without a link to the business&rsquo;s privacy
-                policy, so Facebook tickets are not surveyed until one is set.
+                policy. Until one is set, Facebook tickets are surveyed with rating buttons instead,
+                which only send inside the 24 hours after the customer last wrote.
               </>
             }
           >

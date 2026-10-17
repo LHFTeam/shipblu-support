@@ -104,8 +104,14 @@ async function cardSurvey(ago: number) {
   return { conversationId: ticket!.id, ...sent };
 }
 
-function job(messageId: string) {
-  return { id: 'job-1', type: 'send_meta', payload: { messageId } } as never;
+function job(
+  messageId: string,
+  attempt: { attempts: number; maxAttempts: number } = {
+    attempts: 1,
+    maxAttempts: 5,
+  },
+) {
+  return { id: 'job-1', type: 'send_meta', payload: { messageId }, ...attempt } as never;
 }
 
 async function state(survey: { surveyId: string; messageId: string; conversationId: string }) {
@@ -222,11 +228,47 @@ describe('send_meta, for a survey card', () => {
     expect(after.refusal).toContain('Unsupported post request');
   });
 
+  it('retries the card through a transient refusal, and counts it as the card’s on the last try', async () => {
+    await settingsOn();
+    const survey = await cardSurvey(HOUR);
+    // What Graph says to most refusals, a withdrawn card's quite possibly.
+    const unknown = () => new MetaApiError('An unknown error has occurred.', 500, 2, null, true);
+
+    graph.sendMessageRequest.mockRejectedValueOnce(unknown());
+    await expect(sendMeta(job(survey.messageId))).rejects.toThrow('An unknown error');
+    // A blip, until the queue says otherwise: retried as the card.
+    expect(requests()).toEqual([{ kind: 'card', messagingType: 'RESPONSE', tag: null }]);
+    expect(await state(survey)).toMatchObject({
+      delivery: 'meta_template',
+      refusal: null,
+      fellBack: 0,
+    });
+
+    graph.sendMessageRequest
+      .mockRejectedValueOnce(unknown())
+      .mockResolvedValueOnce({ messageId: 'mid.buttons', recipientId: 'PSID-1' });
+    await sendMeta(job(survey.messageId, { attempts: 5, maxAttempts: 5 }));
+
+    // The last try: the card counts as refused, said on the page, and the
+    // buttons go while the 24 hours are open.
+    expect(requests().slice(1)).toEqual([
+      { kind: 'card', messagingType: 'RESPONSE', tag: null },
+      { kind: 'buttons', messagingType: 'RESPONSE', tag: null },
+    ]);
+    const after = await state(survey);
+    expect(after).toMatchObject({
+      message: { status: 'sent' },
+      delivery: 'meta_quick_reply',
+      fellBack: 1,
+    });
+    expect(after.refusal).toContain('An unknown error');
+  });
+
   it('does not blame the card for a customer who cannot be reached', async () => {
     await settingsOn();
     const survey = await cardSurvey(HOUR);
     graph.sendMessageRequest.mockRejectedValueOnce(
-      new MetaApiError("(#551) This person isn't available right now.", 400, 551, null, false),
+      new MetaApiError("(#551) This person isn't available right now.", 400, 551, 1545041, false),
     );
 
     await sendMeta(job(survey.messageId));

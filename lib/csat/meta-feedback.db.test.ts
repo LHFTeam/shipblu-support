@@ -134,7 +134,10 @@ describe('recordMetaFeedback', () => {
       .select({ dedupeKey: jobs.dedupeKey })
       .from(jobs)
       .where(eq(jobs.type, 'send_meta'));
-    expect(carriers).toEqual([{ dedupeKey: `send:${written[0]!.id}` }]);
+    // The survey's own, queued with it, and the thanks'.
+    expect(carriers.map((row) => row.dedupeKey).sort()).toEqual(
+      [`send:${ticket.messageId}`, `send:${written[0]!.id}`].sort(),
+    );
 
     // The other connection's copy of the same tap, and a second tap: the
     // first answer stands, and nobody is thanked twice.

@@ -81,15 +81,10 @@ export async function saveSurveySettings(
 
   const privacyUrl = text(formData, 'privacyUrl') || null;
   const privacyProblem = privacyUrl ? privacyUrlProblem(privacyUrl) : null;
+  // No link is allowed: Facebook is then surveyed with rating buttons inside
+  // the 24 hours, and the card waits for one — said beside the field, not by
+  // refusing a save of everything else on the form.
   if (privacyProblem) return { error: privacyProblem };
-  // Graph refuses the card without one, so Facebook switched on without it
-  // would only ever write "not surveyed" on every ticket; said here instead.
-  if (on('surveyFacebook') && !privacyUrl) {
-    return {
-      error:
-        'Messenger’s survey card needs a link to your privacy policy. Add one, or leave Facebook off.',
-    };
-  }
 
   const input: CsatSettingsInput = {
     enabled: on('enabled'),

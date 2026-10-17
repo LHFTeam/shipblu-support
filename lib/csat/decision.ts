@@ -191,13 +191,20 @@ export function decideSurvey(input: DecisionInput, settings: CsatSettings): Deci
     if (input.commentThread) return { kind: 'skip', reason: 'comment_thread' };
 
     if (input.channel === 'facebook') {
-      // Messenger's own survey card, which Graph refuses without a privacy
-      // link. Before the window, as "off" comes before a ticket's own
-      // reasons: a missing link is the admin's, and the same on every ticket.
-      if (!settings.privacyUrl) return { kind: 'skip', reason: 'no_privacy_url' };
-      return input.feedbackWindowOpen
-        ? { kind: 'send', delivery: 'meta_template' }
-        : { kind: 'skip', reason: 'window_closed' };
+      // Messenger's own survey card, for the seven days its tag allows — which
+      // Graph refuses without a privacy link. With none, the 24 hours still
+      // take the rating buttons Instagram gets, which need no link; past
+      // them, the missing link is the reason, because with one the card
+      // would have gone.
+      if (settings.privacyUrl && input.feedbackWindowOpen) {
+        return { kind: 'send', delivery: 'meta_template' };
+      }
+      if (input.metaWindowOpen) return { kind: 'send', delivery: 'meta_quick_reply' };
+      return {
+        kind: 'skip',
+        reason:
+          settings.privacyUrl || !input.feedbackWindowOpen ? 'window_closed' : 'no_privacy_url',
+      };
     }
 
     // Instagram has no card; five quick replies under the question, which

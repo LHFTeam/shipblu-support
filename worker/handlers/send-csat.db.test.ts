@@ -280,13 +280,21 @@ describe('send_csat', () => {
     expect(carriers).toHaveLength(2);
   });
 
-  it('leaves Facebook unsurveyed, and says why, until there is a privacy link', async () => {
+  it('surveys Facebook with rating buttons until there is a privacy link, and says why past them', async () => {
     await switchOn();
-    const id = await resolvedTicket({ channel: 'facebook' });
+    const fresh = await resolvedTicket({ channel: 'facebook', customerText: 'where is it?' });
+    const threeDaysAgo = new Date(Date.now() - 3 * 24 * 3_600_000);
+    const late = await resolvedTicket({ channel: 'facebook', lastWroteAt: threeDaysAgo });
 
-    await sendCsat(job(id));
+    for (const id of [fresh, late]) await sendCsat(job(id));
 
-    expect(await surveysOf(id)).toEqual([
+    // Inside the 24 hours the buttons need no link.
+    expect((await surveysOf(fresh))[0]).toMatchObject({
+      status: 'sent',
+      delivery: 'meta_quick_reply',
+    });
+    // Past them only the card would have gone, and it needs one.
+    expect(await surveysOf(late)).toEqual([
       expect.objectContaining({ status: 'skipped', skipReason: 'no_privacy_url' }),
     ]);
   });

@@ -612,6 +612,11 @@ describe('isRecipientRefusal', () => {
     expect(refusal(10, 1545041)).toBe(true);
     expect(refusal(1545041)).toBe(true);
     expect(refusal(10, 2018300)).toBe(true);
+    // No such user, not receiving our messages, outside the allowed window.
+    expect(refusal(100, 2018001)).toBe(true);
+    expect(refusal(10, 2018108)).toBe(true);
+    expect(refusal(10, 2018278)).toBe(true);
+    expect(refusal(551, 1545041)).toBe(true);
     // An invalid request, or a permission: about what was sent, or by whom.
     expect(refusal(100)).toBe(false);
     expect(refusal(10)).toBe(false);
