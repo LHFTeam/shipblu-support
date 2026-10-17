@@ -604,6 +604,42 @@ other pages. Sections:
 `/reports`, `/reports/agents` and the dashboard keep their CSAT columns and
 gain the response rate in the hint, and a link to the new page from the tile.
 
+_Built:_ the seven columns as tabled, from one read of a day's surveys in
+`computeDay`, each fact on its own timestamp. Every CSAT column, the two old
+ones included, now takes the survey's own `channel`, and the ticket's only
+for the one row written before surveys had one, which would otherwise sit in
+the totals and in no channel and fail `reconciles` — which now checks the new
+counts too. A rating off the 1–5 scale counts nowhere, so the average and the
+bars describe the same answers.
+
+No backfill was run, and none is needed on production, which holds one
+survey (sent 2026-08-31, never answered). The backfill "the plan ships with"
+is the existing job (`npm run job -- rollup_metrics days=…`), and two things
+about it changed on the way. An answer is filed on its own `responded_at`,
+which is always recent when it arrives, so the nightly three-day recompute
+already catches a late one; the backfill is only for days rolled up before
+the columns existed. And it is **not safe over days older than three** until
+`docs/PROJECT-STATE.md` §6.98 is fixed: closing a resolved ticket clears
+`resolved_at`, so rebuilding an old day rewrites its resolution counts — the
+"Resolutions surveyed" denominator among them — without every ticket closed
+since. Instead the page counts the window's sends live (`sentSurveys`) and,
+when the rollup holds fewer, says how many are missing rather than reading
+them as none; it also says when the first survey is younger than the window.
+
+The page is `app/(console)/reports/csat/`, its live reads
+`lib/reports/csat-queries.ts`, on the rollup's keys and its
+`workedConversation()`. "Why not surveyed" ends yesterday, like the figures,
+so its total agrees with the tile above it; the comments run to now. The
+agent table, the agent beside each comment, and the CSV's agent rows are
+behind `report.agents`; the rest, `report.view`. Per agent, "resolutions
+surveyed" divides the agent a survey named by the agent who holds the
+ticket now, and the table says so. The distribution is `RatingBars`, five
+bars on a diverging red–grey–blue scale (`--color-rating-1`…`5`, checked with
+the dataviz validator), each carrying its count and share, since the grey
+midpoint is under 3:1 on white. The three tiles' hint is `responsesHint`:
+"12 responses · 40% of 30 sent", the rate left off when nothing was sent;
+`/reports/agents` links to the page only for a holder of `report.view`.
+
 ## Stages
 
 Each is one pull request, verified before the next starts; the first stands on

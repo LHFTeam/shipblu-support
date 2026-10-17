@@ -11,6 +11,7 @@ import {
   Table,
 } from '@/components/ui';
 import { requirePermission } from '@/lib/auth/guard';
+import { can } from '@/lib/auth/permissions';
 import {
   adherence,
   agentDays,
@@ -33,6 +34,7 @@ import {
   averageSeconds,
   formatDuration,
   metPercentage,
+  responsesHint,
 } from '@/lib/reports/queries';
 import { rangeIn, reportingContext } from '@/lib/reports/rollup';
 import { RangeNav } from '../range-nav';
@@ -63,7 +65,7 @@ export default async function AgentProductivityPage({
 }: {
   searchParams: Promise<{ days?: string; agent?: string }>;
 }) {
-  await requirePermission('report.agents');
+  const agent = await requirePermission('report.agents');
 
   const { days: requested, agent: requestedAgent } = await searchParams;
   const days = RANGES.includes(Number(requested) as (typeof RANGES)[number])
@@ -162,7 +164,23 @@ export default async function AgentProductivityPage({
             <Stat
               label="CSAT"
               value={averageRating(team.csatRatingSum, team.csatResponseCount)?.toFixed(1) ?? '—'}
-              hint={`${team.csatResponseCount} response${team.csatResponseCount === 1 ? '' : 's'}`}
+              hint={
+                // The satisfaction report is `report.view`'s, which this page's
+                // own key does not imply: no link to a door that is shut.
+                can(agent, 'report.view') ? (
+                  <>
+                    {responsesHint(team)} ·{' '}
+                    <Link
+                      href={`/reports/csat?days=${days}`}
+                      className="text-(--color-text-link) hover:text-(--color-text-link-hover) hover:underline"
+                    >
+                      Details
+                    </Link>
+                  </>
+                ) : (
+                  responsesHint(team)
+                )
+              }
             />
           </section>
 

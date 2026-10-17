@@ -1,3 +1,4 @@
+import { DateTime } from 'luxon';
 import { and, between, eq, isNotNull, isNull, lte, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { agents, groups, metricsDaily } from '@/db/schema';
@@ -250,6 +251,20 @@ export function responseRate(row: Pick<Totals, 'csatResponseCount' | 'csatSentCo
 }
 
 /**
+ * The line under a CSAT tile: how many answers its average is over, and what
+ * share of the window's surveys they are — the response rate is what says
+ * whether an average of 4.6 is the team or the dozen customers who answered.
+ * The rate is left off when nothing was sent, rather than printed as 0%.
+ */
+export function responsesHint(row: Pick<Totals, 'csatResponseCount' | 'csatSentCount'>): string {
+  const answers = `${row.csatResponseCount.toLocaleString('en-GB')} response${row.csatResponseCount === 1 ? '' : 's'}`;
+  const rate = responseRate(row);
+  return rate === null
+    ? answers
+    : `${answers} · ${rate}% of ${row.csatSentCount.toLocaleString('en-GB')} sent`;
+}
+
+/**
  * Surveys sent over tickets resolved, in the same window — how much of the
  * work was asked about at all. Also a rate: a survey goes out a delay after
  * its resolve, so the two edges of a window do not hold exactly the same
@@ -274,6 +289,25 @@ export function ratingShares(row: Totals): { positive: number | null; negative: 
   const [one, two, , four, five] = ratingCounts(row);
   const counted = ratingCounts(row).reduce((sum, count) => sum + count, 0);
   return { positive: share(four + five, counted), negative: share(one + two, counted) };
+}
+
+/**
+ * Every day from `from` to `to`, both included, as the `YYYY-MM-DD` strings
+ * the rollup keys on — for a series that has to show the days with no row as
+ * days, not skip them. Calendar arithmetic on the dates themselves, never
+ * through a `Date`, which would put each one at midnight UTC (AGENTS.md).
+ */
+export function windowDays(range: Range): string[] {
+  const days: string[] = [];
+  const last = DateTime.fromISO(range.to, { zone: 'utc' });
+  for (
+    let day = DateTime.fromISO(range.from, { zone: 'utc' });
+    day.isValid && day <= last;
+    day = day.plus({ days: 1 })
+  ) {
+    days.push(day.toISODate()!);
+  }
+  return days;
 }
 
 /** "1h 20m", "45s" — a duration a person can read at a glance. */

@@ -193,10 +193,15 @@ export async function rollupMetrics(job?: ClaimedJob): Promise<void> {
       // their own, for the reason at the top of this file: two nightly jobs
       // would be two answers to "which day is this". Rebuilt by delete and
       // insert like the others, and safe to destroy for the same reason —
-      // `conversations.created_at` and `resolved_at` are immutable and
+      // `conversations.created_at` is immutable and
       // `conversation_categories.first_seen_at` is append-only, so every column
       // can be recomputed from scratch. The column that would break that is
-      // "suggestions still open", which is why it is not there.
+      // "suggestions still open", which is why it is not there. `resolved_at`
+      // is not immutable — closing a resolved ticket clears it — which the
+      // cause count survives through `root_cause_set_at` and the resolution
+      // counts in the two tables above do not: recomputing a day older than
+      // the close drops that resolution there (`docs/PROJECT-STATE.md` §6.98).
+      // Read it before any backfill.
       await tx.delete(categoryMetricsDaily).where(eq(categoryMetricsDaily.day, day));
       if (categoryRows.length) await tx.insert(categoryMetricsDaily).values(categoryRows);
 

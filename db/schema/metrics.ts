@@ -486,8 +486,10 @@ export const agentMetricsDaily = pgTable(
  * next door. The page sums whichever channels it is showing.
  *
  * **Everything here is recomputable**, which is what makes a delete-and-insert
- * rebuild safe: `conversations.created_at` and `resolved_at` are immutable, and
- * `conversation_categories.first_seen_at` is append-only. The column that must
+ * rebuild safe: `conversations.created_at` is immutable,
+ * `conversation_categories.first_seen_at` is append-only, and a cause is dated
+ * by `coalesce(resolved_at, root_cause_set_at)`, which outlives the close that
+ * clears `resolved_at` (`docs/PROJECT-STATE.md` §6.98). The column that must
  * never be added is "suggestions still open at day end" — that is current state,
  * and a rebuild would write today's answer onto an old date. It would only
  * surface on the third night, when the recompute window reaches back, which is

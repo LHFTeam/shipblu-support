@@ -90,6 +90,19 @@ export function linePath(values: number[], width: number, height: number, max?: 
     .join(' ');
 }
 
+/**
+ * Each value as a share of the largest, 0–100, for bars that share one track.
+ *
+ * Of the largest rather than of the total, so the longest bar fills its track
+ * and the rest are read against it — five bars of a distribution measured
+ * against the whole would leave most of every track empty. The share of the
+ * total is printed beside each bar instead, where it can be read exactly.
+ */
+export function barWidths(values: readonly number[]): number[] {
+  const peak = Math.max(0, ...values);
+  return values.map((value) => (peak > 0 ? (Math.max(0, value) / peak) * 100 : 0));
+}
+
 /** "1,284", "12.9K", "1.2M" — a stat tile has room for four characters. */
 export function compact(value: number): string {
   if (Math.abs(value) < 10_000) return value.toLocaleString('en-GB');

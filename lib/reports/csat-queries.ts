@@ -106,7 +106,10 @@ export async function latestComments(window: ReportWindow): Promise<SurveyCommen
       and(
         isNotNull(csatSurveys.rating),
         isNotNull(csatSurveys.respondedAt),
-        sql`btrim(${csatSurveys.comment}) <> ''`,
+        // `recordAnswer`, the one door, trims a comment and stores a blank one
+        // as null — so null is the whole test, and no `btrim` here to disagree
+        // with it (Postgres's strips only the space; §6.97).
+        isNotNull(csatSurveys.comment),
         within(csatSurveys.respondedAt, window),
         workedConversation(),
       ),

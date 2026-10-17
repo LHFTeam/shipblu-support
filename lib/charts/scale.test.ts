@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { bands, compact, linePath, niceCeiling, split } from './scale';
+import { bands, barWidths, compact, linePath, niceCeiling, split } from './scale';
 
 describe('niceCeiling', () => {
   it('rounds up to a readable tick', () => {
@@ -87,5 +87,20 @@ describe('compact', () => {
     expect(compact(12_900)).toBe('12.9K');
     expect(compact(20_000)).toBe('20K');
     expect(compact(1_200_000)).toBe('1.2M');
+  });
+});
+
+describe('barWidths', () => {
+  it('fills the track with the largest bar and measures the rest against it', () => {
+    expect(barWidths([1, 4, 2, 0, 8])).toEqual([12.5, 50, 25, 0, 100]);
+  });
+
+  it('draws nothing for nothing, rather than dividing by it', () => {
+    expect(barWidths([0, 0, 0])).toEqual([0, 0, 0]);
+    expect(barWidths([])).toEqual([]);
+  });
+
+  it('never draws a negative bar', () => {
+    expect(barWidths([-2, 4])).toEqual([0, 100]);
   });
 });

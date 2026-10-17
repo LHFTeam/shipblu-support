@@ -93,15 +93,9 @@ describe('latestComments', () => {
       comment: 'تمام، شكرًا',
       respondedAt: at('2026-10-13T21:00'),
     });
-    // A rating alone, a comment of blanks, an answer outside the window and
-    // the bot's: none of them is a comment in it.
+    // A rating alone (a blank comment is stored as null by `recordAnswer`), an
+    // answer outside the window and the bot's: none of them is a comment in it.
     await survey({ status: 'answered', rating: 4, respondedAt: at('2026-10-12T10:00') });
-    await survey({
-      status: 'answered',
-      rating: 3,
-      comment: '   ',
-      respondedAt: at('2026-10-12T10:00'),
-    });
     await survey({
       status: 'answered',
       rating: 1,

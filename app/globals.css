@@ -311,6 +311,19 @@
   --color-series-2: var(--color-coral-600);
   --color-chart-grid: var(--color-border-subtle);
 
+  /* The 1–5 satisfaction scale, diverging on a grey midpoint: red for the low
+     end, blue for the high, two equal steps an arm, so a split week reads as
+     two ends rather than as an average. Checked with the dataviz skill's
+     validator against the white card: adjacent steps ΔE ≥ 13.3 under
+     protanopia and deuteranopia, ≥ 15.7 to normal vision. The grey is 2.49:1
+     on white, under the 3:1 a mark alone needs, so every bar carries its count
+     and share as text. Not the status reds: a 1 is an answer, not an alarm. */
+  --color-rating-1: var(--color-red-700);
+  --color-rating-2: var(--color-red-500);
+  --color-rating-3: var(--color-neutral-400);
+  --color-rating-4: var(--color-blu-500);
+  --color-rating-5: var(--color-blu-700);
+
   /* ── Component · ticket status. Open is an ink outline because most rows are
      open; colour is spent on the exceptions. Resolved leaves blue. */
   --color-ticket-open-bg: var(--color-neutral-0);
