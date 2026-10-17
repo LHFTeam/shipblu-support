@@ -1,4 +1,3 @@
-import { DateTime } from 'luxon';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import type { ReactNode } from 'react';
@@ -21,12 +20,12 @@ import { ratingLabels } from '@/lib/csat/wording';
 import { channelLabel, formatDateTime } from '@/lib/format';
 import {
   countedThrough,
+  firstSend,
   latestComments,
   liveSurveys,
   skipReasons,
   uncounted,
   COMMENT_LIMIT,
-  type LiveDay,
 } from '@/lib/reports/csat-queries';
 import {
   averageRating,
@@ -34,13 +33,15 @@ import {
   byChannel,
   byGroup,
   daily,
+  ratedCount,
   ratingCounts,
+  perDay,
   ratingShares,
   responseRate,
   rolledUpDays,
   surveyedRate,
   totals,
-  windowDays,
+  unsplitAnswers,
   type Row as ReportRow,
   type Totals,
 } from '@/lib/reports/queries';
@@ -98,48 +99,52 @@ export default async function CsatReportPage({
   // midnight and the nightly run, and not on the rollup's newest row, which
   // is the last day anybody worked. One window for all of them, so a day
   // cannot be in the figures and not in the check, or the other way round.
-  const through = countedThrough(range, rolledUp.last);
+  const through = countedThrough(window, rolledUp);
   const counted = { from: range.from, to: through };
   const countedWindow = { ...counted, zone };
 
   // A few at a time rather than all at once: a report page holding every
   // place in the pool for its render is the §6.91 freeze waiting to happen.
-  const [summary, channelRows, groupRows, agentRows, series, reasons, live] = await allLimited(3, [
-    () => totals(counted),
-    () => byChannel(counted),
-    () => byGroup(counted),
-    () => (namesAgents ? byAgent(counted) : Promise.resolve([])),
-    () => daily(counted),
-    () => skipReasons(countedWindow),
-    () => liveSurveys(countedWindow),
-  ] as const);
+  const [summary, channelRows, groupRows, agentRows, series, reasons, liveDays, firstSent] =
+    await allLimited(3, [
+      () => totals(counted),
+      () => byChannel(counted),
+      () => byGroup(counted),
+      () => (namesAgents ? byAgent(counted) : Promise.resolve([])),
+      () => daily(counted),
+      () => skipReasons(countedWindow),
+      () => liveSurveys(countedWindow),
+      () => firstSend(zone),
+    ] as const);
 
   const startsLate = rolledUp.first !== null && rolledUp.first > range.from;
   // Only when it says something the notice above does not: surveys starting
   // after the rollup's history did, inside this window.
   const surveysStartLate =
-    live.first !== null &&
-    live.first > range.from &&
-    (rolledUp.first === null || live.first > rolledUp.first);
+    firstSent !== null &&
+    firstSent > range.from &&
+    (rolledUp.first === null || firstSent > rolledUp.first);
   // Sends and decisions against the rollup has not counted, day by day: a
   // night the job did not run, or a day rolled up before the survey columns
   // existed, whose counts read 0 until it is computed again. The figures
   // below are short by this much, and the page says so rather than reading
   // them as none. It does not say to recompute: over a day older than three,
   // that is not safe yet (`docs/PROJECT-STATE.md` §6.98).
-  const missing = uncounted(live.days, series);
+  const missing = uncounted(liveDays, series);
+  // Answers on days rolled up before the distribution was kept: in the
+  // average, and in nothing beside it.
+  const unsplit = unsplitAnswers(series);
 
   const labels = ratingLabels('en');
   const shares = ratingShares(summary);
   const average = averageRating(summary.csatRatingSum, summary.csatResponseCount);
-  const answered = ratingCounts(summary).reduce((sum, count) => sum + count, 0);
+  const answered = ratedCount(summary);
 
-  const byDay = new Map(series.map((day) => [day.day, day]));
-  const trend = windowDays(counted).map((day) => ({
+  const trend = perDay(counted, series).map(({ day, label, row }) => ({
     day,
-    label: DateTime.fromISO(day).toFormat('d/M'),
-    sent: byDay.get(day)?.csatSentCount ?? 0,
-    answered: byDay.get(day)?.csatResponseCount ?? 0,
+    label,
+    sent: row?.csatSentCount ?? 0,
+    answered: row?.csatResponseCount ?? 0,
   }));
   const surveyedDays = series.filter(hasSurveys);
 
@@ -181,15 +186,30 @@ export default async function CsatReportPage({
         ) : null}
         {surveysStartLate ? (
           <Notice tone="info" icon>
-            The first survey went out on <b>{live.first}</b>, after this window opens, so the days
+            The first survey went out on <b>{firstSent}</b>, after this window opens, so the days
             before it hold no surveys sent or answered.
           </Notice>
         ) : null}
         {missing.days.length > 0 ? (
           <Notice tone="warning" icon>
-            <b>{missingSentence(missing)}</b> {missingDays(missing)} the nightly rollup has no
-            survey counts for — rolled up before it kept them, or a night it did not run — so the
-            figures below, and every rate divided by them, leave them out.
+            <b>{missingSentence(missing)}</b>{' '}
+            {fromDays(
+              missing.sent + missing.skipped,
+              missing.days.map((day) => day.day),
+            )}{' '}
+            the nightly rollup has no survey counts for — rolled up before it kept them, or a night
+            it did not run — so the figures below, and every rate divided by them, leave them out.
+          </Notice>
+        ) : null}
+        {unsplit.answers > 0 ? (
+          <Notice tone="warning" icon>
+            <b>
+              {count(unsplit.answers, 'answer')} in this window{' '}
+              {unsplit.answers === 1 ? 'is' : 'are'} in the average but not in the bars, the shares
+              or the response rate.
+            </b>{' '}
+            {fromDays(unsplit.answers, unsplit.days)} rolled up before the rollup kept how each
+            answer split, so only their sum and count are there to read.
           </Notice>
         ) : null}
       </div>
@@ -197,7 +217,7 @@ export default async function CsatReportPage({
       {/* Nothing at all: not a send, an answer or a decision against. A
           window of skips alone is a page, whose "Why not surveyed" is the one
           section that explains why nothing went out. */}
-      {live.first === null &&
+      {firstSent === null &&
       answered === 0 &&
       summary.csatSkippedCount === 0 &&
       reasons.length === 0 ? (
@@ -222,9 +242,9 @@ export default async function CsatReportPage({
             />
             <Stat
               label="Response rate"
-              explain="Answers in this window over surveys sent in it. A rate, not a cohort: a survey answered weeks after it went out counts in the week it was answered, so a short window can read above 100%."
+              explain="Answers in this window over surveys sent in it. A rate, not a cohort: a survey answered weeks after it went out counts in the week it was answered, so a short window can read above 100%. Answers on a day rolled up before survey counts were kept are left out, since that day's sends were not counted either."
               value={percent(responseRate(summary))}
-              hint={`${summary.csatResponseCount.toLocaleString('en-GB')} answered of ${summary.csatSentCount.toLocaleString('en-GB')} sent`}
+              hint={`${answered.toLocaleString('en-GB')} answered of ${summary.csatSentCount.toLocaleString('en-GB')} sent`}
             />
             <Stat
               label="Surveys sent"
@@ -234,7 +254,7 @@ export default async function CsatReportPage({
             />
             <Stat
               label="Resolutions surveyed"
-              explain="Surveys sent in this window over tickets resolved in it. A survey follows its resolve by the delay, so the window's edges do not hold exactly the same tickets; and a ticket on a channel nobody surveys, or resolved with surveys switched off, counts as resolved and in nothing else."
+              explain="Surveys sent in this window over tickets resolved in it. A survey follows its resolve by the delay, so the window's edges do not hold exactly the same tickets; and a ticket on a channel nobody surveys, or resolved with surveys switched off, counts as resolved and in nothing else. A ticket resolved in a day's first hours and closed by the three-day rule can drop out of that day's resolved count, so this can read a little high."
               value={percent(surveyedRate(summary))}
               hint={`${summary.csatSentCount.toLocaleString('en-GB')} sent of ${summary.ticketsResolved.toLocaleString('en-GB')} resolved`}
             />
@@ -260,20 +280,20 @@ export default async function CsatReportPage({
           <Breakdown
             title="By channel"
             hint="The channel each survey was asked on."
-            rows={channelRows.filter(hasSurveys)}
+            rows={channelRows.filter(hasSurveysOrResolutions)}
             mark={(row) => <ChannelBadge channel={row.label} />}
             label={(row) => channelLabel(row.label)}
           />
           <Breakdown
             title="By group"
             hint="The group the ticket was in when its survey went out."
-            rows={groupRows.filter(hasSurveys)}
+            rows={groupRows.filter(hasSurveysOrResolutions)}
           />
           {namesAgents ? (
             <Breakdown
               title="By agent"
               hint="The agent the ticket was assigned to when its survey went out. A resolution counts against whoever held the ticket when its day was rolled up, so a ticket reassigned in between counts its survey and its resolve against different people."
-              rows={agentRows.filter(hasSurveys)}
+              rows={agentRows.filter(hasSurveysOrResolutions)}
             />
           ) : null}
 
@@ -386,9 +406,20 @@ export default async function CsatReportPage({
   );
 }
 
-/** A row worth a line in a survey table: something was sent, skipped or answered. */
+/** A day worth a line in the by-day table: something was sent, skipped or answered. */
 function hasSurveys(row: Totals): boolean {
   return row.csatSentCount > 0 || row.csatSkippedCount > 0 || row.csatResponseCount > 0;
+}
+
+/**
+ * A row worth a line in a breakdown: a survey fact, or resolutions to have
+ * surveyed. A channel with surveys switched off writes no skip — it is turned
+ * away before a decision is written — so without its resolutions it would
+ * vanish from the table while counting in the "Resolutions surveyed" tile,
+ * and its 0% is the one line that shows it is off.
+ */
+function hasSurveysOrResolutions(row: Totals): boolean {
+  return hasSurveys(row) || row.ticketsResolved > 0;
 }
 
 function percent(value: number | null): string {
@@ -413,9 +444,12 @@ function missingSentence({ sent, skipped }: { sent: number; skipped: number }): 
   return `${parts.join(' and ')} in this window ${one ? 'is' : 'are'} not in the figures below.`;
 }
 
-/** "They are from 2026-08-31 and 2026-09-02, days" — the first three days, and how many more. */
-function missingDays({ sent, skipped, days }: { sent: number; skipped: number; days: LiveDay[] }) {
-  const named = days.slice(0, 3).map((day) => day.day);
+/**
+ * "They are from 2026-08-31 and 2026-09-02, days" — the first three days, and
+ * how many more; "It is" when the count before it is one thing.
+ */
+function fromDays(things: number, days: string[]): string {
+  const named = days.slice(0, 3);
   const rest = days.length - named.length;
   const list =
     rest > 0
@@ -423,7 +457,7 @@ function missingDays({ sent, skipped, days }: { sent: number; skipped: number; d
       : named.length > 1
         ? `${named.slice(0, -1).join(', ')} and ${named.at(-1)}`
         : named[0];
-  return `${sent + skipped === 1 ? 'It is' : 'They are'} from ${list}, ${days.length === 1 ? 'a day' : 'days'}`;
+  return `${things === 1 ? 'It is' : 'They are'} from ${list}, ${days.length === 1 ? 'a day' : 'days'}`;
 }
 
 function Section({ title, hint, children }: { title: string; hint: string; children: ReactNode }) {

@@ -1,32 +1,39 @@
+import { DateTime } from 'luxon';
 import { describe, expect, it } from 'vitest';
 import { countedThrough, uncounted } from './csat-queries';
 
-const RANGE = { from: '2026-09-18', to: '2026-10-17' };
+const WINDOW = { from: '2026-09-18', to: '2026-10-17', zone: 'Africa/Cairo' };
+const at = (local: string) => DateTime.fromISO(local, { zone: WINDOW.zone }).toJSDate();
+// The oldest write among the rows of the three days the nightly run rewrites.
+const rolled = (recomputedAt: Date | null) => ({ recomputedAt });
 
 describe('countedThrough', () => {
-  it('ends on yesterday once tonight’s run has written it', () => {
-    expect(countedThrough(RANGE, '2026-10-16')).toBe('2026-10-16');
+  it('ends on yesterday once tonight’s run has rewritten the three days', () => {
+    expect(countedThrough(WINDOW, rolled(at('2026-10-17T03:00')))).toBe('2026-10-16');
   });
 
   it('ends the day before until then, rather than drawing yesterday as a day of zeros', () => {
-    expect(countedThrough(RANGE, '2026-10-15')).toBe('2026-10-15');
+    // The newest of them is from last night's run, at 03:00 on the 16th.
+    expect(countedThrough(WINDOW, rolled(at('2026-10-16T03:00')))).toBe('2026-10-15');
   });
 
-  it('does not take the last day anybody worked for the last day rolled up', () => {
-    // A quiet week: the runs happened, and wrote nothing.
-    expect(countedThrough(RANGE, '2026-10-09')).toBe('2026-10-15');
-    expect(countedThrough(RANGE, null)).toBe('2026-10-15');
+  it('is measured from the team’s midnight, not the database’s', () => {
+    // 00:30 in Cairo on the 17th is still the 16th in UTC, and after the
+    // team's midnight: a run then is tonight's.
+    expect(countedThrough(WINDOW, rolled(at('2026-10-17T00:30')))).toBe('2026-10-16');
+    expect(countedThrough(WINDOW, rolled(at('2026-10-16T23:30')))).toBe('2026-10-15');
   });
 
-  it('counts a partial row for today, written by hand, as nothing past yesterday', () => {
-    expect(countedThrough(RANGE, '2026-10-17')).toBe('2026-10-16');
+  it('stops a day early when the three days hold nothing to see', () => {
+    // A quiet stretch: the runs happened and wrote nothing, so the page
+    // stops on a day it can vouch for rather than one it cannot.
+    expect(countedThrough(WINDOW, rolled(null))).toBe('2026-10-15');
   });
 
   it('is calendar arithmetic, so a month boundary is a day like any other', () => {
-    expect(countedThrough({ from: '2026-10-01', to: '2026-11-01' }, '2026-10-31')).toBe(
-      '2026-10-31',
-    );
-    expect(countedThrough({ from: '2026-10-01', to: '2026-11-01' }, null)).toBe('2026-10-30');
+    const november = { ...WINDOW, from: '2026-10-01', to: '2026-11-01' };
+    expect(countedThrough(november, rolled(at('2026-11-01T03:00')))).toBe('2026-10-31');
+    expect(countedThrough(november, rolled(null))).toBe('2026-10-30');
   });
 });
 

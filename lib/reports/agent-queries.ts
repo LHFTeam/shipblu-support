@@ -57,6 +57,12 @@ const SUMS = {
   csatRatingSum: sql<number>`coalesce(sum(${metricsDaily.csatRatingSum}), 0)::int`,
   csatResponseCount: sql<number>`coalesce(sum(${metricsDaily.csatResponseCount}), 0)::int`,
   csatSentCount: sql<number>`coalesce(sum(${metricsDaily.csatSentCount}), 0)::int`,
+  // The distribution, for the response rate's numerator (`ratedCount`).
+  csatRating1: sql<number>`coalesce(sum(${metricsDaily.csatRating1}), 0)::int`,
+  csatRating2: sql<number>`coalesce(sum(${metricsDaily.csatRating2}), 0)::int`,
+  csatRating3: sql<number>`coalesce(sum(${metricsDaily.csatRating3}), 0)::int`,
+  csatRating4: sql<number>`coalesce(sum(${metricsDaily.csatRating4}), 0)::int`,
+  csatRating5: sql<number>`coalesce(sum(${metricsDaily.csatRating5}), 0)::int`,
 };
 
 type Sums = { [K in keyof typeof SUMS]: number };

@@ -6259,7 +6259,12 @@ still waiting for it` one whose outcome is not known yet.
     per-agent ones, so a rebuild of a day older than its tickets' closing
     writes those columns without them; the nightly three-day recompute mostly
     finishes with a day before its tickets close, which is why the history
-    looks right. Any `rollup_metrics` over older days — §5's repair, or the
+    looks right. Mostly, not always: day D's last recompute is the run at
+    00:00 UTC on D+3, two or three hours into the team's day, and the rule
+    closes 72 hours after the resolve — so a ticket resolved in D's first two
+    or three hours is closed before that run and drops out of D for good.
+    Its survey stays counted, so "Resolutions surveyed" on `/reports/csat`
+    reads high by those, and a small group or channel can pass 100%. Any `rollup_metrics` over older days — §5's repair, or the
     backfill the survey columns would otherwise want — quietly lowers every
     resolved figure it touches. The comments in `rollup-metrics.ts` and on
     `category_metrics_daily` called `resolved_at` immutable; they no longer

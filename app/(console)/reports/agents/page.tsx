@@ -434,6 +434,11 @@ function totalsOf(rows: AgentSummary[]): AgentSummary {
     csatRatingSum: sum((r) => r.csatRatingSum),
     csatResponseCount: sum((r) => r.csatResponseCount),
     csatSentCount: sum((r) => r.csatSentCount),
+    csatRating1: sum((r) => r.csatRating1),
+    csatRating2: sum((r) => r.csatRating2),
+    csatRating3: sum((r) => r.csatRating3),
+    csatRating4: sum((r) => r.csatRating4),
+    csatRating5: sum((r) => r.csatRating5),
   };
 }
 

@@ -11,7 +11,7 @@ import {
   todaySoFar,
 } from '@/lib/reports/live';
 import { reportingContext } from '@/lib/reports/rollup';
-import { averageSeconds, daily, metPercentage, totals } from '@/lib/reports/queries';
+import { averageSeconds, daily, metPercentage, perDay, totals } from '@/lib/reports/queries';
 import { LiveTicker } from './live';
 import { AgentLoad } from './agents';
 import { ChannelLoad } from './channels';
@@ -65,7 +65,7 @@ export default async function DashboardPage({
   const context = await reportingContext();
 
   // The last `days` complete days, ending yesterday in the team's zone: the
-  // days `densify` draws below, and what the history section says it shows
+  // days the trend draws below, and what the history section says it shows
   // ("Complete days only — today is above"). Not `rangeIn`, which ends today
   // for the reports, where the page prints that today is not in yet — so
   // `/reports?days=N` sums N-1 complete days to this page's N.
@@ -87,7 +87,12 @@ export default async function DashboardPage({
   ]);
 
   const online = agentRows.filter((agent) => agent.presence === 'online').length;
-  const trend = densify(series, days, context.zone, today.day);
+  const trend: Point[] = perDay(history, series).map(({ day, label, row }) => ({
+    day,
+    label,
+    created: row?.ticketsCreated ?? 0,
+    resolved: row?.ticketsResolved ?? 0,
+  }));
   const recent = trend.slice(-14);
   const hasHistory = series.length > 0;
 
@@ -150,35 +155,4 @@ export default async function DashboardPage({
       <Health health={health} now={now} />
     </>
   );
-}
-
-/**
- * One entry per day in the window, including the days the rollup has no row
- * for.
- *
- * A day with no tickets is a real observation — a public holiday, a weekend —
- * and dropping it would slide every later bar leftwards, quietly turning a
- * six-day gap into a continuous line.
- */
-function densify(
-  series: { day: string; ticketsCreated: number; ticketsResolved: number }[],
-  days: number,
-  zone: string,
-  today: string,
-): Point[] {
-  const byDay = new Map(series.map((row) => [row.day, row]));
-  const end = DateTime.fromISO(today, { zone });
-
-  return Array.from({ length: days }, (_, index) => {
-    const date = end.minus({ days: days - index });
-    const day = date.toISODate()!;
-    const row = byDay.get(day);
-
-    return {
-      day,
-      label: date.toFormat('d/M'),
-      created: row?.ticketsCreated ?? 0,
-      resolved: row?.ticketsResolved ?? 0,
-    };
-  });
 }

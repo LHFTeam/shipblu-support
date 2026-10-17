@@ -49,7 +49,10 @@ export async function GET(request: Request) {
 
   const { zone } = await reportingContext();
   const range = rangeIn(zone, days);
-  const counted = { from: range.from, to: countedThrough(range, (await rolledUpDays(range)).last) };
+  const counted = {
+    from: range.from,
+    to: countedThrough({ ...range, zone }, await rolledUpDays(range)),
+  };
 
   // One at a time: an export is not waited on the way a page is, and four
   // reads at once would take half the pool for it (§6.91).
@@ -57,7 +60,7 @@ export async function GET(request: Request) {
   const groups = await byGroup(counted);
   const agents = can(agent, 'report.agents') ? await byAgent(counted) : [];
   const series = await daily(counted);
-  const missing = uncounted((await liveSurveys({ ...counted, zone })).days, series);
+  const missing = uncounted(await liveSurveys({ ...counted, zone }), series);
 
   const rows: unknown[][] = [
     ...channels.map((row) => figures('channel', row.label, row)),

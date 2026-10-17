@@ -3,6 +3,7 @@ import { and, between, eq, isNotNull, isNull, lte, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { agents, groups, metricsDaily } from '@/db/schema';
 import type { Range } from './category-queries';
+import { RATING_COLUMNS } from './rollup';
 
 /**
  * Read models for the reports page.
@@ -169,17 +170,27 @@ export async function daily(range: Range): Promise<(Totals & { day: string })[]>
  *
  * `last` is the newest day with a row: the newest day anybody worked that
  * the rollup has reached, which is not the newest day it has reached, since
- * an empty day leaves no row. `countedThrough` (`csat-queries.ts`) says what
- * can and cannot be told from it.
+ * an empty day leaves no row. `recomputedAt` is the oldest write among the
+ * rows of the three days before `to` — the days the nightly run rewrites —
+ * which sees a run over a quiet yesterday that `last` cannot, and which a
+ * hand run over one of the three, or a partial row written yesterday, cannot
+ * pass for a whole run. `countedThrough` (`csat-queries.ts`) reads it.
  */
-export async function rolledUpDays(
-  range: Range,
-): Promise<{ first: string | null; last: string | null; days: number }> {
+export async function rolledUpDays(range: Range): Promise<{
+  first: string | null;
+  last: string | null;
+  days: number;
+  recomputedAt: Date | null;
+}> {
   const [row] = await db
     .select({
       first: sql<string | null>`min(${metricsDaily.day})::text`,
       last: sql<string | null>`max(${metricsDaily.day})::text`,
       days: sql<number>`(count(distinct ${metricsDaily.day}) filter (where ${metricsDaily.day} >= ${range.from}::date))::int`,
+      recomputedAt:
+        sql<Date | null>`min(${metricsDaily.computedAt}) filter (where ${metricsDaily.day} between ${range.to}::date - 3 and ${range.to}::date - 1)`.mapWith(
+          metricsDaily.computedAt,
+        ),
     })
     .from(metricsDaily)
     .where(
@@ -191,7 +202,12 @@ export async function rolledUpDays(
       ),
     );
 
-  return { first: row?.first ?? null, last: row?.last ?? null, days: row?.days ?? 0 };
+  return {
+    first: row?.first ?? null,
+    last: row?.last ?? null,
+    days: row?.days ?? 0,
+    recomputedAt: row?.recomputedAt ?? null,
+  };
 }
 
 /**
@@ -248,28 +264,66 @@ function share(part: number, of: number): number | null {
   return of > 0 ? Math.round((part / of) * 100) : null;
 }
 
+type RatingColumns = Pick<Totals, (typeof RATING_COLUMNS)[number]>;
+
+/**
+ * The answers the distribution holds: every answer on a day rolled up since
+ * survey counts were kept, and none on a day rolled up before. Those older
+ * days keep their answers in `csat_response_count` alone, beside a send count
+ * of 0 that means "not counted", not "none sent" — so anything that sets
+ * answers against sends counts these, never `csat_response_count`.
+ */
+export function ratedCount(row: RatingColumns): number {
+  return ratingCounts(row).reduce((sum, count) => sum + count, 0);
+}
+
 /**
  * Answers in the window over surveys sent in it. A rate, not a cohort: a link
  * answered three weeks after it went out counts in the week it was answered,
  * so a short window that caught the answers to a busier one before it can
  * read above 100%, and says so rather than being clipped.
+ *
+ * Over `ratedCount`, so a window reaching back to days rolled up before
+ * survey counts were kept divides only the days that kept both: their
+ * answers over nothing read as 200%.
  */
-export function responseRate(row: Pick<Totals, 'csatResponseCount' | 'csatSentCount'>) {
-  return share(row.csatResponseCount, row.csatSentCount);
+export function responseRate(row: Pick<Totals, 'csatSentCount'> & RatingColumns) {
+  return share(ratedCount(row), row.csatSentCount);
 }
 
 /**
  * The line under a CSAT tile: how many answers its average is over, and what
  * share of the window's surveys they are — the response rate is what says
  * whether an average of 4.6 is the team or the dozen customers who answered.
- * The rate is left off when nothing was sent, rather than printed as 0%.
+ * The rate is left off when nothing was sent, rather than printed as 0%, and
+ * when the window holds answers from before survey counts were kept: it is
+ * then the rate of fewer answers than the count beside it names, and the
+ * satisfaction report is where that is said.
  */
-export function responsesHint(row: Pick<Totals, 'csatResponseCount' | 'csatSentCount'>): string {
+export function responsesHint(
+  row: Pick<Totals, 'csatResponseCount' | 'csatSentCount'> & RatingColumns,
+): string {
   const answers = `${row.csatResponseCount.toLocaleString('en-GB')} response${row.csatResponseCount === 1 ? '' : 's'}`;
   const rate = responseRate(row);
-  return rate === null
+  return rate === null || ratedCount(row) !== row.csatResponseCount
     ? answers
     : `${answers} · ${rate}% of ${row.csatSentCount.toLocaleString('en-GB')} sent`;
+}
+
+/**
+ * The answers the average counts and the distribution does not, and the days
+ * they are on: days rolled up before survey counts were kept, which hold an
+ * answer count and a rating sum and nothing else. The page says so, or the
+ * average and the bars beside it describe different answers without a word.
+ */
+export function unsplitAnswers(
+  rows: (Pick<Totals, 'csatResponseCount'> & RatingColumns & { day: string })[],
+): { answers: number; days: string[] } {
+  const days = rows.filter((row) => row.csatResponseCount > ratedCount(row));
+  return {
+    answers: days.reduce((sum, row) => sum + row.csatResponseCount - ratedCount(row), 0),
+    days: days.map((row) => row.day),
+  };
 }
 
 /**
@@ -282,9 +336,10 @@ export function surveyedRate(row: Pick<Totals, 'csatSentCount' | 'ticketsResolve
   return share(row.csatSentCount, row.ticketsResolved);
 }
 
-/** The answers on each step of the scale, 1 to 5. */
-export function ratingCounts(row: Totals): [number, number, number, number, number] {
-  return [row.csatRating1, row.csatRating2, row.csatRating3, row.csatRating4, row.csatRating5];
+/** The answers on each step of the scale, 1 to 5, from the rollup's own list of the columns. */
+export function ratingCounts(row: RatingColumns): [number, number, number, number, number] {
+  const [one, two, three, four, five] = RATING_COLUMNS;
+  return [row[one], row[two], row[three], row[four], row[five]];
 }
 
 /**
@@ -293,9 +348,13 @@ export function ratingCounts(row: Totals): [number, number, number, number, numb
  * rolled up since the distribution existed, and on a day rolled up before it
  * only the distribution's own total says how many answers it describes.
  */
-export function ratingShares(row: Totals): { positive: number | null; negative: number | null } {
-  const [one, two, , four, five] = ratingCounts(row);
-  const counted = ratingCounts(row).reduce((sum, count) => sum + count, 0);
+export function ratingShares(row: RatingColumns): {
+  positive: number | null;
+  negative: number | null;
+} {
+  const counts = ratingCounts(row);
+  const [one, two, , four, five] = counts;
+  const counted = counts.reduce((sum, count) => sum + count, 0);
   return { positive: share(four + five, counted), negative: share(one + two, counted) };
 }
 
@@ -316,6 +375,25 @@ export function windowDays(range: Range): string[] {
     days.push(day.toISODate()!);
   }
   return days;
+}
+
+/**
+ * One point per day of `range`, each with its rolled-up row or none — the
+ * series every chart over the rollup draws. A day with no row is a real
+ * observation, a holiday or a weekend, and dropping it would slide every
+ * later bar leftwards, quietly turning a six-day gap into a continuous line;
+ * and one helper means every chart labels its days the same way.
+ */
+export function perDay<T extends { day: string }>(
+  range: Range,
+  rows: T[],
+): { day: string; label: string; row: T | undefined }[] {
+  const byDay = new Map(rows.map((row) => [row.day, row]));
+  return windowDays(range).map((day) => ({
+    day,
+    label: DateTime.fromISO(day, { zone: 'utc' }).toFormat('d/M'),
+    row: byDay.get(day),
+  }));
 }
 
 /** "1h 20m", "45s" — a duration a person can read at a glance. */

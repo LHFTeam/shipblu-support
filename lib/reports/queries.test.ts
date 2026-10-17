@@ -6,6 +6,7 @@ import {
   responseRate,
   responsesHint,
   surveyedRate,
+  unsplitAnswers,
   windowDays,
   type Totals,
 } from './queries';
@@ -17,35 +18,83 @@ import {
 
 const row = (counts: Partial<Totals>): Totals => ({ ...emptyBucket(), ...counts });
 
+// Answers as the rollup writes them since survey counts were kept: the count
+// and the distribution agree, all of them 4s here.
+const answers = (count: number): Partial<Totals> => ({
+  csatResponseCount: count,
+  csatRating4: count,
+  csatRatingSum: 4 * count,
+});
+
+// A day rolled up before survey counts were kept: its answers' count and sum,
+// no split, and a send count of 0 that means "not counted".
+const before = (count: number): Partial<Totals> => ({
+  csatResponseCount: count,
+  csatRatingSum: 4 * count,
+});
+
 describe('responseRate', () => {
   it('divides the answers in the window by the surveys sent in it', () => {
-    expect(responseRate(row({ csatResponseCount: 3, csatSentCount: 12 }))).toBe(25);
+    expect(responseRate(row({ ...answers(3), csatSentCount: 12 }))).toBe(25);
   });
 
   it('reads nothing sent as no rate, not as zero', () => {
-    expect(responseRate(row({ csatResponseCount: 0, csatSentCount: 0 }))).toBeNull();
-    expect(responseRate(row({ csatResponseCount: 2, csatSentCount: 0 }))).toBeNull();
+    expect(responseRate(row({ csatSentCount: 0 }))).toBeNull();
+    expect(responseRate(row({ ...answers(2), csatSentCount: 0 }))).toBeNull();
   });
 
   it('says so when a window caught the answers to an earlier one', () => {
     // A rate, not a cohort: a link answered after the week it went out
     // counts in the week it was answered, and is not clipped to 100.
-    expect(responseRate(row({ csatResponseCount: 6, csatSentCount: 4 }))).toBe(150);
+    expect(responseRate(row({ ...answers(6), csatSentCount: 4 }))).toBe(150);
+  });
+
+  it('leaves out answers from days rolled up before their sends were counted', () => {
+    // 40 answers on old days and 10 on new ones, over the 20 sends the new
+    // days counted: 50%, not 250%.
+    const window = row({ ...answers(10), csatSentCount: 20 });
+    window.csatResponseCount += before(40).csatResponseCount!;
+    expect(responseRate(window)).toBe(50);
   });
 });
 
 describe('responsesHint', () => {
   it('says how many answers, and what share of the sends they are', () => {
-    expect(responsesHint(row({ csatResponseCount: 3, csatSentCount: 12 }))).toBe(
+    expect(responsesHint(row({ ...answers(3), csatSentCount: 12 }))).toBe(
       '3 responses · 25% of 12 sent',
     );
-    expect(responsesHint(row({ csatResponseCount: 1, csatSentCount: 1 }))).toBe(
+    expect(responsesHint(row({ ...answers(1), csatSentCount: 1 }))).toBe(
       '1 response · 100% of 1 sent',
     );
   });
 
   it('leaves the rate off when nothing was sent, rather than calling it 0%', () => {
-    expect(responsesHint(row({ csatResponseCount: 2, csatSentCount: 0 }))).toBe('2 responses');
+    expect(responsesHint(row({ ...answers(2), csatSentCount: 0 }))).toBe('2 responses');
+  });
+
+  it('leaves the rate off when it would be the rate of fewer answers than it names', () => {
+    const window = row({ ...answers(10), csatSentCount: 20 });
+    window.csatResponseCount += before(40).csatResponseCount!;
+    expect(responsesHint(window)).toBe('50 responses');
+  });
+});
+
+describe('unsplitAnswers', () => {
+  it('names the days whose answers the average counts and the distribution does not', () => {
+    expect(
+      unsplitAnswers([
+        { ...row(before(3)), day: '2026-08-30' },
+        { ...row(answers(5)), day: '2026-10-01' },
+        { ...row({ ...answers(2), csatResponseCount: 4 }), day: '2026-08-31' },
+      ]),
+    ).toEqual({ answers: 5, days: ['2026-08-30', '2026-08-31'] });
+  });
+
+  it('finds none where every day kept its split', () => {
+    expect(unsplitAnswers([{ ...row(answers(5)), day: '2026-10-01' }])).toEqual({
+      answers: 0,
+      days: [],
+    });
   });
 });
 

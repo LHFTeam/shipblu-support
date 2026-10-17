@@ -4,7 +4,13 @@ import { describe, expect, it } from 'vitest';
 import { db } from '@/db/client';
 import { agents, contacts, conversations, csatSurveys, ticketStatuses } from '@/db/schema';
 import { withCleanDatabase } from '@/lib/testing/db';
-import { latestComments, liveSurveys, skipReasons, type ReportWindow } from './csat-queries';
+import {
+  firstSend,
+  latestComments,
+  liveSurveys,
+  skipReasons,
+  type ReportWindow,
+} from './csat-queries';
 
 /**
  * The satisfaction report's live reads, against real Postgres: each keys a
@@ -146,7 +152,7 @@ describe('latestComments', () => {
 });
 
 describe('liveSurveys', () => {
-  it('counts each day’s sends and decisions against as the rollup keys them, and the first send ever', async () => {
+  it('counts each day’s sends and decisions against as the rollup keys them', async () => {
     await survey({ status: 'answered', sentAt: at('2026-10-11T00:05'), rating: 5 });
     await survey({ status: 'expired', sentAt: at('2026-10-12T12:00') });
     await survey({ status: 'sent', sentAt: at('2026-10-13T23:55') });
@@ -159,32 +165,69 @@ describe('liveSurveys', () => {
       createdAt: at('2026-10-10T22:00'),
       sentAt: at('2026-10-11T09:00'),
     });
-    // Before the window, which is also the first send ever; a skip just past
-    // its end; and the bot's, which is nobody's.
+    // Before the window, a skip just past its end, and the bot's, which is
+    // nobody's.
     await survey({ status: 'sent', sentAt: at('2026-10-02T08:00') });
     await survey({ status: 'skipped', skipReason: 'reopened', createdAt: at('2026-10-14T00:05') });
-    await survey({ status: 'sent', sentAt: at('2026-09-01T08:00') }, 'whatsapp_bot');
+    await survey({ status: 'sent', sentAt: at('2026-10-12T08:00') }, 'whatsapp_bot');
 
-    expect(await liveSurveys(WINDOW)).toEqual({
-      days: [
-        { day: '2026-10-11', sent: 2, skipped: 0 },
-        { day: '2026-10-12', sent: 1, skipped: 2 },
-        { day: '2026-10-13', sent: 1, skipped: 0 },
-      ],
-      first: '2026-10-02',
-    });
+    expect(await liveSurveys(WINDOW)).toEqual([
+      { day: '2026-10-11', sent: 2, skipped: 0 },
+      { day: '2026-10-12', sent: 1, skipped: 2 },
+      { day: '2026-10-13', sent: 1, skipped: 0 },
+    ]);
   });
 
   it('files a day in the team’s zone, not the database’s', async () => {
     // 00:30 in Cairo on the 12th is still the 11th in UTC.
     await survey({ status: 'sent', sentAt: at('2026-10-12T00:30') });
-    expect(await liveSurveys(WINDOW)).toEqual({
-      days: [{ day: '2026-10-12', sent: 1, skipped: 0 }],
-      first: '2026-10-12',
-    });
+    expect(await liveSurveys(WINDOW)).toEqual([{ day: '2026-10-12', sent: 1, skipped: 0 }]);
   });
 
-  it('reads an empty archive as no days and no first send', async () => {
-    expect(await liveSurveys(WINDOW)).toEqual({ days: [], first: null });
+  it('reads an empty archive as no days', async () => {
+    expect(await liveSurveys(WINDOW)).toEqual([]);
+  });
+});
+
+describe('firstSend', () => {
+  it('names the first send ever, in the team’s zone, and not the bot’s', async () => {
+    await survey({ status: 'sent', sentAt: at('2026-09-01T08:00') }, 'whatsapp_bot');
+    // 00:30 in Cairo on the 2nd is still the 1st in UTC.
+    await survey({ status: 'sent', sentAt: at('2026-10-02T00:30') });
+    await survey({ status: 'answered', sentAt: at('2026-10-11T10:00'), rating: 5 });
+    expect(await firstSend(ZONE)).toBe('2026-10-02');
+  });
+
+  it('reads an archive with no send as none', async () => {
+    await survey({ status: 'skipped', skipReason: 'reopened', createdAt: at('2026-10-12T12:00') });
+    expect(await firstSend(ZONE)).toBeNull();
+  });
+});
+
+describe('a ticket since deleted or marked spam', () => {
+  it('is in none of the live reads, as it is in none of the figures', async () => {
+    const gone = async (change: Partial<typeof conversations.$inferInsert>) => {
+      const number = await survey({
+        status: 'answered',
+        sentAt: at('2026-10-12T09:00'),
+        respondedAt: at('2026-10-12T10:00'),
+        rating: 1,
+        comment: 'Never arrived',
+      });
+      await db.update(conversations).set(change).where(eq(conversations.number, number));
+      const skipped = await survey({
+        status: 'skipped',
+        skipReason: 'reopened',
+        createdAt: at('2026-10-12T12:00'),
+      });
+      await db.update(conversations).set(change).where(eq(conversations.number, skipped));
+    };
+    await gone({ deletedAt: at('2026-10-15T09:00') });
+    await gone({ isSpam: true });
+
+    expect(await latestComments(WINDOW)).toEqual([]);
+    expect(await liveSurveys(WINDOW)).toEqual([]);
+    expect(await skipReasons(WINDOW)).toEqual([]);
+    expect(await firstSend(ZONE)).toBeNull();
   });
 });

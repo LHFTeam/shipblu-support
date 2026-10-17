@@ -43,16 +43,19 @@ describe('the reports window', () => {
       first: '2026-09-24',
       last: '2026-09-25',
       days: 2,
+      recomputedAt: null,
     });
     expect(await rolledUpDays({ from: '2026-10-01', to: '2026-10-07' })).toEqual({
       first: '2026-09-24',
       last: '2026-09-25',
       days: 0,
+      recomputedAt: null,
     });
     expect(await rolledUpDays({ from: '2026-09-01', to: '2026-09-20' })).toEqual({
       first: null,
       last: null,
       days: 0,
+      recomputedAt: null,
     });
     // The newest day rolled up so far, never one after the window: what a
     // live read checked against the figures stops at.
@@ -71,8 +74,35 @@ describe('the reports window', () => {
     const range = { from: '2026-08-20', to: '2026-08-25' };
     const rolledUp = await rolledUpDays(range);
 
-    expect(rolledUp).toEqual({ first: '2026-08-18', last: '2026-08-23', days: 2 });
+    expect(rolledUp).toEqual({
+      first: '2026-08-18',
+      last: '2026-08-23',
+      days: 2,
+      recomputedAt: expect.any(Date),
+    });
     expect(rolledUp.first! > range.from).toBe(false);
+  });
+
+  it('says when every row of the three days the nightly run rewrites was written', async () => {
+    const written = (on: string, iso: string) =>
+      db.insert(metricsDaily).values({ day: on, ticketsCreated: 1, computedAt: new Date(iso) });
+    const window = { from: '2026-09-18', to: '2026-10-17' };
+
+    // Tonight's run, at 00:00 UTC on the 17th, rewrote the 14th and 15th;
+    // nobody worked on the 16th. The 13th is before the three days, and a
+    // partial row for today, written by hand, is after them.
+    await written('2026-10-13', '2026-10-15T00:00:05Z');
+    await written('2026-10-14', '2026-10-17T00:00:05Z');
+    await written('2026-10-15', '2026-10-17T00:00:06Z');
+    await written('2026-10-17', '2026-10-17T09:00:00Z');
+    expect((await rolledUpDays(window)).recomputedAt).toEqual(new Date('2026-10-17T00:00:05Z'));
+
+    // Before tonight's run, one of the three rewritten by hand after the
+    // team's midnight is not the run: the oldest is still last night's.
+    await db.delete(metricsDaily);
+    await written('2026-10-14', '2026-10-16T00:00:05Z');
+    await written('2026-10-15', '2026-10-16T22:00:00Z');
+    expect((await rolledUpDays(window)).recomputedAt).toEqual(new Date('2026-10-16T00:00:05Z'));
   });
 });
 

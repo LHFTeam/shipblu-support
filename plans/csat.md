@@ -630,13 +630,21 @@ first survey is younger than the window.
 
 The page is `app/(console)/reports/csat/`, its live reads
 `lib/reports/csat-queries.ts`, on the rollup's keys and its
-`workedConversation()`. The figures, the trend, "Why not surveyed" and the
-live counts all stop on one day, `countedThrough`: yesterday once the
-nightly run has written it, the day before until then, so none of them
-holds a day the others do not; the comments run to now. The rollup's newest
-row cannot say that alone, because an empty day writes no row — read as the
-last day rolled up, it named the last day anybody worked, and a quiet week
-read as a rollup that had stopped. Skips are counted as decisions, not tickets: one ticket
+`surveyedConversation()` — worked, and neither deleted nor spam, the filter
+the created, first-response and resolution reads carry; the survey read
+lacked it, so a
+ticket deleted or marked spam after its survey kept counting against
+resolutions that did not. The figures, the trend, "Why not surveyed" and the
+live counts all stop on one day, `countedThrough`: yesterday once tonight's
+run has happened, the day before until then, so none of them holds a day the
+others do not; the comments run to now. The run is seen in the three days
+it rewrites, every row of them written since the team's midnight; the
+rollup's
+newest row alone cannot say it, because an empty day writes no row — read
+as the last day rolled up, it named the last day anybody worked, and a quiet
+week read as a rollup that had stopped. The breakdowns keep a row with
+resolutions and no surveys, the one line that shows a channel switched
+off. Skips are counted as decisions, not tickets: one ticket
 can be decided against twice and surveyed after. The
 agent table, the agent beside each comment, and the CSV's agent rows are
 behind `report.agents`; the rest, `report.view`. Per agent, "resolutions
@@ -647,6 +655,13 @@ the dataviz validator), each carrying its count and share, since the grey
 midpoint is under 3:1 on white. The three tiles' hint is `responsesHint`:
 "12 responses · 40% of 30 sent", the rate left off when nothing was sent;
 `/reports/agents` links to the page only for a holder of `report.view`.
+Every response rate divides the answers in the distribution (`ratedCount`),
+never `csat_response_count`: a day rolled up before survey counts were kept
+holds its answers' count and sum but no split and no sends, so its answers
+over the newer days' sends read as 200%. The hint leaves the rate off for a
+window holding such answers, and the page says which days they are on
+(`unsplitAnswers`) — on production none can exist unless surveys are
+switched on and answered more than three days before this ships.
 
 ## Stages
 

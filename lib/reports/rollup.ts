@@ -175,7 +175,7 @@ export type Bucket = {
 export type Slice = Dimensions & { bucket: Bucket };
 
 /** The bucket column each rating on the 1–5 scale is counted in. */
-const RATING_COLUMNS = [
+export const RATING_COLUMNS = [
   'csatRating1',
   'csatRating2',
   'csatRating3',
@@ -401,7 +401,7 @@ export async function computeDay(
           and(eq(csatSurveys.status, 'skipped'), during(csatSurveys.createdAt)),
           during(csatSurveys.respondedAt),
         ),
-        worked,
+        surveyedConversation(),
       ),
     );
 
@@ -458,6 +458,23 @@ export function workedConversation() {
   return and(
     notInArray(conversations.channel, readOnlyChannels()),
     ne(conversations.sourceSystem, 'import'),
+  );
+}
+
+/**
+ * A conversation whose surveys count: worked, and neither deleted nor spam —
+ * the filter `computeDay`'s created, first-response and resolution reads
+ * carry beside `workedConversation()`. A survey is never sent for a ticket in either
+ * state, but one deleted or marked spam after its survey went out kept
+ * counting, so "Resolutions surveyed" divided sends that included it by
+ * resolutions that did not. The satisfaction report's live reads take the
+ * same filter, for the reason `workedConversation()` is exported.
+ */
+export function surveyedConversation() {
+  return and(
+    isNull(conversations.deletedAt),
+    eq(conversations.isSpam, false),
+    workedConversation(),
   );
 }
 

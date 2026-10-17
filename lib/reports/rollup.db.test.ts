@@ -238,6 +238,26 @@ describe('computeDay, for surveys', () => {
     );
   });
 
+  it('leaves out the surveys of a ticket since deleted or marked spam, as its resolution is', async () => {
+    for (const change of [
+      { deletedAt: at('2026-10-15T09:00') },
+      { isSpam: true },
+    ] satisfies Partial<typeof conversations.$inferInsert>[]) {
+      const conversationId = await ticket('email');
+      await db.insert(csatSurveys).values({
+        conversationId,
+        status: 'answered',
+        channel: 'email',
+        sentAt: at('2026-10-13T10:00'),
+        respondedAt: at('2026-10-13T11:00'),
+        rating: 1,
+      });
+      await db.update(conversations).set(change).where(eq(conversations.id, conversationId));
+    }
+    const slices = await computeDay('2026-10-13', await reportingContext());
+    expect(surveyCounts({ ...slices[0]!, bucket: totalsOf(slices) })).toEqual(counts({}));
+  });
+
   it('leaves out a rating off the scale everywhere, so the average and the bars agree', async () => {
     await db.insert(csatSurveys).values({
       conversationId: await ticket('email'),

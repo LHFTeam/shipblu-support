@@ -5,7 +5,7 @@ import { agents, conversations, csatSurveys } from '@/db/schema';
 import { describeSkip } from '@/lib/csat/skip-reasons';
 import type { Range } from './category-queries';
 import type { Totals } from './queries';
-import { workedConversation } from './rollup';
+import { surveyedConversation } from './rollup';
 
 /**
  * The satisfaction report's live reads: what the rollup cannot hold.
@@ -18,7 +18,7 @@ import { workedConversation } from './rollup';
  * rows or an indexed count over the window, never an aggregate over the
  * archive.
  *
- * Every one counts the conversations the rollup counts (`workedConversation`),
+ * Every one counts the conversations the rollup counts (`surveyedConversation`),
  * and keys a survey on the timestamp the rollup does for the same fact, so the
  * live sections and the figures above them describe one set of surveys.
  */
@@ -58,7 +58,7 @@ export async function skipReasons(window: ReportWindow): Promise<SkipCount[]> {
       and(
         eq(csatSurveys.status, 'skipped'),
         within(csatSurveys.createdAt, window),
-        workedConversation(),
+        surveyedConversation(),
       ),
     )
     .groupBy(csatSurveys.skipReason)
@@ -114,7 +114,7 @@ export async function latestComments(window: ReportWindow): Promise<SurveyCommen
         // with it (Postgres's strips only the space; §6.97).
         isNotNull(csatSurveys.comment),
         within(csatSurveys.respondedAt, window),
-        workedConversation(),
+        surveyedConversation(),
       ),
     )
     .orderBy(desc(csatSurveys.respondedAt), desc(csatSurveys.id))
@@ -132,35 +132,41 @@ export async function latestComments(window: ReportWindow): Promise<SurveyCommen
  * The last day the page can count on the rollup having computed, and so the
  * end of every figure on it and of every live read checked against them.
  *
- * Yesterday once tonight's run has written it, the day before until then —
- * the cron is 00:00 UTC, two or three hours into the team's day, so the day
+ * Yesterday once tonight's run has happened, the day before until then — the
+ * cron is 00:00 UTC, two or three hours into the team's day, so the day
  * before yesterday has always had its run by the time anybody reads this.
- * Whether tonight's has happened is read off the rollup's newest row, which is
- * the one way to tell from here, and it answers "not yet" for a yesterday
- * nobody worked: `computeDay` writes nothing for an empty day. That is the
- * safe way to be wrong. Stopping a day early on a quiet day leaves out a day
- * with nothing in it, where stopping on a yesterday the rollup has not reached
- * would draw it as a day of zeros and report its sends as missing — and the
- * newest row alone, the first version, named the last day anybody *worked*
- * as the last day rolled up, so a quiet week read as a rollup that stopped.
+ * Tonight's run is seen in the three days it rewrites: when every row among
+ * them was written since the team's midnight (`rolledUpDays().recomputedAt`
+ * is the oldest), the run happened, whether or not yesterday had anything
+ * in it. The newest row was the first answer, and it is not one: an empty
+ * day writes no row, so it named the last day anybody worked, and a quiet
+ * week read as a rollup that had stopped. Nor is the newest write: a hand
+ * run over one of the three days after midnight would pass for the whole
+ * run. With three quiet days behind it there is nothing to see, and the page
+ * stops a day early — a day with nothing in it — where stopping on a
+ * yesterday the rollup has not reached would draw it as zeros and report
+ * its sends as missing.
  *
  * A row for today, which only `rollup_metrics day=<today>` by hand can write,
- * is a partial day and counts as nothing beyond yesterday.
+ * is outside the three days and counts for nothing; a partial row for
+ * yesterday written yesterday that way is older than the midnight it is
+ * measured against.
  */
-export function countedThrough(range: Range, newestRow: string | null): string {
-  const today = DateTime.fromISO(range.to, { zone: 'utc' });
-  const yesterday = today.minus({ days: 1 }).toISODate()!;
-  return newestRow !== null && newestRow >= yesterday
-    ? yesterday
-    : today.minus({ days: 2 }).toISODate()!;
+export function countedThrough(
+  window: ReportWindow,
+  rolledUp: { recomputedAt: Date | null },
+): string {
+  const today = DateTime.fromISO(window.to, { zone: window.zone });
+  const ranTonight =
+    rolledUp.recomputedAt !== null && rolledUp.recomputedAt >= today.startOf('day').toJSDate();
+  return today.minus({ days: ranTonight ? 1 : 2 }).toISODate()!;
 }
 
 export type LiveDay = { day: string; sent: number; skipped: number };
 
 /**
  * The surveys sent and the decisions against on each day of a window, counted
- * from `csat_surveys`, and the first day any survey was sent at all — what the
- * page checks the rollup against.
+ * from `csat_surveys` — what the page checks the rollup against.
  *
  * The rollup can be short of the surveys for two reasons that look the same
  * from its side: a night the job did not run, and a day rolled up before
@@ -171,25 +177,18 @@ export type LiveDay = { day: string; sent: number; skipped: number };
  * rollup still counts a survey since purged (`lib/admin/purge-summary.ts`)
  * would otherwise cancel a day it is missing one.
  *
- * Three reads, each served by an index on its timestamp. The first send is
- * the first row in `sent_at` order rather than a `min()` — over a join,
- * Postgres reads every row for a `min()`, and this would be the one query on
- * the page that grew with the archive. `first` has no lower bound, for the
- * reason `rolledUpDays` gives. Grouped by position, because the zone is a
- * parameter and Postgres cannot see that the select's and a `group by`'s are
- * the same one.
+ * Two reads, each served by an index on its timestamp, grouped by position:
+ * the zone is a parameter, and Postgres cannot see that the select's and a
+ * `group by`'s are the same one.
  */
-export async function liveSurveys(
-  window: ReportWindow,
-): Promise<{ days: LiveDay[]; first: string | null }> {
-  const dayOf = (column: Column) =>
-    sql<string>`(${column} at time zone ${window.zone})::date::text`;
+export async function liveSurveys(window: ReportWindow): Promise<LiveDay[]> {
+  const dayOf = dayIn(window.zone);
 
   const sent = await db
     .select({ day: dayOf(csatSurveys.sentAt), count: sql<number>`count(*)::int` })
     .from(csatSurveys)
     .innerJoin(conversations, eq(conversations.id, csatSurveys.conversationId))
-    .where(and(within(csatSurveys.sentAt, window), workedConversation()))
+    .where(and(within(csatSurveys.sentAt, window), surveyedConversation()))
     .groupBy(sql`1`);
 
   const skipped = await db
@@ -200,18 +199,10 @@ export async function liveSurveys(
       and(
         eq(csatSurveys.status, 'skipped'),
         within(csatSurveys.createdAt, window),
-        workedConversation(),
+        surveyedConversation(),
       ),
     )
     .groupBy(sql`1`);
-
-  const [earliest] = await db
-    .select({ first: dayOf(csatSurveys.sentAt) })
-    .from(csatSurveys)
-    .innerJoin(conversations, eq(conversations.id, csatSurveys.conversationId))
-    .where(and(isNotNull(csatSurveys.sentAt), workedConversation()))
-    .orderBy(csatSurveys.sentAt)
-    .limit(1);
 
   const days = new Map<string, LiveDay>();
   for (const row of sent) days.set(row.day, { day: row.day, sent: row.count, skipped: 0 });
@@ -221,10 +212,32 @@ export async function liveSurveys(
     else days.set(row.day, { day: row.day, sent: 0, skipped: row.count });
   }
 
-  return {
-    days: [...days.values()].sort((a, b) => a.day.localeCompare(b.day)),
-    first: earliest?.first ?? null,
-  };
+  return [...days.values()].sort((a, b) => a.day.localeCompare(b.day));
+}
+
+/**
+ * The first day any survey was sent, in the team's zone — what the page says
+ * when surveys began after a window opens.
+ *
+ * The first row in `sent_at` order rather than a `min()`: over a join,
+ * Postgres reads every row for a `min()`, and this would be the one query on
+ * the page that grew with the archive. No lower bound, for the reason
+ * `rolledUpDays` gives.
+ */
+export async function firstSend(zone: string): Promise<string | null> {
+  const [earliest] = await db
+    .select({ first: dayIn(zone)(csatSurveys.sentAt) })
+    .from(csatSurveys)
+    .innerJoin(conversations, eq(conversations.id, csatSurveys.conversationId))
+    .where(and(isNotNull(csatSurveys.sentAt), surveyedConversation()))
+    .orderBy(csatSurveys.sentAt)
+    .limit(1);
+  return earliest?.first ?? null;
+}
+
+/** The team's calendar day a timestamptz falls on, as the rollup keys it. */
+function dayIn(zone: string) {
+  return (column: Column) => sql<string>`(${column} at time zone ${zone})::date::text`;
 }
 
 /**
