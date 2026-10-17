@@ -5,7 +5,14 @@ import { db } from '@/db/client';
 import { csatRules, groups } from '@/db/schema';
 import { requirePermission } from '@/lib/auth/guard';
 import { surveyEmail } from '@/lib/csat/email';
-import { MAX_DELAY_MINUTES, MAX_RESURVEY_DAYS, MIN_RESURVEY_DAYS } from '@/lib/csat/limits';
+import {
+  MAX_DELAY_MINUTES,
+  MAX_META_EXPIRY_DAYS,
+  MAX_RESURVEY_DAYS,
+  MIN_META_EXPIRY_DAYS,
+  MIN_RESURVEY_DAYS,
+  privacyUrlProblem,
+} from '@/lib/csat/limits';
 import { wordingForRule } from '@/lib/csat/rules';
 import { saveCsatSettings, type CsatSettingsInput } from '@/lib/csat/settings';
 import { toWordingPair, wordingColumn, wordingProblems } from '@/lib/csat/wording';
@@ -62,7 +69,27 @@ export async function saveSurveySettings(
   );
   if ('error' in resurvey) return { error: resurvey.error };
 
+  const expiry = bounded(
+    text(formData, 'metaExpiresInDays'),
+    'How long the Messenger card can be answered',
+    MAX_META_EXPIRY_DAYS,
+    MIN_META_EXPIRY_DAYS,
+  );
+  if ('error' in expiry) return { error: expiry.error };
+
   const on = (key: string) => formData.get(key) === 'on';
+
+  const privacyUrl = text(formData, 'privacyUrl') || null;
+  const privacyProblem = privacyUrl ? privacyUrlProblem(privacyUrl) : null;
+  if (privacyProblem) return { error: privacyProblem };
+  // Graph refuses the card without one, so Facebook switched on without it
+  // would only ever write "not surveyed" on every ticket; said here instead.
+  if (on('surveyFacebook') && !privacyUrl) {
+    return {
+      error:
+        'Messenger’s survey card needs a link to your privacy policy. Add one, or leave Facebook off.',
+    };
+  }
 
   const input: CsatSettingsInput = {
     enabled: on('enabled'),
@@ -77,6 +104,8 @@ export async function saveSurveySettings(
       api: on('surveyApi'),
     },
     surveyRuleResolved: on('surveyRuleResolved'),
+    privacyUrl,
+    metaExpiresInDays: expiry.value,
   };
 
   await saveCsatSettings(input, admin.id);

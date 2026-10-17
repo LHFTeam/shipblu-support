@@ -27,6 +27,7 @@ export const SKIP_REASONS = {
   no_address: 'there is no email address to send it to',
   comment_thread: 'the conversation is a public comment thread, where a survey would be public too',
   window_closed: 'the messaging window had closed',
+  no_privacy_url: 'Messenger’s survey card needs a privacy policy link, and none is set',
 } as const;
 
 export type SkipReason = keyof typeof SKIP_REASONS;

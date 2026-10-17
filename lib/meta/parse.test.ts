@@ -670,3 +670,139 @@ describe('window-opening interactions', () => {
     expect(parsed.interactions).toHaveLength(0);
   });
 });
+
+describe('satisfaction survey answers', () => {
+  const SURVEY = '0b6a3f2e-9c41-4d7a-8e15-2f6c9d0a7b13';
+
+  /** Meta's `messaging_feedback` example, verbatim but for our question id. */
+  function feedbackPayload(questions: Record<string, unknown>) {
+    return {
+      object: 'page',
+      entry: [
+        {
+          time: 1_755_000_000_000,
+          messaging: [
+            {
+              sender: { id: 'psid-1' },
+              recipient: { id: '111222333' },
+              messaging_feedback: { feedback_screens: [{ screen_id: 0, questions }] },
+            },
+          ],
+        },
+      ],
+    };
+  }
+
+  it('reads an answer to Messenger’s feedback card, follow-up and all', () => {
+    const parsed = parse(
+      feedbackPayload({
+        csat_0b6a3f2e9c414d7a8e152f6c9d0a7b13: {
+          type: 'csat',
+          payload: '5',
+          follow_up: { type: 'free_form', payload: 'I am very satisfied!' },
+        },
+      }),
+    );
+
+    expect(parsed.feedbacks).toEqual([
+      {
+        platform: 'facebook',
+        connection: 'facebook_page',
+        from: 'psid-1',
+        surveyId: SURVEY,
+        rating: 5,
+        comment: 'I am very satisfied!',
+        source: 'meta_feedback',
+      },
+    ]);
+    // Not a message, and not an interaction either: nothing to answer, no window.
+    expect(parsed.messages).toEqual([]);
+    expect(parsed.interactions).toEqual([]);
+  });
+
+  it('drops a card answer that is not to one of our surveys, or off the scale', () => {
+    const parsed = parse(
+      feedbackPayload({
+        hauydmns8: { type: 'csat', payload: '4' },
+        csat_0b6a3f2e9c414d7a8e152f6c9d0a7b13: { type: 'csat', payload: '7' },
+      }),
+    );
+    expect(parsed.feedbacks).toEqual([]);
+
+    const noComment = parse(
+      feedbackPayload({
+        csat_0b6a3f2e9c414d7a8e152f6c9d0a7b13: {
+          type: 'csat',
+          payload: '2',
+          follow_up: { type: 'free_form', payload: '  ' },
+        },
+      }),
+    );
+    expect(noComment.feedbacks[0]).toMatchObject({ rating: 2, comment: null });
+  });
+
+  it('files a tapped survey button as an answer, never as something the customer said', () => {
+    // The tap arrives as a message whose text is the button's title — "Great"
+    // filed as a reply would reopen the ticket and become its last words.
+    for (const object of ['page', 'instagram'] as const) {
+      const parsed = parse(
+        {
+          object,
+          entry: [
+            {
+              id: '111222333',
+              messaging: [
+                {
+                  sender: { id: 'igsid-1' },
+                  recipient: { id: '111222333' },
+                  timestamp: 1_755_000_000_000,
+                  message: {
+                    mid: 'm_tap',
+                    text: 'Great',
+                    quick_reply: { payload: `csat:${SURVEY}:5` },
+                  },
+                },
+              ],
+            },
+          ],
+        },
+        object === 'page' ? 'facebook_page' : 'instagram_login',
+      );
+
+      expect(parsed.messages).toEqual([]);
+      expect(parsed.feedbacks).toEqual([
+        {
+          platform: object === 'page' ? 'facebook' : 'instagram',
+          connection: object === 'page' ? 'facebook_page' : 'instagram_login',
+          from: 'igsid-1',
+          surveyId: SURVEY,
+          rating: 5,
+          comment: null,
+          source: 'meta_quick_reply',
+        },
+      ]);
+    }
+  });
+
+  it('keeps a quick reply that is not ours as the message it is', () => {
+    const parsed = parse(
+      messengerPayload({
+        message: { mid: 'm_menu', text: 'Track my order', quick_reply: { payload: 'TRACK' } },
+      }),
+    );
+    expect(parsed.feedbacks).toEqual([]);
+    expect(parsed.messages).toHaveLength(1);
+    expect(parsed.messages[0]!.text).toBe('Track my order');
+  });
+
+  it('ignores the echo of our own survey, buttons and all', () => {
+    const parsed = parse(
+      messengerPayload({
+        message: { mid: 'm_echo', text: 'How did we do?', is_echo: true },
+      }),
+    );
+    expect(parsed.feedbacks).toEqual([]);
+    expect(parsed.messages).toEqual([]);
+    expect(parsed.echoes).toBe(1);
+  });
+});

@@ -30,9 +30,10 @@ export type MetaSendContext = {
    * both with the same sentence.
    */
   connection: MetaConnection;
+  /** A survey's card or quick replies are direct messages here: they go where one goes. */
   sendKind: 'dm' | 'comment_reply' | 'private_reply';
   /** The tag a direct message went out with, when it was a direct message. */
-  tag?: 'RESPONSE' | 'HUMAN_AGENT' | null;
+  tag?: 'RESPONSE' | 'HUMAN_AGENT' | 'CUSTOMER_FEEDBACK' | null;
 };
 
 /**

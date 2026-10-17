@@ -159,6 +159,10 @@ export const REQUIRED_PAGE_FIELDS = [
   // `REQUIRED_INSTAGRAM_FIELDS`; this is not a typo either way round.
   'messaging_referrals',
   'message_reactions',
+  // Messenger's customer feedback card answers here and nowhere else — not
+  // as a message — so without it every Facebook survey is a card nobody's
+  // answer comes back from. Messenger only; Instagram has no such field.
+  'messaging_feedback',
 ] as const;
 
 /**

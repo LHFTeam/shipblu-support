@@ -123,6 +123,26 @@ export function messagingTag(
   return null;
 }
 
+/**
+ * What Messenger's customer feedback card goes out with, or null past the
+ * seven days.
+ *
+ * Its own function rather than a third case in `messagingTag`, because the
+ * two tags past 24 hours are each valid on exactly one kind of message:
+ * `CUSTOMER_FEEDBACK` only on this card, which is the one thing it was made
+ * for, and `HUMAN_AGENT` never on it, because nobody wrote it. Two functions
+ * make each mistake a type error instead of a branch somebody has to get
+ * right. The seven days are the same seven days, counted from the same
+ * customer message; the card simply has a tag of its own to use them with.
+ */
+export function feedbackTemplateTag(
+  state: MetaWindowState,
+): 'RESPONSE' | 'CUSTOMER_FEEDBACK' | null {
+  if (state.isOpen) return 'RESPONSE';
+  if (state.needsHumanAgentTag) return 'CUSTOMER_FEEDBACK';
+  return null;
+}
+
 /** One line for the composer, in the agent's terms rather than Meta's. */
 export function describeWindow(state: MetaWindowState): string {
   switch (state.reason) {

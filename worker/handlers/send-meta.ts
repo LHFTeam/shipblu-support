@@ -1,17 +1,29 @@
 import { and, desc, eq, ne } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { conversations, messages } from '@/db/schema';
+import { fallBackToQuickReplies } from '@/lib/csat';
+import { recordTemplateRefusal } from '@/lib/csat/settings';
 import {
+  ACCESS_TOKEN_CODE,
   MetaApiError,
   privateReplyToComment,
   replyToComment,
   sendDirectMessage,
+  sendMessageRequest,
 } from '@/lib/meta/client';
 import { commentReplyTarget } from '@/lib/meta/comments';
-import { metaConnection } from '@/lib/meta/connection';
-import { explainMetaSendError, MetaSendRefusal } from '@/lib/meta/errors';
+import { metaConnection, type MetaConnection } from '@/lib/meta/connection';
+import { explainMetaSendError, MetaSendRefusal, type MetaSendContext } from '@/lib/meta/errors';
+import { feedbackTemplateRequest, type FeedbackCard } from '@/lib/meta/feedback-template';
+import { quickReplySurveyRequest, type RatingLabels } from '@/lib/meta/quick-reply-survey';
 import type { MetaPlatform } from '@/lib/meta/types';
-import { messagingTag, metaWindowState, type MetaSendAuthor } from '@/lib/meta/window';
+import {
+  feedbackTemplateTag,
+  messagingTag,
+  metaWindowState,
+  type MetaSendAuthor,
+  type MetaWindowState,
+} from '@/lib/meta/window';
 import type { ClaimedJob } from '@/lib/queue';
 import { parseJobPayload } from '@/lib/queue/payloads';
 import { alreadySent } from './already-sent';
@@ -33,19 +45,43 @@ const log = logger('send_meta');
  *   comment_reply  a public reply under the customer's comment
  *   private_reply  a one-time move from a public comment into the DM inbox
  *
+ * and two more that only the satisfaction survey writes, each a direct
+ * message with something attached, built from what the survey job froze on
+ * the row (`lib/csat/meta-survey.ts`):
+ *
+ *   feedback_template   Messenger's customer feedback card, tagged
+ *                       CUSTOMER_FEEDBACK past the 24 hours
+ *   quick_reply_survey  the question with five rating buttons under it,
+ *                       inside the 24 hours only
+ *
  * The console writes the message row first and enqueues this, so the agent sees
  * their reply immediately and a Meta outage delays delivery rather than losing
  * what they wrote.
  */
 
+type SendKind =
+  'dm' | 'comment_reply' | 'private_reply' | 'feedback_template' | 'quick_reply_survey';
+
 type SendMeta = {
   metaKind?: 'direct_message' | 'comment';
-  sendKind?: 'dm' | 'comment_reply' | 'private_reply';
+  sendKind?: SendKind;
   platform?: MetaPlatform;
   commentId?: string;
   /** The customer's page-scoped id, for a DM. */
   recipientId?: string;
+  /** A survey message's survey, and what its carrier needs (`MetaSurveyMeta`). */
+  csatSurveyId?: string;
+  card?: FeedbackCard;
+  labels?: RatingLabels;
 };
+
+/**
+ * The request a failure is explained against: what was last put to Graph,
+ * which after a refused card is the quick replies sent in its place. A survey
+ * send is a direct message to the explanation — it goes where one goes, and
+ * is refused for the same reasons.
+ */
+type Attempt = { sendKind: SendKind; tag: MetaSendContext['tag'] };
 
 export async function sendMeta(job: ClaimedJob): Promise<void> {
   const { messageId } = parseJobPayload(job, 'send_meta');
@@ -71,6 +107,7 @@ export async function sendMeta(job: ClaimedJob): Promise<void> {
   }
 
   const sendKind = meta.sendKind ?? (await inferSendKind(row.conversation.id));
+  const attempt: Attempt = { sendKind, tag: null };
 
   // Which host and credential this goes out with. Resolved once here so the log
   // line, the failure explanation and the request itself cannot disagree about
@@ -85,7 +122,7 @@ export async function sendMeta(job: ClaimedJob): Promise<void> {
   const author: MetaSendAuthor = row.message.authorAgentId ? 'human' : 'automated';
 
   try {
-    const externalId = await deliver(sendKind, platform, row, meta, author);
+    const externalId = await deliver(sendKind, platform, row, meta, author, connection, attempt);
 
     await db
       .update(messages)
@@ -96,7 +133,7 @@ export async function sendMeta(job: ClaimedJob): Promise<void> {
       })
       .where(eq(messages.id, messageId));
 
-    log.info(`${messageId} sent as ${sendKind} on ${platform} via ${connection}`);
+    log.info(`${messageId} sent as ${attempt.sendKind} on ${platform} via ${connection}`);
   } catch (error) {
     const message = errorMessage(error);
 
@@ -108,11 +145,8 @@ export async function sendMeta(job: ClaimedJob): Promise<void> {
         ? explainMetaSendError(error, {
             platform,
             connection,
-            sendKind,
-            tag:
-              sendKind === 'dm'
-                ? messagingTag(metaWindowState(row.conversation.lastCustomerMessageAt), author)
-                : null,
+            sendKind: explainedKind(attempt.sendKind),
+            tag: attempt.tag,
           })
         : message;
 
@@ -132,12 +166,19 @@ export async function sendMeta(job: ClaimedJob): Promise<void> {
   }
 }
 
+type Row = {
+  message: typeof messages.$inferSelect;
+  conversation: typeof conversations.$inferSelect;
+};
+
 async function deliver(
-  sendKind: 'dm' | 'comment_reply' | 'private_reply',
+  sendKind: SendKind,
   platform: MetaPlatform,
-  row: { message: typeof messages.$inferSelect; conversation: typeof conversations.$inferSelect },
+  row: Row,
   meta: SendMeta,
   author: MetaSendAuthor,
+  connection: MetaConnection,
+  attempt: Attempt,
 ): Promise<string | null> {
   const text = row.message.bodyText;
 
@@ -187,7 +228,13 @@ async function deliver(
   }
 
   const window = metaWindowState(row.conversation.lastCustomerMessageAt);
+
+  if (sendKind === 'feedback_template') {
+    return deliverFeedbackCard(row, meta, recipientId, window, connection, attempt);
+  }
+
   const tag = messagingTag(window, author);
+  attempt.tag = tag;
 
   if (!tag) {
     // Two ways to arrive here, and they are not the same failure. The seven days
@@ -207,8 +254,119 @@ async function deliver(
     );
   }
 
+  if (sendKind === 'quick_reply_survey') {
+    return sendQuickReplySurvey(platform, recipientId, row, meta);
+  }
+
   const result = await sendDirectMessage({ platform, recipientId, text, tag });
   return result.messageId;
+}
+
+/**
+ * Messenger's feedback card, and what happens when Graph will not take it.
+ *
+ * Meta marks the card "in development" and may withdraw it, and the day it
+ * does is a permanent refusal on every Facebook survey. So a permanent
+ * refusal is kept on the settings row, where the admin page prints it — a
+ * worker log line is where §6.27's missing approval hid for a month — and,
+ * while the 24 hours are open, the survey goes as quick replies on the same
+ * row instead. Past them nothing else sends, and the row fails with Graph's
+ * own sentence, as any refused send does.
+ *
+ * Only a refusal of *this request* falls back. A transient answer, the
+ * unspecified codes among them, is the queue's to retry as the card; and a
+ * dead token, or a refusal this app made itself, fails every send the same
+ * way and is not something the card did.
+ */
+async function deliverFeedbackCard(
+  row: Row,
+  meta: SendMeta,
+  recipientId: string,
+  window: MetaWindowState,
+  connection: MetaConnection,
+  attempt: Attempt,
+): Promise<string | null> {
+  if (row.conversation.channel !== 'facebook') {
+    throw new MetaSendRefusal('Messenger’s feedback card can only be sent on Facebook.');
+  }
+  if (!meta.csatSurveyId || !meta.card) {
+    throw new MetaSendRefusal('This survey message carries no feedback card to send.');
+  }
+
+  // The card's own tag, never `HUMAN_AGENT`: nobody wrote it.
+  const tag = feedbackTemplateTag(window);
+  attempt.tag = tag;
+  if (!tag) {
+    throw new MetaSendRefusal(
+      'Seven days have passed since the customer last wrote, and past them not even ' +
+        'the feedback card sends; only the customer can reopen this conversation.',
+    );
+  }
+
+  try {
+    const result = await sendMessageRequest(
+      'facebook',
+      feedbackTemplateRequest({ recipientId, surveyId: meta.csatSurveyId, card: meta.card, tag }),
+    );
+    return result.messageId;
+  } catch (error) {
+    if (
+      !(error instanceof MetaApiError) ||
+      error instanceof MetaSendRefusal ||
+      error.isTransient ||
+      error.status === 0 ||
+      error.code === ACCESS_TOKEN_CODE
+    ) {
+      throw error;
+    }
+
+    await recordTemplateRefusal(
+      explainMetaSendError(error, { platform: 'facebook', connection, sendKind: 'dm', tag }),
+    );
+
+    if (!window.isOpen || !meta.labels) throw error;
+
+    // Switched on the row before the send, so a retry after a failure from
+    // here on goes straight to the quick replies instead of asking for the
+    // card again and writing a second refusal.
+    await fallBackToQuickReplies(meta.csatSurveyId, row.message.id);
+    attempt.sendKind = 'quick_reply_survey';
+    attempt.tag = 'RESPONSE';
+    log.warn(
+      `${row.message.id}: Messenger refused the feedback card, sending quick replies`,
+      error,
+    );
+
+    return sendQuickReplySurvey('facebook', recipientId, row, meta);
+  }
+}
+
+async function sendQuickReplySurvey(
+  platform: MetaPlatform,
+  recipientId: string,
+  row: Row,
+  meta: SendMeta,
+): Promise<string | null> {
+  if (!meta.csatSurveyId || !meta.labels) {
+    throw new MetaSendRefusal('This survey message carries no rating buttons to send.');
+  }
+
+  const result = await sendMessageRequest(
+    platform,
+    quickReplySurveyRequest({
+      platform,
+      recipientId,
+      surveyId: meta.csatSurveyId,
+      text: row.message.bodyText,
+      labels: meta.labels,
+    }),
+  );
+  return result.messageId;
+}
+
+/** A survey's send is a direct message to `explainMetaSendError`. */
+function explainedKind(sendKind: SendKind): MetaSendContext['sendKind'] {
+  return sendKind === 'comment_reply' || sendKind === 'private_reply' ? sendKind : 'dm';
 }
 
 /**

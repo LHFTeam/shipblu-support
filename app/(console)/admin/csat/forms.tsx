@@ -1,12 +1,18 @@
 'use client';
 
-import { ErrorText, Field, Input, SuccessText, Toggle } from '@/components/ui';
+import { ErrorText, Field, Input, Notice, SuccessText, Toggle } from '@/components/ui';
 import { SubmitButton } from '@/components/submit-button';
 import { InfoTip } from '@/components/tooltip';
 import { RelativeTime } from '@/components/relative-time';
 import { useActionForm } from '@/components/use-action-form';
 import { ago } from '@/lib/format';
-import { MAX_DELAY_MINUTES, MAX_RESURVEY_DAYS, MIN_RESURVEY_DAYS } from '@/lib/csat/limits';
+import {
+  MAX_DELAY_MINUTES,
+  MAX_META_EXPIRY_DAYS,
+  MAX_RESURVEY_DAYS,
+  MIN_META_EXPIRY_DAYS,
+  MIN_RESURVEY_DAYS,
+} from '@/lib/csat/limits';
 import type { CsatSettings } from '@/lib/csat/settings';
 import type { ActionState } from '@/lib/http/action-state';
 import { saveSurveySettings } from './actions';
@@ -122,6 +128,28 @@ export function SurveySettingsForm({ settings }: { settings: CsatSettings }) {
               defaultValue={settings.resurveyAfterDays}
             />
           </Field>
+
+          <Field
+            className="sm:w-56"
+            label="Messenger card open for"
+            hint="Days, 1 to 7."
+            explain={
+              <>
+                How long the customer can still answer Messenger&rsquo;s feedback card after it
+                arrives. Meta allows one to seven days; after that the card can no longer be
+                answered.
+              </>
+            }
+          >
+            <Input
+              name="metaExpiresInDays"
+              type="number"
+              min={MIN_META_EXPIRY_DAYS}
+              max={MAX_META_EXPIRY_DAYS}
+              step={1}
+              defaultValue={settings.metaExpiresInDays}
+            />
+          </Field>
         </div>
       </section>
 
@@ -136,19 +164,49 @@ export function SurveySettingsForm({ settings }: { settings: CsatSettings }) {
         <Toggle
           name="surveyWebchat"
           label="Web chat"
-          hint="A link in the chat."
+          hint="A card in the chat, answered without leaving it."
           defaultChecked={settings.channels.webchat}
         />
         <Toggle
           name="surveyFacebook"
           label="Facebook"
-          hint="A link in a Messenger message, only while the 24-hour window is open."
+          hint="Messenger’s own feedback card, up to 7 days after the customer last wrote. Needs the privacy link below."
           defaultChecked={settings.channels.facebook}
         />
+        <div className="flex flex-col gap-2 ps-6">
+          <Field
+            label="Privacy policy link"
+            hint="Shown on Messenger’s card. Required for Facebook surveys."
+            explain={
+              <>
+                Meta will not send its feedback card without a link to the business&rsquo;s privacy
+                policy, so Facebook tickets are not surveyed until one is set.
+              </>
+            }
+          >
+            <Input
+              name="privacyUrl"
+              type="url"
+              inputMode="url"
+              dir="ltr"
+              placeholder="https://"
+              defaultValue={settings.privacyUrl ?? ''}
+            />
+          </Field>
+          {settings.lastTemplateRefusal ? (
+            <Notice tone="warning" icon>
+              <RelativeTime at={settings.lastTemplateRefusal.at}>
+                {(relative) => `Messenger last refused the feedback card ${ago(relative)}:`}
+              </RelativeTime>{' '}
+              <span className="whitespace-pre-line">{settings.lastTemplateRefusal.text}</span> A
+              survey it refuses goes as rating buttons instead, while the 24-hour window is open.
+            </Notice>
+          ) : null}
+        </div>
         <Toggle
           name="surveyInstagram"
           label="Instagram"
-          hint="A link in a direct message, only while the 24-hour window is open."
+          hint="Five rating buttons under the question, only while the 24-hour window is open."
           defaultChecked={settings.channels.instagram}
         />
         <Toggle

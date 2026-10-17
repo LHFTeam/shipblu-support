@@ -228,9 +228,10 @@ export function preselectedRating(raw: string | string[] | undefined): number | 
 }
 
 /**
- * The survey as a plain message — web chat, and a Meta direct message inside
- * its window: the first line, the question, the link.
+ * The survey as a plain message — web chat's text under its card, and the
+ * prompt Meta's rating buttons sit under: the first line, the question, and
+ * the link where the delivery carries one.
  */
-export function surveyText(wording: Wording, url: string): string {
+export function surveyText(wording: Wording, url: string | null): string {
   return [wording.intro, wording.question, url].filter(Boolean).join('\n');
 }

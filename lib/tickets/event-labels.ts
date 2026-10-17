@@ -214,6 +214,10 @@ export function describeEvent(type: string, data: Record<string, unknown>): stri
       const score = typeof data.rating === 'number' ? ` ${data.rating} / 5` : '';
       return `rated the support${score}${from ? ` ${from}` : ''}`;
     }
+    case 'csat_thanked':
+      return 'thanked the customer for their rating';
+    case 'csat_fell_back':
+      return 'sent the satisfaction survey as rating buttons instead: Messenger refused its feedback card';
     case 'csat_suppressed':
       return 'asked that this ticket not be surveyed';
     case 'csat_unsuppressed':

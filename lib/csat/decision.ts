@@ -64,9 +64,16 @@ export type DecisionInput = {
   commentThread: boolean;
   /**
    * On Facebook and Instagram, whether an automated message can send right
-   * now (`automatedReplyBlocked` answered null). Ignored elsewhere.
+   * now (`automatedReplyBlocked` answered null): Instagram's quick replies
+   * go inside this or not at all. Ignored elsewhere.
    */
   metaWindowOpen: boolean;
+  /**
+   * On Facebook, whether Messenger's feedback card can send right now —
+   * the same question asked for the card, which has seven days rather than
+   * one (`automatedReplyBlocked(…, 'feedback_template')`). Ignored elsewhere.
+   */
+  feedbackWindowOpen: boolean;
   /** Whether the channel is one nobody on the team writes to (`isReadOnlyChannel`). */
   readOnly: boolean;
   /** Whether a message on this channel is written as an email (`sendsByEmail`). */
@@ -155,8 +162,21 @@ export function decideSurvey(input: DecisionInput, settings: CsatSettings): Deci
     // Before the window: a comment thread has no window, which is exactly why
     // `automatedReplyBlocked` lets it through — and why it must not be here.
     if (input.commentThread) return { kind: 'skip', reason: 'comment_thread' };
+
+    if (input.channel === 'facebook') {
+      // Messenger's own survey card, which Graph refuses without a privacy
+      // link. Before the window, as "off" comes before a ticket's own
+      // reasons: a missing link is the admin's, and the same on every ticket.
+      if (!settings.privacyUrl) return { kind: 'skip', reason: 'no_privacy_url' };
+      return input.feedbackWindowOpen
+        ? { kind: 'send', delivery: 'meta_template' }
+        : { kind: 'skip', reason: 'window_closed' };
+    }
+
+    // Instagram has no card; five quick replies under the question, which
+    // no tag carries past the 24 hours.
     return input.metaWindowOpen
-      ? { kind: 'send', delivery: 'text_link' }
+      ? { kind: 'send', delivery: 'meta_quick_reply' }
       : { kind: 'skip', reason: 'window_closed' };
   }
 

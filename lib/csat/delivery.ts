@@ -11,13 +11,26 @@ export const DELIVERIES = {
   email_link: 'by email',
   text_link: 'as a message',
   widget_card: 'as a card in the chat',
+  meta_template: 'as Messenger’s feedback card',
+  meta_quick_reply: 'as rating buttons in the conversation',
 } as const;
 
 export type SurveyDelivery = keyof typeof DELIVERIES;
 
+/**
+ * Whether a delivery carries a link to the survey page. Meta's two do not:
+ * Messenger's card and a tapped quick reply are answered where they were
+ * asked, and come back on Meta's webhook with the survey's id in them.
+ */
+export function carriesLink(delivery: SurveyDelivery): boolean {
+  return delivery !== 'meta_template' && delivery !== 'meta_quick_reply';
+}
+
 export const ANSWER_SOURCES = {
   page: 'on the survey page',
   widget: 'in the chat widget',
+  meta_feedback: 'on Messenger’s feedback card',
+  meta_quick_reply: 'with a rating button in the conversation',
 } as const;
 
 export type AnswerSource = keyof typeof ANSWER_SOURCES;

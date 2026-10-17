@@ -54,12 +54,14 @@ async function switchOn(overrides: Partial<Parameters<typeof saveCsatSettings>[0
 }
 
 async function resolvedTicket(input: {
-  channel: 'email' | 'webchat' | 'facebook' | 'whatsapp' | 'whatsapp_bot';
+  channel: 'email' | 'webchat' | 'facebook' | 'instagram' | 'whatsapp' | 'whatsapp_bot';
   email?: string | null;
   /** The customer's one message; null for none; a media stand-in is words too here. */
   customerText?: string | null;
   status?: string;
   externalId?: string;
+  /** When the customer last wrote, which is what Meta's windows count from. */
+  lastWroteAt?: Date;
 }) {
   const [contact] = await db
     .insert(contacts)
@@ -71,7 +73,7 @@ async function resolvedTicket(input: {
       channel: input.channel,
       statusId: await statusId(input.status ?? 'Resolved'),
       requesterContactId: contact!.id,
-      lastCustomerMessageAt: new Date(),
+      lastCustomerMessageAt: input.lastWroteAt ?? new Date(),
       externalId: input.externalId ?? null,
     })
     .returning({ id: conversations.id });
@@ -231,6 +233,62 @@ describe('send_csat', () => {
 
     // No survey row carries a message, so nothing was queued to any carrier.
     expect(await db.select({ id: jobs.id }).from(jobs)).toHaveLength(0);
+  });
+
+  it('surveys Facebook with Messenger’s card for seven days, and Instagram inside one', async () => {
+    await switchOn({ privacyUrl: 'https://shipblu.com/privacy', metaExpiresInDays: 5 });
+    const threeDaysAgo = new Date(Date.now() - 3 * 24 * 3_600_000);
+    const card = await resolvedTicket({ channel: 'facebook', lastWroteAt: threeDaysAgo });
+    const buttons = await resolvedTicket({ channel: 'instagram', customerText: 'where is it?' });
+    const late = await resolvedTicket({ channel: 'instagram', lastWroteAt: threeDaysAgo });
+
+    for (const id of [card, buttons, late]) await sendCsat(job(id));
+
+    // Past the 24 hours, the card still goes: its own tag carries it.
+    const [cardSurvey] = await surveysOf(card);
+    expect(cardSurvey).toMatchObject({ status: 'sent', delivery: 'meta_template' });
+    // Nothing would carry a link, so there is no token for one.
+    expect(cardSurvey!.tokenHash).toBeNull();
+    const [cardMessage] = await db
+      .select({ bodyText: messages.bodyText, meta: messages.meta })
+      .from(messages)
+      .where(eq(messages.id, cardSurvey!.messageId!));
+    expect(cardMessage!.bodyText).not.toContain('http');
+    expect(cardMessage!.meta).toMatchObject({
+      csatSurveyId: expect.any(String),
+      sendKind: 'feedback_template',
+      card: { privacyUrl: 'https://shipblu.com/privacy', expiresInDays: 5 },
+      labels: ['سيئة جدًا', 'سيئة', 'مقبولة', 'جيدة', 'ممتازة'],
+    });
+
+    expect((await surveysOf(buttons))[0]).toMatchObject({
+      status: 'sent',
+      delivery: 'meta_quick_reply',
+      locale: 'en',
+      tokenHash: null,
+    });
+    // Instagram has no card, and nothing carries its buttons past a day.
+    expect((await surveysOf(late))[0]).toMatchObject({
+      status: 'skipped',
+      skipReason: 'window_closed',
+    });
+
+    const carriers = await db
+      .select({ dedupeKey: jobs.dedupeKey })
+      .from(jobs)
+      .where(eq(jobs.type, 'send_meta'));
+    expect(carriers).toHaveLength(2);
+  });
+
+  it('leaves Facebook unsurveyed, and says why, until there is a privacy link', async () => {
+    await switchOn();
+    const id = await resolvedTicket({ channel: 'facebook' });
+
+    await sendCsat(job(id));
+
+    expect(await surveysOf(id)).toEqual([
+      expect.objectContaining({ status: 'skipped', skipReason: 'no_privacy_url' }),
+    ]);
   });
 
   it('counts a photo as the customer taking part', async () => {

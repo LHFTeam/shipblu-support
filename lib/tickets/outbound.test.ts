@@ -127,6 +127,15 @@ describe('automatedReplyBlocked', () => {
     }
   });
 
+  it('lets Messenger’s feedback card through for the seven days its own tag allows', () => {
+    const card = (channel: string, at: Date) =>
+      automatedReplyBlocked(dm(channel, at), NOW, 'feedback_template');
+    expect(card('facebook', ago(3 * DAY))).toBeNull();
+    expect(card('facebook', ago(8 * DAY))).not.toBeNull();
+    // Instagram has no card, so asking for one changes nothing there.
+    expect(card('instagram', ago(3 * DAY))).toContain('HUMAN_AGENT');
+  });
+
   it('stops a WhatsApp reply outside its 24 hours', () => {
     expect(automatedReplyBlocked(dm('whatsapp', ago(3 * DAY)), NOW)).toContain('template');
   });

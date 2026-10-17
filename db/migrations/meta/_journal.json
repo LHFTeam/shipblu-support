@@ -267,6 +267,13 @@
       "when": 1792186568680,
       "tag": "0037_puzzling_stephen_strange",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1792229438332,
+      "tag": "0038_swift_wind_dancer",
+      "breakpoints": true
     }
   ]
 }

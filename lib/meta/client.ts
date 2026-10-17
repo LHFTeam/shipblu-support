@@ -338,11 +338,23 @@ export async function sendDirectMessage(input: {
   text: string;
   tag: 'RESPONSE' | 'HUMAN_AGENT';
 }): Promise<SendMessageResult> {
-  const body = directMessageRequest(input);
+  return sendMessageRequest(input.platform, directMessageRequest(input));
+}
 
+/**
+ * Posts a message body built and tested elsewhere to the same edge a direct
+ * message goes to: Messenger's feedback card (`feedback-template.ts`) and a
+ * survey's quick replies (`quick-reply-survey.ts`). The body is the caller's
+ * because its shape is the one thing that has to be checked against Meta's
+ * reference, and it is checked where it is built.
+ */
+export async function sendMessageRequest(
+  platform: MetaPlatform,
+  body: object,
+): Promise<SendMessageResult> {
   const result = await graph<{ message_id?: string; recipient_id?: string }>(
-    input.platform,
-    `${accountId(input.platform)}/messages`,
+    platform,
+    `${accountId(platform)}/messages`,
     { method: 'POST', body },
   );
 

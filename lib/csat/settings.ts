@@ -38,6 +38,12 @@ export type CsatSettings = {
   resurveyAfterDays: number;
   channels: CsatChannels;
   surveyRuleResolved: boolean;
+  /** Messenger's `business_privacy.url`; Facebook is not surveyed while null. */
+  privacyUrl: string | null;
+  /** Messenger's `expires_in_days` for the feedback card, 1–7. */
+  metaExpiresInDays: number;
+  /** What Graph said when it last refused the feedback card, or null. */
+  lastTemplateRefusal: { text: string; at: Date } | null;
   /** When it last changed and by whom — null before the first save. */
   changedAt: Date | null;
   changedBy: string | null;
@@ -50,6 +56,9 @@ export const UNSET_CSAT_SETTINGS: CsatSettings = {
   resurveyAfterDays: 14,
   channels: { email: false, webchat: false, facebook: false, instagram: false, api: false },
   surveyRuleResolved: true,
+  privacyUrl: null,
+  metaExpiresInDays: 3,
+  lastTemplateRefusal: null,
   changedAt: null,
   changedBy: null,
 };
@@ -76,6 +85,10 @@ export async function readCsatSettings(): Promise<CsatSettings> {
       surveyInstagram: csatSettings.surveyInstagram,
       surveyApi: csatSettings.surveyApi,
       surveyRuleResolved: csatSettings.surveyRuleResolved,
+      privacyUrl: csatSettings.privacyUrl,
+      metaExpiresInDays: csatSettings.metaExpiresInDays,
+      lastTemplateRefusal: csatSettings.lastTemplateRefusal,
+      lastTemplateRefusalAt: csatSettings.lastTemplateRefusalAt,
       changedAt: csatSettings.updatedAt,
       changedBy: agents.name,
     })
@@ -99,6 +112,12 @@ export async function readCsatSettings(): Promise<CsatSettings> {
       api: row.surveyApi,
     },
     surveyRuleResolved: row.surveyRuleResolved,
+    privacyUrl: row.privacyUrl,
+    metaExpiresInDays: row.metaExpiresInDays,
+    lastTemplateRefusal:
+      row.lastTemplateRefusal && row.lastTemplateRefusalAt
+        ? { text: row.lastTemplateRefusal, at: row.lastTemplateRefusalAt }
+        : null,
     changedAt: row.changedAt,
     changedBy: row.changedBy,
   };
@@ -123,7 +142,10 @@ export function forgetCsatSettings(): void {
   cached = null;
 }
 
-export type CsatSettingsInput = Omit<CsatSettings, 'changedAt' | 'changedBy'>;
+export type CsatSettingsInput = Omit<
+  CsatSettings,
+  'changedAt' | 'changedBy' | 'lastTemplateRefusal'
+>;
 
 /** Write the single row, creating it the first time. */
 export async function saveCsatSettings(
@@ -141,6 +163,8 @@ export async function saveCsatSettings(
     surveyInstagram: input.channels.instagram,
     surveyApi: input.channels.api,
     surveyRuleResolved: input.surveyRuleResolved,
+    privacyUrl: input.privacyUrl,
+    metaExpiresInDays: input.metaExpiresInDays,
     updatedByAgentId,
     updatedAt: new Date(),
   };
@@ -151,4 +175,17 @@ export async function saveCsatSettings(
     .onConflictDoUpdate({ target: csatSettings.id, set: values });
 
   forgetCsatSettings();
+}
+
+/**
+ * Graph refused Messenger's feedback card: keep what it said, for the admin
+ * page. Not a change anybody made, so the "last changed" line is left alone,
+ * and the page shows it on its next read of the row. No row means surveys
+ * were never switched on, and nothing could have been refused.
+ */
+export async function recordTemplateRefusal(text: string): Promise<void> {
+  await db
+    .update(csatSettings)
+    .set({ lastTemplateRefusal: text.slice(0, 2000), lastTemplateRefusalAt: new Date() })
+    .where(eq(csatSettings.id, 1));
 }

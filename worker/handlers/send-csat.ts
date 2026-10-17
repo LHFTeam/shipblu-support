@@ -3,6 +3,7 @@ import { db } from '@/db/client';
 import { contacts, conversations, messages, ticketStatuses } from '@/db/schema';
 import { recordSkip, sendSurvey, unsentSurveyMessage } from '@/lib/csat';
 import { surveyEmail } from '@/lib/csat/email';
+import { metaSurveyMessage } from '@/lib/csat/meta-survey';
 import { wordingForTicket } from '@/lib/csat/rules';
 import { surveyText } from '@/lib/csat/wording';
 import { decideSurvey, type SurveyTrigger } from '@/lib/csat/decision';
@@ -109,6 +110,9 @@ export async function sendCsat(job: ClaimedJob): Promise<void> {
   // the ticket would outlive the hiccup.
   const settings = await readCsatSettings();
   const isMeta = ticket.channel === 'facebook' || ticket.channel === 'instagram';
+  // Both of Meta's windows measured at one instant, so the decision cannot
+  // see the card's seven days and the message's 24 hours at different times.
+  const now = new Date();
 
   const decision = decideSurvey(
     {
@@ -126,7 +130,12 @@ export async function sendCsat(job: ClaimedJob): Promise<void> {
       // The third automated sender, through the same guard as the other two:
       // past 24 hours only `HUMAN_AGENT` sends on these platforms, and that tag
       // is reserved for a message a person wrote.
-      metaWindowOpen: isMeta ? automatedReplyBlocked(ticket) === null : false,
+      metaWindowOpen: isMeta ? automatedReplyBlocked(ticket, now) === null : false,
+      // The one exception the guard makes, asked for by name: Messenger's
+      // feedback card has a tag of its own for the seven days.
+      feedbackWindowOpen: isMeta
+        ? automatedReplyBlocked(ticket, now, 'feedback_template') === null
+        : false,
       readOnly: isReadOnlyChannel(ticket.channel),
       byEmail: sendsByEmail(ticket.channel),
     },
@@ -168,7 +177,12 @@ export async function sendCsat(job: ClaimedJob): Promise<void> {
     ruleId,
     requesterEmail: ticket.contactEmail,
     body: (url) => {
-      if (decision.delivery === 'email_link') {
+      const delivery = decision.delivery;
+      if (delivery === 'meta_template' || delivery === 'meta_quick_reply') {
+        return metaSurveyMessage(wording, locale, delivery, settings);
+      }
+      if (!url) throw new Error(`a ${delivery} survey goes out with its link`);
+      if (delivery === 'email_link') {
         const email = surveyEmail(wording, locale, url);
         return { text: email.text, html: email.html };
       }

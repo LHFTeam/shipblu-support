@@ -137,7 +137,7 @@ print "surveyed 41 of 66 resolutions" and a table of why not. The nightly
 `cleanup` job expires `sent` rows past `expires_at`.
 
 **The rating stays a 1–5 integer whatever carried it.** Messenger's `csat`
-question with `score_option: one_to_five` posts `"1"`–`"5"`; a quick reply
+question with `score_option: five_stars` posts `"1"`–`"5"`; a quick reply
 carries its number in the payload; the page, the widget and the API post the
 number. One scale means `rollup_metrics` and every column already drawn from
 it need no new arithmetic, only new counts.
@@ -341,6 +341,13 @@ knowledge:
   against the reference shape, for the reason `send.ts`'s header gives: a wrong
   shape is invisible in Graph's answer. `send_meta` gains a `feedback_template`
   send kind; the row's `meta` carries the survey id.
+  _Built (stage 4):_ the card's words, the privacy link, the expiry and the
+  five labels are frozen onto the message's `meta` by `send_csat`
+  (`lib/csat/meta-survey.ts`), so the carrier reads the row and nothing else.
+  The scale is `score_option: five_stars`, not `one_to_five`: the reference
+  spells the numeric option two ways (`one_to_five`, `1_to_5`) and gives
+  `five_stars` as both its example and its default, and a value Graph does not
+  know is a refused card. Meta survey rows carry no token (`carriesLink`).
 - **`automatedReplyBlocked` learns a second tag.** The `HUMAN_AGENT` rule is
   untouched — the survey is not a person's message and never carries that tag.
   But `CUSTOMER_FEEDBACK` is Meta's own sanctioned way to send exactly this
@@ -349,6 +356,11 @@ knowledge:
   24 hours as today. `messagingTag()` returns `CUSTOMER_FEEDBACK` for that kind
   past 24 hours, with `messaging_type: MESSAGE_TAG`, and refuses rather than
   sends past 7 days (`skipped: window_closed`).
+  _Built:_ as `feedbackTemplateTag()` beside `messagingTag()` rather than a
+  third case in it — each tag past 24 hours is valid on exactly one kind of
+  message, and two functions make putting either on the other a type error.
+  The guard's kind is a third argument, `automatedReplyBlocked(ticket, now,
+'feedback_template')`, and the job measures both windows at one instant.
 - **`messaging_feedback` joins `REQUIRED_PAGE_FIELDS`** in
   `lib/meta/subscriptions.ts`, `parseWebhook` reads it into a new
   `feedbacks: NormalisedFeedback[]` array beside `interactions` — not as a
@@ -368,6 +380,19 @@ on the settings page (`last_template_refusal`), and sends the quick-reply
 survey instead if the 24-hour window is still open. The template is marked "in
 development"; the fallback is what keeps Facebook surveyed the day it is
 removed.
+
+_Built:_ the refusal is kept on `csat_settings` (`last_template_refusal`,
+`_at`) and printed on Facebook's row of the admin page; the survey row's
+delivery moves to `meta_quick_reply`, the message's `sendKind` with it (so a
+retry goes straight to the buttons), and a `csat_fell_back` event says so on
+the timeline. Only a permanent refusal of the card falls back: a transient
+answer — Graph's unspecified codes among them — is the queue's to retry as the
+card, and a dead token or a refusal this app made itself is not something the
+card did. The admin page will not save Facebook switched on without a privacy
+link, and the job still skips `no_privacy_url` if it meets one missing.
+Expiry is Meta's: a lapsed card cannot be answered, so no `expires_at` is
+written yet, and `recordAnswer` still takes a late answer to a superseded row
+as every door does.
 
 ### Instagram — quick replies inside the window
 
@@ -397,6 +422,15 @@ the two Meta channels.
 Quick replies are also Facebook's fallback (previous section), built by the
 same `lib/meta/quick-reply-survey.ts` with `messaging_type: RESPONSE`, through
 the platform split `send.ts` already keeps.
+
+_Built:_ the second message is the rule's thanks and "Anything to add? Just
+reply here." (Arabic without an imperative), written only for the first answer
+— the other Instagram connection's copy of the same tap records nothing and
+thanks nobody — and only while the 24 hours since the customer's last
+_message_ are open: the tap is an answer, not a message, so it moves neither
+the window nor the clock here. Meta does not draw quick replies on desktop
+Instagram; a customer reading there sees the question without its buttons,
+and an answer typed instead is an ordinary message.
 
 ### myBlu — the `api` channel
 
