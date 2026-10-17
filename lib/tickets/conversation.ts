@@ -311,7 +311,7 @@ export async function getConversation(
       () => sideConversationsForConversation(row.conversation.id),
       () => categoriesForConversation(row.conversation.id),
       () => threadControlTakenAt(row.conversation.id),
-      () => ticketSurveyState(row.conversation.id),
+      () => ticketSurveyState(row.conversation.id, row.conversation.channel),
     ]);
 
   // Paired here rather than in the browser: the target is only named in the

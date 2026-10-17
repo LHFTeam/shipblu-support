@@ -44,13 +44,13 @@ export type DecisionInput = {
    */
   hasCustomerMessage: boolean;
   suppressed: boolean;
-  trigger: SurveyTrigger;
   /**
-   * Whether a rule, not a person, resolved the ticket — read off the row
-   * (`resolved_by_agent_id` is null for a rule's resolve) rather than off
-   * who queued the job, because a ticket resolved by an agent, reopened and
-   * re-resolved by a rule inside the delay has two jobs with two triggers and
-   * one truth.
+   * Whether a rule, not a person, resolved the ticket — read off the ticket's
+   * timeline (`resolvedByRule` in the job) rather than off who queued the
+   * job, because a ticket resolved by an agent, reopened and re-resolved by
+   * a rule inside the delay has two jobs with two triggers and one truth.
+   * Which is also why the trigger is not an input here: it decides the delay
+   * and whether a duplicate is answered on the ticket, both of them the job's.
    */
   resolvedByRule: boolean;
   /** `lacksEmailRecipient`: written as an email, with nowhere to send it. */

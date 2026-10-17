@@ -23,7 +23,6 @@ function input(overrides: Partial<DecisionInput> = {}): DecisionInput {
     mergedIntoId: null,
     hasCustomerMessage: true,
     suppressed: false,
-    trigger: 'agent',
     resolvedByRule: false,
     lacksRecipient: false,
     commentThread: false,
@@ -95,17 +94,13 @@ describe('decideSurvey', () => {
   });
 
   it('leaves a rule-resolved ticket alone only when the admin said so', () => {
-    // Read off the row, not off who queued the job: the trigger says nothing.
     expect(decideSurvey(input({ resolvedByRule: true }), ON).kind).toBe('send');
     expect(
-      decideSurvey(input({ resolvedByRule: true, trigger: 'agent' }), {
-        ...ON,
-        surveyRuleResolved: false,
-      }),
+      decideSurvey(input({ resolvedByRule: true }), { ...ON, surveyRuleResolved: false }),
     ).toEqual({ kind: 'skip', reason: 'rule_resolved' });
     // The switch is about rules; an agent's resolve is unaffected by it.
     expect(
-      decideSurvey(input({ trigger: 'rule' }), { ...ON, surveyRuleResolved: false }).kind,
+      decideSurvey(input({ resolvedByRule: false }), { ...ON, surveyRuleResolved: false }).kind,
     ).toBe('send');
   });
 

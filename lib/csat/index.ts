@@ -15,7 +15,7 @@ import { logger } from '@/lib/log';
 import type { ConversationChannel } from '@/lib/tickets/channel-policy';
 import { writeAutomatedReply } from '@/lib/tickets/outbound';
 import { channelSwitch, type SurveyTrigger } from './decision';
-import { readCsatSettings } from './settings';
+import { loadCsatSettings, readCsatSettings, type CsatSettings } from './settings';
 import type { SkipReason } from './skip-reasons';
 
 const log = logger('csat');
@@ -116,6 +116,12 @@ export type SurveySnapshot = {
  * rows saying the same thing an hour apart tell nobody anything. The same
  * reason within a day is the earlier row's; a different reason, or the same
  * one a day later, is a new decision.
+ *
+ * Except when somebody asked (`repeat`): an agent who pressed "Send now" is
+ * waiting on the ticket for the answer, and the sidebar clears its "queued"
+ * line when a new decision lands. Folded into the earlier row, the same
+ * answer is no answer — the line stays and the button stays gone. The rows
+ * are bounded by presses, and the button is hidden while one is queued.
  */
 const SAME_SKIP_WITHIN_MS = 24 * 3_600_000;
 
@@ -123,9 +129,15 @@ export async function recordSkip(
   conversationId: string,
   reason: SkipReason,
   snapshot: SurveySnapshot,
+  { repeat = false }: { repeat?: boolean } = {},
 ): Promise<boolean> {
   return db.transaction(async (tx) => {
     await lockTicket(tx, conversationId);
+
+    if (repeat) {
+      await writeSkip(tx, conversationId, reason, snapshot);
+      return true;
+    }
 
     const [newest] = await tx
       .select({
@@ -145,23 +157,31 @@ export async function recordSkip(
       return false;
     }
 
-    await tx.insert(csatSurveys).values({
-      conversationId,
-      status: 'skipped',
-      skipReason: reason,
-      agentId: snapshot.agentId,
-      groupId: snapshot.groupId,
-      channel: snapshot.channel,
-    });
-
-    await tx.insert(conversationEvents).values({
-      conversationId,
-      type: 'csat_skipped',
-      actorLabel: ACTOR,
-      data: { reason },
-    });
-
+    await writeSkip(tx, conversationId, reason, snapshot);
     return true;
+  });
+}
+
+async function writeSkip(
+  tx: Tx,
+  conversationId: string,
+  reason: SkipReason,
+  snapshot: SurveySnapshot,
+): Promise<void> {
+  await tx.insert(csatSurveys).values({
+    conversationId,
+    status: 'skipped',
+    skipReason: reason,
+    agentId: snapshot.agentId,
+    groupId: snapshot.groupId,
+    channel: snapshot.channel,
+  });
+
+  await tx.insert(conversationEvents).values({
+    conversationId,
+    type: 'csat_skipped',
+    actorLabel: ACTOR,
+    data: { reason },
   });
 }
 
@@ -331,8 +351,16 @@ export async function sendSurvey(send: SurveySend): Promise<SendOutcome> {
 /**
  * A survey this ticket carries whose message never got a carrier job: the
  * run that wrote it was stopped between its commit and the enqueue. The job
- * queues the carrier for it and nothing else.
+ * queues the carrier for it before deciding anything else.
+ *
+ * Only a recent one. The run that strands a carrier is retried within
+ * minutes, so this is almost always found the same hour; one still owed a
+ * day later is about a resolution long past — its carrier purged, or a retry
+ * that never came — and sending it now would ask about that as though it were
+ * the resolution in front of the customer.
  */
+const OWED_FOR_MS = 24 * 3_600_000;
+
 export async function unsentSurveyMessage(conversationId: string): Promise<string | null> {
   const rows = await db
     .select({ messageId: messages.id })
@@ -342,6 +370,7 @@ export async function unsentSurveyMessage(conversationId: string): Promise<strin
       and(
         eq(csatSurveys.conversationId, conversationId),
         eq(csatSurveys.status, 'sent'),
+        gt(csatSurveys.sentAt, new Date(Date.now() - OWED_FOR_MS)),
         eq(messages.deliveryStatus, 'pending'),
         notExists(
           db
@@ -483,20 +512,37 @@ export type TicketSurveyState = {
   survey: SurveySummary | null;
   /** A decision not to survey, newer than `survey`. */
   skip: { reason: string | null; createdAt: Date } | null;
+  /**
+   * Whether a survey could go out on this ticket's channel right now, so the
+   * sidebar does not offer "Send now" where it can only refuse: `off` and
+   * `channel_off` are switches an admin can flip, `unsupported` a channel no
+   * survey goes out on at all.
+   */
+  availability: SurveyAvailability;
 };
 
-export async function ticketSurveyState(conversationId: string): Promise<TicketSurveyState> {
+export type SurveyAvailability = 'on' | 'off' | 'channel_off' | 'unsupported';
+
+export async function ticketSurveyState(
+  conversationId: string,
+  channel: string,
+): Promise<TicketSurveyState> {
   // One statement: the survey, then the skips after it, ordered so the first
   // row is the survey and the second — if any — the newest later skip.
-  const rows = await db
-    .select(SUMMARY)
-    .from(csatSurveys)
-    .where(eq(csatSurveys.conversationId, conversationId))
-    .orderBy(
-      sql`case when ${csatSurveys.status} = 'answered' then 0 when ${csatSurveys.status} = 'skipped' then 2 else 1 end`,
-      desc(csatSurveys.createdAt),
-      desc(csatSurveys.id),
-    );
+  const [rows, settings] = await Promise.all([
+    db
+      .select(SUMMARY)
+      .from(csatSurveys)
+      .where(eq(csatSurveys.conversationId, conversationId))
+      .orderBy(
+        sql`case when ${csatSurveys.status} = 'answered' then 0 when ${csatSurveys.status} = 'skipped' then 2 else 1 end`,
+        desc(csatSurveys.createdAt),
+        desc(csatSurveys.id),
+      ),
+    // The page's memoised read, on every ticket render: a failed one reads as
+    // off, which only hides a button until the next render.
+    loadCsatSettings(),
+  ]);
 
   const survey = rows.find((row) => row.status !== 'skipped') ?? null;
   const skip =
@@ -507,7 +553,19 @@ export async function ticketSurveyState(conversationId: string): Promise<TicketS
   return {
     survey,
     skip: skip ? { reason: skip.skipReason, createdAt: skip.createdAt } : null,
+    availability: surveyAvailability(settings, channel),
   };
+}
+
+/**
+ * `scheduleSurvey`'s refusals for a channel, the channel with no switch first:
+ * no setting changes that one, so it is the answer whatever the switch says.
+ */
+function surveyAvailability(settings: CsatSettings, channel: string): SurveyAvailability {
+  const key = channelSwitch(channel);
+  if (key === null) return 'unsupported';
+  if (!settings.enabled) return 'off';
+  return settings.channels[key] ? 'on' : 'channel_off';
 }
 
 /** One row of the admin page's recent list: the summary plus which ticket it was. */

@@ -12,7 +12,7 @@ import {
   messages,
   ticketStatuses,
 } from '@/db/schema';
-import { scheduleSurvey } from '@/lib/csat';
+import { scheduleSurvey, ticketSurveyState } from '@/lib/csat';
 import { saveCsatSettings, UNSET_CSAT_SETTINGS } from '@/lib/csat/settings';
 import type { ClaimedJob } from '@/lib/queue';
 import { withCleanDatabase } from '@/lib/testing/db';
@@ -384,5 +384,125 @@ describe('send_csat', () => {
     expect(delayed.runAt.getTime() - before).toBeGreaterThanOrEqual(45 * 60_000 - 1000);
     const manual = queued.find((row) => (row.payload as { trigger: string }).trigger === 'manual')!;
     expect(manual.runAt.getTime() - before).toBeLessThan(5_000);
+  });
+
+  it('answers every "Send now" on the ticket, where a scheduled repeat folds into the earlier row', async () => {
+    await switchOn();
+    const id = await resolvedTicket({ channel: 'email', email: null });
+
+    await sendCsat(job(id));
+    await sendCsat(job(id));
+    expect(await surveysOf(id)).toHaveLength(1);
+
+    // The sidebar clears its "queued" line when a new decision lands; the same
+    // reason folded into the earlier row would leave it up for good.
+    await sendCsat(job(id, 'manual'));
+    await sendCsat(job(id, 'manual'));
+    const rows = await surveysOf(id);
+    expect(rows).toHaveLength(3);
+    expect(rows.every((row) => row.skipReason === 'no_address')).toBe(true);
+  });
+
+  it('reads who resolved the ticket off its timeline, not off a column a direct close leaves empty', async () => {
+    await switchOn({ surveyRuleResolved: false });
+    const [agent] = await db
+      .select({ id: agents.id })
+      .from(agents)
+      .where(eq(agents.email, 'admin@shipblu.test'));
+    const at = (minutesAgo: number) => new Date(Date.now() - minutesAgo * 60_000);
+    const statusEvent = (
+      conversationId: string,
+      category: string,
+      by: 'agent' | 'rule',
+      createdAt: Date,
+    ) => ({
+      conversationId,
+      type: 'status_changed',
+      ...(by === 'agent'
+        ? { actorAgentId: agent!.id }
+        : { actorLabel: 'automation:Close thanks-only tickets' }),
+      data: { category },
+      createdAt,
+    });
+
+    // An agent closed it straight from Open: `resolved_by_agent_id` is never
+    // stamped, which used to read as a rule's resolve.
+    const closedByAgent = await resolvedTicket({
+      channel: 'email',
+      email: 'a@b.test',
+      status: 'Closed',
+    });
+    // An agent resolved it and the three-day rule closed it: still the agent's.
+    const autoClosed = await resolvedTicket({
+      channel: 'email',
+      email: 'b@b.test',
+      status: 'Closed',
+    });
+    // A rule resolved it, it was reopened, and an agent resolved it again.
+    const reResolved = await resolvedTicket({ channel: 'email', email: 'c@b.test' });
+    // A rule resolved it, and nothing since.
+    const byRule = await resolvedTicket({ channel: 'email', email: 'd@b.test' });
+
+    await db
+      .insert(conversationEvents)
+      .values([
+        statusEvent(closedByAgent, 'closed', 'agent', at(10)),
+        statusEvent(autoClosed, 'resolved', 'agent', at(60)),
+        statusEvent(autoClosed, 'closed', 'rule', at(10)),
+        statusEvent(reResolved, 'resolved', 'rule', at(60)),
+        { conversationId: reResolved, type: 'reopened', data: {}, createdAt: at(30) },
+        statusEvent(reResolved, 'resolved', 'agent', at(10)),
+        statusEvent(byRule, 'resolved', 'rule', at(10)),
+      ]);
+
+    for (const id of [closedByAgent, autoClosed, reResolved, byRule]) {
+      await sendCsat(job(id, 'manual'));
+    }
+
+    expect((await surveysOf(closedByAgent))[0]).toMatchObject({ status: 'sent' });
+    expect((await surveysOf(autoClosed))[0]).toMatchObject({ status: 'sent' });
+    expect((await surveysOf(reResolved))[0]).toMatchObject({ status: 'sent' });
+    expect((await surveysOf(byRule))[0]).toMatchObject({ skipReason: 'rule_resolved' });
+  });
+
+  it('leaves a survey stranded for days alone, and decides the resolution in front of it', async () => {
+    await switchOn();
+    const id = await resolvedTicket({ channel: 'email', email: 'a@b.test' });
+
+    await sendCsat(job(id));
+    // Its carrier never queued — purged, or a retry that never came — and the
+    // ticket was resolved again weeks later, past the resurvey window.
+    await db.delete(jobs).where(eq(jobs.type, 'send_email'));
+    await db
+      .update(csatSurveys)
+      .set({ sentAt: new Date(Date.now() - 20 * 24 * 3_600_000) })
+      .where(eq(csatSurveys.conversationId, id));
+
+    await sendCsat(job(id));
+
+    const rows = await surveysOf(id);
+    expect(rows.map((row) => row.status).sort()).toEqual(['expired', 'sent']);
+    const fresh = rows.find((row) => row.status === 'sent')!;
+    // Only the new survey goes; the old one is not sent weeks late.
+    expect(await carrierJobs()).toEqual([
+      { type: 'send_email', dedupeKey: `send:${fresh.messageId}` },
+    ]);
+  });
+});
+
+describe('the sidebar', () => {
+  it('says whether a survey could go out on the ticket\'s channel, so it offers "Send now" only there', async () => {
+    const email = await resolvedTicket({ channel: 'email', email: 'a@b.test' });
+
+    // A fresh install: surveys off.
+    expect((await ticketSurveyState(email, 'email')).availability).toBe('off');
+    expect((await ticketSurveyState(email, 'whatsapp')).availability).toBe('unsupported');
+
+    await switchOn({ channels: { ...UNSET_CSAT_SETTINGS.channels, email: true } });
+    expect((await ticketSurveyState(email, 'email')).availability).toBe('on');
+    // Portal rides email's switch.
+    expect((await ticketSurveyState(email, 'portal')).availability).toBe('on');
+    expect((await ticketSurveyState(email, 'webchat')).availability).toBe('channel_off');
+    expect((await ticketSurveyState(email, 'whatsapp_bot')).availability).toBe('unsupported');
   });
 });

@@ -1,6 +1,6 @@
-import { and, eq, exists } from 'drizzle-orm';
+import { and, eq, exists, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
-import { contacts, conversations, messages, ticketStatuses } from '@/db/schema';
+import { contacts, conversationEvents, conversations, messages, ticketStatuses } from '@/db/schema';
 import { recordSkip, sendSurvey, unsentSurveyMessage } from '@/lib/csat';
 import { surveyEmail } from '@/lib/csat/email';
 import { wordingForTicket } from '@/lib/csat/rules';
@@ -61,7 +61,7 @@ export async function sendCsat(job: ClaimedJob): Promise<void> {
       mergedIntoId: conversations.mergedIntoId,
       csatSuppressed: conversations.csatSuppressed,
       assigneeAgentId: conversations.assigneeAgentId,
-      resolvedByAgentId: conversations.resolvedByAgentId,
+      resolvedByRule: resolvedByRule(),
       groupId: conversations.groupId,
       lastCustomerMessageAt: conversations.lastCustomerMessageAt,
       // Read by `automatedReplyBlocked`, to tell a comment ticket from a DM.
@@ -97,7 +97,12 @@ export async function sendCsat(job: ClaimedJob): Promise<void> {
   // Before deciding anything: a run that committed its survey and was stopped
   // before queueing the carrier owes that carrier whatever has happened to
   // the ticket since — a reopen in between is no reason to leave a survey the
-  // customer was already sent sitting `pending` for good.
+  // customer was already sent sitting `pending` for good. That survey is this
+  // resolution's: only a recent one is owed (`unsentSurveyMessage`), and the
+  // run that strands one is retried within minutes. So this job's decision is
+  // the one already taken, and deciding again would only write "reopened"
+  // beside a survey that went. One stranded for days is not owed; it was
+  // about a resolution long past, and this job decides its own.
   const owed = await unsentSurveyMessage(conversationId);
   if (owed) {
     await enqueueAutomatedDelivery(ticket.channel, owed, PRIORITY);
@@ -119,8 +124,7 @@ export async function sendCsat(job: ClaimedJob): Promise<void> {
       mergedIntoId: ticket.mergedIntoId,
       hasCustomerMessage: Boolean(ticket.hasCustomerMessage),
       suppressed: ticket.csatSuppressed,
-      trigger,
-      resolvedByRule: ticket.resolvedByAgentId === null,
+      resolvedByRule: ticket.resolvedByRule,
       lacksRecipient: lacksEmailRecipient(ticket.channel, ticket.contactEmail),
       commentThread: rootCommentId(ticket.externalId) !== null,
       // The third automated sender, through the same guard as the other two:
@@ -141,8 +145,14 @@ export async function sendCsat(job: ClaimedJob): Promise<void> {
 
   if (decision.kind === 'drop') return;
 
+  // An agent who pressed "Send now" is owed an answer on the ticket even when
+  // it is the same one the scheduled run gave an hour ago: the sidebar waits
+  // for a new decision to land, and a repeat folded into the earlier row is
+  // a "queued" line that never clears.
+  const answer = { repeat: trigger === 'manual' };
+
   if (decision.kind === 'skip') {
-    await recordSkip(conversationId, decision.reason, snapshot);
+    await recordSkip(conversationId, decision.reason, snapshot, answer);
     log.info(`#${ticket.number}: no survey — ${decision.reason}`);
     return;
   }
@@ -180,7 +190,7 @@ export async function sendCsat(job: ClaimedJob): Promise<void> {
 
   if (sent.kind === 'skip') {
     // The ticket changed under the job between its read and the locked write.
-    await recordSkip(conversationId, sent.reason, snapshot);
+    await recordSkip(conversationId, sent.reason, snapshot, answer);
     log.info(`#${ticket.number}: no survey — ${sent.reason}`);
     return;
   }
@@ -192,7 +202,7 @@ export async function sendCsat(job: ClaimedJob): Promise<void> {
     // it would sit on top of is the answer. An agent who pressed "Send now" is
     // owed one, on the ticket.
     if (trigger === 'manual') {
-      await recordSkip(conversationId, 'recently_surveyed', snapshot);
+      await recordSkip(conversationId, 'recently_surveyed', snapshot, answer);
       log.info(`#${ticket.number}: surveyed inside the window already — told the agent`);
     } else {
       log.info(`#${ticket.number}: surveyed inside the window already — nothing to do`);
@@ -203,4 +213,52 @@ export async function sendCsat(job: ClaimedJob): Promise<void> {
   await enqueueAutomatedDelivery(ticket.channel, sent.messageId, PRIORITY);
 
   log.info(`surveyed #${ticket.number} on ${ticket.channel} in ${locale}`);
+}
+
+/**
+ * Whether a rule, not a person, ended the ticket's latest open stretch.
+ *
+ * Read off the timeline rather than off `resolved_by_agent_id`, which is
+ * null for more than a rule's resolve: an agent who closed a ticket straight
+ * from Open never stamps it (`changeStatus` writes it only on a resolve), and
+ * so was refused as "a rule resolved it" whenever rule-resolved tickets are
+ * not surveyed. A rule's status change carries no agent and an
+ * `automation:<rule>` label (`lib/automations`); a person's carries them.
+ *
+ * The first move into a done state since the ticket was last open, not the
+ * newest: an agent's resolve that the three-day rule then closes is still the
+ * agent's resolution, and a rule's resolve that an agent closes is still the
+ * rule's. "Last open" is the newest reopen, or move back to an open or
+ * pending status. A ticket with no such event — older than the timeline's
+ * status events, or written straight into a done state — falls back to the
+ * column, which is right for every resolve a rule ever made.
+ */
+function resolvedByRule() {
+  const lastOpen = sql`(
+    select max(${conversationEvents.createdAt})
+    from ${conversationEvents}
+    where ${conversationEvents.conversationId} = ${conversations.id}
+      and (
+        ${conversationEvents.type} = 'reopened'
+        or (
+          ${conversationEvents.type} = 'status_changed'
+          and ${conversationEvents.data}->>'category' in ('open', 'pending')
+        )
+      )
+  )`;
+
+  return sql<boolean>`coalesce(
+    (
+      select ${conversationEvents.actorAgentId} is null
+        and coalesce(${conversationEvents.actorLabel}, '') like 'automation:%'
+      from ${conversationEvents}
+      where ${conversationEvents.conversationId} = ${conversations.id}
+        and ${conversationEvents.type} = 'status_changed'
+        and ${conversationEvents.data}->>'category' in ('resolved', 'closed')
+        and ${conversationEvents.createdAt} > coalesce(${lastOpen}, '-infinity'::timestamptz)
+      order by ${conversationEvents.createdAt} asc
+      limit 1
+    ),
+    ${conversations.resolvedByAgentId} is null and ${ticketStatuses.category} = 'resolved'
+  )`;
 }

@@ -34,7 +34,7 @@ export function SatisfactionField({
   suppressed: boolean;
   survey: TicketSurveyState;
 }) {
-  const { survey, skip } = state;
+  const { survey, skip, availability } = state;
   const suppression = useFieldAction(setSurveySuppression);
   const send = useFieldAction(sendSurveyNow);
   // Queued is not sent: the job decides, and the timeline shows what it decided.
@@ -52,12 +52,21 @@ export function SatisfactionField({
   // nothing to send now. After a later skip the button comes back, and the
   // job answers it on the ticket — "surveyed recently" included.
   const outstanding = skip === null && (survey?.status === 'sent' || survey?.status === 'answered');
+  // Offered only where it could queue something: a button that answers
+  // "surveys are switched off" every time is worse than none. The switch
+  // itself stays on a channel that has one, because the flag outlives the
+  // switch — an agent can keep a ticket out of a survey before an admin turns
+  // surveys on.
+  const surveyable = availability !== 'unsupported';
 
   return (
     <DetailsSection collapsible={false} title="Satisfaction">
       <div className="flex flex-col gap-2 text-xs text-(--color-text-secondary)">
         {survey === null ? (
-          <p>No survey yet.</p>
+          // Where no survey can go out, the line below says why instead.
+          availability === 'on' ? (
+            <p>No survey yet.</p>
+          ) : null
         ) : survey.status === 'answered' ? (
           <>
             <p className="text-sm font-semibold text-(--color-text-primary)">
@@ -104,35 +113,46 @@ export function SatisfactionField({
           <p className="text-(--color-text-primary)">This ticket will not be surveyed.</p>
         ) : null}
 
-        <div className="flex flex-wrap gap-2">
-          <Button
-            type="button"
-            variant="secondary"
-            size="sm"
-            disabled={suppression.pending}
-            onClick={() =>
-              void suppression.run({ conversationId, suppressed: suppressed ? 'off' : 'on' })
-            }
-          >
-            {suppressed ? 'Allow a survey' : 'Don’t survey this ticket'}
-          </Button>
+        {availability === 'unsupported' ? (
+          <p>Surveys are not sent on this channel.</p>
+        ) : availability !== 'on' ? (
+          <p>
+            Surveys are switched off
+            {availability === 'channel_off' ? ' for this channel' : ''}.
+          </p>
+        ) : null}
 
-          {resolved && !suppressed && !outstanding && !queued ? (
+        {surveyable ? (
+          <div className="flex flex-wrap gap-2">
             <Button
               type="button"
               variant="secondary"
               size="sm"
-              disabled={send.pending}
+              disabled={suppression.pending}
               onClick={() =>
-                void send.run({ conversationId }).then((result) => {
-                  if (!result.error) setQueuedOn(shown);
-                })
+                void suppression.run({ conversationId, suppressed: suppressed ? 'off' : 'on' })
               }
             >
-              Send survey now
+              {suppressed ? 'Allow a survey' : 'Don’t survey this ticket'}
             </Button>
-          ) : null}
-        </div>
+
+            {availability === 'on' && resolved && !suppressed && !outstanding && !queued ? (
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                disabled={send.pending}
+                onClick={() =>
+                  void send.run({ conversationId }).then((result) => {
+                    if (!result.error) setQueuedOn(shown);
+                  })
+                }
+              >
+                Send survey now
+              </Button>
+            ) : null}
+          </div>
+        ) : null}
 
         {suppression.error ? (
           <p className="text-(--color-feedback-danger-fg)">{suppression.error}</p>
