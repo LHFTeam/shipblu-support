@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { db } from '@/db/client';
 import { agents, contacts, conversations, csatSurveys, ticketStatuses } from '@/db/schema';
 import { withCleanDatabase } from '@/lib/testing/db';
-import { latestComments, sentSurveys, skipReasons, type ReportWindow } from './csat-queries';
+import { latestComments, liveSurveys, skipReasons, type ReportWindow } from './csat-queries';
 
 /**
  * The satisfaction report's live reads, against real Postgres: each keys a
@@ -48,7 +48,8 @@ describe('skipReasons', () => {
     await skipped('window_closed', '2026-10-13T23:55');
     await skipped('agent_suppressed', '2026-10-12T12:00');
     // Five minutes before the window's first Cairo midnight, and five after
-    // its last: both outside, although in UTC the first is on the 11th.
+    // its last: both outside, although in UTC the second is still the 13th
+    // (and the first counted one above, 21:05 UTC, still the 10th).
     await skipped('reopened', '2026-10-10T23:55');
     await skipped('reopened', '2026-10-14T00:05');
     // The bot's, which the rollup never counts either.
@@ -144,27 +145,46 @@ describe('latestComments', () => {
   });
 });
 
-describe('sentSurveys', () => {
-  it('counts the window’s sends as the rollup keys them, and the first send ever', async () => {
+describe('liveSurveys', () => {
+  it('counts each day’s sends and decisions against as the rollup keys them, and the first send ever', async () => {
     await survey({ status: 'answered', sentAt: at('2026-10-11T00:05'), rating: 5 });
     await survey({ status: 'expired', sentAt: at('2026-10-12T12:00') });
     await survey({ status: 'sent', sentAt: at('2026-10-13T23:55') });
-    // Before the window, which is also the first send ever.
-    await survey({ status: 'sent', sentAt: at('2026-10-02T08:00') });
-    // A skip has no send, and the bot's is nobody's.
     await survey({ status: 'skipped', skipReason: 'reopened', createdAt: at('2026-10-12T12:00') });
+    await survey({ status: 'skipped', skipReason: 'reopened', createdAt: at('2026-10-12T13:00') });
+    // A survey written on the 10th and sent on the 11th is a send on the 11th
+    // and nothing on the 10th.
+    await survey({
+      status: 'sent',
+      createdAt: at('2026-10-10T22:00'),
+      sentAt: at('2026-10-11T09:00'),
+    });
+    // Before the window, which is also the first send ever; a skip just past
+    // its end; and the bot's, which is nobody's.
+    await survey({ status: 'sent', sentAt: at('2026-10-02T08:00') });
+    await survey({ status: 'skipped', skipReason: 'reopened', createdAt: at('2026-10-14T00:05') });
     await survey({ status: 'sent', sentAt: at('2026-09-01T08:00') }, 'whatsapp_bot');
 
-    expect(await sentSurveys(WINDOW)).toEqual({ sent: 3, first: '2026-10-02' });
+    expect(await liveSurveys(WINDOW)).toEqual({
+      days: [
+        { day: '2026-10-11', sent: 2, skipped: 0 },
+        { day: '2026-10-12', sent: 1, skipped: 2 },
+        { day: '2026-10-13', sent: 1, skipped: 0 },
+      ],
+      first: '2026-10-02',
+    });
   });
 
-  it('names the first day in the team’s zone, not the database’s', async () => {
-    // 00:30 in Cairo on the 2nd is still the 1st in UTC.
-    await survey({ status: 'sent', sentAt: at('2026-10-02T00:30') });
-    expect((await sentSurveys(WINDOW)).first).toBe('2026-10-02');
+  it('files a day in the team’s zone, not the database’s', async () => {
+    // 00:30 in Cairo on the 12th is still the 11th in UTC.
+    await survey({ status: 'sent', sentAt: at('2026-10-12T00:30') });
+    expect(await liveSurveys(WINDOW)).toEqual({
+      days: [{ day: '2026-10-12', sent: 1, skipped: 0 }],
+      first: '2026-10-12',
+    });
   });
 
-  it('reads an empty archive as nothing sent and no first day', async () => {
-    expect(await sentSurveys(WINDOW)).toEqual({ sent: 0, first: null });
+  it('reads an empty archive as no days and no first send', async () => {
+    expect(await liveSurveys(WINDOW)).toEqual({ days: [], first: null });
   });
 });

@@ -21,12 +21,19 @@ export function History({
   trend,
   window,
   firstResponseSla,
+  canViewReports,
 }: {
   days: number;
   hasHistory: boolean;
   trend: Point[];
   window: Awaited<ReturnType<typeof totals>>;
   firstResponseSla: number | null;
+  /**
+   * The dashboard is `admin.agents`, the reports `report.view`, and the two
+   * part company on an account given one by hand without the other: no link
+   * to a page that answers 404.
+   */
+  canViewReports: boolean;
 }) {
   return (
     <Section
@@ -109,23 +116,25 @@ export function History({
             />
           </div>
 
-          <p className="mt-2 text-xs text-(--color-text-secondary)">
-            Cuts by agent, group and channel live in{' '}
-            <Link
-              href={`/reports?days=${days}`}
-              className="text-(--color-text-link) hover:text-(--color-text-link-hover) hover:underline"
-            >
-              Reports
-            </Link>
-            ; how customers rated the work, and what they wrote, in{' '}
-            <Link
-              href={`/reports/csat?days=${days}`}
-              className="text-(--color-text-link) hover:text-(--color-text-link-hover) hover:underline"
-            >
-              Customer satisfaction
-            </Link>
-            .
-          </p>
+          {canViewReports ? (
+            <p className="mt-2 text-xs text-(--color-text-secondary)">
+              Cuts by agent, group and channel live in{' '}
+              <Link
+                href={`/reports?days=${days}`}
+                className="text-(--color-text-link) hover:text-(--color-text-link-hover) hover:underline"
+              >
+                Reports
+              </Link>
+              ; how customers rated the work, and what they wrote, in{' '}
+              <Link
+                href={`/reports/csat?days=${days}`}
+                className="text-(--color-text-link) hover:text-(--color-text-link-hover) hover:underline"
+              >
+                Customer satisfaction
+              </Link>
+              .
+            </p>
+          ) : null}
         </>
       )}
     </Section>

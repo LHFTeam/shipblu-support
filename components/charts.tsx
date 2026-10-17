@@ -294,7 +294,10 @@ export function RatingBars({
       <ol className="grid grid-cols-[minmax(0,7.5rem)_minmax(0,1fr)_auto] gap-x-3 gap-y-2">
         {[4, 3, 2, 1, 0].map((step) => {
           const count = counts[step]!;
-          const percent = total > 0 ? Math.round((count / total) * 100) : 0;
+          // A step somebody chose never reads as 0%, beside a bar drawn to
+          // say it is there.
+          const rounded = total > 0 ? Math.round((count / total) * 100) : 0;
+          const percent = count > 0 && rounded === 0 ? '<1' : rounded;
           return (
             <li key={step} className="col-span-3 grid grid-cols-subgrid items-center text-xs">
               <span className="truncate text-(--color-text-secondary)">

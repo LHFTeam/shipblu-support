@@ -1,8 +1,10 @@
 import { and, desc, eq, isNotNull, sql, type Column, type SQL } from 'drizzle-orm';
+import { DateTime } from 'luxon';
 import { db } from '@/db/client';
 import { agents, conversations, csatSurveys } from '@/db/schema';
 import { describeSkip } from '@/lib/csat/skip-reasons';
 import type { Range } from './category-queries';
+import type { Totals } from './queries';
 import { workedConversation } from './rollup';
 
 /**
@@ -11,9 +13,10 @@ import { workedConversation } from './rollup';
  * Everything with a number in it on `/reports/csat` comes from `metrics_daily`
  * through `queries.ts`. These three read `csat_surveys` itself, each for a
  * reason a sum cannot serve — why tickets went unsurveyed, keyed on a reason
- * the rollup has no column for; the customers' own words; and a count of the
- * surveys sent, to check the rollup against. Each is a few rows or an indexed
- * count over the window, never an aggregate over the archive.
+ * the rollup has no column for; the customers' own words; and the sends and
+ * decisions against day by day, to check the rollup against. Each is a few
+ * rows or an indexed count over the window, never an aggregate over the
+ * archive.
  *
  * Every one counts the conversations the rollup counts (`workedConversation`),
  * and keys a survey on the timestamp the rollup does for the same fact, so the
@@ -126,39 +129,125 @@ export async function latestComments(window: ReportWindow): Promise<SurveyCommen
 }
 
 /**
- * The surveys sent in a window, counted from `csat_surveys`, and the first day
- * any survey was sent at all — what the page checks the rollup against.
+ * The last day the page can count on the rollup having computed, and so the
+ * end of every figure on it and of every live read checked against them.
+ *
+ * Yesterday once tonight's run has written it, the day before until then —
+ * the cron is 00:00 UTC, two or three hours into the team's day, so the day
+ * before yesterday has always had its run by the time anybody reads this.
+ * Whether tonight's has happened is read off the rollup's newest row, which is
+ * the one way to tell from here, and it answers "not yet" for a yesterday
+ * nobody worked: `computeDay` writes nothing for an empty day. That is the
+ * safe way to be wrong. Stopping a day early on a quiet day leaves out a day
+ * with nothing in it, where stopping on a yesterday the rollup has not reached
+ * would draw it as a day of zeros and report its sends as missing — and the
+ * newest row alone, the first version, named the last day anybody *worked*
+ * as the last day rolled up, so a quiet week read as a rollup that stopped.
+ *
+ * A row for today, which only `rollup_metrics day=<today>` by hand can write,
+ * is a partial day and counts as nothing beyond yesterday.
+ */
+export function countedThrough(range: Range, newestRow: string | null): string {
+  const today = DateTime.fromISO(range.to, { zone: 'utc' });
+  const yesterday = today.minus({ days: 1 }).toISODate()!;
+  return newestRow !== null && newestRow >= yesterday
+    ? yesterday
+    : today.minus({ days: 2 }).toISODate()!;
+}
+
+export type LiveDay = { day: string; sent: number; skipped: number };
+
+/**
+ * The surveys sent and the decisions against on each day of a window, counted
+ * from `csat_surveys`, and the first day any survey was sent at all — what the
+ * page checks the rollup against.
  *
  * The rollup can be short of the surveys for two reasons that look the same
  * from its side: a night the job did not run, and a day rolled up before
  * survey counts were kept, whose columns read 0 until it is computed again.
- * Counting the same surveys live, on the same days, is the one way the page
- * can tell "none were sent" from "none were counted" and say which.
+ * Counting the same surveys live, on the same days and the same timestamps,
+ * is the one way the page can tell "none were sent" from "none were counted"
+ * and say which. Per day, not one total for the window: a day where the
+ * rollup still counts a survey since purged (`lib/admin/purge-summary.ts`)
+ * would otherwise cancel a day it is missing one.
  *
- * Two reads, each served by `csat_surveys_sent_idx`: the window's count with
- * the window in its `where`, and the first send as the first row in `sent_at`
- * order rather than a `min()` — over a join, Postgres reads every row for a
- * `min()`, and this would be the one query on the page that grew with the
- * archive. `first` has no lower bound, for the reason `rolledUpDays` gives.
+ * Three reads, each served by an index on its timestamp. The first send is
+ * the first row in `sent_at` order rather than a `min()` — over a join,
+ * Postgres reads every row for a `min()`, and this would be the one query on
+ * the page that grew with the archive. `first` has no lower bound, for the
+ * reason `rolledUpDays` gives. Grouped by position, because the zone is a
+ * parameter and Postgres cannot see that the select's and a `group by`'s are
+ * the same one.
  */
-export async function sentSurveys(
+export async function liveSurveys(
   window: ReportWindow,
-): Promise<{ sent: number; first: string | null }> {
-  const [counted] = await db
-    .select({ sent: sql<number>`count(*)::int` })
+): Promise<{ days: LiveDay[]; first: string | null }> {
+  const dayOf = (column: Column) =>
+    sql<string>`(${column} at time zone ${window.zone})::date::text`;
+
+  const sent = await db
+    .select({ day: dayOf(csatSurveys.sentAt), count: sql<number>`count(*)::int` })
     .from(csatSurveys)
     .innerJoin(conversations, eq(conversations.id, csatSurveys.conversationId))
-    .where(and(within(csatSurveys.sentAt, window), workedConversation()));
+    .where(and(within(csatSurveys.sentAt, window), workedConversation()))
+    .groupBy(sql`1`);
+
+  const skipped = await db
+    .select({ day: dayOf(csatSurveys.createdAt), count: sql<number>`count(*)::int` })
+    .from(csatSurveys)
+    .innerJoin(conversations, eq(conversations.id, csatSurveys.conversationId))
+    .where(
+      and(
+        eq(csatSurveys.status, 'skipped'),
+        within(csatSurveys.createdAt, window),
+        workedConversation(),
+      ),
+    )
+    .groupBy(sql`1`);
 
   const [earliest] = await db
-    .select({
-      first: sql<string>`(${csatSurveys.sentAt} at time zone ${window.zone})::date::text`,
-    })
+    .select({ first: dayOf(csatSurveys.sentAt) })
     .from(csatSurveys)
     .innerJoin(conversations, eq(conversations.id, csatSurveys.conversationId))
     .where(and(isNotNull(csatSurveys.sentAt), workedConversation()))
     .orderBy(csatSurveys.sentAt)
     .limit(1);
 
-  return { sent: counted?.sent ?? 0, first: earliest?.first ?? null };
+  const days = new Map<string, LiveDay>();
+  for (const row of sent) days.set(row.day, { day: row.day, sent: row.count, skipped: 0 });
+  for (const row of skipped) {
+    const day = days.get(row.day);
+    if (day) day.skipped = row.count;
+    else days.set(row.day, { day: row.day, sent: 0, skipped: row.count });
+  }
+
+  return {
+    days: [...days.values()].sort((a, b) => a.day.localeCompare(b.day)),
+    first: earliest?.first ?? null,
+  };
+}
+
+/**
+ * What the live counts hold that the rollup does not: the sends and the
+ * decisions against on each day beyond what that day's row counts, and the
+ * days they fall on. A day the rollup counts more on — a survey since purged
+ * — is not a shortfall, and is not set against one.
+ */
+export function uncounted(
+  live: LiveDay[],
+  rolled: (Pick<Totals, 'csatSentCount' | 'csatSkippedCount'> & { day: string })[],
+): { sent: number; skipped: number; days: LiveDay[] } {
+  const byDay = new Map(rolled.map((row) => [row.day, row]));
+  const days = live
+    .map((day) => ({
+      day: day.day,
+      sent: Math.max(0, day.sent - (byDay.get(day.day)?.csatSentCount ?? 0)),
+      skipped: Math.max(0, day.skipped - (byDay.get(day.day)?.csatSkippedCount ?? 0)),
+    }))
+    .filter((day) => day.sent > 0 || day.skipped > 0);
+  return {
+    sent: days.reduce((sum, day) => sum + day.sent, 0),
+    skipped: days.reduce((sum, day) => sum + day.skipped, 0),
+    days,
+  };
 }

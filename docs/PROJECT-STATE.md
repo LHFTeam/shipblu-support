@@ -6274,8 +6274,9 @@ still waiting for it` one whose outcome is not known yet.
     their instants back from their `status_changed` events. Until then, run no
     backfill over days older than three. The survey columns need none on
     production today: it holds one survey, sent 2026-08-31 and never
-    answered, and `/reports/csat` says when a window's sends are not in its
-    figures rather than reading them as none.
+    answered, and `/reports/csat` says when a window's sends or decisions
+    against are not in its figures, and on which days, rather than reading
+    them as none.
 
 ### Tooling notes for this environment
 

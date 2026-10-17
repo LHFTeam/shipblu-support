@@ -20,10 +20,13 @@ import { allLimited } from '@/lib/concurrency';
 import { ratingLabels } from '@/lib/csat/wording';
 import { channelLabel, formatDateTime } from '@/lib/format';
 import {
+  countedThrough,
   latestComments,
-  sentSurveys,
+  liveSurveys,
   skipReasons,
+  uncounted,
   COMMENT_LIMIT,
+  type LiveDay,
 } from '@/lib/reports/csat-queries';
 import {
   averageRating,
@@ -55,9 +58,9 @@ const RANGES = [7, 30, 90] as const;
  * The figures are the nightly rollup's, like every report here, so today's
  * appear tomorrow. Three sections read `csat_surveys` live instead, because a
  * sum cannot hold them (`lib/reports/csat-queries.ts`): why tickets went
- * unsurveyed, what customers wrote, and a count of the sends to check the
- * rollup against — so a window rolled up before survey counts were kept says
- * so instead of reading as a quiet week.
+ * unsurveyed, what customers wrote, and the sends and decisions against day
+ * by day to check the rollup against — so a day rolled up before survey
+ * counts were kept says so instead of reading as a quiet one.
  *
  * Behind `report.view` like `/reports`; the table naming agents, and the
  * agent beside each comment, behind `report.agents` as on `/reports/agents`.
@@ -82,39 +85,33 @@ export default async function CsatReportPage({
   // today's are the ones to read.
   const { zone } = await reportingContext();
   const range = rangeIn(zone, days);
-  const yesterday = DateTime.fromISO(range.to).minus({ days: 1 }).toISODate()!;
   const window = { ...range, zone };
+
+  const [rolledUp, comments] = await allLimited(2, [
+    () => rolledUpDays(range),
+    () => latestComments(window),
+  ] as const);
+
+  // Every figure, the trend, and the live reads checked against them stop on
+  // the last day the rollup can be counted on to have computed — not on
+  // yesterday, which is not in the figures for the hours between the team's
+  // midnight and the nightly run, and not on the rollup's newest row, which
+  // is the last day anybody worked. One window for all of them, so a day
+  // cannot be in the figures and not in the check, or the other way round.
+  const through = countedThrough(range, rolledUp.last);
+  const counted = { from: range.from, to: through };
+  const countedWindow = { ...counted, zone };
 
   // A few at a time rather than all at once: a report page holding every
   // place in the pool for its render is the §6.91 freeze waiting to happen.
-  const [summary, channelRows, groupRows, agentRows, series, rolledUp, comments] = await allLimited(
-    3,
-    [
-      () => totals(range),
-      () => byChannel(range),
-      () => byGroup(range),
-      () => (namesAgents ? byAgent(range) : Promise.resolve([])),
-      () => daily(range),
-      () => rolledUpDays(range),
-      () => latestComments(window),
-    ] as const,
-  );
-
-  // The live reads with a figure above them to agree with — the sends the
-  // rollup is checked against, and the skips its tile counts — stop on the
-  // last day the rollup holds, not on yesterday: for the hours between the
-  // team's midnight and the nightly run, yesterday is not in the figures yet,
-  // and counting it live would report a gap that is only the clock.
-  const countedThrough =
-    rolledUp.last === null
-      ? DateTime.fromISO(range.from).minus({ days: 1 }).toISODate()!
-      : rolledUp.last < yesterday
-        ? rolledUp.last
-        : yesterday;
-  const countedWindow = { ...window, to: countedThrough };
-  const [reasons, live] = await allLimited(2, [
+  const [summary, channelRows, groupRows, agentRows, series, reasons, live] = await allLimited(3, [
+    () => totals(counted),
+    () => byChannel(counted),
+    () => byGroup(counted),
+    () => (namesAgents ? byAgent(counted) : Promise.resolve([])),
+    () => daily(counted),
     () => skipReasons(countedWindow),
-    () => sentSurveys(countedWindow),
+    () => liveSurveys(countedWindow),
   ] as const);
 
   const startsLate = rolledUp.first !== null && rolledUp.first > range.from;
@@ -124,13 +121,13 @@ export default async function CsatReportPage({
     live.first !== null &&
     live.first > range.from &&
     (rolledUp.first === null || live.first > rolledUp.first);
-  // Sends the rollup has not counted, on days it has rolled up: a night the
-  // job did not run, or a day rolled up before the survey columns existed,
-  // whose counts read 0 until it is computed again. Either way the figures
-  // below are short by this many, and the page says so rather than reading
+  // Sends and decisions against the rollup has not counted, day by day: a
+  // night the job did not run, or a day rolled up before the survey columns
+  // existed, whose counts read 0 until it is computed again. The figures
+  // below are short by this much, and the page says so rather than reading
   // them as none. It does not say to recompute: over a day older than three,
   // that is not safe yet (`docs/PROJECT-STATE.md` §6.98).
-  const uncounted = Math.max(0, live.sent - summary.csatSentCount);
+  const missing = uncounted(live.days, series);
 
   const labels = ratingLabels('en');
   const shares = ratingShares(summary);
@@ -138,7 +135,7 @@ export default async function CsatReportPage({
   const answered = ratingCounts(summary).reduce((sum, count) => sum + count, 0);
 
   const byDay = new Map(series.map((day) => [day.day, day]));
-  const trend = windowDays({ from: range.from, to: yesterday }).map((day) => ({
+  const trend = windowDays(counted).map((day) => ({
     day,
     label: DateTime.fromISO(day).toFormat('d/M'),
     sent: byDay.get(day)?.csatSentCount ?? 0,
@@ -150,7 +147,7 @@ export default async function CsatReportPage({
     <div className="app-scroll h-full overflow-y-auto p-4 sm:p-6">
       <PageHeader
         title="Customer satisfaction"
-        description={`${range.from} to ${range.to}, in ${zone}. Rolled up nightly: the figures run to ${rolledUp.last && rolledUp.last >= range.from ? rolledUp.last : 'no day in this window yet'}; the comments, read live, to now.`}
+        description={`${range.from} to ${range.to}, in ${zone}. Rolled up nightly: the figures run to ${through >= range.from ? through : 'no day in this window yet'}; the comments, read live, to now.`}
         actions={
           <div className="flex flex-wrap items-center gap-3">
             <RangeNav
@@ -188,15 +185,11 @@ export default async function CsatReportPage({
             before it hold no surveys sent or answered.
           </Notice>
         ) : null}
-        {uncounted > 0 ? (
+        {missing.days.length > 0 ? (
           <Notice tone="warning" icon>
-            <b>
-              {uncounted} {uncounted === 1 ? 'survey' : 'surveys'} sent in this window{' '}
-              {uncounted === 1 ? 'is' : 'are'} not in the figures below.
-            </b>{' '}
-            {uncounted === 1 ? 'It went' : 'They went'} out on a day the nightly rollup has no
-            survey counts for — one rolled up before it kept them, or a night it did not run — so
-            the sends, and every rate divided by them, leave {uncounted === 1 ? 'it' : 'them'} out.
+            <b>{missingSentence(missing)}</b> {missingDays(missing)} the nightly rollup has no
+            survey counts for — rolled up before it kept them, or a night it did not run — so the
+            figures below, and every rate divided by them, leave them out.
           </Notice>
         ) : null}
       </div>
@@ -289,7 +282,7 @@ export default async function CsatReportPage({
               <>
                 <Card className="mb-3">
                   <Columns
-                    caption={`Surveys sent and answered on each of the window's ${trend.length} days up to yesterday`}
+                    caption={`Surveys sent and answered on each day from ${counted.from} to ${counted.to}`}
                     labels={trend.map((point) => point.label)}
                     series={[
                       {
@@ -408,6 +401,29 @@ function rating(row: Totals): string {
 
 function count(value: number, noun: string): string {
   return `${value.toLocaleString('en-GB')} ${noun}${value === 1 ? '' : 's'}`;
+}
+
+/** "1 survey sent and 2 decisions against in this window are not in the figures below." */
+function missingSentence({ sent, skipped }: { sent: number; skipped: number }): string {
+  const parts = [
+    ...(sent > 0 ? [`${count(sent, 'survey')} sent`] : []),
+    ...(skipped > 0 ? [`${count(skipped, 'decision')} against`] : []),
+  ];
+  const one = parts.length === 1 && sent + skipped === 1;
+  return `${parts.join(' and ')} in this window ${one ? 'is' : 'are'} not in the figures below.`;
+}
+
+/** "They are from 2026-08-31 and 2026-09-02, days" — the first three days, and how many more. */
+function missingDays({ sent, skipped, days }: { sent: number; skipped: number; days: LiveDay[] }) {
+  const named = days.slice(0, 3).map((day) => day.day);
+  const rest = days.length - named.length;
+  const list =
+    rest > 0
+      ? `${named.join(', ')} and ${count(rest, 'other day')}`
+      : named.length > 1
+        ? `${named.slice(0, -1).join(', ')} and ${named.at(-1)}`
+        : named[0];
+  return `${sent + skipped === 1 ? 'It is' : 'They are'} from ${list}, ${days.length === 1 ? 'a day' : 'days'}`;
 }
 
 function Section({ title, hint, children }: { title: string; hint: string; children: ReactNode }) {

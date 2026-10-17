@@ -1,5 +1,6 @@
 import { requireAgent } from '@/lib/auth/guard';
 import { can } from '@/lib/auth/permissions';
+import { countedThrough, liveSurveys, uncounted, type LiveDay } from '@/lib/reports/csat-queries';
 import { csvFile, csvHeaders } from '@/lib/reports/csv';
 import {
   averageRating,
@@ -10,6 +11,7 @@ import {
   ratingCounts,
   ratingShares,
   responseRate,
+  rolledUpDays,
   surveyedRate,
   type Totals,
 } from '@/lib/reports/queries';
@@ -24,9 +26,15 @@ const RANGES = [7, 30, 90];
  * and day, the page's tables in one sheet with a column saying which.
  *
  * The rows the page's figures are made of, not the figures alone: every rate
- * goes out beside the counts it divides, so a spreadsheet can re-cut them —
- * sum two channels, take a week of days — where a column of percentages can
- * only be averaged, which is wrong.
+ * goes out beside the counts it divides, the average beside its sum, so a
+ * spreadsheet can re-cut them — sum two channels, take a week of days — where
+ * a column of percentages can only be averaged, which is wrong.
+ *
+ * Over the page's window, to the last day the rollup can be counted on
+ * (`countedThrough`), and with the page's warning in its own rows: a
+ * `not_rolled_up` row for each day holding sends or decisions against that
+ * the figures do not, so a file opened without the page cannot read a 0
+ * there as none sent.
  *
  * Re-checks the permission itself, as the agents export does: a route handler
  * is reachable by URL. The agent rows only for `report.agents`, as on the
@@ -41,23 +49,26 @@ export async function GET(request: Request) {
 
   const { zone } = await reportingContext();
   const range = rangeIn(zone, days);
+  const counted = { from: range.from, to: countedThrough(range, (await rolledUpDays(range)).last) };
 
   // One at a time: an export is not waited on the way a page is, and four
   // reads at once would take half the pool for it (§6.91).
-  const channels = await byChannel(range);
-  const groups = await byGroup(range);
-  const agents = can(agent, 'report.agents') ? await byAgent(range) : [];
-  const series = await daily(range);
+  const channels = await byChannel(counted);
+  const groups = await byGroup(counted);
+  const agents = can(agent, 'report.agents') ? await byAgent(counted) : [];
+  const series = await daily(counted);
+  const missing = uncounted((await liveSurveys({ ...counted, zone })).days, series);
 
   const rows: unknown[][] = [
     ...channels.map((row) => figures('channel', row.label, row)),
     ...groups.map((row) => figures('group', row.label, row)),
     ...agents.map((row) => figures('agent', row.label, row)),
     ...series.map((row) => figures('day', row.day, row)),
+    ...missing.days.map(notRolledUp),
   ];
 
   return new Response(csvFile(HEADER, rows), {
-    headers: csvHeaders(`customer-satisfaction-${range.from}-to-${range.to}.csv`),
+    headers: csvHeaders(`customer-satisfaction-${counted.from}-to-${counted.to}.csv`),
   });
 }
 
@@ -70,6 +81,7 @@ function figures(kind: string, label: string, row: Totals): unknown[] {
     row.csatSentCount,
     row.csatSkippedCount,
     row.csatResponseCount,
+    row.csatRatingSum,
     ...ratingCounts(row),
     row.ticketsResolved,
     // Blank, never zero, where there is nothing to divide: a rate of 0 is a
@@ -82,6 +94,15 @@ function figures(kind: string, label: string, row: Totals): unknown[] {
   ];
 }
 
+/**
+ * A day's sends and decisions against that its rolled-up row does not hold,
+ * in the columns they would be counted in, and nothing else: what they were
+ * rated, and the resolutions beside them, are what the rollup is missing.
+ */
+function notRolledUp(day: LiveDay): unknown[] {
+  return ['not_rolled_up', day.day, day.sent, day.skipped, ...HEADER.slice(4).map(() => '')];
+}
+
 const HEADER = [
   'kind',
   'label',
@@ -90,6 +111,8 @@ const HEADER = [
   // surveyed after.
   'decided_against',
   'answered',
+  // The average's numerator, beside the answers it is over.
+  'rating_sum',
   'rated_1',
   'rated_2',
   'rated_3',

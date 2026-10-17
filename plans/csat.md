@@ -622,21 +622,26 @@ the columns existed. And it is **not safe over days older than three** until
 `docs/PROJECT-STATE.md` §6.98 is fixed: closing a resolved ticket clears
 `resolved_at`, so rebuilding an old day rewrites its resolution counts — the
 "Resolutions surveyed" denominator among them — without every ticket closed
-since. Instead the page counts the window's sends live (`sentSurveys`) and,
-when the rollup holds fewer, says how many are missing rather than reading
-them as none; it also says when the first survey is younger than the window.
+since. Instead the page counts the window's sends and decisions against live,
+day by day (`liveSurveys`), and where a day's row holds fewer it says how
+many are missing and on which days rather than reading them as none, and the
+CSV carries the same days as `not_rolled_up` rows; it also says when the
+first survey is younger than the window.
 
 The page is `app/(console)/reports/csat/`, its live reads
 `lib/reports/csat-queries.ts`, on the rollup's keys and its
-`workedConversation()`. "Why not surveyed" and the live count of sends stop
-on the last day the rollup holds — yesterday once the nightly run is done,
-the day before until then — so they agree with the figures above them; the
-comments run to now. Skips are counted as decisions, not tickets: one ticket
+`workedConversation()`. The figures, the trend, "Why not surveyed" and the
+live counts all stop on one day, `countedThrough`: yesterday once the
+nightly run has written it, the day before until then, so none of them
+holds a day the others do not; the comments run to now. The rollup's newest
+row cannot say that alone, because an empty day writes no row — read as the
+last day rolled up, it named the last day anybody worked, and a quiet week
+read as a rollup that had stopped. Skips are counted as decisions, not tickets: one ticket
 can be decided against twice and surveyed after. The
 agent table, the agent beside each comment, and the CSV's agent rows are
 behind `report.agents`; the rest, `report.view`. Per agent, "resolutions
-surveyed" divides the agent a survey named by the agent who holds the
-ticket now, and the table says so. The distribution is `RatingBars`, five
+surveyed" divides the agent a survey named by the agent who held the ticket
+when its resolve's day was rolled up, and the table says so. The distribution is `RatingBars`, five
 bars on a diverging red–grey–blue scale (`--color-rating-1`…`5`, checked with
 the dataviz validator), each carrying its count and share, since the grey
 midpoint is under 3:1 on white. The three tiles' hint is `responsesHint`:

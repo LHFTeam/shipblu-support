@@ -167,10 +167,10 @@ export async function daily(range: Range): Promise<(Totals & { day: string })[]>
  * when a wider range reaches further back. `days` stays the count inside the
  * window. Read from the totals slice, the one every figure on the page sums.
  *
- * `last` is the newest day rolled up so far: yesterday once tonight's run has
- * happened, the day before until then (the cron is 00:00 UTC, two or three
- * hours into the team's day). A live read checked against the figures stops
- * there, or it counts a day the figures do not have yet.
+ * `last` is the newest day with a row: the newest day anybody worked that
+ * the rollup has reached, which is not the newest day it has reached, since
+ * an empty day leaves no row. `countedThrough` (`csat-queries.ts`) says what
+ * can and cannot be told from it.
  */
 export async function rolledUpDays(
   range: Range,

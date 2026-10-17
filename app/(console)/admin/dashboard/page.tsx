@@ -1,6 +1,7 @@
 import { DateTime } from 'luxon';
 import { PageHeader } from '@/components/ui';
 import { requirePermission } from '@/lib/auth/guard';
+import { can } from '@/lib/auth/permissions';
 import {
   agentLoad,
   channelLoad,
@@ -48,7 +49,7 @@ export default async function DashboardPage({
 }: {
   searchParams: Promise<{ days?: string }>;
 }) {
-  await requirePermission('admin.agents');
+  const agent = await requirePermission('admin.agents');
 
   const { days: requested } = await searchParams;
   const days = RANGES.includes(Number(requested) as (typeof RANGES)[number])
@@ -136,6 +137,7 @@ export default async function DashboardPage({
         trend={trend}
         window={window}
         firstResponseSla={firstResponseSla}
+        canViewReports={can(agent, 'report.view')}
       />
 
       {/* --------------------------------------------------------------- Agents */}
