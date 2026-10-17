@@ -59,6 +59,7 @@ describe('parseFilters', () => {
       view: 'all',
       statusCategory: 'unresolved',
       channel: 'all',
+      rating: 'any',
       q: '',
     });
   });
@@ -71,16 +72,34 @@ describe('parseFilters', () => {
 
   it('reads the filters the list offers', () => {
     expect(
-      parseFilters({ view: 'mine', status: 'resolved', channel: 'whatsapp', q: '  #42  ' }),
-    ).toEqual({ view: 'mine', statusCategory: 'resolved', channel: 'whatsapp', q: '#42' });
+      parseFilters({
+        view: 'mine',
+        status: 'resolved',
+        channel: 'whatsapp',
+        rating: 'low',
+        q: '  #42  ',
+      }),
+    ).toEqual({
+      view: 'mine',
+      statusCategory: 'resolved',
+      channel: 'whatsapp',
+      rating: 'low',
+      q: '#42',
+    });
   });
 
   it('falls back rather than passing an unknown value to the query', () => {
-    const filters = parseFilters({ view: 'everyone', status: 'sideways', channel: 'telegram' });
+    const filters = parseFilters({
+      view: 'everyone',
+      status: 'sideways',
+      channel: 'telegram',
+      rating: 'terrible',
+    });
 
     expect(filters.view).toBe('all');
     expect(filters.statusCategory).toBe('unresolved');
     expect(filters.channel).toBe('all');
+    expect(filters.rating).toBe('any');
   });
 
   it('takes the first value when a param is repeated', () => {

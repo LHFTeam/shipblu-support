@@ -2,7 +2,7 @@ import Link from 'next/link';
 import type { ReactNode } from 'react';
 import type { ViewIcon } from '@/lib/tickets/inbox-views';
 import { channelInfo } from './channel';
-import { CheckIcon, ClockIcon, InboxIcon, ListIcon, UserIcon } from './icons';
+import { CheckIcon, ClockIcon, InboxIcon, ListIcon, ThumbsDownIcon, UserIcon } from './icons';
 import { CountBadge } from './ui';
 
 export type ViewsPanelItem = {
@@ -25,11 +25,12 @@ const ICONS: Record<ViewIcon, (props: { size: number; className: string }) => Re
   list: ListIcon,
   clock: ClockIcon,
   check: CheckIcon,
+  'thumbs-down': ThumbsDownIcon,
 };
 
 /**
  * The column of saved views beside a list: Mine, Unassigned, All, the
- * channels, the statuses.
+ * channels, the statuses, and the low ratings for whoever may see them.
  *
  * Links rather than buttons, and no client code: every view is a URL the list
  * already understands, so choosing one is a navigation that works before the

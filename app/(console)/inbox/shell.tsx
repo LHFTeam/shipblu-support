@@ -51,10 +51,11 @@ export async function InboxShell({
   const viewingTicket = activeNumber !== undefined;
   const canViewAll = can(agent, 'ticket.view.all');
   const canSeeBot = can(agent, 'ticket.view.bot');
+  const canSeeRatings = can(agent, 'report.view');
 
   // A view keeps the open ticket open, as the Status and Channel selects do.
   const base = viewingTicket ? `/inbox/${activeNumber}` : '/inbox';
-  const views = inboxViews({ canSeeBot, canViewAll });
+  const views = inboxViews({ canSeeBot, canViewAll, canSeeRatings });
   const activeView = activeViewId(views, filters, { canViewAll });
   const sections: ViewsPanelSection[] = views.map((section) => ({
     title: section.title,
@@ -95,6 +96,8 @@ export async function InboxShell({
           views={sections}
           activeView={activeView}
           canSeeBot={canSeeBot}
+          canSeeRatings={canSeeRatings}
+          canViewAll={canViewAll}
           canCreate={can(agent, 'ticket.create')}
           canViewContacts={can(agent, 'contact.view')}
         />

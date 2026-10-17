@@ -71,10 +71,21 @@ export type ReportingContext = { zone: string; hoursFor: HoursFor };
 export async function reportingContext(): Promise<ReportingContext> {
   const [catalog, policies] = await Promise.all([loadHoursCatalog(), loadPolicies()]);
 
-  return {
-    zone: defaultHours(catalog)?.timezone ?? FALLBACK_ZONE,
-    hoursFor: hoursResolver(catalog, policies),
-  };
+  return { zone: zoneOf(catalog), hoursFor: hoursResolver(catalog, policies) };
+}
+
+/**
+ * The zone alone, for a live read that needs the team's days and no calendar
+ * — the inbox's rated view. From the same memoised catalog as
+ * `reportingContext`, so a list and the report beside it cut their days at
+ * the same midnight.
+ */
+export async function reportingZone(): Promise<string> {
+  return zoneOf(await loadHoursCatalog());
+}
+
+function zoneOf(catalog: HoursCatalog): string {
+  return defaultHours(catalog)?.timezone ?? FALLBACK_ZONE;
 }
 
 /** The team's current date, which is what "today" means everywhere below. */

@@ -14,6 +14,12 @@ export type InboxFilters = {
   view: 'all' | 'mine' | 'unassigned';
   statusCategory: 'open' | 'pending' | 'resolved' | 'closed' | 'all' | 'unresolved';
   channel: 'all' | 'email' | 'whatsapp' | 'webchat' | 'facebook' | 'instagram' | 'whatsapp_bot';
+  /**
+   * `low`: only tickets a customer rated 1 or 2 in the last seven days, the
+   * report's week (`ratedLowWithin`). No select offers it; the "Rated 1–2"
+   * view does, and the list says so while it is on.
+   */
+  rating: 'any' | 'low';
   q: string;
 };
 
@@ -78,6 +84,7 @@ export function parseFilters(params: Record<string, string | string[] | undefine
   const view = one('view');
   const statusCategory = one('status');
   const channel = one('channel');
+  const rating = one('rating');
 
   return {
     view: view === 'mine' || view === 'unassigned' ? view : 'all',
@@ -94,6 +101,7 @@ export function parseFilters(params: Record<string, string | string[] | undefine
     channel: FILTERABLE_CHANNELS.includes(channel as FilterableChannel)
       ? (channel as FilterableChannel)
       : 'all',
+    rating: rating === 'low' ? 'low' : 'any',
     q: (one('q') ?? '').trim(),
   };
 }
