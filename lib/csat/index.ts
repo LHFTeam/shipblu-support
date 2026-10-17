@@ -1,10 +1,9 @@
-import { and, desc, eq, gt, inArray, isNull, notExists, sql } from 'drizzle-orm';
+import { and, desc, eq, gt, inArray, isNull, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import {
   conversationEvents,
   conversations,
   csatSurveys,
-  jobs,
   messages,
   ticketStatuses,
 } from '@/db/schema';
@@ -13,11 +12,16 @@ import { publicBaseUrl } from '@/lib/kb/site';
 import { enqueue } from '@/lib/queue';
 import { logger } from '@/lib/log';
 import type { ConversationChannel } from '@/lib/tickets/channel-policy';
-import { writeAutomatedReply } from '@/lib/tickets/outbound';
-import { channelSwitch, isClosedChat, type SurveyTrigger } from './decision';
+import { enqueueAutomatedDelivery, writeAutomatedReply } from '@/lib/tickets/outbound';
+import {
+  isClosedChat,
+  surveyAvailability,
+  type SurveyAvailability,
+  type SurveyTrigger,
+} from './decision';
 import { carriesLink, type AnswerSource, type SurveyDelivery } from './delivery';
 import { MAX_COMMENT } from './limits';
-import { readCsatSettings } from './settings';
+import { loadCsatSettings, readCsatSettings } from './settings';
 import type { SkipReason } from './skip-reasons';
 
 const log = logger('csat');
@@ -38,6 +42,9 @@ const log = logger('csat');
 
 /** Timeline actor for everything the survey machinery writes. */
 const ACTOR = 'csat';
+
+/** The survey's carrier priority: behind an acknowledgement, which a customer is waiting on. */
+const CARRIER_PRIORITY = 50;
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
@@ -70,7 +77,6 @@ export async function scheduleSurvey(
 ): Promise<ScheduleOutcome> {
   try {
     const settings = await readCsatSettings();
-    if (!settings.enabled) return 'off';
 
     const rows = await db
       .select({ channel: conversations.channel })
@@ -80,9 +86,12 @@ export async function scheduleSurvey(
     const channel = rows[0]?.channel;
     if (!channel) return 'unknown';
 
-    const key = channelSwitch(channel);
-    if (key === null) return 'channel_unsupported';
-    if (!settings.channels[key]) return 'channel_off';
+    // The sidebar's own question, so the two cannot answer the same ticket
+    // differently — a WhatsApp ticket is "not sent on this channel" to both,
+    // whatever the switch says.
+    const availability = surveyAvailability(settings, channel);
+    if (availability === 'unsupported') return 'channel_unsupported';
+    if (availability !== 'on') return availability;
 
     const isMeta = channel === 'facebook' || channel === 'instagram';
     const delayMinutes =
@@ -118,6 +127,13 @@ export type SurveySnapshot = {
  * rows saying the same thing an hour apart tell nobody anything. The same
  * reason within a day is the earlier row's; a different reason, or the same
  * one a day later, is a new decision.
+ *
+ * Except when somebody asked (`repeat`): an agent who pressed "Send now" is
+ * waiting on the ticket for the answer, and the sidebar clears its "queued"
+ * line when a new decision lands. Folded into the earlier row, the same
+ * answer is no answer — the line stays and the button stays gone. The rows
+ * are bounded by runs of the job: one per press, the button hidden while one
+ * is queued, and a second only when a worker stopped mid-run runs it again.
  */
 const SAME_SKIP_WITHIN_MS = 24 * 3_600_000;
 
@@ -125,9 +141,15 @@ export async function recordSkip(
   conversationId: string,
   reason: SkipReason,
   snapshot: SurveySnapshot,
+  { repeat = false }: { repeat?: boolean } = {},
 ): Promise<boolean> {
   return db.transaction(async (tx) => {
     await lockTicket(tx, conversationId);
+
+    if (repeat) {
+      await writeSkip(tx, conversationId, reason, snapshot);
+      return true;
+    }
 
     const [newest] = await tx
       .select({
@@ -147,24 +169,42 @@ export async function recordSkip(
       return false;
     }
 
-    await tx.insert(csatSurveys).values({
-      conversationId,
-      status: 'skipped',
-      skipReason: reason,
-      agentId: snapshot.agentId,
-      groupId: snapshot.groupId,
-      channel: snapshot.channel,
-    });
-
-    await tx.insert(conversationEvents).values({
-      conversationId,
-      type: 'csat_skipped',
-      actorLabel: ACTOR,
-      data: { reason },
-    });
-
+    await writeSkip(tx, conversationId, reason, snapshot);
     return true;
   });
+}
+
+async function writeSkip(
+  tx: Tx,
+  conversationId: string,
+  reason: SkipReason,
+  snapshot: SurveySnapshot,
+): Promise<void> {
+  await tx.insert(csatSurveys).values({
+    conversationId,
+    status: 'skipped',
+    skipReason: reason,
+    agentId: snapshot.agentId,
+    groupId: snapshot.groupId,
+    channel: snapshot.channel,
+  });
+
+  await tx.insert(conversationEvents).values({
+    conversationId,
+    type: 'csat_skipped',
+    actorLabel: ACTOR,
+    data: { reason },
+  });
+
+  // Touch the conversation so its `notify_change` trigger fires, as the
+  // categoriser does: neither row above notifies, and an agent who pressed
+  // "Send now" is waiting on the open ticket for this answer. Delivered at
+  // commit, so the refresh it causes reads the skip; `updated_at` is no queue
+  // column, so it wakes this ticket and no queue.
+  await tx
+    .update(conversations)
+    .set({ updatedAt: new Date() })
+    .where(eq(conversations.id, conversationId));
 }
 
 /** The row lock every write on a ticket's surveys takes first, so two jobs for one ticket queue behind each other. */
@@ -241,12 +281,16 @@ export type SendOutcome =
  *   reply reopened the ticket between the job's read and this write is the
  *   case the delay exists for, so the status and the agent's flag are read
  *   again here, where nothing can change them until the commit.
- * - **The survey, the message and the event commit together.** A worker
- *   stopped between them, or a pool error on the way, left a `sent` row with
- *   no message, which the retry counted as surveyed; the customer never got
- *   it while the sidebar said it went. Only the carrier job is queued after
- *   the commit (`enqueueAutomatedDelivery`), and it is keyed on the message,
- *   so a retry can queue it again and queue nothing.
+ * - **The survey, the message, the event and the carrier job commit
+ *   together.** A worker stopped between them, or a pool error on the way,
+ *   left a `sent` row with no message, which the retry counted as surveyed;
+ *   the customer never got it while the sidebar said it went. The carrier
+ *   was once queued after the commit, and a run stopped between the two left
+ *   a survey with no job to send it — which took a day-bounded "owed" check,
+ *   an "abandoned" one and a retirement of its message to make right. Queued
+ *   on the same transaction (`enqueueAutomatedDelivery(…, tx)`), the job
+ *   exists exactly when its survey does, and the worker cannot see it
+ *   before.
  * - **The ticket's last survey, unanswered, is superseded.** Most are never
  *   answered, so without this the next resolution would meet
  *   `csat_surveys_open_idx` on the old row and the job would die. Its link
@@ -341,6 +385,7 @@ export async function sendSurvey(send: SurveySend): Promise<SendOutcome> {
     );
 
     await tx.update(csatSurveys).set({ messageId }).where(eq(csatSurveys.id, surveyId));
+    await enqueueAutomatedDelivery(send.snapshot.channel, messageId, CARRIER_PRIORITY, tx);
 
     return { kind: 'sent', surveyId, messageId };
   });
@@ -378,34 +423,6 @@ export async function fallBackToQuickReplies(surveyId: string, messageId: string
       });
     }
   });
-}
-
-/**
- * A survey this ticket carries whose message never got a carrier job: the
- * run that wrote it was stopped between its commit and the enqueue. The job
- * queues the carrier for it and nothing else.
- */
-export async function unsentSurveyMessage(conversationId: string): Promise<string | null> {
-  const rows = await db
-    .select({ messageId: messages.id })
-    .from(csatSurveys)
-    .innerJoin(messages, eq(messages.id, csatSurveys.messageId))
-    .where(
-      and(
-        eq(csatSurveys.conversationId, conversationId),
-        eq(csatSurveys.status, 'sent'),
-        eq(messages.deliveryStatus, 'pending'),
-        notExists(
-          db
-            .select({ one: sql`1` })
-            .from(jobs)
-            .where(eq(jobs.dedupeKey, sql`'send:' || ${messages.id}::text`)),
-        ),
-      ),
-    )
-    .limit(1);
-
-  return rows[0]?.messageId ?? null;
 }
 
 export type SurveyView = {
@@ -545,9 +562,9 @@ const SUMMARY = {
 
 /**
  * What the sidebar shows: the ticket's survey — the newest answered one, else
- * the newest sent or superseded one — and, when a decision not to send
- * another came after it, that decision. Two things rather than the newest
- * row, because a `skipped` row written after an answered survey (the ticket
+ * the newest sent or superseded one — and, when the newest decision was not
+ * to send another, that decision. Two things rather than the newest row,
+ * because a `skipped` row written after an answered survey (the ticket
  * reopened and was resolved again inside the window) must not bury the
  * customer's rating; and the answered one first, because a customer who
  * answers a superseded link has still rated the ticket, and a newer survey
@@ -555,32 +572,64 @@ const SUMMARY = {
  */
 export type TicketSurveyState = {
   survey: SurveySummary | null;
-  /** A decision not to survey, newer than `survey`. */
+  /** A survey sent after the answered one shown, still unanswered. */
+  newer: { sentAt: Date | null } | null;
+  /**
+   * The newest decision, when it was not to survey. Not merely newer than
+   * `survey`: a survey sent after the skip answers it, even under an older
+   * answered one that stays on screen.
+   */
   skip: { reason: string | null; createdAt: Date } | null;
+  /**
+   * The newest decision of any kind, which the sidebar's "queued" line is
+   * remembered against: whatever the job decides, a survey or a skip, is a new
+   * row and clears it. Keyed on what is shown instead, a survey sent under an
+   * older answered one changed nothing on screen, and the line never cleared.
+   */
+  latestId: string | null;
+  /** Whether a survey could go out on this ticket's channel right now (`surveyAvailability`). */
+  availability: SurveyAvailability;
 };
 
-export async function ticketSurveyState(conversationId: string): Promise<TicketSurveyState> {
-  // One statement: the survey, then the skips after it, ordered so the first
-  // row is the survey and the second — if any — the newest later skip.
+export async function ticketSurveyState(
+  conversationId: string,
+  channel: string,
+): Promise<TicketSurveyState> {
+  // The sidebar's memoised read. A failed one is null, which is `unknown`:
+  // "Send now" is hidden and nothing is said about the switch until the next
+  // render reads it again. Read before the rows rather than beside them: this
+  // runs as one lane of the ticket page's `allLimited` reads, and two at once
+  // would take a second place in the pool for it.
+  const settings = await loadCsatSettings();
   const rows = await db
     .select(SUMMARY)
     .from(csatSurveys)
     .where(eq(csatSurveys.conversationId, conversationId))
-    .orderBy(
-      sql`case when ${csatSurveys.status} = 'answered' then 0 when ${csatSurveys.status} = 'skipped' then 2 else 1 end`,
-      desc(csatSurveys.createdAt),
-      desc(csatSurveys.id),
-    );
+    .orderBy(desc(csatSurveys.createdAt), desc(csatSurveys.id));
 
-  const survey = rows.find((row) => row.status !== 'skipped') ?? null;
-  const skip =
-    rows.find(
-      (row) => row.status === 'skipped' && (survey === null || row.createdAt > survey.createdAt),
-    ) ?? null;
+  // Newest first, so the newest decision is the first row.
+  const latest = rows[0] ?? null;
+  const survey =
+    rows.find((row) => row.status === 'answered') ??
+    rows.find((row) => row.status !== 'skipped') ??
+    null;
+
+  // A survey sent after the rating shown — "Send now" on a ticket rated
+  // weeks ago — is on its way, and says so beside the rating it sits under.
+  const newer =
+    survey?.status === 'answered'
+      ? (rows.find((row) => row.status === 'sent' && row.createdAt > survey.createdAt) ?? null)
+      : null;
 
   return {
     survey,
-    skip: skip ? { reason: skip.skipReason, createdAt: skip.createdAt } : null,
+    newer: newer ? { sentAt: newer.sentAt } : null,
+    skip:
+      latest?.status === 'skipped'
+        ? { reason: latest.skipReason, createdAt: latest.createdAt }
+        : null,
+    latestId: latest?.id ?? null,
+    availability: surveyAvailability(settings, channel),
   };
 }
 

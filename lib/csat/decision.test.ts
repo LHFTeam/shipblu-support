@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { channelSurveyed, channelSwitch, decideSurvey, type DecisionInput } from './decision';
+import {
+  channelSurveyed,
+  channelSwitch,
+  decideSurvey,
+  surveyAvailability,
+  type DecisionInput,
+} from './decision';
 import { UNSET_CSAT_SETTINGS, type CsatSettings } from './settings';
 
 /**
@@ -24,7 +30,6 @@ function input(overrides: Partial<DecisionInput> = {}): DecisionInput {
     mergedIntoId: null,
     hasCustomerMessage: true,
     suppressed: false,
-    trigger: 'agent',
     resolvedByRule: false,
     lacksRecipient: false,
     commentThread: false,
@@ -109,17 +114,13 @@ describe('decideSurvey', () => {
   });
 
   it('leaves a rule-resolved ticket alone only when the admin said so', () => {
-    // Read off the row, not off who queued the job: the trigger says nothing.
     expect(decideSurvey(input({ resolvedByRule: true }), ON).kind).toBe('send');
     expect(
-      decideSurvey(input({ resolvedByRule: true, trigger: 'agent' }), {
-        ...ON,
-        surveyRuleResolved: false,
-      }),
+      decideSurvey(input({ resolvedByRule: true }), { ...ON, surveyRuleResolved: false }),
     ).toEqual({ kind: 'skip', reason: 'rule_resolved' });
     // The switch is about rules; an agent's resolve is unaffected by it.
     expect(
-      decideSurvey(input({ trigger: 'rule' }), { ...ON, surveyRuleResolved: false }).kind,
+      decideSurvey(input({ resolvedByRule: false }), { ...ON, surveyRuleResolved: false }).kind,
     ).toBe('send');
   });
 
@@ -217,5 +218,21 @@ describe('channelSurveyed', () => {
     expect(channelSurveyed(ON, 'whatsapp_bot')).toBe(false);
     expect(channelSwitch('portal')).toBe('email');
     expect(channelSwitch('whatsapp')).toBeNull();
+  });
+});
+
+describe('surveyAvailability', () => {
+  it('says "off" only for a switch somebody turned off, never for settings it could not read', () => {
+    expect(surveyAvailability(ON, 'email')).toBe('on');
+    expect(surveyAvailability({ ...ON, enabled: false }, 'email')).toBe('off');
+    expect(
+      surveyAvailability({ ...ON, channels: { ...ON.channels, webchat: false } }, 'webchat'),
+    ).toBe('channel_off');
+    // A failed read: the sidebar must not tell the agent surveys are off.
+    expect(surveyAvailability(null, 'email')).toBe('unknown');
+    // A channel with no switch is the same answer whatever the settings say,
+    // read or not.
+    expect(surveyAvailability(null, 'whatsapp')).toBe('unsupported');
+    expect(surveyAvailability(ON, 'whatsapp')).toBe('unsupported');
   });
 });

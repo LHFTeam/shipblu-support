@@ -3,7 +3,7 @@ import { listGroupNames } from '@/lib/admin/settings';
 import { requirePermission } from '@/lib/auth/guard';
 import { recentSurveys } from '@/lib/csat';
 import { listWordingRules } from '@/lib/csat/rules';
-import { loadCsatSettings } from '@/lib/csat/settings';
+import { readCsatSettings } from '@/lib/csat/settings';
 import { publicBaseUrl } from '@/lib/kb/site';
 import { SurveySettingsForm } from './forms';
 import { RecentSurveyList } from './recent-list';
@@ -25,8 +25,12 @@ const RECENT = 50;
 export default async function CsatAdminPage() {
   const admin = await requirePermission('admin.csat');
 
+  // The settings uncached, and a read that fails fails the page: this form is
+  // saved back whole, so a thirty-second-old copy from another instance, or a
+  // failed read drawn as all-off, would be written over the real settings by
+  // the next save.
   const [settings, recent, rules, groups] = await Promise.all([
-    loadCsatSettings(),
+    readCsatSettings(),
     recentSurveys(RECENT),
     listWordingRules(),
     listGroupNames(),

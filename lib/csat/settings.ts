@@ -8,16 +8,22 @@ const log = logger('csat');
 /**
  * The survey switch and its numbers.
  *
- * Read when a ticket resolves and again when its survey job runs, so it is
- * memoised the way `lib/canned-suggest/settings.ts` memoises its switch: per
- * process, for thirty seconds. An admin who flips it sees their own change at
- * once (`forget` after the save) and the worker within the TTL. Switching off
- * is the rollback, so thirty seconds is also how long the rollback takes.
+ * Two readers, for two kinds of caller. Everything that acts on the settings
+ * reads them uncached through `readCsatSettings`, which throws when the read
+ * fails: the resolve that schedules a survey, the job that sends it — so
+ * switching off, the rollback, reaches the next resolve at once — and the
+ * admin form, which is saved back whole and so must never be drawn from a
+ * stale copy or from a failed read taken as all-off. "Off" written on a
+ * ticket, or saved over the real settings, outlives a hiccup.
  *
- * No row is a fresh install and reads as off with every channel off. On a
- * page a failed read also reads as off, uncached, so the next request tries
- * again; the job and the sidebar's "Send now" read through `readCsatSettings`,
- * which throws instead, because "off" written on a ticket outlives a hiccup.
+ * Only the ticket sidebar, which reads them on every render to decide whether
+ * to offer "Send now", goes through `loadCsatSettings`: memoised per process
+ * for thirty seconds, the way `lib/canned-suggest/settings.ts` memoises its
+ * switch. A failed read there is null, uncached: the sidebar then says the
+ * settings could not be read, never that surveys are off, which is a claim
+ * about what an admin did.
+ *
+ * No row is a fresh install and reads as off with every channel off.
  */
 
 const CACHE_TTL_MS = 30_000;
@@ -68,9 +74,10 @@ let cached: { at: number; value: CsatSettings } | null = null;
 /**
  * The settings as the row holds them, now, or the error the read raised.
  *
- * For the job and the sidebar's "Send now": a read that failed must fail
- * them, so the queue retries, rather than answer "off" — which the job would
- * record on the ticket as a reason, in a row that outlives the hiccup.
+ * For the resolve, the job, "Send now" and the admin form: a read that failed
+ * must fail them — the queue retries, the page errors — rather than answer
+ * "off", which the job would record on the ticket as a reason and the form
+ * would save over the real settings.
  */
 export async function readCsatSettings(): Promise<CsatSettings> {
   const rows = await db
@@ -123,21 +130,25 @@ export async function readCsatSettings(): Promise<CsatSettings> {
   };
 }
 
-/** The settings for a page, memoised; a failed read reads as off, uncached. */
-export async function loadCsatSettings(): Promise<CsatSettings> {
+/** The settings for the ticket sidebar, memoised; null, uncached, when the read failed. */
+export async function loadCsatSettings(): Promise<CsatSettings | null> {
   if (cached && Date.now() - cached.at < CACHE_TTL_MS) return cached.value;
 
   try {
     cached = { at: Date.now(), value: await readCsatSettings() };
   } catch (error) {
-    log.error('could not read the survey settings, treating them as off', error);
-    return UNSET_CSAT_SETTINGS;
+    log.error('could not read the survey settings', error);
+    return null;
   }
 
   return cached.value;
 }
 
-/** Drop the memo, so the admin who just saved sees their own change. This process only. */
+/**
+ * Drop the memo, so the ticket sidebar on the process that saved offers "Send
+ * now" by the new settings at once. This process only; elsewhere it takes up
+ * to the TTL.
+ */
 export function forgetCsatSettings(): void {
   cached = null;
 }

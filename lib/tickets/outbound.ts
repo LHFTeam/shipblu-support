@@ -145,8 +145,8 @@ export type AutomatedReplyOptions = {
 /**
  * Writes the message, moves the thread and records the event, on the executor
  * it is given, and returns the new message's id. The carrier is queued apart
- * (`enqueueAutomatedDelivery`), because a job is enqueued only after the rows
- * it acts on commit — and a caller holding a transaction decides when that is.
+ * (`enqueueAutomatedDelivery`), on the same executor when the caller holds a
+ * transaction, so the job commits with the message it carries.
  */
 export async function writeAutomatedReply(
   on: Executor,
@@ -220,25 +220,30 @@ export async function writeAutomatedReply(
 }
 
 /**
- * Queues the carrier for a message `writeAutomatedReply` wrote, once it has
- * committed. Nothing on web chat, where the row is the delivery. Keyed on the
- * message, which is once-ever for it, so a caller that is not sure whether it
- * already queued this one — a job run again after its rows committed — can
- * call it again and queue nothing.
+ * Queues the carrier for a message `writeAutomatedReply` wrote: on the pool
+ * once it has committed, or on the transaction that wrote it (`on`), so the
+ * two commit together. Nothing on web chat, where the row is the delivery.
+ * Keyed on the message, which is once-ever for it, so a second call queues
+ * nothing.
  */
 export async function enqueueAutomatedDelivery(
   channel: string,
   messageId: string,
   priority = 20,
+  on?: Executor,
 ): Promise<void> {
   if (channel === 'webchat') return;
-  await enqueue(carrierFor(channel), { messageId }, { priority, dedupeKey: `send:${messageId}` });
+  await enqueue(
+    carrierFor(channel),
+    { messageId },
+    { priority, dedupeKey: `send:${messageId}`, on },
+  );
 }
 
 /**
  * The two acknowledging senders' door: the write on the pool, then the
  * carrier at an acknowledgement's priority. The survey takes the two halves
- * itself, inside its own transaction and at its own priority.
+ * itself, both inside its own transaction and at its own priority.
  */
 export async function deliverAutomatedReply(reply: AutomatedReply): Promise<string> {
   const messageId = await writeAutomatedReply(db, reply);
