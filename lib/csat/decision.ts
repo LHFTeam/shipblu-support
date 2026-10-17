@@ -193,17 +193,31 @@ export function decideSurvey(input: DecisionInput, settings: CsatSettings): Deci
     if (input.channel === 'facebook') {
       // Messenger's own survey card, for the seven days its tag allows — which
       // Graph refuses without a privacy link. With none, the 24 hours still
-      // take the rating buttons Instagram gets, which need no link; past
-      // them, the missing link is the reason, because with one the card
-      // would have gone.
-      if (settings.privacyUrl && input.feedbackWindowOpen) {
-        return { kind: 'send', delivery: 'meta_template' };
-      }
+      // take the rating buttons Instagram gets, which need no link.
+      //
+      // A card Messenger refused last time (`lastTemplateRefusal`) is still
+      // tried inside the 24 hours, where a refusal falls back to those
+      // buttons on the same row — and where a card that goes out takes the
+      // refusal down, so these are what find out Meta has taken it back.
+      // Past them nothing would carry the survey if the card were refused
+      // again, so it is not written: a row recorded as sent whose message
+      // could only fail would count as unanswered and hold the ticket's
+      // resurvey window shut for nothing.
+      const cardSends =
+        Boolean(settings.privacyUrl) &&
+        input.feedbackWindowOpen &&
+        (input.metaWindowOpen || settings.lastTemplateRefusal === null);
+      if (cardSends) return { kind: 'send', delivery: 'meta_template' };
       if (input.metaWindowOpen) return { kind: 'send', delivery: 'meta_quick_reply' };
+      // Past the 24 hours: the reason the card did not go, the window first
+      // because nothing an admin does reopens it.
       return {
         kind: 'skip',
-        reason:
-          settings.privacyUrl || !input.feedbackWindowOpen ? 'window_closed' : 'no_privacy_url',
+        reason: !input.feedbackWindowOpen
+          ? 'window_closed'
+          : !settings.privacyUrl
+            ? 'no_privacy_url'
+            : 'card_refused',
       };
     }
 

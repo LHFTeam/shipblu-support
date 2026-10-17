@@ -30,8 +30,13 @@ export type MetaSendContext = {
    * both with the same sentence.
    */
   connection: MetaConnection;
-  /** A survey's card or quick replies are direct messages here: they go where one goes. */
-  sendKind: 'dm' | 'comment_reply' | 'private_reply';
+  /**
+   * The survey's quick replies are a `dm` here: they go where one goes and are
+   * refused for the same reasons. Messenger's feedback card is not — a refusal
+   * of it is as likely to be Meta's of the template as anything about the
+   * thread, so none of a plain reply's diagnoses are appended to it.
+   */
+  sendKind: 'dm' | 'comment_reply' | 'private_reply' | 'feedback_card';
   /** The tag a direct message went out with, when it was a direct message. */
   tag?: 'RESPONSE' | 'HUMAN_AGENT' | 'CUSTOMER_FEEDBACK' | null;
 };
@@ -143,7 +148,7 @@ export function explainMetaSendError(error: MetaApiError, context: MetaSendConte
     return withReference(`${base}\n\n${handoverExplanation(context)}`, error, context.connection);
   }
 
-  if (context.sendKind !== 'dm' && isCommentPermissionRefusal(error)) {
+  if (isCommentSend(context) && isCommentPermissionRefusal(error)) {
     return withReference(
       `${base}\n\n${commentPermissionExplanation(context)}`,
       error,
@@ -151,7 +156,7 @@ export function explainMetaSendError(error: MetaApiError, context: MetaSendConte
     );
   }
 
-  if (context.sendKind !== 'dm' && isCommentTargetRefusal(error)) {
+  if (isCommentSend(context) && isCommentTargetRefusal(error)) {
     return withReference(
       `${base}\n\n${commentTargetExplanation(context)}`,
       error,
@@ -172,6 +177,11 @@ export function explainMetaSendError(error: MetaApiError, context: MetaSendConte
   }
 
   return withReference(base, error, context.connection);
+}
+
+/** A reply on the comment edge, or a private reply to a comment: the sends a comment can refuse. */
+function isCommentSend(context: MetaSendContext): boolean {
+  return context.sendKind === 'comment_reply' || context.sendKind === 'private_reply';
 }
 
 function isUnspecified(error: MetaApiError): boolean {

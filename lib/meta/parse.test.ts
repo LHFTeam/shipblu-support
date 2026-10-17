@@ -709,6 +709,8 @@ describe('satisfaction survey answers', () => {
         platform: 'facebook',
         connection: 'facebook_page',
         from: 'psid-1',
+        accountId: '111222333',
+        standby: false,
         surveyId: SURVEY,
         rating: 5,
         comment: 'I am very satisfied!',
@@ -739,6 +741,26 @@ describe('satisfaction survey answers', () => {
       }),
     );
     expect(noComment.feedbacks[0]).toMatchObject({ rating: 2, comment: null });
+  });
+
+  it('reads a card answer shaped any other way as nothing, and keeps the rest of the batch', () => {
+    // "Nothing here throws": an object where the reference has an array would
+    // throw out of a `for…of`, and the delivery's other events with it.
+    const payload = feedbackPayload({});
+    const event = payload.entry[0]!.messaging[0]! as Record<string, unknown>;
+    for (const screens of [{ 0: { questions: {} } }, 'screens', 42, null]) {
+      event.messaging_feedback = { feedback_screens: screens };
+      payload.entry[0]!.messaging.push({
+        sender: { id: 'psid-2' },
+        recipient: { id: '111222333' },
+        timestamp: 1_755_000_000_000,
+        message: { mid: `m_${String(screens)}`, text: 'Where is my parcel?' },
+      } as never);
+
+      const parsed = parse(payload);
+      expect(parsed.feedbacks).toEqual([]);
+      expect(parsed.messages.at(-1)!.text).toBe('Where is my parcel?');
+    }
   });
 
   it('files a tapped survey button as an answer, never as something the customer said', () => {
@@ -775,6 +797,8 @@ describe('satisfaction survey answers', () => {
           platform: object === 'page' ? 'facebook' : 'instagram',
           connection: object === 'page' ? 'facebook_page' : 'instagram_login',
           from: 'igsid-1',
+          accountId: '111222333',
+          standby: false,
           surveyId: SURVEY,
           rating: 5,
           comment: null,
@@ -782,6 +806,26 @@ describe('satisfaction survey answers', () => {
         },
       ]);
     }
+  });
+
+  it('says a tap arrived in standby, so nothing replies on a thread another app holds', () => {
+    const parsed = parse({
+      object: 'page',
+      entry: [
+        {
+          id: '111222333',
+          standby: [
+            {
+              sender: { id: 'psid-1' },
+              recipient: { id: '111222333' },
+              timestamp: 1_755_000_000_000,
+              message: { mid: 'm_tap', text: 'Good', quick_reply: { payload: `csat:${SURVEY}:4` } },
+            },
+          ],
+        },
+      ],
+    });
+    expect(parsed.feedbacks).toMatchObject([{ surveyId: SURVEY, rating: 4, standby: true }]);
   });
 
   it('keeps a quick reply that is not ours as the message it is', () => {

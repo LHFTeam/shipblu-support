@@ -87,7 +87,7 @@ function WordingFields({
             hint={
               limit.max === null
                 ? 'Any length.'
-                : `Up to ${limit.max} characters${limit.min ? `, at least ${limit.min}` : ''}${limit.noUrl ? '; no links' : ''}.`
+                : `Up to ${limit.max} characters${limit.maxBytes ? ', fewer with emoji' : ''}${limit.min ? `, at least ${limit.min}` : ''}${limit.noUrl ? '; no links' : ''}.`
             }
             explain={EXPLAIN[field]}
           >

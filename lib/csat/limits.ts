@@ -1,3 +1,5 @@
+import { MAX_EXPIRES_IN_DAYS, MIN_EXPIRES_IN_DAYS } from '@/lib/meta/feedback-template';
+
 /**
  * The bounds on the survey's numbers, shared by the admin form's native
  * validation and the action that refuses what the browser let through. Two
@@ -10,9 +12,9 @@
  * a "Send now" beside it — would survey the customer again.
  */
 export const MAX_DELAY_MINUTES = 7 * 24 * 60;
-/** Messenger's `expires_in_days` takes 1–7 and nothing else. */
-export const MIN_META_EXPIRY_DAYS = 1;
-export const MAX_META_EXPIRY_DAYS = 7;
+/** Messenger's `expires_in_days`, from beside the request that sends it. */
+export const MIN_META_EXPIRY_DAYS = MIN_EXPIRES_IN_DAYS;
+export const MAX_META_EXPIRY_DAYS = MAX_EXPIRES_IN_DAYS;
 export const MIN_RESURVEY_DAYS = 1;
 export const MAX_RESURVEY_DAYS = 365;
 

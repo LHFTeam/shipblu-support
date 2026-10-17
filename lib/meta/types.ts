@@ -251,6 +251,14 @@ export type NormalisedFeedback = {
   connection: MetaConnection | null;
   /** Page-scoped id of whoever answered; it must be the ticket's requester. */
   from: string;
+  /** The page or account it was answered on, as a message records it. */
+  accountId: string | null;
+  /**
+   * It arrived in the handover protocol's `standby` array: another app held
+   * the thread on that connection, so a reply sent over it would be refused
+   * (`metaThreadState` decides whether ours goes over it).
+   */
+  standby: boolean;
   surveyId: string;
   /** 1–5. */
   rating: number;

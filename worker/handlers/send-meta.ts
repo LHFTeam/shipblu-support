@@ -2,6 +2,7 @@ import { and, desc, eq, ne } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { conversations, messages } from '@/db/schema';
 import { fallBackToQuickReplies } from '@/lib/csat';
+import type { MetaSurveyMeta, SurveyMessageMeta } from '@/lib/csat/meta-survey';
 import { clearTemplateRefusal, recordTemplateRefusal } from '@/lib/csat/settings';
 import {
   ACCESS_TOKEN_CODE,
@@ -19,8 +20,8 @@ import {
   MetaSendRefusal,
   type MetaSendContext,
 } from '@/lib/meta/errors';
-import { feedbackTemplateRequest, type FeedbackCard } from '@/lib/meta/feedback-template';
-import { quickReplySurveyRequest, type RatingLabels } from '@/lib/meta/quick-reply-survey';
+import { feedbackTemplateRequest } from '@/lib/meta/feedback-template';
+import { quickReplySurveyRequest } from '@/lib/meta/quick-reply-survey';
 import type { MetaPlatform } from '@/lib/meta/types';
 import {
   feedbackTemplateTag,
@@ -64,8 +65,7 @@ const log = logger('send_meta');
  * what they wrote.
  */
 
-type SendKind =
-  'dm' | 'comment_reply' | 'private_reply' | 'feedback_template' | 'quick_reply_survey';
+type SendKind = 'dm' | 'comment_reply' | 'private_reply' | MetaSurveyMeta['sendKind'];
 
 type SendMeta = {
   metaKind?: 'direct_message' | 'comment';
@@ -74,17 +74,20 @@ type SendMeta = {
   commentId?: string;
   /** The customer's page-scoped id, for a DM. */
   recipientId?: string;
-  /** A survey message's survey, and what its carrier needs (`MetaSurveyMeta`). */
-  csatSurveyId?: string;
-  card?: FeedbackCard;
-  labels?: RatingLabels;
+  /**
+   * A survey message's survey, and what its carrier needs — named from the
+   * type the survey writes them under, so a field renamed there is a compile
+   * error here rather than every survey refused as carrying nothing to send.
+   * Optional because the row's `sendKind` says which of them it carries.
+   */
+  csatSurveyId?: SurveyMessageMeta['csatSurveyId'];
+  card?: Extract<MetaSurveyMeta, { sendKind: 'feedback_template' }>['card'];
+  labels?: MetaSurveyMeta['labels'];
 };
 
 /**
  * The request a failure is explained against: what was last put to Graph,
- * which after a refused card is the quick replies sent in its place. A survey
- * send is a direct message to the explanation — it goes where one goes, and
- * is refused for the same reasons.
+ * which after a refused card is the quick replies sent in its place.
  */
 type Attempt = {
   sendKind: SendKind;
@@ -342,7 +345,12 @@ async function deliverFeedbackCard(
     }
 
     await recordTemplateRefusal(
-      explainMetaSendError(error, { platform: 'facebook', connection, sendKind: 'dm', tag }),
+      explainMetaSendError(error, {
+        platform: 'facebook',
+        connection,
+        sendKind: 'feedback_card',
+        tag,
+      }),
     );
 
     if (!window.isOpen || !meta.labels) throw error;
@@ -395,9 +403,19 @@ async function sendQuickReplySurvey(
   return result.messageId;
 }
 
-/** A survey's send is a direct message to `explainMetaSendError`. */
+/**
+ * What `explainMetaSendError` explains a failure as: the survey's quick
+ * replies as the direct message they are, the card as itself.
+ */
 function explainedKind(sendKind: SendKind): MetaSendContext['sendKind'] {
-  return sendKind === 'comment_reply' || sendKind === 'private_reply' ? sendKind : 'dm';
+  switch (sendKind) {
+    case 'feedback_template':
+      return 'feedback_card';
+    case 'quick_reply_survey':
+      return 'dm';
+    default:
+      return sendKind;
+  }
 }
 
 /**

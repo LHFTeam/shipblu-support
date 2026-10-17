@@ -18,12 +18,24 @@ export const DELIVERIES = {
 export type SurveyDelivery = keyof typeof DELIVERIES;
 
 /**
- * Whether a delivery carries a link to the survey page. Meta's two do not:
- * Messenger's card and a tapped quick reply are answered where they were
- * asked, and come back on Meta's webhook with the survey's id in them.
+ * The deliveries with no link to the survey page: Messenger's card and a
+ * tapped quick reply are answered where they were asked, and come back on
+ * Meta's webhook with the survey's id in them.
  */
-export function carriesLink(delivery: SurveyDelivery): boolean {
-  return delivery !== 'meta_template' && delivery !== 'meta_quick_reply';
+const LINKLESS = ['meta_template', 'meta_quick_reply'] as const satisfies readonly SurveyDelivery[];
+
+type LinklessDelivery = (typeof LINKLESS)[number];
+
+/**
+ * Whether a delivery carries a link to the survey page — a type guard, so a
+ * caller building the message without one is handed exactly the deliveries
+ * that take none, and a new one added here is a compile error wherever a
+ * body is built for them.
+ */
+export function carriesLink(
+  delivery: SurveyDelivery,
+): delivery is Exclude<SurveyDelivery, LinklessDelivery> {
+  return !(LINKLESS as readonly SurveyDelivery[]).includes(delivery);
 }
 
 export const ANSWER_SOURCES = {

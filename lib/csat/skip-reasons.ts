@@ -29,6 +29,8 @@ export const SKIP_REASONS = {
   window_closed: 'the messaging window had closed',
   no_privacy_url:
     'past the 24 hours only Messenger’s survey card sends, and it needs a privacy policy link that is not set',
+  card_refused:
+    'past the 24 hours only Messenger’s survey card sends, and Messenger refused it the last time it was sent',
 } as const;
 
 export type SkipReason = keyof typeof SKIP_REASONS;

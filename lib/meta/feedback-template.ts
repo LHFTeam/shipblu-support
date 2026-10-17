@@ -19,7 +19,8 @@
  *   prefix — which is also how the answer, arriving on the `messaging_feedback`
  *   webhook keyed by that id, finds its row (`surveyIdFromQuestionId`).
  * - **`business_privacy.url` is required.** The admin page holds it; with
- *   none, Facebook is not surveyed at all (`no_privacy_url`).
+ *   none, no card is sent — Facebook gets the rating buttons inside the 24
+ *   hours, and past them is skipped as `no_privacy_url`.
  * - **`expires_in_days` is 1–7.**
  * - **Past the 24-hour window it sends with the `CUSTOMER_FEEDBACK` tag**, for
  *   up to seven days after the customer's last message, and that tag is valid
@@ -38,6 +39,13 @@
  * day Meta — which marks the card "in development" — stops accepting it.
  */
 
+/**
+ * `expires_in_days`, as the reference bounds it. The admin form and its
+ * action read these (`lib/csat/limits.ts`), so what saves is what sends.
+ */
+export const MIN_EXPIRES_IN_DAYS = 1;
+export const MAX_EXPIRES_IN_DAYS = 7;
+
 /** The card's words and settings, as the survey job froze them on the message. */
 export type FeedbackCard = {
   /** The card's title: the survey's first line. */
@@ -51,7 +59,7 @@ export type FeedbackCard = {
   placeholder: string;
   /** `business_privacy.url`. */
   privacyUrl: string;
-  /** `expires_in_days`, clamped to Meta's 1–7. */
+  /** `expires_in_days`, clamped to Meta's 1–7 (`MIN_EXPIRES_IN_DAYS`…). */
   expiresInDays: number;
 };
 
@@ -148,7 +156,10 @@ export function feedbackTemplateRequest(input: {
             },
           ],
           business_privacy: { url: card.privacyUrl },
-          expires_in_days: Math.min(7, Math.max(1, Math.round(card.expiresInDays))),
+          expires_in_days: Math.min(
+            MAX_EXPIRES_IN_DAYS,
+            Math.max(MIN_EXPIRES_IN_DAYS, Math.round(card.expiresInDays)),
+          ),
         },
       },
     },

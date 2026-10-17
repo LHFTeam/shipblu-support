@@ -1,5 +1,5 @@
 import { and, eq } from 'drizzle-orm';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { db } from '@/db/client';
 import {
   contactIdentities,
@@ -15,6 +15,13 @@ import { fallBackToQuickReplies, sendSurvey } from '@/lib/csat';
 import type { NormalisedFeedback } from '@/lib/meta/types';
 import { withCleanDatabase } from '@/lib/testing/db';
 import { recordMetaFeedback } from './meta-feedback';
+
+// The account a reply is addressed from. Unset here, every thread reads as
+// one no reply can be addressed on, and nobody is thanked.
+vi.mock('@/lib/meta/client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/meta/client')>()),
+  configuredAccountId: () => 'account-1',
+}));
 
 /**
  * A survey answered on Facebook or Instagram, against real Postgres: only the
@@ -81,6 +88,8 @@ function answer(surveyId: string, overrides: Partial<NormalisedFeedback> = {}): 
     platform: 'instagram',
     connection: 'instagram_login',
     from: 'psid-amira',
+    accountId: null,
+    standby: false,
     surveyId,
     rating: 5,
     comment: null,
@@ -233,6 +242,36 @@ describe('recordMetaFeedback', () => {
 
     expect(await recordMetaFeedback(answer(ticket.surveyId, { rating: 3 }))).toBe('recorded');
     expect((await surveyRow(ticket.surveyId)).rating).toBe(3);
+    expect(await thanks(ticket.conversationId, ticket.messageId)).toEqual([]);
+  });
+
+  it('records a tap made while another app holds the thread, and thanks nobody', async () => {
+    const ticket = await surveyedTicket({ platform: 'facebook', delivery: 'meta_quick_reply' });
+
+    // Handed to another inbox tool after the survey went: the tap arrives in
+    // `standby` on the Page, which is the connection a Messenger reply takes.
+    expect(
+      await recordMetaFeedback(
+        answer(ticket.surveyId, {
+          platform: 'facebook',
+          connection: 'facebook_page',
+          standby: true,
+          rating: 5,
+        }),
+      ),
+    ).toBe('recorded');
+    expect((await surveyRow(ticket.surveyId)).rating).toBe(5);
+    expect(await thanks(ticket.conversationId, ticket.messageId)).toEqual([]);
+  });
+
+  it('records a tap on a ticket marked spam since, and writes nothing onto it', async () => {
+    const ticket = await surveyedTicket({ platform: 'instagram', delivery: 'meta_quick_reply' });
+    await db
+      .update(conversations)
+      .set({ isSpam: true })
+      .where(eq(conversations.id, ticket.conversationId));
+
+    expect(await recordMetaFeedback(answer(ticket.surveyId, { rating: 1 }))).toBe('recorded');
     expect(await thanks(ticket.conversationId, ticket.messageId)).toEqual([]);
   });
 });

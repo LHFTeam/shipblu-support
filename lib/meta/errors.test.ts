@@ -153,6 +153,32 @@ describe('explainMetaSendError', () => {
     expect(explained).not.toContain('App Review');
   });
 
+  it('keeps a refused feedback card to Meta’s words, with none of a reply’s or a comment’s leads', () => {
+    // What the admin page prints under "Messenger last refused the feedback
+    // card": a paragraph ruling out the causes of a refused *reply*, or one
+    // about a deleted comment or a comment permission, would point the admin
+    // away from the template Meta may have taken back.
+    const card = {
+      platform: 'facebook',
+      connection: 'facebook_page',
+      sendKind: 'feedback_card',
+    } as const;
+    const refusals = [
+      refusal(1),
+      new MetaApiError('Unsupported post request.', 400, 100, 33, false, null, 'AaBb'),
+      new MetaApiError('(#200) Permissions error', 403, 200, null, false, null, 'AT9Pvg'),
+    ];
+    for (const error of refusals) {
+      for (const tag of ['RESPONSE', 'CUSTOMER_FEEDBACK'] as const) {
+        // Meta's sentence and the reference under it, and nothing between.
+        expect(explainMetaSendError(error, { ...card, tag }).split('\n\n')).toEqual([
+          error.message,
+          expect.stringMatching(/^\(Meta: code /),
+        ]);
+      }
+    }
+  });
+
   /*
     A refusal this app made itself — a thread another tool owns, a page it
     cannot address — never reached Graph, so there is no code, subcode or trace

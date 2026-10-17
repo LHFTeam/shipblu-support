@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { metaSurveyMessage, quickReplyThanks } from './meta-survey';
-import { DEFAULT_WORDING } from './wording';
+import { DEFAULT_WORDING, WORDING_LIMITS, wordingProblem } from './wording';
 
 /**
  * What the survey job freezes on a Meta survey's message: everything its
@@ -59,5 +59,23 @@ describe('quickReplyThanks', () => {
       `${DEFAULT_WORDING.en.thanks}\nAnything to add? Just reply here.`,
     );
     expect(quickReplyThanks(DEFAULT_WORDING.ar, 'ar')).toContain('حضرتك');
+  });
+
+  it('stays inside Instagram’s 1,000 bytes with the longest thanks a rule can save', () => {
+    const bytes = (text: string) => new TextEncoder().encode(text).length;
+    const most = WORDING_LIMITS.thanks.maxBytes!;
+    // The most each can reach: 225 emoji under the byte cap, 300 Arabic letters under the character one.
+    const emoji = '🙏'.repeat(most / 4);
+    const arabic = 'ش'.repeat(WORDING_LIMITS.thanks.max!);
+    for (const thanks of [emoji, arabic]) {
+      expect(wordingProblem('thanks', thanks)).toBeNull();
+      for (const locale of ['ar', 'en'] as const) {
+        expect(
+          bytes(quickReplyThanks({ ...DEFAULT_WORDING[locale], thanks }, locale)),
+        ).toBeLessThanOrEqual(1000);
+      }
+    }
+    // One more emoji is refused, where the 300-character count alone let 300 through.
+    expect(wordingProblem('thanks', `${emoji}🙏`)).toMatch(/too long to send on Instagram/);
   });
 });

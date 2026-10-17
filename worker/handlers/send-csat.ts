@@ -7,6 +7,7 @@ import { metaSurveyMessage } from '@/lib/csat/meta-survey';
 import { wordingForTicket } from '@/lib/csat/rules';
 import { surveyText } from '@/lib/csat/wording';
 import { decideSurvey, type SurveyTrigger } from '@/lib/csat/decision';
+import { carriesLink } from '@/lib/csat/delivery';
 import { readCsatSettings } from '@/lib/csat/settings';
 import { rootCommentId } from '@/lib/meta/comments';
 import { isReadOnlyChannel } from '@/lib/tickets/channel-policy';
@@ -165,9 +166,7 @@ export async function sendCsat(job: ClaimedJob): Promise<void> {
     requesterEmail: ticket.contactEmail,
     body: (url) => {
       const delivery = decision.delivery;
-      if (delivery === 'meta_template' || delivery === 'meta_quick_reply') {
-        return metaSurveyMessage(wording, locale, delivery, settings);
-      }
+      if (!carriesLink(delivery)) return metaSurveyMessage(wording, locale, delivery, settings);
       if (!url) throw new Error(`a ${delivery} survey goes out with its link`);
       if (delivery === 'email_link') {
         const email = surveyEmail(wording, locale, url);

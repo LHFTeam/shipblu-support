@@ -20,6 +20,7 @@ import {
   type SurveyTrigger,
 } from './decision';
 import { carriesLink, type AnswerSource, type SurveyDelivery } from './delivery';
+import type { SurveyMessageMeta } from './meta-survey';
 import { MAX_COMMENT } from './limits';
 import { loadCsatSettings, readCsatSettings } from './settings';
 import type { SkipReason } from './skip-reasons';
@@ -376,7 +377,10 @@ export async function sendSurvey(send: SurveySend): Promise<SendOutcome> {
         actorLabel: ACTOR,
         eventType: 'csat_sent',
         eventData: { surveyId, delivery: send.delivery, locale: send.locale },
-        meta: { ...body.meta, csatSurveyId: surveyId },
+        meta: { ...body.meta, csatSurveyId: surveyId } satisfies Pick<
+          SurveyMessageMeta,
+          'csatSurveyId'
+        >,
       },
       // A survey is not the acknowledgement the rule engine looks for; the
       // ticket is resolved, and a rule keyed off "already acknowledged" must

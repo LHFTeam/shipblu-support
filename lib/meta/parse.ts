@@ -114,7 +114,7 @@ function readMessagingEvent(
   // message on it — so before the interactions, which would read it as
   // nothing and drop it.
   if (event.messaging_feedback) {
-    result.feedbacks.push(...readCardFeedback(event, platform, connection));
+    result.feedbacks.push(...readCardFeedback(event, platform, connection, accountId, standby));
     return;
   }
 
@@ -157,6 +157,8 @@ function readMessagingEvent(
         platform,
         connection,
         from: event.sender.id,
+        accountId: event.recipient?.id ?? accountId,
+        standby,
         surveyId: answer.surveyId,
         rating: answer.rating,
         comment: null,
@@ -285,12 +287,18 @@ function readCardFeedback(
   event: MetaMessagingEvent,
   platform: MetaPlatform,
   connection: MetaConnection | null,
+  accountId: string | null,
+  standby: boolean,
 ): NormalisedFeedback[] {
   const from = event.sender?.id;
   if (!from) return [];
 
+  // An array by the reference, and checked as one: a delivery shaped any other
+  // way is not ours to read, and `for…of` over an object would throw out of
+  // the parser and take the rest of the batch with it.
+  const screens = event.messaging_feedback?.feedback_screens;
   const answers: NormalisedFeedback[] = [];
-  for (const screen of event.messaging_feedback?.feedback_screens ?? []) {
+  for (const screen of Array.isArray(screens) ? screens : []) {
     if (!isObject(screen) || !isObject(screen.questions)) continue;
     for (const [id, question] of Object.entries(screen.questions)) {
       const surveyId = surveyIdFromQuestionId(id);
@@ -303,6 +311,8 @@ function readCardFeedback(
         platform,
         connection,
         from,
+        accountId: event.recipient?.id ?? accountId,
+        standby,
         surveyId,
         rating,
         comment: comment || null,

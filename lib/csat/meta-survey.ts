@@ -33,6 +33,13 @@ export type MetaSurveyMeta =
   | { sendKind: 'feedback_template'; card: FeedbackCard; labels: RatingLabels }
   | { sendKind: 'quick_reply_survey'; labels: RatingLabels };
 
+/**
+ * The row's `meta` whole: the above, and the survey's id, which `sendSurvey`
+ * puts beside it on every survey message. `send_meta` names its fields from
+ * here, so the writer and the reader are one type.
+ */
+export type SurveyMessageMeta = MetaSurveyMeta & { csatSurveyId: string };
+
 export function metaSurveyMessage(
   wording: Wording,
   locale: WordingLocale,

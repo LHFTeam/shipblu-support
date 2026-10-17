@@ -2,6 +2,9 @@ import { eq } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { conversations, csatSurveys } from '@/db/schema';
 import { logger } from '@/lib/log';
+import { configuredAccountId } from '@/lib/meta/client';
+import { metaConnection } from '@/lib/meta/connection';
+import { metaThreadState } from '@/lib/meta/thread';
 import type { NormalisedFeedback } from '@/lib/meta/types';
 import { findContactByIdentity } from '@/lib/tickets/contacts';
 import {
@@ -46,6 +49,8 @@ export async function recordMetaFeedback(feedback: NormalisedFeedback): Promise<
       externalId: conversations.externalId,
       lastCustomerMessageAt: conversations.lastCustomerMessageAt,
       deletedAt: conversations.deletedAt,
+      isSpam: conversations.isSpam,
+      mergedIntoId: conversations.mergedIntoId,
     })
     .from(csatSurveys)
     .innerJoin(conversations, eq(conversations.id, csatSurveys.conversationId))
@@ -60,10 +65,18 @@ export async function recordMetaFeedback(feedback: NormalisedFeedback): Promise<
 
   // Messenger's card thanks the customer itself. A tap has nothing after it,
   // so the first one is answered — and only the first: a second tap, or the
-  // other connection's copy of this one, is `ignored` above.
-  if (outcome === 'recorded' && feedback.source === 'meta_quick_reply' && !survey.deletedAt) {
+  // other connection's copy of this one, is `ignored` above. Not on a ticket
+  // that is gone — deleted, spam, merged away — which the survey job drops
+  // for the same reason.
+  if (
+    outcome === 'recorded' &&
+    feedback.source === 'meta_quick_reply' &&
+    !survey.deletedAt &&
+    !survey.isSpam &&
+    !survey.mergedIntoId
+  ) {
     try {
-      await thankForTap(survey);
+      await thankForTap(survey, feedback);
     } catch (error) {
       // The rating is recorded, which is what the customer did; a thanks lost
       // to a failed write is not worth failing the delivery that carried it,
@@ -82,17 +95,42 @@ export async function recordMetaFeedback(feedback: NormalisedFeedback): Promise<
  * customer's last *message*: the tap opens Meta's, but it is an answer and not
  * a message, so it moves nothing here, and a survey tapped more than a day
  * after the customer last wrote is recorded without a reply.
+ *
+ * Nor where the tap says the thread is not ours to answer. It is the newest
+ * thing the customer did, and it carries the handover protocol's `standby`
+ * like a message would: another app took the thread after the survey went
+ * out. `send_meta` would refuse the thanks, and a reply the customer was
+ * never going to see would sit failed on a resolved ticket. Asked of
+ * `metaThreadState`, which holds a standby only against the connection the
+ * reply goes out over — so a Page delivery in standby does not stop a thanks
+ * sent with the Instagram account's own token (§6.29).
  */
-async function thankForTap(survey: {
-  id: string;
-  conversationId: string;
-  locale: string | null;
-  ruleId: string | null;
-  channel: string;
-  externalId: string | null;
-  lastCustomerMessageAt: Date | null;
-}): Promise<void> {
+async function thankForTap(
+  survey: {
+    id: string;
+    conversationId: string;
+    locale: string | null;
+    ruleId: string | null;
+    channel: string;
+    externalId: string | null;
+    lastCustomerMessageAt: Date | null;
+  },
+  tap: NormalisedFeedback,
+): Promise<void> {
   if (automatedReplyBlocked(survey)) return;
+
+  const thread = metaThreadState({
+    platform: tap.platform,
+    connection: metaConnection(tap.platform),
+    inboundAccountId: tap.accountId,
+    configuredAccountId: configuredAccountId(tap.platform),
+    standby: tap.standby,
+    inboundConnection: tap.connection,
+  });
+  if (!thread.canSend) {
+    log.info(`survey ${survey.id}: not thanked — ${thread.reason}`);
+    return;
+  }
 
   const locale = survey.locale === 'ar' ? 'ar' : 'en';
   const wording = await wordingForRule(survey.ruleId, locale);

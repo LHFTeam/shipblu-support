@@ -262,6 +262,9 @@ describe('send_meta, for a survey card', () => {
       fellBack: 1,
     });
     expect(after.refusal).toContain('An unknown error');
+    // Explained as the card, not as a refused reply: the paragraph ruling out
+    // a reply's causes would send the admin looking at the thread.
+    expect(after.refusal).not.toContain('24-hour window');
   });
 
   it('does not blame the card for a customer who cannot be reached', async () => {

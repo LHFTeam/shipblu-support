@@ -174,6 +174,31 @@ describe('decideSurvey', () => {
     ).toEqual({ kind: 'skip', reason: 'window_closed' });
   });
 
+  it('tries a card Messenger last refused only where the buttons can follow it', () => {
+    const facebook = (overrides: Partial<DecisionInput> = {}) =>
+      input({ channel: 'facebook', byEmail: false, ...overrides });
+    const refused = {
+      ...ON,
+      lastTemplateRefusal: { text: '(#100) Unsupported post request.', at: new Date() },
+    };
+
+    // Inside the 24 hours: the card still goes, falls back to buttons if it is
+    // refused again, and clears the refusal if it is not.
+    expect(decideSurvey(facebook(), refused)).toEqual({ kind: 'send', delivery: 'meta_template' });
+    // Past them nothing would carry it, so nothing is written to fail.
+    expect(decideSurvey(facebook({ metaWindowOpen: false }), refused)).toEqual({
+      kind: 'skip',
+      reason: 'card_refused',
+    });
+    // A missing link says more than a refusal, and a closed window more than either.
+    expect(
+      decideSurvey(facebook({ metaWindowOpen: false }), { ...refused, privacyUrl: null }),
+    ).toEqual({ kind: 'skip', reason: 'no_privacy_url' });
+    expect(
+      decideSurvey(facebook({ metaWindowOpen: false, feedbackWindowOpen: false }), refused),
+    ).toEqual({ kind: 'skip', reason: 'window_closed' });
+  });
+
   it('sends quick replies on Instagram only inside the 24 hours, whatever the card could do', () => {
     const instagram = (overrides: Partial<DecisionInput> = {}) =>
       input({ channel: 'instagram', byEmail: false, ...overrides });
