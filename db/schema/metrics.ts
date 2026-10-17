@@ -1,4 +1,5 @@
 import { sql } from 'drizzle-orm';
+import type { AnyPgColumn } from 'drizzle-orm/pg-core';
 import {
   boolean,
   date,
@@ -7,6 +8,7 @@ import {
   pgTable,
   text,
   timestamp,
+  unique,
   uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core';
@@ -60,6 +62,13 @@ export const csatSurveys = pgTable(
     locale: text('locale'),
     /** The outbound row that carried it, so the timeline and the sidebar agree on what was sent. */
     messageId: uuid('message_id').references(() => messages.id, { onDelete: 'set null' }),
+    /**
+     * The wording it went out with, so the landing page asks the question the
+     * mail asked. Null for the built-in wording, and again once the rule is
+     * deleted — the page then falls back to the built-in, which is what the
+     * rule was a variation of.
+     */
+    ruleId: uuid('rule_id').references((): AnyPgColumn => csatRules.id, { onDelete: 'set null' }),
 
     sentAt: timestamp('sent_at', { withTimezone: true }),
     respondedAt: timestamp('responded_at', { withTimezone: true }),
@@ -116,6 +125,60 @@ export const csatSettings = pgTable('csat_settings', {
     onDelete: 'set null',
   }),
 });
+
+/**
+ * What a survey says, scoped like the out-of-hours reply: two nullable columns
+ * rather than a `scope` enum, the most specific row wins, and the scope is
+ * the identity (`plans/out-of-hours-auto-response.md`). No row matching is the
+ * built-in wording in `lib/csat/wording.ts`, so the switch works before an
+ * admin has written a word.
+ *
+ * Every customer-facing string is an `_ar` / `_en` pair, both `not null
+ * default ''`, either covering the other. The lengths are Meta's — the same
+ * strings become a Messenger card's title, subtitle, button and question in a
+ * later stage — and they are enforced on every row, not only one scoped to
+ * Facebook, because a group rule with no channel reaches Facebook too.
+ */
+export const csatRules = pgTable(
+  'csat_rules',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+
+    /** Null means every group, including tickets that have none. */
+    groupId: uuid('group_id').references(() => groups.id, { onDelete: 'cascade' }),
+    /** Null means every channel. */
+    channel: channelEnum('channel'),
+
+    /** The question itself: the email's heading, the card's question, Messenger's question title. */
+    questionAr: text('question_ar').notNull().default(''),
+    questionEn: text('question_en').notNull().default(''),
+    /** The first line: the email's opening, Messenger's card title. */
+    introAr: text('intro_ar').notNull().default(''),
+    introEn: text('intro_en').notNull().default(''),
+    /** The second line: Messenger's card subtitle. */
+    subtitleAr: text('subtitle_ar').notNull().default(''),
+    subtitleEn: text('subtitle_en').notNull().default(''),
+    /** The confirm button on the page and the card, Messenger's button title. */
+    buttonAr: text('button_ar').notNull().default(''),
+    buttonEn: text('button_en').notNull().default(''),
+    /** The comment box's label; the follow-up's placeholder on Messenger. */
+    commentPromptAr: text('comment_prompt_ar').notNull().default(''),
+    commentPromptEn: text('comment_prompt_en').notNull().default(''),
+    /** After an answer. */
+    thanksAr: text('thanks_ar').notNull().default(''),
+    thanksEn: text('thanks_en').notNull().default(''),
+
+    isActive: boolean('is_active').notNull().default(true),
+
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    // `nulls not distinct`, as `auto_responses_scope_key`: two rows for one
+    // scope would make the winner depend on row order.
+    unique('csat_rules_scope_key').on(t.groupId, t.channel).nullsNotDistinct(),
+  ],
+);
 
 /**
  * Nightly rollups. Dashboards read only from here, so reporting never runs live
