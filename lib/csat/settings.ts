@@ -44,11 +44,18 @@ export type CsatSettings = {
   resurveyAfterDays: number;
   channels: CsatChannels;
   surveyRuleResolved: boolean;
-  /** Messenger's `business_privacy.url`; Facebook is not surveyed while null. */
+  /**
+   * Messenger's `business_privacy.url`. No card is sent while null: Facebook
+   * gets the rating buttons inside the 24 hours and is skipped past them.
+   */
   privacyUrl: string | null;
   /** Messenger's `expires_in_days` for the feedback card, 1–7. */
   metaExpiresInDays: number;
-  /** What Graph said when it last refused the feedback card, or null. */
+  /**
+   * What Graph said when it last refused the feedback card, or null. Cleared
+   * by a card that goes out, and stops counting a day after `at`
+   * (`cardRefusalStands`).
+   */
   lastTemplateRefusal: { text: string; at: Date } | null;
   /** When it last changed and by whom — null before the first save. */
   changedAt: Date | null;

@@ -153,7 +153,7 @@ export function wordingProblem(field: WordingField, value: string): string | nul
     return `${limit.label} can be at most ${limit.max} characters`;
   }
   if (limit.maxBytes !== null && new TextEncoder().encode(trimmed).length > limit.maxBytes) {
-    return `${limit.label} is too long to send on Instagram, which counts an emoji or an Arabic letter as more than one character`;
+    return `${limit.label} is too long to send on Instagram, which counts an emoji as several characters`;
   }
   if (limit.min !== null && length < limit.min) {
     return `${limit.label} has to be at least ${limit.min} characters`;

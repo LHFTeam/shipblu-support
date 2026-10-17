@@ -631,7 +631,7 @@ describe('thread control', () => {
 describe('isRecipientRefusal', () => {
   it('tells a refusal about the customer from a refusal of what was sent', () => {
     const refusal = (code: number | null, subcode: number | null = null) =>
-      isRecipientRefusal(new MetaApiError('refused', 400, code, subcode, false));
+      isRecipientRefusal(new MetaApiError('refused', 400, code, subcode, false), 'RESPONSE');
     // Blocked the Page, the window closed (a code in the table, a subcode on
     // the wire), another app holds the thread.
     expect(refusal(551)).toBe(true);
@@ -647,5 +647,20 @@ describe('isRecipientRefusal', () => {
     expect(refusal(100)).toBe(false);
     expect(refusal(10)).toBe(false);
     expect(refusal(null)).toBe(false);
+  });
+
+  it('reads a window refusal of the card’s own tag as the card’s', () => {
+    // Inside the seven days the tag allows — `feedbackTemplateTag` counts them
+    // — so the window Meta means is the tag's on this card, not the customer's.
+    const outside = new MetaApiError('refused', 400, 10, 2018278, false);
+    expect(isRecipientRefusal(outside, 'CUSTOMER_FEEDBACK')).toBe(false);
+    expect(isRecipientRefusal(outside, 'RESPONSE')).toBe(true);
+    // A refusal about the customer is theirs whatever the card carried.
+    expect(
+      isRecipientRefusal(
+        new MetaApiError('refused', 400, 551, 1545041, false),
+        'CUSTOMER_FEEDBACK',
+      ),
+    ).toBe(true);
   });
 });

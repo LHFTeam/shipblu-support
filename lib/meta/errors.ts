@@ -37,7 +37,7 @@ export type MetaSendContext = {
    * thread, so none of a plain reply's diagnoses are appended to it.
    */
   sendKind: 'dm' | 'comment_reply' | 'private_reply' | 'feedback_card';
-  /** The tag a direct message went out with, when it was a direct message. */
+  /** The tag a direct message or the feedback card went out with. */
   tag?: 'RESPONSE' | 'HUMAN_AGENT' | 'CUSTOMER_FEEDBACK' | null;
 };
 
@@ -184,7 +184,13 @@ function isCommentSend(context: MetaSendContext): boolean {
   return context.sendKind === 'comment_reply' || context.sendKind === 'private_reply';
 }
 
-function isUnspecified(error: MetaApiError): boolean {
+/**
+ * One of Graph's refusals that names nothing — code 1 or 2, or no code at all
+ * on a 5xx. The answer a withdrawn feedback card most likely gets, and so the
+ * only transient one `send_meta` will count as the card refused on its last
+ * try: a rate limit that outlasts the retries says nothing about the card.
+ */
+export function isUnspecified(error: MetaApiError): boolean {
   return error.code === null || UNSPECIFIED_CODES.has(error.code);
 }
 
@@ -299,15 +305,28 @@ function isHandoverRefusal(error: MetaApiError): boolean {
  * the thread (`10` / `2018300`, read out of a log). Keyed on the subcode
  * wherever there is one, because `100` and `10` are also how Graph refuses a
  * malformed request and a missing permission — which *are* the card's.
+ *
+ * All but the last are from the Send API reference's error table rather than
+ * a log, against this file's habit, because here the cost of a guess runs
+ * the other way: a refusal about the customer read as the card's is a false
+ * alarm on the admin page and every later Facebook survey skipped for it.
+ *
+ * Outside the window is the customer's only for a send carrying no tag of the
+ * card's own. Past the 24 hours the card goes with `CUSTOMER_FEEDBACK`, inside
+ * the seven days `feedbackTemplateTag` already counts, so a window refusal
+ * there says Meta did not take that tag on the card — the card's refusal.
  */
 const RECIPIENT_CODES = new Set([551]);
-const RECIPIENT_SUBCODES = new Set([1545041, 2018001, 2018108, 2018278]);
+const RECIPIENT_SUBCODES = new Set([1545041, 2018001, 2018108]);
+const OUTSIDE_WINDOW_SUBCODE = 2018278;
 
-export function isRecipientRefusal(error: MetaApiError): boolean {
+export function isRecipientRefusal(error: MetaApiError, tag: MetaSendContext['tag']): boolean {
   return (
     (error.code !== null && RECIPIENT_CODES.has(error.code)) ||
+    // The table lists 1545041 as a code; it arrives as 551's subcode.
     (error.code !== null && RECIPIENT_SUBCODES.has(error.code)) ||
     (error.subcode !== null && RECIPIENT_SUBCODES.has(error.subcode)) ||
+    (error.subcode === OUTSIDE_WINDOW_SUBCODE && tag !== 'CUSTOMER_FEEDBACK') ||
     isHandoverRefusal(error)
   );
 }

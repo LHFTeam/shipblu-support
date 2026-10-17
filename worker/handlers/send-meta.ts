@@ -17,6 +17,7 @@ import { metaConnection, type MetaConnection } from '@/lib/meta/connection';
 import {
   explainMetaSendError,
   isRecipientRefusal,
+  isUnspecified,
   MetaSendRefusal,
   type MetaSendContext,
 } from '@/lib/meta/errors';
@@ -286,12 +287,14 @@ async function deliver(
  * row instead. Past them nothing else sends, and the row fails with Graph's
  * own sentence, as any refused send does.
  *
- * Only a refusal of *the card* falls back. A transient answer, the
- * unspecified codes and Graph's 5xx among them, is the queue's to retry as
- * the card — until the queue's last try, where it counts as the card refused:
- * "An unknown error has occurred" is the shape Graph gives most refusals,
- * and a card withdrawn that way would otherwise be retried to `dead` on every
- * Facebook survey, with no warning on the page and the 24 hours spent. A dead
+ * Only a refusal of *the card* falls back. A transient answer is the queue's
+ * to retry as the card — until the queue's last try, where one that names
+ * nothing (`isUnspecified`: codes 1 and 2, a bare 5xx) counts as the card
+ * refused: "An unknown error has occurred" is the shape Graph gives most
+ * refusals, and a card withdrawn that way would otherwise be retried to
+ * `dead` on every Facebook survey, with no warning on the page and the 24
+ * hours spent. A rate limit that outlasts the retries is not, and goes to
+ * `dead` as any send's would. A dead
  * token, a refusal this app made itself, and a refusal about the recipient —
  * a customer who blocked the Page, a thread another app holds
  * (`isRecipientRefusal`) — would refuse anything sent here: kept on the
@@ -336,10 +339,10 @@ async function deliverFeedbackCard(
     if (
       !(error instanceof MetaApiError) ||
       error instanceof MetaSendRefusal ||
-      (error.isTransient && !attempt.final) ||
+      (error.isTransient && !(attempt.final && isUnspecified(error))) ||
       error.status === 0 ||
       error.code === ACCESS_TOKEN_CODE ||
-      isRecipientRefusal(error)
+      isRecipientRefusal(error, tag)
     ) {
       throw error;
     }

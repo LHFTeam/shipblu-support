@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  cardRefusalStands,
   channelSurveyed,
   channelSwitch,
   decideSurvey,
@@ -35,6 +36,7 @@ function input(overrides: Partial<DecisionInput> = {}): DecisionInput {
     commentThread: false,
     metaWindowOpen: true,
     feedbackWindowOpen: true,
+    cardRefused: false,
     readOnly: false,
     byEmail: true,
     ...overrides,
@@ -176,27 +178,42 @@ describe('decideSurvey', () => {
 
   it('tries a card Messenger last refused only where the buttons can follow it', () => {
     const facebook = (overrides: Partial<DecisionInput> = {}) =>
-      input({ channel: 'facebook', byEmail: false, ...overrides });
-    const refused = {
-      ...ON,
-      lastTemplateRefusal: { text: '(#100) Unsupported post request.', at: new Date() },
-    };
+      input({ channel: 'facebook', byEmail: false, cardRefused: true, ...overrides });
 
     // Inside the 24 hours: the card still goes, falls back to buttons if it is
     // refused again, and clears the refusal if it is not.
-    expect(decideSurvey(facebook(), refused)).toEqual({ kind: 'send', delivery: 'meta_template' });
+    expect(decideSurvey(facebook(), ON)).toEqual({ kind: 'send', delivery: 'meta_template' });
     // Past them nothing would carry it, so nothing is written to fail.
-    expect(decideSurvey(facebook({ metaWindowOpen: false }), refused)).toEqual({
+    expect(decideSurvey(facebook({ metaWindowOpen: false }), ON)).toEqual({
       kind: 'skip',
       reason: 'card_refused',
     });
     // A missing link says more than a refusal, and a closed window more than either.
+    expect(decideSurvey(facebook({ metaWindowOpen: false }), { ...ON, privacyUrl: null })).toEqual({
+      kind: 'skip',
+      reason: 'no_privacy_url',
+    });
     expect(
-      decideSurvey(facebook({ metaWindowOpen: false }), { ...refused, privacyUrl: null }),
-    ).toEqual({ kind: 'skip', reason: 'no_privacy_url' });
-    expect(
-      decideSurvey(facebook({ metaWindowOpen: false, feedbackWindowOpen: false }), refused),
+      decideSurvey(facebook({ metaWindowOpen: false, feedbackWindowOpen: false }), ON),
     ).toEqual({ kind: 'skip', reason: 'window_closed' });
+    // Instagram has no card to have been refused.
+    expect(
+      decideSurvey(input({ channel: 'instagram', byEmail: false, cardRefused: true }), ON),
+    ).toEqual({ kind: 'send', delivery: 'meta_quick_reply' });
+  });
+
+  it('lets a refusal stand for a day, so a survey past the 24 hours tries the card again', () => {
+    const now = new Date('2026-10-17T12:00:00Z');
+    const refusal = (hoursAgo: number) => ({
+      text: '(#100) Unsupported post request.',
+      at: new Date(now.getTime() - hoursAgo * 3_600_000),
+    });
+    expect(cardRefusalStands(null, now)).toBe(false);
+    expect(cardRefusalStands(refusal(1), now)).toBe(true);
+    expect(cardRefusalStands(refusal(23.9), now)).toBe(true);
+    // With a Meta delay of a day or more no card is ever sent inside the 24
+    // hours to clear it; lapsing is what keeps Facebook from going quiet for good.
+    expect(cardRefusalStands(refusal(24), now)).toBe(false);
   });
 
   it('sends quick replies on Instagram only inside the 24 hours, whatever the card could do', () => {

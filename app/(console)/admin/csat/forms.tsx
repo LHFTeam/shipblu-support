@@ -200,10 +200,10 @@ export function SurveySettingsForm({ settings }: { settings: CsatSettings }) {
               <RelativeTime at={settings.lastTemplateRefusal.at}>
                 {(relative) => `Messenger last refused the feedback card ${ago(relative)}:`}
               </RelativeTime>{' '}
-              <span className="whitespace-pre-line">{settings.lastTemplateRefusal.text}</span> Until
-              a card goes out again, a survey due within 24 hours of the customer’s last message
-              still tries the card and falls back to rating buttons; one due later is skipped. The
-              next card that goes out clears this.
+              <span className="whitespace-pre-line">{settings.lastTemplateRefusal.text}</span> For a
+              day after it, or until a card goes out, a survey due more than 24 hours after the
+              customer’s last message is skipped. One due within them still gets the card where a
+              privacy link is set, and rating buttons if Messenger refuses it again.
             </Notice>
           ) : null}
         </div>

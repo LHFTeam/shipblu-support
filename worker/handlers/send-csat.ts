@@ -6,7 +6,7 @@ import { surveyEmail } from '@/lib/csat/email';
 import { metaSurveyMessage } from '@/lib/csat/meta-survey';
 import { wordingForTicket } from '@/lib/csat/rules';
 import { surveyText } from '@/lib/csat/wording';
-import { decideSurvey, type SurveyTrigger } from '@/lib/csat/decision';
+import { cardRefusalStands, decideSurvey, type SurveyTrigger } from '@/lib/csat/decision';
 import { carriesLink } from '@/lib/csat/delivery';
 import { readCsatSettings } from '@/lib/csat/settings';
 import { rootCommentId } from '@/lib/meta/comments';
@@ -118,6 +118,7 @@ export async function sendCsat(job: ClaimedJob): Promise<void> {
       feedbackWindowOpen: isMeta
         ? automatedReplyBlocked(ticket, now, 'feedback_template') === null
         : false,
+      cardRefused: cardRefusalStands(settings.lastTemplateRefusal, now),
       readOnly: isReadOnlyChannel(ticket.channel),
       byEmail: sendsByEmail(ticket.channel),
     },

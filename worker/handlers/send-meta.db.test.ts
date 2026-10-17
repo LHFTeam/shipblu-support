@@ -267,6 +267,58 @@ describe('send_meta, for a survey card', () => {
     expect(after.refusal).not.toContain('24-hour window');
   });
 
+  it('does not count a rate limit on the last try as the card refused', async () => {
+    await settingsOn();
+    const survey = await cardSurvey(HOUR);
+    // Transient, and outlasting every retry — but about how much we sent, not
+    // what: nothing to put on the admin page, and no reason to skip later surveys.
+    graph.sendMessageRequest.mockRejectedValueOnce(
+      new MetaApiError(
+        '(#613) Calls to this api have exceeded the rate limit.',
+        400,
+        613,
+        null,
+        true,
+      ),
+    );
+
+    await expect(sendMeta(job(survey.messageId, { attempts: 5, maxAttempts: 5 }))).rejects.toThrow(
+      'rate limit',
+    );
+    expect(requests()).toHaveLength(1);
+    expect(await state(survey)).toMatchObject({
+      message: { status: 'failed' },
+      delivery: 'meta_template',
+      refusal: null,
+      fellBack: 0,
+    });
+  });
+
+  it('counts a window refusal of the card’s own tag as the card’s', async () => {
+    await settingsOn();
+    const survey = await cardSurvey(3 * 24 * HOUR);
+    // Inside the seven days `CUSTOMER_FEEDBACK` allows, so the window Meta
+    // refused is the tag's on this card — not the customer's.
+    graph.sendMessageRequest.mockRejectedValueOnce(
+      new MetaApiError(
+        '(#10) This message is sent outside of allowed window.',
+        400,
+        10,
+        2018278,
+        false,
+      ),
+    );
+
+    await sendMeta(job(survey.messageId));
+
+    expect(requests()).toEqual([
+      { kind: 'card', messagingType: 'MESSAGE_TAG', tag: 'CUSTOMER_FEEDBACK' },
+    ]);
+    const after = await state(survey);
+    expect(after).toMatchObject({ message: { status: 'failed' }, fellBack: 0 });
+    expect(after.refusal).toContain('outside of allowed window');
+  });
+
   it('does not blame the card for a customer who cannot be reached', async () => {
     await settingsOn();
     const survey = await cardSurvey(HOUR);

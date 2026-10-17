@@ -98,8 +98,11 @@ customer sees.
   fallback on refusal, and the admin page shows the last refusal.
 - **The template needs a privacy policy URL** (`business_privacy.url`,
   required). There is no privacy page on the help centre today. Default: a
-  URL field on the admin page, and the Facebook channel stays off until it is
-  filled in — the page says so rather than sending a template Graph rejects.
+  URL field on the admin page, and no card without it — the page says so
+  rather than sending a template Graph rejects. _Built:_ Facebook still gets
+  the rating buttons inside the 24 hours, which need no link, and is skipped
+  `no_privacy_url` only past them; keeping the whole channel off read on the
+  ticket as a missing link where the buttons would have gone.
 - **Should a `closed` status survey too?** Only `resolved` does today, and a
   ticket an automation closes after a week of silence was resolved a week
   earlier. Default: `resolved` only, unchanged.
@@ -151,19 +154,19 @@ rollback — reaches the next resolve at once. Only the ticket sidebar reads the
 thirty-second memo (`loadCsatSettings`), where a failed read is reported as not
 known rather than as off.
 
-| Field                               | Default | What it does                                                                      |
-| ----------------------------------- | ------- | --------------------------------------------------------------------------------- |
-| `enabled`                           | false   | Nothing is scheduled while off; a ticket resolved while off is not surveyed later |
-| `delay_minutes`                     | 30      | Resolve → send, the reopen grace `SURVEY_DELAY_MS` is today                       |
-| `meta_delay_minutes`                | null    | The same, for Facebook and Instagram only; null means `delay_minutes`             |
-| `resurvey_after_days`               | 14      | `RESURVEY_AFTER_DAYS`, configurable                                               |
-| `channels`                          | all off | One boolean per deliverable channel: email, webchat, facebook, instagram, api     |
-| `survey_rule_resolved`              | true    | Whether an automation's resolve schedules a survey                                |
-| `meta_expires_in_days`              | 3       | Meta's `expires_in_days`, 1–7                                                     |
-| `privacy_url`                       | null    | Meta's `business_privacy.url`; Facebook stays off while null                      |
-| `api_email_fallback`                | false   | Whether an `api` ticket whose contact has an address is also emailed              |
-| `last_template_refusal`             | null    | What Graph last said when it refused the Facebook template, shown on the page     |
-| `updated_at`, `updated_by_agent_id` |         | Who flipped it last, shown on the page                                            |
+| Field                               | Default | What it does                                                                                                                                       |
+| ----------------------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `enabled`                           | false   | Nothing is scheduled while off; a ticket resolved while off is not surveyed later                                                                  |
+| `delay_minutes`                     | 30      | Resolve → send, the reopen grace `SURVEY_DELAY_MS` is today                                                                                        |
+| `meta_delay_minutes`                | null    | The same, for Facebook and Instagram only; null means `delay_minutes`                                                                              |
+| `resurvey_after_days`               | 14      | `RESURVEY_AFTER_DAYS`, configurable                                                                                                                |
+| `channels`                          | all off | One boolean per deliverable channel: email, webchat, facebook, instagram, api                                                                      |
+| `survey_rule_resolved`              | true    | Whether an automation's resolve schedules a survey                                                                                                 |
+| `meta_expires_in_days`              | 3       | Meta's `expires_in_days`, 1–7                                                                                                                      |
+| `privacy_url`                       | null    | Meta's `business_privacy.url`; no card while null, the buttons inside 24h instead                                                                  |
+| `api_email_fallback`                | false   | Whether an `api` ticket whose contact has an address is also emailed                                                                               |
+| `last_template_refusal`             | null    | What Graph last said when it refused the Facebook template, shown on the page; for a day after it, a survey due past 24h is skipped `card_refused` |
+| `updated_at`, `updated_by_agent_id` |         | Who flipped it last, shown on the page                                                                                                             |
 
 ### `csat_rules` — the wording, scoped like the out-of-hours reply
 
@@ -402,7 +405,14 @@ goes out clears the last refusal. While one stands, a survey due inside the 24
 hours still tries the card — a refusal falls back to the buttons, and a card
 that goes out is what clears it — and one due past them is skipped
 `card_refused` rather than written as sent with a message that could only
-fail, which would count as unanswered and hold the resurvey window shut.
+fail, which would count as unanswered and hold the resurvey window shut. The
+refusal stands for a day (`CARD_REFUSAL_STANDS_MS`): with a Meta delay of a
+day or more no card is ever tried inside the 24 hours to clear it, and a
+refusal that never lapsed would skip every Facebook survey for good. On the
+queue's last try only an answer that names nothing (`isUnspecified`) counts
+as the card refused — a rate limit that outlasts the retries is not — and
+`2018278` (outside the window) is the card's when it carried
+`CUSTOMER_FEEDBACK`, whose seven days `feedbackTemplateTag` already counts.
 Refused that way, the card is explained as itself (`sendKind:
 'feedback_card'`), not with the paragraphs a refused reply or comment gets.
 Without a privacy link, Facebook is surveyed
