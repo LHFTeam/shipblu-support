@@ -56,6 +56,7 @@ const SUMS = {
   slaResolutionBreached: sql<number>`coalesce(sum(${metricsDaily.slaResolutionBreached}), 0)::int`,
   csatRatingSum: sql<number>`coalesce(sum(${metricsDaily.csatRatingSum}), 0)::int`,
   csatResponseCount: sql<number>`coalesce(sum(${metricsDaily.csatResponseCount}), 0)::int`,
+  csatSentCount: sql<number>`coalesce(sum(${metricsDaily.csatSentCount}), 0)::int`,
 };
 
 type Sums = { [K in keyof typeof SUMS]: number };

@@ -415,6 +415,7 @@ function totalsOf(rows: AgentSummary[]): AgentSummary {
     slaResolutionBreached: sum((r) => r.slaResolutionBreached),
     csatRatingSum: sum((r) => r.csatRatingSum),
     csatResponseCount: sum((r) => r.csatResponseCount),
+    csatSentCount: sum((r) => r.csatSentCount),
   };
 }
 

@@ -82,4 +82,31 @@ describe('reconciles', () => {
     };
     expect(reconciles([slice(null, 5), slice('email', 5), withAgent])).toBe(true);
   });
+
+  it('checks the survey counts too, each step of the scale on its own', () => {
+    const surveys = (channel: string | null, counts: Partial<Slice['bucket']>): Slice => ({
+      groupId: null,
+      agentId: null,
+      channel,
+      bucket: { ...emptyBucket(), ...counts },
+    });
+    const day = [
+      surveys(null, { csatSentCount: 3, csatSkippedCount: 1, csatRating2: 1, csatRating5: 2 }),
+      surveys('email', { csatSentCount: 2, csatRating5: 2 }),
+      surveys('webchat', { csatSentCount: 1, csatSkippedCount: 1, csatRating2: 1 }),
+    ];
+    expect(reconciles(day)).toBe(true);
+
+    // A survey counted in the totals and in no channel — what a survey with no
+    // channel of its own would do without the ticket's to fall back on.
+    for (const counts of [
+      { csatSentCount: 4 },
+      { csatSkippedCount: 2 },
+      { csatRating2: 2 },
+      { csatRating5: 1 },
+    ]) {
+      const [totals, ...rest] = day;
+      expect(reconciles([surveys(null, { ...totals!.bucket, ...counts }), ...rest])).toBe(false);
+    }
+  });
 });

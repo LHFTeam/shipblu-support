@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { db } from '@/db/client';
 import { metricsDaily } from '@/db/schema';
 import { withCleanDatabase } from '@/lib/testing/db';
-import { daily, rolledUpDays, totals } from './queries';
+import { byChannel, daily, rolledUpDays, totals } from './queries';
 
 /**
  * The reports overview's window. The queries used to turn a day count into a
@@ -67,5 +67,40 @@ describe('the reports window', () => {
 
     expect(rolledUp).toEqual({ first: '2026-08-18', days: 2 });
     expect(rolledUp.first! > range.from).toBe(false);
+  });
+});
+
+describe('the survey columns', () => {
+  it('sums the sends, the skips and each step of the scale over the window', async () => {
+    const surveys = {
+      csatSentCount: 4,
+      csatSkippedCount: 1,
+      csatRating1: 1,
+      csatRating4: 1,
+      csatRating5: 2,
+      csatResponseCount: 4,
+      csatRatingSum: 15,
+    };
+    await db.insert(metricsDaily).values([
+      { day: '2026-10-12', ...surveys },
+      { day: '2026-10-13', ...surveys, csatRating4: 0, csatRating5: 3 },
+      { day: '2026-10-13', channel: 'email', ...surveys },
+      // Outside the window.
+      { day: '2026-10-14', ...surveys },
+    ]);
+
+    expect(await totals({ from: '2026-10-12', to: '2026-10-13' })).toMatchObject({
+      csatSentCount: 8,
+      csatSkippedCount: 2,
+      csatRating1: 2,
+      csatRating2: 0,
+      csatRating3: 0,
+      csatRating4: 1,
+      csatRating5: 5,
+      csatResponseCount: 8,
+    });
+    expect(await byChannel({ from: '2026-10-12', to: '2026-10-13' })).toMatchObject([
+      { label: 'email', csatSentCount: 4, csatRating5: 2 },
+    ]);
   });
 });

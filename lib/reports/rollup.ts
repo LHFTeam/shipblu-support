@@ -1,5 +1,5 @@
 import { DateTime } from 'luxon';
-import { and, eq, gte, isNull, lt, ne, notInArray, sql } from 'drizzle-orm';
+import { and, eq, gte, isNull, lt, ne, notInArray, or, sql, type Column } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { conversationEvents, conversations, csatSurveys, metricsDaily } from '@/db/schema';
 import { businessMinutesBetween, type HoursConfig } from '@/lib/hours';
@@ -163,9 +163,25 @@ export type Bucket = {
   slaResolutionBreached: number;
   csatRatingSum: number;
   csatResponseCount: number;
+  csatSentCount: number;
+  csatSkippedCount: number;
+  csatRating1: number;
+  csatRating2: number;
+  csatRating3: number;
+  csatRating4: number;
+  csatRating5: number;
 };
 
 export type Slice = Dimensions & { bucket: Bucket };
+
+/** The bucket column each rating on the 1–5 scale is counted in. */
+const RATING_COLUMNS = [
+  'csatRating1',
+  'csatRating2',
+  'csatRating3',
+  'csatRating4',
+  'csatRating5',
+] as const satisfies readonly (keyof Bucket)[];
 
 export function emptyBucket(): Bucket {
   return {
@@ -182,6 +198,13 @@ export function emptyBucket(): Bucket {
     slaResolutionBreached: 0,
     csatRatingSum: 0,
     csatResponseCount: 0,
+    csatSentCount: 0,
+    csatSkippedCount: 0,
+    csatRating1: 0,
+    csatRating2: 0,
+    csatRating3: 0,
+    csatRating4: 0,
+    csatRating5: 0,
   };
 }
 
@@ -214,25 +237,7 @@ export async function computeDay(
     for (const slice of slicesFor(dims)) apply(bucketFor(buckets, slice));
   };
 
-  /**
-   * Conversations the team actually worked.
-   *
-   * Applied to every query below rather than subtracted from the totals
-   * afterwards. A read-only channel has no first response and no SLA by
-   * construction, so leaving it in would not add a channel row to the report —
-   * it would quietly lower the response and resolution rates for every channel
-   * that does have them, by counting tickets that could never have either.
-   *
-   * An imported conversation — a WhatsApp Business app chat copied in after a
-   * coexistence onboarding — is out for a sharper reason: its `created_at` is
-   * when the customer first wrote on the phone, so it would land as demand on
-   * a day already reported, and an agent answering it now would measure a
-   * first response in months.
-   */
-  const worked = and(
-    notInArray(conversations.channel, readOnlyChannels()),
-    ne(conversations.sourceSystem, 'import'),
-  );
+  const worked = workedConversation();
 
   // --- Created --------------------------------------------------------------
   const created = await db
@@ -366,24 +371,61 @@ export async function computeDay(
   }
 
   // --- CSAT -----------------------------------------------------------------
+  // One read for the three things a survey can add to a day — it was sent,
+  // skipped, or answered — each on its own timestamp (the columns' comment in
+  // `db/schema/metrics.ts`), so a survey sent today and answered next week
+  // counts once on each day and is re-read by neither.
+  const during = (at: Column) => and(gte(at, from), lt(at, to));
   const surveys = await db
     .select({
+      status: csatSurveys.status,
+      sentAt: csatSurveys.sentAt,
+      createdAt: csatSurveys.createdAt,
+      respondedAt: csatSurveys.respondedAt,
       rating: csatSurveys.rating,
       agentId: csatSurveys.agentId,
       groupId: csatSurveys.groupId,
-      channel: conversations.channel,
+      // The survey's own channel, not the ticket's: a merged ticket would
+      // otherwise move a score from the channel it was asked on to the one
+      // it was merged into. The ticket's only for the one row written before
+      // the survey had a channel — without one, a fact would land in the
+      // totals and in no channel slice, and `reconciles` would refuse the day.
+      channel: sql<string>`coalesce(${csatSurveys.channel}, ${conversations.channel})`,
     })
     .from(csatSurveys)
     .innerJoin(conversations, eq(conversations.id, csatSurveys.conversationId))
-    .where(and(gte(csatSurveys.respondedAt, from), lt(csatSurveys.respondedAt, to), worked));
+    .where(
+      and(
+        or(
+          during(csatSurveys.sentAt),
+          and(eq(csatSurveys.status, 'skipped'), during(csatSurveys.createdAt)),
+          during(csatSurveys.respondedAt),
+        ),
+        worked,
+      ),
+    );
+
+  const inDay = (at: Date | null) => at !== null && at >= from && at < to;
 
   for (const row of surveys) {
-    if (row.rating === null) continue;
     // The agent and group are the survey's own snapshot, not the ticket's
     // current owner: a score belongs to whoever handled it at the time.
     add({ groupId: row.groupId, agentId: row.agentId, channel: row.channel }, (bucket) => {
-      bucket.csatRatingSum += row.rating!;
-      bucket.csatResponseCount += 1;
+      if (inDay(row.sentAt)) bucket.csatSentCount += 1;
+      if (row.status === 'skipped' && inDay(row.createdAt)) bucket.csatSkippedCount += 1;
+
+      // Only a rating on the scale: every door refuses anything else, and one
+      // that got past them would count in the average and in no bar of the
+      // distribution, so the two would stop describing the same answers.
+      const rating = row.rating;
+      if (inDay(row.respondedAt) && rating !== null && Number.isInteger(rating)) {
+        const column = RATING_COLUMNS[rating - 1];
+        if (column) {
+          bucket.csatRatingSum += rating;
+          bucket.csatResponseCount += 1;
+          bucket[column] += 1;
+        }
+      }
     });
   }
 
@@ -391,6 +433,32 @@ export async function computeDay(
     const [groupId, agentId, channel] = key.split('|');
     return { groupId: groupId || null, agentId: agentId || null, channel: channel || null, bucket };
   });
+}
+
+/**
+ * Conversations the team actually worked, as a condition on `conversations`.
+ *
+ * Applied to every query in `computeDay` rather than subtracted from the
+ * totals afterwards. A read-only channel has no first response and no SLA by
+ * construction, so leaving it in would not add a channel row to the report —
+ * it would quietly lower the response and resolution rates for every channel
+ * that does have them, by counting tickets that could never have either.
+ *
+ * An imported conversation — a WhatsApp Business app chat copied in after a
+ * coexistence onboarding — is out for a sharper reason: its `created_at` is
+ * when the customer first wrote on the phone, so it would land as demand on
+ * a day already reported, and an agent answering it now would measure a
+ * first response in months.
+ *
+ * Exported for the satisfaction report's live reads, which have to count the
+ * same surveys the rollup does or the page's check of one against the other
+ * would report a gap that is only two definitions.
+ */
+export function workedConversation() {
+  return and(
+    notInArray(conversations.channel, readOnlyChannels()),
+    ne(conversations.sourceSystem, 'import'),
+  );
 }
 
 /**
@@ -417,7 +485,10 @@ export function reconciles(slices: Slice[]): boolean {
     totals.ticketsReopened === sum((b) => b.ticketsReopened) &&
     totals.firstResponseCount === sum((b) => b.firstResponseCount) &&
     totals.resolutionCount === sum((b) => b.resolutionCount) &&
-    totals.csatResponseCount === sum((b) => b.csatResponseCount)
+    totals.csatResponseCount === sum((b) => b.csatResponseCount) &&
+    totals.csatSentCount === sum((b) => b.csatSentCount) &&
+    totals.csatSkippedCount === sum((b) => b.csatSkippedCount) &&
+    RATING_COLUMNS.every((column) => totals[column] === sum((b) => b[column]))
   );
 }
 

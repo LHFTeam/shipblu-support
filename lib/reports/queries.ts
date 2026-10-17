@@ -26,6 +26,13 @@ export type Totals = {
   slaResolutionBreached: number;
   csatRatingSum: number;
   csatResponseCount: number;
+  csatSentCount: number;
+  csatSkippedCount: number;
+  csatRating1: number;
+  csatRating2: number;
+  csatRating3: number;
+  csatRating4: number;
+  csatRating5: number;
 };
 
 const SUMS = {
@@ -42,6 +49,13 @@ const SUMS = {
   slaResolutionBreached: sql<number>`coalesce(sum(${metricsDaily.slaResolutionBreached}), 0)::int`,
   csatRatingSum: sql<number>`coalesce(sum(${metricsDaily.csatRatingSum}), 0)::int`,
   csatResponseCount: sql<number>`coalesce(sum(${metricsDaily.csatResponseCount}), 0)::int`,
+  csatSentCount: sql<number>`coalesce(sum(${metricsDaily.csatSentCount}), 0)::int`,
+  csatSkippedCount: sql<number>`coalesce(sum(${metricsDaily.csatSkippedCount}), 0)::int`,
+  csatRating1: sql<number>`coalesce(sum(${metricsDaily.csatRating1}), 0)::int`,
+  csatRating2: sql<number>`coalesce(sum(${metricsDaily.csatRating2}), 0)::int`,
+  csatRating3: sql<number>`coalesce(sum(${metricsDaily.csatRating3}), 0)::int`,
+  csatRating4: sql<number>`coalesce(sum(${metricsDaily.csatRating4}), 0)::int`,
+  csatRating5: sql<number>`coalesce(sum(${metricsDaily.csatRating5}), 0)::int`,
 };
 
 /**
@@ -193,6 +207,13 @@ function normalise(row: Partial<Record<keyof Totals, unknown>> | undefined): Tot
     slaResolutionBreached: value('slaResolutionBreached'),
     csatRatingSum: value('csatRatingSum'),
     csatResponseCount: value('csatResponseCount'),
+    csatSentCount: value('csatSentCount'),
+    csatSkippedCount: value('csatSkippedCount'),
+    csatRating1: value('csatRating1'),
+    csatRating2: value('csatRating2'),
+    csatRating3: value('csatRating3'),
+    csatRating4: value('csatRating4'),
+    csatRating5: value('csatRating5'),
   };
 }
 
@@ -211,6 +232,48 @@ export function metPercentage(met: number, breached: number): number | null {
 
 export function averageRating(sum: number, count: number): number | null {
   return count > 0 ? Math.round((sum / count) * 10) / 10 : null;
+}
+
+/** A whole percentage of `of`, or null when there is nothing to divide by. */
+function share(part: number, of: number): number | null {
+  return of > 0 ? Math.round((part / of) * 100) : null;
+}
+
+/**
+ * Answers in the window over surveys sent in it. A rate, not a cohort: a link
+ * answered three weeks after it went out counts in the week it was answered,
+ * so a short window that caught the answers to a busier one before it can
+ * read above 100%, and says so rather than being clipped.
+ */
+export function responseRate(row: Pick<Totals, 'csatResponseCount' | 'csatSentCount'>) {
+  return share(row.csatResponseCount, row.csatSentCount);
+}
+
+/**
+ * Surveys sent over tickets resolved, in the same window — how much of the
+ * work was asked about at all. Also a rate: a survey goes out a delay after
+ * its resolve, so the two edges of a window do not hold exactly the same
+ * tickets.
+ */
+export function surveyedRate(row: Pick<Totals, 'csatSentCount' | 'ticketsResolved'>) {
+  return share(row.csatSentCount, row.ticketsResolved);
+}
+
+/** The answers on each step of the scale, 1 to 5. */
+export function ratingCounts(row: Totals): [number, number, number, number, number] {
+  return [row.csatRating1, row.csatRating2, row.csatRating3, row.csatRating4, row.csatRating5];
+}
+
+/**
+ * The share of the distribution at 4–5 and at 1–2. Out of the distribution
+ * rather than `csat_response_count`: the two are the same answers on every day
+ * rolled up since the distribution existed, and on a day rolled up before it
+ * only the distribution's own total says how many answers it describes.
+ */
+export function ratingShares(row: Totals): { positive: number | null; negative: number | null } {
+  const [one, two, , four, five] = ratingCounts(row);
+  const counted = ratingCounts(row).reduce((sum, count) => sum + count, 0);
+  return { positive: share(four + five, counted), negative: share(one + two, counted) };
 }
 
 /** "1h 20m", "45s" — a duration a person can read at a glance. */

@@ -91,6 +91,9 @@ export const csatSurveys = pgTable(
     index('csat_surveys_conversation_idx').on(t.conversationId),
     index('csat_surveys_responded_idx').on(t.respondedAt),
     index('csat_surveys_created_idx').on(t.createdAt),
+    // The rollup's sent count and the report's live check both read a day of
+    // `sent_at`, which the two indexes above cannot serve.
+    index('csat_surveys_sent_idx').on(t.sentAt),
     // The job enqueues without a dedupe key and is idempotent instead, so two
     // runs racing on one ticket meet here rather than sending two surveys.
     uniqueIndex('csat_surveys_open_idx')
@@ -243,6 +246,23 @@ export const metricsDaily = pgTable(
 
     csatRatingSum: integer('csat_rating_sum').notNull().default(0),
     csatResponseCount: integer('csat_response_count').notNull().default(0),
+
+    /**
+     * Surveys on the day, each keyed on the one timestamp that never moves
+     * once written — `csat_surveys.status` does (`sent` → `expired` →
+     * `answered`), so a count keyed on it would change with every answer.
+     * Sent on `sent_at`, which an expired or answered survey keeps: it was
+     * sent. Skipped on `created_at`, the decision's own instant. The five
+     * ratings on `responded_at`, like the two columns above, so the
+     * distribution and the average are one set of answers.
+     */
+    csatSentCount: integer('csat_sent_count').notNull().default(0),
+    csatSkippedCount: integer('csat_skipped_count').notNull().default(0),
+    csatRating1: integer('csat_rating_1').notNull().default(0),
+    csatRating2: integer('csat_rating_2').notNull().default(0),
+    csatRating3: integer('csat_rating_3').notNull().default(0),
+    csatRating4: integer('csat_rating_4').notNull().default(0),
+    csatRating5: integer('csat_rating_5').notNull().default(0),
 
     computedAt: timestamp('computed_at', { withTimezone: true }).notNull().defaultNow(),
   },
