@@ -1,4 +1,4 @@
-import { and, desc, eq, gt, inArray, isNull, sql } from 'drizzle-orm';
+import { and, desc, eq, gt, inArray, isNull, sql, type SQL } from 'drizzle-orm';
 import { db } from '@/db/client';
 import {
   conversationEvents,
@@ -16,6 +16,7 @@ import { enqueueAutomatedDelivery, writeAutomatedReply } from '@/lib/tickets/out
 import {
   isClosedChat,
   surveyAvailability,
+  type SuppressedBy,
   type SurveyAvailability,
   type SurveyTrigger,
 } from './decision';
@@ -267,7 +268,7 @@ export type SendOutcome =
   /** The ticket already carries a survey inside the window; nothing was written. */
   | { kind: 'surveyed' }
   /** The ticket changed under the job since it decided; the reason is the job's to record. */
-  | { kind: 'skip'; reason: 'reopened' | 'chat_closed' | 'agent_suppressed' }
+  | { kind: 'skip'; reason: 'reopened' | 'chat_closed' | 'agent_suppressed' | 'rule_suppressed' }
   /** The ticket is gone. */
   | { kind: 'drop' };
 
@@ -280,8 +281,8 @@ export type SendOutcome =
  *   apart, or "Send now" pressed twice — run at once in the worker pool, and a
  *   check made before either writes lets both through. And a customer whose
  *   reply reopened the ticket between the job's read and this write is the
- *   case the delay exists for, so the status and the agent's flag are read
- *   again here, where nothing can change them until the commit.
+ *   case the delay exists for, so the status and the "don't survey" flag
+ *   are read again here, where nothing can change them until the commit.
  * - **The survey, the message, the event and the carrier job commit
  *   together.** A worker stopped between them, or a pool error on the way,
  *   left a `sent` row with no message, which the retry counted as surveyed;
@@ -315,7 +316,7 @@ export async function sendSurvey(send: SurveySend): Promise<SendOutcome> {
         deletedAt: conversations.deletedAt,
         isSpam: conversations.isSpam,
         mergedIntoId: conversations.mergedIntoId,
-        csatSuppressed: conversations.csatSuppressed,
+        suppressedBy: suppressedBy(),
         statusCategory: ticketStatuses.category,
       })
       .from(conversations)
@@ -327,10 +328,15 @@ export async function sendSurvey(send: SurveySend): Promise<SendOutcome> {
     if (ticket.statusCategory !== 'resolved' && ticket.statusCategory !== 'closed') {
       return { kind: 'skip', reason: 'reopened' };
     }
-    if (ticket.csatSuppressed) return { kind: 'skip', reason: 'agent_suppressed' };
+    if (ticket.suppressedBy !== null) {
+      return {
+        kind: 'skip',
+        reason: ticket.suppressedBy === 'rule' ? 'rule_suppressed' : 'agent_suppressed',
+      };
+    }
     // `decideSurvey`'s rule, again behind the lock and in its order — after
-    // the agent's flag: closed in between, a chat is one the visitor can no
-    // longer open.
+    // the agent's or the rule's flag: closed in between, a chat is one the
+    // visitor can no longer open.
     if (isClosedChat(send.snapshot.channel, ticket.statusCategory)) {
       return { kind: 'skip', reason: 'chat_closed' };
     }
@@ -684,4 +690,91 @@ export async function setSurveySuppressed(
       data: {},
     });
   });
+}
+
+/**
+ * A rule's `suppress_survey`: the agent's flag, set only where it changes
+ * something and only where no agent has said otherwise. Whether it changed
+ * anything is the answer, which the engine logs.
+ *
+ * Conditional in the statement, not on the ticket the engine read, for two
+ * reasons. A rule runs again on every update it matches, and a time rule
+ * over every live ticket every fifteen minutes, so writing whenever it
+ * matched would put a fresh `csat_suppressed` on the timeline each time;
+ * this writes the event once, on the flip. And the engine's ticket is read
+ * before its first rule runs, so an earlier action or another request can
+ * have changed the flag since.
+ *
+ * An agent who pressed "Allow a survey" on the ticket keeps it allowed: a
+ * `csat_unsuppressed` event, which only an agent writes, stops the rule for
+ * the rest of the ticket's life. Without it the next update or time rule
+ * would undo the agent's choice — in the very request, when the agent
+ * resolves from the status picker, which runs `on_update` right after.
+ */
+export async function suppressSurveyByRule(
+  conversationId: string,
+  ruleName: string,
+): Promise<boolean> {
+  return db.transaction(async (tx) => {
+    const flipped = await tx
+      .update(conversations)
+      .set({ csatSuppressed: true })
+      .where(
+        and(
+          eq(conversations.id, conversationId),
+          eq(conversations.csatSuppressed, false),
+          sql`not exists (
+            select 1 from ${conversationEvents} e
+            where e.conversation_id = ${conversations}.id and e.type = 'csat_unsuppressed'
+          )`,
+        ),
+      )
+      .returning({ id: conversations.id });
+    if (flipped.length === 0) return false;
+
+    await tx.insert(conversationEvents).values({
+      conversationId,
+      type: 'csat_suppressed',
+      // No actor agent: the timeline names the rule, as every action does.
+      actorLabel: `automation:${ruleName}`,
+      data: {},
+    });
+    return true;
+  });
+}
+
+/**
+ * Who keeps a ticket from being surveyed, for a query over `conversations`:
+ * null when its flag is off, `rule` when the newest `csat_suppressed` event
+ * is a rule's, `agent` otherwise — a flag with no event behind it included,
+ * which is how every flag set before rules could set one reads.
+ *
+ * Off the timeline, as `resolvedByRule` reads who resolved a ticket, rather
+ * than a second column beside the flag: the event already names who set it,
+ * and a column would be one more thing the sidebar's toggle had to keep in
+ * step. A rule's event carries no agent and a label the engine writes
+ * (`automation:<rule>`); an agent's carries the agent, and a deleted agent's
+ * keeps no label, so it still reads as an agent's.
+ *
+ * Written against `${conversations}.id` and an aliased events table rather
+ * than the columns' own references: in a select from `conversations` alone,
+ * drizzle renders a column reference unqualified, and a bare "id" inside the
+ * subquery is the event's own id — every flag would read as an agent's
+ * (`lib/admin/settings.ts` met the same thing).
+ */
+export function suppressedBy(): SQL<SuppressedBy | null> {
+  return sql<SuppressedBy | null>`case
+    when not ${conversations}.csat_suppressed then null
+    when coalesce(
+      (
+        select e.actor_agent_id is null and coalesce(e.actor_label, '') like 'automation:%'
+        from ${conversationEvents} e
+        where e.conversation_id = ${conversations}.id and e.type = 'csat_suppressed'
+        order by e.created_at desc
+        limit 1
+      ),
+      false
+    ) then 'rule'
+    else 'agent'
+  end`;
 }

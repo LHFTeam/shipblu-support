@@ -13,7 +13,8 @@ import {
 } from '@/db/schema';
 import { allLimited } from '@/lib/concurrency';
 import { formName } from '@/lib/forms/naming';
-import { ticketSurveyState, type TicketSurveyState } from '@/lib/csat';
+import { suppressedBy, ticketSurveyState, type TicketSurveyState } from '@/lib/csat';
+import type { SuppressedBy } from '@/lib/csat/decision';
 import type { SessionAgent } from '@/lib/auth/session';
 import { can } from '@/lib/auth/permissions';
 import { configuredAccountId } from '@/lib/meta/client';
@@ -107,8 +108,8 @@ export type ConversationDetail = {
   lastCustomerMessageAt: Date | null;
   createdAt: Date;
   reopenCount: number;
-  /** An agent asked that this ticket not be surveyed. */
-  csatSuppressed: boolean;
+  /** Who asked that this ticket not be surveyed, an agent or a rule; null when nobody did. */
+  csatSuppressedBy: SuppressedBy | null;
   /**
    * Spam, or merged into another ticket: the survey job drops it and writes
    * nothing, so a "Send now" there would wait for an answer that never comes.
@@ -215,6 +216,7 @@ export async function getConversation(
       formNameAr: ticketForms.nameAr,
       formNameEn: ticketForms.nameEn,
       formSlug: ticketForms.slug,
+      csatSuppressedBy: suppressedBy(),
     })
     .from(conversations)
     .innerJoin(ticketStatuses, eq(ticketStatuses.id, conversations.statusId))
@@ -426,7 +428,7 @@ export async function getConversation(
     lastCustomerMessageAt: row.conversation.lastCustomerMessageAt,
     createdAt: row.conversation.createdAt,
     reopenCount: row.conversation.reopenCount,
-    csatSuppressed: row.conversation.csatSuppressed,
+    csatSuppressedBy: row.csatSuppressedBy,
     surveyDropped: row.conversation.isSpam || row.conversation.mergedIntoId !== null,
     survey,
     messages: timeline.map((entry) => ({

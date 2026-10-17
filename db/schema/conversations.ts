@@ -211,10 +211,12 @@ export const conversations = pgTable(
     reopenCount: integer('reopen_count').notNull().default(0),
 
     /**
-     * An agent asked that this ticket not be surveyed: the customer is a
-     * colleague, or furious, or the ticket was a test. Read by `send_csat` at
+     * Somebody asked that this ticket not be surveyed: an agent from the
+     * sidebar — the customer is a colleague, or furious, or the ticket was a
+     * test — or an automation rule's `suppress_survey`. Read by `send_csat` at
      * send time rather than at resolve, so it works until the moment the
-     * survey goes out, and recorded on the timeline as `csat_suppressed`.
+     * survey goes out, and recorded on the timeline as `csat_suppressed`,
+     * whose newest event says which of the two set it (`suppressedBy`).
      */
     csatSuppressed: boolean('csat_suppressed').notNull().default(false),
 
