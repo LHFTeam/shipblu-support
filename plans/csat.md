@@ -190,7 +190,7 @@ Every customer-facing string is an `*_ar` / `*_en` pair, both `not null default
 | `subtitle`       | Messenger's `subtitle`; the email's second line                                                                                                                                          | ≤ 80, no URL                          |
 | `button`         | the page's and the widget card's confirm button (stage 4: Messenger's `button_title` is its own, "Rate our support" / «تقييم الخدمة», because it opens the question rather than sending) | ≤ 20, no URL                          |
 | `comment_prompt` | the follow-up's `placeholder`; the comment box's label                                                                                                                                   | ≤ 65, no URL                          |
-| `thanks`         | after an answer, on the page and the card; and, with "Anything to add?", the message after a tapped rating (stage 4)                                                                     | ≤ 300, inside Instagram's 1,000 bytes |
+| `thanks`         | after an answer, on the page and the card; and, on its own, the message after a tapped rating (stage 4)                                                                                  | ≤ 300, inside Instagram's 1,000 bytes |
 
 The limits are Meta's and they are enforced on every rule, not only one scoped
 to Facebook: a group rule with no channel applies to Facebook tickets too, and a
@@ -443,7 +443,11 @@ categorised, be the inbox preview and the language the next automated reply
 went out in. The comment is asked for only after the rating, as a second plain
 message ("Anything to add? Just reply here."), and whatever the customer types
 next is an ordinary inbound message — on a resolved ticket, that reopens it,
-which is right: a customer with more to say has more to say.
+which is right: a customer with more to say has more to say. _Changed in
+review:_ the second message is the thanks alone. An invitation to comment is
+mostly answered with "thanks!", which reopened the ticket into the queue as
+new demand and never reached `csat_surveys.comment`; a customer with more to
+say still writes, and still reopens it. A quick-reply answer has no comment.
 
 Quick replies send only inside the 24-hour window, and no tag extends them. A
 survey that reaches its `runAt` with the window closed is `skipped:
@@ -455,8 +459,7 @@ Quick replies are also Facebook's fallback (previous section), built by the
 same `lib/meta/quick-reply-survey.ts` with `messaging_type: RESPONSE`, through
 the platform split `send.ts` already keeps.
 
-_Built:_ the second message is the rule's thanks and "Anything to add? Just
-reply here." (Arabic without an imperative), written only for the first answer
+_Built:_ the second message is the rule's thanks, written only for the first answer
 — the other Instagram connection's copy of the same tap records nothing and
 thanks nobody — and only while the 24 hours since the customer's last
 _message_ are open: the tap is an answer, not a message, so it moves neither
@@ -464,8 +467,8 @@ the window nor the clock here. Nor on a ticket since deleted, marked spam or
 merged away, nor when the tap arrived in `standby` on the connection the
 thanks would go out over (`metaThreadState`): another app took the thread
 after the survey went, and the thanks would sit failed on the timeline. The
-rule's thanks is held to 900 bytes as well as 300 characters, so it and the
-line after it fit Instagram's 1,000-byte message whatever the script. Meta does not draw quick replies on desktop
+rule's thanks is held to 1,000 bytes as well as 300 characters, Instagram's
+limit for a message, which 300 emoji would pass. Meta does not draw quick replies on desktop
 Instagram; a customer reading there sees the question without its buttons,
 and an answer typed instead is an ordinary message.
 

@@ -75,20 +75,3 @@ export function metaSurveyMessage(
     },
   };
 }
-
-/**
- * After a tapped rating: the thanks, and where to put anything else. A quick
- * reply has no box for a comment, so whatever the customer types next is an
- * ordinary message — on a resolved ticket that reopens it, which is right: a
- * customer with more to say has more to say. Not an imperative in Arabic,
- * whose customer and agent are of unknown gender (AGENTS.md, the canned
- * library's rule).
- */
-const REPLY_HERE: Record<WordingLocale, string> = {
-  en: 'Anything to add? Just reply here.',
-  ar: 'هل هناك ما تودّ حضرتك إضافته؟ يمكن لحضرتك الرد هنا.',
-};
-
-export function quickReplyThanks(wording: Wording, locale: WordingLocale): string {
-  return [wording.thanks, REPLY_HERE[locale]].filter(Boolean).join('\n');
-}

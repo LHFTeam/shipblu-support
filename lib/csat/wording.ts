@@ -37,12 +37,10 @@ export type WordingLimit = {
   max: number | null;
   /**
    * The most it may be in UTF-8 bytes, where a message's limit is counted in
-   * them: the thanks is sent as a message after a tapped rating, with a line
-   * after it (`quickReplyThanks`), and Instagram refuses a message over 1,000
-   * bytes. Code points cannot hold that — an Arabic letter is two bytes, an
-   * emoji four — so 300 of them can be 1,200. What is left of the 1,000 once
-   * the longer of the two follow-up lines is sent; `meta-survey.test.ts`
-   * holds the sum.
+   * them: the thanks is sent on its own as a message after a tapped rating,
+   * and Instagram refuses a message over 1,000 bytes. Code points cannot hold
+   * that — an Arabic letter is two bytes, an emoji four — so 300 of them can
+   * be 1,200.
    */
   maxBytes: number | null;
   /** Whether Meta refuses a URL in it. */
@@ -55,7 +53,7 @@ export const WORDING_LIMITS: Record<WordingField, WordingLimit> = {
   subtitle: { label: 'Second line', min: null, max: 80, maxBytes: null, noUrl: true },
   button: { label: 'Button', min: null, max: 20, maxBytes: null, noUrl: true },
   commentPrompt: { label: 'Comment prompt', min: null, max: 65, maxBytes: null, noUrl: true },
-  thanks: { label: 'Thanks', min: null, max: 300, maxBytes: 900, noUrl: false },
+  thanks: { label: 'Thanks', min: null, max: 300, maxBytes: 1000, noUrl: false },
 };
 
 /** One language's worth of a rule's strings. */

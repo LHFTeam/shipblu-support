@@ -13,7 +13,6 @@ import {
   writeAutomatedReply,
 } from '@/lib/tickets/outbound';
 import { recordAnswer, type ResponseOutcome } from '@/lib/csat';
-import { quickReplyThanks } from './meta-survey';
 import { wordingForRule } from './rules';
 
 const log = logger('csat');
@@ -89,8 +88,8 @@ export async function recordMetaFeedback(feedback: NormalisedFeedback): Promise<
 }
 
 /**
- * The thanks, and where to put anything else (`quickReplyThanks`), as an
- * automated message through the door every automated sender uses — so on a
+ * The rule's thanks, and nothing after it, as an automated message through
+ * the door every automated sender uses — so on a
  * channel whose window has closed it is not written at all. The window is the
  * customer's last *message*: the tap opens Meta's, but it is an answer and not
  * a message, so it moves nothing here, and a survey tapped more than a day
@@ -147,7 +146,11 @@ async function thankForTap(
         conversationId: survey.conversationId,
         channel: survey.channel,
         requesterEmail: null,
-        bodyText: quickReplyThanks(wording, locale),
+        // Alone. An invitation to add a comment would only be answered with
+        // an ordinary message — a quick reply has no box for one — and on a
+        // resolved ticket that reopens it: a "thanks!" back would land in the
+        // queue as new demand, and never in the survey's comment.
+        bodyText: wording.thanks,
         bodyHtml: null,
         actorLabel: 'csat',
         eventType: 'csat_thanked',

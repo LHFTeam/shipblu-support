@@ -12,6 +12,7 @@ import {
   ticketStatuses,
 } from '@/db/schema';
 import { fallBackToQuickReplies, sendSurvey } from '@/lib/csat';
+import { DEFAULT_WORDING } from '@/lib/csat/wording';
 import type { NormalisedFeedback } from '@/lib/meta/types';
 import { withCleanDatabase } from '@/lib/testing/db';
 import { recordMetaFeedback } from './meta-feedback';
@@ -137,7 +138,9 @@ describe('recordMetaFeedback', () => {
 
     const written = await thanks(ticket.conversationId, ticket.messageId);
     expect(written).toHaveLength(1);
-    expect(written[0]!.bodyText).toContain('Just reply here.');
+    // The rule's thanks and nothing after it: an invitation to add a comment
+    // would be answered with a message that reopens the ticket.
+    expect(written[0]!.bodyText).toBe(DEFAULT_WORDING.en.thanks);
     // Carried like any automated message on the channel.
     const carriers = await db
       .select({ dedupeKey: jobs.dedupeKey })
