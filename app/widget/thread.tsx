@@ -9,6 +9,7 @@ import type { Locale } from '@/lib/kb/locale';
 import { parseVisitorDetails } from '@/lib/widget/contact';
 import type { WidgetCopy } from './copy';
 import { WIDGET_FIELD } from './field';
+import { SurveyCard, type SurveyResult } from './survey-card';
 import type { ArticleLink, Message } from '@/lib/widget/types';
 
 /**
@@ -30,6 +31,7 @@ export function WidgetThread({
   onSend,
   onSaveDetails,
   onOpenArticle,
+  onAnswerSurvey,
 }: {
   locale: Locale;
   copy: WidgetCopy;
@@ -43,6 +45,11 @@ export function WidgetThread({
   onSend: (body: string, details: OfflineDetails | null) => Promise<boolean>;
   onSaveDetails: (details: OfflineDetails) => Promise<boolean>;
   onOpenArticle: (article: ArticleLink) => void;
+  onAnswerSurvey: (
+    surveyId: string,
+    rating: number,
+    comment: string | null,
+  ) => Promise<SurveyResult>;
 }) {
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
@@ -254,12 +261,19 @@ export function WidgetThread({
           labelled in words as well: the border alone says nothing to a screen
           reader, nor to anybody who has not learned what dashes mean.
         */}
+        {/*
+          A survey is the card, not its message's text: the text is the
+          help-centre link, kept for the console and for a widget loaded before
+          the card existed, and a link out of the chat is the thing the card
+          replaces. `attachment` because the card is a surface of its own.
+        */}
         <ol className="flex flex-col">
           {messages.map((message, index) => (
             <ChatBubble
               key={message.id}
               from={message.from === 'visitor' ? 'out' : 'in'}
-              kind={message.from === 'system' ? 'bot' : 'message'}
+              kind={message.survey ? 'attachment' : message.from === 'system' ? 'bot' : 'message'}
+              automated={message.from === 'system'}
               group={runs[index]}
               author={
                 message.from === 'agent'
@@ -269,7 +283,11 @@ export function WidgetThread({
                     : undefined
               }
             >
-              <p className="whitespace-pre-wrap">{message.body}</p>
+              {message.survey ? (
+                <SurveyCard survey={message.survey} onAnswer={onAnswerSurvey} />
+              ) : (
+                <p className="whitespace-pre-wrap">{message.body}</p>
+              )}
             </ChatBubble>
           ))}
         </ol>

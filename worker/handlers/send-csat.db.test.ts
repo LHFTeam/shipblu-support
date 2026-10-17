@@ -242,7 +242,14 @@ describe('send_csat', () => {
 
     await sendCsat(job(id));
 
-    expect((await surveysOf(id))[0]).toMatchObject({ status: 'sent', locale: 'en' });
+    expect((await surveysOf(id))[0]).toMatchObject({
+      status: 'sent',
+      locale: 'en',
+      // Drawn by the widget as a card; the message still carries the link,
+      // so it still has a token.
+      delivery: 'widget_card',
+      tokenHash: expect.any(String),
+    });
   });
 
   it('answers an agent who pressed "Send now" on a surveyed ticket, on the ticket', async () => {

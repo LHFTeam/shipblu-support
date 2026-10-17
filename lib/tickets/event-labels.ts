@@ -1,3 +1,4 @@
+import { describeAnswerSource, describeDelivery } from '@/lib/csat/delivery';
 import { describeSkip } from '@/lib/csat/skip-reasons';
 
 /**
@@ -203,13 +204,16 @@ export function describeEvent(type: string, data: Record<string, unknown>): stri
     // "csat received" — the type with its underscores swapped — and drop the
     // reason and the score, which are the whole content of the event.
     case 'csat_sent':
-      return `sent a satisfaction survey ${data.delivery === 'email_link' ? 'by email' : 'as a message'}`;
+      return `sent a satisfaction survey ${describeDelivery(data.delivery)}`;
     case 'csat_skipped':
       return `did not send a satisfaction survey: ${describeSkip(data.reason)}`;
-    case 'csat_received':
-      return typeof data.rating === 'number'
-        ? `rated the support ${data.rating} / 5`
-        : 'rated the support';
+    case 'csat_received': {
+      // Where it came from, when the event says: an answer recorded before
+      // the second door existed carries no source, and came through the page.
+      const from = describeAnswerSource(data.source);
+      const score = typeof data.rating === 'number' ? ` ${data.rating} / 5` : '';
+      return `rated the support${score}${from ? ` ${from}` : ''}`;
+    }
     case 'csat_suppressed':
       return 'asked that this ticket not be surveyed';
     case 'csat_unsuppressed':

@@ -22,6 +22,16 @@ describe('describeEvent', () => {
     expect(describeEvent('csat_skipped', { reason: 'expired' })).toBe(
       'did not send a satisfaction survey: for a reason this version does not know',
     );
+    expect(describeEvent('csat_sent', { delivery: 'widget_card' })).toBe(
+      'sent a satisfaction survey as a card in the chat',
+    );
+    expect(describeEvent('csat_received', { rating: 4, source: 'widget' })).toBe(
+      'rated the support 4 / 5 in the chat widget',
+    );
+    expect(describeEvent('csat_received', { rating: 2, source: 'page' })).toBe(
+      'rated the support 2 / 5 on the survey page',
+    );
+    // Recorded before the event carried a source.
     expect(describeEvent('csat_received', { rating: 4 })).toBe('rated the support 4 / 5');
     expect(describeEvent('csat_received', {})).toBe('rated the support');
   });

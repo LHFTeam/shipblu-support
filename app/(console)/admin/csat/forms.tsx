@@ -68,7 +68,9 @@ export function SurveySettingsForm({ settings }: { settings: CsatSettings }) {
               <>
                 The grace in which a customer&rsquo;s &ldquo;one more thing&rdquo; reopens the
                 ticket instead of being answered with a survey. The survey checks the ticket is
-                still resolved when the time comes.
+                still resolved when the time comes. A web chat is closed three days after it is
+                resolved, by the built-in rule, and a closed chat can no longer show its survey: a
+                delay of three days or more leaves web chat unsurveyed.
               </>
             }
           >

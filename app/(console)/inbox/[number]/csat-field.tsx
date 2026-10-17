@@ -5,6 +5,7 @@ import { Button } from '@/components/ui';
 import { RelativeTime } from '@/components/relative-time';
 import { DetailsSection } from '@/components/details-section';
 import type { TicketSurveyState } from '@/lib/csat';
+import { isClosedChat } from '@/lib/csat/decision';
 import { describeSkip } from '@/lib/csat/skip-reasons';
 import { ago } from '@/lib/format';
 import { sendSurveyNow, setSurveySuppression } from '../../ticket-actions';
@@ -25,11 +26,13 @@ import { useFieldAction } from './use-field-action';
  */
 export function SatisfactionField({
   conversationId,
+  channel,
   statusCategory,
   suppressed,
   survey: state,
 }: {
   conversationId: string;
+  channel: string;
   statusCategory: string;
   suppressed: boolean;
   survey: TicketSurveyState;
@@ -47,7 +50,11 @@ export function SatisfactionField({
   const shown = latestId ?? 'none';
   const queued = queuedOn === shown;
 
-  const resolved = statusCategory === 'resolved' || statusCategory === 'closed';
+  // A closed chat is a survey nobody could see, which the job refuses every
+  // time; the button is not offered where its only answer is a refusal.
+  const resolved =
+    (statusCategory === 'resolved' || statusCategory === 'closed') &&
+    !isClosedChat(channel, statusCategory);
   // A survey on its way or answered, with no later decision against another:
   // nothing to send now. After a later skip the button comes back, and the
   // job answers it on the ticket — "surveyed recently" included.

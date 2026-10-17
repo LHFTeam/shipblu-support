@@ -1,4 +1,4 @@
-import { asc, eq } from 'drizzle-orm';
+import { asc, eq, inArray } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { csatRules } from '@/db/schema';
 import {
@@ -49,4 +49,15 @@ export async function wordingForRule(
   if (!ruleId) return resolveWording(null, locale);
   const rows = await db.select().from(csatRules).where(eq(csatRules.id, ruleId)).limit(1);
   return resolveWording(rows[0] ?? null, locale);
+}
+
+/**
+ * Several rules by id in one statement, for a reader holding more than one
+ * survey: the widget's transcript is re-read on every message, and a read per
+ * survey there is a read per survey on every push to every open widget.
+ */
+export async function wordingRulesById(ids: string[]): Promise<Map<string, WordingRule>> {
+  if (ids.length === 0) return new Map();
+  const rows = await db.select().from(csatRules).where(inArray(csatRules.id, ids));
+  return new Map(rows.map((row) => [row.id, row]));
 }

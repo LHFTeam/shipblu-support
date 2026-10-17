@@ -1,3 +1,4 @@
+import type { SurveyDelivery } from './delivery';
 import type { CsatChannels, CsatSettings } from './settings';
 import type { SkipReason } from './skip-reasons';
 
@@ -74,7 +75,7 @@ export type DecisionInput = {
 };
 
 export type Decision =
-  | { kind: 'send'; delivery: 'email_link' | 'text_link' }
+  | { kind: 'send'; delivery: SurveyDelivery }
   | { kind: 'skip'; reason: SkipReason }
   /** The ticket is gone — deleted, spam, merged away — and nothing is written. */
   | { kind: 'drop' };
@@ -97,6 +98,17 @@ export function channelSwitch(channel: string): keyof CsatChannels | null {
     default:
       return null;
   }
+}
+
+/**
+ * A web chat that is closed is not the visitor's any more: the widget opens a
+ * fresh conversation in its place (`findLiveConversation`), so a survey
+ * written onto this one is one nobody can see, recorded as sent. Asked by the
+ * decision, again under the lock in `sendSurvey`, and by the ticket sidebar
+ * before it offers "Send now" — one question, so the three cannot disagree.
+ */
+export function isClosedChat(channel: string, statusCategory: string): boolean {
+  return channel === 'webchat' && statusCategory === 'closed';
 }
 
 /** Whether the admin has surveys on for this channel; false for one with no switch. */
@@ -175,6 +187,14 @@ export function decideSurvey(input: DecisionInput, settings: CsatSettings): Deci
       : { kind: 'skip', reason: 'window_closed' };
   }
 
-  // Web chat: the row is the delivery.
-  return { kind: 'send', delivery: 'text_link' };
+  // Web chat: the row is the delivery, and the widget draws it as a card the
+  // visitor answers without leaving the chat. The message keeps the link, for
+  // the console's timeline and for a widget loaded before the card existed.
+  // A closed chat is a delivery that cannot happen, like an address that is
+  // not there or a window that has shut, so it is said here with them —
+  // after the agent's and the rule's reasons, which say more about the ticket
+  // than which conversation the widget happens to show.
+  return isClosedChat(input.channel, input.statusCategory)
+    ? { kind: 'skip', reason: 'chat_closed' }
+    : { kind: 'send', delivery: 'widget_card' };
 }
