@@ -232,10 +232,12 @@ the lock.
 9. Deliver per channel, below: one transaction, under a lock on the ticket row,
    that refuses when the ticket already carries a survey inside the window
    (writing nothing — the row it would sit on top of is the answer), retires
-   the last unanswered survey, writes the survey row, the message and the
-   event, and commits; the carrier is queued after, keyed on the message, so a
-   run stopped between the two is finished by the next. Or `skipped` with the
-   channel's own reason.
+   the last unanswered survey, writes the survey row, the message, the event
+   and the carrier job (keyed on the message), and commits — so the survey and
+   the job that sends it exist together or not at all. (Stage 1 queued the
+   carrier after the commit, and needed an "owed" and an "abandoned" survey to
+   repair a run stopped between the two; review moved the job inside.) Or
+   `skipped` with the channel's own reason.
 
 A `csat_sent` or `csat_skipped` event lands on the timeline either way, so the
 agent sees the decision where they resolved the ticket.

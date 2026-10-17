@@ -29,15 +29,18 @@ export function SatisfactionField({
   channel,
   statusCategory,
   suppressed,
+  dropped,
   survey: state,
 }: {
   conversationId: string;
   channel: string;
   statusCategory: string;
   suppressed: boolean;
+  /** Spam or merged away: the job writes nothing, so "Send now" is not offered. */
+  dropped: boolean;
   survey: TicketSurveyState;
 }) {
-  const { survey, skip, latestId, availability } = state;
+  const { survey, newer, skip, latestId, availability } = state;
   const suppression = useFieldAction(setSurveySuppression);
   const send = useFieldAction(sendSurveyNow);
   // Queued is not sent: the job decides, and the timeline shows what it decided.
@@ -96,6 +99,15 @@ export function SatisfactionField({
                 {survey.comment}
               </blockquote>
             ) : null}
+            {newer ? (
+              <p>
+                A newer survey went out{' '}
+                {newer.sentAt ? (
+                  <RelativeTime at={newer.sentAt}>{(relative) => ago(relative)}</RelativeTime>
+                ) : null}
+                , no answer yet.
+              </p>
+            ) : null}
           </>
         ) : (
           <p>
@@ -146,7 +158,12 @@ export function SatisfactionField({
               {suppressed ? 'Allow a survey' : 'Don’t survey this ticket'}
             </Button>
 
-            {availability === 'on' && resolved && !suppressed && !outstanding && !queued ? (
+            {availability === 'on' &&
+            resolved &&
+            !dropped &&
+            !suppressed &&
+            !outstanding &&
+            !queued ? (
               <Button
                 type="button"
                 variant="secondary"

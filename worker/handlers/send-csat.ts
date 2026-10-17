@@ -1,7 +1,7 @@
 import { and, eq, exists, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { contacts, conversationEvents, conversations, messages, ticketStatuses } from '@/db/schema';
-import { recordSkip, sendSurvey, unsentSurveyMessage } from '@/lib/csat';
+import { recordSkip, sendSurvey } from '@/lib/csat';
 import { surveyEmail } from '@/lib/csat/email';
 import { wordingForTicket } from '@/lib/csat/rules';
 import { surveyText } from '@/lib/csat/wording';
@@ -11,12 +11,7 @@ import { rootCommentId } from '@/lib/meta/comments';
 import { isReadOnlyChannel } from '@/lib/tickets/channel-policy';
 import { requesterLocale } from '@/lib/tickets/locale';
 import { notReaction } from '@/lib/tickets/not-reaction';
-import {
-  automatedReplyBlocked,
-  enqueueAutomatedDelivery,
-  lacksEmailRecipient,
-  sendsByEmail,
-} from '@/lib/tickets/outbound';
+import { automatedReplyBlocked, lacksEmailRecipient, sendsByEmail } from '@/lib/tickets/outbound';
 import type { ClaimedJob } from '@/lib/queue';
 import { parseJobPayload } from '@/lib/queue/payloads';
 import { logger } from '@/lib/log';
@@ -38,13 +33,10 @@ const log = logger('send_csat');
  * The job runs at least once, not exactly once (AGENTS.md, _The worker is a
  * pool_), and two jobs for one ticket can run together. `sendSurvey` is where
  * that is settled: under a lock on the ticket, a second survey inside the
- * window is refused and nothing is written, and a run stopped after its rows
- * committed is finished by the next one, inside a day, queueing the carrier it
- * never did.
+ * window is refused and nothing is written, and the survey, its message and
+ * the job that carries it commit together, so a run stopped at any point
+ * either sent the survey or wrote nothing.
  */
-
-/** The survey's carrier priority: behind an acknowledgement, which a customer is waiting on. */
-const PRIORITY = 50;
 
 export async function sendCsat(job: ClaimedJob): Promise<void> {
   const payload = parseJobPayload(job, 'send_csat');
@@ -94,24 +86,6 @@ export async function sendCsat(job: ClaimedJob): Promise<void> {
 
   const ticket = rows[0];
   if (!ticket) return;
-
-  // Before deciding anything: a run that committed its survey and was stopped
-  // before queueing the carrier owes that carrier whatever has happened to
-  // the ticket since — a reopen in between is no reason to leave a survey the
-  // customer was already sent sitting `pending` for good. That survey is this
-  // resolution's: only one stranded under a day is owed
-  // (`unsentSurveyMessage`), and the run that strands one is retried within
-  // minutes. So this job's decision is the one already taken, and deciding
-  // again would only write "reopened" beside a survey that went. One stranded
-  // longer is abandoned: it was about a resolution long past, it no longer
-  // counts as a survey sent, and this job decides its own — `sendSurvey`
-  // retires it if this one sends.
-  const owed = await unsentSurveyMessage(conversationId);
-  if (owed) {
-    await enqueueAutomatedDelivery(ticket.channel, owed, PRIORITY);
-    log.info(`#${ticket.number}: queued the carrier for a survey a stopped run left behind`);
-    return;
-  }
 
   // A read that fails fails the job, so the queue retries: "off" written on
   // the ticket would outlive the hiccup.
@@ -200,11 +174,9 @@ export async function sendCsat(job: ClaimedJob): Promise<void> {
 
   if (sent.kind === 'surveyed') {
     // Surveyed inside the window already, by an earlier run or by the other of
-    // two jobs for one ticket — and a survey whose carrier never queued counts
-    // only while it is still owed, so the run that wrote it, or the next job,
-    // queues that carrier. A scheduled duplicate writes nothing: the survey it
-    // would sit on top of is the answer. An agent who pressed "Send now" is
-    // owed one, on the ticket.
+    // two jobs for one ticket, whose carrier committed with it. A scheduled
+    // duplicate writes nothing: the survey it would sit on top of is the
+    // answer. An agent who pressed "Send now" is owed one, on the ticket.
     if (trigger === 'manual') {
       await recordSkip(conversationId, 'recently_surveyed', snapshot, answer);
       log.info(`#${ticket.number}: surveyed inside the window already — told the agent`);
@@ -213,8 +185,6 @@ export async function sendCsat(job: ClaimedJob): Promise<void> {
     }
     return;
   }
-
-  await enqueueAutomatedDelivery(ticket.channel, sent.messageId, PRIORITY);
 
   log.info(`surveyed #${ticket.number} on ${ticket.channel} in ${locale}`);
 }
@@ -229,13 +199,18 @@ export async function sendCsat(job: ClaimedJob): Promise<void> {
  * not surveyed. A rule's status change carries no agent and an
  * `automation:<rule>` label (`lib/automations`); a person's carries them.
  *
- * The first move into a done state since the ticket was last open, not the
- * newest: an agent's resolve that the three-day rule then closes is still the
- * agent's resolution, and a rule's resolve that an agent closes is still the
- * rule's. "Last open" is the newest reopen, or move back to an open or
- * pending status. A ticket with no such event — older than the timeline's
- * status events, or written straight into a done state — falls back to the
- * column, which is right for every resolve a rule ever made.
+ * Since the ticket was last open, the newest move into a resolved status,
+ * and only with none of those the first move into a closed one. Resolving is
+ * what a resolution is, and closing is tidying after it: an agent's resolve
+ * that the three-day rule then closes is still the agent's, a rule's resolve
+ * that an agent closes is still the rule's — and a rule's resolve that an
+ * agent resolves again, answering with "reply and resolve" or moving it to
+ * another resolved status, is the agent's, who did the work the survey asks
+ * about (`changeStatus` writes the move and schedules the survey either way).
+ * "Last open" is the newest reopen, or move back to an open or pending
+ * status. A ticket with no such event — older than the timeline's status
+ * events, or written straight into a done state — falls back to the column,
+ * which is right for every resolve a rule ever made.
  */
 function resolvedByRule() {
   const lastOpen = sql`(
@@ -260,7 +235,11 @@ function resolvedByRule() {
         and ${conversationEvents.type} = 'status_changed'
         and ${conversationEvents.data}->>'category' in ('resolved', 'closed')
         and ${conversationEvents.createdAt} > coalesce(${lastOpen}, '-infinity'::timestamptz)
-      order by ${conversationEvents.createdAt} asc
+      order by
+        ${conversationEvents.data}->>'category' = 'resolved' desc,
+        case when ${conversationEvents.data}->>'category' = 'resolved'
+          then ${conversationEvents.createdAt} end desc nulls last,
+        ${conversationEvents.createdAt} asc
       limit 1
     ),
     ${conversations.resolvedByAgentId} is null and ${ticketStatuses.category} = 'resolved'

@@ -202,6 +202,7 @@ export function Sidebar({
                   channel={conversation.channel}
                   statusCategory={conversation.statusCategory}
                   suppressed={conversation.csatSuppressed}
+                  dropped={conversation.surveyDropped}
                   survey={conversation.survey}
                 />
 
