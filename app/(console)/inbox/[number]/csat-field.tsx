@@ -29,25 +29,28 @@ export function SatisfactionField({
   channel,
   statusCategory,
   suppressed,
+  dropped,
   survey: state,
 }: {
   conversationId: string;
   channel: string;
   statusCategory: string;
   suppressed: boolean;
+  /** Spam or merged away: the job writes nothing, so "Send now" is not offered. */
+  dropped: boolean;
   survey: TicketSurveyState;
 }) {
-  const { survey, skip } = state;
+  const { survey, newer, skip, latestId, availability } = state;
   const suppression = useFieldAction(setSurveySuppression);
   const send = useFieldAction(sendSurveyNow);
   // Queued is not sent: the job decides, and the timeline shows what it decided.
-  // Remembered against the decision on screen when the button was pressed, so
-  // it clears itself the moment a new decision lands and the page re-renders
-  // with it; until then the button is gone, so waiting cannot queue a second
-  // job. Derived rather than reset in an effect, which would set state from a
-  // render.
+  // Remembered against the newest decision when the button was pressed, so it
+  // clears itself the moment the job's lands — a survey or a skip, each a new
+  // row — and the page re-renders with it; until then the button is gone, so
+  // waiting cannot queue a second job. Derived rather than reset in an effect,
+  // which would set state from a render.
   const [queuedOn, setQueuedOn] = useState<string | null>(null);
-  const shown = `${survey?.id ?? 'none'}:${skip?.createdAt.toISOString() ?? ''}`;
+  const shown = latestId ?? 'none';
   const queued = queuedOn === shown;
 
   // A closed chat is a survey nobody could see, which the job refuses every
@@ -59,12 +62,21 @@ export function SatisfactionField({
   // nothing to send now. After a later skip the button comes back, and the
   // job answers it on the ticket — "surveyed recently" included.
   const outstanding = skip === null && (survey?.status === 'sent' || survey?.status === 'answered');
+  // Offered only where it could queue something: a button that answers
+  // "surveys are switched off" every time is worse than none. The switch
+  // itself stays on a channel that has one, because the flag outlives the
+  // switch — an agent can keep a ticket out of a survey before an admin turns
+  // surveys on.
+  const surveyable = availability !== 'unsupported';
 
   return (
     <DetailsSection collapsible={false} title="Satisfaction">
       <div className="flex flex-col gap-2 text-xs text-(--color-text-secondary)">
         {survey === null ? (
-          <p>No survey yet.</p>
+          // Where no survey can go out, the line below says why instead.
+          availability === 'on' || availability === 'unknown' ? (
+            <p>No survey yet.</p>
+          ) : null
         ) : survey.status === 'answered' ? (
           <>
             <p className="text-sm font-semibold text-(--color-text-primary)">
@@ -86,6 +98,15 @@ export function SatisfactionField({
               >
                 {survey.comment}
               </blockquote>
+            ) : null}
+            {newer ? (
+              <p>
+                A newer survey went out{' '}
+                {newer.sentAt ? (
+                  <RelativeTime at={newer.sentAt}>{(relative) => ago(relative)}</RelativeTime>
+                ) : null}
+                , no answer yet.
+              </p>
             ) : null}
           </>
         ) : (
@@ -111,35 +132,54 @@ export function SatisfactionField({
           <p className="text-(--color-text-primary)">This ticket will not be surveyed.</p>
         ) : null}
 
-        <div className="flex flex-wrap gap-2">
-          <Button
-            type="button"
-            variant="secondary"
-            size="sm"
-            disabled={suppression.pending}
-            onClick={() =>
-              void suppression.run({ conversationId, suppressed: suppressed ? 'off' : 'on' })
-            }
-          >
-            {suppressed ? 'Allow a survey' : 'Don’t survey this ticket'}
-          </Button>
+        {availability === 'unsupported' ? (
+          <p>Surveys are not sent on this channel.</p>
+        ) : availability === 'unknown' ? (
+          // Not "off": nobody switched anything, and the next render reads again.
+          <p>Survey settings could not be read just now.</p>
+        ) : availability !== 'on' ? (
+          <p>
+            Surveys are switched off
+            {availability === 'channel_off' ? ' for this channel' : ''}.
+          </p>
+        ) : null}
 
-          {resolved && !suppressed && !outstanding && !queued ? (
+        {surveyable ? (
+          <div className="flex flex-wrap gap-2">
             <Button
               type="button"
               variant="secondary"
               size="sm"
-              disabled={send.pending}
+              disabled={suppression.pending}
               onClick={() =>
-                void send.run({ conversationId }).then((result) => {
-                  if (!result.error) setQueuedOn(shown);
-                })
+                void suppression.run({ conversationId, suppressed: suppressed ? 'off' : 'on' })
               }
             >
-              Send survey now
+              {suppressed ? 'Allow a survey' : 'Don’t survey this ticket'}
             </Button>
-          ) : null}
-        </div>
+
+            {availability === 'on' &&
+            resolved &&
+            !dropped &&
+            !suppressed &&
+            !outstanding &&
+            !queued ? (
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                disabled={send.pending}
+                onClick={() =>
+                  void send.run({ conversationId }).then((result) => {
+                    if (!result.error) setQueuedOn(shown);
+                  })
+                }
+              >
+                Send survey now
+              </Button>
+            ) : null}
+          </div>
+        ) : null}
 
         {suppression.error ? (
           <p className="text-(--color-feedback-danger-fg)">{suppression.error}</p>

@@ -144,9 +144,12 @@ it need no new arithmetic, only new counts.
 
 ### `csat_settings` — the one-row switch and the numbers
 
-Modelled on `canned_suggestion_settings`: one row, `id = 1`, read through a
-thirty-second memo (`surveysLive()`), off on a fresh install. Switching off is
-the rollback and takes thirty seconds to reach the fleet.
+Modelled on `canned_suggestion_settings`: one row, `id = 1`, off on a fresh
+install. The resolve, the job and the admin form read it uncached through
+`readCsatSettings`, which throws on a failed read, so switching off — the
+rollback — reaches the next resolve at once. Only the ticket sidebar reads the
+thirty-second memo (`loadCsatSettings`), where a failed read is reported as not
+known rather than as off.
 
 | Field                               | Default | What it does                                                                      |
 | ----------------------------------- | ------- | --------------------------------------------------------------------------------- |
@@ -229,10 +232,12 @@ the lock.
 9. Deliver per channel, below: one transaction, under a lock on the ticket row,
    that refuses when the ticket already carries a survey inside the window
    (writing nothing — the row it would sit on top of is the answer), retires
-   the last unanswered survey, writes the survey row, the message and the
-   event, and commits; the carrier is queued after, keyed on the message, so a
-   run stopped between the two is finished by the next. Or `skipped` with the
-   channel's own reason.
+   the last unanswered survey, writes the survey row, the message, the event
+   and the carrier job (keyed on the message), and commits — so the survey and
+   the job that sends it exist together or not at all. (Stage 1 queued the
+   carrier after the commit, and needed an "owed" and an "abandoned" survey to
+   repair a run stopped between the two; review moved the job inside.) Or
+   `skipped` with the channel's own reason.
 
 A `csat_sent` or `csat_skipped` event lands on the timeline either way, so the
 agent sees the decision where they resolved the ticket.

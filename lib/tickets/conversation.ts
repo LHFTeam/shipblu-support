@@ -109,6 +109,11 @@ export type ConversationDetail = {
   reopenCount: number;
   /** An agent asked that this ticket not be surveyed. */
   csatSuppressed: boolean;
+  /**
+   * Spam, or merged into another ticket: the survey job drops it and writes
+   * nothing, so a "Send now" there would wait for an answer that never comes.
+   */
+  surveyDropped: boolean;
   /** The ticket's newest survey, and a later decision not to send one, for the sidebar. */
   survey: TicketSurveyState;
   /**
@@ -311,7 +316,7 @@ export async function getConversation(
       () => sideConversationsForConversation(row.conversation.id),
       () => categoriesForConversation(row.conversation.id),
       () => threadControlTakenAt(row.conversation.id),
-      () => ticketSurveyState(row.conversation.id),
+      () => ticketSurveyState(row.conversation.id, row.conversation.channel),
     ]);
 
   // Paired here rather than in the browser: the target is only named in the
@@ -422,6 +427,7 @@ export async function getConversation(
     createdAt: row.conversation.createdAt,
     reopenCount: row.conversation.reopenCount,
     csatSuppressed: row.conversation.csatSuppressed,
+    surveyDropped: row.conversation.isSpam || row.conversation.mergedIntoId !== null,
     survey,
     messages: timeline.map((entry) => ({
       id: entry.message.id,

@@ -63,6 +63,13 @@ export type EnqueueOptions = {
    * handler idempotent instead and enqueue without a key.
    */
   dedupeKey?: string;
+  /**
+   * The executor to insert on: the pool, or the transaction that writes the
+   * rows the job acts on. Inserted on that transaction, the job commits with
+   * them or not at all — the worker cannot see it a moment before its rows
+   * exist, and no run stopped between the two can leave the rows with no job.
+   */
+  on?: Pick<typeof db, 'insert'>;
 };
 
 export type ClaimedJob = typeof jobs.$inferSelect;
@@ -82,8 +89,10 @@ export async function enqueue<T extends JobType>(
     dedupeKey: options.dedupeKey ?? null,
   };
 
+  const on = options.on ?? db;
+
   if (values.dedupeKey) {
-    const rows = await db
+    const rows = await on
       .insert(jobs)
       .values(values)
       .onConflictDoNothing({ target: jobs.dedupeKey })
@@ -91,7 +100,7 @@ export async function enqueue<T extends JobType>(
     return rows[0]?.id ?? null;
   }
 
-  const rows = await db.insert(jobs).values(values).returning({ id: jobs.id });
+  const rows = await on.insert(jobs).values(values).returning({ id: jobs.id });
   return rows[0]?.id ?? null;
 }
 
