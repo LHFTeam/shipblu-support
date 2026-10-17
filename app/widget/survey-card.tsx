@@ -25,12 +25,14 @@ export type SurveyResult = number | null | false;
  * a tap on a rating records it at once — most people answer the number and
  * leave — and the comment box opens after, saving separately.
  *
- * Unlike the page, a rating that went through cannot be changed by tapping
- * another: the first answer is the one kept (`recordAnswer`), so the card
- * shows the rating the server says it holds, and a scale still open after
- * that would be offering to change it. A rating that did not go through is
- * put back, with a sentence, so the visitor can tap again rather than believe
- * they answered.
+ * As on the page, a rating that went through cannot be changed by tapping
+ * another: the first answer is the one kept (`recordAnswer`), and a scale
+ * still open after that would be offering to change it. Unlike the page, the
+ * card shows the rating the server says it holds rather than the one tapped,
+ * because its route answers with it; the page's answers 204 whatever happened,
+ * so as not to tell a stranger which tokens exist. A rating that did not go
+ * through is put back, with a sentence, so the visitor can tap again rather
+ * than believe they answered.
  *
  * In the survey's own language and direction, which is the customer's and can
  * differ from the widget's: the message it stands in for was written in it.

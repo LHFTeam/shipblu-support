@@ -1,0 +1,1 @@
+ALTER TABLE "csat_settings" ADD COLUMN "low_rating_alerts" boolean DEFAULT true NOT NULL;

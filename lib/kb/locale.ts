@@ -117,6 +117,11 @@ const STRINGS = {
     pageErrorHint: 'Something went wrong on our side. Try again in a moment.',
     tryAgain: 'Try again',
     csatAlreadyAnswered: 'You have already answered this survey.',
+    // A rating the route did not confirm — refused, or a reply that never
+    // came, after which it may have been kept: the button under the comment
+    // box sends the same rating again either way.
+    csatNotConfirmed:
+      'We could not confirm your rating reached us. The button below sends it again.',
     // The five ratings, worst first, as words rather than faces: a face is an
     // emoji the design system does not draw, and its meaning is a guess.
     csatRating1: 'Very bad',
@@ -303,6 +308,7 @@ const STRINGS = {
     pageErrorHint: 'حدث خطأ من جهتنا. يمكن لحضرتك المحاولة مرة أخرى بعد قليل.',
     tryAgain: 'إعادة المحاولة',
     csatAlreadyAnswered: 'لقد أجبت على هذا الاستطلاع بالفعل.',
+    csatNotConfirmed: 'لم نتمكن من التأكد من وصول تقييم حضرتك. الزر بالأسفل يرسله مرة أخرى.',
     csatRating1: 'سيئة جدًا',
     csatRating2: 'سيئة',
     csatRating3: 'مقبولة',

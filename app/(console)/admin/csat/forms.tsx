@@ -7,6 +7,7 @@ import { RelativeTime } from '@/components/relative-time';
 import { useActionForm } from '@/components/use-action-form';
 import { ago } from '@/lib/format';
 import {
+  LOW_RATINGS_IN_WORDS,
   MAX_DELAY_MINUTES,
   MAX_META_EXPIRY_DAYS,
   MAX_RESURVEY_DAYS,
@@ -232,6 +233,12 @@ export function SurveySettingsForm({ settings }: { settings: CsatSettings }) {
           label="Survey tickets an automation resolved"
           hint="Off, a ticket a rule resolved is left alone; an agent’s resolve is always surveyed."
           defaultChecked={settings.surveyRuleResolved}
+        />
+        <Toggle
+          name="lowRatingAlerts"
+          label={`Email supervisors about a ${LOW_RATINGS_IN_WORDS}`}
+          hint="Everyone who can see the satisfaction report and every ticket gets a link to the ticket, without the customer’s words."
+          defaultChecked={settings.lowRatingAlerts}
         />
       </section>
 

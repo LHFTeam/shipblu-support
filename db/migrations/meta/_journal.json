@@ -288,6 +288,13 @@
       "when": 1792258361003,
       "tag": "0040_clean_black_knight",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1792273679133,
+      "tag": "0041_bumpy_richard_fisk",
+      "breakpoints": true
     }
   ]
 }

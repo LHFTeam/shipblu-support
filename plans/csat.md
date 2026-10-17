@@ -258,6 +258,37 @@ answer. It writes `csat_received` with `{rating, source}`, and `describeEvent`
 gets the case it never had: "rated the support 4 / 5 in the chat widget" (stage
 3; "on the survey page" for the link).
 
+_Built (stage 7b):_ a 1 or 2 (`LOW_RATING_MAX`) also emails the supervisors.
+`recordAnswer` now records the rating, its event and, for a low one, a
+`notify_low_rating` job in one transaction, under the ticket's lock — taken
+first, as `sendSurvey` takes it, since the event's foreign key would otherwise
+lock the ticket after the survey's row and deadlock against a send
+superseding it. So the job exists exactly when a low answer does: never for a
+second tap, a comment, or a link answered twice. The job reads the switch
+(`csat_settings.low_rating_alerts`, default on, under "Behaviour" on
+`/admin/csat`) when it runs, holds the ticket to `surveyedConversation()` —
+the filter the "Rated 1–2" view lists by — once to find it and again under the
+ticket's lock, where it writes a `csat_low_rating` event naming who was to be
+told and queues one `send_notification_email` per recipient on the same
+transaction, so a second run finds the event and a refused address retries
+alone. The recipients are every active agent who has set a password and holds
+both `report.view` and `ticket.view.all` (`lib/csat/low-rating.ts`): somebody
+who can read the ratings and open any ticket. The email carries the ticket's
+number, the score, the survey's group and a link to the ticket, and the
+survey's agent only to a recipient holding `report.agents`, as the report
+names one; never the comment or the subject, which for a chat is the
+customer's opening message, because an email reaches phones and archives
+nothing can reach back into. With nobody to tell, the event still says so.
+The survey page's scale now shuts on the first tap: first answer wins, so a
+scale left open let a customer pick 4 on screen while a supervisor was emailed
+about their mistaken 1. On the tap rather than on the reply, because the
+page's route answers 204 whatever happened, so a lost reply looks like a lost
+request; a tap the route did not confirm says so, and the button below sends
+the same rating again and thanks the customer only once the route has taken
+it. The scale is shut with `aria-disabled` rather than `disabled`, so the
+pressed rating keeps keyboard focus. The chat card shuts on the rating its
+route says it kept.
+
 ## Delivery, channel by channel
 
 ### Email, and portal
@@ -523,15 +554,16 @@ Sections, top to bottom, every control an `InfoTip` away from its reason:
    Plain numbers with their units.
 3. **Channels.** One row per deliverable channel with its switch and a sentence
    on how it is delivered ("Facebook: Messenger's feedback card, up to 7 days
-   after the customer's last message"), the last template refusal on Facebook's
-   row, and the API email fallback on the API row.
+   after the customer's last message"), the privacy link and the last template
+   refusal on Facebook's row, and the API email fallback on the API row.
 4. **Wording.** The `csat_rules` table — scope, both languages, which rows are
    complete — with the form the out-of-hours page has, the Meta length limits
    printed under each field and counted live, and a **preview** that renders
    the rule three ways: the email, the widget card, and a description of the
    Messenger card (Meta renders that one; the preview shows the strings in
    their slots with the limits).
-5. **Behaviour.** Survey rule-resolved tickets; the privacy URL.
+5. **Behaviour.** Survey rule-resolved tickets, and whether a 1 or 2 emails the
+   supervisors (stage 7b).
 6. **Recent surveys.** The last fifty rows live from `csat_surveys` — ticket,
    channel, delivery, status, skip reason, rating — because the first thing an
    admin does after switching it on is wait half an hour and look.

@@ -44,6 +44,8 @@ export type CsatSettings = {
   resurveyAfterDays: number;
   channels: CsatChannels;
   surveyRuleResolved: boolean;
+  /** Whether a 1 or 2 emails the supervisors (`lib/csat/low-rating.ts`). */
+  lowRatingAlerts: boolean;
   /**
    * Messenger's `business_privacy.url`. No card is sent while null: Facebook
    * gets the rating buttons inside the 24 hours and is skipped past them.
@@ -69,6 +71,7 @@ export const UNSET_CSAT_SETTINGS: CsatSettings = {
   resurveyAfterDays: 14,
   channels: { email: false, webchat: false, facebook: false, instagram: false, api: false },
   surveyRuleResolved: true,
+  lowRatingAlerts: true,
   privacyUrl: null,
   metaExpiresInDays: 3,
   lastTemplateRefusal: null,
@@ -99,6 +102,7 @@ export async function readCsatSettings(): Promise<CsatSettings> {
       surveyInstagram: csatSettings.surveyInstagram,
       surveyApi: csatSettings.surveyApi,
       surveyRuleResolved: csatSettings.surveyRuleResolved,
+      lowRatingAlerts: csatSettings.lowRatingAlerts,
       privacyUrl: csatSettings.privacyUrl,
       metaExpiresInDays: csatSettings.metaExpiresInDays,
       lastTemplateRefusal: csatSettings.lastTemplateRefusal,
@@ -126,6 +130,7 @@ export async function readCsatSettings(): Promise<CsatSettings> {
       api: row.surveyApi,
     },
     surveyRuleResolved: row.surveyRuleResolved,
+    lowRatingAlerts: row.lowRatingAlerts,
     privacyUrl: row.privacyUrl,
     metaExpiresInDays: row.metaExpiresInDays,
     lastTemplateRefusal:
@@ -181,6 +186,7 @@ export async function saveCsatSettings(
     surveyInstagram: input.channels.instagram,
     surveyApi: input.channels.api,
     surveyRuleResolved: input.surveyRuleResolved,
+    lowRatingAlerts: input.lowRatingAlerts,
     privacyUrl: input.privacyUrl,
     metaExpiresInDays: input.metaExpiresInDays,
     updatedByAgentId,

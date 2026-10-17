@@ -196,7 +196,7 @@ function Fields({
       <Field
         as="group"
         label="Escalate to"
-        hint="These agents are added as watchers on a breached ticket and the reason is recorded on its timeline. There is no notification channel yet, so this is a watchlist rather than an alert."
+        hint="These agents are added as watchers on a breached ticket and the reason is recorded on its timeline. They are not emailed, so this is a watchlist rather than an alert."
       >
         <select
           name="escalationAgentIds"

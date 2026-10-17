@@ -1,6 +1,12 @@
 import { and, eq, exists, inArray, or, sql, type SQL } from 'drizzle-orm';
 import type { db } from '@/db/client';
-import { jobs, messages, sideConversationMessages, sideConversations } from '@/db/schema';
+import {
+  csatSurveys,
+  jobs,
+  messages,
+  sideConversationMessages,
+  sideConversations,
+} from '@/db/schema';
 import type { JobType } from '@/lib/queue';
 
 /**
@@ -22,8 +28,8 @@ import type { JobType } from '@/lib/queue';
  * worker already holding it — deleting its row would not stop the handler, and
  * would only let `completeJob()` update nothing — so those are left to fail on
  * their own: every handler scoped here re-reads its subject by id and ends for
- * good when it is gone (`worker/handlers/subject-gone.ts`; `send_csat` and
- * `fetch_meta_profile` return quietly), and `download_media` re-checks under a
+ * good when it is gone (`worker/handlers/subject-gone.ts`; `send_csat`,
+ * `notify_low_rating` and `fetch_meta_profile` return quietly), and `download_media` re-checks under a
  * lock before it keeps an object it stored.
  *
  * Two kinds of pending work name this purge's subject and are deliberately not
@@ -33,7 +39,10 @@ import type { JobType } from '@/lib/queue';
  *   bodies — and no contact or conversation id. Matching on the address would
  *   be matching on a value another contact may share or later be given. What
  *   it sends is a portal link, and the portal tokens behind it cascade with the
- *   contact, so the link it delivers is already dead.
+ *   contact, so the link it delivers is already dead; an admin's test survey,
+ *   which is about no ticket; or a low rating's alert to a supervisor, which
+ *   names the ticket's number and no customer, and whose link finds no ticket
+ *   once it is gone.
  * - `process_webhook` carries only a `webhook_events` id, and who the delivery
  *   is about is inside the provider's raw payload, in a different shape per
  *   channel. Parsing it here would re-implement three ingest parsers inside a
@@ -95,6 +104,21 @@ export async function purgeJobs(
       and(
         eq(jobs.type, 'send_csat' satisfies JobType),
         inArray(sql`${jobs.payload}->>'conversationId'`, conversationIds),
+      )!,
+      // A low rating's alert names its survey, which cascades with the ticket.
+      and(
+        eq(jobs.type, 'notify_low_rating' satisfies JobType),
+        exists(
+          tx
+            .select({ id: csatSurveys.id })
+            .from(csatSurveys)
+            .where(
+              and(
+                inArray(csatSurveys.conversationId, conversationIds),
+                eq(sql`${csatSurveys.id}::text`, sql`${jobs.payload}->>'surveyId'`),
+              ),
+            ),
+        ),
       )!,
     );
   }

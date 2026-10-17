@@ -14,7 +14,8 @@
 #
 # An argument is there to reach a statement the bare run would skip: without
 # `staleMinutes`, sync_stale_shipments never plans its stale-row query, and
-# send_csat needs an id — any id — to plan its selection before finding no row.
+# send_csat and notify_low_rating need an id — any id — to plan their
+# selections before finding no row.
 
 run: cleanup
 run: sla_sweep
@@ -31,6 +32,7 @@ run: backfill_message_locations limit=1
 run: normalise_kb_formatting dryRun=true
 run: backfill_categorise_ai dryRun=true limit=1
 run: send_csat conversationId=00000000-0000-0000-0000-000000000000
+run: notify_low_rating surveyId=00000000-0000-0000-0000-000000000000
 run: seed_canned_responses dryRun=true
 run: rotate_whatsapp_credentials dryRun=true
 

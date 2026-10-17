@@ -135,6 +135,13 @@ export const csatSettings = pgTable('csat_settings', {
 
   /** Whether a ticket an automation rule resolved is surveyed as one an agent resolved is. */
   surveyRuleResolved: boolean('survey_rule_resolved').notNull().default(true),
+  /**
+   * Whether a 1 or 2 (`LOW_RATING_MAX`) emails the supervisors who see every
+   * ticket and the report (`lib/csat/low-rating.ts`). On by default: the
+   * answer it reports is one somebody wants to follow up the same day, and
+   * nothing else tells them it arrived.
+   */
+  lowRatingAlerts: boolean('low_rating_alerts').notNull().default(true),
 
   /**
    * Messenger's feedback card requires a link to the business's privacy

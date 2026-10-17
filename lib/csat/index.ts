@@ -21,7 +21,7 @@ import {
 } from './decision';
 import { carriesLink, type AnswerSource, type SurveyDelivery } from './delivery';
 import type { SurveyMessageMeta } from './meta-survey';
-import { MAX_COMMENT } from './limits';
+import { LOW_RATING_MAX, MAX_COMMENT } from './limits';
 import { loadCsatSettings, readCsatSettings } from './settings';
 import type { SkipReason } from './skip-reasons';
 
@@ -46,6 +46,9 @@ const ACTOR = 'csat';
 
 /** The survey's carrier priority: behind an acknowledgement, which a customer is waiting on. */
 const CARRIER_PRIORITY = 50;
+
+/** A low rating's alert: behind every reply, since nobody is waiting on it to send. */
+const ALERT_PRIORITY = 60;
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
@@ -489,36 +492,63 @@ export async function recordAnswer(
 
   const trimmed = comment ? comment.trim().slice(0, MAX_COMMENT) || null : null;
 
-  const rated = await db
-    .update(csatSurveys)
-    .set({
-      status: 'answered',
-      rating,
-      comment: trimmed,
-      respondedAt: new Date(),
-      answerSource: source,
-    })
-    .where(
-      and(
-        eq(csatSurveys.id, surveyId),
-        inArray(csatSurveys.status, ['sent', 'expired']),
-        isNull(csatSurveys.respondedAt),
-      ),
-    )
-    .returning({ id: csatSurveys.id, conversationId: csatSurveys.conversationId });
+  const subject = await db
+    .select({ conversationId: csatSurveys.conversationId })
+    .from(csatSurveys)
+    .where(eq(csatSurveys.id, surveyId))
+    .limit(1);
+  const conversationId = subject[0]?.conversationId;
+  if (!conversationId) return 'ignored';
 
-  if (rated[0]) {
+  // One transaction, so a low rating's alert is queued exactly when the
+  // rating is recorded: never for a tap that lost to an earlier answer, never
+  // lost to a process that died between the two. The ticket's lock comes
+  // first, as in `sendSurvey`, which holds it while it supersedes this
+  // ticket's older surveys: taking the survey's row first and the ticket's
+  // (the event's foreign key) second would deadlock against it.
+  const recorded = await db.transaction(async (tx) => {
+    await lockTicket(tx, conversationId);
+
+    const rated = await tx
+      .update(csatSurveys)
+      .set({
+        status: 'answered',
+        rating,
+        comment: trimmed,
+        respondedAt: new Date(),
+        answerSource: source,
+      })
+      .where(
+        and(
+          eq(csatSurveys.id, surveyId),
+          inArray(csatSurveys.status, ['sent', 'expired']),
+          isNull(csatSurveys.respondedAt),
+        ),
+      )
+      .returning({ id: csatSurveys.id });
+
+    if (!rated[0]) return false;
+
     // On the timeline, so the agent who handled the ticket sees the score
     // against the conversation rather than only in an aggregate report.
-    await db.insert(conversationEvents).values({
-      conversationId: rated[0].conversationId,
+    await tx.insert(conversationEvents).values({
+      conversationId,
       type: 'csat_received',
       actorLabel: ACTOR,
       data: { rating, source },
     });
 
-    return 'recorded';
-  }
+    // The job decides whether anybody is told (`notify_low_rating`): the
+    // switch is read when it runs, so turning alerts off stops the ones
+    // already queued, and nothing about who is told slows the customer's tap.
+    if (rating <= LOW_RATING_MAX) {
+      await enqueue('notify_low_rating', { surveyId }, { on: tx, priority: ALERT_PRIORITY });
+    }
+
+    return true;
+  });
+
+  if (recorded) return 'recorded';
 
   if (!trimmed) return 'ignored';
 

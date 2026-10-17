@@ -8,6 +8,7 @@ import * as schema from '@/db/schema';
 import {
   contacts,
   conversations,
+  csatSurveys,
   jobs,
   messages,
   sideConversationMessages,
@@ -30,6 +31,7 @@ type Scope = {
   messageId: string;
   sideId: string;
   sideMessageId: string;
+  surveyId: string;
 };
 
 type JobSpec = {
@@ -53,6 +55,7 @@ function subjects(scope: Scope) {
     ...messageJobs.map((type) => ({ type, payload: { messageId: scope.messageId } })),
     { type: 'send_side_email', payload: { messageId: scope.sideMessageId } },
     { type: 'send_csat', payload: { conversationId: scope.conversationId } },
+    { type: 'notify_low_rating', payload: { surveyId: scope.surveyId } },
     { type: 'fetch_meta_profile', payload: { contactId: scope.contactId } },
   ];
 }
@@ -64,6 +67,7 @@ async function seedScope(tx: typeof db, statusId: string): Promise<Scope> {
     messageId: randomUUID(),
     sideId: randomUUID(),
     sideMessageId: randomUUID(),
+    surveyId: randomUUID(),
   };
   await tx.insert(contacts).values({ id: scope.contactId, name: 'Purge queue regression' });
   await tx.insert(conversations).values({
@@ -87,6 +91,12 @@ async function seedScope(tx: typeof db, statusId: string): Promise<Scope> {
     id: scope.sideMessageId,
     sideConversationId: scope.sideId,
     direction: 'outbound',
+  });
+  await tx.insert(csatSurveys).values({
+    id: scope.surveyId,
+    conversationId: scope.conversationId,
+    status: 'answered',
+    rating: 1,
   });
   return scope;
 }
@@ -209,7 +219,13 @@ describe('purgeJobs against Postgres', () => {
           },
         },
       ];
-      for (const type of [...messageJobs, 'send_side_email', 'send_csat', 'fetch_meta_profile']) {
+      for (const type of [
+        ...messageJobs,
+        'send_side_email',
+        'send_csat',
+        'notify_low_rating',
+        'fetch_meta_profile',
+      ]) {
         for (const [name, value] of [
           ['orphan', randomUUID()],
           ['malformed', 'not-a-uuid'],
@@ -219,7 +235,7 @@ describe('purgeJobs against Postgres', () => {
           specs.push({
             label: `${type}/${name}`,
             type,
-            payload: { messageId: value, conversationId: value, contactId: value },
+            payload: { messageId: value, conversationId: value, contactId: value, surveyId: value },
           });
         }
         specs.push({ label: `${type}/missing`, type, payload: {} });

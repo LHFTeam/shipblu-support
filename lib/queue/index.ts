@@ -25,6 +25,7 @@ export type JobType =
   | 'presence_sweep'
   | 'run_time_automations'
   | 'send_csat'
+  | 'notify_low_rating'
   | 'rollup_metrics'
   | 'snapshot_backlog'
   | 'import_freshdesk_kb'

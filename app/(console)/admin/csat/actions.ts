@@ -99,6 +99,7 @@ export async function saveSurveySettings(
       api: on('surveyApi'),
     },
     surveyRuleResolved: on('surveyRuleResolved'),
+    lowRatingAlerts: on('lowRatingAlerts'),
     privacyUrl,
     metaExpiresInDays: expiry.value,
   };

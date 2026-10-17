@@ -200,7 +200,7 @@ export function describeEvent(type: string, data: Record<string, unknown>): stri
         ? `recorded the cause as ${String(data.rootCauseKey)}`
         : 'cleared the recorded cause';
 
-    // The survey's four decisions. Without cases these read "csat skipped" and
+    // The survey's decisions. Without cases these read "csat skipped" and
     // "csat received" — the type with its underscores swapped — and drop the
     // reason and the score, which are the whole content of the event.
     case 'csat_sent':
@@ -224,6 +224,18 @@ export function describeEvent(type: string, data: Record<string, unknown>): stri
       return 'asked that this ticket not be surveyed';
     case 'csat_unsuppressed':
       return 'allowed a satisfaction survey on this ticket again';
+    case 'csat_low_rating': {
+      // Written as the emails are queued, in one transaction, so it says who
+      // was to be told rather than that they were: a send that then fails is
+      // the queue's to retry, and one that dies is a dead job, not a delivery.
+      const score =
+        typeof data.rating === 'number' ? `the ${data.rating} / 5 rating` : 'the rating';
+      const told = Array.isArray(data.agentIds) ? data.agentIds.length : 0;
+      if (told === 0) {
+        return `had nobody to email about ${score}: nobody who can sign in sees both the satisfaction report and every ticket`;
+      }
+      return `queued an email to ${told} ${told === 1 ? 'supervisor' : 'supervisors'} about ${score}`;
+    }
 
     default:
       return type.replace(/_/g, ' ');

@@ -3,8 +3,9 @@ import type { ClaimedJob } from '@/lib/queue';
 import { parseJobPayload } from '@/lib/queue/payloads';
 
 /**
- * Sends one transactional email that does not belong to a ticket — today, the
- * customer portal's verification and password-reset links.
+ * Sends one transactional email that is no message on a ticket's thread — the
+ * customer portal's verification and password-reset links, the admin's survey
+ * test, and a low rating's alert to the supervisors (`notify_low_rating`).
  *
  * The body arrives in the payload rather than being rendered here, because the
  * caller is the only place that knows which locale the customer was reading
