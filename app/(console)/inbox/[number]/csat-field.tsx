@@ -5,7 +5,7 @@ import { Button } from '@/components/ui';
 import { RelativeTime } from '@/components/relative-time';
 import { DetailsSection } from '@/components/details-section';
 import type { TicketSurveyState } from '@/lib/csat';
-import { isClosedChat } from '@/lib/csat/decision';
+import { isClosedChat, type SuppressedBy } from '@/lib/csat/decision';
 import { describeSkip } from '@/lib/csat/skip-reasons';
 import { ago } from '@/lib/format';
 import { sendSurveyNow, setSurveySuppression } from '../../ticket-actions';
@@ -28,19 +28,21 @@ export function SatisfactionField({
   conversationId,
   channel,
   statusCategory,
-  suppressed,
+  suppressedBy,
   dropped,
   survey: state,
 }: {
   conversationId: string;
   channel: string;
   statusCategory: string;
-  suppressed: boolean;
+  /** Who asked that the ticket not be surveyed; null when nobody did. */
+  suppressedBy: SuppressedBy | null;
   /** Spam or merged away: the job writes nothing, so "Send now" is not offered. */
   dropped: boolean;
   survey: TicketSurveyState;
 }) {
   const { survey, newer, skip, latestId, availability } = state;
+  const suppressed = suppressedBy !== null;
   const suppression = useFieldAction(setSurveySuppression);
   const send = useFieldAction(sendSurveyNow);
   // Queued is not sent: the job decides, and the timeline shows what it decided.
@@ -128,7 +130,15 @@ export function SatisfactionField({
           </p>
         ) : null}
 
-        {suppressed ? (
+        {suppressedBy === 'rule' ? (
+          // Said, because allowing a survey here keeps every rule off the
+          // ticket for good (`suppressSurveyByRule`), which nothing else
+          // would tell the agent pressing it.
+          <p className="text-(--color-text-primary)">
+            An automation rule asked that this ticket not be surveyed. Allowing a survey here keeps
+            rules from turning it off again.
+          </p>
+        ) : suppressed ? (
           <p className="text-(--color-text-primary)">This ticket will not be surveyed.</p>
         ) : null}
 

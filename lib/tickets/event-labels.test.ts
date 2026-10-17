@@ -18,6 +18,9 @@ describe('describeEvent', () => {
     expect(describeEvent('csat_skipped', { reason: 'agent_suppressed' })).toBe(
       'did not send a satisfaction survey: an agent asked that this ticket not be surveyed',
     );
+    expect(describeEvent('csat_skipped', { reason: 'rule_suppressed' })).toBe(
+      'did not send a satisfaction survey: an automation rule asked that this ticket not be surveyed',
+    );
     // A reason written by a later version, read by this one, still makes a sentence.
     expect(describeEvent('csat_skipped', { reason: 'expired' })).toBe(
       'did not send a satisfaction survey: for a reason this version does not know',

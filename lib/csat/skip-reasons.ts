@@ -22,6 +22,7 @@ export const SKIP_REASONS = {
   read_only_channel: 'the conversation belongs to another service',
   no_customer_message: 'the customer never wrote on this ticket',
   agent_suppressed: 'an agent asked that this ticket not be surveyed',
+  rule_suppressed: 'an automation rule asked that this ticket not be surveyed',
   rule_resolved: 'a rule resolved it, and rule-resolved tickets are not surveyed',
   recently_surveyed: 'the customer was surveyed about this ticket recently',
   no_address: 'there is no email address to send it to',

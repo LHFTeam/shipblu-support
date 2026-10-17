@@ -30,7 +30,7 @@ function input(overrides: Partial<DecisionInput> = {}): DecisionInput {
     isSpam: false,
     mergedIntoId: null,
     hasCustomerMessage: true,
-    suppressed: false,
+    suppressedBy: null,
     resolvedByRule: false,
     lacksRecipient: false,
     commentThread: false,
@@ -86,14 +86,33 @@ describe('decideSurvey', () => {
       kind: 'skip',
       reason: 'reopened',
     });
-    expect(decideSurvey(input({ hasCustomerMessage: false, suppressed: true }), ON)).toEqual({
+    expect(decideSurvey(input({ hasCustomerMessage: false, suppressedBy: 'agent' }), ON)).toEqual({
       kind: 'skip',
       reason: 'no_customer_message',
     });
-    expect(decideSurvey(input({ suppressed: true, lacksRecipient: true }), ON)).toEqual({
+    expect(decideSurvey(input({ suppressedBy: 'agent', lacksRecipient: true }), ON)).toEqual({
       kind: 'skip',
       reason: 'agent_suppressed',
     });
+  });
+
+  it('names a rule that kept the survey off apart from an agent, in the agent’s place', () => {
+    expect(decideSurvey(input({ suppressedBy: 'rule' }), ON)).toEqual({
+      kind: 'skip',
+      reason: 'rule_suppressed',
+    });
+    // After the ticket's own facts, before the rule-resolved switch and every
+    // delivery reason, as the agent's flag is.
+    expect(decideSurvey(input({ hasCustomerMessage: false, suppressedBy: 'rule' }), ON)).toEqual({
+      kind: 'skip',
+      reason: 'no_customer_message',
+    });
+    expect(
+      decideSurvey(input({ suppressedBy: 'rule', resolvedByRule: true, lacksRecipient: true }), {
+        ...ON,
+        surveyRuleResolved: false,
+      }),
+    ).toEqual({ kind: 'skip', reason: 'rule_suppressed' });
   });
 
   it('surveys a closed ticket as a resolved one, except a chat nobody can open again', () => {
@@ -105,7 +124,7 @@ describe('decideSurvey', () => {
     expect(decideSurvey(closedChat, ON)).toEqual({ kind: 'skip', reason: 'chat_closed' });
     // A delivery reason, so the ticket's own reasons come first: an agent who
     // asked that it not be surveyed is the answer, and the report counts it.
-    expect(decideSurvey({ ...closedChat, suppressed: true }, ON)).toEqual({
+    expect(decideSurvey({ ...closedChat, suppressedBy: 'agent' }, ON)).toEqual({
       kind: 'skip',
       reason: 'agent_suppressed',
     });

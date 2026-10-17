@@ -43,7 +43,19 @@ export type Action =
   | { type: 'remove_tags'; tags: string[] }
   | { type: 'add_watchers'; agentIds: string[] }
   | { type: 'mark_spam' }
-  | { type: 'send_reply'; cannedResponseId: string };
+  | { type: 'send_reply'; cannedResponseId: string }
+  /**
+   * "Don't survey this ticket", set by a rule rather than an agent: for a
+   * class of ticket nobody should be asked about — a group's internal queue,
+   * a form the team fills in itself — without somebody remembering to click.
+   *
+   * It sets the agent's flag, read when the survey job runs, so it works
+   * whenever it lands before the survey goes out: an `on_create` rule keyed on
+   * the form or the channel, or an `on_update` rule on the group an agent
+   * moves the ticket into. It never overrules an agent who pressed "Allow a
+   * survey" on the ticket (`suppressSurveyByRule`).
+   */
+  | { type: 'suppress_survey' };
 
 const STRATEGIES = new Set(['group_default', 'manual', 'round_robin', 'load_balanced']);
 
@@ -106,6 +118,9 @@ export function parseAction(input: unknown): Action | null {
         ? { type: 'send_reply', cannedResponseId: node.cannedResponseId }
         : null;
 
+    case 'suppress_survey':
+      return { type: 'suppress_survey' };
+
     default:
       return null;
   }
@@ -114,6 +129,23 @@ export function parseAction(input: unknown): Action | null {
 export function parseActions(input: unknown): Action[] {
   if (!Array.isArray(input)) return [];
   return input.map(parseAction).filter((action): action is Action => action !== null);
+}
+
+/**
+ * The order a rule's actions run in: as the admin listed them, except that
+ * `suppress_survey` goes first.
+ *
+ * A rule that resolves and suppresses is naturally written "Set status, then
+ * don't survey", and the resolve queues the survey before the next action
+ * runs; with the survey delay at 0 the worker can send it in between. The
+ * suppression reads nothing another action writes, so moving it ahead
+ * changes no outcome but that one.
+ */
+export function inRunOrder(actions: Action[]): Action[] {
+  return [
+    ...actions.filter((action) => action.type === 'suppress_survey'),
+    ...actions.filter((action) => action.type !== 'suppress_survey'),
+  ];
 }
 
 function asIdOrNull(value: unknown): string | null {

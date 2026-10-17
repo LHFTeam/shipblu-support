@@ -12,7 +12,7 @@ import {
 } from '@/db/schema';
 import { assignConversation } from '@/lib/assignment';
 import { textToHtml } from '@/lib/html/sanitize';
-import { scheduleSurvey } from '@/lib/csat';
+import { scheduleSurvey, suppressSurveyByRule } from '@/lib/csat';
 import { resolveLocale } from '@/lib/tickets/canned';
 import { readOnlyChannels } from '@/lib/tickets/channel-policy';
 import { requesterLocale } from '@/lib/tickets/locale';
@@ -21,7 +21,7 @@ import { matches } from '@/lib/rules/conditions';
 import { conversationFacts } from '@/lib/rules/facts';
 import { onGroupChanged, onPriorityChanged, onStatusChanged } from '@/lib/sla';
 import { PRIORITY_STAMP } from '@/lib/tickets/priority-stamp';
-import { parseActions, type Action } from './actions';
+import { inRunOrder, parseActions, type Action } from './actions';
 import { logger } from '@/lib/log';
 
 const log = logger('automations');
@@ -127,7 +127,7 @@ export async function applyRules(
   for (const rule of rules) {
     if (!matches(rule.conditions, facts)) continue;
 
-    const actions = parseActions(rule.actions);
+    const actions = inRunOrder(parseActions(rule.actions));
     for (const action of actions) {
       try {
         await applyAction(action, ticket, rule.name);
@@ -327,6 +327,22 @@ async function applyAction(action: Action, ticket: TicketRow, ruleName: string):
 
     case 'send_reply':
       await sendCannedReply(action.cannedResponseId, ticket, ruleName);
+      return;
+
+    case 'suppress_survey':
+      // Not through `record()`: the write and its event are one conditional
+      // transaction, so a rule that matches every fifteen minutes writes the
+      // event once, on the flip. It still works after a resolve has queued
+      // the survey — another rule's `set_status`, or the status picker's
+      // resolve, which runs `on_update` straight after — because the job reads
+      // the flag when it runs, and again under the ticket lock; with the
+      // survey delay at 0 it can lose that race, as the agent's own toggle
+      // can. Reply-and-resolve runs no `on_update`, so a rule meant to catch a
+      // resolve keys on what the ticket is — its form, channel or group — on
+      // the trigger that sets it.
+      if (await suppressSurveyByRule(conversationId, ruleName)) {
+        log.info(`"${ruleName}" kept the survey off ${conversationId}`);
+      }
       return;
   }
 }
