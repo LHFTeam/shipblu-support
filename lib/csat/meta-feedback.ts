@@ -97,21 +97,27 @@ async function thankForTap(survey: {
   const locale = survey.locale === 'ar' ? 'ar' : 'en';
   const wording = await wordingForRule(survey.ruleId, locale);
 
-  const messageId = await writeAutomatedReply(
-    db,
-    {
-      conversationId: survey.conversationId,
-      channel: survey.channel,
-      requesterEmail: null,
-      bodyText: quickReplyThanks(wording, locale),
-      bodyHtml: null,
-      actorLabel: 'csat',
-      eventType: 'csat_thanked',
-      eventData: { surveyId: survey.id },
-    },
-    // Not the acknowledgement a rule looks for, for the reason the survey
-    // itself is not one.
-    { stampFirstAutoReply: false },
-  );
-  await enqueueAutomatedDelivery(survey.channel, messageId, 50);
+  // The message and the job that sends it in one transaction, as the survey
+  // itself is written: a failure between the two would leave a thanks on the
+  // timeline that nothing will send, and the tap's answer already recorded
+  // means no retry comes back to write it again.
+  await db.transaction(async (tx) => {
+    const messageId = await writeAutomatedReply(
+      tx,
+      {
+        conversationId: survey.conversationId,
+        channel: survey.channel,
+        requesterEmail: null,
+        bodyText: quickReplyThanks(wording, locale),
+        bodyHtml: null,
+        actorLabel: 'csat',
+        eventType: 'csat_thanked',
+        eventData: { surveyId: survey.id },
+      },
+      // Not the acknowledgement a rule looks for, for the reason the survey
+      // itself is not one.
+      { stampFirstAutoReply: false },
+    );
+    await enqueueAutomatedDelivery(survey.channel, messageId, 50, tx);
+  });
 }
