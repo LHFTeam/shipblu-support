@@ -16,7 +16,14 @@ vi.stubGlobal('window', {});
 beforeEach(forgetInboxPosition);
 
 function filters(overrides: Partial<InboxFilters> = {}): InboxFilters {
-  return { view: 'all', statusCategory: 'unresolved', channel: 'all', q: '', ...overrides };
+  return {
+    view: 'all',
+    statusCategory: 'unresolved',
+    channel: 'all',
+    rating: 'any',
+    q: '',
+    ...overrides,
+  };
 }
 
 function rows(...ids: string[]): InboxRow[] {
@@ -31,6 +38,7 @@ describe('inboxSignature', () => {
       { view: 'mine' } as const,
       { statusCategory: 'resolved' } as const,
       { channel: 'whatsapp_bot' } as const,
+      { rating: 'low' } as const,
       { q: '#42' },
     ]) {
       expect(inboxSignature(filters(overrides))).not.toBe(base);

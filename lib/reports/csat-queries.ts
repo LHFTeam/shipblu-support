@@ -1,7 +1,8 @@
-import { and, between, desc, eq, isNotNull, sql, type Column } from 'drizzle-orm';
+import { and, between, desc, eq, isNotNull, sql, type Column, type SQL } from 'drizzle-orm';
 import { DateTime } from 'luxon';
 import { db } from '@/db/client';
 import { agents, conversations, csatSurveys } from '@/db/schema';
+import { LOW_RATING_MAX } from '@/lib/csat/limits';
 import { describeSkip } from '@/lib/csat/skip-reasons';
 import type { Totals } from './queries';
 import { surveyedConversation, within, type ReportWindow } from './rollup';
@@ -10,17 +11,43 @@ import { surveyedConversation, within, type ReportWindow } from './rollup';
  * The satisfaction report's live reads: what the rollup cannot hold.
  *
  * Everything with a number in it on `/reports/csat` comes from `metrics_daily`
- * through `queries.ts`. These three read `csat_surveys` itself, each for a
+ * through `queries.ts`. These read `csat_surveys` itself, each for a
  * reason a sum cannot serve — why tickets went unsurveyed, keyed on a reason
  * the rollup has no column for; the customers' own words; and the sends and
  * decisions against day by day, to check the rollup against. Each is a few
  * rows or an indexed count over the window, never an aggregate over the
- * archive.
+ * archive. And one predicate the inbox borrows (`ratedLowWithin`), so its
+ * "Rated 1–2" view keys an answer exactly as these do.
  *
  * Every one counts the conversations the rollup counts (`surveyedConversation`),
  * and keys a survey on the timestamp the rollup does for the same fact, so the
  * live sections and the figures above them describe one set of surveys.
  */
+
+/**
+ * A ticket a customer rated low inside the window, for a query over
+ * `conversations` — the inbox's "Rated 1–2" view, on the report's definition
+ * of an answer: `responded_at` in the team's zone (`within`), over the
+ * conversations the rollup counts. Not the same number as the report's
+ * "rated 1 or 2", which counts answers to yesterday where this lists tickets
+ * to now.
+ *
+ * An `exists` rather than a join, so a ticket answered low twice — rated,
+ * reopened, surveyed and rated again — is one row, and the inbox's keyset
+ * paging stays clean. A rating and its `responded_at` never change once
+ * given, so a ticket leaves the view only when the window moves past it. The
+ * correlation is `${conversations}.id` against an aliased survey table, which
+ * stays bound to the outer ticket however the query around it renders its
+ * columns.
+ */
+export function ratedLowWithin(window: ReportWindow): SQL {
+  return sql`(${surveyedConversation()} and exists (
+    select 1 from ${csatSurveys} s
+    where s.conversation_id = ${conversations}.id
+      and s.rating between 1 and ${LOW_RATING_MAX}
+      and ${within(sql`s.responded_at`, window)}
+  ))`;
+}
 
 export type SkipCount = { reason: string; label: string; count: number };
 
