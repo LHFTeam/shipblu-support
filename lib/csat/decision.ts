@@ -24,7 +24,8 @@ import type { SkipReason } from './skip-reasons';
 /**
  * Who asked for the survey: a resolve, by an agent or a rule, or the
  * sidebar's "Send now". It decides the delay and whether a duplicate is
- * answered on the ticket; who resolved the ticket is read off the row.
+ * answered on the ticket; who resolved the ticket is read off its timeline
+ * (`resolvedByRule` in the job), never off the trigger.
  */
 export const SURVEY_TRIGGERS = ['agent', 'rule', 'manual'] as const;
 export type SurveyTrigger = (typeof SURVEY_TRIGGERS)[number];
@@ -102,6 +103,32 @@ export function channelSwitch(channel: string): keyof CsatChannels | null {
 export function channelSurveyed(settings: CsatSettings, channel: string): boolean {
   const key = channelSwitch(channel);
   return key !== null && settings.channels[key];
+}
+
+/**
+ * Whether a survey could go out on a ticket's channel right now, for the
+ * sidebar: `off` and `channel_off` are switches an admin can flip,
+ * `unsupported` a channel no survey goes out on at all, and `unknown` settings
+ * that could not be read.
+ */
+export type SurveyAvailability = 'on' | 'off' | 'channel_off' | 'unsupported' | 'unknown';
+
+/**
+ * `scheduleSurvey`'s refusals for a channel, the channel with no switch first:
+ * no setting changes that one, so it is the answer whatever the switch says.
+ * Settings that could not be read are `unknown`, never `off`, for the reason
+ * `scheduleSurvey` gives — the agent is not told a switch is off that nobody
+ * turned off.
+ */
+export function surveyAvailability(
+  settings: CsatSettings | null,
+  channel: string,
+): SurveyAvailability {
+  const key = channelSwitch(channel);
+  if (key === null) return 'unsupported';
+  if (settings === null) return 'unknown';
+  if (!settings.enabled) return 'off';
+  return settings.channels[key] ? 'on' : 'channel_off';
 }
 
 export function decideSurvey(input: DecisionInput, settings: CsatSettings): Decision {

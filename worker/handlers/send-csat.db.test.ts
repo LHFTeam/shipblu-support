@@ -12,7 +12,7 @@ import {
   messages,
   ticketStatuses,
 } from '@/db/schema';
-import { scheduleSurvey, ticketSurveyState } from '@/lib/csat';
+import { scheduleSurvey, sendSurvey, ticketSurveyState } from '@/lib/csat';
 import { saveCsatSettings, UNSET_CSAT_SETTINGS } from '@/lib/csat/settings';
 import type { ClaimedJob } from '@/lib/queue';
 import { withCleanDatabase } from '@/lib/testing/db';
@@ -396,7 +396,23 @@ describe('send_csat', () => {
 
     // The sidebar clears its "queued" line when a new decision lands; the same
     // reason folded into the earlier row would leave it up for good.
+    const pressedOn = (await ticketSurveyState(id, 'email')).latestId;
+    // And the open ticket hears that it landed: neither row a skip writes
+    // notifies, so the skip touches the conversation, whose trigger does.
+    const updatedAt = async () => {
+      const [row] = await db
+        .select({ at: conversations.updatedAt })
+        .from(conversations)
+        .where(eq(conversations.id, id));
+      return row!.at.getTime();
+    };
+    const before = await updatedAt();
+
     await sendCsat(job(id, 'manual'));
+
+    expect((await ticketSurveyState(id, 'email')).latestId).not.toBe(pressedOn);
+    expect(await updatedAt()).toBeGreaterThan(before);
+
     await sendCsat(job(id, 'manual'));
     const rows = await surveysOf(id);
     expect(rows).toHaveLength(3);
@@ -426,10 +442,19 @@ describe('send_csat', () => {
     });
 
     // An agent closed it straight from Open: `resolved_by_agent_id` is never
-    // stamped, which used to read as a rule's resolve.
+    // stamped, which read as a rule's resolve when the column alone answered.
+    // The fallback's status check answers this one too; the next is the case
+    // only the timeline can.
     const closedByAgent = await resolvedTicket({
       channel: 'email',
       email: 'a@b.test',
+      status: 'Closed',
+    });
+    // A rule closed it straight from Open: the fallback reads a closed ticket
+    // as an agent's, so only a `closed` move on the timeline says rule.
+    const closedByRule = await resolvedTicket({
+      channel: 'email',
+      email: 'e@b.test',
       status: 'Closed',
     });
     // An agent resolved it and the three-day rule closed it: still the agent's.
@@ -440,6 +465,11 @@ describe('send_csat', () => {
     });
     // A rule resolved it, it was reopened, and an agent resolved it again.
     const reResolved = await resolvedTicket({ channel: 'email', email: 'c@b.test' });
+    // A rule resolved it, an agent moved it back to Open or Pending — a status
+    // change, no `reopened` event — and resolved it. The rule's resolve is
+    // the older stretch's; the column, null, would say rule.
+    const backToOpen = await resolvedTicket({ channel: 'email', email: 'f@b.test' });
+    const backToPending = await resolvedTicket({ channel: 'email', email: 'g@b.test' });
     // A rule resolved it, and nothing since.
     const byRule = await resolvedTicket({ channel: 'email', email: 'd@b.test' });
 
@@ -447,21 +477,39 @@ describe('send_csat', () => {
       .insert(conversationEvents)
       .values([
         statusEvent(closedByAgent, 'closed', 'agent', at(10)),
+        statusEvent(closedByRule, 'closed', 'rule', at(10)),
         statusEvent(autoClosed, 'resolved', 'agent', at(60)),
         statusEvent(autoClosed, 'closed', 'rule', at(10)),
         statusEvent(reResolved, 'resolved', 'rule', at(60)),
         { conversationId: reResolved, type: 'reopened', data: {}, createdAt: at(30) },
         statusEvent(reResolved, 'resolved', 'agent', at(10)),
+        statusEvent(backToOpen, 'resolved', 'rule', at(60)),
+        statusEvent(backToOpen, 'open', 'agent', at(30)),
+        statusEvent(backToOpen, 'resolved', 'agent', at(10)),
+        statusEvent(backToPending, 'resolved', 'rule', at(60)),
+        statusEvent(backToPending, 'pending', 'agent', at(30)),
+        statusEvent(backToPending, 'resolved', 'agent', at(10)),
         statusEvent(byRule, 'resolved', 'rule', at(10)),
       ]);
 
-    for (const id of [closedByAgent, autoClosed, reResolved, byRule]) {
+    for (const id of [
+      closedByAgent,
+      closedByRule,
+      autoClosed,
+      reResolved,
+      backToOpen,
+      backToPending,
+      byRule,
+    ]) {
       await sendCsat(job(id, 'manual'));
     }
 
     expect((await surveysOf(closedByAgent))[0]).toMatchObject({ status: 'sent' });
+    expect((await surveysOf(closedByRule))[0]).toMatchObject({ skipReason: 'rule_resolved' });
     expect((await surveysOf(autoClosed))[0]).toMatchObject({ status: 'sent' });
     expect((await surveysOf(reResolved))[0]).toMatchObject({ status: 'sent' });
+    expect((await surveysOf(backToOpen))[0]).toMatchObject({ status: 'sent' });
+    expect((await surveysOf(backToPending))[0]).toMatchObject({ status: 'sent' });
     expect((await surveysOf(byRule))[0]).toMatchObject({ skipReason: 'rule_resolved' });
   });
 
@@ -488,6 +536,63 @@ describe('send_csat', () => {
       { type: 'send_email', dedupeKey: `send:${fresh.messageId}` },
     ]);
   });
+
+  it('retires a survey stranded past a day inside the window, rather than counting it as sent', async () => {
+    await switchOn({ resurveyAfterDays: 14 });
+    const id = await resolvedTicket({ channel: 'email', email: 'a@b.test' });
+
+    await sendCsat(job(id));
+    // Its carrier never queued — every retry of the run that wrote it failed —
+    // and the ticket was reopened and resolved again three days later, well
+    // inside the window. Counted as sent, it refused this survey too, and the
+    // customer was asked about neither resolution.
+    await db.delete(jobs).where(eq(jobs.type, 'send_email'));
+    await db
+      .update(csatSurveys)
+      .set({ sentAt: new Date(Date.now() - 3 * 24 * 3_600_000) })
+      .where(eq(csatSurveys.conversationId, id));
+    const [stranded] = await surveysOf(id);
+
+    await sendCsat(job(id));
+
+    const rows = await surveysOf(id);
+    expect(rows.map((row) => row.status).sort()).toEqual(['expired', 'sent']);
+    const fresh = rows.find((row) => row.status === 'sent')!;
+    expect(await carrierJobs()).toEqual([
+      { type: 'send_email', dedupeKey: `send:${fresh.messageId}` },
+    ]);
+    // Nor does the timeline keep showing the old one on its way.
+    const [old] = await db
+      .select({ deliveryStatus: messages.deliveryStatus })
+      .from(messages)
+      .where(eq(messages.id, stranded!.messageId!));
+    expect(old!.deliveryStatus).toBe('failed');
+  });
+
+  it('counts a survey stranded under a day as sent, so the job behind it does not send a second', async () => {
+    await switchOn();
+    const id = await resolvedTicket({ channel: 'email', email: 'a@b.test' });
+
+    await sendCsat(job(id));
+    // The run that wrote it has committed and not yet queued its carrier when
+    // a second job takes the ticket's lock: to that job the survey looks
+    // exactly like an abandoned one, but for its age.
+    await db.delete(jobs).where(eq(jobs.type, 'send_email'));
+
+    const outcome = await sendSurvey({
+      conversationId: id,
+      locale: 'en',
+      delivery: 'email_link',
+      snapshot: { agentId: null, groupId: null, channel: 'email' },
+      resurveyAfterDays: 14,
+      ruleId: null,
+      requesterEmail: 'a@b.test',
+      body: (url) => ({ text: url, html: null }),
+    });
+
+    expect(outcome).toEqual({ kind: 'surveyed' });
+    expect(await surveysOf(id)).toHaveLength(1);
+  });
 });
 
 describe('the sidebar', () => {
@@ -504,5 +609,52 @@ describe('the sidebar', () => {
     expect((await ticketSurveyState(email, 'portal')).availability).toBe('on');
     expect((await ticketSurveyState(email, 'webchat')).availability).toBe('channel_off');
     expect((await ticketSurveyState(email, 'whatsapp_bot')).availability).toBe('unsupported');
+  });
+
+  it('shows a skip only while it is the newest decision, and keys "queued" on that decision', async () => {
+    await switchOn({ resurveyAfterDays: 14 });
+    const id = await resolvedTicket({ channel: 'email', email: 'a@b.test' });
+
+    // Answered three weeks ago, outside the window; since then the ticket was
+    // reopened and resolved again, and the customer wrote back inside the
+    // delay.
+    await sendCsat(job(id));
+    const longAgo = new Date(Date.now() - 21 * 24 * 3_600_000);
+    await db
+      .update(csatSurveys)
+      .set({
+        status: 'answered',
+        rating: 4,
+        respondedAt: longAgo,
+        sentAt: longAgo,
+        createdAt: longAgo,
+      })
+      .where(eq(csatSurveys.conversationId, id));
+    await db.insert(csatSurveys).values({
+      conversationId: id,
+      status: 'skipped',
+      skipReason: 'reopened',
+      channel: 'email',
+      createdAt: new Date(Date.now() - 3_600_000),
+    });
+
+    const pressed = await ticketSurveyState(id, 'email');
+    expect(pressed.survey?.status).toBe('answered');
+    expect(pressed.skip?.reason).toBe('reopened');
+
+    // "Send now": a survey goes out under the old rating.
+    await sendCsat(job(id, 'manual'));
+
+    const [sent] = await db
+      .select({ id: csatSurveys.id })
+      .from(csatSurveys)
+      .where(and(eq(csatSurveys.conversationId, id), eq(csatSurveys.status, 'sent')));
+    const after = await ticketSurveyState(id, 'email');
+    // The rating stays on screen; the skip the new survey answered does not,
+    // and the "queued" line — keyed on the decision before — clears.
+    expect(after.survey?.status).toBe('answered');
+    expect(after.skip).toBeNull();
+    expect(after.latestId).toBe(sent!.id);
+    expect(after.latestId).not.toBe(pressed.latestId);
   });
 });

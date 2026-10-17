@@ -26,9 +26,9 @@ export default async function CsatAdminPage() {
   const admin = await requirePermission('admin.csat');
 
   // The settings uncached, and a read that fails fails the page: this form is
-  // saved back whole, so a thirty-second-old copy from another instance, or
-  // the all-off answer a failed read gives elsewhere, would be written over
-  // the real settings by the next save.
+  // saved back whole, so a thirty-second-old copy from another instance, or a
+  // failed read drawn as all-off, would be written over the real settings by
+  // the next save.
   const [settings, recent, rules, groups] = await Promise.all([
     readCsatSettings(),
     recentSurveys(RECENT),

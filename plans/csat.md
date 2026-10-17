@@ -144,9 +144,12 @@ it need no new arithmetic, only new counts.
 
 ### `csat_settings` — the one-row switch and the numbers
 
-Modelled on `canned_suggestion_settings`: one row, `id = 1`, read through a
-thirty-second memo (`surveysLive()`), off on a fresh install. Switching off is
-the rollback and takes thirty seconds to reach the fleet.
+Modelled on `canned_suggestion_settings`: one row, `id = 1`, off on a fresh
+install. The resolve, the job and the admin form read it uncached through
+`readCsatSettings`, which throws on a failed read, so switching off — the
+rollback — reaches the next resolve at once. Only the ticket sidebar reads the
+thirty-second memo (`loadCsatSettings`), where a failed read is reported as not
+known rather than as off.
 
 | Field                               | Default | What it does                                                                      |
 | ----------------------------------- | ------- | --------------------------------------------------------------------------------- |

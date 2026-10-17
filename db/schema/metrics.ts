@@ -88,11 +88,11 @@ export const csatSurveys = pgTable(
 );
 
 /**
- * The survey switch and its numbers: one row, `id = 1`, read through a
- * thirty-second memo (`lib/csat/settings.ts`). No row is a fresh install and
- * reads as off, with every channel off — the plan's "nothing goes out until
- * an admin says which channels". Not `presence_policy`'s shape only because
- * there is more than a pair of windows here.
+ * The survey switch and its numbers: one row, `id = 1`, read uncached by
+ * everything that acts on it (`lib/csat/settings.ts`). No row is a fresh
+ * install and reads as off, with every channel off — the plan's "nothing goes
+ * out until an admin says which channels". Not `presence_policy`'s shape only
+ * because there is more than a pair of windows here.
  */
 export const csatSettings = pgTable('csat_settings', {
   id: integer('id').primaryKey().default(1),

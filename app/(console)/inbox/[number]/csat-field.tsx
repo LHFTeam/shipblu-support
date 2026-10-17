@@ -34,17 +34,17 @@ export function SatisfactionField({
   suppressed: boolean;
   survey: TicketSurveyState;
 }) {
-  const { survey, skip, availability } = state;
+  const { survey, skip, latestId, availability } = state;
   const suppression = useFieldAction(setSurveySuppression);
   const send = useFieldAction(sendSurveyNow);
   // Queued is not sent: the job decides, and the timeline shows what it decided.
-  // Remembered against the decision on screen when the button was pressed, so
-  // it clears itself the moment a new decision lands and the page re-renders
-  // with it; until then the button is gone, so waiting cannot queue a second
-  // job. Derived rather than reset in an effect, which would set state from a
-  // render.
+  // Remembered against the newest decision when the button was pressed, so it
+  // clears itself the moment the job's lands — a survey or a skip, each a new
+  // row — and the page re-renders with it; until then the button is gone, so
+  // waiting cannot queue a second job. Derived rather than reset in an effect,
+  // which would set state from a render.
   const [queuedOn, setQueuedOn] = useState<string | null>(null);
-  const shown = `${survey?.id ?? 'none'}:${skip?.createdAt.toISOString() ?? ''}`;
+  const shown = latestId ?? 'none';
   const queued = queuedOn === shown;
 
   const resolved = statusCategory === 'resolved' || statusCategory === 'closed';
@@ -64,7 +64,7 @@ export function SatisfactionField({
       <div className="flex flex-col gap-2 text-xs text-(--color-text-secondary)">
         {survey === null ? (
           // Where no survey can go out, the line below says why instead.
-          availability === 'on' ? (
+          availability === 'on' || availability === 'unknown' ? (
             <p>No survey yet.</p>
           ) : null
         ) : survey.status === 'answered' ? (
@@ -115,6 +115,9 @@ export function SatisfactionField({
 
         {availability === 'unsupported' ? (
           <p>Surveys are not sent on this channel.</p>
+        ) : availability === 'unknown' ? (
+          // Not "off": nobody switched anything, and the next render reads again.
+          <p>Survey settings could not be read just now.</p>
         ) : availability !== 'on' ? (
           <p>
             Surveys are switched off

@@ -13,14 +13,15 @@ const log = logger('csat');
  * fails: the resolve that schedules a survey, the job that sends it — so
  * switching off, the rollback, reaches the next resolve at once — and the
  * admin form, which is saved back whole and so must never be drawn from a
- * stale copy or from the all-off answer a failed read gives elsewhere. "Off"
- * written on a ticket, or saved over the real settings, outlives a hiccup.
+ * stale copy or from a failed read taken as all-off. "Off" written on a
+ * ticket, or saved over the real settings, outlives a hiccup.
  *
  * Only the ticket sidebar, which reads them on every render to decide whether
  * to offer "Send now", goes through `loadCsatSettings`: memoised per process
  * for thirty seconds, the way `lib/canned-suggest/settings.ts` memoises its
- * switch, with a failed read as off, uncached. The worst it does is hide a
- * button until the next render.
+ * switch. A failed read there is null, uncached: the sidebar then says the
+ * settings could not be read, never that surveys are off, which is a claim
+ * about what an admin did.
  *
  * No row is a fresh install and reads as off with every channel off.
  */
@@ -110,21 +111,25 @@ export async function readCsatSettings(): Promise<CsatSettings> {
   };
 }
 
-/** The settings for the ticket sidebar, memoised; a failed read reads as off, uncached. */
-export async function loadCsatSettings(): Promise<CsatSettings> {
+/** The settings for the ticket sidebar, memoised; null, uncached, when the read failed. */
+export async function loadCsatSettings(): Promise<CsatSettings | null> {
   if (cached && Date.now() - cached.at < CACHE_TTL_MS) return cached.value;
 
   try {
     cached = { at: Date.now(), value: await readCsatSettings() };
   } catch (error) {
-    log.error('could not read the survey settings, treating them as off', error);
-    return UNSET_CSAT_SETTINGS;
+    log.error('could not read the survey settings', error);
+    return null;
   }
 
   return cached.value;
 }
 
-/** Drop the memo, so the admin who just saved sees their own change. This process only. */
+/**
+ * Drop the memo, so the ticket sidebar on the process that saved offers "Send
+ * now" by the new settings at once. This process only; elsewhere it takes up
+ * to the TTL.
+ */
 export function forgetCsatSettings(): void {
   cached = null;
 }

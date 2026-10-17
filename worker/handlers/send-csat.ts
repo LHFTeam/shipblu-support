@@ -39,7 +39,8 @@ const log = logger('send_csat');
  * pool_), and two jobs for one ticket can run together. `sendSurvey` is where
  * that is settled: under a lock on the ticket, a second survey inside the
  * window is refused and nothing is written, and a run stopped after its rows
- * committed is finished by the next one queueing the carrier it never did.
+ * committed is finished by the next one, inside a day, queueing the carrier it
+ * never did.
  */
 
 /** The survey's carrier priority: behind an acknowledgement, which a customer is waiting on. */
@@ -98,11 +99,13 @@ export async function sendCsat(job: ClaimedJob): Promise<void> {
   // before queueing the carrier owes that carrier whatever has happened to
   // the ticket since — a reopen in between is no reason to leave a survey the
   // customer was already sent sitting `pending` for good. That survey is this
-  // resolution's: only a recent one is owed (`unsentSurveyMessage`), and the
-  // run that strands one is retried within minutes. So this job's decision is
-  // the one already taken, and deciding again would only write "reopened"
-  // beside a survey that went. One stranded for days is not owed; it was
-  // about a resolution long past, and this job decides its own.
+  // resolution's: only one stranded under a day is owed
+  // (`unsentSurveyMessage`), and the run that strands one is retried within
+  // minutes. So this job's decision is the one already taken, and deciding
+  // again would only write "reopened" beside a survey that went. One stranded
+  // longer is abandoned: it was about a resolution long past, it no longer
+  // counts as a survey sent, and this job decides its own — `sendSurvey`
+  // retires it if this one sends.
   const owed = await unsentSurveyMessage(conversationId);
   if (owed) {
     await enqueueAutomatedDelivery(ticket.channel, owed, PRIORITY);
@@ -197,9 +200,10 @@ export async function sendCsat(job: ClaimedJob): Promise<void> {
 
   if (sent.kind === 'surveyed') {
     // Surveyed inside the window already, by an earlier run or by the other of
-    // two jobs for one ticket — and the other job's carrier, if it was still
-    // owed, was queued above. A scheduled duplicate writes nothing: the survey
-    // it would sit on top of is the answer. An agent who pressed "Send now" is
+    // two jobs for one ticket — and a survey whose carrier never queued counts
+    // only while it is still owed, so the run that wrote it, or the next job,
+    // queues that carrier. A scheduled duplicate writes nothing: the survey it
+    // would sit on top of is the answer. An agent who pressed "Send now" is
     // owed one, on the ticket.
     if (trigger === 'manual') {
       await recordSkip(conversationId, 'recently_surveyed', snapshot, answer);

@@ -1,4 +1,17 @@
-import { and, desc, eq, gt, inArray, isNull, notExists, sql } from 'drizzle-orm';
+import {
+  and,
+  desc,
+  eq,
+  exists,
+  gt,
+  inArray,
+  isNull,
+  lte,
+  not,
+  notExists,
+  sql,
+  type SQL,
+} from 'drizzle-orm';
 import { db } from '@/db/client';
 import {
   conversationEvents,
@@ -14,8 +27,13 @@ import { enqueue } from '@/lib/queue';
 import { logger } from '@/lib/log';
 import type { ConversationChannel } from '@/lib/tickets/channel-policy';
 import { writeAutomatedReply } from '@/lib/tickets/outbound';
-import { channelSwitch, type SurveyTrigger } from './decision';
-import { loadCsatSettings, readCsatSettings, type CsatSettings } from './settings';
+import {
+  channelSwitch,
+  surveyAvailability,
+  type SurveyAvailability,
+  type SurveyTrigger,
+} from './decision';
+import { loadCsatSettings, readCsatSettings } from './settings';
 import type { SkipReason } from './skip-reasons';
 
 const log = logger('csat');
@@ -183,6 +201,16 @@ async function writeSkip(
     actorLabel: ACTOR,
     data: { reason },
   });
+
+  // Touch the conversation so its `notify_change` trigger fires, as the
+  // categoriser does: neither row above notifies, and an agent who pressed
+  // "Send now" is waiting on the open ticket for this answer. Delivered at
+  // commit, so the refresh it causes reads the skip; `updated_at` is no queue
+  // column, so it wakes this ticket and no queue.
+  await tx
+    .update(conversations)
+    .set({ updatedAt: new Date() })
+    .where(eq(conversations.id, conversationId));
 }
 
 /** The row lock every write on a ticket's surveys takes first, so two jobs for one ticket queue behind each other. */
@@ -194,7 +222,10 @@ async function lockTicket(tx: Tx, conversationId: string): Promise<void> {
     .for('update');
 }
 
-/** True when this ticket carries a survey sent inside the resurvey window. */
+/**
+ * True when this ticket carries a survey sent inside the resurvey window —
+ * one the customer could have been sent, which an abandoned one never was.
+ */
 async function surveyedWithin(tx: Tx, conversationId: string, days: number): Promise<boolean> {
   // Never below a day, whatever the row says (`MIN_RESURVEY_DAYS`): at zero
   // the window is empty and every job for a ticket sends.
@@ -208,6 +239,7 @@ async function surveyedWithin(tx: Tx, conversationId: string, days: number): Pro
         eq(csatSurveys.conversationId, conversationId),
         inArray(csatSurveys.status, ['sent', 'answered', 'expired']),
         gt(csatSurveys.sentAt, cutoff),
+        not(stranded('abandoned')),
       ),
     )
     .limit(1);
@@ -296,6 +328,25 @@ export async function sendSurvey(send: SurveySend): Promise<SendOutcome> {
       return { kind: 'surveyed' };
     }
 
+    // An abandoned survey is retired with the rest below, and its message
+    // said to have gone nowhere: left `pending`, the timeline shows it
+    // sending for good, just above the survey that replaces it.
+    await tx
+      .update(messages)
+      .set({
+        deliveryStatus: 'failed',
+        deliveryError: 'never sent, and a later survey replaced it',
+      })
+      .where(
+        inArray(
+          messages.id,
+          tx
+            .select({ id: csatSurveys.messageId })
+            .from(csatSurveys)
+            .where(and(eq(csatSurveys.conversationId, send.conversationId), stranded('abandoned'))),
+        ),
+      );
+
     await tx
       .update(csatSurveys)
       .set({ status: 'expired' })
@@ -349,37 +400,58 @@ export async function sendSurvey(send: SurveySend): Promise<SendOutcome> {
 }
 
 /**
- * A survey this ticket carries whose message never got a carrier job: the
- * run that wrote it was stopped between its commit and the enqueue. The job
- * queues the carrier for it before deciding anything else.
+ * A survey whose message never got a carrier job: the run that wrote it was
+ * stopped between its commit and the enqueue. One predicate read two ways by
+ * its age, so the job that owes a carrier and the window that counts a survey
+ * cannot disagree about the same row:
  *
- * Only a recent one. The run that strands a carrier is retried within
- * minutes, so this is almost always found the same hour; one still owed a
- * day later is about a resolution long past — its carrier purged, or a retry
- * that never came — and sending it now would ask about that as though it were
- * the resolution in front of the customer.
+ * - **Owed, for a day.** The run that strands a carrier is retried within
+ *   minutes, so this is almost always found the same hour, and the next job
+ *   queues the carrier before deciding anything (`unsentSurveyMessage`). The
+ *   bound is also what keeps two jobs from sending twice: a run that has just
+ *   committed and not yet queued looks exactly like this to the job holding
+ *   the lock after it, which must count it as sent.
+ * - **Abandoned, after that.** It is about a resolution long past — its
+ *   carrier purged, or a retry that never came — so sending it now would ask
+ *   about that as though it were the resolution in front of the customer. Nor
+ *   does it count as surveyed (`surveyedWithin`): the customer never got it,
+ *   and counted, it refused every survey until the window ran out while the
+ *   sidebar said one had gone and hid "Send now".
  */
 const OWED_FOR_MS = 24 * 3_600_000;
 
+function stranded(age: 'owed' | 'abandoned'): SQL {
+  const owedSince = new Date(Date.now() - OWED_FOR_MS);
+
+  return and(
+    eq(csatSurveys.status, 'sent'),
+    age === 'owed' ? gt(csatSurveys.sentAt, owedSince) : lte(csatSurveys.sentAt, owedSince),
+    exists(
+      db
+        .select({ one: sql`1` })
+        .from(messages)
+        .where(
+          and(
+            eq(messages.id, csatSurveys.messageId),
+            eq(messages.deliveryStatus, 'pending'),
+            notExists(
+              db
+                .select({ one: sql`1` })
+                .from(jobs)
+                .where(eq(jobs.dedupeKey, sql`'send:' || ${messages.id}::text`)),
+            ),
+          ),
+        ),
+    ),
+  )!;
+}
+
+/** The message of a survey still owed its carrier, queued before the job decides anything else. */
 export async function unsentSurveyMessage(conversationId: string): Promise<string | null> {
   const rows = await db
-    .select({ messageId: messages.id })
+    .select({ messageId: csatSurveys.messageId })
     .from(csatSurveys)
-    .innerJoin(messages, eq(messages.id, csatSurveys.messageId))
-    .where(
-      and(
-        eq(csatSurveys.conversationId, conversationId),
-        eq(csatSurveys.status, 'sent'),
-        gt(csatSurveys.sentAt, new Date(Date.now() - OWED_FOR_MS)),
-        eq(messages.deliveryStatus, 'pending'),
-        notExists(
-          db
-            .select({ one: sql`1` })
-            .from(jobs)
-            .where(eq(jobs.dedupeKey, sql`'send:' || ${messages.id}::text`)),
-        ),
-      ),
-    )
+    .where(and(eq(csatSurveys.conversationId, conversationId), stranded('owed')))
     .limit(1);
 
   return rows[0]?.messageId ?? null;
@@ -500,9 +572,9 @@ const SUMMARY = {
 
 /**
  * What the sidebar shows: the ticket's survey — the newest answered one, else
- * the newest sent or superseded one — and, when a decision not to send
- * another came after it, that decision. Two things rather than the newest
- * row, because a `skipped` row written after an answered survey (the ticket
+ * the newest sent or superseded one — and, when the newest decision was not
+ * to send another, that decision. Two things rather than the newest row,
+ * because a `skipped` row written after an answered survey (the ticket
  * reopened and was resolved again inside the window) must not bury the
  * customer's rating; and the answered one first, because a customer who
  * answers a superseded link has still rated the ticket, and a newer survey
@@ -510,62 +582,55 @@ const SUMMARY = {
  */
 export type TicketSurveyState = {
   survey: SurveySummary | null;
-  /** A decision not to survey, newer than `survey`. */
+  /**
+   * The newest decision, when it was not to survey. Not merely newer than
+   * `survey`: a survey sent after the skip answers it, even under an older
+   * answered one that stays on screen.
+   */
   skip: { reason: string | null; createdAt: Date } | null;
   /**
-   * Whether a survey could go out on this ticket's channel right now, so the
-   * sidebar does not offer "Send now" where it can only refuse: `off` and
-   * `channel_off` are switches an admin can flip, `unsupported` a channel no
-   * survey goes out on at all.
+   * The newest decision of any kind, which the sidebar's "queued" line is
+   * remembered against: whatever the job decides, a survey or a skip, is a new
+   * row and clears it. Keyed on what is shown instead, a survey sent under an
+   * older answered one changed nothing on screen, and the line never cleared.
    */
+  latestId: string | null;
+  /** Whether a survey could go out on this ticket's channel right now (`surveyAvailability`). */
   availability: SurveyAvailability;
 };
-
-export type SurveyAvailability = 'on' | 'off' | 'channel_off' | 'unsupported';
 
 export async function ticketSurveyState(
   conversationId: string,
   channel: string,
 ): Promise<TicketSurveyState> {
-  // One statement: the survey, then the skips after it, ordered so the first
-  // row is the survey and the second — if any — the newest later skip.
   const [rows, settings] = await Promise.all([
     db
       .select(SUMMARY)
       .from(csatSurveys)
       .where(eq(csatSurveys.conversationId, conversationId))
-      .orderBy(
-        sql`case when ${csatSurveys.status} = 'answered' then 0 when ${csatSurveys.status} = 'skipped' then 2 else 1 end`,
-        desc(csatSurveys.createdAt),
-        desc(csatSurveys.id),
-      ),
-    // The page's memoised read, on every ticket render: a failed one reads as
-    // off, which only hides a button until the next render.
+      .orderBy(desc(csatSurveys.createdAt), desc(csatSurveys.id)),
+    // The sidebar's memoised read. A failed one is null, which is `unknown`:
+    // "Send now" is hidden and nothing is said about the switch until the
+    // next render reads it again.
     loadCsatSettings(),
   ]);
 
-  const survey = rows.find((row) => row.status !== 'skipped') ?? null;
-  const skip =
-    rows.find(
-      (row) => row.status === 'skipped' && (survey === null || row.createdAt > survey.createdAt),
-    ) ?? null;
+  // Newest first, so the newest decision is the first row.
+  const latest = rows[0] ?? null;
+  const survey =
+    rows.find((row) => row.status === 'answered') ??
+    rows.find((row) => row.status !== 'skipped') ??
+    null;
 
   return {
     survey,
-    skip: skip ? { reason: skip.skipReason, createdAt: skip.createdAt } : null,
+    skip:
+      latest?.status === 'skipped'
+        ? { reason: latest.skipReason, createdAt: latest.createdAt }
+        : null,
+    latestId: latest?.id ?? null,
     availability: surveyAvailability(settings, channel),
   };
-}
-
-/**
- * `scheduleSurvey`'s refusals for a channel, the channel with no switch first:
- * no setting changes that one, so it is the answer whatever the switch says.
- */
-function surveyAvailability(settings: CsatSettings, channel: string): SurveyAvailability {
-  const key = channelSwitch(channel);
-  if (key === null) return 'unsupported';
-  if (!settings.enabled) return 'off';
-  return settings.channels[key] ? 'on' : 'channel_off';
 }
 
 /** One row of the admin page's recent list: the summary plus which ticket it was. */

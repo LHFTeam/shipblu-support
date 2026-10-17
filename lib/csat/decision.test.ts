@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { channelSurveyed, channelSwitch, decideSurvey, type DecisionInput } from './decision';
+import {
+  channelSurveyed,
+  channelSwitch,
+  decideSurvey,
+  surveyAvailability,
+  type DecisionInput,
+} from './decision';
 import { UNSET_CSAT_SETTINGS, type CsatSettings } from './settings';
 
 /**
@@ -164,5 +170,21 @@ describe('channelSurveyed', () => {
     expect(channelSurveyed(ON, 'whatsapp_bot')).toBe(false);
     expect(channelSwitch('portal')).toBe('email');
     expect(channelSwitch('whatsapp')).toBeNull();
+  });
+});
+
+describe('surveyAvailability', () => {
+  it('says "off" only for a switch somebody turned off, never for settings it could not read', () => {
+    expect(surveyAvailability(ON, 'email')).toBe('on');
+    expect(surveyAvailability({ ...ON, enabled: false }, 'email')).toBe('off');
+    expect(
+      surveyAvailability({ ...ON, channels: { ...ON.channels, webchat: false } }, 'webchat'),
+    ).toBe('channel_off');
+    // A failed read: the sidebar must not tell the agent surveys are off.
+    expect(surveyAvailability(null, 'email')).toBe('unknown');
+    // A channel with no switch is the same answer whatever the settings say,
+    // read or not.
+    expect(surveyAvailability(null, 'whatsapp')).toBe('unsupported');
+    expect(surveyAvailability(ON, 'whatsapp')).toBe('unsupported');
   });
 });
