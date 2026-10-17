@@ -2,11 +2,10 @@
  * How a survey went out and which door its answer came back through, in
  * words.
  *
- * Pure, for the reason `skip-reasons.ts` gives: the timeline's `describeEvent`,
- * the admin page's recent list and the ticket sidebar each print these, and
- * the first two must stay clear of anything that would pull a database client
- * into the browser bundle. The keys are the `csat_delivery` and
- * `csat_answer_source` enums.
+ * Pure, for the reason `skip-reasons.ts` gives: the timeline's `describeEvent`
+ * and the admin page's recent list print these, and both must stay clear of
+ * anything that would pull a database client into the browser bundle. The
+ * keys are the `csat_delivery` and `csat_answer_source` enums.
  */
 export const DELIVERIES = {
   email_link: 'by email',

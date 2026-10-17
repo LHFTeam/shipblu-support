@@ -208,16 +208,13 @@ export function SurveyCard({
       ) : null}
 
       {/*
-        Only while there is something to try again, and announced: a rating
-        that did not go through leaves a screen reader's user on a button that
-        went quiet, which sounds exactly like one that worked. Mounted with the
-        sentence, so each failure is read out afresh.
+        Only while there is something to try again, and announced — the block
+        form is an alert: a rating that did not go through leaves a screen
+        reader's user on a button that went quiet, which sounds exactly like one
+        that worked. Mounted with the sentence, so each failure is read out
+        afresh.
       */}
-      {failed && !done && !closed ? (
-        <p role="alert">
-          <ErrorText inline>{copy.surveyFailed}</ErrorText>
-        </p>
-      ) : null}
+      {failed && !done && !closed ? <ErrorText>{copy.surveyFailed}</ErrorText> : null}
     </div>
   );
 }

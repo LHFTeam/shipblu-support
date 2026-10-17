@@ -14,7 +14,7 @@ import { enqueue } from '@/lib/queue';
 import { logger } from '@/lib/log';
 import type { ConversationChannel } from '@/lib/tickets/channel-policy';
 import { writeAutomatedReply } from '@/lib/tickets/outbound';
-import { channelSwitch, type SurveyTrigger } from './decision';
+import { channelSwitch, isClosedChat, type SurveyTrigger } from './decision';
 import type { AnswerSource, SurveyDelivery } from './delivery';
 import { MAX_COMMENT } from './limits';
 import { readCsatSettings } from './settings';
@@ -274,7 +274,7 @@ export async function sendSurvey(send: SurveySend): Promise<SendOutcome> {
     }
     // `decideSurvey`'s rule, again behind the lock: closed in between, a chat
     // is one the visitor can no longer open.
-    if (send.snapshot.channel === 'webchat' && ticket.statusCategory === 'closed') {
+    if (isClosedChat(send.snapshot.channel, ticket.statusCategory)) {
       return { kind: 'skip', reason: 'chat_closed' };
     }
     if (ticket.csatSuppressed) return { kind: 'skip', reason: 'agent_suppressed' };

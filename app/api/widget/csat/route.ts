@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
-import { MAX_COMMENT } from '@/lib/csat/limits';
 import { readJsonBody } from '@/lib/http/json-body';
 import { allow, clientIp } from '@/lib/http/rate-limit';
 import { isUuid } from '@/lib/http/uuid';
@@ -53,10 +52,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'no rating' }, { status: 400 });
   }
 
-  const comment =
-    typeof body.comment === 'string' && body.comment.trim()
-      ? body.comment.slice(0, MAX_COMMENT)
-      : null;
+  // As sent: `recordAnswer` trims it and cuts it to length, once, for every door.
+  const comment = typeof body.comment === 'string' ? body.comment : null;
 
   const stored = await answerSurvey(contactId, body.surveyId, body.rating, comment);
 

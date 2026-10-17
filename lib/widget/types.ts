@@ -18,8 +18,8 @@ export type Message = {
 
 /**
  * A satisfaction survey as the widget's card needs it: resolved on the
- * server, so the card prints what the survey went out with and holds no
- * wording logic of its own. It carries no token, and the card needs none: the
+ * server from the rule the survey went out with, as that rule reads now, so
+ * the card holds no wording logic of its own. It carries no token, and the card needs none: the
  * visitor's session is what answers it (`/api/widget/csat`). The message's
  * `body` still holds the survey's link, which is the visitor's own.
  */

@@ -39,9 +39,12 @@ export type WidgetMessage = Message;
  * Private notes are excluded here, not filtered in the UI.
  *
  * A message that carries a satisfaction survey comes with the survey, so the
- * thread can draw it as a card: its state, and the words it went out with in
- * the language it was sent in, resolved here so the card holds no wording
- * logic of its own. The card carries no token. The message's body still holds
+ * thread can draw it as a card: its state, and the wording of the rule it
+ * went out with, in the language it was sent in, resolved here so the card
+ * holds no wording logic of its own. The rule as it reads now, as the survey
+ * page reads it: an admin who rewords a rule rewords its open surveys, while
+ * the message's body keeps the sentence it was sent with — the price of not
+ * copying six strings onto every survey row. The card carries no token. The message's body still holds
  * the survey's link — the visitor's own, and what a widget loaded before the
  * card existed draws — so this is not a way of keeping the link from the
  * browser, only of not needing it there.

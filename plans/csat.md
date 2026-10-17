@@ -276,8 +276,8 @@ widget_card`. `listMessages` carries `survey` on a message whose survey row
 names it (`csat_surveys.message_id`, joined in the transcript's one
 statement): `{ id, rating, expired, locale }` and the strings the card prints
 — the intro, the question, the five labels, the comment prompt, the button,
-the thanks — resolved on the server from the rule the survey went out with,
-in the language it went out in, so the card holds no wording logic and can
+the thanks — resolved on the server from the rule the survey went out with
+(as it reads now, as the survey page reads it), in the language it went out in, so the card holds no wording logic and can
 sit under a widget in the other language. The card carries no token; the
 message's body still holds the link, which is the visitor's own and what a
 widget loaded before the card existed draws.

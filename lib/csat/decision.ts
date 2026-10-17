@@ -99,6 +99,17 @@ export function channelSwitch(channel: string): keyof CsatChannels | null {
   }
 }
 
+/**
+ * A web chat that is closed is not the visitor's any more: the widget opens a
+ * fresh conversation in its place (`findLiveConversation`), so a survey
+ * written onto this one is one nobody can see, recorded as sent. Asked by the
+ * decision, again under the lock in `sendSurvey`, and by the ticket sidebar
+ * before it offers "Send now" — one question, so the three cannot disagree.
+ */
+export function isClosedChat(channel: string, statusCategory: string): boolean {
+  return channel === 'webchat' && statusCategory === 'closed';
+}
+
 /** Whether the admin has surveys on for this channel; false for one with no switch. */
 export function channelSurveyed(settings: CsatSettings, channel: string): boolean {
   const key = channelSwitch(channel);
@@ -125,10 +136,7 @@ export function decideSurvey(input: DecisionInput, settings: CsatSettings): Deci
     return { kind: 'skip', reason: 'reopened' };
   }
 
-  // A closed chat is not the visitor's any more: the widget opens a fresh one
-  // in its place (`findLiveConversation`), so a card written onto this one is
-  // a survey nobody can see, recorded as sent.
-  if (input.channel === 'webchat' && input.statusCategory === 'closed') {
+  if (isClosedChat(input.channel, input.statusCategory)) {
     return { kind: 'skip', reason: 'chat_closed' };
   }
 

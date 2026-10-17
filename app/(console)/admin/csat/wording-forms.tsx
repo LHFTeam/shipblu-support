@@ -140,17 +140,17 @@ const EXPLAIN: Record<WordingField, string> = {
   thanks: 'Shown after the customer answers. Never reaches Meta, so it has no limit.',
 };
 
+/** The preview card's answer: the rating it was given, kept nowhere. */
+async function previewAnswer(_surveyId: string, rating: number): Promise<number> {
+  return rating;
+}
+
 /**
  * The rule three ways, as the strings on screen will be used: the email, the
  * chat card, and the slots of Messenger’s card with their limits — Meta
  * draws that one, so the preview shows what goes in each slot rather than
  * pretending to draw it.
  */
-/** The preview card's answer: the rating it was given, kept nowhere. */
-async function previewAnswer(_surveyId: string, rating: number): Promise<number> {
-  return rating;
-}
-
 export function WordingPreview({ pair, locale }: { pair: WordingPair; locale: WordingLocale }) {
   const wording = resolveWording(pair, locale);
   const labels = ratingLabels(locale);

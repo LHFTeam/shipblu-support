@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { recordAnswer, surveyByToken } from '@/lib/csat';
-import { MAX_COMMENT } from '@/lib/csat/limits';
 import { readJsonBody } from '@/lib/http/json-body';
 import { allow, clientIp } from '@/lib/http/rate-limit';
 
@@ -40,10 +39,8 @@ export async function POST(request: Request) {
     return new NextResponse(null, { status: 400 });
   }
 
-  const comment =
-    typeof body.comment === 'string' && body.comment.trim()
-      ? body.comment.slice(0, MAX_COMMENT)
-      : null;
+  // As sent: `recordAnswer` trims it and cuts it to length, once, for every door.
+  const comment = typeof body.comment === 'string' ? body.comment : null;
 
   // The outcome is deliberately not reflected in the status code. A response
   // that distinguishes "unknown token" from "already answered" is an oracle for

@@ -273,6 +273,7 @@ export function WidgetThread({
               key={message.id}
               from={message.from === 'visitor' ? 'out' : 'in'}
               kind={message.survey ? 'attachment' : message.from === 'system' ? 'bot' : 'message'}
+              automated={message.from === 'system'}
               group={runs[index]}
               author={
                 message.from === 'agent'
