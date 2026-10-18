@@ -319,4 +319,40 @@ describe('ratedLowWithin', () => {
 
     expect(await ratedLow()).toEqual([number]);
   });
+
+  it('names the ticket a rated one was merged into, as the inbox lists no merged ticket', async () => {
+    const rated = await answered(1, '2026-10-12T12:00');
+    // Its survivor was rated too, but not low: it is listed for the merge.
+    const survivor = await answered(5, '2026-10-12T12:00');
+    const idOf = async (number: number) =>
+      (
+        await db
+          .select({ id: conversations.id })
+          .from(conversations)
+          .where(eq(conversations.number, number))
+      )[0]!.id;
+    await db
+      .update(conversations)
+      .set({ mergedIntoId: await idOf(survivor) })
+      .where(eq(conversations.number, rated));
+    // The report's filter holds on the rated ticket, not its survivor: an
+    // answer on a ticket marked spam, deleted, imported or on the bot counts
+    // nowhere, merged or not — one case per column of the filter.
+    const uncounted: [Partial<typeof conversations.$inferInsert>, Channel?][] = [
+      [{ isSpam: true }],
+      [{ deletedAt: at('2026-10-15T09:00') }],
+      [{ sourceSystem: 'import' }],
+      [{}, 'whatsapp_bot'],
+    ];
+    for (const [change, channel] of uncounted) {
+      const uncountedRated = await answered(1, '2026-10-12T12:00', channel);
+      const cleanSurvivor = await answered(5, '2026-10-12T12:00');
+      await db
+        .update(conversations)
+        .set({ ...change, mergedIntoId: await idOf(cleanSurvivor) })
+        .where(eq(conversations.number, uncountedRated));
+    }
+
+    expect(await ratedLow()).toEqual([survivor]);
+  });
 });

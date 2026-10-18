@@ -679,6 +679,18 @@ describe('the Rated 1–2 view', () => {
     expect(ids).not.toContain(early.id);
   });
 
+  it('lists the ticket a low-rated one was merged into', async () => {
+    const agent = await admin();
+    const merged = await rated(1, anHourAgo());
+    const survivor = await rated(5, anHourAgo(), 'Open');
+    await db
+      .update(conversations)
+      .set({ mergedIntoId: survivor.id })
+      .where(eq(conversations.id, merged.id));
+
+    expect((await listInbox(agent, RATED)).rows.map((row) => row.id)).toEqual([survivor.id]);
+  });
+
   it('returns nothing to an agent who may not see the ratings, however the URL asks', async () => {
     const agent = { ...(await admin()), permissions: { 'report.view': false } };
     await rated(1, anHourAgo());

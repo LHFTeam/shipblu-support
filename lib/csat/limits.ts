@@ -21,16 +21,29 @@ export const MAX_RESURVEY_DAYS = 365;
 
 /**
  * The highest rating that counts as a low one: a 1 or a 2. The inbox's
- * "Rated 1–2" view reads it for its query, its label and the line above its
- * list, so the three cannot disagree. The report's "rated 1 or 2"
- * (`ratingShares`) is the same two steps, summed from the distribution's own
- * columns; it moves with this by hand.
+ * "Rated 1–2" view reads it for its query (`ratedLowWithin`), its label
+ * (`LOW_RATINGS_RANGE`) and the line above its list (`LOW_RATINGS_IN_WORDS`),
+ * so the three cannot disagree. The report's "rated 1 or 2" (`ratingShares`)
+ * is the same two steps, summed from the distribution's own columns; it moves
+ * with this by hand.
  */
 export const LOW_RATING_MAX: number = 2;
 
 /** The low ratings in a sentence: "1 or 2". */
 export const LOW_RATINGS_IN_WORDS =
   LOW_RATING_MAX === 1 ? '1' : LOW_RATING_MAX === 2 ? '1 or 2' : `1 to ${LOW_RATING_MAX}`;
+
+/** The low ratings as a label: "1–2". */
+export const LOW_RATINGS_RANGE = LOW_RATING_MAX === 1 ? '1' : `1–${LOW_RATING_MAX}`;
+
+/**
+ * The days "Rated 1–2" reaches back: today and the six before it, the
+ * report's week (`/reports/csat?days=7`). Rolling rather than a calendar week,
+ * which would empty the view the morning a week began and hide Thursday's 1
+ * before anybody had followed it up. Here rather than beside the query
+ * (`ratedLowRecently`) because the list's line says it too, in the browser.
+ */
+export const RATED_LOW_DAYS = 7;
 
 /**
  * The longest comment kept, in characters. The routes cut what they are sent

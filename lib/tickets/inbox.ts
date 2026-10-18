@@ -22,9 +22,7 @@ import { rootCommentId } from '@/lib/meta/comments';
 import { sbidMatches, trackingMatches } from '@/lib/shipments/queries';
 import { cleanQuery, textMatches } from '@/lib/search/text';
 import { parseSearchTerm } from './search';
-import { ratedLowWithin } from '@/lib/reports/csat-queries';
-import { rangeIn, reportingZone } from '@/lib/reports/rollup';
-import { RATED_LOW_DAYS } from './inbox-views';
+import { ratedLowRecently } from '@/lib/reports/csat-queries';
 import { type InboxCursor, type InboxFilters, PAGE_SIZE, encodeInboxCursor } from './inbox-filters';
 
 /**
@@ -202,12 +200,7 @@ export async function listInbox(
   // anybody else — as forcing a restricted channel does. Before the named
   // scope, so `#812` searched inside the view still has to be rated low.
   if (filters.rating === 'low') {
-    if (!can(agent, 'report.view')) {
-      where.push(sql`false`);
-    } else {
-      const zone = await reportingZone();
-      where.push(ratedLowWithin({ ...rangeIn(zone, RATED_LOW_DAYS), zone }));
-    }
+    where.push(can(agent, 'report.view') ? await ratedLowRecently() : sql`false`);
   }
 
   // Everything but the status and the search: what the ticket a query names by

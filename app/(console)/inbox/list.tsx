@@ -15,8 +15,7 @@ import type { ViewsPanelSection } from '@/components/views-panel';
 import { DEFAULT_LOCALE } from '@/lib/kb/locale';
 import type { InboxRow } from '@/lib/tickets/inbox';
 import type { InboxFilters } from '@/lib/tickets/inbox-filters';
-import { LOW_RATINGS_IN_WORDS } from '@/lib/csat/limits';
-import { RATED_LOW_DAYS } from '@/lib/tickets/inbox-views';
+import { LOW_RATINGS_IN_WORDS, RATED_LOW_DAYS } from '@/lib/csat/limits';
 import { FILTERABLE_CHANNELS, isRestrictedChannel } from '@/lib/tickets/channel-policy';
 import { rowBadges } from '@/lib/tickets/inbox-badges';
 import { messageLines } from '@/lib/tickets/inbox-lines';
@@ -83,15 +82,21 @@ export function InboxList({
     onScroll,
   } = useOlderPages({ firstPage: rows, nextCursor, filters, params });
 
-  function setParam(key: string, value: string) {
+  function setParams(changes: Record<string, string>) {
     const next = new URLSearchParams(params.toString());
-    if (value) next.set(key, value);
-    else next.delete(key);
+    for (const [key, value] of Object.entries(changes)) {
+      if (value) next.set(key, value);
+      else next.delete(key);
+    }
     // Strips the page number a bookmark or a still-open tab may carry from when
     // this list was paged. It no longer means anything, and leaving it in the
     // URL suggests it does.
     next.delete('page');
     router.push(`${pathname}?${next.toString()}`);
+  }
+
+  function setParam(key: string, value: string) {
+    setParams({ [key]: value });
   }
 
   // The server's first page is always the freshest view of the top of the
@@ -235,7 +240,20 @@ export function InboxList({
             {canSeeRatings
               ? `Only tickets a customer rated ${LOW_RATINGS_IN_WORDS} in the last ${RATED_LOW_DAYS} days.`
               : 'Low ratings are listed only for people who can see the satisfaction report.'}
-            <Button variant="ghost" size="sm" onClick={() => setParam('rating', '')}>
+            <Button
+              variant="ghost"
+              size="sm"
+              // Every status was the view's choice, not the agent's: kept, the
+              // button would land on a "Custom filter" of every ticket on any
+              // status. Cleared, it lands on All open — or on a channel or a
+              // status the agent narrowed to inside the view, which stays.
+              onClick={() =>
+                setParams({
+                  rating: '',
+                  ...(filters.statusCategory === 'all' ? { status: '' } : {}),
+                })
+              }
+            >
               Stop filtering by rating
             </Button>
           </p>

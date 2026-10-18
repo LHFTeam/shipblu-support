@@ -1,5 +1,5 @@
 import { FILTERABLE_CHANNELS, isRestrictedChannel, type FilterableChannel } from './channel-policy';
-import { LOW_RATING_MAX } from '@/lib/csat/limits';
+import { LOW_RATINGS_RANGE } from '@/lib/csat/limits';
 import type { InboxFilters } from './inbox-filters';
 
 /**
@@ -26,14 +26,6 @@ import type { InboxFilters } from './inbox-filters';
 type ViewFilters = Pick<InboxFilters, 'view' | 'statusCategory' | 'channel' | 'rating'>;
 
 export type ViewIcon = 'user' | 'inbox' | 'list' | 'clock' | 'check' | 'thumbs-down';
-
-/**
- * The days "Rated 1–2" reaches back: today and the six before it, the
- * report's week (`/reports/csat?days=7`). Rolling rather than a calendar week,
- * which would empty the view the morning a week began and hide Thursday's 1
- * before anybody had followed it up.
- */
-export const RATED_LOW_DAYS = 7;
 
 export type InboxView = {
   id: string;
@@ -141,7 +133,7 @@ export function inboxViews({
                 // or set pending. A link to it returns nothing for anybody
                 // without `report.view`, whom it is not offered.
                 id: 'rated-low',
-                label: `Rated 1–${LOW_RATING_MAX}`,
+                label: `Rated ${LOW_RATINGS_RANGE}`,
                 icon: 'thumbs-down' as const,
                 filters: { ...OPEN_WORK, statusCategory: 'all' as const, rating: 'low' as const },
               },

@@ -15,9 +15,9 @@ export type InboxFilters = {
   statusCategory: 'open' | 'pending' | 'resolved' | 'closed' | 'all' | 'unresolved';
   channel: 'all' | 'email' | 'whatsapp' | 'webchat' | 'facebook' | 'instagram' | 'whatsapp_bot';
   /**
-   * `low`: only tickets a customer rated 1 or 2 in the last seven days, the
-   * report's week (`ratedLowWithin`). No select offers it; the "Rated 1–2"
-   * view does, and the list says so while it is on.
+   * `low`: only tickets a customer rated `LOW_RATING_MAX` or lower in the last
+   * `RATED_LOW_DAYS` days (`ratedLowRecently`). No select offers it; the
+   * "Rated 1–2" view does, and the list says so while it is on.
    */
   rating: 'any' | 'low';
   q: string;
