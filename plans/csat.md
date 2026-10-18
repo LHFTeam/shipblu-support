@@ -121,18 +121,18 @@ customer sees.
 `csat_surveys` becomes the record of every time the system decided whether to
 ask, and every row says what happened:
 
-| Column          | Change                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `status`        | new enum `csat_status`: `sent`, `answered`, `skipped`, `expired` — all four from stage 1, `expired` being a survey a newer one superseded; a later stage that lets a link or a Messenger card lapse writes the same value, and adds no enum value, since Postgres cannot drop one                                                                                                                                                                                                                    |
-| `skip_reason`   | new, text, null unless `skipped`: `reopened`, `read_only_channel`, `no_address`, `window_closed`, `agent_suppressed`, `contact_opted_out`, `rule_resolved`, `no_customer_message`, `channel_off`, `csat_off`, `comment_thread`, `no_privacy_url`, `card_refused`, and `chat_closed` (stage 3: a web chat closed before its survey went out, which no widget can open again). Not "surveyed recently": a ticket already carrying its survey needs no second row saying so, and that row is the answer |
-| `channel`       | new, `channel` enum, snapshotted like `agent_id` — a merged ticket keeps the channel it was surveyed on                                                                                                                                                                                                                                                                                                                                                                                              |
-| `delivery`      | new enum `csat_delivery`: `email_link` and `text_link` (stage 1 — the link in a mail, and in a plain message on web chat or inside a Meta window); `widget_card`, `meta_template`, `meta_quick_reply`, `api_pull` and `whatsapp_template` join it as their stages land                                                                                                                                                                                                                               |
-| `locale`        | new, `ar` / `en`, what it went out in                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| `message_id`    | new, the outbound `messages` row that carried it, null for `api_pull` and `skipped`                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| `rule_id`       | new, the `csat_rules` row whose wording it used, `set null` on delete                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| `answer_source` | new, null until answered: `page`, `widget` (stage 3, the enum `csat_answer_source`), then `meta_feedback`, `meta_quick_reply`, `api` as their stages land                                                                                                                                                                                                                                                                                                                                            |
-| `expires_at`    | new; the template's `expires_in_days` for Meta, the link's life elsewhere                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| `token_hash`    | **nullable**: a skipped row never had a link, and a widget or Meta survey needs none                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| Column          | Change                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `status`        | new enum `csat_status`: `sent`, `answered`, `skipped`, `expired` — all four from stage 1, `expired` being a survey a newer one superseded; a later stage that lets a link or a Messenger card lapse writes the same value, and adds no enum value, since Postgres cannot drop one                                                                                                                                                                                                                                                                                                     |
+| `skip_reason`   | new, text, null unless `skipped`: `reopened`, `read_only_channel`, `no_address`, `window_closed`, `agent_suppressed`, `contact_opted_out`, `rule_resolved`, `no_customer_message`, `channel_off`, `csat_off`, `comment_thread`, `no_privacy_url`, `card_refused`, `chat_closed` (stage 3: a web chat closed before its survey went out, which no widget can open again), and `rule_suppressed` (stage 7a: the flag set by an automation's `suppress_survey`). Not "surveyed recently": a ticket already carrying its survey needs no second row saying so, and that row is the answer |
+| `channel`       | new, `channel` enum, snapshotted like `agent_id` — a merged ticket keeps the channel it was surveyed on                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `delivery`      | new enum `csat_delivery`: `email_link` and `text_link` (stage 1 — the link in a mail, and in a plain message on web chat or inside a Meta window); `widget_card`, `meta_template`, `meta_quick_reply`, `api_pull` and `whatsapp_template` join it as their stages land                                                                                                                                                                                                                                                                                                                |
+| `locale`        | new, `ar` / `en`, what it went out in                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `message_id`    | new, the outbound `messages` row that carried it, null for `api_pull` and `skipped`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `rule_id`       | new, the `csat_rules` row whose wording it used, `set null` on delete                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `answer_source` | new, null until answered: `page`, `widget` (stage 3, the enum `csat_answer_source`), then `meta_feedback`, `meta_quick_reply`, `api` as their stages land                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `expires_at`    | new; the template's `expires_in_days` for Meta, the link's life elsewhere                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `token_hash`    | **nullable**: a skipped row never had a link, and a widget or Meta survey needs none                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 
 A skipped row is cheap and it is the whole answer to item 6: the ticket's
 timeline shows "not surveyed — the customer opted out", and the report can
@@ -228,7 +228,9 @@ the lock.
 4. Read-only channel → `skipped: read_only_channel`.
 5. No inbound `reply` carrying customer words (an agent-opened ticket nobody
    answered) → `skipped: no_customer_message`.
-6. `csat_suppressed` / `csat_opt_out` → the matching reason.
+6. `csat_suppressed` / `csat_opt_out` → the matching reason: `agent_suppressed`
+   or `rule_suppressed`, by who set the flag (`suppressedBy`, the newest
+   `csat_suppressed` event).
 7. Resolved by a rule and `survey_rule_resolved` off → `skipped: rule_resolved`.
 8. Pick the rule (`csat_rules`, most specific) and the locale
    (`requesterLocale()`'s two ingredients — the fix for item 2).
@@ -622,6 +624,39 @@ Elsewhere in the console:
 - **Automations**: a `suppress_survey` action, so a rule can keep surveys off a
   class of ticket (a group's internal queue, a form) without an agent clicking.
 
+  _Built (stage 7a):_ the action sets the agent's flag,
+  `conversations.csat_suppressed`, read when the survey job runs, so it works
+  whenever it lands before the survey goes out — after a resolve that has
+  already queued the survey included. A rule's resolve queues its survey only
+  once the whole pass of rules is over (`applyRules`), so a `suppress_survey`
+  in the same pass — later in the resolving rule, or in a later rule —
+  cannot lose to it, and rules resolving twice queue one survey.
+  `suppressSurveyByRule` writes the flag only where it changes something, so
+  a rule that matches every fifteen minutes puts one `csat_suppressed` event
+  on the timeline, named for the rule, and skips the write altogether where
+  the pass found the flag on; and never where an agent allowed a survey after
+  a rule had kept it off, which the next update or time rule would otherwise
+  undo — in the very request, when the agent resolves from the status
+  picker, which runs `on_update` straight after. An agent undoing their own
+  "Don't survey" overruled no rule and stops none. The sidebar says when a
+  rule set the flag, and, where there is a button to press, that allowing a
+  survey keeps rules off the ticket. The skip says which of them it was:
+  `rule_suppressed` beside `agent_suppressed` (`suppressionReason`), read off
+  the newest `csat_suppressed` event (`suppressedBy`), as `resolvedByRule`
+  reads who resolved a ticket, so no column was added. Both writers stamp
+  their event once they hold the ticket's row, as `PRIORITY_STAMP` does, so
+  "newest" is the order the flag was written. With the delay at 0 a rule in a
+  later request can lose to the survey, as the agent's own toggle can.
+
+  Which rules can catch a ticket follows from the triggers. `on_update` runs on
+  a sidebar edit, a customer's reply and the priority classifier, and not on
+  reply-and-resolve or an agent's plain reply, so a rule keyed on the resolve
+  misses the commonest one. And a rule's conditions are matched against the
+  ticket as it was before the run, so a rule keyed on a group another rule
+  assigns in the same run does not see it. Key it on what the ticket is — its
+  form or channel in an `on_create` rule, or the group in the rule that
+  assigns it.
+
 ## Reporting
 
 ### The rollup
@@ -788,8 +823,9 @@ API row's fallback switch. Verified with the app's staging build against
 staging.
 
 **7. Follow-ups, each its own small change.** `suppress_survey` as an
-automation action; a `csat_low_rating` event and a supervisor notification on
-a 1 or 2; an inbox view "Rated 1–2 this week".
+automation action (7a, built: see _Automations_ above); a `csat_low_rating`
+event and a supervisor notification on a 1 or 2; an inbox view "Rated 1–2 this
+week".
 
 ## Risks and what is deliberately not solved
 

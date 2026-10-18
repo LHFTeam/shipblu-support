@@ -26,7 +26,8 @@ type ActionKind =
   | 'remove_tags'
   | 'add_watchers'
   | 'mark_spam'
-  | 'send_reply';
+  | 'send_reply'
+  | 'suppress_survey';
 
 const KINDS: { value: ActionKind; label: string }[] = [
   { value: 'set_priority', label: 'Set priority' },
@@ -39,6 +40,7 @@ const KINDS: { value: ActionKind; label: string }[] = [
   { value: 'add_watchers', label: 'Add watchers' },
   { value: 'mark_spam', label: 'Mark as spam' },
   { value: 'send_reply', label: 'Send a canned response' },
+  { value: 'suppress_survey', label: 'Don’t survey the ticket' },
 ];
 
 /**
@@ -197,6 +199,7 @@ function ValueInput({
     case 'add_watchers':
       return select(agents, 'Choose an agent…');
     case 'mark_spam':
+    case 'suppress_survey':
       return <span className="text-xs text-(--color-text-secondary)">No settings</span>;
     default:
       return (
@@ -232,6 +235,7 @@ function toJson(items: Item[]): string {
       case 'add_watchers':
         return { type: item.type, agentIds: item.value ? [item.value] : [] };
       case 'mark_spam':
+      case 'suppress_survey':
         return { type: item.type };
       default:
         return {

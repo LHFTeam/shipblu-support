@@ -43,7 +43,20 @@ export type Action =
   | { type: 'remove_tags'; tags: string[] }
   | { type: 'add_watchers'; agentIds: string[] }
   | { type: 'mark_spam' }
-  | { type: 'send_reply'; cannedResponseId: string };
+  | { type: 'send_reply'; cannedResponseId: string }
+  /**
+   * "Don't survey this ticket", set by a rule rather than an agent: for a
+   * class of ticket nobody should be asked about — a group's internal queue,
+   * a form the team fills in itself — without somebody remembering to click.
+   *
+   * It sets the agent's flag, read when the survey job runs, so it works
+   * whenever it lands before the survey goes out: an `on_create` rule keyed on
+   * the form or the channel, or an `on_update` rule on the group an agent
+   * moves the ticket into. It never overrules an agent who allowed a survey
+   * after a rule had kept it off (`suppressSurveyByRule`); an agent undoing
+   * their own "Don't survey" overruled no rule, and stops none.
+   */
+  | { type: 'suppress_survey' };
 
 const STRATEGIES = new Set(['group_default', 'manual', 'round_robin', 'load_balanced']);
 
@@ -105,6 +118,9 @@ export function parseAction(input: unknown): Action | null {
       return typeof node.cannedResponseId === 'string' && node.cannedResponseId
         ? { type: 'send_reply', cannedResponseId: node.cannedResponseId }
         : null;
+
+    case 'suppress_survey':
+      return { type: 'suppress_survey' };
 
     default:
       return null;

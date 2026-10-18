@@ -1,7 +1,7 @@
 import { and, eq, exists, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { contacts, conversationEvents, conversations, messages, ticketStatuses } from '@/db/schema';
-import { recordSkip, sendSurvey } from '@/lib/csat';
+import { recordSkip, sendSurvey, suppressedBy } from '@/lib/csat';
 import { surveyEmail } from '@/lib/csat/email';
 import { metaSurveyMessage } from '@/lib/csat/meta-survey';
 import { wordingForTicket } from '@/lib/csat/rules';
@@ -54,7 +54,7 @@ export async function sendCsat(job: ClaimedJob): Promise<void> {
       isSpam: conversations.isSpam,
       deletedAt: conversations.deletedAt,
       mergedIntoId: conversations.mergedIntoId,
-      csatSuppressed: conversations.csatSuppressed,
+      suppressedBy: suppressedBy(),
       assigneeAgentId: conversations.assigneeAgentId,
       resolvedByRule: resolvedByRule(),
       groupId: conversations.groupId,
@@ -105,7 +105,7 @@ export async function sendCsat(job: ClaimedJob): Promise<void> {
       isSpam: ticket.isSpam,
       mergedIntoId: ticket.mergedIntoId,
       hasCustomerMessage: Boolean(ticket.hasCustomerMessage),
-      suppressed: ticket.csatSuppressed,
+      suppressedBy: ticket.suppressedBy,
       resolvedByRule: ticket.resolvedByRule,
       lacksRecipient: lacksEmailRecipient(ticket.channel, ticket.contactEmail),
       commentThread: rootCommentId(ticket.externalId) !== null,

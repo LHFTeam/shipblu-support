@@ -12,7 +12,7 @@ import {
 } from '@/db/schema';
 import { assignConversation } from '@/lib/assignment';
 import { textToHtml } from '@/lib/html/sanitize';
-import { scheduleSurvey } from '@/lib/csat';
+import { scheduleSurvey, suppressSurveyByRule } from '@/lib/csat';
 import { resolveLocale } from '@/lib/tickets/canned';
 import { readOnlyChannels } from '@/lib/tickets/channel-policy';
 import { requesterLocale } from '@/lib/tickets/locale';
@@ -122,31 +122,49 @@ export async function applyRules(
   now = new Date(),
 ): Promise<number> {
   const facts = conversationFacts(ticket, now);
+  const pass: Pass = { surveyOwed: false };
   let applied = 0;
 
-  for (const rule of rules) {
-    if (!matches(rule.conditions, facts)) continue;
+  try {
+    for (const rule of rules) {
+      if (!matches(rule.conditions, facts)) continue;
 
-    const actions = parseActions(rule.actions);
-    for (const action of actions) {
-      try {
-        await applyAction(action, ticket, rule.name);
-      } catch (error) {
-        // Isolated per action: a rule that assigns, tags and replies should not
-        // lose the assignment because the tag write failed. Loud, though — this
-        // is a rule that is not doing what its author asked for.
-        log.error(`"${rule.name}" could not apply ${action.type}`, error);
+      for (const action of parseActions(rule.actions)) {
+        try {
+          await applyAction(action, ticket, rule.name, pass);
+        } catch (error) {
+          // Isolated per action: a rule that assigns, tags and replies should not
+          // lose the assignment because the tag write failed. Loud, though — this
+          // is a rule that is not doing what its author asked for.
+          log.error(`"${rule.name}" could not apply ${action.type}`, error);
+        }
       }
+
+      await db
+        .update(automationRules)
+        .set({ lastRunAt: now })
+        .where(eq(automationRules.id, rule.id));
+
+      applied += 1;
+      if (rule.stopProcessing) break;
     }
-
-    await db.update(automationRules).set({ lastRunAt: now }).where(eq(automationRules.id, rule.id));
-
-    applied += 1;
-    if (rule.stopProcessing) break;
+  } finally {
+    // Once the pass is over, so a `suppress_survey` anywhere in it — later in
+    // the resolving rule, or in a later rule — has set the flag before the job
+    // exists: queued at the resolve, with the delay at 0 the worker could send
+    // it before the suppression ran. And once, however many rules resolved.
+    // In a `finally`, because the resolve has committed: a pass that throws
+    // after it (the `lastRunAt` write above is not isolated) must not take
+    // the ticket's survey with it, and `scheduleSurvey` throws nothing that
+    // could hide the error.
+    if (pass.surveyOwed) await scheduleSurvey(ticket.conversation.id, 'rule');
   }
 
   return applied;
 }
+
+/** What one pass over the rules owes once every rule in it has run. */
+type Pass = { surveyOwed: boolean };
 
 /**
  * A `text[]` literal with one bound parameter per element.
@@ -162,7 +180,12 @@ function textArray(values: string[]): SQL {
   )}]::text[]`;
 }
 
-async function applyAction(action: Action, ticket: TicketRow, ruleName: string): Promise<void> {
+async function applyAction(
+  action: Action,
+  ticket: TicketRow,
+  ruleName: string,
+  pass: Pass,
+): Promise<void> {
   const conversationId = ticket.conversation.id;
 
   const record = (type: string, data: Record<string, unknown>) =>
@@ -239,8 +262,9 @@ async function applyAction(action: Action, ticket: TicketRow, ruleName: string):
       // would quietly stop every clock without recording the pause.
       await onStatusChanged(conversationId, status.stopsSlaClock);
       // A rule that resolves a ticket should survey the customer exactly as an
-      // agent resolving it by hand does.
-      if (action.category === 'resolved') await scheduleSurvey(conversationId, 'rule');
+      // agent resolving it by hand does — queued when the pass ends
+      // (`applyRules`), so the pass's own `suppress_survey` comes first.
+      if (action.category === 'resolved') pass.surveyOwed = true;
       return;
     }
 
@@ -327,6 +351,26 @@ async function applyAction(action: Action, ticket: TicketRow, ruleName: string):
 
     case 'send_reply':
       await sendCannedReply(action.cannedResponseId, ticket, ruleName);
+      return;
+
+    case 'suppress_survey':
+      // Already off, as the pass found it: nothing to write, and no
+      // transaction for a time rule matching every live ticket each sweep. A
+      // stale read only skips a write the next pass makes.
+      if (ticket.conversation.csatSuppressed) return;
+      // Not through `record()`: the write and its event are one conditional
+      // transaction, so a rule that matches every fifteen minutes writes the
+      // event once, on the flip. A resolve in the same pass queues its survey
+      // only once the pass is over (`applyRules`). One queued earlier — the
+      // status picker's resolve, which runs `on_update` straight after — is
+      // still caught, because the job reads the flag when it runs and again
+      // under the ticket lock; with the survey delay at 0 it can lose that
+      // race, as the agent's own toggle can. Reply-and-resolve runs no
+      // `on_update`, so a rule meant to catch a resolve keys on what the
+      // ticket is — its form, channel or group — on the trigger that sets it.
+      if (await suppressSurveyByRule(conversationId, ruleName)) {
+        log.info(`"${ruleName}" kept the survey off ${conversationId}`);
+      }
       return;
   }
 }

@@ -12,6 +12,8 @@ describe('parseAction', () => {
       category: 'resolved',
     });
     expect(parseAction({ type: 'mark_spam' })).toEqual({ type: 'mark_spam' });
+    // Nothing to set, so nothing else is kept off a stored row.
+    expect(parseAction({ type: 'suppress_survey', tags: [] })).toEqual({ type: 'suppress_survey' });
     expect(parseAction({ type: 'send_reply', cannedResponseId: 'abc' })).toEqual({
       type: 'send_reply',
       cannedResponseId: 'abc',

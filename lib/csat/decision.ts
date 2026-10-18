@@ -31,6 +31,24 @@ import type { SkipReason } from './skip-reasons';
 export const SURVEY_TRIGGERS = ['agent', 'rule', 'manual'] as const;
 export type SurveyTrigger = (typeof SURVEY_TRIGGERS)[number];
 
+/**
+ * Who asked that the ticket not be surveyed: an agent from the sidebar, or an
+ * automation rule's `suppress_survey`. One flag either way; which of them set
+ * it is read off the ticket's timeline (`suppressedBy` in `lib/csat`), so the
+ * skip names the one that did.
+ */
+export type SuppressedBy = 'agent' | 'rule';
+
+/**
+ * The skip that names who kept the survey off. One mapping, because the job
+ * asks twice — `decideSurvey` here, and `sendSurvey` again under the ticket's
+ * lock — and a third suppressor written into one and not the other would have
+ * the two name different reasons for the same ticket.
+ */
+export function suppressionReason(by: SuppressedBy): 'agent_suppressed' | 'rule_suppressed' {
+  return by === 'rule' ? 'rule_suppressed' : 'agent_suppressed';
+}
+
 export type DecisionInput = {
   channel: string;
   statusCategory: string;
@@ -45,7 +63,8 @@ export type DecisionInput = {
    * decide that.
    */
   hasCustomerMessage: boolean;
-  suppressed: boolean;
+  /** Null when nobody asked that the ticket not be surveyed. */
+  suppressedBy: SuppressedBy | null;
   /**
    * Whether a rule, not a person, resolved the ticket — read off the ticket's
    * timeline (`resolvedByRule` in the job) rather than off who queued the
@@ -199,7 +218,9 @@ export function decideSurvey(input: DecisionInput, settings: CsatSettings): Deci
   // An agent-opened ticket the customer never answered has nothing to rate.
   if (!input.hasCustomerMessage) return { kind: 'skip', reason: 'no_customer_message' };
 
-  if (input.suppressed) return { kind: 'skip', reason: 'agent_suppressed' };
+  if (input.suppressedBy !== null) {
+    return { kind: 'skip', reason: suppressionReason(input.suppressedBy) };
+  }
 
   if (input.resolvedByRule && !settings.surveyRuleResolved) {
     return { kind: 'skip', reason: 'rule_resolved' };
