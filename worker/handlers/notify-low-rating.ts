@@ -1,4 +1,5 @@
 import { and, between, eq, sql } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/pg-core';
 import { db } from '@/db/client';
 import { agents, conversationEvents, conversations, csatSurveys, groups } from '@/db/schema';
 import { LOW_RATING_MAX } from '@/lib/csat/limits';
@@ -6,7 +7,8 @@ import { lowRatingEmail, lowRatingRecipients, namesAgentTo } from '@/lib/csat/lo
 import { readCsatSettings } from '@/lib/csat/settings';
 import { appUrl } from '@/lib/env';
 import { logger } from '@/lib/log';
-import { enqueue, type ClaimedJob } from '@/lib/queue';
+import { enqueueNotificationEmail } from '@/lib/email/notify';
+import type { ClaimedJob } from '@/lib/queue';
 import { parseJobPayload } from '@/lib/queue/payloads';
 import { surveyedConversation } from '@/lib/reports/rollup';
 
@@ -44,11 +46,16 @@ export async function notifyLowRating(job: ClaimedJob): Promise<void> {
     return;
   }
 
+  // The ticket a merged one went into, which is the one a supervisor can
+  // open: the inbox lists no merged ticket, and its "Rated 1–2" view names
+  // the survivor for the same answer (`ratedLowWithin`).
+  const survivor = alias(conversations, 'survivor');
   const [survey] = await db
     .select({
       conversationId: csatSurveys.conversationId,
       rating: csatSurveys.rating,
       number: conversations.number,
+      survivorNumber: survivor.number,
       agentName: agents.name,
       groupName: groups.name,
     })
@@ -57,6 +64,7 @@ export async function notifyLowRating(job: ClaimedJob): Promise<void> {
       conversations,
       and(eq(conversations.id, csatSurveys.conversationId), surveyedConversation()),
     )
+    .leftJoin(survivor, eq(survivor.id, conversations.mergedIntoId))
     .leftJoin(agents, eq(agents.id, csatSurveys.agentId))
     .leftJoin(groups, eq(groups.id, csatSurveys.groupId))
     .where(
@@ -85,16 +93,18 @@ export async function notifyLowRating(job: ClaimedJob): Promise<void> {
       isActive: agents.isActive,
       activated: sql<boolean>`${agents.passwordHash} is not null`,
     })
-    .from(agents)
-    .where(eq(agents.isActive, true));
+    .from(agents);
+  // Every agent, and `lowRatingRecipients` decides: the one gate, the tested
+  // one, rather than a second copy of its "active" in the query.
   const recipients = lowRatingRecipients(candidates);
 
+  const opens = survey.survivorNumber ?? survey.number;
   const alert = {
-    number: survey.number,
+    number: opens,
     rating: survey.rating,
     agentName: survey.agentName,
     groupName: survey.groupName,
-    url: `${appUrl()}/inbox/${survey.number}`,
+    url: `${appUrl()}/inbox/${opens}`,
   };
   const naming = lowRatingEmail({ ...alert, namesAgent: true });
   const unnamed = lowRatingEmail({ ...alert, namesAgent: false });
@@ -131,8 +141,7 @@ export async function notifyLowRating(job: ClaimedJob): Promise<void> {
     });
 
     for (const agent of recipients) {
-      await enqueue(
-        'send_notification_email',
+      await enqueueNotificationEmail(
         { to: agent.email, ...(namesAgentTo(agent) ? naming : unnamed) },
         { on: tx, priority: EMAIL_PRIORITY },
       );

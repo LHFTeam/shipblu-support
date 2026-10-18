@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Button, ErrorText, Textarea } from '@/components/ui';
 import { ratingLabels, type Wording } from '@/lib/csat/wording';
 import { t, type Locale } from '@/lib/kb/locale';
@@ -42,6 +42,13 @@ import { t, type Locale } from '@/lib/kb/locale';
  * so as not to tell a stranger which tokens exist.
  */
 
+/**
+ * How long a post may stay on the wire before the page stops waiting for it.
+ * Long enough for a slow mobile connection; short enough that a dropped one
+ * gives the customer the button back while they are still on the page.
+ */
+const SEND_DEADLINE_MS = 15_000;
+
 /*
   Words, not faces. The faces were emoji, which the design system does not use
   as icons, and a face leaves the customer guessing which of two frowns is the
@@ -63,6 +70,12 @@ export function SurveyForm({
   const [rating, setRating] = useState<number | null>(preselected);
   /** A rating was tapped: the scale is shut on it. */
   const [locked, setLocked] = useState(false);
+  /**
+   * The route took a post of the rating: only then may a comment go without
+   * waiting. A ref, because the tap's post and the button's can both be out
+   * at once, and whichever settles last has to see the other's answer.
+   */
+  const confirmed = useRef(false);
   /** The route did not confirm the rating's post, so the button below sends it again. */
   const [unconfirmed, setUnconfirmed] = useState(false);
   /** The button's post of the rating is on the wire. */
@@ -71,49 +84,77 @@ export function SurveyForm({
   const [saved, setSaved] = useState(false);
   const labels = ratingLabels(locale);
 
-  /** Whether the route took it — not what it did with it, which it does not say. */
+  function confirm() {
+    confirmed.current = true;
+    setUnconfirmed(false);
+  }
+
+  /**
+   * Whether the route took it — not what it did with it, which it does not
+   * say. Given up after `SEND_DEADLINE_MS`, so a request lost to a dropped
+   * connection ends in the not-confirmed line and a button that works again,
+   * rather than a "Sending…" nothing ends: posting the same rating twice is
+   * harmless, since the route keeps the first answer and one comment.
+   */
   async function send(value: number, text: string | null): Promise<boolean> {
     if (preview) return true;
-    return fetch('/api/kb/csat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token, rating: value, comment: text }),
-    }).then(
-      (response) => response.ok,
+    const controller = new AbortController();
+    const deadline = setTimeout(() => controller.abort(), SEND_DEADLINE_MS);
+    try {
+      const response = await fetch('/api/kb/csat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token, rating: value, comment: text }),
+        signal: controller.signal,
+      });
+      return response.ok;
+    } catch {
       // Caught: a customer who has already told us their score should not be
-      // shown an error page about our own network. The tap's line below says
-      // it was not confirmed instead.
-      () => false,
-    );
+      // shown an error page about our own network. The line below the scale
+      // says it was not confirmed instead.
+      return false;
+    } finally {
+      clearTimeout(deadline);
+    }
   }
 
   async function rate(value: number) {
     if (locked) return;
     setRating(value);
     setLocked(true);
-    setUnconfirmed(!(await send(value, null)));
+    if (await send(value, null)) confirm();
+    else if (!confirmed.current) setUnconfirmed(true);
   }
 
   async function finish(value: number) {
+    // A press while the button's own post is on the wire starts no second
+    // post; the first one's answer decides.
+    if (finishing) return;
     const text = comment.trim() || null;
     // A comment after a rating the route took goes out without waiting: the
     // score is in, and a lost sentence is not worth a refusal on screen.
-    if (locked && !unconfirmed) {
+    if (confirmed.current) {
       void send(value, text);
       setSaved(true);
       return;
     }
     // Otherwise this is the rating's own post — a preselected rating never
-    // tapped, or a tap the route did not confirm — and the thanks waits for
-    // the route: the route records a rating it has not seen and attaches a
-    // comment to one it has, so this one post is the whole answer either way.
-    if (finishing) return;
+    // tapped, a tap the route did not confirm or one still on the wire — and
+    // the thanks waits for the route: the route records a rating it has not
+    // seen and attaches a comment to one it has, so this one post is the
+    // whole answer either way.
     setFinishing(true);
     setLocked(true);
     const took = await send(value, text);
     setFinishing(false);
-    if (took) setSaved(true);
-    else setUnconfirmed(true);
+    // The tap's own post may have been taken while this one was out: the
+    // score is in either way, and only the sentence was lost.
+    if (took || confirmed.current) {
+      confirm();
+      setSaved(true);
+    } else {
+      setUnconfirmed(true);
+    }
   }
 
   if (saved) {
@@ -173,8 +214,11 @@ export function SurveyForm({
             onChange={(event) => setComment(event.target.value)}
             rows={4}
           />
-          <Button className="mt-1" onClick={() => void finish(rating)}>
-            {wording.button}
+          {/* Busy, not disabled, for the scale's reason: a disabled button
+              drops the focus it holds. The guard in `finish` takes no second
+              press while the first is on the wire. */}
+          <Button className="mt-1" loading={finishing} onClick={() => void finish(rating)}>
+            {finishing ? t(locale, 'csatSending') : wording.button}
           </Button>
         </div>
       ) : null}

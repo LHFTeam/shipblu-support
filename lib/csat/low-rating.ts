@@ -1,5 +1,5 @@
 import { can, type AgentRole } from '@/lib/auth/permissions';
-import { emailShell, escapeHtml, type EmailBody } from '@/lib/email/html';
+import { emailButton, emailShell, escapeHtml, type EmailBody } from '@/lib/email/html';
 
 /**
  * Who hears about a 1 or a 2, and what they are told.
@@ -58,7 +58,10 @@ export function namesAgentTo(recipient: Pick<AlertCandidate, 'role' | 'permissio
 export type LowRatingAlert = {
   number: number;
   rating: number;
-  /** The survey's snapshot, null when nobody was assigned or the agent was since removed. */
+  /**
+   * The survey's snapshot, null when nobody was assigned or the agent was
+   * since removed — which the email cannot tell apart, so it says neither.
+   */
   agentName: string | null;
   groupName: string | null;
   /** The console's ticket page, absolute. */
@@ -70,7 +73,7 @@ export type LowRatingAlert = {
 export function lowRatingEmail(alert: LowRatingAlert): EmailBody {
   const headline = `Ticket #${alert.number} was rated ${alert.rating} / 5 by the customer.`;
   const facts = [
-    ...(alert.namesAgent ? [`Agent: ${alert.agentName ?? 'nobody was assigned'}`] : []),
+    ...(alert.namesAgent ? [`Agent: ${alert.agentName ?? 'none on record'}`] : []),
     `Group: ${alert.groupName ?? 'none'}`,
   ];
   const ask =
@@ -100,12 +103,7 @@ export function lowRatingEmail(alert: LowRatingAlert): EmailBody {
       `<p>${escapeHtml(headline)}</p>`,
       `<p>${facts.map(escapeHtml).join('<br />')}</p>`,
       `<p>${escapeHtml(ask)}</p>`,
-      // The invitation's button, for its reasons (`lib/auth/invite-email.ts`):
-      // an anchor rather than a <button>, the brand blue written out as hex,
-      // and the bare link below it for a client that does not make it
-      // clickable.
-      `<p style="margin:24px 0"><a href="${escapeHtml(alert.url)}" style="display:inline-block;background:#1558ad;color:#ffffff;text-decoration:none;padding:12px 20px;border-radius:6px;font-weight:600">Open ticket #${alert.number}</a></p>`,
-      `<p style="color:#666;font-size:13px">If the button does not work, copy this link into your browser:<br /><span style="word-break:break-all">${escapeHtml(alert.url)}</span></p>`,
+      ...emailButton(alert.url, `Open ticket #${alert.number}`),
       `<p style="color:#666;font-size:13px">${escapeHtml(why)} ${escapeHtml(noReply)}</p>`,
       '<p>ShipBlu Support</p>',
     ]),

@@ -263,8 +263,10 @@ _Built (stage 7b):_ a 1 or 2 (`LOW_RATING_MAX`) also emails the supervisors.
 `notify_low_rating` job in one transaction, under the ticket's lock — taken
 first, as `sendSurvey` takes it, since the event's foreign key would otherwise
 lock the ticket after the survey's row and deadlock against a send
-superseding it. So the job exists exactly when a low answer does: never for a
-second tap, a comment, or a link answered twice. The job reads the switch
+superseding it; `fallBackToQuickReplies` takes the ticket first now too. So
+the job exists exactly when a low answer does: never for a second tap, a
+comment, or a link answered twice — and an answer already recorded goes
+straight to its comment, without the ticket's lock. The job reads the switch
 (`csat_settings.low_rating_alerts`, default on, under "Behaviour" on
 `/admin/csat`) when it runs, holds the ticket to `surveyedConversation()` —
 the filter the "Rated 1–2" view lists by — once to find it and again under the
@@ -273,7 +275,9 @@ told and queues one `send_notification_email` per recipient on the same
 transaction, so a second run finds the event and a refused address retries
 alone. The recipients are every active agent who has set a password and holds
 both `report.view` and `ticket.view.all` (`lib/csat/low-rating.ts`): somebody
-who can read the ratings and open any ticket. The email carries the ticket's
+who can read the ratings and open any ticket. A ticket since merged is named and linked
+by the one it went into, the ticket a supervisor can open. The email carries
+the ticket's
 number, the score, the survey's group and a link to the ticket, and the
 survey's agent only to a recipient holding `report.agents`, as the report
 names one; never the comment or the subject, which for a chat is the

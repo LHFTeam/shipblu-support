@@ -1,4 +1,4 @@
-import { enqueue } from '@/lib/queue';
+import { enqueue, type EnqueueOptions } from '@/lib/queue';
 
 /**
  * Transactional mail that is not part of a ticket.
@@ -26,8 +26,13 @@ export type NotificationEmail = {
   htmlBody: string;
 };
 
-export async function enqueueNotificationEmail(email: NotificationEmail): Promise<void> {
-  // Priority 40: ahead of ticket replies (50). Somebody is sitting on a form
-  // waiting for this link, which is not true of any other outbound mail.
-  await enqueue('send_notification_email', { ...email }, { priority: 40 });
+export async function enqueueNotificationEmail(
+  email: NotificationEmail,
+  options: Pick<EnqueueOptions, 'on' | 'priority'> = {},
+): Promise<void> {
+  // Priority 40 by default: ahead of ticket replies (50), because somebody is
+  // sitting on a form waiting for a sign-in link. A caller nobody is waiting
+  // on — a low rating's alert — names a later one, and queues on its own
+  // transaction where the email belongs to a row it writes.
+  await enqueue('send_notification_email', { ...email }, { priority: 40, ...options });
 }

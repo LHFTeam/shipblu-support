@@ -113,9 +113,11 @@ describe('lowRatingEmail', () => {
     expect(email.textBody).toContain('https://console.shipblu.test/inbox/1234');
   });
 
-  it('says when nobody was assigned rather than printing null', () => {
+  it('says no agent is on record rather than printing null, or guessing why', () => {
     const email = lowRatingEmail({ ...alert, agentName: null, groupName: null });
-    expect(email.textBody).toContain('Agent: nobody was assigned');
+    // Null is nobody assigned, or an agent since removed: the row cannot say
+    // which, so the email claims neither.
+    expect(email.textBody).toContain('Agent: none on record');
     expect(email.textBody).toContain('Group: none');
     expect(email.textBody).not.toContain('null');
   });

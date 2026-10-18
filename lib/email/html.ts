@@ -73,3 +73,28 @@ export function escapeHtml(value: string): string {
 export function textToEscapedHtml(text: string): string {
   return escapeHtml(text).replace(/\n/g, '<br>');
 }
+
+/**
+ * A link as a button, and the bare link below it, for an email that asks the
+ * reader to open one thing — the invitation's activation link, a low
+ * rating's ticket. One copy, because the brand blue below is written out by
+ * hand and a second copy is how it stops matching.
+ *
+ * A styled anchor rather than a <button>: a button in an email is a form
+ * control that does nothing, and Outlook strips it. Padding and a background
+ * on an <a> is the call-to-action every client renders. `#1558ad` is
+ * `--color-brand-600` resolved to hex: no client supports a CSS variable, and
+ * Outlook and Gmail do not support oklch — both would drop the declaration
+ * and render a white-on-white button. So this is the one copy to update by
+ * hand if the brand moves.
+ *
+ * The bare URL below the button, because a proportion of clients render the
+ * anchor without making it clickable, and the recipient is then holding a
+ * message with no way to act on it.
+ */
+export function emailButton(url: string, label: string): string[] {
+  return [
+    `<p style="margin:24px 0"><a href="${escapeHtml(url)}" style="display:inline-block;background:#1558ad;color:#ffffff;text-decoration:none;padding:12px 20px;border-radius:6px;font-weight:600">${escapeHtml(label)}</a></p>`,
+    `<p style="color:#666;font-size:13px">If the button does not work, copy this link into your browser:<br /><span style="word-break:break-all">${escapeHtml(url)}</span></p>`,
+  ];
+}

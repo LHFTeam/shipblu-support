@@ -122,6 +122,9 @@ const STRINGS = {
     // box sends the same rating again either way.
     csatNotConfirmed:
       'We could not confirm your rating reached us. The button below sends it again.',
+    // The survey page's button while its post is on the wire, in words rather
+    // than only the spinner (`Button`'s `loading`).
+    csatSending: 'Sending…',
     // The five ratings, worst first, as words rather than faces: a face is an
     // emoji the design system does not draw, and its meaning is a guess.
     csatRating1: 'Very bad',
@@ -309,6 +312,7 @@ const STRINGS = {
     tryAgain: 'إعادة المحاولة',
     csatAlreadyAnswered: 'لقد أجبت على هذا الاستطلاع بالفعل.',
     csatNotConfirmed: 'لم نتمكن من التأكد من وصول تقييم حضرتك. الزر بالأسفل يرسله مرة أخرى.',
+    csatSending: 'جارٍ الإرسال…',
     csatRating1: 'سيئة جدًا',
     csatRating2: 'سيئة',
     csatRating3: 'مقبولة',

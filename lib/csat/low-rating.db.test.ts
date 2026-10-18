@@ -230,6 +230,28 @@ describe('recording a low rating', () => {
     expect(await alertJobs()).toEqual([{ surveyId: ticket.surveyId }]);
   });
 
+  it('adds the comment after the rating without waiting on the ticket', async () => {
+    // The normal second request, and a tap delivered twice: neither can record
+    // a rating, so neither queues behind whatever holds the ticket's row.
+    const ticket = await surveyed();
+    await recordAnswer(ticket.surveyId, 4, null, 'page');
+
+    let outcome: string | undefined;
+    await db.transaction(async (tx) => {
+      await tx
+        .select({ id: conversations.id })
+        .from(conversations)
+        .where(eq(conversations.id, ticket.conversationId))
+        .for('update');
+      outcome = await Promise.race([
+        recordAnswer(ticket.surveyId, 4, 'Quick, thanks.', 'page'),
+        new Promise<string>((resolve) => setTimeout(() => resolve('waited on the ticket'), 2000)),
+      ]);
+    });
+
+    expect(outcome).toBe('comment_added');
+  });
+
   it('ignores a survey that does not exist, without a transaction to roll back', async () => {
     expect(await recordAnswer('00000000-0000-0000-0000-000000000000', 1, null, 'page')).toBe(
       'ignored',
@@ -321,6 +343,28 @@ describe('notify_low_rating', () => {
 
     expect(await events(ticket.conversationId, 'csat_low_rating')).toEqual([]);
     expect(await emails()).toEqual([]);
+  });
+
+  it('names and links the ticket a merged one went into, which is the one a supervisor can open', async () => {
+    await team();
+    const merged = await surveyed();
+    const survivor = await surveyed();
+    await db
+      .update(conversations)
+      .set({ mergedIntoId: survivor.conversationId })
+      .where(eq(conversations.id, merged.conversationId));
+    await recordAnswer(merged.surveyId, 1, null, 'page');
+
+    await notifyLowRating(job(merged.surveyId));
+
+    for (const email of await emails()) {
+      expect(email.subject).toBe(`Ticket #${survivor.number} was rated 1 / 5`);
+      expect(email.textBody).toContain(`https://support.example.test/inbox/${survivor.number}`);
+      expect(email.textBody).not.toContain(`/inbox/${merged.number}`);
+    }
+    expect(await emails()).toHaveLength(2);
+    // The event stays on the ticket the customer rated, beside its rating.
+    expect(await events(merged.conversationId, 'csat_low_rating')).toHaveLength(1);
   });
 
   it('tells nobody twice, run again or twice at once', async () => {

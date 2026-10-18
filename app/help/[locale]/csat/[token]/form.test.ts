@@ -36,14 +36,39 @@ const NOT_CONFIRMED = t('en', 'csatNotConfirmed');
 
 /** The route's answers, in order: a status, or `'drop'` for a reply that never came. */
 function route(answers: (number | 'drop' | 'hang')[]) {
-  const fetch = vi.fn(async () => {
+  const fetch = vi.fn(async (_url: string, init?: RequestInit) => {
     const answer = answers.shift() ?? 204;
     if (answer === 'drop') throw new TypeError('Failed to fetch');
-    if (answer === 'hang') return new Promise<Response>(() => {});
+    // Never answered, until the page's own deadline gives up on it.
+    if (answer === 'hang') {
+      return new Promise<Response>((_resolve, reject) =>
+        init?.signal?.addEventListener('abort', () => reject(new DOMException('', 'AbortError'))),
+      );
+    }
     return new Response(null, { status: answer });
   });
   vi.stubGlobal('fetch', fetch);
   return fetch;
+}
+
+/** The route, answering each post only when the test says, in any order. */
+function heldRoute() {
+  const held: ((status: number) => void)[] = [];
+  const fetch = vi.fn(
+    () =>
+      new Promise<Response>((resolve) => {
+        held.push((status) => resolve(new Response(null, { status })));
+      }),
+  );
+  vi.stubGlobal('fetch', fetch);
+  return {
+    fetch,
+    answer: async (call: number, status: number) => {
+      await act(async () => {
+        held[call]!(status);
+      });
+    },
+  };
 }
 
 function mount(props: { preselected?: number | null; preview?: boolean } = {}) {
@@ -174,6 +199,82 @@ describe('SurveyForm', () => {
     expect(text()).toContain(NOT_CONFIRMED);
     expect(shut(button(labels[4]))).toBe(true);
     expect(button(labels[1]).getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('waits for the route when the button is pressed while the tap is still on the wire', async () => {
+    // The tap never settles; the button's own post of the same rating drops.
+    // Thanked on the tap's say-so, the customer would believe they answered.
+    const fetch = route(['hang', 'drop']);
+    mount();
+
+    await click(button(labels[0]));
+    await type('It never came.');
+    await click(button(DEFAULT_WORDING.en.button));
+
+    expect(posted(fetch, 1)).toEqual({ token: 'token-1', rating: 1, comment: 'It never came.' });
+    expect(text()).not.toContain(DEFAULT_WORDING.en.thanks);
+    expect(text()).toContain(NOT_CONFIRMED);
+  });
+
+  it('says it is sending while the button’s post is on the wire, and takes no second press', async () => {
+    const fetch = route(['drop', 'hang']);
+    mount();
+
+    await click(button(labels[0]));
+    await click(button(DEFAULT_WORDING.en.button));
+
+    const busy = button(t('en', 'csatSending'));
+    expect(busy.getAttribute('aria-busy')).toBe('true');
+    await click(busy);
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('takes no second press of the button while its first post of a preselected rating is on the wire', async () => {
+    const fetch = route(['hang']);
+    mount({ preselected: 2 });
+
+    await click(button(DEFAULT_WORDING.en.button));
+    await click(button(t('en', 'csatSending')));
+
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(text()).not.toContain(DEFAULT_WORDING.en.thanks);
+  });
+
+  it('thanks the customer when the tap was taken while the button’s own post was out, whatever that post meets', async () => {
+    // The tap is slow; Send is pressed meanwhile; the tap is taken, and only
+    // then is the button's post refused. The rating is in: saying it may not
+    // be, and offering to send it again, would be the page contradicting the
+    // route.
+    const { answer } = heldRoute();
+    mount();
+
+    await click(button(labels[0]));
+    await click(button(DEFAULT_WORDING.en.button));
+    await answer(0, 204);
+    await answer(1, 429);
+
+    expect(text()).not.toContain(NOT_CONFIRMED);
+    expect(text()).toContain(DEFAULT_WORDING.en.thanks);
+  });
+
+  it('gives up on a post nothing answers, and gives the customer the button back', async () => {
+    vi.useFakeTimers();
+    try {
+      route(['hang', 204]);
+      mount({ preselected: 2 });
+
+      await click(button(DEFAULT_WORDING.en.button));
+      expect(button(t('en', 'csatSending')).getAttribute('aria-busy')).toBe('true');
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(15_000);
+      });
+
+      expect(text()).toContain(NOT_CONFIRMED);
+      await click(button(DEFAULT_WORDING.en.button));
+      expect(text()).toContain(DEFAULT_WORDING.en.thanks);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('sends a comment after a rating the route took without waiting on it', async () => {

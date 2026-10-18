@@ -1,4 +1,4 @@
-import { emailShell, escapeHtml } from '@/lib/email/html';
+import { emailButton, emailShell, escapeHtml } from '@/lib/email/html';
 import type { NotificationEmail } from '@/lib/email/notify';
 import { formatDateTime } from '@/lib/format';
 
@@ -79,19 +79,7 @@ export function inviteEmail({
     htmlBody: emailShell([
       `<p>${escapeHtml(greeting)}</p>`,
       `<p>${escapeHtml(inviter)} to join the ShipBlu Support team console — the tool the team answers customer tickets in.</p>`,
-      // A styled anchor rather than a <button>: a button in an email is a form
-      // control that does nothing, and Outlook strips it. Padding and a
-      // background on an <a> is the call-to-action every client renders.
-      // #1558ad is `--color-brand-600` resolved to hex. It is written out
-      // rather than referenced because an email is not the app: no client
-      // supports a CSS variable, and Outlook and Gmail do not support oklch —
-      // both would drop the declaration and render a white-on-white button.
-      // So this is a copy that has to be updated by hand if the brand moves.
-      `<p style="margin:24px 0"><a href="${escapeHtml(url)}" style="display:inline-block;background:#1558ad;color:#ffffff;text-decoration:none;padding:12px 20px;border-radius:6px;font-weight:600">Activate your account</a></p>`,
-      // The bare URL below the button, because a proportion of clients render
-      // the anchor without making it clickable and the recipient is then
-      // holding a message with no way to act on it.
-      `<p style="color:#666;font-size:13px">If the button does not work, copy this link into your browser:<br /><span style="word-break:break-all">${escapeHtml(url)}</span></p>`,
+      ...emailButton(url, 'Activate your account'),
       `<p style="color:#666;font-size:13px">${escapeHtml(expiry)} If you were not expecting this, ignore the email — the account is not created until you set a password.</p>`,
       '<p>ShipBlu Support</p>',
     ]),
