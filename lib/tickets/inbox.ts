@@ -22,6 +22,7 @@ import { rootCommentId } from '@/lib/meta/comments';
 import { sbidMatches, trackingMatches } from '@/lib/shipments/queries';
 import { cleanQuery, textMatches } from '@/lib/search/text';
 import { parseSearchTerm } from './search';
+import { ratedLowRecently } from '@/lib/reports/csat-queries';
 import { type InboxCursor, type InboxFilters, PAGE_SIZE, encodeInboxCursor } from './inbox-filters';
 
 /**
@@ -190,6 +191,16 @@ export async function listInbox(
 
   if (filters.channel !== 'all') {
     where.push(eq(conversations.channel, filters.channel));
+  }
+
+  // The "Rated 1–2" view: tickets a customer rated low in the report's week,
+  // today and the six days before it in the team's zone. Behind `report.view`
+  // as the report's comments are, and enforced here rather than by not
+  // offering the view, so a hand-typed `?rating=low` returns nothing for
+  // anybody else — as forcing a restricted channel does. Before the named
+  // scope, so `#812` searched inside the view still has to be rated low.
+  if (filters.rating === 'low') {
+    where.push(can(agent, 'report.view') ? await ratedLowRecently() : sql`false`);
   }
 
   // Everything but the status and the search: what the ticket a query names by

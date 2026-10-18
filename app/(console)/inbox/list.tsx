@@ -15,6 +15,7 @@ import type { ViewsPanelSection } from '@/components/views-panel';
 import { DEFAULT_LOCALE } from '@/lib/kb/locale';
 import type { InboxRow } from '@/lib/tickets/inbox';
 import type { InboxFilters } from '@/lib/tickets/inbox-filters';
+import { LOW_RATINGS_IN_WORDS, RATED_LOW_DAYS } from '@/lib/csat/limits';
 import { FILTERABLE_CHANNELS, isRestrictedChannel } from '@/lib/tickets/channel-policy';
 import { rowBadges } from '@/lib/tickets/inbox-badges';
 import { messageLines } from '@/lib/tickets/inbox-lines';
@@ -45,6 +46,8 @@ export function InboxList({
   activeView,
   layout = 'avatar',
   canSeeBot = false,
+  canSeeRatings = false,
+  canViewAll = false,
   canCreate = false,
   canViewContacts = false,
 }: {
@@ -56,6 +59,10 @@ export function InboxList({
   activeView: string | null;
   layout?: 'avatar' | 'ticket';
   canSeeBot?: boolean;
+  /** `report.view`: without it `listInbox` answers the rated view with nothing. */
+  canSeeRatings?: boolean;
+  /** `ticket.view.all`: without it every list is the agent's own tickets. */
+  canViewAll?: boolean;
   canCreate?: boolean;
   /** The avatar route answers 404 without `contact.view`, so the tile is not asked for one. */
   canViewContacts?: boolean;
@@ -75,15 +82,21 @@ export function InboxList({
     onScroll,
   } = useOlderPages({ firstPage: rows, nextCursor, filters, params });
 
-  function setParam(key: string, value: string) {
+  function setParams(changes: Record<string, string>) {
     const next = new URLSearchParams(params.toString());
-    if (value) next.set(key, value);
-    else next.delete(key);
+    for (const [key, value] of Object.entries(changes)) {
+      if (value) next.set(key, value);
+      else next.delete(key);
+    }
     // Strips the page number a bookmark or a still-open tab may carry from when
     // this list was paged. It no longer means anything, and leaving it in the
     // URL suggests it does.
     next.delete('page');
     router.push(`${pathname}?${next.toString()}`);
+  }
+
+  function setParam(key: string, value: string) {
+    setParams({ [key]: value });
   }
 
   // The server's first page is always the freshest view of the top of the
@@ -212,6 +225,39 @@ export function InboxList({
             ))}
           </Select>
         </div>
+
+        {/*
+          The rated view narrows by an axis no select shows, and the selects
+          carry it, as they carry the view: change Status or Channel inside it
+          and the header reads "Custom filter" over a list still cut to low
+          ratings. So whatever the header says, this line says why the list is
+          short, and how to stop it — including to somebody handed the link
+          who may not see ratings, for whom the list is empty for that reason
+          and not because nobody rated low.
+        */}
+        {filters.rating === 'low' ? (
+          <p className="flex flex-wrap items-center gap-x-2 text-xs text-(--color-text-secondary)">
+            {canSeeRatings
+              ? `Only tickets a customer rated ${LOW_RATINGS_IN_WORDS} in the last ${RATED_LOW_DAYS} days.`
+              : 'Low ratings are listed only for people who can see the satisfaction report.'}
+            <Button
+              variant="ghost"
+              size="sm"
+              // Every status was the view's choice, not the agent's: kept, the
+              // button would land on a "Custom filter" of every ticket on any
+              // status. Cleared, it lands on All open — or on a channel or a
+              // status the agent narrowed to inside the view, which stays.
+              onClick={() =>
+                setParams({
+                  rating: '',
+                  ...(filters.statusCategory === 'all' ? { status: '' } : {}),
+                })
+              }
+            >
+              Stop filtering by rating
+            </Button>
+          </p>
+        ) : null}
       </div>
 
       <ol
@@ -222,7 +268,15 @@ export function InboxList({
       >
         {visible.length === 0 ? (
           <li>
-            <EmptyState title="Nothing matches those filters." />
+            <EmptyState
+              title={
+                activeView === 'rated-low' && !filters.q
+                  ? // Said of what the list can reach: an agent who sees only
+                    // their own tickets hears about theirs, not the team's.
+                    `${canViewAll ? 'No ticket' : 'None of your tickets'} was rated ${LOW_RATINGS_IN_WORDS} in the last ${RATED_LOW_DAYS} days.`
+                  : 'Nothing matches those filters.'
+              }
+            />
           </li>
         ) : null}
 

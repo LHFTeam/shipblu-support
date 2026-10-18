@@ -13,6 +13,7 @@ import {
   type SQL,
   type SQLWrapper,
 } from 'drizzle-orm';
+import type { AnyPgColumn } from 'drizzle-orm/pg-core';
 import { db } from '@/db/client';
 import { conversationEvents, conversations, csatSurveys, metricsDaily } from '@/db/schema';
 import { businessMinutesBetween, type HoursConfig } from '@/lib/hours';
@@ -71,10 +72,21 @@ export type ReportingContext = { zone: string; hoursFor: HoursFor };
 export async function reportingContext(): Promise<ReportingContext> {
   const [catalog, policies] = await Promise.all([loadHoursCatalog(), loadPolicies()]);
 
-  return {
-    zone: defaultHours(catalog)?.timezone ?? FALLBACK_ZONE,
-    hoursFor: hoursResolver(catalog, policies),
-  };
+  return { zone: zoneOf(catalog), hoursFor: hoursResolver(catalog, policies) };
+}
+
+/**
+ * The zone alone, for a live read that needs the team's days and no calendar
+ * — the inbox's rated view. From the same memoised catalog as
+ * `reportingContext`, so a list and the report beside it cut their days at
+ * the same midnight.
+ */
+export async function reportingZone(): Promise<string> {
+  return zoneOf(await loadHoursCatalog());
+}
+
+function zoneOf(catalog: HoursCatalog): string {
+  return defaultHours(catalog)?.timezone ?? FALLBACK_ZONE;
 }
 
 /** The team's current date, which is what "today" means everywhere below. */
@@ -464,6 +476,14 @@ export async function computeDay(
 }
 
 /**
+ * `conversations`, or an alias of it (`alias(conversations, 'rated')`), for
+ * `workedConversation` and `surveyedConversation` when they are read inside
+ * a subquery over a second copy of the table: written against
+ * `conversations` itself there, they would bind to the outer row.
+ */
+type TicketColumns = Record<'channel' | 'sourceSystem' | 'deletedAt' | 'isSpam', AnyPgColumn>;
+
+/**
  * Conversations the team actually worked, as a condition on `conversations`.
  *
  * Applied to every query in `computeDay` rather than subtracted from the
@@ -482,11 +502,8 @@ export async function computeDay(
  * same surveys the rollup does or the page's check of one against the other
  * would report a gap that is only two definitions.
  */
-export function workedConversation() {
-  return and(
-    notInArray(conversations.channel, readOnlyChannels()),
-    ne(conversations.sourceSystem, 'import'),
-  );
+export function workedConversation(ticket: TicketColumns = conversations) {
+  return and(notInArray(ticket.channel, readOnlyChannels()), ne(ticket.sourceSystem, 'import'));
 }
 
 /**
@@ -498,12 +515,8 @@ export function workedConversation() {
  * resolutions that did not. The satisfaction report's live reads take the
  * same filter, for the reason `workedConversation()` is exported.
  */
-export function surveyedConversation() {
-  return and(
-    isNull(conversations.deletedAt),
-    eq(conversations.isSpam, false),
-    workedConversation(),
-  );
+export function surveyedConversation(ticket: TicketColumns = conversations) {
+  return and(isNull(ticket.deletedAt), eq(ticket.isSpam, false), workedConversation(ticket));
 }
 
 /**

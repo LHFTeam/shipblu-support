@@ -1,8 +1,18 @@
 import { eq, inArray } from 'drizzle-orm';
-import { describe, expect, it } from 'vitest';
+import { DateTime } from 'luxon';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { db } from '@/db/client';
-import { agents, contacts, conversations, messages, ticketStatuses } from '@/db/schema';
+import {
+  agents,
+  businessHours,
+  contacts,
+  conversations,
+  csatSurveys,
+  messages,
+  ticketStatuses,
+} from '@/db/schema';
 import type { SessionAgent } from '@/lib/auth/session';
+import { forgetHoursCatalog } from '@/lib/hours/catalog';
 import { withCleanDatabase } from '@/lib/testing/db';
 import { getConversation } from './conversation';
 import { listInbox } from './inbox';
@@ -565,5 +575,148 @@ describe('listInbox search', () => {
     const { rows } = await listInbox(agent, parseFilters({ q: `#${theirs!.number}` }));
 
     expect(rows).toEqual([]);
+  });
+});
+
+describe('the Rated 1–2 view', () => {
+  const RATED = parseFilters({ status: 'all', rating: 'low' });
+  // Noon in Cairo, pinned: the window is read from the clock when the list is
+  // asked for, and a team midnight passing between the fixtures and the query
+  // would move it a day under the test. Only `Date` is faked; the database's
+  // clock plays no part, since the window is bound as two dates.
+  const NOON = DateTime.fromISO('2026-10-14T12:00', { zone: 'Africa/Cairo' });
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(NOON.toJSDate());
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    forgetHoursCatalog();
+  });
+
+  async function statusId(name: string): Promise<string> {
+    const [row] = await db
+      .select({ id: ticketStatuses.id })
+      .from(ticketStatuses)
+      .where(eq(ticketStatuses.name, name));
+    return row!.id;
+  }
+
+  /** A ticket in `status`, rated `rating` at `respondedAt`. */
+  async function rated(
+    rating: number,
+    respondedAt: Date,
+    status = 'Resolved',
+    assigneeAgentId: string | null = null,
+  ) {
+    const [contact] = await db.insert(contacts).values({ name: 'Amira' }).returning();
+    const [row] = await db
+      .insert(conversations)
+      .values({
+        channel: 'email',
+        statusId: await statusId(status),
+        requesterContactId: contact!.id,
+        assigneeAgentId,
+      })
+      .returning({ id: conversations.id, number: conversations.number });
+    await db
+      .insert(csatSurveys)
+      .values({ conversationId: row!.id, status: 'answered', rating, respondedAt });
+    return row!;
+  }
+
+  const anHourAgo = () => NOON.minus({ hours: 1 }).toJSDate();
+
+  it('lists a low rating from the last seven days on any status, once per ticket', async () => {
+    const agent = await admin();
+    const firstDay = NOON.startOf('day').minus({ days: 6 });
+
+    const resolved = await rated(1, anHourAgo());
+    const closed = await rated(2, anHourAgo(), 'Closed');
+    const reopened = await rated(1, firstDay.plus({ minutes: 5 }).toJSDate(), 'Open');
+    // Answered low twice: one row, and the paging stays clean.
+    await db.insert(csatSurveys).values({
+      conversationId: resolved.id,
+      status: 'answered',
+      rating: 2,
+      respondedAt: anHourAgo(),
+    });
+    await rated(3, anHourAgo());
+    // A minute before the window's first midnight.
+    await rated(1, firstDay.minus({ minutes: 1 }).toJSDate());
+
+    const { rows, nextCursor } = await listInbox(agent, RATED);
+    expect(rows.map((row) => row.id).sort()).toEqual([resolved.id, closed.id, reopened.id].sort());
+    expect(nextCursor).toBeNull();
+  });
+
+  it('cuts its days at the team’s midnight, wherever the team’s schedule is', async () => {
+    const agent = await admin();
+    await db
+      .update(businessHours)
+      .set({ timezone: 'America/Los_Angeles' })
+      .where(eq(businessHours.isDefault, true));
+    forgetHoursCatalog();
+    vi.setSystemTime(
+      DateTime.fromISO('2026-10-14T12:00', { zone: 'America/Los_Angeles' }).toJSDate(),
+    );
+
+    // The window's first day is the 8th in Los Angeles, which begins at 10:00
+    // in Cairo: an answer at 05:00 in Cairo is a day too early there, though a
+    // Cairo window would hold it.
+    const early = await rated(
+      1,
+      DateTime.fromISO('2026-10-08T05:00', { zone: 'Africa/Cairo' }).toJSDate(),
+    );
+    const inside = await rated(
+      1,
+      DateTime.fromISO('2026-10-08T12:00', { zone: 'Africa/Cairo' }).toJSDate(),
+    );
+
+    const ids = (await listInbox(agent, RATED)).rows.map((row) => row.id);
+    expect(ids).toEqual([inside.id]);
+    expect(ids).not.toContain(early.id);
+  });
+
+  it('lists the ticket a low-rated one was merged into', async () => {
+    const agent = await admin();
+    const merged = await rated(1, anHourAgo());
+    const survivor = await rated(5, anHourAgo(), 'Open');
+    await db
+      .update(conversations)
+      .set({ mergedIntoId: survivor.id })
+      .where(eq(conversations.id, merged.id));
+
+    expect((await listInbox(agent, RATED)).rows.map((row) => row.id)).toEqual([survivor.id]);
+  });
+
+  it('returns nothing to an agent who may not see the ratings, however the URL asks', async () => {
+    const agent = { ...(await admin()), permissions: { 'report.view': false } };
+    await rated(1, anHourAgo());
+
+    expect((await listInbox(agent, RATED)).rows).toEqual([]);
+  });
+
+  it('shows an agent who sees only their own tickets only their own', async () => {
+    const agent = {
+      ...(await signedIn('agent', 'mona@shipblu.test')),
+      permissions: { 'report.view': true, 'ticket.view.all': false },
+    };
+    const theirs = await rated(1, anHourAgo(), 'Resolved', agent.id);
+    await rated(1, anHourAgo());
+
+    expect((await listInbox(agent, RATED)).rows.map((row) => row.id)).toEqual([theirs.id]);
+  });
+
+  it('keeps a ticket named by number to the view', async () => {
+    const agent = await admin();
+    const low = await rated(1, anHourAgo());
+    const high = await rated(5, anHourAgo());
+
+    const search = (number: number) =>
+      listInbox(agent, parseFilters({ status: 'all', rating: 'low', q: `#${number}` }));
+    expect((await search(low.number)).rows.map((row) => row.id)).toEqual([low.id]);
+    expect((await search(high.number)).rows).toEqual([]);
   });
 });

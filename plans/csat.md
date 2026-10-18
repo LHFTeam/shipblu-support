@@ -548,6 +548,35 @@ Actions follow the repo shape: `requirePermission('admin.csat')`, write,
 
 Elsewhere in the console:
 
+- **Inbox**, the view "Rated 1–2" (stage 7).
+
+  _Built (stage 7c):_ a built-in view under "Satisfaction", over a new URL
+  axis, `rating=low`: tickets a customer rated 1 or 2 (`LOW_RATING_MAX`) in
+  the report's week — today and the six days before it, from the team's
+  midnight (`rangeIn(reportingZone(), RATED_LOW_DAYS)`) — on any status, since a rated
+  ticket is resolved, closed or reopened. Rolling rather than a calendar
+  week, which would empty the view the morning a week began; so it is named
+  "Rated 1–2" and the list says "in the last 7 days" rather than "this
+  week". `ratedLowWithin` is an `in` over the tickets answered low in the
+  window, keyed on `responded_at`, over the conversations the report counts,
+  so a ticket answered low twice is one row and the keyset paging is
+  untouched. A ticket since merged names the one it was merged into, which
+  the inbox can list. Postgres plans it as a semi-join, as it would an
+  `exists`; on production it drives from the surveys. `ratedLowRecently` owns
+  the window (`RATED_LOW_DAYS`, the team's zone). Behind
+  `report.view`, like the report's comments, and enforced inside `listInbox`
+  rather than by not offering the view, so `?rating=low` typed by anybody
+  else returns nothing; a ticket named by number inside the view must still
+  be rated low. No select offers the axis and the selects carry it, so the
+  list says so in a line with "Stop filtering by rating" whenever it is on —
+  and, to somebody handed the link who may not see ratings, that this is why
+  it is empty. The button also drops the view's every-status preset, so it
+  lands on All open (or on a channel or status the agent narrowed to inside
+  the view) rather than a "Custom filter" of every ticket on any status. It
+  has no count. A new rating reaches the list on its next
+  render, whatever causes one; the answer itself sets none off, since nothing
+  notifies on `csat_surveys`.
+
 - **Ticket sidebar**, a "Satisfaction" `DetailsSection`: the rating and
   comment with the source and time; "not surveyed — _reason_" for a skipped
   row; the "Don't survey this ticket" toggle; and "Send survey now" on a

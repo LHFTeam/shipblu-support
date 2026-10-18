@@ -4,7 +4,13 @@ import { describe, expect, it } from 'vitest';
 import { db } from '@/db/client';
 import { agents, contacts, conversations, csatSurveys, ticketStatuses } from '@/db/schema';
 import { withCleanDatabase } from '@/lib/testing/db';
-import { firstSend, latestComments, liveSurveys, skipReasons } from './csat-queries';
+import {
+  firstSend,
+  latestComments,
+  liveSurveys,
+  ratedLowWithin,
+  skipReasons,
+} from './csat-queries';
 import type { ReportWindow } from './rollup';
 
 /**
@@ -248,5 +254,105 @@ describe('a ticket since deleted or marked spam', () => {
     expect(await liveSurveys(WINDOW)).toEqual([]);
     expect(await skipReasons(WINDOW)).toEqual([]);
     expect(await firstSend(ZONE)).toBeNull();
+  });
+});
+
+describe('ratedLowWithin', () => {
+  async function ratedLow() {
+    const rows = await db
+      .select({ number: conversations.number })
+      .from(conversations)
+      .where(ratedLowWithin(WINDOW))
+      .orderBy(conversations.number);
+    return rows.map((row) => row.number);
+  }
+  const answered = (rating: number | null, local: string, channel?: Channel) =>
+    survey({ status: 'answered', rating, respondedAt: at(local) }, channel);
+
+  it('takes a 1 or a 2 answered on the window’s days, in the team’s zone', async () => {
+    const one = await answered(1, '2026-10-11T00:05');
+    const two = await answered(2, '2026-10-13T23:55');
+    // A 3 is not low, nor a 0 off the scale below it; a survey nobody
+    // answered has no rating.
+    await answered(3, '2026-10-12T12:00');
+    await answered(0, '2026-10-12T12:00');
+    await survey({ status: 'sent', sentAt: at('2026-10-12T12:00') });
+    // Five minutes before the first Cairo midnight, and five after the last:
+    // both outside, though in UTC the second is still the 13th.
+    await answered(1, '2026-10-10T23:55');
+    await answered(1, '2026-10-14T00:05');
+
+    expect(await ratedLow()).toEqual([one, two]);
+  });
+
+  it('counts only the conversations the report counts', async () => {
+    const counted = await answered(1, '2026-10-12T12:00');
+    await answered(1, '2026-10-12T12:00', 'whatsapp_bot');
+    const spam = await answered(1, '2026-10-12T12:00');
+    await db.update(conversations).set({ isSpam: true }).where(eq(conversations.number, spam));
+    const deleted = await answered(2, '2026-10-12T12:00');
+    await db
+      .update(conversations)
+      .set({ deletedAt: at('2026-10-15T09:00') })
+      .where(eq(conversations.number, deleted));
+    const imported = await answered(2, '2026-10-12T12:00');
+    await db
+      .update(conversations)
+      .set({ sourceSystem: 'import' })
+      .where(eq(conversations.number, imported));
+
+    expect(await ratedLow()).toEqual([counted]);
+  });
+
+  it('is one row for a ticket answered low twice', async () => {
+    const number = await answered(1, '2026-10-11T10:00');
+    const [row] = await db
+      .select({ id: conversations.id })
+      .from(conversations)
+      .where(eq(conversations.number, number));
+    await db.insert(csatSurveys).values({
+      conversationId: row!.id,
+      status: 'answered',
+      rating: 2,
+      respondedAt: at('2026-10-12T10:00'),
+    });
+
+    expect(await ratedLow()).toEqual([number]);
+  });
+
+  it('names the ticket a rated one was merged into, as the inbox lists no merged ticket', async () => {
+    const rated = await answered(1, '2026-10-12T12:00');
+    // Its survivor was rated too, but not low: it is listed for the merge.
+    const survivor = await answered(5, '2026-10-12T12:00');
+    const idOf = async (number: number) =>
+      (
+        await db
+          .select({ id: conversations.id })
+          .from(conversations)
+          .where(eq(conversations.number, number))
+      )[0]!.id;
+    await db
+      .update(conversations)
+      .set({ mergedIntoId: await idOf(survivor) })
+      .where(eq(conversations.number, rated));
+    // The report's filter holds on the rated ticket, not its survivor: an
+    // answer on a ticket marked spam, deleted, imported or on the bot counts
+    // nowhere, merged or not — one case per column of the filter.
+    const uncounted: [Partial<typeof conversations.$inferInsert>, Channel?][] = [
+      [{ isSpam: true }],
+      [{ deletedAt: at('2026-10-15T09:00') }],
+      [{ sourceSystem: 'import' }],
+      [{}, 'whatsapp_bot'],
+    ];
+    for (const [change, channel] of uncounted) {
+      const uncountedRated = await answered(1, '2026-10-12T12:00', channel);
+      const cleanSurvivor = await answered(5, '2026-10-12T12:00');
+      await db
+        .update(conversations)
+        .set({ ...change, mergedIntoId: await idOf(cleanSurvivor) })
+        .where(eq(conversations.number, uncountedRated));
+    }
+
+    expect(await ratedLow()).toEqual([survivor]);
   });
 });

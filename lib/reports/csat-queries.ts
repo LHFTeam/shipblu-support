@@ -1,26 +1,90 @@
-import { and, between, desc, eq, isNotNull, sql, type Column } from 'drizzle-orm';
+import {
+  and,
+  between,
+  desc,
+  eq,
+  inArray,
+  isNotNull,
+  sql,
+  type Column,
+  type SQL,
+} from 'drizzle-orm';
+import { alias } from 'drizzle-orm/pg-core';
 import { DateTime } from 'luxon';
 import { db } from '@/db/client';
 import { agents, conversations, csatSurveys } from '@/db/schema';
+import { LOW_RATING_MAX, RATED_LOW_DAYS } from '@/lib/csat/limits';
 import { describeSkip } from '@/lib/csat/skip-reasons';
 import type { Totals } from './queries';
-import { surveyedConversation, within, type ReportWindow } from './rollup';
+import { rangeIn, reportingZone, surveyedConversation, within, type ReportWindow } from './rollup';
 
 /**
  * The satisfaction report's live reads: what the rollup cannot hold.
  *
  * Everything with a number in it on `/reports/csat` comes from `metrics_daily`
- * through `queries.ts`. These three read `csat_surveys` itself, each for a
+ * through `queries.ts`. These read `csat_surveys` itself, each for a
  * reason a sum cannot serve — why tickets went unsurveyed, keyed on a reason
  * the rollup has no column for; the customers' own words; and the sends and
  * decisions against day by day, to check the rollup against. Each is a few
  * rows or an indexed count over the window, never an aggregate over the
- * archive.
+ * archive. And one predicate the inbox borrows (`ratedLowRecently`), so its
+ * "Rated 1–2" view keys an answer exactly as these do.
  *
  * Every one counts the conversations the rollup counts (`surveyedConversation`),
  * and keys a survey on the timestamp the rollup does for the same fact, so the
  * live sections and the figures above them describe one set of surveys.
  */
+
+/**
+ * A ticket a customer rated low inside the window, for a query over
+ * `conversations` — the inbox's "Rated 1–2" view, on the report's definition
+ * of an answer: `responded_at` in the team's zone (`within`), over the
+ * conversations the rollup counts. Not the same number as the report's
+ * "rated 1 or 2", which counts answers to yesterday where this lists tickets
+ * to now.
+ *
+ * An `in` over the set of tickets answered low in the window, so that each
+ * answer can name the ticket the inbox is able to list: a survey on a ticket
+ * since merged into another names the one it was merged into
+ * (`coalesce(merged_into_id, id)`). The report still counts that answer and
+ * the inbox lists no merged ticket, so without it the 1 would be on the
+ * report and nowhere in the view. A ticket answered low twice — rated,
+ * reopened, surveyed and rated again — is still one row, and the inbox's
+ * keyset paging stays clean. Postgres plans this `in` as a semi-join, as it
+ * would an `exists`, and picks the order by cost; on production's 63k
+ * tickets it drives from the few surveys, then looks tickets up by key.
+ *
+ * The rated ticket is held to the report's filter through an alias, which
+ * keeps every column of the filter on the survey's ticket rather than the
+ * outer one.
+ */
+export function ratedLowWithin(window: ReportWindow): SQL {
+  const rated = alias(conversations, 'rated');
+  return inArray(
+    conversations.id,
+    db
+      .select({ id: sql`coalesce(${rated.mergedIntoId}, ${rated.id})` })
+      .from(csatSurveys)
+      .innerJoin(rated, eq(rated.id, csatSurveys.conversationId))
+      .where(
+        and(
+          between(csatSurveys.rating, 1, LOW_RATING_MAX),
+          within(csatSurveys.respondedAt, window),
+          surveyedConversation(rated),
+        ),
+      ),
+  );
+}
+
+/**
+ * `ratedLowWithin` over the view's own window — the last `RATED_LOW_DAYS`
+ * days to the team's midnight (`reportingZone`, `rangeIn`) — so the inbox
+ * asks one thing and the window is defined in one place.
+ */
+export async function ratedLowRecently(): Promise<SQL> {
+  const zone = await reportingZone();
+  return ratedLowWithin({ ...rangeIn(zone, RATED_LOW_DAYS), zone });
+}
 
 export type SkipCount = { reason: string; label: string; count: number };
 
