@@ -562,19 +562,25 @@ Elsewhere in the console:
   _Built (stage 7a):_ the action sets the agent's flag,
   `conversations.csat_suppressed`, read when the survey job runs, so it works
   whenever it lands before the survey goes out — after a resolve that has
-  already queued the survey included. A rule runs its `suppress_survey` ahead
-  of its other actions, so "Set status, then don't survey" cannot lose to the
-  survey its own resolve queued. `suppressSurveyByRule` writes the flag only
-  where it changes something, so a rule that matches every fifteen minutes
-  puts one `csat_suppressed` event on the timeline, named for the rule; and
-  never where an agent pressed "Allow a survey" on the ticket, which the next
-  update or time rule would otherwise undo — in the very request, when the
-  agent resolves from the status picker, which runs `on_update` straight
-  after. The sidebar says when a rule set the flag, and that allowing a survey
-  keeps rules off the ticket. The skip says which of them it was:
-  `rule_suppressed` beside `agent_suppressed`, read off the newest
-  `csat_suppressed` event (`suppressedBy`), as `resolvedByRule` reads who
-  resolved a ticket, so no column was added. With the delay at 0 a rule in a
+  already queued the survey included. A rule's resolve queues its survey only
+  once the whole pass of rules is over (`applyRules`), so a `suppress_survey`
+  in the same pass — later in the resolving rule, or in a later rule —
+  cannot lose to it, and rules resolving twice queue one survey.
+  `suppressSurveyByRule` writes the flag only where it changes something, so
+  a rule that matches every fifteen minutes puts one `csat_suppressed` event
+  on the timeline, named for the rule, and skips the write altogether where
+  the pass found the flag on; and never where an agent allowed a survey after
+  a rule had kept it off, which the next update or time rule would otherwise
+  undo — in the very request, when the agent resolves from the status
+  picker, which runs `on_update` straight after. An agent undoing their own
+  "Don't survey" overruled no rule and stops none. The sidebar says when a
+  rule set the flag, and, where there is a button to press, that allowing a
+  survey keeps rules off the ticket. The skip says which of them it was:
+  `rule_suppressed` beside `agent_suppressed` (`suppressionReason`), read off
+  the newest `csat_suppressed` event (`suppressedBy`), as `resolvedByRule`
+  reads who resolved a ticket, so no column was added. Both writers stamp
+  their event once they hold the ticket's row, as `PRIORITY_STAMP` does, so
+  "newest" is the order the flag was written. With the delay at 0 a rule in a
   later request can lose to the survey, as the agent's own toggle can.
 
   Which rules can catch a ticket follows from the triggers. `on_update` runs on

@@ -133,10 +133,11 @@ export function SatisfactionField({
         {suppressedBy === 'rule' ? (
           // Said, because allowing a survey here keeps every rule off the
           // ticket for good (`suppressSurveyByRule`), which nothing else
-          // would tell the agent pressing it.
+          // would tell the agent pressing it — and only where there is a
+          // button to press: on a channel surveys never reach, there is none.
           <p className="text-(--color-text-primary)">
-            An automation rule asked that this ticket not be surveyed. Allowing a survey here keeps
-            rules from turning it off again.
+            An automation rule asked that this ticket not be surveyed.
+            {surveyable ? ' Allowing a survey here keeps rules from turning it off again.' : null}
           </p>
         ) : suppressed ? (
           <p className="text-(--color-text-primary)">This ticket will not be surveyed.</p>

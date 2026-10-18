@@ -15,6 +15,7 @@ import type { ConversationChannel } from '@/lib/tickets/channel-policy';
 import { enqueueAutomatedDelivery, writeAutomatedReply } from '@/lib/tickets/outbound';
 import {
   isClosedChat,
+  suppressionReason,
   surveyAvailability,
   type SuppressedBy,
   type SurveyAvailability,
@@ -329,10 +330,7 @@ export async function sendSurvey(send: SurveySend): Promise<SendOutcome> {
       return { kind: 'skip', reason: 'reopened' };
     }
     if (ticket.suppressedBy !== null) {
-      return {
-        kind: 'skip',
-        reason: ticket.suppressedBy === 'rule' ? 'rule_suppressed' : 'agent_suppressed',
-      };
+      return { kind: 'skip', reason: suppressionReason(ticket.suppressedBy) };
     }
     // `decideSurvey`'s rule, again behind the lock and in its order — after
     // the agent's or the rule's flag: closed in between, a chat is one the
@@ -687,15 +685,32 @@ export async function setSurveySuppressed(
       conversationId,
       type: suppressed ? 'csat_suppressed' : 'csat_unsuppressed',
       actorAgentId: agentId,
+      createdAt: DECISION_STAMP,
       data: {},
     });
   });
 }
 
 /**
+ * The `created_at` of a `csat_suppressed` or `csat_unsuppressed` event, read
+ * once the update before it holds the ticket's row lock — `PRIORITY_STAMP`'s
+ * reasoning. The column default, `now()`, is when the transaction began, so an
+ * agent's toggle that began first and wrote last would sort before a rule's
+ * that committed in between, and `suppressedBy` would name the rule for the
+ * agent's flag; and the guard in `suppressSurveyByRule` orders an allow
+ * against a rule's suppression by the same column.
+ */
+const DECISION_STAMP = sql<Date>`clock_timestamp()`;
+
+/** An event a rule wrote: no agent, and the engine's `automation:` label. */
+function writtenByRule(alias: SQL): SQL {
+  return sql`${alias}.actor_agent_id is null and coalesce(${alias}.actor_label, '') like 'automation:%'`;
+}
+
+/**
  * A rule's `suppress_survey`: the agent's flag, set only where it changes
- * something and only where no agent has said otherwise. Whether it changed
- * anything is the answer, which the engine logs.
+ * something and only where no agent has overruled a rule on the ticket.
+ * Whether it changed anything is the answer, which the engine logs.
  *
  * Conditional in the statement, not on the ticket the engine read, for two
  * reasons. A rule runs again on every update it matches, and a time rule
@@ -705,11 +720,14 @@ export async function setSurveySuppressed(
  * before its first rule runs, so an earlier action or another request can
  * have changed the flag since.
  *
- * An agent who pressed "Allow a survey" on the ticket keeps it allowed: a
- * `csat_unsuppressed` event, which only an agent writes, stops the rule for
- * the rest of the ticket's life. Without it the next update or time rule
- * would undo the agent's choice — in the very request, when the agent
- * resolves from the status picker, which runs `on_update` right after.
+ * An agent who allowed a survey after a rule had kept it off keeps it
+ * allowed: a `csat_unsuppressed` event, which only an agent writes, newer
+ * than a rule's `csat_suppressed`, stops rules for the rest of the ticket's
+ * life. Without it the next update or time rule would undo the agent's
+ * choice — in the very request, when the agent resolves from the status
+ * picker, which runs `on_update` right after. An agent undoing their own
+ * "Don't survey" overruled no rule, so it stops none, and the sidebar warns
+ * only where a rule set the flag.
  */
 export async function suppressSurveyByRule(
   conversationId: string,
@@ -724,8 +742,16 @@ export async function suppressSurveyByRule(
           eq(conversations.id, conversationId),
           eq(conversations.csatSuppressed, false),
           sql`not exists (
-            select 1 from ${conversationEvents} e
-            where e.conversation_id = ${conversations}.id and e.type = 'csat_unsuppressed'
+            select 1 from ${conversationEvents} allowed
+            where allowed.conversation_id = ${conversations}.id
+              and allowed.type = 'csat_unsuppressed'
+              and exists (
+                select 1 from ${conversationEvents} ruled
+                where ruled.conversation_id = ${conversations}.id
+                  and ruled.type = 'csat_suppressed'
+                  and ${writtenByRule(sql`ruled`)}
+                  and ruled.created_at < allowed.created_at
+              )
           )`,
         ),
       )
@@ -737,6 +763,7 @@ export async function suppressSurveyByRule(
       type: 'csat_suppressed',
       // No actor agent: the timeline names the rule, as every action does.
       actorLabel: `automation:${ruleName}`,
+      createdAt: DECISION_STAMP,
       data: {},
     });
     return true;
@@ -767,7 +794,7 @@ export function suppressedBy(): SQL<SuppressedBy | null> {
     when not ${conversations}.csat_suppressed then null
     when coalesce(
       (
-        select e.actor_agent_id is null and coalesce(e.actor_label, '') like 'automation:%'
+        select ${writtenByRule(sql`e`)}
         from ${conversationEvents} e
         where e.conversation_id = ${conversations}.id and e.type = 'csat_suppressed'
         order by e.created_at desc

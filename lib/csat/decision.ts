@@ -39,6 +39,16 @@ export type SurveyTrigger = (typeof SURVEY_TRIGGERS)[number];
  */
 export type SuppressedBy = 'agent' | 'rule';
 
+/**
+ * The skip that names who kept the survey off. One mapping, because the job
+ * asks twice — `decideSurvey` here, and `sendSurvey` again under the ticket's
+ * lock — and a third suppressor written into one and not the other would have
+ * the two name different reasons for the same ticket.
+ */
+export function suppressionReason(by: SuppressedBy): 'agent_suppressed' | 'rule_suppressed' {
+  return by === 'rule' ? 'rule_suppressed' : 'agent_suppressed';
+}
+
 export type DecisionInput = {
   channel: string;
   statusCategory: string;
@@ -209,10 +219,7 @@ export function decideSurvey(input: DecisionInput, settings: CsatSettings): Deci
   if (!input.hasCustomerMessage) return { kind: 'skip', reason: 'no_customer_message' };
 
   if (input.suppressedBy !== null) {
-    return {
-      kind: 'skip',
-      reason: input.suppressedBy === 'rule' ? 'rule_suppressed' : 'agent_suppressed',
-    };
+    return { kind: 'skip', reason: suppressionReason(input.suppressedBy) };
   }
 
   if (input.resolvedByRule && !settings.surveyRuleResolved) {

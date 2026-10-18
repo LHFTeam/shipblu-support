@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { inRunOrder, parseAction, parseActions } from './actions';
+import { parseAction, parseActions } from './actions';
 
 describe('parseAction', () => {
   it('accepts each supported action', () => {
@@ -111,20 +111,5 @@ describe('auto_assign', () => {
     ]);
     expect(actions).toHaveLength(2);
     expect(actions[1]).toMatchObject({ type: 'auto_assign', strategy: 'round_robin' });
-  });
-});
-
-describe('inRunOrder', () => {
-  it('runs a rule’s suppress_survey first and keeps the rest as listed', () => {
-    const actions = parseActions([
-      { type: 'set_status', category: 'resolved' },
-      { type: 'add_tags', tags: ['internal'] },
-      { type: 'suppress_survey' },
-    ]);
-    expect(inRunOrder(actions).map((action) => action.type)).toEqual([
-      'suppress_survey',
-      'set_status',
-      'add_tags',
-    ]);
   });
 });
