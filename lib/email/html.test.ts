@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { escapeHtml, textToEscapedHtml } from './html';
+import { emailButton, escapeHtml, textToEscapedHtml } from './html';
 
 describe('textToEscapedHtml', () => {
   it('escapes markup once, ampersand first', () => {
@@ -15,5 +15,14 @@ describe('textToEscapedHtml', () => {
 
   it('escapes an apostrophe as escapeHtml does, which renders the same in text', () => {
     expect(textToEscapedHtml("can't")).toBe('can&#39;t');
+  });
+});
+
+describe('emailButton', () => {
+  it('escapes the link and the label, and gives the bare link below the button', () => {
+    const [cta, fallback] = emailButton('https://x.test/a?b=1&c="2"', 'Open <ticket>');
+    expect(cta).toContain('href="https://x.test/a?b=1&amp;c=&quot;2&quot;"');
+    expect(cta).toContain('>Open &lt;ticket&gt;</a>');
+    expect(fallback).toContain('https://x.test/a?b=1&amp;c=&quot;2&quot;');
   });
 });

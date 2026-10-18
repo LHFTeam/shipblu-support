@@ -371,7 +371,9 @@ either the SQL that loads those rows or the strategy that picks between them.
 - **Escalation finally reads `groups.escalate_to_agent_id`**, which has been in the schema
   since the first migration with a comment describing exactly this and no code behind it.
   It means what it means in the SLA sweep — the named agent becomes a watcher and the
-  timeline says why — because there is still no agent notification channel in this product.
+  timeline says why — and is emailed nothing. The one email that tells an agent about a
+  ticket is a low rating's alert (`notify_low_rating`), and whether a slow queue warrants one
+  too is its own decision.
 
 ## The customer portal
 
@@ -400,8 +402,11 @@ Private notes are excluded in the query rather than filtered in the renderer, an
 portal query is scoped by the contact id from the session cookie — a ticket number is
 guessable, so the number is never looked up on its own.
 
-Verification and reset links are sent by the `send_notification_email` job, which is the
-only outbound mail in the system that does not belong to a conversation.
+Verification and reset links are sent by the `send_notification_email` job, which carries
+finished mail that is no message on a conversation: these links, an admin's test survey, and
+a low rating's alert to the supervisors, which names a ticket and nothing the customer wrote.
+An agent's invitation is the same kind of mail with a job of its own (`send_agent_invite`), so
+its link is never kept in a payload.
 
 `logged_in` and `selected_companies` knowledge base articles are still not served: the
 public KB queries do not yet take the viewer into account, and an unevaluated visibility

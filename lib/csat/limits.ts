@@ -23,8 +23,10 @@ export const MAX_RESURVEY_DAYS = 365;
  * The highest rating that counts as a low one: a 1 or a 2. The inbox's
  * "Rated 1–2" view reads it for its query (`ratedLowWithin`), its label
  * (`LOW_RATINGS_RANGE`) and the line above its list (`LOW_RATINGS_IN_WORDS`),
- * so the three cannot disagree. The report's "rated 1 or 2" (`ratingShares`)
- * is the same two steps, summed from the distribution's own columns; it moves
+ * and an answer at or below it emails the supervisors
+ * (`lib/csat/low-rating.ts`), so the view and the alert cannot disagree about
+ * which tickets they mean. The report's "rated 1 or 2" (`ratingShares`) is
+ * the same two steps, summed from the distribution's own columns; it moves
  * with this by hand.
  */
 export const LOW_RATING_MAX: number = 2;

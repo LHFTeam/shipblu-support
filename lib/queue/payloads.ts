@@ -62,6 +62,9 @@ export const JOB_PAYLOADS = {
     conversationId: z.string().min(1),
     trigger: z.enum(SURVEY_TRIGGERS).optional(),
   }),
+  // The survey, not the ticket: one alert per answer, and the handler's
+  // once-only check keys on it. Strict because CI runs it by hand.
+  notify_low_rating: z.strictObject({ surveyId: z.uuid() }),
   // Facebook and Instagram hand over a URL, WhatsApp an id to exchange for one.
   // The WhatsApp half names no source, so a Meta payload that lost its URL
   // matches neither half rather than being read as WhatsApp media.

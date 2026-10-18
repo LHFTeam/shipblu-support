@@ -1,4 +1,4 @@
-import { and, eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { describe, expect, it, vi } from 'vitest';
 import { db } from '@/db/client';
 import {
@@ -311,4 +311,44 @@ describe('fallBackToQuickReplies', () => {
       );
     expect(fellBack).toHaveLength(1);
   });
+
+  it('waits for an answer holding the ticket, rather than deadlocking against it', async () => {
+    // An answer takes the ticket's lock and then the survey's row; a fallback
+    // that took the survey's row first and the ticket second (its event's
+    // foreign key) would hold what the answer needs while needing what it
+    // holds, and Postgres would abort one of them.
+    const ticket = await surveyedTicket({ platform: 'facebook', delivery: 'meta_template' });
+
+    let fell: Promise<void> | undefined;
+    await db.transaction(async (tx) => {
+      await tx
+        .select({ id: conversations.id })
+        .from(conversations)
+        .where(eq(conversations.id, ticket.conversationId))
+        .for('update');
+      fell = fallBackToQuickReplies(ticket.surveyId, ticket.messageId);
+      await untilSomebodyWaits();
+      // The answer's own write on the survey, under the ticket's lock.
+      await tx
+        .update(csatSurveys)
+        .set({ status: 'answered', rating: 1, respondedAt: new Date() })
+        .where(eq(csatSurveys.id, ticket.surveyId));
+    });
+    await fell;
+
+    expect(await surveyRow(ticket.surveyId)).toMatchObject({ delivery: 'meta_quick_reply' });
+  });
 });
+
+/** Resolves once another session is waiting on a lock this test holds. */
+async function untilSomebodyWaits(): Promise<void> {
+  for (let tries = 0; tries < 200; tries++) {
+    const [row] = await db.execute<{ waiting: number }>(
+      sql`select count(*)::int as waiting from pg_stat_activity
+          where datname = current_database() and wait_event_type = 'Lock'`,
+    );
+    if (row && row.waiting > 0) return;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error('nothing came to wait on the lock this test holds');
+}

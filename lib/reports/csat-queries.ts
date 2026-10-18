@@ -9,7 +9,7 @@ import {
   type Column,
   type SQL,
 } from 'drizzle-orm';
-import { alias } from 'drizzle-orm/pg-core';
+import { alias, type AnyPgColumn } from 'drizzle-orm/pg-core';
 import { DateTime } from 'luxon';
 import { db } from '@/db/client';
 import { agents, conversations, csatSurveys } from '@/db/schema';
@@ -45,14 +45,14 @@ import { rangeIn, reportingZone, surveyedConversation, within, type ReportWindow
  *
  * An `in` over the set of tickets answered low in the window, so that each
  * answer can name the ticket the inbox is able to list: a survey on a ticket
- * since merged into another names the one it was merged into
- * (`coalesce(merged_into_id, id)`). The report still counts that answer and
- * the inbox lists no merged ticket, so without it the 1 would be on the
- * report and nowhere in the view. A ticket answered low twice — rated,
- * reopened, surveyed and rated again — is still one row, and the inbox's
- * keyset paging stays clean. Postgres plans this `in` as a semi-join, as it
- * would an `exists`, and picks the order by cost; on production's 63k
- * tickets it drives from the few surveys, then looks tickets up by key.
+ * since merged into another names the one it was merged into (`shownOn`).
+ * The report still counts that answer and the inbox lists no merged ticket,
+ * so without it the 1 would be on the report and nowhere in the view. A
+ * ticket answered low twice — rated, reopened, surveyed and rated again — is
+ * still one row, and the inbox's keyset paging stays clean. Postgres plans
+ * this `in` as a semi-join, as it would an `exists`, and picks the order by
+ * cost; on production's 63k tickets it drives from the few surveys, then
+ * looks tickets up by key.
  *
  * The rated ticket is held to the report's filter through an alias, which
  * keeps every column of the filter on the survey's ticket rather than the
@@ -63,7 +63,7 @@ export function ratedLowWithin(window: ReportWindow): SQL {
   return inArray(
     conversations.id,
     db
-      .select({ id: sql`coalesce(${rated.mergedIntoId}, ${rated.id})` })
+      .select({ id: shownOn(rated) })
       .from(csatSurveys)
       .innerJoin(rated, eq(rated.id, csatSurveys.conversationId))
       .where(
@@ -74,6 +74,18 @@ export function ratedLowWithin(window: ReportWindow): SQL {
         ),
       ),
   );
+}
+
+/**
+ * The ticket an answer on `ticket` is shown on: the one it was merged into,
+ * or itself. The inbox lists no merged ticket, so this is the ticket the
+ * "Rated 1–2" view lists for the answer and the one its alert email links to
+ * (`notify_low_rating`) — one expression, so the two cannot come to name
+ * different tickets. `merged_into_id` is `on delete set null`, so it always
+ * names a ticket that exists.
+ */
+export function shownOn(ticket: Record<'id' | 'mergedIntoId', AnyPgColumn>): SQL<string> {
+  return sql<string>`coalesce(${ticket.mergedIntoId}, ${ticket.id})`;
 }
 
 /**

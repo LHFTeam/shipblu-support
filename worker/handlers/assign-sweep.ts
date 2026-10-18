@@ -176,9 +176,11 @@ async function reclaimAbandoned(now: Date): Promise<number> {
  * exactly this and no code behind them.
  *
  * What escalation means here is what it means in the SLA sweep: the named agent
- * becomes a watcher and the timeline says why. There is still no agent
- * notification channel in this product, and inventing a quieter one for this
- * feature would leave two things to change when notifications land. The event
+ * becomes a watcher and the timeline says why, and nobody is emailed. The one
+ * email that tells agents about a ticket is a low rating's alert
+ * (`notify_low_rating`); escalation
+ * sends one in both sweeps or in neither, so the watchlist reads the same
+ * wherever a ticket was escalated from. The event
  * row is the idempotency key, exactly as it is there — without it, a ticket that
  * stays unassigned over a weekend escalates five hundred times.
  *

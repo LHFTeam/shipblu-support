@@ -21,7 +21,8 @@ import {
 } from './decision';
 import { carriesLink, type AnswerSource, type SurveyDelivery } from './delivery';
 import type { SurveyMessageMeta } from './meta-survey';
-import { MAX_COMMENT } from './limits';
+import { LOW_RATING_MAX, MAX_COMMENT } from './limits';
+import { ALERT_PRIORITY } from './low-rating';
 import { loadCsatSettings, readCsatSettings } from './settings';
 import type { SkipReason } from './skip-reasons';
 
@@ -208,7 +209,14 @@ async function writeSkip(
     .where(eq(conversations.id, conversationId));
 }
 
-/** The row lock every write on a ticket's surveys takes first, so two jobs for one ticket queue behind each other. */
+/**
+ * The ticket's row lock, taken first by every write that changes a ticket's
+ * surveys and writes its timeline too — so two jobs for one ticket queue
+ * behind each other, and the event's foreign key, which locks the ticket,
+ * never comes second to a survey's row. The one write without it is a
+ * comment added to an answered survey (`recordAnswer`): one row and no event,
+ * waiting on nothing that could close a cycle.
+ */
 async function lockTicket(tx: Tx, conversationId: string): Promise<void> {
   await tx
     .select({ id: conversations.id })
@@ -404,7 +412,19 @@ export async function sendSurvey(send: SurveySend): Promise<SendOutcome> {
  * moved the row.
  */
 export async function fallBackToQuickReplies(surveyId: string, messageId: string): Promise<void> {
+  const [subject] = await db
+    .select({ conversationId: csatSurveys.conversationId })
+    .from(csatSurveys)
+    .where(eq(csatSurveys.id, surveyId))
+    .limit(1);
+
   await db.transaction(async (tx) => {
+    // The ticket first, then the survey's row, as every write that touches
+    // both takes them (`lockTicket`): the event below locks the ticket
+    // through its foreign key, and taking that after the survey's row would
+    // deadlock against an answer being recorded on the same survey.
+    if (subject) await lockTicket(tx, subject.conversationId);
+
     const moved = await tx
       .update(csatSurveys)
       .set({ delivery: 'meta_quick_reply' })
@@ -489,34 +509,22 @@ export async function recordAnswer(
 
   const trimmed = comment ? comment.trim().slice(0, MAX_COMMENT) || null : null;
 
-  const rated = await db
-    .update(csatSurveys)
-    .set({
-      status: 'answered',
-      rating,
-      comment: trimmed,
-      respondedAt: new Date(),
-      answerSource: source,
-    })
-    .where(
-      and(
-        eq(csatSurveys.id, surveyId),
-        inArray(csatSurveys.status, ['sent', 'expired']),
-        isNull(csatSurveys.respondedAt),
-      ),
-    )
-    .returning({ id: csatSurveys.id, conversationId: csatSurveys.conversationId });
+  const [subject] = await db
+    .select({ conversationId: csatSurveys.conversationId, respondedAt: csatSurveys.respondedAt })
+    .from(csatSurveys)
+    .where(eq(csatSurveys.id, surveyId))
+    .limit(1);
+  if (!subject) return 'ignored';
 
-  if (rated[0]) {
-    // On the timeline, so the agent who handled the ticket sees the score
-    // against the conversation rather than only in an aggregate report.
-    await db.insert(conversationEvents).values({
-      conversationId: rated[0].conversationId,
-      type: 'csat_received',
-      actorLabel: ACTOR,
-      data: { rating, source },
-    });
-
+  // Already answered — the comment after the tap, the normal second request,
+  // or a tap delivered twice — needs no rating, so takes no lock on the
+  // ticket: straight to the comment. An answer landing between this read and
+  // the transaction is still refused there, by the update's own
+  // `responded_at is null`.
+  if (
+    subject.respondedAt === null &&
+    (await recordRating(surveyId, subject.conversationId, rating, trimmed, source))
+  ) {
     return 'recorded';
   }
 
@@ -535,6 +543,60 @@ export async function recordAnswer(
     .returning({ id: csatSurveys.id });
 
   return commented[0] ? 'comment_added' : 'ignored';
+}
+
+/**
+ * The first answer: the rating, its event and, for a low one, its alert, in
+ * one transaction, so a low rating's alert is queued exactly when the rating
+ * is recorded — never for a tap that lost to an earlier answer, never lost to
+ * a process that died between the two. The ticket's lock comes first, as in
+ * `sendSurvey`, which holds it while it supersedes this ticket's older
+ * surveys: taking the survey's row first and the ticket's (the event's
+ * foreign key) second would deadlock against it. False when an earlier
+ * answer was there first.
+ */
+async function recordRating(
+  surveyId: string,
+  conversationId: string,
+  rating: number,
+  comment: string | null,
+  source: AnswerSource,
+): Promise<boolean> {
+  return db.transaction(async (tx) => {
+    await lockTicket(tx, conversationId);
+
+    const rated = await tx
+      .update(csatSurveys)
+      .set({ status: 'answered', rating, comment, respondedAt: new Date(), answerSource: source })
+      .where(
+        and(
+          eq(csatSurveys.id, surveyId),
+          inArray(csatSurveys.status, ['sent', 'expired']),
+          isNull(csatSurveys.respondedAt),
+        ),
+      )
+      .returning({ id: csatSurveys.id });
+
+    if (!rated[0]) return false;
+
+    // On the timeline, so the agent who handled the ticket sees the score
+    // against the conversation rather than only in an aggregate report.
+    await tx.insert(conversationEvents).values({
+      conversationId,
+      type: 'csat_received',
+      actorLabel: ACTOR,
+      data: { rating, source },
+    });
+
+    // The job decides whether anybody is told (`notify_low_rating`): the
+    // switch is read when it runs, so turning alerts off stops the ones
+    // already queued, and nothing about who is told slows the customer's tap.
+    if (rating <= LOW_RATING_MAX) {
+      await enqueue('notify_low_rating', { surveyId }, { on: tx, priority: ALERT_PRIORITY });
+    }
+
+    return true;
+  });
 }
 
 // --- What the console reads back --------------------------------------------

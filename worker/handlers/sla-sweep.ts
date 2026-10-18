@@ -225,10 +225,14 @@ async function recordBreach(
  * Escalation, `afterMins` after the target was missed.
  *
  * Escalating means putting the named agents on the ticket as watchers and
- * saying so in the timeline. There is no agent notification channel in the
- * product yet, so this is the honest version: the ticket appears in the
- * escalation contacts' watched list and the reason is on the record. When
- * notifications land, this is the one place that needs to also send one.
+ * saying so in the timeline, and emailing nobody: the ticket appears in the
+ * escalation contacts' watched list and the reason is on the record. The one
+ * email that tells agents about a ticket is a low rating's alert, and
+ * `notify_low_rating` is the shape to copy when escalation should send one
+ * too — an event naming who was to be told, and one `send_notification_email`
+ * per recipient on its transaction — here and in `escalateStale`
+ * (`assign-sweep.ts`) together, so the watchlist reads the same wherever a
+ * ticket was escalated from.
  *
  * Returns 1 when an escalation was recorded, so the sweep's log line counts
  * escalations rather than watcher rows — agents who already watched the ticket

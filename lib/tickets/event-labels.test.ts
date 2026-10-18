@@ -52,6 +52,22 @@ describe('describeEvent', () => {
     expect(describeEvent('csat_received', {})).toBe('rated the support');
   });
 
+  it('says who a low rating’s email was queued for, and when it reached nobody', () => {
+    expect(describeEvent('csat_low_rating', { rating: 1, agentIds: ['a', 'b'] })).toBe(
+      'queued an email to 2 supervisors about the 1 / 5 rating',
+    );
+    expect(describeEvent('csat_low_rating', { rating: 2, agentIds: ['a'] })).toBe(
+      'queued an email to 1 supervisor about the 2 / 5 rating',
+    );
+    expect(describeEvent('csat_low_rating', { rating: 2, agentIds: [] })).toBe(
+      'had nobody to email about the 2 / 5 rating: nobody who can sign in sees both the satisfaction report and every ticket',
+    );
+    // An untyped payload makes a sentence, not "undefined".
+    expect(describeEvent('csat_low_rating', {})).toBe(
+      'had nobody to email about the rating: nobody who can sign in sees both the satisfaction report and every ticket',
+    );
+  });
+
   it('names the claimed address, and the client address only when there is one', () => {
     expect(describeEvent('unverified_submitter', { email: 'a@b.test', ip: '203.0.113.9' })).toBe(
       'submitted without signing in, as a@b.test from 203.0.113.9',
