@@ -28,9 +28,10 @@ import type { JobType } from '@/lib/queue';
  * worker already holding it — deleting its row would not stop the handler, and
  * would only let `completeJob()` update nothing — so those are left to fail on
  * their own: every handler scoped here re-reads its subject by id and ends for
- * good when it is gone (`worker/handlers/subject-gone.ts`; `send_csat`,
- * `notify_low_rating` and `fetch_meta_profile` return quietly), and `download_media` re-checks under a
- * lock before it keeps an object it stored.
+ * good when it is gone (`worker/handlers/subject-gone.ts`, which
+ * `notify_low_rating` throws too unless the purge lands while it waits on the
+ * ticket's lock; `send_csat` and `fetch_meta_profile` return quietly), and
+ * `download_media` re-checks under a lock before it keeps an object it stored.
  *
  * Two kinds of pending work name this purge's subject and are deliberately not
  * matched, because nothing in their payload can tie them to it safely:

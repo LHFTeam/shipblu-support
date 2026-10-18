@@ -14,7 +14,7 @@ import {
 import { resetEnvCache } from '@/lib/env';
 import { recordAnswer } from '@/lib/csat';
 import { saveCsatSettings, UNSET_CSAT_SETTINGS } from '@/lib/csat/settings';
-import type { ClaimedJob } from '@/lib/queue';
+import { PermanentJobError, type ClaimedJob } from '@/lib/queue';
 import { withCleanDatabase } from '@/lib/testing/db';
 import { notifyLowRating } from '@/worker/handlers/notify-low-rating';
 
@@ -428,10 +428,22 @@ describe('notify_low_rating', () => {
     // Only by hand: `recordAnswer` queues neither.
     await notifyLowRating(job(four.surveyId));
     await notifyLowRating(job(unanswered.surveyId));
-    await notifyLowRating(job('00000000-0000-0000-0000-000000000000'));
 
     expect(await events(four.conversationId, 'csat_low_rating')).toEqual([]);
     expect(await events(unanswered.conversationId, 'csat_low_rating')).toEqual([]);
+    expect(await emails()).toEqual([]);
+  });
+
+  // A purge that lands after the job is claimed, or a wrong id typed by hand:
+  // dead on its first attempt, naming the survey, rather than a quiet success.
+  it('fails at once, naming the survey, when the survey is gone', async () => {
+    await team();
+    const missing = '00000000-0000-0000-0000-000000000000';
+
+    const failure = notifyLowRating(job(missing));
+
+    await expect(failure).rejects.toBeInstanceOf(PermanentJobError);
+    await expect(failure).rejects.toThrow(missing);
     expect(await emails()).toEqual([]);
   });
 });

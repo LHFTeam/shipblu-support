@@ -22,6 +22,7 @@ import {
 import { carriesLink, type AnswerSource, type SurveyDelivery } from './delivery';
 import type { SurveyMessageMeta } from './meta-survey';
 import { LOW_RATING_MAX, MAX_COMMENT } from './limits';
+import { ALERT_PRIORITY } from './low-rating';
 import { loadCsatSettings, readCsatSettings } from './settings';
 import type { SkipReason } from './skip-reasons';
 
@@ -46,9 +47,6 @@ const ACTOR = 'csat';
 
 /** The survey's carrier priority: behind an acknowledgement, which a customer is waiting on. */
 const CARRIER_PRIORITY = 50;
-
-/** A low rating's alert: behind every reply, since nobody is waiting on it to send. */
-const ALERT_PRIORITY = 60;
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 

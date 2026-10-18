@@ -290,6 +290,18 @@ describe('SurveyForm', () => {
     expect(text()).toContain(DEFAULT_WORDING.en.thanks);
   });
 
+  it('posts nothing from the button after a rating the route took, when there is no comment', async () => {
+    // The route would ignore it, and it would spend the shared address's limit.
+    const fetch = route([204]);
+    mount();
+
+    await click(button(labels[3]));
+    await click(button(DEFAULT_WORDING.en.button));
+
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(text()).toContain(DEFAULT_WORDING.en.thanks);
+  });
+
   it('says a refused tap was not confirmed too, rather than drawing it as answered', async () => {
     // The route's 20-an-hour limit, which a carrier's shared address reaches.
     route([429]);

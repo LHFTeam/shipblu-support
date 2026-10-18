@@ -7,6 +7,7 @@ import {
   claimJobs,
   completeJob,
   enqueue,
+  enqueueMany,
   failJob,
   hasActiveJob,
   PermanentJobError,
@@ -45,6 +46,26 @@ describe('enqueue', () => {
     const [first] = await claimJobs(1, 'worker-a');
     expect(await completeJob(first!)).toBe(true);
     expect(await enqueue('cleanup', {}, { dedupeKey: 'once' })).toBeNull();
+  });
+});
+
+describe('enqueueMany', () => {
+  // Its options took `on` from the type and wrote through the pool anyway, so
+  // jobs queued "on" a transaction that rolled back still ran.
+  it('queues on the transaction it is given, so its jobs go when that transaction does', async () => {
+    const rolledBack = new Error('rolled back');
+    await expect(
+      db.transaction(async (tx) => {
+        expect(await enqueueMany('cleanup', [{}, {}], { on: tx })).toBe(2);
+        throw rolledBack;
+      }),
+    ).rejects.toBe(rolledBack);
+    expect(await db.select({ id: jobs.id }).from(jobs)).toEqual([]);
+
+    await db.transaction(async (tx) => {
+      await enqueueMany('cleanup', [{}, {}], { on: tx });
+    });
+    expect(await db.select({ id: jobs.id }).from(jobs)).toHaveLength(2);
   });
 });
 

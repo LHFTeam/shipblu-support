@@ -30,6 +30,13 @@ import { emailButton, emailShell, escapeHtml, type EmailBody } from '@/lib/email
  * invitation is, because the console has no Arabic.
  */
 
+/**
+ * The queue priority of a low rating's alert and of each email it sends:
+ * behind every reply, since nobody is waiting on either. One number, so the
+ * job and its emails cannot drift apart.
+ */
+export const ALERT_PRIORITY = 60;
+
 export type AlertCandidate = {
   id: string;
   email: string;

@@ -132,9 +132,11 @@ export function SurveyForm({
     if (finishing) return;
     const text = comment.trim() || null;
     // A comment after a rating the route took goes out without waiting: the
-    // score is in, and a lost sentence is not worth a refusal on screen.
+    // score is in, and a lost sentence is not worth a refusal on screen. No
+    // comment, no post: the route would ignore it, and every post counts
+    // against a limit customers behind one carrier address share.
     if (confirmed.current) {
-      void send(value, text);
+      if (text) void send(value, text);
       setSaved(true);
       return;
     }

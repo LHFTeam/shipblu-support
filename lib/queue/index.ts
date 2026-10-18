@@ -112,11 +112,18 @@ export async function enqueue<T extends JobType>(
  * version is one database round trip per job — invisible at twenty, minutes of
  * pure latency at twenty thousand, which is the size a backfill is for.
  *
+ * Also for the jobs one write fans out to — a low rating's emails, one per
+ * recipient — where a round trip each would hold the caller's transaction, and
+ * whatever it has locked, for one more trip per job. `on` is that transaction,
+ * as for `enqueue`: the jobs commit with its rows or not at all.
+ *
  * No `dedupeKey`, deliberately: the index behind it is a plain unique index over
  * the whole table, so a key can only ever be used once in the life of the
  * system. A bulk enqueue is exactly where that bites — see the note on
- * `dedupeKey` above — so the handlers this is used with have to be idempotent
- * themselves.
+ * `dedupeKey` above — so a job queued here must be harmless queued twice some
+ * other way: its handler is idempotent, as a backfill's are, or its caller
+ * queues it once, as `notify_low_rating` does by finding its own event under
+ * the ticket's lock — `send_notification_email` sends on every run.
  */
 export async function enqueueMany<T extends JobType>(
   type: T,
@@ -125,7 +132,7 @@ export async function enqueueMany<T extends JobType>(
 ): Promise<number> {
   if (payloads.length === 0) return 0;
 
-  const rows = await db
+  const rows = await (options.on ?? db)
     .insert(jobs)
     .values(
       payloads.map((payload) => ({

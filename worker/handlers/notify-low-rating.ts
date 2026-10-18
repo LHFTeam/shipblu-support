@@ -3,19 +3,23 @@ import { alias } from 'drizzle-orm/pg-core';
 import { db } from '@/db/client';
 import { agents, conversationEvents, conversations, csatSurveys, groups } from '@/db/schema';
 import { LOW_RATING_MAX } from '@/lib/csat/limits';
-import { lowRatingEmail, lowRatingRecipients, namesAgentTo } from '@/lib/csat/low-rating';
+import {
+  ALERT_PRIORITY,
+  lowRatingEmail,
+  lowRatingRecipients,
+  namesAgentTo,
+} from '@/lib/csat/low-rating';
 import { readCsatSettings } from '@/lib/csat/settings';
 import { appUrl } from '@/lib/env';
 import { logger } from '@/lib/log';
-import { enqueueNotificationEmail } from '@/lib/email/notify';
+import { enqueueNotificationEmails } from '@/lib/email/notify';
 import type { ClaimedJob } from '@/lib/queue';
 import { parseJobPayload } from '@/lib/queue/payloads';
+import { shownOn } from '@/lib/reports/csat-queries';
 import { surveyedConversation } from '@/lib/reports/rollup';
+import { subjectGone } from './subject-gone';
 
 const log = logger('notify_low_rating');
-
-/** Behind every reply: a supervisor's alert waits for no customer. */
-const EMAIL_PRIORITY = 60;
 
 /**
  * Tells the supervisors that a customer rated a ticket 1 or 2.
@@ -34,6 +38,7 @@ const EMAIL_PRIORITY = 60;
  * the transaction that writes the timeline's `csat_low_rating` event, which
  * names who was to be told, under the ticket's lock: a second run of this job — the
  * worker runs a job at least once — waits for the first and finds its event.
+ * In one insert, so however many are told, the lock is held one trip longer.
  * The event is written with nobody to tell too, so a ticket whose 1 reached
  * nobody says so rather than leaving a supervisor to wonder why.
  */
@@ -48,14 +53,14 @@ export async function notifyLowRating(job: ClaimedJob): Promise<void> {
 
   // The ticket a merged one went into, which is the one a supervisor can
   // open: the inbox lists no merged ticket, and its "Rated 1–2" view names
-  // the survivor for the same answer (`ratedLowWithin`).
+  // the same ticket for the same answer (`shownOn`).
   const survivor = alias(conversations, 'survivor');
   const [survey] = await db
     .select({
       conversationId: csatSurveys.conversationId,
       rating: csatSurveys.rating,
       number: conversations.number,
-      survivorNumber: survivor.number,
+      opens: survivor.number,
       agentName: agents.name,
       groupName: groups.name,
     })
@@ -64,7 +69,7 @@ export async function notifyLowRating(job: ClaimedJob): Promise<void> {
       conversations,
       and(eq(conversations.id, csatSurveys.conversationId), surveyedConversation()),
     )
-    .leftJoin(survivor, eq(survivor.id, conversations.mergedIntoId))
+    .innerJoin(survivor, eq(survivor.id, shownOn(conversations)))
     .leftJoin(agents, eq(agents.id, csatSurveys.agentId))
     .leftJoin(groups, eq(groups.id, csatSurveys.groupId))
     .where(
@@ -76,10 +81,19 @@ export async function notifyLowRating(job: ClaimedJob): Promise<void> {
     )
     .limit(1);
 
-  // Purged, deleted, spam, or not a low answer — the last only by hand, since
-  // `recordAnswer` queues this for nothing else. Each is a ticket nobody is
-  // asked to follow up, not a fault to retry.
   if (!survey || survey.rating === null) {
+    // No survey at all is a purge that landed after this job was claimed, or
+    // a wrong id typed by hand: dead at once, naming it (`subjectGone`), so
+    // the queue says which. A ticket deleted or marked spam, or an answer
+    // that is not low — the last only by hand, since `recordAnswer` queues
+    // this for nothing else — is a ticket nobody is asked to follow up, not
+    // a fault.
+    const [exists] = await db
+      .select({ id: csatSurveys.id })
+      .from(csatSurveys)
+      .where(eq(csatSurveys.id, surveyId))
+      .limit(1);
+    if (!exists) throw subjectGone('notify_low_rating', `survey ${surveyId}`);
     log.info(`${surveyId}: no low rating on a ticket the report counts — nobody told`);
     return;
   }
@@ -98,16 +112,19 @@ export async function notifyLowRating(job: ClaimedJob): Promise<void> {
   // one, rather than a second copy of its "active" in the query.
   const recipients = lowRatingRecipients(candidates);
 
-  const opens = survey.survivorNumber ?? survey.number;
   const alert = {
-    number: opens,
+    number: survey.opens,
     rating: survey.rating,
     agentName: survey.agentName,
     groupName: survey.groupName,
-    url: `${appUrl()}/inbox/${opens}`,
+    url: `${appUrl()}/inbox/${survey.opens}`,
   };
   const naming = lowRatingEmail({ ...alert, namesAgent: true });
   const unnamed = lowRatingEmail({ ...alert, namesAgent: false });
+  const emails = recipients.map((agent) => ({
+    to: agent.email,
+    ...(namesAgentTo(agent) ? naming : unnamed),
+  }));
 
   const told = await db.transaction(async (tx) => {
     // The filter again, against the row this waited for: Postgres re-reads a
@@ -140,12 +157,7 @@ export async function notifyLowRating(job: ClaimedJob): Promise<void> {
       data: { surveyId, rating: survey.rating, agentIds: recipients.map((agent) => agent.id) },
     });
 
-    for (const agent of recipients) {
-      await enqueueNotificationEmail(
-        { to: agent.email, ...(namesAgentTo(agent) ? naming : unnamed) },
-        { on: tx, priority: EMAIL_PRIORITY },
-      );
-    }
+    await enqueueNotificationEmails(emails, { on: tx, priority: ALERT_PRIORITY });
 
     return recipients.length;
   });
