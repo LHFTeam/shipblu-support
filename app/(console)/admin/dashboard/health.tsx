@@ -11,6 +11,12 @@ export function Health({
   health: Awaited<ReturnType<typeof systemHealth>>;
   now: Date;
 }) {
+  // Further behind than tonight's run explains: the threshold `/reports/csat`
+  // warns at, so the tile turns amber on the day that page does. Said in the
+  // hint as well, because the amber is never the only signal.
+  const behind = health.rollupDaysBehind ?? 0;
+  const stalled = behind > 1;
+
   return (
     <Section
       title="Behind the scenes"
@@ -50,10 +56,10 @@ export function Health({
           value={health.rollupDay ?? '—'}
           hint={
             health.rollupComputedAt
-              ? `Computed ${ago(formatRelative(health.rollupComputedAt, now))}`
+              ? `Computed ${ago(formatRelative(health.rollupComputedAt, now))}${stalled ? ` · the ${behind} days after ${health.rollupDay} are not rolled up` : ''}`
               : 'The rollup has not computed a day yet'
           }
-          tone={health.rollupComputedAt ? undefined : 'caution'}
+          tone={!health.rollupComputedAt || stalled ? 'caution' : undefined}
         />
       </div>
     </Section>

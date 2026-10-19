@@ -116,6 +116,7 @@ describe('systemHealth', () => {
 
     expect(health.rollupDay).toBe('2026-10-18');
     expect(health.rollupComputedAt).toEqual(at('2026-10-19T03:00:00'));
+    expect(health.rollupDaysBehind).toBe(0);
     expect(health.rollupDay).toBe(
       await lastWholeDay({ from: '2026-09-20', to: '2026-10-19', zone: ZONE }),
     );
@@ -133,6 +134,23 @@ describe('systemHealth', () => {
 
     expect(health.rollupDay).toBe('2026-10-17');
     expect(health.rollupComputedAt).toEqual(at('2026-10-18T03:00:00'));
+    // A night missed, and still no further behind than before tonight's run,
+    // as `/reports/csat` counts it: the tile turns amber at the next midnight.
+    expect(health.rollupDaysBehind).toBe(1);
+  });
+
+  it('counts the days a stalled rollup has not reached', async () => {
+    // Saturday's run reached Friday the 16th. Sunday's run and last night's
+    // did not happen, so neither the 17th nor the 18th has been computed.
+    await db.insert(rollupDays).values([
+      { day: '2026-10-15', computedAt: at('2026-10-17T03:00:05') },
+      { day: '2026-10-16', computedAt: at('2026-10-17T03:00:00') },
+    ]);
+
+    const health = await systemHealth(ZONE, MONDAY_NOON);
+
+    expect(health.rollupDay).toBe('2026-10-16');
+    expect(health.rollupDaysBehind).toBe(2);
   });
 
   it('reads the newest figures before today while rollup_days is empty', async () => {
@@ -150,6 +168,9 @@ describe('systemHealth', () => {
 
     expect(health.rollupDay).toBe('2026-10-15');
     expect(health.rollupComputedAt).toEqual(at('2026-10-18T03:00:21'));
+    // Three days back, but whether they were missed or quiet is not
+    // something `metrics_daily` can say.
+    expect(health.rollupDaysBehind).toBeNull();
   });
 
   it('names no day before the rollup has computed one', async () => {
@@ -157,5 +178,6 @@ describe('systemHealth', () => {
 
     expect(health.rollupDay).toBeNull();
     expect(health.rollupComputedAt).toBeNull();
+    expect(health.rollupDaysBehind).toBeNull();
   });
 });

@@ -241,7 +241,7 @@ export function countedThrough(window: ReportWindow, lastWhole: string | null): 
  * more only when the rollup has fallen behind — the page says so then, since
  * the end it prints is otherwise the only sign.
  */
-export function daysUncounted(window: ReportWindow, through: string): number {
+export function daysUncounted(window: Pick<ReportWindow, 'to'>, through: string): number {
   const today = DateTime.fromISO(window.to, { zone: 'utc' });
   return Math.max(
     0,

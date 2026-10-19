@@ -15,6 +15,7 @@ import {
 import { openBacklog } from '@/lib/tickets/backlog';
 import { readOnlyChannels } from '@/lib/tickets/channel-policy';
 import { notReaction } from '@/lib/tickets/not-reaction';
+import { daysUncounted } from './csat-queries';
 import { lastWholeRollup } from './queries';
 import { computeDay, todayIn, totalsOf, type Bucket, type ReportingContext } from './rollup';
 
@@ -281,6 +282,14 @@ export type SystemHealth = {
   rollupDay: string | null;
   /** When the rollup began computing `rollupDay`. */
   rollupComputedAt: Date | null;
+  /**
+   * The days between `rollupDay` and today the rollup has not computed
+   * (`daysUncounted`): 0 once tonight's run has reached yesterday, and 1
+   * before it — all of the day after a night it missed included — so more
+   * only from the midnight after a missed night. Null when the day came from
+   * `metrics_daily`, which cannot tell a missed night from a quiet day.
+   */
+  rollupDaysBehind: number | null;
 };
 
 /**
@@ -327,6 +336,7 @@ export async function systemHealth(zone: string, now: Date = new Date()): Promis
     oldestWebhookSince: asDate(hooks[0]?.oldest),
     rollupDay: rollup?.day ?? null,
     rollupComputedAt: rollup?.computedAt ?? null,
+    rollupDaysBehind: rollup?.behind ?? null,
   };
 }
 
@@ -355,14 +365,19 @@ export async function systemHealth(zone: string, now: Date = new Date()): Promis
  * never today, which only a hand run over a day still going can have written.
  * Read only then, so the page polling every twenty seconds asks one question,
  * not two.
+ *
+ * How far behind it is comes only from `rollup_days`, counted as
+ * `/reports/csat` counts it, so the card turns amber on the day that page
+ * warns. From `metrics_daily` it is unknown: a missed night and a quiet day
+ * read the same there, and amber for a quiet weekend is the mistake above.
  */
 async function lastComputedDay(
   zone: string,
   now: Date,
-): Promise<{ day: string; computedAt: Date } | null> {
+): Promise<{ day: string; computedAt: Date; behind: number | null } | null> {
   const today = DateTime.fromJSDate(now, { zone }).toISODate()!;
   const whole = await lastWholeRollup({ to: today, zone });
-  if (whole) return whole;
+  if (whole) return { ...whole, behind: daysUncounted({ to: today }, whole.day) };
 
   const [newest] = await db
     .select({ day: metricsDaily.day, computedAt: metricsDaily.computedAt })
@@ -370,7 +385,7 @@ async function lastComputedDay(
     .where(lt(metricsDaily.day, today))
     .orderBy(desc(metricsDaily.day))
     .limit(1);
-  return newest ?? null;
+  return newest ? { ...newest, behind: null } : null;
 }
 
 export type HourBucket = { hour: number; inbound: number; outbound: number };
