@@ -822,10 +822,11 @@ ticket creation: the two survey endpoints, `notify_myblu`, the env vars, the
 API row's fallback switch. Verified with the app's staging build against
 staging.
 
-**7. Follow-ups, each its own small change.** `suppress_survey` as an
-automation action (7a, built: see _Automations_ above); a `csat_low_rating`
-event and a supervisor notification on a 1 or 2; an inbox view "Rated 1–2 this
-week".
+**7. Follow-ups, each its own small change, all built.** `suppress_survey` as
+an automation action (7a: see _Automations_ above); a `csat_low_rating` event
+and an email to the supervisors on a 1 or 2 (7b: see _Receiving an answer_
+above); an inbox view "Rated 1–2" over the last seven days to the team's
+midnight, not a calendar week (7c: see _Inbox_ above).
 
 ## Risks and what is deliberately not solved
 
