@@ -428,9 +428,10 @@ return 200 immediately; they never do the work inline.
 **A Facebook or Instagram batch is retried whole when any item in it fails**
 (`process-meta-webhook.ts`), so the items that worked run again on every retry,
 and the one that failed lands after siblings newer than it. Every item type
-there therefore does nothing on a second run, and moves a ticket's "last"
-columns and its reply clock only forward (`latest()`). A new item type meets
-both, or a retry duplicates it or winds a ticket back. A WhatsApp batch still
+there therefore does nothing on a second run, moves a ticket's "last" columns
+only forward (`latest()`), and starts its reply clock from the
+`lastCustomerMessageAt` that update returns rather than from its own instant. A
+new item type meets all three, or a retry duplicates it or winds a ticket back. A WhatsApp batch still
 retries only for history or when everything failed, which is a change of its
 own to make.
 

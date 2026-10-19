@@ -34,8 +34,9 @@ const log = logger('meta');
  *   answer is thanked (`recordMetaFeedback`);
  * - a receipt moves a message forward only (`applyMetaReceipt`).
  *
- * Instagram already ran every item twice, once per connection, so none of
- * this is new to the items. What a retry adds is order: the item that failed
+ * Instagram, delivered on both of its connections, already ran its items
+ * twice; on Facebook a second run is new, which is why each item type's dedupe
+ * is listed above. What a retry adds is order: the item that failed
  * now lands after siblings that are newer than it, which is why the ingest
  * moves a ticket's "last" columns and its reply clock forward only. A new
  * item type has to meet both.

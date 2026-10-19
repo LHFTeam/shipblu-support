@@ -591,20 +591,21 @@ describe('an older Meta item stored after a newer one', () => {
     expect(await clocks(ticket)).toEqual(onNewer);
   });
 
-  it('keeps a comment thread on a reply stored before the comment it answers', async () => {
-    const reply = await ingestMetaComment(
-      comment({ commentId: 'post-1_c2', parentCommentId: 'post-1_c1', createdAt: NEWER }),
-    );
-    const root = await ingestMetaComment(comment({ createdAt: OLDER }));
+  it('keeps a comment thread on a reply stored before an older one', async () => {
+    await hourlyPolicy();
+    const root = await ingestMetaComment(comment({ createdAt: OPENED }));
+    await answered(root.conversationId, ANSWERED);
+    const reply = (commentId: string, createdAt: Date) =>
+      ingestMetaComment(comment({ commentId, parentCommentId: 'post-1_c1', createdAt }));
 
-    expect(root).toMatchObject({
-      conversationId: reply.conversationId,
+    await reply('post-1_c3', NEWER);
+    const older = await reply('post-1_c2', OLDER);
+
+    expect(older).toMatchObject({
+      conversationId: root.conversationId,
       createdConversation: false,
     });
-    expect(await clocks(reply.conversationId)).toMatchObject({
-      lastMessageAt: NEWER,
-      lastCustomerMessageAt: NEWER,
-    });
+    expect(await clocks(root.conversationId)).toEqual(onNewer);
   });
 
   it('restarts the clock from the newer message when an older postback lands', async () => {

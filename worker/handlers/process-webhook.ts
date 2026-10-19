@@ -18,9 +18,10 @@ const log = logger('process_webhook');
  * Marking `processed_at` is what makes replay safe: a payload is only ever
  * turned into a ticket once, and ingest itself is independently idempotent on
  * the email's Message-ID, so even a double-run cannot duplicate a message.
- * A Meta or WhatsApp batch can take several attempts to get there — one item
- * that fails retries the delivery, and the items that worked run again — so
- * each item they ingest is idempotent the same way.
+ * A Meta batch can take several attempts to get there — one item that fails
+ * retries the delivery, and the items that worked run again — and so can a
+ * WhatsApp batch whose history failed, or whose every item did. So each item
+ * either ingests is idempotent the same way.
  */
 export async function processWebhook(job: ClaimedJob): Promise<void> {
   const { webhookEventId } = parseJobPayload(job, 'process_webhook');

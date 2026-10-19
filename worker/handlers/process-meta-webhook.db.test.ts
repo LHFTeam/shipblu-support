@@ -260,19 +260,27 @@ describe('processWebhook — a Meta batch with an item that failed', () => {
   });
 
   it('queues a download with its message or not at all, so the retry gets both', async () => {
-    const url = 'https://lookaside.fbsbx.com/ig_messaging_cdn/?asset_id=1';
+    const first = 'https://lookaside.fbsbx.com/ig_messaging_cdn/?asset_id=1';
+    const second = 'https://lookaside.fbsbx.com/ig_messaging_cdn/?asset_id=2';
     const id = await store([
       dm('igsid-karim', 'm_photo', Date.now() - MINUTE, {
         text: undefined,
-        attachments: [{ type: 'image', payload: { url } }],
+        attachments: [
+          { type: 'image', payload: { url: first } },
+          { type: 'image', payload: { url: second } },
+        ],
       }),
     ]);
-    failing.downloads.add(url);
+    // The second, so the first is already queued when the transaction fails.
+    failing.downloads.add(second);
 
     // Queued after the message committed, the failed download left a stored
-    // message that every retry finds by its mid and stops at.
+    // message that every retry finds by its mid and stops at. Queued on the
+    // pool rather than the transaction, the first download would outlive the
+    // message it names.
     await expect(run(id)).rejects.toThrow('m_photo');
     expect(await storedMids()).toEqual([]);
+    expect(await db.select().from(jobs).where(eq(jobs.type, 'download_media'))).toEqual([]);
 
     await run(id);
 
@@ -285,7 +293,8 @@ describe('processWebhook — a Meta batch with an item that failed', () => {
       .from(jobs)
       .where(eq(jobs.type, 'download_media'));
     expect(downloads).toEqual([
-      { payload: { messageId: message!.id, url, index: 0, source: 'meta' } },
+      { payload: { messageId: message!.id, url: first, index: 0, source: 'meta' } },
+      { payload: { messageId: message!.id, url: second, index: 1, source: 'meta' } },
     ]);
   });
 });
