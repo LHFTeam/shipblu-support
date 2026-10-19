@@ -29,7 +29,7 @@ export function Health({
         />
         <Stat
           label="Jobs given up on"
-          explain="Work that used every retry and stopped — a reply that never sent, a webhook never handled. Nothing retries it on its own, so any number above zero is something that did not happen."
+          explain="Work that used every retry and stopped — a reply that never sent, a webhook not fully handled. Nothing retries it on its own, so any number above zero is something that did not happen."
           value={health.jobsDead.toLocaleString('en-GB')}
           hint={`${health.jobsFailed.toLocaleString('en-GB')} retrying`}
           tone={health.jobsDead > 0 ? 'critical' : undefined}

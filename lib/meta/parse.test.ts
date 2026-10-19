@@ -471,8 +471,8 @@ describe('parseMetaWebhook', () => {
   });
 
   it('returns nothing rather than throwing on rubbish', () => {
-    // A throw makes Meta redeliver the whole batch, including the parts we
-    // understood, and repeated failures disable the subscription.
+    // A throw fails every attempt of the job the same way, so the delivery
+    // goes `dead` with nothing in it ingested, the parts we understood included.
     expect(parse(null).messages).toEqual([]);
     expect(parse('nope').comments).toEqual([]);
     expect(parse({ object: 'whatsapp_business_account' }).messages).toEqual([]);

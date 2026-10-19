@@ -67,7 +67,7 @@ export const RETAINED = [
   'finished and running queue jobs, whose payloads can hold the customer’s address and message text',
   'messages they wrote on other customers’ tickets, kept there without an author',
   'the deletion record, which keeps their name and contact details or the ticket’s subject — so this is not a data-erasure tool',
-  'incoming messages already queued when you delete, which can create the customer again',
+  'incoming messages already queued, or waiting to be retried, when you delete, which can create the customer again',
   'notification emails already queued to them, which still send, though the portal link inside no longer works',
 ] as const;
 

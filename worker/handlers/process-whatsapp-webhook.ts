@@ -239,7 +239,8 @@ export async function processWhatsAppWebhook(event: {
     // Partial failure: recorded on the event so it is visible when inspecting
     // the row, but not retried — a retry would re-run the parts that worked.
     // History is the exception above because re-running it was reasoned
-    // through; widening that to every item is a change of its own.
+    // through; widening that to every item is a change of its own, which the
+    // Meta batch has made for its five (`process-meta-webhook.ts`).
     log.error(`partial failure on ${event.id}: ${failures.join(' | ')}`);
     await db
       .update(webhookEvents)

@@ -48,9 +48,11 @@ import type { JobType } from '@/lib/queue';
  *   is about is inside the provider's raw payload, in a different shape per
  *   channel. Parsing it here would re-implement three ingest parsers inside a
  *   delete, and a wrong guess would silently drop a real customer's message.
- *   A delivery still pending for this contact will, when it runs, file a new
- *   contact and ticket for them — which is the same thing a message arriving
- *   one minute after the purge would do. `RETAINED` says so.
+ *   A delivery still pending for this contact — not yet run, or waiting to
+ *   retry an item that failed beside ones that worked, which run again too —
+ *   will, when it runs, file a new contact and ticket for them, which is the
+ *   same thing a message arriving one minute after the purge would do.
+ *   `RETAINED` says so.
  */
 export async function purgeJobs(
   tx: typeof db,

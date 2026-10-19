@@ -425,6 +425,17 @@ per-row backfill — must make its handler idempotent and enqueue without a key,
 or the retry silently does nothing. Webhooks persist to `webhook_events` and
 return 200 immediately; they never do the work inline.
 
+**A Facebook or Instagram batch is retried whole when any item in it fails**
+(`process-meta-webhook.ts`), so the items that worked run again on every retry,
+and the one that failed lands after siblings newer than it. Every item type
+there therefore does nothing on a second run and moves a ticket's "last"
+columns only forward (`latest()`), before `onCustomerReply`, which starts the
+reply clock from the newest of them under the ticket's lock — and not at all
+when an agent has answered since. A new item type meets both, or a retry
+duplicates it or winds a ticket back. A WhatsApp batch still
+retries only for history or when everything failed, which is a change of its
+own to make.
+
 **The worker is a pool, and a running job's lock is kept fresh.**
 `worker/pool.ts` refills a slot as each job finishes, so a slow job holds only
 its own slot, and refreshes the lock of every job it is running each
@@ -1384,7 +1395,7 @@ npm run test:db
 postgres.js gets it as an untyped parameter, assumes text and throws
 `ERR_INVALID_ARG_TYPE`; drizzle maps a Date only when a typed operator tells it
 the column, and a template never does. Interpolate `at.toISOString()` behind an
-explicit `::timestamptz`. `interactionWindowSet` and `staleTemplateFilter` are
+explicit `::timestamptz`. `customerWroteSet` and `staleTemplateFilter` are
 both exported purely so a test can read `toSQL().params` back and assert no raw
 Date survives — do that for any new fragment holding an instant. An `EXPLAIN` of
 the statement typed out by hand does **not** catch this: the literal is a literal

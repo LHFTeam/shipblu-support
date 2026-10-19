@@ -8,7 +8,7 @@ import type {
   NormalisedInteraction,
   NormalisedReceipt,
 } from '@/lib/meta/types';
-import { enqueue } from '@/lib/queue';
+import { enqueue, type EnqueueOptions } from '@/lib/queue';
 import { onCustomerReply } from '@/lib/sla';
 import { findContactByIdentity, needsChannelProfile, resolveContact } from './contacts';
 import { UNNAMED_SUBJECT } from './customer-text';
@@ -141,20 +141,21 @@ export async function ingestMetaMessage(
       })
       .returning({ id: messages.id });
 
+    const messageId = insertedMessage[0]!.id;
+
+    // With the message, not after it: once the message has committed, a retry
+    // finds it by its mid and stops, so a download that failed to queue after
+    // the commit would never be queued at all. Everything left to run after
+    // the commit logs its own failures rather than throwing.
+    await queueAttachments(tx, messageId, message.attachments);
+
     await tx
       .update(conversations)
-      .set({ lastMessageAt: message.sentAt, lastCustomerMessageAt: message.sentAt })
+      .set(customerWroteSet(message.sentAt))
       .where(eq(conversations.id, conversationId));
 
-    return {
-      conversationId,
-      conversationNumber,
-      messageId: insertedMessage[0]!.id,
-      createdConversation,
-    };
+    return { conversationId, conversationNumber, messageId, createdConversation };
   });
-
-  await queueAttachments(result.messageId, message.attachments);
 
   await afterMessageStored({
     conversationId: result.conversationId,
@@ -266,9 +267,10 @@ export async function ingestMetaComment(comment: NormalisedComment): Promise<Met
       })
       .returning({ id: messages.id });
 
+    // A reply processed before the comment it answers is the newer of the two.
     await tx
       .update(conversations)
-      .set({ lastMessageAt: comment.createdAt, lastCustomerMessageAt: comment.createdAt })
+      .set(customerWroteSet(comment.createdAt))
       .where(eq(conversations.id, conversationId));
 
     return {
@@ -295,8 +297,16 @@ export async function ingestMetaComment(comment: NormalisedComment): Promise<Met
 // --- Interactions -----------------------------------------------------------
 
 /**
- * The window advance, as a `set` object, exported so a test can assert what it
- * binds.
+ * Something the customer did that opens the window — a message, a comment, a
+ * postback — as a `set` object: both columns moved forward to its instant,
+ * and never back. Exported so a test can assert what it binds.
+ *
+ * Forward only, as email's and WhatsApp's columns are, because deliveries are
+ * processed in no order (§6.77) and a batch with an item that failed is run
+ * again whole, so the item that failed lands after siblings newer than it.
+ * Written plainly, the older one would drag the ticket down the list and the
+ * messaging window shut early. The reply clock started after it reads the
+ * column back under the ticket's lock (`onCustomerReply`), for the same reason.
  *
  * The instant is interpolated as an ISO string with an explicit cast, never as a
  * `Date`. A bare Date in a `sql` template reaches postgres.js as an untyped
@@ -311,12 +321,10 @@ export async function ingestMetaComment(comment: NormalisedComment): Promise<Met
  * the `database` CI job does not run, so no Postgres ever plans this statement
  * before production does.
  *
- * `greatest` never goes backwards, which matters because Meta redelivers and
- * these events arrive interleaved with the messages they accompany. It is
- * documented as ignoring nulls in its list, so a conversation whose customer has
- * never written takes the interaction's own instant.
+ * `greatest` is documented as ignoring nulls in its list, so a conversation
+ * whose customer has never written takes the instant given.
  */
-export function interactionWindowSet(at: Date) {
+export function customerWroteSet(at: Date) {
   return {
     lastMessageAt: latest(conversations.lastMessageAt, at),
     lastCustomerMessageAt: latest(conversations.lastCustomerMessageAt, at),
@@ -419,10 +427,10 @@ export async function applyMetaInteraction(interaction: NormalisedInteraction): 
 
     // Never backwards: a Get Started replayed after the customer's question must
     // not wind the window, or the next-response target derived from it, back to
-    // before the question was asked. See `interactionWindowSet`.
+    // before the question was asked. See `customerWroteSet`.
     await tx
       .update(conversations)
-      .set(interactionWindowSet(interaction.at))
+      .set(customerWroteSet(interaction.at))
       .where(eq(conversations.id, existing.id));
   });
 
@@ -586,6 +594,7 @@ function subjectFrom(text: string, fallback: string): string {
  * immediately rather than when an agent opens the ticket.
  */
 async function queueAttachments(
+  tx: NonNullable<EnqueueOptions['on']>,
   messageId: string,
   attachments: { type: string; url: string | null }[],
 ): Promise<void> {
@@ -595,7 +604,7 @@ async function queueAttachments(
     await enqueue(
       'download_media',
       { messageId, url: attachment.url, index, source: 'meta' },
-      { priority: 5, dedupeKey: `download_media:${messageId}:${index}` },
+      { priority: 5, dedupeKey: `download_media:${messageId}:${index}`, on: tx },
     );
   }
 }
