@@ -6309,9 +6309,10 @@ dryRun=true`, then without, gives those two theirs back from their
     its day for none, its cause falling back to the day the cause was set;
     and a cause recorded on a closed ticket more than three days after its
     resolve, which is filed on the resolve's day — a day the nightly no longer
-    recomputes, so that day keeps its old cause until a backfill. Until this
-    change the same edit was filed on the day it was made, and counted on two
-    days instead.
+    recomputes, so that day keeps its old cause, or lacks a first one, until a
+    backfill. Until this change a correction was filed on the day it was made,
+    and counted on two days instead; a first cause was counted once, on that
+    day. No cause had been recorded on production when this was read.
 
 ### Tooling notes for this environment
 

@@ -22,7 +22,9 @@ const T = (hour: number) => new Date(Date.UTC(2026, 7, 18, hour, 0, 0, 123));
 
 type Move =
   | { kind: 'status'; category: 'open' | 'pending' | 'resolved' | 'closed'; at: Date }
-  | { kind: 'reopened'; at: Date };
+  | { kind: 'reopened'; at: Date }
+  /** A `status_changed` that names its status but records no category. */
+  | { kind: 'uncategorised'; at: Date };
 
 /** A ticket now in `statusName`, with no stamp, and the timeline given. */
 async function ticket(statusName: string, moves: Move[]): Promise<string> {
@@ -41,7 +43,9 @@ async function ticket(statusName: string, moves: Move[]): Promise<string> {
       createdAt: move.at,
       ...(move.kind === 'reopened'
         ? { type: 'reopened', actorLabel: 'inbound_email', data: { reason: 'customer_replied' } }
-        : { type: 'status_changed', data: { to: move.category, category: move.category } }),
+        : move.kind === 'uncategorised'
+          ? { type: 'status_changed', data: { to: 'Waiting' } }
+          : { type: 'status_changed', data: { to: move.category, category: move.category } }),
     });
   }
   return row!.id;
@@ -112,6 +116,9 @@ describe('restore_resolved_at', () => {
         { kind: 'status', category: 'pending', at: T(10) },
         close(T(12)),
       ]),
+      // Resolved, then a move that records no category, then closed: it could
+      // have been a reopen, so the resolve before it is not restored.
+      await ticket('Closed', [resolve(T(9)), { kind: 'uncategorised', at: T(10) }, close(T(12))]),
     ];
     // Not closed: the writers stamp what is still resolved, so nothing here is
     // this job's to repair.

@@ -1,6 +1,5 @@
-import type { conversations, ticketStatuses } from '@/db/schema';
-
-type StatusCategory = (typeof ticketStatuses.$inferSelect)['category'];
+import type { conversations } from '@/db/schema';
+import type { StatusCategory } from './vocabulary';
 
 /**
  * What a move into a status of `category` writes to `resolved_at`, for every
@@ -32,7 +31,15 @@ type StatusCategory = (typeof ticketStatuses.$inferSelect)['category'];
 export function resolveStamp(
   category: StatusCategory,
 ): Partial<Pick<typeof conversations.$inferInsert, 'resolvedAt'>> {
-  if (category === 'resolved') return { resolvedAt: new Date() };
-  if (category === 'closed') return {};
-  return { resolvedAt: null };
+  // No default arm: a category added to the enum is a compile error here
+  // rather than a move that silently clears the stamp.
+  switch (category) {
+    case 'resolved':
+      return { resolvedAt: new Date() };
+    case 'closed':
+      return {};
+    case 'open':
+    case 'pending':
+      return { resolvedAt: null };
+  }
 }

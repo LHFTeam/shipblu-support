@@ -26,7 +26,10 @@ type Restorable = { number: number; resolved_at: string };
  * Open, or a WhatsApp Business app conversation or a copied history, which are
  * filed resolved with no `resolved_at` on purpose). Those keep their null. Moves
  * into Closed are passed over, because a close keeps the stamp now and so says
- * nothing about it.
+ * nothing about it. A `status_changed` that records no category is not passed
+ * over: nothing says it was a close, so it decides, and it is not a resolve, so
+ * the ticket keeps its null rather than getting back a resolve that move may
+ * have undone.
  *
  * The event's instant is the column's to within the request, not to the
  * microsecond: `changeStatus` stamped the column from the server's clock inside
@@ -52,7 +55,7 @@ export async function restoreResolvedAt(job: ClaimedJob): Promise<void> {
       WHERE e.conversation_id = c.id
         AND (
           e.type = 'reopened'
-          OR (e.type = 'status_changed' AND e.data ->> 'category' <> 'closed')
+          OR (e.type = 'status_changed' AND e.data ->> 'category' IS DISTINCT FROM 'closed')
         )
       ORDER BY e.created_at DESC
       LIMIT 1
@@ -63,7 +66,7 @@ export async function restoreResolvedAt(job: ClaimedJob): Promise<void> {
       AND last.category = 'resolved'
   `;
 
-  const rows = (await db.execute(
+  const rows = await db.execute<Restorable>(
     dryRun
       ? sql`SELECT r.number, r.created_at::text AS resolved_at FROM (${restorable}) r ORDER BY r.number`
       : sql`
@@ -77,7 +80,7 @@ export async function restoreResolvedAt(job: ClaimedJob): Promise<void> {
           )
           SELECT number, resolved_at::text AS resolved_at FROM restored ORDER BY number
         `,
-  )) as unknown as Restorable[];
+  );
 
   for (const row of rows) {
     log.info(
