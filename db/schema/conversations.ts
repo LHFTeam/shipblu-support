@@ -166,6 +166,13 @@ export const conversations = pgTable(
     lastMessageAt: timestamp('last_message_at', { withTimezone: true }).notNull().defaultNow(),
     lastCustomerMessageAt: timestamp('last_customer_message_at', { withTimezone: true }),
     lastAgentMessageAt: timestamp('last_agent_message_at', { withTimezone: true }),
+    /**
+     * When the ticket was last resolved, if it has not been back to Open or
+     * Pending since. Kept through a close, so a resolve the seeded rule then
+     * closes still counts on its day (`resolveStamp`); null on a ticket nobody
+     * resolved — one closed straight from Open (`root_cause_set_at` says why
+     * that is not a resolve), or a conversation WhatsApp ingest files resolved.
+     */
     resolvedAt: timestamp('resolved_at', { withTimezone: true }),
     /**
      * Who moved it into a resolved status, as opposed to who holds it now.

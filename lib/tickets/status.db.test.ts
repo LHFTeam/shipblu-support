@@ -1,4 +1,4 @@
-import { and, eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { db } from '@/db/client';
 import { agents, contacts, conversationEvents, conversations, ticketStatuses } from '@/db/schema';
@@ -8,8 +8,9 @@ import { changeStatus, type StatusTarget } from './status';
 /**
  * The status write both console paths share. What it must get right is which
  * stamps each category writes and clears: a resolve records who resolved,
- * moving back to Open keeps that record for the reopen to read, and a close is
- * dated by `closedAt` alone.
+ * moving back to Open keeps that record for the reopen to read, and a close
+ * keeps the resolve it follows — a ticket closed straight from Open gets none
+ * (`resolveStamp`, docs/PROJECT-STATE.md §6.98).
  */
 
 withCleanDatabase();
@@ -56,6 +57,15 @@ async function stamps(id: string) {
     .from(conversations)
     .where(eq(conversations.id, id));
   return row!;
+}
+
+/** The stamp as Postgres holds it, to the microsecond a `Date` would round away. */
+async function resolvedAtText(id: string): Promise<string | null> {
+  const [row] = await db
+    .select({ at: sql<string | null>`${conversations.resolvedAt}::text` })
+    .from(conversations)
+    .where(eq(conversations.id, id));
+  return row!.at;
 }
 
 async function statusEvents(id: string) {
@@ -128,7 +138,7 @@ describe('changeStatus', () => {
     });
   });
 
-  it('closes: dated by closedAt, with no resolve stamps', async () => {
+  it('closes straight from Open: dated by closedAt, with no resolve stamps', async () => {
     const { id, agentId } = await openTicket();
 
     await changeStatus(agentId, id, await status('Closed'));
@@ -136,5 +146,64 @@ describe('changeStatus', () => {
     const row = await stamps(id);
     expect(row).toMatchObject({ resolvedAt: null, resolvedByAgentId: null });
     expect(row.closedAt).toBeInstanceOf(Date);
+  });
+
+  // §6.98: the close used to clear it, and the rollup's next recompute of the
+  // resolve's day then lost the resolution.
+  it('closes a resolved ticket keeping the resolve it follows, and who made it', async () => {
+    const { id, agentId } = await openTicket();
+    await changeStatus(agentId, id, await status('Resolved'));
+    const resolvedAt = await resolvedAtText(id);
+
+    await changeStatus(agentId, id, await status('Closed'));
+
+    expect(await resolvedAtText(id)).toBe(resolvedAt);
+    const row = await stamps(id);
+    expect(row.resolvedByAgentId).toBe(agentId);
+    expect(row.closedAt).toBeInstanceOf(Date);
+  });
+
+  it('keeps it through a move from one closed status to another', async () => {
+    const { id, agentId } = await openTicket();
+    const [archived] = await db
+      .insert(ticketStatuses)
+      .values({ name: 'Archived', category: 'closed', stopsSlaClock: true, position: 99 })
+      .returning({ id: ticketStatuses.id });
+    await changeStatus(agentId, id, await status('Resolved'));
+    const resolvedAt = await resolvedAtText(id);
+    await changeStatus(agentId, id, await status('Closed'));
+
+    await changeStatus(agentId, id, await status('Archived'));
+
+    expect((await stamps(id)).statusId).toBe(archived!.id);
+    expect(await resolvedAtText(id)).toBe(resolvedAt);
+  });
+
+  it.each(['Open', 'Pending'])('clears it when a closed ticket goes back to %s', async (back) => {
+    const { id, agentId } = await openTicket();
+    await changeStatus(agentId, id, await status('Resolved'));
+    await changeStatus(agentId, id, await status('Closed'));
+
+    await changeStatus(agentId, id, await status(back));
+
+    expect(await stamps(id)).toMatchObject({
+      resolvedAt: null,
+      resolvedByAgentId: agentId,
+      closedAt: null,
+    });
+  });
+
+  it('stamps a fresh resolve when a closed ticket is resolved again', async () => {
+    const { id, agentId } = await openTicket();
+    await changeStatus(agentId, id, await status('Resolved'));
+    const first = await resolvedAtText(id);
+    await changeStatus(agentId, id, await status('Closed'));
+
+    await changeStatus(agentId, id, await status('Resolved'));
+
+    const again = await resolvedAtText(id);
+    expect(again).not.toBeNull();
+    expect(again).not.toBe(first);
+    expect((await stamps(id)).closedAt).toBeNull();
   });
 });

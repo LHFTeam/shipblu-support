@@ -2305,9 +2305,10 @@ message bodies — the same reasoning as the deliberately tiny `pg_notify` paylo
   to the figures, `npm run job -- rollup_metrics days=90` (or `from=…`,
   `to=…`, `day=…`) runs it now: `run-job.ts` takes trailing `key=value` pairs
   as the payload, and the payload's schema refuses a mistyped key. **Read §6.98
-  first**: rebuilding a day older than about three days rewrites its
-  resolution counts without every ticket closed since, so a backfill is not
-  free until that is fixed.
+  first**: once its fix is deployed, run `restore_resolved_at` once before any
+  backfill, and know that a rebuild still takes a resolution off its old day
+  once the ticket has been reopened or resolved again since: it counts on the
+  later resolve's day, or on none while the ticket is open again.
 
 - **Connections are left mid-transaction by the pooler. Reaped, not solved.**
   Backends appear as `state=active` + `wait_event=ClientRead` with an open
@@ -6282,6 +6283,35 @@ still waiting for it` one whose outcome is not known yet.
     answered, and `/reports/csat` says when a window's sends or decisions
     against are not in its figures, and on which days, rather than reading
     them as none.
+
+    **Fixed 2026-10-19.** Both writers now take the stamp from `resolveStamp`
+    (`lib/tickets/resolve-stamp.ts`): a resolve stamps it, a move back to Open
+    or Pending clears it, and a close leaves it out of the update — so a
+    resolved ticket keeps the resolve it follows, and one closed straight from
+    Open keeps its null. Leaving it out rather than writing a value back is
+    what keeps the rule's sweep, which reads before it writes, from putting an
+    old resolve onto a ticket the customer reopened in between; and a close
+    never stamps a missing one, because a WhatsApp Business app conversation
+    or a copied history is filed resolved with none on purpose. The 11 were
+    fewer than they looked (read 2026-10-19): only #2 and #13749 had been
+    resolved before the rule closed them; the other nine were closed straight
+    from Open and rightly have no stamp. `npm run job -- restore_resolved_at
+dryRun=true`, then without, gives those two theirs back from their
+    `status_changed` events — the instant to within the request, since the
+    column and the event took different clocks. Their days, 2026-08-18 and
+    2026-08-31, were rolled up before the closes and already count them, so the
+    restore makes a rebuild agree with what is stored rather than change it.
+    What a rebuild still moves: a resolution resolved again since, because
+    every resolve writes a new stamp — after a move back to Open or Pending
+    (a customer's reopen, or an agent's or a rule's), or on a ticket already
+    resolved or closed, where the picker and "Resolve after sending" still
+    offer Resolved; a resolution reopened and not resolved again, which leaves
+    its day for none, its cause falling back to the day the cause was set;
+    and a cause recorded on a closed ticket more than three days after its
+    resolve, which is filed on the resolve's day — a day the nightly no longer
+    recomputes, so that day keeps its old cause until a backfill. Until this
+    change the same edit was filed on the day it was made, and counted on two
+    days instead.
 
 ### Tooling notes for this environment
 

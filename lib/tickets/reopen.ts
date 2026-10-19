@@ -1,6 +1,7 @@
 import { eq } from 'drizzle-orm';
 import type { db } from '@/db/client';
 import { conversationEvents, conversations } from '@/db/schema';
+import { resolveStamp } from './resolve-stamp';
 import { defaultOpenStatusId } from './statuses';
 
 /** Why a resolved ticket went back to open: the web chat's visitor wrote, or any other customer did. */
@@ -38,7 +39,7 @@ export async function reopenResolved(
   // to be read back below.
   const reopened = await tx
     .update(conversations)
-    .set({ statusId, resolvedAt: null, reopenCount: ticket.reopenCount + 1 })
+    .set({ statusId, ...resolveStamp('open'), reopenCount: ticket.reopenCount + 1 })
     .where(eq(conversations.id, ticket.id))
     .returning({ resolvedBy: conversations.resolvedByAgentId });
 

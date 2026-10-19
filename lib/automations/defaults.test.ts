@@ -60,6 +60,12 @@ describe('the close-after-3-days rule', () => {
     expect(matches(CLOSE_RESOLVED_RULE.conditions, resolvedHoursAgo(200, 'open'))).toBe(false);
   });
 
+  it('never closes a ticket it has already closed', () => {
+    // A close keeps `resolved_at`, so every ticket this rule closed still reads
+    // its hours since resolved, and only the category condition keeps it out.
+    expect(matches(CLOSE_RESOLVED_RULE.conditions, resolvedHoursAgo(200, 'closed'))).toBe(false);
+  });
+
   it('is a time-based rule, since nothing a person does can fire it', () => {
     expect(CLOSE_RESOLVED_RULE.trigger).toBe('time_based');
   });

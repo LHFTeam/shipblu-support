@@ -70,7 +70,8 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
       // one next to it made the whole rule advisory: picking the other option
       // ended the ticket with no cause recorded and nothing to say so. See
       // `conversations.root_cause_set_at` for how a closed ticket's cause is
-      // then dated, since `resolved_at` stays null on this path.
+      // then dated: one closed without being resolved has no `resolved_at`
+      // (closing a resolved one keeps the resolve it follows: `resolveStamp`).
       if (status.category === 'resolved' || status.category === 'closed') {
         const incomplete = await refuseIfIncomplete(row.conversation.customFields);
         if (incomplete) return incomplete;
