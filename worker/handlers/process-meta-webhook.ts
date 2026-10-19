@@ -137,12 +137,15 @@ export async function processMetaWebhook(event: {
   );
 
   // Written on the row by `processWebhook` as it rethrows, and gone from it
-  // once an attempt succeeds.
+  // once an attempt succeeds. Cut short, as the partial-failure note this
+  // replaces was: a database outage fails every item of a large batch, each
+  // error carries its statement's parameters — customer text — and a dead
+  // job's `last_error` is kept for good.
   if (failures.length > 0) {
-    throw new Error(
+    const message =
       `${failures.length} item(s) in the batch failed, so the delivery is retried: ` +
-        failures.join(' | '),
-    );
+      failures.join(' | ');
+    throw new Error(message.slice(0, 2000));
   }
 }
 

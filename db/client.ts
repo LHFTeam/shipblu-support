@@ -667,7 +667,7 @@ type Limits = { timeoutMs: number; lostAfterMs: number };
  * would otherwise wrap the previous scope's wrapper, and every query would arm
  * N timers against N counters behind N gates.
  *
- * Exported for `db/client.test.ts`, in the same spirit as `interactionWindowSet`
+ * Exported for `db/client.test.ts`, in the same spirit as `customerWroteSet`
  * — the wrapping is the whole mechanism and there is no other way to reach it
  * without a live connection.
  */

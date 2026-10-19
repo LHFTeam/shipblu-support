@@ -259,6 +259,18 @@ describe('processWebhook — a Meta batch with an item that failed', () => {
     });
   });
 
+  it('keeps the error it records short when a large batch fails', async () => {
+    const now = Date.now();
+    const mids = Array.from({ length: 80 }, (_, n) => `m_outage_${n}`);
+    const id = await store(mids.map((mid, n) => dm(`igsid-${n}`, mid, now - MINUTE)));
+    for (const mid of mids) failing.mids.add(mid);
+
+    await expect(run(id)).rejects.toThrow('80 item(s) in the batch failed');
+    const { error } = await delivery(id);
+    expect(error).toMatch(/^80 item\(s\) in the batch failed/);
+    expect(error!.length).toBeLessThanOrEqual(2000);
+  });
+
   it('queues a download with its message or not at all, so the retry gets both', async () => {
     const first = 'https://lookaside.fbsbx.com/ig_messaging_cdn/?asset_id=1';
     const second = 'https://lookaside.fbsbx.com/ig_messaging_cdn/?asset_id=2';

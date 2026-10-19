@@ -428,10 +428,11 @@ return 200 immediately; they never do the work inline.
 **A Facebook or Instagram batch is retried whole when any item in it fails**
 (`process-meta-webhook.ts`), so the items that worked run again on every retry,
 and the one that failed lands after siblings newer than it. Every item type
-there therefore does nothing on a second run, moves a ticket's "last" columns
-only forward (`latest()`), and starts its reply clock from the
-`lastCustomerMessageAt` that update returns rather than from its own instant. A
-new item type meets all three, or a retry duplicates it or winds a ticket back. A WhatsApp batch still
+there therefore does nothing on a second run and moves a ticket's "last"
+columns only forward (`latest()`), before `onCustomerReply`, which starts the
+reply clock from the newest of them under the ticket's lock — and not at all
+when an agent has answered since. A new item type meets both, or a retry
+duplicates it or winds a ticket back. A WhatsApp batch still
 retries only for history or when everything failed, which is a change of its
 own to make.
 
@@ -1394,7 +1395,7 @@ npm run test:db
 postgres.js gets it as an untyped parameter, assumes text and throws
 `ERR_INVALID_ARG_TYPE`; drizzle maps a Date only when a typed operator tells it
 the column, and a template never does. Interpolate `at.toISOString()` behind an
-explicit `::timestamptz`. `interactionWindowSet` and `staleTemplateFilter` are
+explicit `::timestamptz`. `customerWroteSet` and `staleTemplateFilter` are
 both exported purely so a test can read `toSQL().params` back and assert no raw
 Date survives — do that for any new fragment holding an instant. An `EXPLAIN` of
 the statement typed out by hand does **not** catch this: the literal is a literal

@@ -269,13 +269,44 @@ export async function onAgentReply(conversationId: string, at: Date = new Date()
  * Only once the ticket has been answered at least once — before that the
  * first-response clock is already running and starting a second countdown
  * beside it would just show the same obligation twice.
+ *
+ * Owed from when, and whether at all, is decided under the ticket's lock from
+ * the row (`owedSince`), not from `at`, because `at` is the message being
+ * processed and that need not be the newest thing on the ticket — deliveries
+ * are processed in no order, and a Facebook or Instagram batch with an item
+ * that failed is run again behind its newer siblings. The same rule as
+ * `onAgentReply`'s, from the other side, so the clocks come out as they would
+ * have in arrival order.
  */
 export async function onCustomerReply(
   conversationId: string,
   at: Date = new Date(),
 ): Promise<void> {
   await closeStrayPause(conversationId, at);
-  await startReplyClock(conversationId, () => at);
+  await startReplyClock(conversationId, ({ conversation }) => owedSince(conversation, at));
+}
+
+/**
+ * The instant a reply is owed from: the customer's newest message — the
+ * `lastCustomerMessageAt` every inbound path moves forward before calling, or
+ * `at` when that is newer — unless the team has replied since, when nothing
+ * is.
+ *
+ * Read from the locked row, so an older message processed after a newer one,
+ * even concurrently, cannot restart the clock from its own earlier instant and
+ * pull back the newer one's due date; nor restart it at all when an agent has
+ * answered the newer one in between, which would leave the ticket awaiting a
+ * reply it already had. Automated messages do not move `lastAgentMessageAt`
+ * (`lib/tickets/outbound.ts`), so an acknowledgement is never the reply.
+ */
+function owedSince(
+  row: { lastCustomerMessageAt: Date | null; lastAgentMessageAt: Date | null },
+  at: Date,
+): Date | null {
+  const wrote =
+    row.lastCustomerMessageAt && row.lastCustomerMessageAt > at ? row.lastCustomerMessageAt : at;
+  if (row.lastAgentMessageAt && row.lastAgentMessageAt >= wrote) return null;
+  return wrote;
 }
 
 /**

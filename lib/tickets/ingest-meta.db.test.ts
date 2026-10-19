@@ -591,6 +591,23 @@ describe('an older Meta item stored after a newer one', () => {
     expect(await clocks(ticket)).toEqual(onNewer);
   });
 
+  // An agent answered the newer message before the older one was stored —
+  // inside a retry's backoff, say. In arrival order that reply answered both,
+  // so nothing is owed, and the ticket must not read as awaiting us.
+  it('starts no clock for an older message when an agent has answered the newer one', async () => {
+    const ticket = await answeredTicket();
+    const repliedAt = new Date(NEWER.getTime() + 2 * 60_000);
+    await answered(ticket, repliedAt);
+
+    await ingestMetaMessage(dm({ mid: 'm_older', sentAt: OLDER, text: 'Any news?' }));
+
+    expect(await clocks(ticket)).toEqual({
+      lastMessageAt: repliedAt,
+      lastCustomerMessageAt: NEWER,
+      nextResponseDueAt: null,
+    });
+  });
+
   it('keeps a comment thread on a reply stored before an older one', async () => {
     await hourlyPolicy();
     const root = await ingestMetaComment(comment({ createdAt: OPENED }));

@@ -149,45 +149,25 @@ export async function ingestMetaMessage(
     // the commit logs its own failures rather than throwing.
     await queueAttachments(tx, messageId, message.attachments);
 
-    // Forward only (`latest`), as email's and WhatsApp's columns are:
-    // deliveries are processed in no order (§6.77), and a batch with an item
-    // that failed is run again whole, so the item that failed lands after
-    // siblings newer than it. Written plainly, the older message would drag
-    // the ticket down the list and the messaging window shut early.
-    const [clocks] = await tx
+    await tx
       .update(conversations)
-      .set({
-        lastMessageAt: latest(conversations.lastMessageAt, message.sentAt),
-        lastCustomerMessageAt: latest(conversations.lastCustomerMessageAt, message.sentAt),
-      })
-      .where(eq(conversations.id, conversationId))
-      .returning({ lastCustomerMessageAt: conversations.lastCustomerMessageAt });
+      .set(customerWroteSet(message.sentAt))
+      .where(eq(conversations.id, conversationId));
 
-    return {
-      conversationId,
-      conversationNumber,
-      messageId,
-      createdConversation,
-      customerWroteAt: clocks?.lastCustomerMessageAt ?? message.sentAt,
-    };
+    return { conversationId, conversationNumber, messageId, createdConversation };
   });
-  const { customerWroteAt, ...stored } = result;
 
   await afterMessageStored({
-    conversationId: stored.conversationId,
-    messageId: stored.messageId,
+    conversationId: result.conversationId,
+    messageId: result.messageId,
     bodyText: message.text,
     kind: 'reply',
     direction: 'inbound',
   });
 
-  // The next-response clock counts from the customer's newest message on the
-  // ticket, not from this one, for the reason the columns move forward only:
-  // restarted from an older message's instant, it would pull back a due date
-  // the newer one had set.
-  await afterInboundMessage(stored.conversationId, stored.createdConversation, customerWroteAt);
+  await afterInboundMessage(result.conversationId, result.createdConversation, message.sentAt);
 
-  return { ...stored, duplicate: false };
+  return { ...result, duplicate: false };
 }
 
 // --- Comments ---------------------------------------------------------------
@@ -287,46 +267,46 @@ export async function ingestMetaComment(comment: NormalisedComment): Promise<Met
       })
       .returning({ id: messages.id });
 
-    // Forward only, and the clock below from what this returns, as for a
-    // direct message: a reply processed before the comment it answers is the
-    // newer of the two.
-    const [clocks] = await tx
+    // A reply processed before the comment it answers is the newer of the two.
+    await tx
       .update(conversations)
-      .set({
-        lastMessageAt: latest(conversations.lastMessageAt, comment.createdAt),
-        lastCustomerMessageAt: latest(conversations.lastCustomerMessageAt, comment.createdAt),
-      })
-      .where(eq(conversations.id, conversationId))
-      .returning({ lastCustomerMessageAt: conversations.lastCustomerMessageAt });
+      .set(customerWroteSet(comment.createdAt))
+      .where(eq(conversations.id, conversationId));
 
     return {
       conversationId,
       conversationNumber,
       messageId: insertedMessage[0]!.id,
       createdConversation,
-      customerWroteAt: clocks?.lastCustomerMessageAt ?? comment.createdAt,
     };
   });
-  const { customerWroteAt, ...stored } = result;
 
   await afterMessageStored({
-    conversationId: stored.conversationId,
-    messageId: stored.messageId,
+    conversationId: result.conversationId,
+    messageId: result.messageId,
     bodyText: comment.text,
     kind: 'reply',
     direction: 'inbound',
   });
 
-  await afterInboundMessage(stored.conversationId, stored.createdConversation, customerWroteAt);
+  await afterInboundMessage(result.conversationId, result.createdConversation, comment.createdAt);
 
-  return { ...stored, duplicate: false };
+  return { ...result, duplicate: false };
 }
 
 // --- Interactions -----------------------------------------------------------
 
 /**
- * The window advance, as a `set` object, exported so a test can assert what it
- * binds.
+ * Something the customer did that opens the window — a message, a comment, a
+ * postback — as a `set` object: both columns moved forward to its instant,
+ * and never back. Exported so a test can assert what it binds.
+ *
+ * Forward only, as email's and WhatsApp's columns are, because deliveries are
+ * processed in no order (§6.77) and a batch with an item that failed is run
+ * again whole, so the item that failed lands after siblings newer than it.
+ * Written plainly, the older one would drag the ticket down the list and the
+ * messaging window shut early. The reply clock started after it reads the
+ * column back under the ticket's lock (`onCustomerReply`), for the same reason.
  *
  * The instant is interpolated as an ISO string with an explicit cast, never as a
  * `Date`. A bare Date in a `sql` template reaches postgres.js as an untyped
@@ -341,12 +321,10 @@ export async function ingestMetaComment(comment: NormalisedComment): Promise<Met
  * the `database` CI job does not run, so no Postgres ever plans this statement
  * before production does.
  *
- * `greatest` never goes backwards, which matters because Meta redelivers and
- * these events arrive interleaved with the messages they accompany. It is
- * documented as ignoring nulls in its list, so a conversation whose customer has
- * never written takes the interaction's own instant.
+ * `greatest` is documented as ignoring nulls in its list, so a conversation
+ * whose customer has never written takes the instant given.
  */
-export function interactionWindowSet(at: Date) {
+export function customerWroteSet(at: Date) {
   return {
     lastMessageAt: latest(conversations.lastMessageAt, at),
     lastCustomerMessageAt: latest(conversations.lastCustomerMessageAt, at),
@@ -415,7 +393,7 @@ export async function applyMetaInteraction(interaction: NormalisedInteraction): 
 
   if (already.length > 0) return false;
 
-  const customerWroteAt = await db.transaction(async (tx) => {
+  await db.transaction(async (tx) => {
     await tx.insert(conversationEvents).values({
       conversationId: existing.id,
       type,
@@ -433,7 +411,7 @@ export async function applyMetaInteraction(interaction: NormalisedInteraction): 
       createdAt: interaction.at,
     });
 
-    if (!interaction.opensWindow) return null;
+    if (!interaction.opensWindow) return;
 
     // A resolved ticket is reopened, exactly as an inbound message reopens one.
     // Moving the window on a resolved ticket without reopening it would leave a
@@ -449,13 +427,11 @@ export async function applyMetaInteraction(interaction: NormalisedInteraction): 
 
     // Never backwards: a Get Started replayed after the customer's question must
     // not wind the window, or the next-response target derived from it, back to
-    // before the question was asked. See `interactionWindowSet`.
-    const [clocks] = await tx
+    // before the question was asked. See `customerWroteSet`.
+    await tx
       .update(conversations)
-      .set(interactionWindowSet(interaction.at))
-      .where(eq(conversations.id, existing.id))
-      .returning({ lastCustomerMessageAt: conversations.lastCustomerMessageAt });
-    return clocks?.lastCustomerMessageAt ?? interaction.at;
+      .set(customerWroteSet(interaction.at))
+      .where(eq(conversations.id, existing.id));
   });
 
   // The next-response clock, restarted the same way an inbound message restarts
@@ -465,9 +441,8 @@ export async function applyMetaInteraction(interaction: NormalisedInteraction): 
   // and the reason a reaction is excluded from all of this ("measuring an agent
   // as late for not answering 👍") would describe a clock that was never wound.
   // Outside the transaction and best-effort, exactly as `afterInboundMessage`
-  // calls it — and from the customer's newest instant on the ticket, as a
-  // message's clock is, so a postback processed late cannot pull it back.
-  if (customerWroteAt) await onCustomerReply(existing.id, customerWroteAt);
+  // calls it.
+  if (interaction.opensWindow) await onCustomerReply(existing.id, interaction.at);
 
   return true;
 }

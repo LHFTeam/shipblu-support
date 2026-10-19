@@ -20,8 +20,8 @@ const log = logger('process_webhook');
  * the email's Message-ID, so even a double-run cannot duplicate a message.
  * A Meta batch can take several attempts to get there — one item that fails
  * retries the delivery, and the items that worked run again — and so can a
- * WhatsApp batch whose history failed, or whose every item did. So each item
- * either ingests is idempotent the same way.
+ * WhatsApp batch whose history failed, or whose every item did. So every item
+ * either handler ingests is idempotent the same way.
  */
 export async function processWebhook(job: ClaimedJob): Promise<void> {
   const { webhookEventId } = parseJobPayload(job, 'process_webhook');
@@ -46,13 +46,9 @@ export async function processWebhook(job: ClaimedJob): Promise<void> {
     throw new Error(`webhook_event ${webhookEventId} failed signature verification`);
   }
 
-  // The error goes with each attempt, so the column says what the latest one
-  // left: a processed row holding one is a failure nothing will retry — an
-  // email dropped on purpose, or the WhatsApp items a delivery records and
-  // moves past — and not a batch item a retry has since recovered.
   await db
     .update(webhookEvents)
-    .set({ attempts: sql`${webhookEvents.attempts} + 1`, error: null })
+    .set({ attempts: sql`${webhookEvents.attempts} + 1` })
     .where(eq(webhookEvents.id, webhookEventId));
 
   try {
@@ -77,9 +73,14 @@ export async function processWebhook(job: ClaimedJob): Promise<void> {
         payload: event.payload,
         connection: event.connection,
       });
+      // A Meta batch fails whole on any failed item, so success means every
+      // item went in, and an error an earlier attempt left would read as one
+      // lost. Kept until then, so a row whose retry is still pending, or was
+      // stopped mid-run, says why. Not on WhatsApp's branch: a delivery there
+      // records the items it moves past on this same column before returning.
       await db
         .update(webhookEvents)
-        .set({ processedAt: new Date() })
+        .set({ processedAt: new Date(), error: null })
         .where(eq(webhookEvents.id, webhookEventId));
       return;
     }

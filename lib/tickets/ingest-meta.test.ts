@@ -3,7 +3,7 @@ import { eq } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { conversations } from '@/db/schema';
 import { withTestEnv } from '@/lib/testing/env';
-import { interactionWindowSet } from './ingest-meta';
+import { customerWroteSet } from './ingest-meta';
 
 /**
  * A guard against a bug that only appears against a real database: a `Date`
@@ -30,12 +30,12 @@ const AT = new Date('2026-09-06T10:00:00.000Z');
 function built() {
   return db
     .update(conversations)
-    .set(interactionWindowSet(AT))
+    .set(customerWroteSet(AT))
     .where(eq(conversations.id, '00000000-0000-0000-0000-000000000000'))
     .toSQL();
 }
 
-describe('interactionWindowSet', () => {
+describe('customerWroteSet', () => {
   it('binds no raw Date', () => {
     expect(built().params.some((param) => param instanceof Date)).toBe(false);
   });
