@@ -21,6 +21,7 @@ import { matches } from '@/lib/rules/conditions';
 import { conversationFacts } from '@/lib/rules/facts';
 import { onGroupChanged, onPriorityChanged, onStatusChanged } from '@/lib/sla';
 import { PRIORITY_STAMP } from '@/lib/tickets/priority-stamp';
+import { resolveStamp } from '@/lib/tickets/resolve-stamp';
 import { parseActions, type Action } from './actions';
 import { logger } from '@/lib/log';
 
@@ -246,11 +247,12 @@ async function applyAction(
         .update(conversations)
         .set({
           statusId: status.id,
-          resolvedAt: action.category === 'resolved' ? new Date() : null,
-          // Explicitly nobody, not "leave whoever was there". A rule closing a
-          // ticket that an agent had resolved earlier owns this resolution, so
-          // if the customer comes back it must not land on that agent's reopen
-          // rate — they are not the reason it was closed this time.
+          ...resolveStamp(action.category),
+          // Explicitly nobody, not "leave whoever was there". A rule resolving
+          // a ticket that an agent had resolved earlier owns this resolution,
+          // so if the customer comes back it must not land on that agent's
+          // reopen rate — they are not the reason it was resolved this time.
+          // A rule's close leaves it: the resolve it follows is still theirs.
           ...(action.category === 'resolved' ? { resolvedByAgentId: null } : {}),
           closedAt: action.category === 'closed' ? new Date() : null,
         })

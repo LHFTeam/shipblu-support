@@ -35,6 +35,7 @@ export type JobType =
   | 'backfill_categorise_ai'
   | 'classify_priority'
   | 'normalise_kb_formatting'
+  | 'restore_resolved_at'
   | 'seed_console_handbook'
   | 'seed_canned_responses'
   | 'rotate_whatsapp_credentials'

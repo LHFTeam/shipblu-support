@@ -208,6 +208,10 @@ export const JOB_PAYLOADS = {
     /** One locale only, for a cautious first run. */
     locale: z.enum(LOCALES).optional(),
   }),
+  restore_resolved_at: z.strictObject({
+    /** Report the tickets and the instants they would get, write nothing. */
+    dryRun: z.boolean().optional(),
+  }),
   seed_console_handbook: z.strictObject({
     /** Report what would change, write nothing. */
     dryRun: z.boolean().optional(),

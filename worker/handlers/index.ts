@@ -28,6 +28,7 @@ import { sendAgentInvite } from './send-agent-invite';
 import { sendNotificationEmail } from './send-notification-email';
 import { sendSideEmail } from './send-side-email';
 import { sendWhatsApp } from './send-whatsapp';
+import { restoreResolvedAt } from './restore-resolved-at';
 import { slaSweep } from './sla-sweep';
 import { snapshotBacklog } from './snapshot-backlog';
 import { subscribeMetaWebhooks } from './subscribe-meta-webhooks';
@@ -66,6 +67,7 @@ export const handlers: Partial<Record<JobType, JobHandler>> = {
   presence_sweep: () => presenceSweep(),
   process_webhook: processWebhook,
   rollup_metrics: (job) => rollupMetrics(job),
+  restore_resolved_at: (job) => restoreResolvedAt(job),
   rotate_whatsapp_credentials: (job) => rotateWhatsAppCredentials(job),
   run_time_automations: () => runTimeAutomations(),
   seed_canned_responses: (job) => seedCannedResponses(job),

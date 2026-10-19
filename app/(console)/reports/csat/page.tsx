@@ -133,8 +133,9 @@ export default async function CsatReportPage({
   // day rolled up before the survey columns existed, whose counts read 0
   // until it is computed again, or a day no run computed whole, behind a
   // later one that was. The figures below are short by this much, and the page says so rather than reading
-  // them as none. It does not say to recompute: over a day older than three,
-  // that is not safe yet (`docs/PROJECT-STATE.md` §6.98).
+  // them as none. It does not say to recompute: a rebuild of an old day takes
+  // off it a resolution reopened or resolved again since, which counts on the
+  // later resolve's day or on none (`docs/PROJECT-STATE.md` §6.98).
   const missing = uncounted(liveDays, series);
   // Answers on days rolled up before the distribution was kept: in the
   // average, and in nothing beside it.
@@ -276,7 +277,7 @@ export default async function CsatReportPage({
                 />
                 <Stat
                   label="Resolutions surveyed"
-                  explain="Surveys sent in this window over tickets resolved in it. A survey follows its resolve by the delay, so the window's edges do not hold exactly the same tickets; and a ticket on a channel nobody surveys, or resolved with surveys switched off, counts as resolved and in nothing else. A ticket resolved in a day's first hours and closed by the three-day rule can drop out of that day's resolved count, so this can read a little high."
+                  explain="Surveys sent in this window over tickets resolved in it. A survey follows its resolve by the delay, so the window's edges do not hold exactly the same tickets; and a ticket on a channel nobody surveys, or resolved with surveys switched off, counts as resolved and in nothing else. A resolution counts on the day of the ticket's latest resolve, and on none while it is open again, but a survey stays on the day it was sent, so this can read a little high."
                   value={percent(surveyedRate(summary))}
                   hint={`${summary.csatSentCount.toLocaleString('en-GB')} sent of ${summary.ticketsResolved.toLocaleString('en-GB')} resolved`}
                 />

@@ -519,10 +519,11 @@ export const agentMetricsDaily = pgTable(
  * **Everything here is recomputable**, which is what makes a delete-and-insert
  * rebuild safe: `conversations.created_at` is immutable and
  * `conversation_categories.first_seen_at` is append-only. A cause is dated by
- * `coalesce(resolved_at, root_cause_set_at)`, so the close that clears
- * `resolved_at` does not lose it, but a rebuild after the close files it on the
- * day the cause was set rather than the day it was resolved
- * (`docs/PROJECT-STATE.md` §6.98). The column that must
+ * `coalesce(resolved_at, root_cause_set_at)`: a resolve keeps its stamp through
+ * the close that follows it, so the cause stays on the day it was resolved, and
+ * a ticket closed straight from Open, or reopened and not yet resolved again,
+ * falls back to the day the cause was set (`docs/PROJECT-STATE.md` §6.98).
+ * The column that must
  * never be added is "suggestions still open at day end" — that is current state,
  * and a rebuild would write today's answer onto an old date. It would only
  * surface on the third night, when the recompute window reaches back, which is
@@ -579,8 +580,9 @@ export const categoryMetricsDaily = pgTable(
  * report that silently rewrites last quarter is worse than one that is a little
  * out of date.
  *
- * Counted from `conversations.resolved_at` rather than `created_at`: the cause
- * is recorded at resolution, so a ticket that arrives in one month and is
+ * Counted from the resolve (`coalesce(resolved_at, root_cause_set_at)`, as
+ * `categoryMetricsDaily` explains) rather than `created_at`: the cause is
+ * recorded at resolution, so a ticket that arrives in one month and is
  * understood in the next belongs to the month somebody worked it out.
  */
 export const rootCauseMetricsDaily = pgTable(

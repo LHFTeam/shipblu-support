@@ -3,6 +3,7 @@ import { db } from '@/db/client';
 import { conversationEvents, conversations, type ticketStatuses } from '@/db/schema';
 import { onStatusChanged } from '@/lib/sla';
 import { afterTicketResolved } from '@/lib/tickets/lifecycle';
+import { resolveStamp } from './resolve-stamp';
 
 /** The status a ticket is moving to, as read from `ticket_statuses`. */
 export type StatusTarget = Pick<
@@ -33,7 +34,7 @@ export async function changeStatus(
       .update(conversations)
       .set({
         statusId: status.id,
-        resolvedAt: status.category === 'resolved' ? new Date() : null,
+        ...resolveStamp(status.category),
         // Stamped on the way in and left alone otherwise. Moving a ticket
         // back to Open must not erase who resolved it — that record is what
         // the reopening about to follow gets attributed to.

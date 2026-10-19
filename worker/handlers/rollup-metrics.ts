@@ -217,12 +217,14 @@ export async function rollupMetrics(job?: ClaimedJob): Promise<void> {
       // `conversation_categories.first_seen_at` is append-only, so every column
       // can be recomputed from scratch. The column that would break that is
       // "suggestions still open", which is why it is not there. `resolved_at`
-      // is not immutable — closing a resolved ticket clears it. A cause
-      // survives that through `root_cause_set_at`, though a rebuild may file
-      // it a day or two earlier; the resolution counts in the two tables
-      // above do not: recomputing a day older than the close drops that
-      // resolution there (`docs/PROJECT-STATE.md` §6.98).
-      // Read it before any backfill.
+      // is not immutable: a close keeps it (`resolveStamp`), but every resolve
+      // stamps it afresh, and a reopen or any move back to Open or Pending
+      // clears it. So recomputing a day takes a resolution off it once the
+      // ticket has been resolved again or reopened since: it counts on the
+      // later resolve's day, or on none while the ticket is open again, and a
+      // cause dated by it goes with it or falls back to `root_cause_set_at`.
+      // Tickets closed before the close kept it need `restore_resolved_at` run
+      // once before any backfill (`docs/PROJECT-STATE.md` §6.98).
       await tx.delete(categoryMetricsDaily).where(eq(categoryMetricsDaily.day, day));
       if (categoryRows.length) await tx.insert(categoryMetricsDaily).values(categoryRows);
 

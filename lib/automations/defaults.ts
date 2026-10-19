@@ -40,11 +40,13 @@ export const CLOSE_AFTER_HOURS = 72;
  * clock measures what we owe the customer and must not run over a weekend, but
  * this window is the customer's own to spend, and theirs includes Friday.
  *
- * `status.category` is redundant against `hours_since_resolved` today —
- * `resolved_at` is nulled whenever a ticket leaves resolved, so a reopened
- * ticket already reads null and null never satisfies `gte`. It is stated anyway
- * because this rule is editable in the admin screen, and an admin reading
- * "resolved for 72 hours" should not have to know that to trust it.
+ * `status.category` carries weight. A close keeps `resolved_at`
+ * (`resolveStamp`), so every ticket this rule has closed still reads its hours
+ * since resolved, and the category is what keeps a closed one out — with the
+ * time sweep's population, which is never closed (`liveTickets`), as the second
+ * guard. A reopened ticket reads null, and null never satisfies `gte`. Spelt
+ * out, it also lets an admin reading "resolved for 72 hours" in the admin
+ * screen, where this rule is editable, trust it without knowing any of that.
  */
 export const CLOSE_RESOLVED_RULE: SeededRule = {
   name: 'Close resolved tickets after 3 days',
