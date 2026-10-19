@@ -135,13 +135,15 @@ describe('systemHealth', () => {
     expect(health.rollupComputedAt).toEqual(at('2026-10-18T03:00:00'));
   });
 
-  it('reads the newest figures while rollup_days is empty', async () => {
+  it('reads the newest figures before today while rollup_days is empty', async () => {
     // Between the deploy whose migration creates the table and the first
     // nightly run to write it: the last day with figures, and when they were
-    // written.
+    // written. Not the 14th, rebuilt by hand on Sunday afternoon after the
+    // night's run wrote the 15th, nor today, rebuilt by hand this morning.
     await db.insert(metricsDaily).values([
-      { day: '2026-10-14', ticketsCreated: 3, computedAt: at('2026-10-17T03:00:30') },
+      { day: '2026-10-14', ticketsCreated: 3, computedAt: at('2026-10-18T15:00:00') },
       { day: '2026-10-15', ticketsCreated: 2, computedAt: at('2026-10-18T03:00:21') },
+      { day: '2026-10-19', ticketsCreated: 1, computedAt: at('2026-10-19T10:00:01') },
     ]);
 
     const health = await systemHealth(ZONE, MONDAY_NOON);

@@ -347,12 +347,14 @@ export async function systemHealth(zone: string, now: Date = new Date()): Promis
  * whole days only, so neither can a hand run over today, which `planDays`
  * computes as asked.
  *
- * While `rollup_days` holds no whole day, the newest day in `metrics_daily`
- * instead: between the deploy whose migration creates the table and the first
- * nightly run to write it, and after the table is lost, which its schema
- * allows because every run writes it again. A day short after a quiet one, as
- * the card always was, until a run reaches the table. Read only then, so the
- * page polling every twenty seconds asks one question, not two.
+ * While `rollup_days` holds no whole day, the newest day before today in
+ * `metrics_daily` instead: between the deploy whose migration creates the
+ * table and the first nightly run to write it, and after the table is lost,
+ * which its schema allows because every run writes it again. A day short after
+ * a quiet one, as the card always was, until a run reaches the table; but
+ * never today, which only a hand run over a day still going can have written.
+ * Read only then, so the page polling every twenty seconds asks one question,
+ * not two.
  */
 async function lastComputedDay(
   zone: string,
@@ -365,6 +367,7 @@ async function lastComputedDay(
   const [newest] = await db
     .select({ day: metricsDaily.day, computedAt: metricsDaily.computedAt })
     .from(metricsDaily)
+    .where(lt(metricsDaily.day, today))
     .orderBy(desc(metricsDaily.day))
     .limit(1);
   return newest ?? null;
