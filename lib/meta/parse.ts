@@ -23,10 +23,11 @@ import type {
  * interactions that open a messaging window without being messages, and the
  * answers to a satisfaction survey.
  *
- * Nothing here throws. A payload we cannot read becomes an empty result,
- * because throwing makes Meta redeliver the whole batch — including the parts
- * that were fine — and repeated failures eventually get the subscription
- * disabled.
+ * Nothing here throws. A part we cannot read is left out, because a throw
+ * here loses the whole batch: this runs in the worker before any item does, so
+ * every retry throws again and the delivery goes `dead` with nothing in it
+ * ingested — the parts that were fine included. An item that fails on its own
+ * costs only a retry (`process-meta-webhook.ts`).
  *
  * `connection` is passed in rather than derived. It is not in the payload —
  * both Instagram connections send the same body and differ only in the

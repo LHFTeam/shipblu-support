@@ -57,7 +57,9 @@ const UNVERIFIED_WEBHOOK_DAYS = 7;
  * deleted the evidence a week after the failure and left the job pointing at a
  * row that no longer exists. Today the two predicates select the same 4,531
  * rows — production holds no verified-but-unprocessed row at all — so this is
- * written before the case arrives rather than after it.
+ * written before the case arrives rather than after it. A Facebook or
+ * Instagram batch with one item that keeps failing is now that case, since it
+ * retries on any failed item (`process-meta-webhook.ts`).
  *
  * The third clause exists so that nothing is exempt forever, which was the
  * original bug: a verified row whose processing never completed is kept for the

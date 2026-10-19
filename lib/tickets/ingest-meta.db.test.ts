@@ -9,11 +9,16 @@ import {
   conversations,
   jobs,
   messages,
+  slaPolicies,
   ticketStatuses,
 } from '@/db/schema';
-import type { NormalisedComment, NormalisedDirectMessage } from '@/lib/meta/types';
+import type {
+  NormalisedComment,
+  NormalisedDirectMessage,
+  NormalisedInteraction,
+} from '@/lib/meta/types';
 import { withCleanDatabase } from '@/lib/testing/db';
-import { ingestMetaComment, ingestMetaMessage } from './ingest-meta';
+import { applyMetaInteraction, ingestMetaComment, ingestMetaMessage } from './ingest-meta';
 
 /**
  * What the two Meta ingest paths write today, quirks included, so the shared
@@ -503,5 +508,121 @@ describe('ingestMetaComment', () => {
       duplicate: true,
     });
     expect(await messagesOf(first.conversationId)).toHaveLength(1);
+  });
+});
+
+/**
+ * Deliveries are processed in no order, and a batch with an item that failed is
+ * run again whole — so the item that failed is stored after siblings newer
+ * than it. Each case stores the newer thing first, then the older one, and
+ * expects the ticket to stay where the newer one put it: in the list, in the
+ * messaging window, and on the next-response clock.
+ */
+describe('an older Meta item stored after a newer one', () => {
+  const OPENED = new Date('2026-09-20T09:00:00Z');
+  const ANSWERED = new Date('2026-09-20T09:30:00Z');
+  const OLDER = new Date('2026-09-20T10:00:00Z');
+  const NEWER = new Date('2026-09-20T10:05:00Z');
+  const HOUR = 3_600_000;
+
+  /** The default policy, so `applySlaOnCreate` gives every new ticket an hour. */
+  async function hourlyPolicy() {
+    const target = { firstResponseMins: 60, nextResponseMins: 60, resolutionMins: 1440 };
+    await db.insert(slaPolicies).values({
+      name: 'every hour',
+      hoursSource: 'round_the_clock',
+      isDefault: true,
+      targets: { low: target, medium: target, high: target, urgent: target },
+    });
+  }
+
+  /** What `storeAgentReply` and `onAgentReply` leave on the ticket, at a chosen instant. */
+  async function answered(conversationId: string, at: Date) {
+    await db
+      .update(conversations)
+      .set({
+        lastMessageAt: at,
+        lastAgentMessageAt: at,
+        firstRespondedAt: at,
+        nextResponseDueAt: null,
+      })
+      .where(eq(conversations.id, conversationId));
+  }
+
+  /** A DM ticket we have answered, on which the customer wrote again at NEWER. */
+  async function answeredTicket() {
+    await hourlyPolicy();
+    const opened = await ingestMetaMessage(dm({ mid: 'm_opened', sentAt: OPENED }));
+    await answered(opened.conversationId, ANSWERED);
+    await ingestMetaMessage(dm({ mid: 'm_newer', sentAt: NEWER, text: 'Hello?' }));
+    return opened.conversationId;
+  }
+
+  async function clocks(conversationId: string) {
+    const [row] = await db
+      .select({
+        lastMessageAt: conversations.lastMessageAt,
+        lastCustomerMessageAt: conversations.lastCustomerMessageAt,
+        nextResponseDueAt: conversations.nextResponseDueAt,
+      })
+      .from(conversations)
+      .where(eq(conversations.id, conversationId));
+    return row!;
+  }
+
+  const onNewer = {
+    lastMessageAt: NEWER,
+    lastCustomerMessageAt: NEWER,
+    nextResponseDueAt: new Date(NEWER.getTime() + HOUR),
+  };
+
+  it('keeps a direct message thread on the newer message', async () => {
+    const ticket = await answeredTicket();
+    expect(await clocks(ticket)).toEqual(onNewer);
+
+    await ingestMetaMessage(dm({ mid: 'm_older', sentAt: OLDER, text: 'Any news?' }));
+
+    expect((await messagesOf(ticket)).map((m) => m.channelMessageId)).toEqual([
+      'm_opened',
+      'm_older',
+      'm_newer',
+    ]);
+    // Plainly written, both columns read 10:00 and the clock 11:00.
+    expect(await clocks(ticket)).toEqual(onNewer);
+  });
+
+  it('keeps a comment thread on a reply stored before the comment it answers', async () => {
+    const reply = await ingestMetaComment(
+      comment({ commentId: 'post-1_c2', parentCommentId: 'post-1_c1', createdAt: NEWER }),
+    );
+    const root = await ingestMetaComment(comment({ createdAt: OLDER }));
+
+    expect(root).toMatchObject({
+      conversationId: reply.conversationId,
+      createdConversation: false,
+    });
+    expect(await clocks(reply.conversationId)).toMatchObject({
+      lastMessageAt: NEWER,
+      lastCustomerMessageAt: NEWER,
+    });
+  });
+
+  it('restarts the clock from the newer message when an older postback lands', async () => {
+    const ticket = await answeredTicket();
+    const postback: NormalisedInteraction = {
+      platform: 'facebook',
+      connection: 'facebook_page',
+      kind: 'postback',
+      from: PSID,
+      at: OLDER,
+      opensWindow: true,
+      summary: 'Track my order',
+      payload: 'TRACK',
+      standby: false,
+    };
+
+    expect(await applyMetaInteraction(postback)).toBe(true);
+    // From the postback's own instant, the clock would read 11:00.
+    expect(await clocks(ticket)).toEqual(onNewer);
   });
 });

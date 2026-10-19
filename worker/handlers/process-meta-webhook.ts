@@ -1,6 +1,3 @@
-import { eq } from 'drizzle-orm';
-import { db } from '@/db/client';
-import { webhookEvents } from '@/db/schema';
 import { recordMetaFeedback } from '@/lib/csat/meta-feedback';
 import type { MetaConnection } from '@/lib/meta/connection';
 import { parseMetaWebhook } from '@/lib/meta/parse';
@@ -19,9 +16,29 @@ const log = logger('meta');
  * Turns a stored Facebook or Instagram payload into conversations.
  *
  * One batch can carry unrelated events from different customers, so each is
- * processed independently and failures are collected. The job only fails — and
- * so only retries — when *everything* in the batch failed, which distinguishes
- * a real outage from one malformed comment.
+ * processed independently and failures are collected: one item that throws
+ * does not stop the rest. **Any failure then fails the job**, so the queue
+ * runs the whole delivery again, and a delivery that keeps failing goes
+ * `dead` where it can be seen.
+ *
+ * It used to fail only when *every* item had failed, to tell an outage from
+ * one malformed comment. That dropped the item that failed beside one that
+ * worked — a message, or a survey answer, lost to a dropped connection, with
+ * nothing to retry it and Meta never redelivering. The rerun is safe because
+ * every item type does nothing the second time:
+ *
+ * - a message and a comment are found by their mid or comment id, before
+ *   anything is written (`ingestMetaMessage`, `ingestMetaComment`);
+ * - an interaction by its instant on the ticket (`applyMetaInteraction`);
+ * - a survey answer by `recordAnswer`'s first-answer-wins, and only a first
+ *   answer is thanked (`recordMetaFeedback`);
+ * - a receipt moves a message forward only (`applyMetaReceipt`).
+ *
+ * Instagram already ran every item twice, once per connection, so none of
+ * this is new to the items. What a retry adds is order: the item that failed
+ * now lands after siblings that are newer than it, which is why the ingest
+ * moves a ticket's "last" columns and its reply clock forward only. A new
+ * item type has to meet both.
  *
  * The connection travels on the row rather than being worked out here: the two
  * Instagram connections post identical bodies and are separated only by which
@@ -43,8 +60,8 @@ export async function processMetaWebhook(event: {
   let answers = 0;
   // Interactions that found no live ticket, or had already been recorded, and
   // survey answers that recorded nothing — a second copy, an unknown survey,
-  // somebody other than the requester. They did nothing, so they must not
-  // count toward `attempted` below.
+  // somebody other than the requester. For the log line only; on a retry it
+  // includes what an earlier attempt recorded.
   let skipped = 0;
 
   for (const message of parsed.messages) {
@@ -80,7 +97,7 @@ export async function processMetaWebhook(event: {
       else skipped += 1;
       log.info(
         `${interaction.platform} ${interaction.kind} from ${interaction.from} ` +
-          `(${interaction.summary}) → ${applied ? 'recorded' : 'no live ticket'}`,
+          `(${interaction.summary}) → ${applied ? 'recorded' : 'no live ticket, or already recorded'}`,
       );
     } catch (error) {
       failures.push(`${interaction.kind}: ${errorMessage(error)}`);
@@ -97,7 +114,7 @@ export async function processMetaWebhook(event: {
           `from ${feedback.from} → ${outcome}`,
       );
     } catch (error) {
-      failures.push(`survey answer: ${errorMessage(error)}`);
+      failures.push(`survey answer for ${feedback.surveyId}: ${errorMessage(error)}`);
     }
   }
 
@@ -109,39 +126,23 @@ export async function processMetaWebhook(event: {
     }
   }
 
-  // What could meaningfully have failed. An interaction that no-ops — nobody to
-  // attach it to, or a copy already recorded — is not a success, and counting it
-  // as one widens this denominator: a batch of one failed customer message and
-  // one such interaction would no longer be "everything failed", so the job
-  // would report success, the webhook would be stamped processed, and the
-  // customer's message would be lost with no retry.
-  const attempted =
-    parsed.messages.length +
-    parsed.comments.length +
-    parsed.receipts.length +
-    parsed.interactions.length +
-    parsed.feedbacks.length -
-    skipped;
-
-  if (failures.length > 0 && failures.length === attempted) {
-    throw new Error(`every item in the batch failed: ${failures.join(' | ')}`);
-  }
-
-  if (failures.length > 0) {
-    log.error(`partial failure on ${event.id}: ${failures.join(' | ')}`);
-    await db
-      .update(webhookEvents)
-      .set({ error: failures.join(' | ').slice(0, 2000) })
-      .where(eq(webhookEvents.id, event.id));
-  }
-
   log.info(
     `${event.id} via ${event.connection ?? 'an unrecorded connection'}: ` +
       `${messages} message(s), ${comments} comment(s), ${receipts} receipt(s), ` +
       `${interactions} interaction(s), ${answers} survey answer(s) (${skipped} skipped), ` +
       `${parsed.echoes} echo(es) ignored, ` +
-      `${parsed.emptyCards} empty card(s) ignored`,
+      `${parsed.emptyCards} empty card(s) ignored` +
+      (failures.length ? `, ${failures.length} failed` : ''),
   );
+
+  // Written on the row by `processWebhook` as it rethrows, and gone from it
+  // once an attempt succeeds.
+  if (failures.length > 0) {
+    throw new Error(
+      `${failures.length} item(s) in the batch failed, so the delivery is retried: ` +
+        failures.join(' | '),
+    );
+  }
 }
 
 /** The stored connection, or null for anything that is not one we know. */

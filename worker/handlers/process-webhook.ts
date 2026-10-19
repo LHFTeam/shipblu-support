@@ -18,6 +18,9 @@ const log = logger('process_webhook');
  * Marking `processed_at` is what makes replay safe: a payload is only ever
  * turned into a ticket once, and ingest itself is independently idempotent on
  * the email's Message-ID, so even a double-run cannot duplicate a message.
+ * A Meta or WhatsApp batch can take several attempts to get there — one item
+ * that fails retries the delivery, and the items that worked run again — so
+ * each item they ingest is idempotent the same way.
  */
 export async function processWebhook(job: ClaimedJob): Promise<void> {
   const { webhookEventId } = parseJobPayload(job, 'process_webhook');
@@ -42,9 +45,13 @@ export async function processWebhook(job: ClaimedJob): Promise<void> {
     throw new Error(`webhook_event ${webhookEventId} failed signature verification`);
   }
 
+  // The error goes with each attempt, so the column says what the latest one
+  // left: a processed row holding one is a failure nothing will retry — an
+  // email dropped on purpose, or the WhatsApp items a delivery records and
+  // moves past — and not a batch item a retry has since recovered.
   await db
     .update(webhookEvents)
-    .set({ attempts: sql`${webhookEvents.attempts} + 1` })
+    .set({ attempts: sql`${webhookEvents.attempts} + 1`, error: null })
     .where(eq(webhookEvents.id, webhookEventId));
 
   try {
