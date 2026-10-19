@@ -1,7 +1,11 @@
+import { eq } from 'drizzle-orm';
+import { DateTime } from 'luxon';
 import { describe, expect, it } from 'vitest';
 import { db } from '@/db/client';
-import { metricsDaily, rollupDays } from '@/db/schema';
+import { contacts, conversations, metricsDaily, rollupDays, ticketStatuses } from '@/db/schema';
 import type { ClaimedJob } from '@/lib/queue';
+import { systemHealth } from '@/lib/reports/live';
+import { reportingZone } from '@/lib/reports/rollup';
 import { withCleanDatabase } from '@/lib/testing/db';
 import { rollupMetrics } from './rollup-metrics';
 
@@ -9,7 +13,8 @@ import { rollupMetrics } from './rollup-metrics';
  * That a run records each day it computed, an empty one included.
  *
  * The reports ask `rollup_days` whether last night's run has reached
- * yesterday (`countedThrough`), because `metrics_daily` holds no row for a
+ * yesterday (`countedThrough`), and the dashboard's health card how far it
+ * has reached (`systemHealth`), because `metrics_daily` holds no row for a
  * day nobody worked. A run that wrote the marker only beside rows would put
  * the question back where it started: a quiet yesterday would read as a
  * night the job did not run.
@@ -42,5 +47,34 @@ describe('rollup_metrics', () => {
     const markers = await db.select().from(rollupDays);
     expect(markers).toHaveLength(1);
     expect(markers[0]!.computedAt > new Date('2026-10-15T00:00:05Z')).toBe(true);
+  });
+
+  it('puts a quiet day it computed on the dashboard, not the last day anybody worked', async () => {
+    const zone = await reportingZone();
+    // A ticket on Thursday the 15th, and nobody at work on Friday.
+    const [contact] = await db.insert(contacts).values({ name: 'Amira' }).returning();
+    const [open] = await db
+      .select({ id: ticketStatuses.id })
+      .from(ticketStatuses)
+      .where(eq(ticketStatuses.name, 'Open'));
+    await db.insert(conversations).values({
+      channel: 'email',
+      statusId: open!.id,
+      requesterContactId: contact!.id,
+      createdAt: DateTime.fromISO('2026-10-15T11:00', { zone }).toJSDate(),
+    });
+
+    await rollupMetrics(job({ from: '2026-10-15', to: '2026-10-16' }));
+
+    expect(await db.selectDistinct({ day: metricsDaily.day }).from(metricsDaily)).toEqual([
+      { day: '2026-10-15' },
+    ]);
+    const [friday] = await db.select().from(rollupDays).where(eq(rollupDays.day, '2026-10-16'));
+
+    // Read at the real clock, which stamped the run: both days are long over.
+    const health = await systemHealth(zone);
+
+    expect(health.rollupDay).toBe('2026-10-16');
+    expect(health.rollupComputedAt).toEqual(friday!.computedAt);
   });
 });

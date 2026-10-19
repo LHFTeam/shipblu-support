@@ -46,13 +46,14 @@ export function Health({
         />
         <Stat
           label="Reports cover up to"
-          value={health.lastRollupDay ?? '—'}
+          explain="The newest day the nightly rollup has finished computing, whether or not anybody worked it: the day the customer satisfaction report counts to. It moves to yesterday when the nightly run reaches it, so a day older than the one before yesterday means a night's run was missed."
+          value={health.rollupDay ?? '—'}
           hint={
-            health.lastRollupAt
-              ? `That day's figures were written ${ago(formatRelative(health.lastRollupAt, now))}`
-              : 'The nightly job has never run'
+            health.rollupComputedAt
+              ? `Computed ${ago(formatRelative(health.rollupComputedAt, now))}`
+              : 'The rollup has not computed a day yet'
           }
-          tone={health.lastRollupAt ? undefined : 'caution'}
+          tone={health.rollupComputedAt ? undefined : 'caution'}
         />
       </div>
     </Section>
