@@ -89,9 +89,10 @@ export function shownOn(ticket: Record<'id' | 'mergedIntoId', AnyPgColumn>): SQL
 }
 
 /**
- * `ratedLowWithin` over the view's own window — the last `RATED_LOW_DAYS`
- * days to the team's midnight (`reportingZone`, `rangeIn`) — so the inbox
- * asks one thing and the window is defined in one place.
+ * `ratedLowWithin` over the view's own window, so the inbox asks one thing and
+ * the window is defined in one place: today and the `RATED_LOW_DAYS - 1` days
+ * before it, from the team's midnight (`reportingZone`, `rangeIn`), so a 1
+ * given this morning is in it.
  */
 export async function ratedLowRecently(): Promise<SQL> {
   const zone = await reportingZone();
