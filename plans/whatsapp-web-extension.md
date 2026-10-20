@@ -121,6 +121,7 @@ rule:
 | `POST tickets/[id]/side-conversations`    | start one                                                      |
 | `POST side-conversations/[id]/replies`    | a follow-up                                                    |
 | `POST side-conversations/[id]/state`      | done / reopen                                                  |
+| `POST tickets/[id]/claim`                 | "Take this ticket" — assign an unassigned one to the caller    |
 | `GET side-conversation-recipients`        | the picker's directory                                         |
 
 The side-conversation writes must not be a second copy of the action.
@@ -196,22 +197,37 @@ carry both.
 6. **Ship** — CI step for `extension/`, packaging, the Ubuntu policy file, a
    page in the console handbook.
 
-### Who sees which ticket
+### Who sees which ticket: assign on use
 
 The extension applies the console's visibility rule unchanged
 (`loadConversation`): a supervisor or admin sees every ticket, and an agent
-with the plain `agent` role sees only tickets **assigned to them**. On a
-coexistence number that is a real limit — a reply typed on the phone or in
-WhatsApp Web assigns nothing, so an agent answering an unassigned chat would
-see "not found" in the panel. Widening it is a product decision, not a
-side effect of this feature, and the options are: assign on reply from the
-panel, a per-number permission, or none. Open with the user.
+with the plain `agent` role sees only tickets assigned to them. On a
+coexistence number nothing assigns one — a reply typed in WhatsApp Web or on
+the phone arrives with no author — so the user chose **assign on use**
+(`lib/extension/claim.ts`, `POST tickets/[id]/claim`):
+
+- When `resolve` finds a ticket the agent cannot see, the panel shows a **Take
+  this ticket** button rather than the tabs. Pressing it assigns the ticket to
+  them and the tabs load. Opening a chat alone assigns nothing, or an agent
+  scrolling the chat list would collect every ticket they clicked past.
+- Only an **unassigned** ticket is taken. One somebody holds answers 409 with
+  their name; reassigning stays in the console.
+- Only a ticket on a **coexistence WhatsApp number** — the reason to let an
+  agent claim what they cannot see is that its chat is open in front of them,
+  which is true of no other channel.
+- The update is conditional on `assignee_agent_id is null`, so two agents
+  pressing at once leave one owner, and the other is told who.
+
+Stage 2's `resolve` must therefore find the ticket regardless of assignment,
+and answer only what the button needs about one the agent cannot see: its id,
+that it exists, and the assignee's name.
 
 ## Decisions taken with the user
 
 - **Ubuntu only** for now; Windows later, with the Web Store question above.
 - **A week-long session**, not extended by use.
 - **Code in this repo**, under `extension/`.
+- **Assign on use** for tickets an agent cannot yet see (above).
 - **Which ticket**: every chat on a coexistence number has a ticket, so the
   question is only which one when the customer has several. Matching by
   message key answers it without a rule: the newest message on screen belongs
