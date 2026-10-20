@@ -1,0 +1,17 @@
+{
+  // The extension's own program, so `chrome` is a global here and nowhere
+  // else: chrome-types declares it for every file of whatever program loads
+  // it, and the app's would then accept `chrome.tabs` in a server module.
+  // `npm run typecheck` runs both. Paths and strictness come from the root.
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "incremental": false,
+    "plugins": [],
+    // Named rather than left to automatic inclusion, which only reaches
+    // `@types/*`: chrome-types is Google's own package, generated from
+    // Chromium's API definitions, and is not one.
+    "types": ["chrome-types", "node"]
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx"],
+  "exclude": ["dist"]
+}

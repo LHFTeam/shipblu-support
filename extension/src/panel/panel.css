@@ -1,0 +1,23 @@
+/*
+ * The panel's stylesheet: the console's own, compiled by the same Tailwind.
+ *
+ * `globals.css` carries the design system's tokens and its utilities; the
+ * `@source` lines are the files whose class names Tailwind has to see, because
+ * the build runs from `extension/` and would otherwise find only the panel's.
+ */
+@import '../../../app/globals.css';
+
+@source '../../src';
+@source '../../../components';
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-background-canvas);
+  color: var(--color-text-primary);
+  font-family: var(--font-console);
+}

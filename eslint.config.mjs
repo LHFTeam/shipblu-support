@@ -29,7 +29,7 @@ function layer(files, dir, message) {
 // no FlatCompat shim (which breaks under ESLint 10).
 const config = [
   {
-    ignores: ['node_modules/**', '.next/**', 'db/migrations/**'],
+    ignores: ['node_modules/**', '.next/**', 'db/migrations/**', 'extension/dist/**'],
   },
   ...nextCoreWebVitals,
   ...nextTypescript,

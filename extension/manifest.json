@@ -1,0 +1,37 @@
+{
+  "manifest_version": 3,
+  "name": "ShipBlu Support for WhatsApp Web",
+  "short_name": "ShipBlu Support",
+  "description": "The ShipBlu Support ticket beside the WhatsApp Web chat you are answering: its shipments and its side conversations.",
+  "version": "0.1.0",
+  "minimum_chrome_version": "116",
+  "icons": {
+    "16": "icons/16.png",
+    "32": "icons/32.png",
+    "48": "icons/48.png",
+    "128": "icons/128.png"
+  },
+  "action": {
+    "default_title": "ShipBlu Support",
+    "default_icon": {
+      "16": "icons/16.png",
+      "32": "icons/32.png"
+    }
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "side_panel": {
+    "default_path": "panel.html"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://web.whatsapp.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "permissions": ["sidePanel"],
+  "host_permissions": ["https://web.whatsapp.com/*", "__SUPPORT_ORIGIN__/*"]
+}

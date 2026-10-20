@@ -6,6 +6,7 @@ import type { SessionAgent } from '@/lib/auth/session';
 import { isUuid } from '@/lib/http/uuid';
 import { shipmentCard } from '@/lib/shipments/card';
 import { agentTrackingFor } from '@/lib/shipments/lookup';
+import { trackingView } from '@/lib/shipments/tracking-view';
 import { shipmentsForConversation } from '@/lib/shipments/queries';
 import { describeRequesterRole } from '@/lib/shipments/roles';
 import {
@@ -56,7 +57,8 @@ export async function ticketShipments(agent: SessionAgent, conversationId: strin
 }
 
 /**
- * One parcel's full tracking, as the console's shipment page shows it.
+ * One parcel's full tracking, as the console's shipment page shows it, and
+ * the `trackingView` that page words it with.
  *
  * Behind `contact.view`, as that page is: it carries the recipient's name,
  * address, phone and the COD amount. And only for a parcel linked to this
@@ -90,7 +92,10 @@ export async function ticketShipmentDetail(
     .limit(1);
 
   const trackingNumber = linked[0]?.trackingNumber;
-  return trackingNumber ? agentTrackingFor(trackingNumber) : null;
+  const tracking = trackingNumber ? await agentTrackingFor(trackingNumber) : null;
+  // With the words the console's shipment page draws, from the same function,
+  // so a return reads the same in the panel as it does there.
+  return tracking ? { tracking, view: trackingView(tracking) } : null;
 }
 
 /**

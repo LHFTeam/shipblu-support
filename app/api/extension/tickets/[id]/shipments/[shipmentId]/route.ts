@@ -22,5 +22,5 @@ export async function GET(
   }
   if (!detail) return NextResponse.json({ error: 'not found' }, { status: 404 });
 
-  return NextResponse.json({ tracking: detail });
+  return NextResponse.json(detail);
 }

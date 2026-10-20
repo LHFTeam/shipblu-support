@@ -93,11 +93,14 @@ an agent who is busy in WhatsApp, and the user asked for an explicit sign-in.
   extended** (the user's answer) — revoked by `destroyAllSessionsForAgent` too,
   so deactivation ends it, and checked against `agents.is_active` on every
   call for the reason `getSessionAgent` gives.
-- The token lives in `chrome.storage.local`, so a week-long session survives
-  a browser restart, and is sent only by the extension's service worker as
-  `Authorization: Bearer`. **The content script never holds it and never calls
-  the API** — it runs inside web.whatsapp.com's page, and talks only to the
-  service worker by `chrome.runtime` messaging.
+- The token lives in the extension origin's `localStorage`, held and sent by
+  the side panel as `Authorization: Bearer`. Not `chrome.storage.local`, as
+  first planned: a content script can read that one, and it cannot read the
+  extension origin's storage, which still outlives a browser restart as a
+  week-long session must. **The content script never holds the token and
+  never calls the API** — it runs inside web.whatsapp.com's page and only
+  announces what is on screen; the panel asks it by `chrome.tabs.sendMessage`
+  and listens for its updates.
 - Every `/api/extension/*` route resolves the agent through one
   `requireExtensionAgent(request)` and then applies exactly the permission and
   ticket-visibility checks the console does (`can()`, `loadConversation`).
@@ -151,9 +154,11 @@ extension adds no new reader of `shipments.data` (§6.38).
   at any moment is not worth it for this.
 - Permissions: `sidePanel`, `storage`, host permissions for
   `https://web.whatsapp.com/*` and the support host. Nothing else.
-- Arabic and English, RTL by `direction()`, matching the console's palette
-  (the design-system tokens copied as CSS variables — the extension cannot
-  import `app/globals.css`).
+- English, as the console is, with `dir="auto"` on anything a customer or a
+  hub wrote. Drawn with the console's own components (`components/ui.tsx`,
+  `shipment-status.tsx`), its stylesheet compiled from `app/globals.css` by the
+  same Tailwind — not a copy of the tokens, as first planned, which would have
+  drifted from the design system the first time it moved.
 
 ### 5. Where the code lives and how it ships
 
@@ -191,9 +196,14 @@ carry both.
    `lib/extension/tickets.ts` for the reads, `lib/side-conversations/write.ts`
    shared with the console's actions, and `lib/extension/tickets.db.test.ts`
    for visibility, permission and the customer's-address refusal.
-4. **Extension** — skeleton, sign-in, number detection, chat resolution,
-   Shipments tab.
-5. **Extension** — Side conversations tab and composer.
+4. **Extension** — built (`extension/`, its README). Sign-in, number detection,
+   the chat's message keys, "Take this ticket", the Shipments tab with
+   tracking detail (`trackingView`, now shared with the console's shipment
+   page). Reading the open chat is provisional until stage 0.
+5. **Extension** — built. Side conversations tab, composer, reply, done/reopen.
+   Driven end to end in Chromium against a local console with only `resolve`
+   stubbed: the writes landed as the console's do (assigned event, status to
+   Pending, SLA paused, `send_side_email` queued).
 6. **Ship** — CI step for `extension/`, packaging, the Ubuntu policy file, a
    page in the console handbook.
 
