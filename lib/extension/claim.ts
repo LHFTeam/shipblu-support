@@ -10,11 +10,12 @@ import { parseCoexistence } from '@/lib/whatsapp/coexistence';
 /**
  * "Take this ticket" from the WhatsApp Web side panel.
  *
- * An agent with the plain `agent` role sees only tickets assigned to them, and
+ * An agent without `ticket.view.all` sees the tickets assigned to them and those
+ * in their groups (`assignmentScope` in `lib/tickets/visibility.ts`), and
  * nothing a business does on a coexistence number assigns one: a reply typed in
- * WhatsApp Web or on the phone arrives as an echo with no author. So the agent
- * answering a chat would open the panel to "not found" on the very ticket they
- * are working. The user chose assign-on-use over widening the visibility rule:
+ * WhatsApp Web or on the phone arrives as an echo with no author. So an agent
+ * answering a chat whose ticket sits outside their groups, or in no group,
+ * would open the panel to "not found" on the very ticket they are working. The user chose assign-on-use over widening the visibility rule:
  * the rule stays the console's, and the panel offers to make the ticket theirs.
  *
  * Three limits, each closing something the button could otherwise be used for:

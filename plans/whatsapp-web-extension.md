@@ -201,9 +201,11 @@ carry both.
 
 The extension applies the console's visibility rule unchanged
 (`loadConversation`): a supervisor or admin sees every ticket, and an agent
-with the plain `agent` role sees only tickets assigned to them. On a
-coexistence number nothing assigns one — a reply typed in WhatsApp Web or on
-the phone arrives with no author — so the user chose **assign on use**
+sees the tickets assigned to them and — with `ticket.view.group` — those in
+their groups (`assignmentScope`, `lib/tickets/visibility.ts`, since #386). On a
+coexistence number nothing assigns a ticket — a reply typed in WhatsApp Web or
+on the phone arrives with no author — so for a chat whose ticket is outside
+the agent's groups, or in none, the user chose **assign on use**
 (`lib/extension/claim.ts`, `POST tickets/[id]/claim`):
 
 - When `resolve` finds a ticket the agent cannot see, the panel shows a **Take
