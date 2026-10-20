@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { unstable_rethrow, useRouter } from 'next/navigation';
 
 export type LinkAction = (
   state: { error: string | null },
@@ -33,6 +33,14 @@ export type LinkAction = (
  *
  * `run` hands the result back, so a control can do its own follow-up: revert a
  * choice it showed optimistically, clear an input, disarm a button.
+ *
+ * An action may also redirect: `updateTicket` does when the change takes the
+ * ticket out of the agent's own sight, and `requireAgent()` does for a session
+ * that has ended. Called directly, as here, such an action's promise rejects
+ * with Next's redirect while the router is already navigating, so the
+ * rejection is the redirect being under way, not a failure: it is answered as
+ * nothing refused, and the control unmounts with the page. Left uncaught, it
+ * escaped the control's event handler as an unhandled rejection.
  */
 export function useFieldAction(
   action: LinkAction,
@@ -57,7 +65,13 @@ export function useFieldAction(
       else formData.set(key, value);
     }
 
-    const result = await action({ error: null }, formData);
+    let result: { error: string | null };
+    try {
+      result = await action({ error: null }, formData);
+    } catch (error) {
+      if (!isNextNavigation(error)) throw error;
+      result = { error: null };
+    }
     setPending(false);
     setError(result.error);
     if (result.error && rereadOnRefusal) router.refresh();
@@ -66,4 +80,18 @@ export function useFieldAction(
   }
 
   return { pending, error, run };
+}
+
+/**
+ * Whether a thrown value is Next's own redirect or not-found. Asked of
+ * `unstable_rethrow`, which throws exactly those and lets anything else pass,
+ * so the hook names no private Next module to tell them apart.
+ */
+function isNextNavigation(error: unknown): boolean {
+  try {
+    unstable_rethrow(error);
+    return false;
+  } catch {
+    return true;
+  }
 }
