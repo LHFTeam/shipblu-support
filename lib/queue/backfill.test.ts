@@ -96,4 +96,23 @@ describe('logChannelTable', () => {
     ]);
     log.mockRestore();
   });
+
+  it('widens the channel column for a channel longer than the fourteen it starts at', () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const tallies = new Map([
+      ['instagram_comment', { seen: 9 }],
+      ['email', { seen: 4 }],
+    ]);
+
+    logChannelTable(logger('tag'), tallies, [
+      { heading: 'seen', width: 6, value: (tally) => tally.seen },
+    ]);
+
+    expect(log.mock.calls.map(([line]) => line)).toEqual([
+      '[tag] channel              seen',
+      '[tag] email                   4',
+      '[tag] instagram_comment       9',
+    ]);
+    log.mockRestore();
+  });
 });

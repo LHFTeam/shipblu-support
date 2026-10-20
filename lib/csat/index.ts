@@ -11,7 +11,7 @@ import { generateToken, hashToken } from '@/lib/auth/tokens';
 import { publicBaseUrl } from '@/lib/kb/site';
 import { enqueue } from '@/lib/queue';
 import { logger } from '@/lib/log';
-import type { ConversationChannel } from '@/lib/tickets/channel-policy';
+import { isMetaChannel, type ConversationChannel } from '@/lib/tickets/channel-policy';
 import { enqueueAutomatedDelivery, writeAutomatedReply } from '@/lib/tickets/outbound';
 import {
   isClosedChat,
@@ -97,7 +97,7 @@ export async function scheduleSurvey(
     if (availability === 'unsupported') return 'channel_unsupported';
     if (availability !== 'on') return availability;
 
-    const isMeta = channel === 'facebook' || channel === 'instagram';
+    const isMeta = isMetaChannel(channel);
     const delayMinutes =
       trigger === 'manual'
         ? 0

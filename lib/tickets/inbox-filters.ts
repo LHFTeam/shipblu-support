@@ -14,7 +14,7 @@ export type InboxFilters = {
   /** `groups`: tickets in the groups the agent belongs to, whoever holds them. */
   view: 'all' | 'mine' | 'unassigned' | 'groups';
   statusCategory: 'open' | 'pending' | 'resolved' | 'closed' | 'all' | 'unresolved';
-  channel: 'all' | 'email' | 'whatsapp' | 'webchat' | 'facebook' | 'instagram' | 'whatsapp_bot';
+  channel: 'all' | FilterableChannel;
   /**
    * `low`: only tickets a customer rated `LOW_RATING_MAX` or lower in the last
    * `RATED_LOW_DAYS` days (`ratedLowRecently`). No select offers it; the

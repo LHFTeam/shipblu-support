@@ -369,6 +369,12 @@
   --color-channel-facebook-fg: var(--color-blu-700);
   --color-channel-instagram-bg: var(--color-magenta-50);
   --color-channel-instagram-fg: var(--color-magenta-600);
+  /* A platform's comments take its hue; the mark's globe is what differs, so
+     colour is never the only thing telling a public thread from a private one. */
+  --color-channel-facebook-comment-bg: var(--color-channel-facebook-bg);
+  --color-channel-facebook-comment-fg: var(--color-channel-facebook-fg);
+  --color-channel-instagram-comment-bg: var(--color-channel-instagram-bg);
+  --color-channel-instagram-comment-fg: var(--color-channel-instagram-fg);
   --color-channel-portal-bg: var(--color-neutral-100);
   --color-channel-portal-fg: var(--color-neutral-700);
   --color-channel-api-bg: var(--color-neutral-100);

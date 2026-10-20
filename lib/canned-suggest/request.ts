@@ -1,3 +1,4 @@
+import { isMetaChannel, metaPlatformOf } from '@/lib/tickets/channel-policy';
 import { resolveLocale, type BilingualBody } from '@/lib/tickets/canned';
 import {
   MAX_CHOICE_OPTIONS,
@@ -233,7 +234,9 @@ export function stateFor(
     }));
 
   return {
-    channel: context.channel,
+    // The platform for a comment channel, as the field said before comments
+    // had channels of their own; the comment is said by the flag beside it.
+    channel: isMetaChannel(context.channel) ? metaPlatformOf(context.channel) : context.channel,
     ...(context.isPublicComment ? { reply_is_public_comment: true } : {}),
     ...(context.emailSubject?.trim() ? { email_subject: cut(context.emailSubject, 200) } : {}),
     messages_oldest_first: messages,

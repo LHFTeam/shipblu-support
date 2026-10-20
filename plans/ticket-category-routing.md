@@ -1073,6 +1073,32 @@ worker and all four crons. 1.2 does not start until all six run 1.1.
 - **The external id stays a safeguard.** The send path, the 24-hour guard and
   the CSAT skip keep their `rootCommentId(externalId)` test beside the new
   channel test.
+- **As built (2026-10-20).** Where 1.1 differs from the items above, and why.
+  - **Three comparisons stay strict**, and say so: the `feedback_template`
+    case of `automatedReplyBlocked`, `send_meta`'s feedback card and
+    `recordMetaFeedback`'s survey-to-tap match. Messenger's card exists only
+    in a Messenger thread, so widening them through `metaPlatformOf` would let
+    a comment channel through the one door that must stay shut to it.
+  - **The two thread-control actions refuse a comment ticket** (by channel or
+    external id), rather than mapping it to its platform. The header offers
+    neither on a comment, so a request reaching them is a stale tab or a forged
+    form, and both answer in words saying the comment is answered on the post.
+  - **The names live once**, in `lib/tickets/channel-labels.ts`, keyed by
+    `ConversationChannel`: the badge and `channelLabel` read the same record, so
+    a new channel does not compile until it has a name. `channelLabel` used to
+    know three channels and print the enum value for the rest.
+  - **The condition builder offers the comment values** under their badge names,
+    and its comment says a condition on `facebook` does not reach a comment.
+    Nothing stored names them yet; Q11 says nothing will.
+  - **`send_meta` maps its source rather than casting it**: `meta.platform`,
+    else the ticket's channel, through `metaPlatformOf`, so a comment value that
+    reached `meta.platform` goes out on its platform instead of dead-lettering
+    the reply.
+  - **The admin channels page reads the comment types and declines them** as it
+    declines `portal` and `api`, until 1.2 teaches the form to create them.
+  - **The marks are the platform glyph with a globe on a disc**, cut out of the
+    glyph so it reads at 12px, drawn from new
+    `--color-channel-*-comment-bg/fg` tokens that alias the platform's for now.
 
 **1.2 — Stored configuration, then writers.** The worker carries the writer;
 deploy it with web and the crons.

@@ -9,8 +9,11 @@ import {
   drawsMediaInline,
   hasWrittenSubject,
   hiddenChannels,
+  isCommentChannel,
+  isMetaChannel,
   isReadOnlyChannel,
   isRestrictedChannel,
+  metaPlatformOf,
   readOnlyChannels,
   readOnlyReason,
   restrictedChannels,
@@ -26,7 +29,9 @@ it('lists every database channel, including ones only shown through all', () => 
     'whatsapp',
     'webchat',
     'facebook',
+    'facebook_comment',
     'instagram',
+    'instagram_comment',
     'portal',
     'api',
     'whatsapp_bot',
@@ -157,7 +162,38 @@ it('draws files inline only on a chat, so email and anything added later stay at
     'whatsapp',
     'webchat',
     'facebook',
+    'facebook_comment',
     'instagram',
+    'instagram_comment',
     'whatsapp_bot',
   ]);
+});
+
+describe('the Meta channels', () => {
+  // Over every channel, so a new one is placed here rather than defaulting.
+  it('are the two platforms and their comments', () => {
+    expect(CONVERSATION_CHANNELS.filter(isMetaChannel)).toEqual([
+      'facebook',
+      'facebook_comment',
+      'instagram',
+      'instagram_comment',
+    ]);
+    expect(CONVERSATION_CHANNELS.filter(isCommentChannel)).toEqual([
+      'facebook_comment',
+      'instagram_comment',
+    ]);
+  });
+
+  it('ride their platform', () => {
+    expect(metaPlatformOf('facebook')).toBe('facebook');
+    expect(metaPlatformOf('facebook_comment')).toBe('facebook');
+    expect(metaPlatformOf('instagram')).toBe('instagram');
+    expect(metaPlatformOf('instagram_comment')).toBe('instagram');
+  });
+
+  it('are not prototype keys or near misses', () => {
+    expect(isMetaChannel('toString')).toBe(false);
+    expect(isMetaChannel('facebook_comments')).toBe(false);
+    expect(isCommentChannel('facebook')).toBe(false);
+  });
 });

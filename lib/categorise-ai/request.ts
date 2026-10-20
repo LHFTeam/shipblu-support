@@ -1,4 +1,5 @@
 import { MAX_TEXT_LENGTH } from '@/lib/categorise/normalise';
+import { isMetaChannel, metaPlatformOf } from '@/lib/tickets/channel-policy';
 import { UNCLASSIFIED_KEY } from '@/lib/categorise/taxonomy';
 import {
   MAX_CHOICE_OPTIONS,
@@ -137,7 +138,11 @@ export function categoryQuestion(options: readonly CategoryOption[]): ChoiceQues
  */
 export function stateFor(message: MessageForState, withContext: boolean): Record<string, unknown> {
   const state: Record<string, unknown> = {
-    channel: message.channel,
+    // The platform for a comment channel, which is what this field said for a
+    // comment before comments had channels of their own: the request is the
+    // same bytes for the same message whichever value the ticket carries, and
+    // this one function builds the priority request too.
+    channel: isMetaChannel(message.channel) ? metaPlatformOf(message.channel) : message.channel,
     message: message.bodyText.slice(0, MAX_TEXT_LENGTH),
   };
 

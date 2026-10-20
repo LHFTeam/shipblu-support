@@ -6,6 +6,7 @@ import { configuredAccountId } from '@/lib/meta/client';
 import { metaConnection } from '@/lib/meta/connection';
 import { metaThreadState } from '@/lib/meta/thread';
 import type { NormalisedFeedback } from '@/lib/meta/types';
+import type { ConversationChannel } from '@/lib/tickets/channel-policy';
 import { findContactByIdentity } from '@/lib/tickets/contacts';
 import {
   automatedReplyBlocked,
@@ -55,6 +56,9 @@ export async function recordMetaFeedback(feedback: NormalisedFeedback): Promise<
     .innerJoin(conversations, eq(conversations.id, csatSurveys.conversationId))
     .where(eq(csatSurveys.id, feedback.surveyId))
     .limit(1);
+  // The ticket's channel against the tap's platform, strictly and on purpose:
+  // a survey on a comment channel (none is ever sent) fails it, so a tap can
+  // never thank a commenter, which `send_meta` would post on the public thread.
   if (!survey || survey.channel !== feedback.platform) return 'unknown_survey';
 
   const contactId = await findContactByIdentity(feedback.platform, feedback.from);
@@ -111,7 +115,7 @@ async function thankForTap(
     conversationId: string;
     locale: string | null;
     ruleId: string | null;
-    channel: string;
+    channel: ConversationChannel;
     externalId: string | null;
     lastCustomerMessageAt: Date | null;
   },

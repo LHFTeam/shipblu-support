@@ -20,7 +20,9 @@ export type LiveConversation = {
  * WhatsApp path and the widget each wrote these conditions out, and the point
  * of sharing them is that they cannot drift apart again. Meta's direct
  * messages are not here, on purpose — they must also skip comment threads, which
- * live on the same channel and are told apart by `external_id`.
+ * may still live on the same channel (until `split_comment_channels` has moved
+ * them to `facebook_comment` / `instagram_comment`) and are told apart by
+ * `external_id`.
  *
  * Never an imported conversation: a WhatsApp Business app chat copied in after
  * a coexistence onboarding is filed resolved, and its newest message can be

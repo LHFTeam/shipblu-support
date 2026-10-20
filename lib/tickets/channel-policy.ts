@@ -1,5 +1,6 @@
 import type { conversations } from '@/db/schema';
 import type { SessionAgent } from '@/lib/auth/session';
+import type { MetaPlatform } from '@/lib/meta/types';
 import { can } from '@/lib/auth/permissions';
 
 /**
@@ -35,7 +36,9 @@ export const CONVERSATION_CHANNELS = [
   'whatsapp',
   'webchat',
   'facebook',
+  'facebook_comment',
   'instagram',
+  'instagram_comment',
   'portal',
   'api',
   'whatsapp_bot',
@@ -64,11 +67,67 @@ export const FILTERABLE_CHANNELS = [
   'whatsapp',
   'webchat',
   'facebook',
+  'facebook_comment',
   'instagram',
+  'instagram_comment',
   'whatsapp_bot',
 ] as const satisfies readonly ConversationChannel[];
 
 export type FilterableChannel = (typeof FILTERABLE_CHANNELS)[number];
+
+/**
+ * The Meta channels: each platform's direct messages and the public comments
+ * on its posts. A Facebook or Instagram comment is a channel of its own
+ * (`db/schema/enums.ts` says why), and the four ask two different questions of
+ * one value:
+ *
+ * - **Which platform carries it** — the Page or the Instagram account, its
+ *   token, its Graph host, its contact identity. `metaPlatformOf` answers, and
+ *   everything that names the platform takes that answer rather than the
+ *   channel: contact identities, webhook deliveries, `messages.meta.platform`,
+ *   job payloads and the external id never hold a comment value.
+ * - **Whether it is a public comment** — answered on the post, with no
+ *   messaging window, never surveyed, never sent an every-channel
+ *   acknowledgement. `isCommentChannel` answers.
+ *
+ * Everything that compared a channel with `'facebook' || 'instagram'` asks one
+ * of these instead, because that comparison is silently false for a comment
+ * channel, and most of the places that made it are typed `string` with a
+ * default arm the compiler cannot see past (`carrierFor` sent the rest to
+ * email). Comment tickets carried `facebook`/`instagram` until Stage 1.2 of
+ * `plans/ticket-category-routing.md` moves them, so wherever being a comment
+ * matters the external id (`rootCommentId`) is asked too, beside the channel —
+ * the safeguard stays until a CHECK makes the two one answer (Stage 1.3).
+ */
+const META_CHANNELS = [
+  'facebook',
+  'facebook_comment',
+  'instagram',
+  'instagram_comment',
+] as const satisfies readonly ConversationChannel[];
+
+export type MetaChannel = (typeof META_CHANNELS)[number];
+export type CommentChannel = Extract<MetaChannel, `${string}_comment`>;
+
+export function isMetaChannel(channel: string): channel is MetaChannel {
+  return (META_CHANNELS as readonly string[]).includes(channel);
+}
+
+export function isCommentChannel(channel: string): channel is CommentChannel {
+  return channel === 'facebook_comment' || channel === 'instagram_comment';
+}
+
+/** The platform a Meta channel rides: its Page or account, token and host. */
+export function metaPlatformOf(channel: MetaChannel): MetaPlatform {
+  switch (channel) {
+    case 'facebook':
+    case 'facebook_comment':
+      return 'facebook';
+    case 'instagram':
+    case 'instagram_comment':
+      return 'instagram';
+  }
+}
 
 /**
  * Channels the platform only observes.
@@ -246,7 +305,9 @@ const CHAT_MEDIA: readonly ConversationChannel[] = [
   'whatsapp',
   'whatsapp_bot',
   'facebook',
+  'facebook_comment',
   'instagram',
+  'instagram_comment',
   'webchat',
 ];
 

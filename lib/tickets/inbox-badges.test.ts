@@ -61,6 +61,20 @@ describe('rowBadges', () => {
     ]);
   });
 
+  it('gives a comment channel no window and calls it public, by its channel alone', () => {
+    for (const channel of ['facebook_comment', 'instagram_comment']) {
+      for (const isComment of [true, false]) {
+        expect(
+          rowBadges(
+            row({ channel, isComment, lastCustomerMessageAt: hoursAgo(200) }),
+            NOW,
+            'avatar',
+          ),
+        ).toEqual([{ key: 'comment', tone: 'public', label: 'Public comment' }]);
+      }
+    }
+  });
+
   it('marks a Messenger thread outside 24 hours and after seven days', () => {
     expect(
       labels(row({ channel: 'instagram', lastCustomerMessageAt: hoursAgo(30) }), NOW, 'avatar'),

@@ -46,17 +46,26 @@ export type AutoResponseRule = {
  * Rules the caller has already filtered to `isActive`; an inactive rule is not
  * a match at all, so a ticket falls through to the next broadest one rather
  * than to silence — which is what makes turning a rule off a safe thing to do.
+ *
+ * **A public comment matches only a rule that names its channel.** A reply on a
+ * comment ticket is posted under the customer's comment, where anybody reading
+ * the post sees it (`send_meta` infers the comment reply), so a company-wide
+ * out-of-hours message written for a private inbox would go out in public. A
+ * rule with no channel — every channel, or every channel in a group — is
+ * "every channel except public comments" for that reason, and says so on the
+ * admin page. `isComment` is the comment channel or the external id, so this
+ * holds for a comment ticket that still carries its platform's channel.
  */
 export function pickRule(
   rules: AutoResponseRule[],
-  scope: { groupId: string | null; channel: string },
+  scope: { groupId: string | null; channel: string; isComment: boolean },
 ): AutoResponseRule | null {
   let best: AutoResponseRule | null = null;
   let bestScore = -1;
 
   for (const rule of rules) {
     if (rule.groupId !== null && rule.groupId !== scope.groupId) continue;
-    if (rule.channel !== null && rule.channel !== scope.channel) continue;
+    if (rule.channel === null ? scope.isComment : rule.channel !== scope.channel) continue;
 
     // Channel 2, group 1: a rule naming both scores 3 and outranks either alone.
     const score = (rule.channel !== null ? 2 : 0) + (rule.groupId !== null ? 1 : 0);

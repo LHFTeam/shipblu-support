@@ -295,6 +295,13 @@
       "when": 1792273679133,
       "tag": "0041_bumpy_richard_fisk",
       "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1792529488560,
+      "tag": "0042_cloudy_tattoo",
+      "breakpoints": true
     }
   ]
 }

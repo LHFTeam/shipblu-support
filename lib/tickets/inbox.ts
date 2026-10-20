@@ -18,7 +18,7 @@ import type { SessionAgent } from '@/lib/auth/session';
 import { can } from '@/lib/auth/permissions';
 import { heldByOrInGroupsOf, inGroupsOf } from './assignment-scope';
 import { assignmentScope, assignmentVisibility } from './visibility';
-import { hiddenChannels, restrictedChannels } from './channel-policy';
+import { hiddenChannels, isCommentChannel, restrictedChannels } from './channel-policy';
 import { notReaction } from './not-reaction';
 import { rootCommentId } from '@/lib/meta/comments';
 import { sbidMatches, trackingMatches } from '@/lib/shipments/queries';
@@ -353,7 +353,9 @@ export async function listInbox(
       assigneeColor: row.assigneeColor,
       lastMessageAt: row.lastMessageAt,
       lastCustomerMessageAt: row.lastCustomerMessageAt,
-      isComment: rootCommentId(row.externalId) !== null,
+      // By its channel, or by its external id for a comment ticket that still
+      // carries its platform's channel.
+      isComment: isCommentChannel(row.channel) || rootCommentId(row.externalId) !== null,
       tags: row.tags,
       preview: row.preview,
       lastFromUs: row.lastFromUs,

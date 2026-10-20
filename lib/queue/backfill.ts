@@ -71,8 +71,12 @@ export function logChannelTable<T>(
   tallies: Map<string, T>,
   columns: TallyColumn<T>[],
 ): void {
+  // As wide as the longest channel it prints, two clear of it: `padEnd` never
+  // truncates, so a fixed 14 let `instagram_comment` push its figures out of
+  // their columns.
+  const width = Math.max(14, ...[...tallies.keys()].map((channel) => channel.length + 2));
   const header = [
-    'channel'.padEnd(14),
+    'channel'.padEnd(width),
     ...columns.map((column) => column.heading.padStart(column.width)),
   ].join('');
   log.info(header);
@@ -80,7 +84,7 @@ export function logChannelTable<T>(
   for (const [channel, tally] of [...tallies.entries()].sort()) {
     log.info(
       [
-        channel.padEnd(14),
+        channel.padEnd(width),
         ...columns.map((column) => String(column.value(tally)).padStart(column.width)),
       ].join(''),
     );

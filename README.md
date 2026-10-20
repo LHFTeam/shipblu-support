@@ -136,6 +136,13 @@ Design decisions worth knowing before changing things:
   comment threads on the root of its reply chain, so a customer commenting on two posts
   gets two tickets, each needing its own public answer. Meta echoes our own outbound
   messages back to us, and dropping those is what stops an agent replying to themselves.
+- **A comment is a channel of its own; the person is not.** `facebook_comment` and
+  `instagram_comment` sit beside `facebook` and `instagram` in the channel enum, so a
+  filter, an auto-response or a report can treat a public reply under a post apart from
+  a private conversation — they differ in who can read the answer. The contact, the
+  webhook and every Graph call stay on the platform, because the person commenting is
+  the same Facebook or Instagram user who writes to the inbox, and splitting the
+  identity would make them two contacts.
 - **The two platforms agree about almost nothing under the surface.** One webhook, one
   parser and one send job cover both, but a comment on Instagram has a `replies` edge
   where Facebook has `comments`, is hidden with `hide` where Facebook uses `is_hidden`,

@@ -21,7 +21,13 @@ import { metaConnection } from '@/lib/meta/connection';
 import { metaThreadStateFromMessage, type MetaThreadState } from '@/lib/meta/thread';
 import type { CustomFieldValues } from './custom-fields';
 import { threadControlTakenAt } from './meta-thread';
-import { hiddenChannels } from './channel-policy';
+import {
+  hiddenChannels,
+  isCommentChannel,
+  isMetaChannel,
+  metaPlatformOf,
+  type ConversationChannel,
+} from './channel-policy';
 import { assignmentVisibility } from './visibility';
 import { metaIndex } from './message-media';
 import {
@@ -81,7 +87,7 @@ export type ConversationDetail = {
   id: string;
   number: number;
   subject: string | null;
-  channel: string;
+  channel: ConversationChannel;
   priority: string;
   type: string | null;
   statusId: string;
@@ -363,17 +369,18 @@ export async function getConversation(
     its own: the composer's verdict has to describe the same last message the
     agent is looking at, and a second read could catch a newer one.
 
-    A comment ticket is left out. It is answered through the comment endpoints,
-    which are addressed by comment id and are not page-scoped, so neither of the
-    two refusals applies to it.
+    A comment ticket is left out — by its channel, or by its external id while
+    it still carries its platform's. It is answered through the comment
+    endpoints, which are addressed by comment id and are not page-scoped, so
+    neither of the two refusals applies to it.
   */
-  const isMeta =
-    row.conversation.channel === 'facebook' || row.conversation.channel === 'instagram';
-  const isCommentThread = Boolean(row.conversation.externalId?.includes(':comment:'));
+  const channel = row.conversation.channel;
+  const isCommentThread =
+    isCommentChannel(channel) || Boolean(row.conversation.externalId?.includes(':comment:'));
 
   let metaThread: MetaThreadState | null = null;
-  if (isMeta && !isCommentThread) {
-    const platform = row.conversation.channel as 'facebook' | 'instagram';
+  if (isMetaChannel(channel) && !isCommentThread) {
+    const platform = metaPlatformOf(channel);
     const lastInbound = timeline.filter((entry) => entry.message.direction === 'inbound').at(-1);
 
     metaThread = metaThreadStateFromMessage({

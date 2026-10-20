@@ -269,6 +269,23 @@ describe('decideSurvey', () => {
     // reaches it; a comment ticket on email does not exist.
     expect(decideSurvey(input({ commentThread: true }), ON).kind).toBe('send');
   });
+
+  it('never surveys a comment channel, even with no external id to say so', () => {
+    for (const channel of ['facebook_comment', 'instagram_comment']) {
+      expect(
+        decideSurvey(
+          input({
+            channel,
+            byEmail: false,
+            commentThread: false,
+            metaWindowOpen: true,
+            feedbackWindowOpen: true,
+          }),
+          ON,
+        ),
+      ).toEqual({ kind: 'skip', reason: 'comment_thread' });
+    }
+  });
 });
 
 describe('channelSurveyed', () => {
@@ -290,6 +307,21 @@ describe('channelSurveyed', () => {
     expect(channelSurveyed(ON, 'whatsapp_bot')).toBe(false);
     expect(channelSwitch('portal')).toBe('email');
     expect(channelSwitch('whatsapp')).toBeNull();
+  });
+
+  // Behind their platform's switch, so the survey is still queued and the
+  // decision records `comment_thread`, rather than "not sent on this channel"
+  // answered before anything is written.
+  it('puts a comment channel behind its platform’s switch', () => {
+    expect(channelSwitch('facebook_comment')).toBe('facebook');
+    expect(channelSwitch('instagram_comment')).toBe('instagram');
+    expect(surveyAvailability(ON, 'facebook_comment')).toBe('on');
+    expect(
+      surveyAvailability(
+        { ...ON, channels: { ...ON.channels, instagram: false } },
+        'instagram_comment',
+      ),
+    ).toBe('channel_off');
   });
 });
 

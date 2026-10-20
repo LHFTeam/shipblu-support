@@ -17,6 +17,8 @@ import {
 import { describeProfileRefresh, refreshChannelProfile } from '@/lib/meta/profile-refresh';
 import { MetaApiError, takeThreadControl } from '@/lib/meta/client';
 import { explainTakeControlError } from '@/lib/meta/errors';
+import { rootCommentId } from '@/lib/meta/comments';
+import { isCommentChannel, isMetaChannel, metaPlatformOf } from '@/lib/tickets/channel-policy';
 import { metaReplyTarget, THREAD_CONTROL_TAKEN } from '@/lib/tickets/meta-thread';
 import { loadConversation, refresh, refuseIfReadOnly } from '@/lib/tickets/console-guards';
 import type { ActionState } from './action-state';
@@ -137,9 +139,17 @@ export async function refreshRequesterProfile(
   if (readOnly) return readOnly;
 
   const channel = row.conversation.channel;
-  if (channel !== 'facebook' && channel !== 'instagram') {
+  if (!isMetaChannel(channel)) {
     return { error: 'Only Facebook and Instagram customers have a profile to look up' };
   }
+  // The header offers this only on a direct-message ticket, so a comment ticket
+  // reaching here is a stale tab or a hand-made request, refused as the screen
+  // would have: a commenter is answered on the post, not looked up.
+  if (isCommentChannel(channel) || rootCommentId(row.conversation.externalId)) {
+    return { error: 'A comment ticket has no Messenger profile to look up' };
+  }
+  // The identity, the Graph call and the sentence below all name the platform.
+  const platform = metaPlatformOf(channel);
 
   // The identity is re-read here rather than posted by the form: a scoped id in
   // a FormData field is an argument to a Graph call, and the ticket is the only
@@ -150,17 +160,17 @@ export async function refreshRequesterProfile(
     .where(
       and(
         eq(contactIdentities.contactId, row.conversation.requesterContactId),
-        eq(contactIdentities.channel, channel),
+        eq(contactIdentities.channel, platform),
       ),
     )
     .limit(1);
 
   const identity = identities[0];
-  if (!identity) return { error: 'This customer has no ' + channel + ' identity on file' };
+  if (!identity) return { error: 'This customer has no ' + platform + ' identity on file' };
 
   const result = await refreshChannelProfile({
     contactId: row.conversation.requesterContactId,
-    platform: channel,
+    platform,
     userId: identity.identifier,
     // The point of the button. Without it a contact already answered for — with
     // a name Meta has since changed, or a picture that failed to copy — would
@@ -229,15 +239,22 @@ export async function claimThreadControl(
   if (readOnly) return readOnly;
 
   const channel = row.conversation.channel;
-  if (channel !== 'facebook' && channel !== 'instagram') {
+  if (!isMetaChannel(channel)) {
     return { error: 'Only Facebook and Instagram conversations have thread control' };
   }
+  // Thread control is a direct message's, and the composer never offers it on
+  // a comment: refused here in the same terms rather than taken on a thread
+  // the reply would not go into.
+  if (isCommentChannel(channel) || rootCommentId(row.conversation.externalId)) {
+    return { error: 'A comment thread has no thread control; it is answered on the post' };
+  }
+  const platform = metaPlatformOf(channel);
 
   // The recipient and the verdict both come from here rather than from the
   // form: a page-scoped id in a FormData field is an argument to a Graph call,
   // and re-reading is also what makes the check below describe the ticket as it
   // is now rather than as the page rendered it.
-  const { recipientId, thread } = await metaReplyTarget(row.conversation.id, channel);
+  const { recipientId, thread } = await metaReplyTarget(row.conversation.id, platform);
 
   if (thread.reason !== 'standby') {
     // Includes the case the button exists for having already succeeded. Saying
@@ -257,9 +274,9 @@ export async function claimThreadControl(
   }
 
   try {
-    await takeThreadControl({ platform: channel, recipientId });
+    await takeThreadControl({ platform, recipientId });
   } catch (error) {
-    if (error instanceof MetaApiError) return { error: explainTakeControlError(error, channel) };
+    if (error instanceof MetaApiError) return { error: explainTakeControlError(error, platform) };
     throw error;
   }
 

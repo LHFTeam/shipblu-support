@@ -5,7 +5,12 @@ import { loadHoursCatalog } from '@/lib/hours/catalog';
 import { groupHours } from '@/lib/hours/resolve';
 import { holidayName, holidayOn, isWithinBusinessHours, nextOpeningAt } from '@/lib/hours';
 import { textToHtml } from '@/lib/html/sanitize';
-import { isReadOnlyChannel } from '@/lib/tickets/channel-policy';
+import { rootCommentId } from '@/lib/meta/comments';
+import {
+  isCommentChannel,
+  isReadOnlyChannel,
+  type ConversationChannel,
+} from '@/lib/tickets/channel-policy';
 import {
   automatedReplyBlocked,
   deliverAutomatedReply,
@@ -36,7 +41,7 @@ const log = logger('auto-response');
 type Ticket = {
   id: string;
   number: number;
-  channel: string;
+  channel: ConversationChannel;
   groupId: string | null;
   isSpam: boolean;
   deletedAt: Date | null;
@@ -87,7 +92,11 @@ async function send(conversationId: string, at: Date): Promise<void> {
   // number whose replies we do not receive.
   if (isReadOnlyChannel(ticket.channel)) return;
 
-  const rule = pickRule(rules, { groupId: ticket.groupId, channel: ticket.channel });
+  const rule = pickRule(rules, {
+    groupId: ticket.groupId,
+    channel: ticket.channel,
+    isComment: isCommentChannel(ticket.channel) || rootCommentId(ticket.externalId) !== null,
+  });
   if (!rule || rule.silent) return;
 
   const hours = groupHours(await loadHoursCatalog(), ticket.groupId);

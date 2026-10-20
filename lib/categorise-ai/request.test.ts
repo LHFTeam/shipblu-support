@@ -106,6 +106,20 @@ describe('stateFor', () => {
     });
   });
 
+  // The request a comment ticket sent before comments had channels of their
+  // own, byte for byte: the priority request is built here too, and its bytes
+  // must not move because the ticket's channel did.
+  it('names a comment channel by its platform, so the request does not change', () => {
+    for (const [channel, platform] of [
+      ['facebook_comment', 'facebook'],
+      ['instagram_comment', 'instagram'],
+    ] as const) {
+      expect(JSON.stringify(stateFor({ ...message, channel }, true))).toBe(
+        JSON.stringify(stateFor({ ...message, channel: platform }, true)),
+      );
+    }
+  });
+
   it('leaves Arabic exactly as it arrived', () => {
     // The opposite of the rules path, which folds text before matching. Folding
     // here would hand the model a string no human wrote.

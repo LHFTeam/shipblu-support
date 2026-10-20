@@ -4,7 +4,12 @@ import { conversationEvents, conversations, messages } from '@/db/schema';
 import { rootCommentId } from '@/lib/meta/comments';
 import { feedbackTemplateTag, metaWindowState } from '@/lib/meta/window';
 import { enqueue } from '@/lib/queue';
-import { isReadOnlyChannel } from '@/lib/tickets/channel-policy';
+import {
+  isCommentChannel,
+  isMetaChannel,
+  isReadOnlyChannel,
+  type ConversationChannel,
+} from '@/lib/tickets/channel-policy';
 import { firstAt } from '@/lib/tickets/latest';
 import { windowState as whatsappWindowState } from '@/lib/whatsapp/window';
 
@@ -52,6 +57,8 @@ import { windowState as whatsappWindowState } from '@/lib/whatsapp/window';
  *                        rule's, and this closes at 24 hours rather than at
  *                        seven days.
  *
+ * `facebook_comment` and `instagram_comment` answer null, for the reason below.
+ *
  * With one exception, which is Meta's own and is asked for by name:
  * Messenger's customer feedback card (`kind: 'feedback_template'`) carries a
  * tag of its own, `CUSTOMER_FEEDBACK`, valid on that card and nothing else,
@@ -64,8 +71,10 @@ import { windowState as whatsappWindowState } from '@/lib/whatsapp/window';
  * before it ever consults the clock, so blocking one on the customer's last
  * message would silently stop every automated reply on a public thread older
  * than a day — a reply that would have posted perfectly well. The ticket is
- * identified the way the send path identifies it, through `rootCommentId`
- * rather than a second reading of `external_id`.
+ * identified by its channel (`isCommentChannel`) or, the way the send path
+ * identifies it, by `rootCommentId` over its external id. Both, because comment
+ * tickets carried the platform's channel until they were given their own, and
+ * the external id stays the safeguard until a CHECK makes the two one answer.
  *
  * `now` defaults to the real clock and callers should leave it alone outside a
  * test. It is deliberately *not* the instant of the message being handled: the
@@ -91,10 +100,13 @@ export function automatedReplyBlocked(
       : 'the WhatsApp 24-hour window is closed and only an approved template would send';
   }
 
-  if (ticket.channel === 'facebook' || ticket.channel === 'instagram') {
-    if (rootCommentId(ticket.externalId)) return null;
+  if (isMetaChannel(ticket.channel)) {
+    if (isCommentChannel(ticket.channel) || rootCommentId(ticket.externalId)) return null;
 
     const window = metaWindowState(ticket.lastCustomerMessageAt, now);
+    // The literal, not the platform: Messenger's card is for a Facebook
+    // conversation, and a `facebook_comment` ticket must never be offered it.
+    // The return above already keeps comments out; this does not lean on it.
     if (kind === 'feedback_template' && ticket.channel === 'facebook') {
       return feedbackTemplateTag(window)
         ? null
@@ -113,7 +125,7 @@ export function automatedReplyBlocked(
 
 export type AutomatedReply = {
   conversationId: string;
-  channel: string;
+  channel: ConversationChannel;
   /** The requester's address; used where the carrier is email and there is nowhere else to send. */
   requesterEmail: string | null;
   bodyText: string;
@@ -154,9 +166,9 @@ export async function writeAutomatedReply(
   { stampFirstAutoReply = true }: AutomatedReplyOptions = {},
 ): Promise<string> {
   // Asked of the carrier rather than of the channel name, because `send_email`
-  // is what carries `portal` and anything unrecognised as well as `email` — and
-  // it is the carrier that decides whether an HTML part and a recipient are
-  // worth storing. Testing `channel === 'email'` stored a portal reply with no
+  // is what carries `portal` and `api` as well as `email` — and it is the
+  // carrier that decides whether an HTML part and a recipient are worth
+  // storing. Testing `channel === 'email'` stored a portal reply with no
   // HTML body and no address, and the worker then rebuilt the body as one
   // escaped paragraph with every line break in a three-paragraph message lost.
   const job = carrierFor(reply.channel);
@@ -227,7 +239,7 @@ export async function writeAutomatedReply(
  * nothing.
  */
 export async function enqueueAutomatedDelivery(
-  channel: string,
+  channel: ConversationChannel,
   messageId: string,
   priority = 20,
   on?: Executor,
@@ -254,7 +266,7 @@ export async function deliverAutomatedReply(reply: AutomatedReply): Promise<stri
 /**
  * The job that carries a message on each channel.
  *
- * Facebook and Instagram go to `send_meta` rather than falling into the email
+ * Every Meta channel goes to `send_meta` rather than falling into the email
  * branch, which is what the console has always done and what the automated
  * senders — reading `channel === 'whatsapp' ? … : 'send_email'` — did not: an
  * automated reply on a Facebook ticket was queued as an email to a contact who
@@ -265,11 +277,33 @@ export async function deliverAutomatedReply(reply: AutomatedReply): Promise<stri
  * `portal` sends by email deliberately. A portal ticket's customer is reachable
  * at the address they registered with, and `send_email` falls back to it when
  * the message names no recipient.
+ *
+ * Exhaustive over the enum, with no default arm. This used to send anything it
+ * did not recognise to email, which is how a new channel would have mailed its
+ * replies to contacts with no address; now a channel added to the enum does not
+ * compile until somebody says what carries it. Web chat and the customer bot
+ * keep the answer they always had: every caller sets both aside by name before
+ * asking (web chat's row is its delivery; the bot is never written to).
  */
-export function carrierFor(channel: string): 'send_whatsapp' | 'send_meta' | 'send_email' {
-  if (channel === 'whatsapp') return 'send_whatsapp';
-  if (channel === 'facebook' || channel === 'instagram') return 'send_meta';
-  return 'send_email';
+export function carrierFor(
+  channel: ConversationChannel,
+): 'send_whatsapp' | 'send_meta' | 'send_email' {
+  switch (channel) {
+    case 'whatsapp':
+      return 'send_whatsapp';
+    case 'facebook':
+    case 'facebook_comment':
+    case 'instagram':
+    case 'instagram_comment':
+      return 'send_meta';
+    case 'email':
+    case 'portal':
+    case 'api':
+      return 'send_email';
+    case 'webchat':
+    case 'whatsapp_bot':
+      return 'send_email';
+  }
 }
 
 /**
@@ -282,14 +316,14 @@ export function carrierFor(channel: string): 'send_whatsapp' | 'send_meta' | 'se
  * then fell back to the contact's address at send time and rebuilt the body
  * from plain text.
  *
- * `carrierFor` sends anything it does not recognise to `send_email`, so two
- * kinds of channel are excluded by name rather than by carrier. Web chat has no
+ * `carrierFor` answers `send_email` for two kinds of channel that do not send
+ * by email, so they are excluded by name rather than by carrier. Web chat has no
  * carrier at all — writing its row is its delivery. A read-only channel
  * (`whatsapp_bot`) is never written to by us, and the senders refuse it before
  * they ask; answering "email" for it would only be true by accident. `api` does
  * go out by email, and is written as email.
  */
-export function sendsByEmail(channel: string): boolean {
+export function sendsByEmail(channel: ConversationChannel): boolean {
   return (
     channel !== 'webchat' && !isReadOnlyChannel(channel) && carrierFor(channel) === 'send_email'
   );
@@ -306,6 +340,6 @@ export function sendsByEmail(channel: string): boolean {
  * permanently failed message on the customer's timeline. One question, asked
  * one way, by every sender that needs it.
  */
-export function lacksEmailRecipient(channel: string, address: string | null): boolean {
+export function lacksEmailRecipient(channel: ConversationChannel, address: string | null): boolean {
   return sendsByEmail(channel) && !address;
 }

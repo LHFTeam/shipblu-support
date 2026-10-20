@@ -21,13 +21,20 @@ import { refresh, type SettingsState } from '../settings-shared';
  * `whatsapp_bot` is deliberately absent. Nothing is ever sent on it — the bot
  * owns those conversations — so offering it would be offering a setting that
  * cannot do anything.
+ *
+ * The comment channels are here because naming one is the only way a public
+ * comment is acknowledged at all: a rule with no channel skips them
+ * (`pickRule`), since the reply is posted under the comment for anybody
+ * reading the post to see.
  */
 const AUTO_RESPONSE_CHANNELS = [
   'email',
   'whatsapp',
   'webchat',
   'facebook',
+  'facebook_comment',
   'instagram',
+  'instagram_comment',
   'portal',
 ] as const;
 

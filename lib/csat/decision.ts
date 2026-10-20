@@ -1,3 +1,4 @@
+import { isCommentChannel, isMetaChannel } from '@/lib/tickets/channel-policy';
 import type { SurveyDelivery } from './delivery';
 import type { CsatChannels, CsatSettings } from './settings';
 import type { SkipReason } from './skip-reasons';
@@ -79,7 +80,9 @@ export type DecisionInput = {
   /**
    * On Facebook and Instagram, whether the ticket is a public comment thread
    * (`rootCommentId` found one). A survey there would be posted on the comment
-   * edge, link and all, for anybody reading the post to answer.
+   * edge, link and all, for anybody reading the post to answer. A comment
+   * channel is one whatever this says; it is asked for the comment tickets that
+   * still carry their platform's channel.
    */
   commentThread: boolean;
   /**
@@ -127,6 +130,14 @@ export function channelSwitch(channel: string): keyof CsatChannels | null {
     case 'instagram':
     case 'api':
       return channel;
+    // A comment channel is behind its platform's switch, as its tickets were
+    // while they carried the platform's channel. So the survey is still queued,
+    // and the decision records why it skipped (`comment_thread`) rather than
+    // answering "not sent on this channel" before anything is written.
+    case 'facebook_comment':
+      return 'facebook';
+    case 'instagram_comment':
+      return 'instagram';
     default:
       return null;
   }
@@ -232,10 +243,12 @@ export function decideSurvey(input: DecisionInput, settings: CsatSettings): Deci
       : { kind: 'send', delivery: 'email_link' };
   }
 
-  if (input.channel === 'facebook' || input.channel === 'instagram') {
+  if (isMetaChannel(input.channel)) {
     // Before the window: a comment thread has no window, which is exactly why
     // `automatedReplyBlocked` lets it through — and why it must not be here.
-    if (input.commentThread) return { kind: 'skip', reason: 'comment_thread' };
+    if (input.commentThread || isCommentChannel(input.channel)) {
+      return { kind: 'skip', reason: 'comment_thread' };
+    }
 
     if (input.channel === 'facebook') {
       // Messenger's own survey card, for the seven days its tag allows — which

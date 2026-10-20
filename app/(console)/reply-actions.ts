@@ -9,6 +9,7 @@ import { canonicalUuid } from '@/lib/http/uuid';
 import { ok } from '@/lib/http/action-state';
 import { can } from '@/lib/auth/permissions';
 import { sendsByEmail } from '@/lib/tickets/outbound';
+import { isCommentChannel, isMetaChannel, metaPlatformOf } from '@/lib/tickets/channel-policy';
 import { htmlToText, sanitiseEmailHtml, textToHtml } from '@/lib/html/sanitize';
 import { afterMessageStored } from '@/lib/tickets/lifecycle';
 import { recordCannedUse } from '@/lib/tickets/canned-usage';
@@ -115,8 +116,18 @@ export async function sendReply(_state: ActionState, formData: FormData): Promis
     }
   }
 
-  const isMeta = conversation.channel === 'facebook' || conversation.channel === 'instagram';
-  const isCommentThread = Boolean(conversation.externalId?.includes(':comment:'));
+  // The platform the reply rides, for every Meta channel — a comment channel
+  // rides its platform's Page or account — and what `meta.platform` records,
+  // which names the platform and never a comment channel.
+  const platform = isMetaChannel(conversation.channel)
+    ? metaPlatformOf(conversation.channel)
+    : null;
+  const isMeta = platform !== null;
+  // A public comment by its channel, or by its external id: the safeguard for a
+  // comment ticket that still carries its platform's channel.
+  const isCommentThread =
+    isCommentChannel(conversation.channel) ||
+    Boolean(conversation.externalId?.includes(':comment:'));
 
   // A comment ticket can be answered in public, or taken private exactly once.
   // A direct-message ticket only has the one option.
@@ -132,10 +143,7 @@ export async function sendReply(_state: ActionState, formData: FormData): Promis
     // to answer it — a reply into an inbox another app controls, or onto a page
     // this deployment cannot address, fails whatever the clock says, and it
     // fails with a Graph error that names no reason.
-    const { thread } = await metaReplyTarget(
-      conversationId,
-      conversation.channel as 'facebook' | 'instagram',
-    );
+    const { thread } = await metaReplyTarget(conversationId, platform);
     if (!thread.canSend) return { error: thread.explanation ?? 'This thread cannot be answered.' };
 
     const state = metaWindowState(conversation.lastCustomerMessageAt);
@@ -174,7 +182,7 @@ export async function sendReply(_state: ActionState, formData: FormData): Promis
         : isMeta
           ? {
               metaKind: isCommentThread ? 'comment' : 'direct_message',
-              platform: conversation.channel,
+              platform,
               sendKind: metaSendKind,
               // A public reply is on the record for everyone who can see the
               // post, so the timeline says which of the two this was.
