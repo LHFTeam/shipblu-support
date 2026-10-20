@@ -66,9 +66,10 @@ export type AutoResponseRule = {
  * admin page.
  *
  * It takes the ticket's channel and external id as stored and decides which
- * channel to match on itself (`ruleChannel`), so no caller can hand it the
- * column read raw — which would undo the comment exclusion for every comment
- * ticket still filed on its platform, and nothing would fail.
+ * channel to match on itself (`ruleChannel`), so every caller must supply the
+ * external id and none can skip the mapping by forgetting it — which would undo
+ * the comment exclusion for every comment ticket still filed on its platform,
+ * and nothing would fail.
  */
 export function pickRule(
   rules: AutoResponseRule[],

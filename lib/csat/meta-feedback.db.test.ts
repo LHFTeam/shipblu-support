@@ -46,13 +46,12 @@ async function statusId(name: string): Promise<string> {
 
 /**
  * A resolved ticket whose customer is `psid` on `platform`, surveyed as
- * `delivery`: a DM unless `channel` and `externalId` say it is a comment.
+ * `delivery`: a DM unless `externalId` names a comment.
  */
 async function surveyedTicket(input: {
   platform: 'facebook' | 'instagram';
   delivery: 'meta_template' | 'meta_quick_reply';
   lastWroteAt?: Date;
-  channel?: 'facebook' | 'instagram' | 'facebook_comment' | 'instagram_comment';
   externalId?: string;
 }) {
   const [contact] = await db
@@ -67,7 +66,7 @@ async function surveyedTicket(input: {
   const [ticket] = await db
     .insert(conversations)
     .values({
-      channel: input.channel ?? input.platform,
+      channel: input.platform,
       externalId: input.externalId ?? null,
       statusId: await statusId('Resolved'),
       requesterContactId: contact!.id,
@@ -244,7 +243,7 @@ describe('recordMetaFeedback', () => {
 
   // No survey is ever sent on a comment; this is the second line, for a row
   // that got there anyway. A thanks on one would be posted under the post.
-  it('takes no answer on a comment ticket, by its channel or its external id', async () => {
+  it('takes no answer on a comment ticket, before 1.2 moves it or after', async () => {
     const legacy = await surveyedTicket({
       platform: 'instagram',
       delivery: 'meta_quick_reply',
@@ -252,10 +251,11 @@ describe('recordMetaFeedback', () => {
     });
     expect(await recordMetaFeedback(answer(legacy.surveyId))).toBe('unknown_survey');
 
-    // The same ticket once 1.2 has moved it: the channel alone refuses it.
+    // The same ticket once 1.2 has moved it to its comment channel, keeping its
+    // external id as the backfill does (and as 1.3's CHECK requires).
     await db
       .update(conversations)
-      .set({ channel: 'instagram_comment', externalId: null })
+      .set({ channel: 'instagram_comment' })
       .where(eq(conversations.id, legacy.conversationId));
     expect(await recordMetaFeedback(answer(legacy.surveyId))).toBe('unknown_survey');
 

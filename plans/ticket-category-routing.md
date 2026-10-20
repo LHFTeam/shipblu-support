@@ -1093,9 +1093,10 @@ worker and all four crons. 1.2 does not start until all six run 1.1.
   - **The auto-response picker reads a comment ticket still filed on
     `facebook`/`instagram` as the comment channel it is moving to**: `pickRule`
     takes the stored channel and external id and maps them itself
-    (`ruleChannel`), so no caller can pass the column raw. Matching the column raw, a rule naming the platform would
-    post its wording under a comment and a rule naming a comment channel would
-    match nothing until the backfill. The form names the platform's scope
+    (`ruleChannel`), so every caller must supply the external id and none can
+    skip the mapping by forgetting it. Matched on the bare column, a rule naming
+    the platform would post its wording under a comment and a rule naming a
+    comment channel would match nothing until the backfill. The form names the platform's scope
     "Facebook messages" / "Instagram messages" beside "… comments" for the same
     reason. Production holds one rule, null-scoped and inactive (2026-10-20).
   - **The filter, the Channels views and the condition builder offer the
@@ -1111,8 +1112,9 @@ worker and all four crons. 1.2 does not start until all six run 1.1.
     a new channel does not compile until it has a name. `channelLabel` used to
     know three channels and print the enum value for the rest.
   - **The condition builder offers the comment values** under their badge names,
-    and its comment says a condition on `facebook` does not reach a comment.
-    Nothing stored names them yet; Q11 says nothing will.
+    and its comment says a condition on `facebook` stops reaching a comment once
+    the backfill has moved it — and reaches every one until then. Nothing stored
+    names them yet; Q11 says nothing will.
   - **`send_meta` maps its source rather than casting it**: `meta.platform`,
     else the ticket's channel, through `metaPlatformOf`, so a comment value that
     reached `meta.platform` goes out on its platform instead of dead-lettering
@@ -1153,7 +1155,10 @@ deploy it with web and the crons.
   `type === 'facebook' || type === 'instagram'` tests (`forms.tsx`, the
   address field, and `actions.ts`, the stored config) become `isMetaChannel`,
   or a comment row falls through to the email address field and is stored as
-  `{ address }` rather than `{}`. The page's own address column already asks
+  `{ address }` rather than `{}`. The address field's
+  `type === 'facebook' ? 'FACEBOOK_PAGE_ID' : 'INSTAGRAM_ACCOUNT_ID'` becomes
+  `metaPlatformOf(type) === 'facebook'`, or a Facebook comment row names
+  Instagram's variable. The page's own address column already asks
   `isMetaChannel` (1.1).
 - **Backfill job `split_comment_channels`** (strict payload, `dryRun`).
   - **What it moves.** Existing comment tickets (52 today) move to the new

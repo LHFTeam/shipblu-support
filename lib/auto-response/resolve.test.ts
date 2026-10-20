@@ -155,6 +155,11 @@ describe('pickRule', () => {
     const onlyPlatform = [rule({ id: 'company' }), rule({ id: 'messages', channel: 'facebook' })];
     expect(pickRule(onlyPlatform, legacy)).toBeNull();
 
+    // And once the backfill has moved it, keeping its external id.
+    const moved = { ...legacy, channel: 'facebook_comment' } as const;
+    expect(pickRule(rules, moved)?.id).toBe('comments');
+    expect(pickRule(onlyPlatform, moved)).toBeNull();
+
     const instagram = [rule({ id: 'ig-comments', channel: 'instagram_comment' })];
     expect(
       pickRule(instagram, {

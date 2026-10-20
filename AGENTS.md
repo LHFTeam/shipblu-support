@@ -609,14 +609,20 @@ comment ticket can still sit on its platform's channel — every one ingested
 before 1.2 does, and `split_comment_channels` moves them — so **detecting a
 comment is the channel test _or_ the external id**
 (`isCommentChannel(channel) || rootCommentId(externalId)`), never either alone.
-The auto-response picker is the one reader where the difference is public: a
-rule with no channel matches every channel _except_ the comment ones, because
-its reply would be posted under the customer's comment where anybody reading
-the post sees it, and only a rule naming a comment channel answers there.
-`pickRule` takes the stored channel and external id and reads a comment still
-filed on its platform as the comment channel it is moving to, so a rule naming
-the platform answers that platform's direct messages and nothing posted in
-public — and no caller can hand it the column read raw.
+The difference is public wherever the software replies on its own, because a
+reply on a comment ticket is posted under the customer's comment where anybody
+reading the post sees it. The out-of-hours picker handles it: a rule with no
+channel matches every channel _except_ the comment ones, and only a rule naming
+a comment channel answers there. `pickRule` takes the stored channel and
+external id and reads a comment still filed on its platform as the comment
+channel it is moving to, so a rule naming the platform answers that platform's
+direct messages and nothing posted in public; every caller must supply the
+external id, so none can skip the mapping by forgetting it. **The automation
+engine does not handle it yet**: its `channel` fact is the stored column, so a
+`send_reply` rule a comment ticket satisfies — no channel condition,
+`channel is not email`, or `channel is facebook` until the backfill — posts in
+public. No rule sends a reply today; the risk and its fix are in
+`plans/ticket-category-routing.md` under "Risks not closed by the design".
 
 Graph request shapes are written down in `lib/meta/comments.ts` and
 `lib/meta/send.ts` rather than built inline, and asserted there against Meta's
