@@ -57,7 +57,9 @@ the support lead can answer. The plan went through two rounds of adversarial
 review against the code before this version. The first covered deploy order,
 rollback, migrations, routing races and the classifier. The second covered the
 redesigned routing hold and consistency between sections. Every finding that
-held is folded in.
+held is folded in. The support lead answered every open question on
+2026-10-20; [Decisions taken](#decisions-taken-with-the-support-lead-2026-10-20)
+records the answers, and the plan below already reflects them.
 
 ## What production says (read-only, 2026-10-19/20)
 
@@ -83,11 +85,18 @@ and should be read as a guide:
   Provider latency is p50 238 ms; from message to answer it is p50 2.2 s.
   Priority has been in `apply` since 2026-10-13, despite
   `docs/PROJECT-STATE.md` §1 still saying it "ships off".
-- **Assignment today happens almost entirely in the sweep, and the sweep has
-  stopped.** Only 9 of 532 tickets were assigned on arrival. The other 253
-  assignments came from `assign_sweep`, at a median of 40 hours. Nothing at all
-  has been assigned since 2026-10-07, and nobody has established why (see
-  Stage 0.7).
+- **Assignment today happens almost entirely in the sweep, and nobody is free
+  to be assigned.** Only 9 of 532 tickets were assigned on arrival. The other
+  253 assignments came from `assign_sweep`, at a median of 40 hours. Nothing has
+  been assigned since 2026-10-07. The sweep is not broken: it runs every day and
+  writes its skips (199 `outside_hours` and 115 `none_available` on 2026-10-19
+  alone). It finds nobody, because of Support's three members:
+  - one is switched off by a supervisor and was last seen on 2026-10-10;
+  - one is switched off by themselves;
+  - one is "accepting" but has never signed in.
+
+  See Stage 0.7.
+
 - **Only one group has members.** Support has 3 (admins). Merchant Care,
   Customer Care and Inbound Sales Team (created 2026-10-19) have 0, though all
   four are `round_robin`. Nine of twelve active agents are in no group.
@@ -272,7 +281,9 @@ it:
 
 The design is a `ticket_categories` table shaped like `ticket_root_causes`:
 
-- `key`: immutable, `sales`, `customer_support`, `merchant_support`. A CHECK
+- `key`: immutable. The starter set is `sales`, `customer_support`,
+  `merchant_support` and `courier_jobs` (Q3: couriers and outsourcing
+  companies looking to work with or for ShipBlu). A CHECK
   named `ticket_categories_key_format` holds it to lowercase letters and
   underscores, and refuses `unknown`, which is reserved for Jev's escape hatch
   (decision 4). Hyphens appear only in labels. The CHECK's name is
@@ -827,14 +838,41 @@ migrations land one at a time.
     remove it. A stale name otherwise renders as a blank select. In a list it
     becomes an invisible member that is written back on every save
     (`app/(console)/admin/condition-builder.tsx:170-203`).
-  - **Fix the stored conditions through the console.** That is a production
-    write, so it follows the `AGENTS.md` sequence: read the rows, say the
-    change, have the way back. The four SLA policies need two things:
-    - **uuids, not names**, in every group condition;
-    - **an order that lets a group policy match.** Today policy 1 catches every
-      chat ticket before policy 4 is reached, so policy 1 moves to the end or
-      loses its channel branch. This is done together with Stage 1.2's channel
-      inventory, since both change the same rows.
+  - **Fix the stored conditions through the console**, once the builder change
+    is deployed. That is a production write, so it follows the `AGENTS.md`
+    sequence: read the rows, say the change, have the way back. The support lead
+    approved this restructure on 2026-10-20 (Q15). Read on that date, the four
+    policies are:
+
+    | Now | Policy                          | Default | Conditions                                                                           | Tickets |
+    | --- | ------------------------------- | ------- | ------------------------------------------------------------------------------------ | ------- |
+    | 1   | Live Support (Customer Care)    | yes     | any: channel in (facebook, instagram, webchat, whatsapp), group.id = "Customer Care" | 397     |
+    | 2   | Offline Support (Customer Care) | no      | all: channel = email, group.id = "Customer Care"                                     | 1       |
+    | 3   | Offline Support (Merchant Care) | no      | all: channel = email, group.id = "Merchant Care"                                     | 0       |
+    | 4   | Live Support (Merchant Care)    | no      | all: channel in (whatsapp, webchat, facebook, instagram), group.id = "Merchant Care" | 0       |
+
+    They become, with the group uuids read from `groups` on the day (Customer
+    Care `0861a48b…`, Merchant Care `b080b5d9…`):
+
+    | New | Policy                          | Default | Conditions                                                                         |
+    | --- | ------------------------------- | ------- | ---------------------------------------------------------------------------------- |
+    | 1   | Live Support (Merchant Care)    | no      | all: channel in (whatsapp, webchat, facebook, instagram), group.id = Merchant Care |
+    | 2   | Offline Support (Merchant Care) | no      | all: channel = email, group.id = Merchant Care                                     |
+    | 3   | Offline Support (Customer Care) | no      | all: channel = email, group.id = Customer Care                                     |
+    | 4   | Live Support (Customer Care)    | **yes** | any: channel in (facebook, instagram, webchat, whatsapp), group.id = Customer Care |
+
+    The specific policies come first and the catch-all default last.
+    `selectPolicy` takes the first match by position and falls back to the
+    default (`lib/sla/policy.ts:47-58`), so every ticket that matches nothing
+    else still gets Live Support, as all 397 do today. That includes the comment
+    channels, which Q11 leaves out of every condition. The way back is the old
+    table, typed back in.
+
+    Sales gets its own policies once the `category.id` fact exists (Stage 3).
+    They go above the default, with targets the support lead chooses: "Live
+    Sales" for category = sales on the chat channels, and "Offline Sales" on
+    email. A policy can combine category, channel and group in one condition, so
+    "category is sales **or** group is Inbound Sales Team" is a single policy.
 - **0.3 — A group cannot be deleted out from under routing.** `deleteGroup`
   refuses while a channel or a form names the group as its default. Today
   both are `on delete set null`, and new tickets would silently land in no
@@ -884,13 +922,22 @@ migrations land one at a time.
     assign-to-self action.
   - **It switches on for every agent at once.** Deploying this enables group
     visibility for every agent-role user the moment it lands, because the
-    grant already exists. Q8 decides whether the key stays in `AGENT`.
-    Answering "no" means removing it there in the same PR, with per-agent
-    overrides for anyone who should keep it. 0.5 does not deploy until Q8 is
-    answered.
+    grant already exists. Q8 settled it: the key stays in `AGENT`.
 - **0.6 — Staffing and group settings (operations, not code).**
-  - Put agents into Inbound Sales Team, Merchant Care and Customer Care, and
-    decide what Support is for once those groups exist.
+  - Put agents into Inbound Sales Team, Merchant Care and Customer Care. Support
+    is then unused (Q5).
+  - **Before Support is emptied, every channel that defaults to it moves to
+    Customer Care**, in the console. Today that is six channels: email, web
+    chat, Facebook, Instagram, WhatsApp Support and ShipBlu Admin. A channel's
+    default group is where every ticket lands that no category routes:
+    - `fallback` and `unknown`;
+    - courier jobs, which have no route group (Q3);
+    - every channel left in `default_group` mode.
+
+    In an empty group those tickets wait for nobody. Support's open backlog,
+    127 unassigned tickets on 2026-10-19, is moved or closed in the same step.
+    That is a person's decision, not a side effect.
+
   - For each future route group, read and confirm:
     - `assignment_strategy`, which must not be `manual`. Manual is the
       column's default (`db/schema/agents.ts:159`), `assign_sweep` skips such
@@ -901,17 +948,21 @@ migrations land one at a time.
   Without this, every routed ticket waits unassigned, and each of those groups
   escalates after 60 minutes to a named agent.
 
-- **0.7 — Find out why `assign_sweep` stopped (read-only).** It has assigned
-  nothing since 2026-10-07, yet it is routing's backstop and its rollback path.
-  - **Logs.** Read `shipblu-sla-sweep`'s logs for the
-    `[assign_sweep] reclaimed= assigned=` line.
-  - **The chain.** Check whether an earlier step fails. The cron chains
-    `sla_sweep && presence_sweep && assign_sweep` (`render.yaml:411`), so a
-    throwing earlier sweep stops assignment silently, as §6.66 already
-    records once.
-  - **The groups.** Check the accepting state of Support's three members.
+- **0.7 — Find out why `assign_sweep` stopped (read-only). Done 2026-10-20.**
+  It has assigned nothing since 2026-10-07, yet it is routing's backstop and its
+  rollback path. **The cause is staffing, not code.**
+  - **The cron chain runs through to the end.** It chains
+    `sla_sweep && presence_sweep && assign_sweep` (`render.yaml:411`), and a
+    throwing earlier step would stop it, as §6.66 records once. That is not
+    happening here: `assign_sweep` writes `assignment_skipped` events every day
+    (`outside_hours`, `none_available`, and `no_group_members` for Merchant Care
+    since 2026-10-11).
+  - **Nobody it may pick is free.** Of Support's three members, one is switched
+    off by a supervisor (last seen 2026-10-10), one switched themselves off, and
+    the one marked accepting has never signed in.
 
-  Fix the cause or name it before Stage 5.
+  0.6 is therefore the fix, and "the sweep assigned something in the last day"
+  stays a 5.2 prerequisite, as the proof that it was.
 
 ### Stage 1 — comment channels
 
@@ -968,10 +1019,17 @@ deploy it with web and the crons.
 - **Before anything writes the new values: the inventory.** With read-only
   SELECTs, quote every `automation_rules`, `sla_policies` and `skills`
   condition, and every `auto_responses` scope, whose text names `facebook` or
-  `instagram`. Decide each row with the support lead, and edit through the
-  console under the live-write sequence, together with 0.2's SLA restructure.
-  `csat_rules` is a channel column and comment tickets are never surveyed, so
-  it needs no change.
+  `instagram`.
+  - **Nothing gains the comment values.** The support lead decided this row by
+    row on 2026-10-20 (Q11), so comment tickets stop matching every condition
+    that names their platform.
+  - **The SLA stays as it is.** Comment tickets fall through to the default
+    policy, Live Support (Customer Care), which is what they get today. That
+    holds before and after 0.2's restructure.
+  - **The inventory is still taken.** Quoting it is what proves that nothing
+    else, such as an automation rule added since, depends on the old match.
+  - `csat_rules` is a channel column and comment tickets are never surveyed, so
+    it needs no change.
 - Ingest writes `channel: '<platform>_comment'` for a comment ticket
   (`lib/tickets/ingest-meta.ts:216`).
 - `channelFor` looks for the comment row and falls back to the platform's row
@@ -1053,7 +1111,7 @@ readers are harmless.
 
 - **Wording.** "Subcategory", in the sidebar block, admin pages, reports,
   review queue, shadow page, nav, error text and event-label sentences. The
-  Arabic wording comes from the support lead (Q2).
+  Arabic is التصنيف الفرعي (Q2).
 - **Routes** move to `/admin/subcategories`, `/admin/subcategories/review`,
   `/admin/subcategories/shadow` and `/reports/subcategories`.
   - **Redirects.** `next.config.ts` serves **temporary** redirects from the
@@ -1208,13 +1266,24 @@ cannot parse.
     `OLD.category_id IS DISTINCT FROM NEW.category_id` added to the
     `queue_relevant` list in `001_extensions_and_triggers.sql:370-385`. Without
     the second, open inboxes do not redraw when only the category changes.
-- **Seeding.** `lib/categories/registry.ts` holds the starter set: three rows
+- **Seeding.** `lib/categories/registry.ts` holds the starter set: four rows
   with English and Arabic labels and descriptions written for Jev. Being in
-  code means the wording goes through review. `seed_ticket_categories` puts
-  the set in idempotently, finding rows by key, and production runs it by
-  hand, because deploys only run `db:migrate`
-  (`docs/PROJECT-STATE.md` §6.30). `db/baseline.ts` seeds the same set for
-  tests and development.
+  code means the wording goes through review.
+  - **Route groups (Q5).** The seed leaves them empty, and an admin sets them
+    on the Categories page when Stage 5 turns on:
+    - `sales` → Inbound Sales Team;
+    - `merchant_support` → Merchant Care;
+    - `customer_support` → Customer Care.
+  - **`courier_jobs` has no route group.** It lands in its channel's default
+    group, which 0.6 moves to Customer Care.
+  - **The `courier_jobs` description.** It must exclude greetings and generic
+    "I want to work" openers that name no courier or delivery work. Otherwise
+    a greeting answered "courier jobs" would settle the ticket before its
+    informative message arrives. `seed_ticket_categories` puts
+    the set in idempotently, finding rows by key, and production runs it by
+    hand, because deploys only run `db:migrate`
+    (`docs/PROJECT-STATE.md` §6.30). `db/baseline.ts` seeds the same set for
+    tests and development.
 - **Admin.** A "Categories" page at `/admin/categories`. This PR removes the
   2.A redirect from that path.
   - **Edit** labels, description, position, active flag and the route group.
@@ -1361,12 +1430,14 @@ enqueued, so no job type is ever unknown.
    - 90% precision on `sales`, with sales recall reported beside it, on at
      least 30 labelled tickets.
    - The threshold set from the report.
-   - Merchant support is expected to stay below 30 labelled tickets for a long
-     time: 2 of 126 in September. Its routing gate is its route group, which
-     stays empty until it qualifies (Q5).
+   - **Merchant support routes from the start (Q5).** It is expected to stay
+     below 30 labelled tickets for a long time: 2 of 126 in September. So the
+     report shows its precision with the sample size beside it, and a supervisor
+     reads every merchant-support route for the first two weeks of `apply`. If
+     it proves wrong too often, emptying its route group stops it routing
+     without stopping it labelling (see Risks).
 4. Switch the classifier to `apply`.
-5. **Optionally, back-classify the open backlog (Q12).** Preconditions:
-   - Q12 has been answered;
+5. **Back-classify the open backlog (Q12).** Preconditions:
    - the classifier has been in `apply` for a week;
    - `backfill_category_ai mode=apply dryRun=true` has been read, including
      which rules it would wake.
@@ -1481,10 +1552,12 @@ enqueues `settle_routing` until an admin changes a channel's mode.
 
 1. **Prerequisites.**
    - All six services run 5.1.
-   - Stage 0.5 is shipped and 0.6 is done: each route group has a non-manual
-     strategy and members who accept tickets.
-   - 0.7's cause is known, and the sweep has assigned something in the last
-     day.
+   - Stage 0.5 is shipped and 0.6 is done:
+     - each route group has a non-manual strategy and members who accept
+       tickets;
+     - no channel defaults to the retired Support group.
+   - The sweep has assigned something in the last day. 0.7 found it idle for
+     want of anyone to assign to, so this is the proof that 0.6 fixed it.
    - The classifier is in `apply`, with category route groups set.
    - The comment channel rows exist (Q11), and the count of comment tickets
      whose `channel_id` is not a comment row is 0. Until then, a comment ticket
@@ -1529,7 +1602,7 @@ Web first (it migrates `metrics_daily`), then the worker and crons, with
 | ----- | --------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 1     | Every comment ticket on a comment channel, and only those | `count(*) filter (where (coalesce(external_id,'') ~ '^(facebook\|instagram):comment:') <> (channel in ('facebook_comment','instagram_comment')))` = 0 |
 | 1     | No comment reply queued as email                          | `jobs` where `type='send_email'` joined to comment-channel messages = 0                                                                               |
-| 1     | The SLA did not change under comments                     | Comment tickets created after 1.2 with a null `sla_policy_id` = 0, and the same policy mix as before the split                                        |
+| 1     | The SLA did not change under comments                     | Comment tickets created after 1.2 with a null `sla_policy_id` = 0, and every one on the default policy (Q11)                                          |
 | 2     | Detector still writing                                    | `subcategorised` events in the last hour > 0 during traffic                                                                                           |
 | 2     | Old names gone                                            | No `pg_class` relation named `ticket_categories%`, `conversation_categories%`, `category_metrics_daily%` or `ai_category_runs%` before Stage 3        |
 | 3     | Registry seeded                                           | 3 active rows; every `route_group_id` resolves to a non-manual group                                                                                  |
@@ -1550,16 +1623,23 @@ Web first (it migrates `metrics_daily`), then the worker and crons, with
   rates (`commercial.pricing_enquiry`) can write the same sentence, and no
   record tells them apart in production. Expect merchant support to be the
   weakest class until shipping accounts are linked.
-- **A wrong answer settles.** Merchant support answers still label and settle a
-  ticket while its route group is empty. A false merchant answer on the first
-  message therefore stops a later, correct sales answer from routing. The cost
-  is a ticket left in the default group, as on a fallback, labelled wrong until
-  a person fixes it. If that proves too costly, a per-category "may settle"
-  flag makes a class record-only, behaving like `unknown`.
+- **A wrong answer settles, and merchant support routes on thin evidence.**
+  Q5 routes merchant support to Merchant Care from the first day of `apply`,
+  before its precision can be measured on 30 labels. A false merchant answer on
+  the first message therefore sends a sales or customer ticket to Merchant Care,
+  and stops a later, correct answer from re-routing it.
+  - **Bounding it.** A supervisor reads every merchant route for the first two
+    weeks (4.2), and "Hand to <group>" undoes one in a click.
+  - **Stopping it.** Emptying the route group stops merchant support routing
+    without stopping it labelling.
+  - **Going further.** A per-category "may settle" flag makes a class
+    record-only, behaving like `unknown`.
 - **Customer text goes to TypeSafe a second time per message.** The
   data-processing caveat recorded for canned suggestions
-  (`docs/PROJECT-STATE.md`, the canned-suggestion section) applies, and needs
-  an answer.
+  (`docs/PROJECT-STATE.md`, the canned-suggestion section) applies. The support
+  lead confirmed on 2026-10-20 that TypeSafe's terms cover it (Q16), and
+  `docs/PROJECT-STATE.md` records that beside the canned-suggestion caveat in
+  4.1.
 - **Two classifiers each run an `on_update` pass at creation.** A rule "group
   is Sales and priority is urgent" fires on whichever pass comes last. Rules
   are level-triggered, so the last pass sees both facts. The router's own pass
@@ -1584,104 +1664,86 @@ Web first (it migrates `metrics_daily`), then the worker and crons, with
   3), but anyone reading the old `onGroupChanged` comment needs the new one
   beside it.
 
-## Questions for the support lead
+## Decisions taken with the support lead (2026-10-20)
 
-Each one has the default this plan assumes, so work can start while it is
-answered.
+Each question this plan raised, its default, and the answer. The numbers are the
+ones the stages cite (Q2, Q5, Q8, Q11, Q12, Q15).
 
-1. **"Categorised by Jev" means the new category** (sales / customer / merchant
-   support). It does not mean making Jev's _subcategory_ answers live, which
-   stay a shadow measurement. **Default: the new category only.** Promoting
-   subcategories is a separate, argued change.
-   Support Lead Answer: Yes, your default is acceptable.
-   
-3. **The on-screen name "Category"** sits beside "Status category" in the rule
-   builder. **Default: "Category", with "Status category" unchanged.** Arabic
-   wording for both "category" and "subcategory" is also needed. Suggested:
-   التصنيف for category and التصنيف الفرعي for subcategory. Today's handbook
-   uses التصنيف for what becomes the subcategory, so this decides 2.A's
-   handbook text.
-   Support Lead Answer: Yes, your default is acceptable.
-   
-4. **A fourth value for job applications, partnership and courier offers, and
-   vendors.** Jev's shadow run found 11 such tickets on 126 Facebook DMs.
-   **Default: no fourth value.** They answer `unknown` and stay in the
-   default group. If "Other" is added later, its description must exclude
-   greetings. Otherwise a greeting answered "other" would settle the ticket
-   before its informative message arrives.
-   Support Lead Answer: Let's add courier jobs (for couriers and outsourcing companies looking to work with or for ShipBlu) as a fourth value, and keep the 'unknown' option as per the scenario you listed.
-   
-6. **The category and subcategories are independent.** **Default: yes.**
-   Alternatively, each subcategory could carry a "usually" category to narrow
-   the picker.
-   Support Lead Answer: Yes, your default is acceptable.
-   
-7. **Where each category routes, and when merchant support may route.**
-   **Default:**
-   - Sales → Inbound Sales Team
-   - Merchant support → no route group until its own evaluation reaches 30
-     labels, then Merchant Care. Until then its answers still label and settle
-     a ticket and leave it in the default group (see Risks).
-   - Customer support → Customer Care, or Support?
+1. **What Jev classifies.** The new category only. Jev's _subcategory_ answers
+   stay a shadow measurement, and promoting them is a separate, argued change.
+   _Default accepted._
+2. **Names.** "Category" on screen, beside an unchanged "Status category".
+   Arabic: التصنيف for category and التصنيف الفرعي for subcategory, which also
+   sets 2.A's handbook text. _Default accepted._
+3. **A fourth value.** **Courier jobs** is added, for couriers and outsourcing
+   companies looking to work with or for ShipBlu. `unknown` stays the escape
+   hatch for greetings and content-free openers. _Changed from the default
+   (no fourth value)._ It has no route group (see Still open).
+4. **Category and subcategories are independent.** _Default accepted._
+5. **Where each category routes:**
+   - Sales → Inbound Sales Team.
+   - Merchant support → Merchant Care, from the first day of `apply`. _Changed
+     from the default, which held merchant support back until its own
+     evaluation reached 30 labels; see Risks and 4.2._
+   - Customer support → Customer Care.
 
-   What is Support for once those three are staffed?
+   Support is unused once the three are staffed. That moves every channel's
+   default group (0.6).
 
-   Support Lead Answer:
-   - Sales → Inbound Sales Team
-   - Merchant support → Merchant Care.
-   - Customer support → Customer Care
-   Once those three are staffed, the Support group will be unused for now.
+6. **The hold window.** 5 minutes, tuned from the shadow data. _Default
+   assumed; not separately answered._
+7. **A person changing the category.** During the hold it routes the ticket.
+   After the hold it relabels, and "Hand to <group>" moves and re-assigns.
+   _Default accepted._
+8. **Agents see their groups' tickets.** The key stays in `AGENT`, so 0.5
+   switches it on for everyone. _Default accepted._
+9. **Coexistence numbers never route,** enforced in code. _Default accepted._
+10. **Messenger stays in shadow until the Freshworks swap;** Instagram and the
+    comment channels go live first. _Default accepted._
+11. **The comment channels:**
+    - **Names.** "Facebook comments" and "Instagram comments".
+    - **Default group.** The same as their platform's channel.
+    - **Out-of-hours replies.** Never posted publicly on a comment unless a
+      rule names the comment channel.
+    - **Existing rules and policies.** None of those naming Facebook or
+      Instagram gains the comment values. _Answered: no._ Comment tickets
+      therefore take the default SLA policy, as they do today (1.2).
+12. **Historic data.** Reports are rebuilt for the comment split from
+    2026-08-29. The open backlog is back-classified, without routing, as 4.2's
+    last step. _Default accepted._
+13. **The rename reaches the database,** URLs, permission keys, the job name
+    and the `CATEGORISE_*` variables, keeping stored history. _Default
+    accepted._
+14. **Permissions.** Every agent may change a ticket's category, and admins
+    manage the list. _Default accepted._
+15. **SLA.** A ticket's policy may be chosen by its category and/or its channel
+    and/or its group. Sales gets its own targets, and the four existing policies
+    are restructured as written in 0.2. _Answered: yes._ Three things are
+    worth knowing about how that works:
+    - **Matching is ordered, not combined.** Each policy is one condition
+      over any mix of the three facts, with `all` or `any`. Policies are
+      tried by position, and the first that matches decides; their targets
+      are not merged. So a specific policy (Merchant Care on chat) sits above
+      a general one (any chat channel), and the default is last.
+    - **The category is usually not known at the first instant.** It arrives
+      seconds, or after a greeting minutes, later. A ticket therefore starts
+      on the policy its channel and group give it, and the policy is chosen
+      again when the category lands, provided nobody has answered yet
+      (decision 3). After the first response the policy holds.
+    - **Priority stays a dimension inside each policy.** Every policy prices
+      its targets per priority, so "Sales, urgent" and "Sales, low" are one
+      policy's two rows, not two policies.
+16. **TypeSafe's data-processing terms** cover a second per-message call
+    carrying customer text. _Answered: yes._
 
-8. **The hold window.** **Default: 5 minutes,** tuned from the shadow data.
-9. **A person changing the category.** **Default:**
-   - **during the hold:** it routes the ticket, as Jev's answer would;
-   - **after the hold:** it relabels only, and the sidebar offers "Hand to
-     <group>", which moves and re-assigns.
+### Still open
 
-   The alternative is to re-route automatically after the hold too.
+Neither blocks Stage 0. Both are needed before Stage 5 turns on.
 
-   Support Lead Answer: Your default is acceptable.
-
-10. **Agents see their groups' tickets** (Stage 0.5). The permission is already
-   granted to every agent role, and implementing it switches it on.
-   **Default: keep it.** "No" means removing it from the `AGENT` role in the
-   same PR. Without it, a routed ticket nobody is free to take is invisible to
-   the group.
-   Support Lead Answer: Your default is acceptable.
-
-11. **Coexistence numbers stay on their default group.** **Default: yes,
-   enforced in code.** They are answered on the phone.
-   Support Lead Answer: Your default is acceptable.
-
-12. **Messenger routes in shadow until the Freshworks swap**, and Instagram and
-    the comment channels go live first. **Default: yes.**
-   Support Lead Answer: Your default is acceptable.
-
-13. **The comment channels:**
-    - **Names.** **Default: "Facebook comments" / "Instagram comments".** Support Lead Answer: Your default is acceptable.
-    - **Default group.** **Default: the same as their platform's, until you
-      choose otherwise.** Support Lead Answer: Your default is acceptable.
-    - **Out-of-hours replies on comments.** A reply there is posted publicly.
-      **Default: never, unless a rule names the comment channel.** Support Lead Answer: Your default is acceptable.
-    - **Existing rules and policies.** For each rule and policy that names
-      Facebook or Instagram (1.2's inventory): should it also name the comment
-      channel? Support Lead Answer: No.
-      
-14. **Historic data.**
-    - **Reports.** Rebuild them for the comment split from 2026-08-29.
-      **Default: yes.** Support Lead Answer: Your default is acceptable.
-    - **The open backlog.** Back-classify its category, without routing it.
-      **Default: yes, as 4.2's last step.** Support Lead Answer: Your default is acceptable.
-15. **The rename reaches the database, URLs, permission keys, the job name and
-    the `CATEGORISE_*` variables, keeping stored history.** **Default: yes.**
-    The cost is one maintenance window of a few minutes, off-hours. Support Lead Answer: Your default is acceptable.
-16. **Who may change a ticket's category, and who manages the list.**
-    **Default: every agent changes it; admins manage it.** Support Lead Answer: Your default is acceptable.
-17. **SLA by category.** Before the first response, the policy is re-selected
-    whenever the category or the group changes. Should Sales tickets get their
-    own targets? And are the four existing policies restructured in Stage 0.2
-    as proposed? 
-    That's a good idea - so the SLA of an incoming ticket can be determined by: its category and/or its channel and/or its group. If there is anything not clear or confusing about this, let me know.
-    Yes, the existing policies should be restructured as proposed in Stage 0.2.
-18. **TypeSafe's data-processing terms** cover a second per-message call
-    carrying customer text. **This needs a yes before 4.2.** Support Lead Answer: Yes.
+- **Where courier jobs go.** The default is no route group, so a courier-jobs
+  ticket stays in its channel's default group: Customer Care, once 0.6 has run.
+  If those enquiries belong to another team (operations, fleet), naming a group
+  on the category's row is all it takes.
+- **Moving channel defaults off Support.** Customer Care, as 0.6 proposes, or
+  another group per channel? The coexistence number "Nayera Mohamed" already
+  defaults to Merchant Care and stays there.
