@@ -16,6 +16,8 @@ import { db } from '@/db/client';
 import { agents, conversations, contacts, messages, ticketStatuses } from '@/db/schema';
 import type { SessionAgent } from '@/lib/auth/session';
 import { can } from '@/lib/auth/permissions';
+import { heldByOrInGroupsOf, inGroupsOf } from './assignment-scope';
+import { assignmentScope, assignmentVisibility } from './visibility';
 import { hiddenChannels, restrictedChannels } from './channel-policy';
 import { notReaction } from './not-reaction';
 import { rootCommentId } from '@/lib/meta/comments';
@@ -166,9 +168,8 @@ export async function listInbox(
   // Visibility is enforced in the query, not the template: an agent who can
   // only see their own tickets must not be able to reach another's by URL, and
   // filtering after the fact would still have loaded the row.
-  if (!can(agent, 'ticket.view.all')) {
-    where.push(eq(conversations.assigneeAgentId, agent.id));
-  }
+  const assignment = assignmentVisibility(agent);
+  if (assignment) where.push(assignment);
 
   // Restricted channels are excluded in the query, for two different reasons
   // that happen to use the same clause.
@@ -188,6 +189,14 @@ export async function listInbox(
 
   if (filters.view === 'mine') where.push(eq(conversations.assigneeAgentId, agent.id));
   if (filters.view === 'unassigned') where.push(isNull(conversations.assigneeAgentId));
+  // The agent's groups, whoever holds the ticket. Narrows what visibility
+  // allows rather than widening it: for an agent who sees only their own
+  // tickets this is their own tickets in their groups.
+  if (filters.view === 'groups') where.push(inGroupsOf(agent.id));
+
+  // A group view or a hand-typed `?group=`. Inside visibility like every other
+  // filter, so naming a group an agent does not belong to returns nothing.
+  if (filters.group) where.push(eq(conversations.groupId, filters.group));
 
   if (filters.channel !== 'all') {
     where.push(eq(conversations.channel, filters.channel));
@@ -398,23 +407,29 @@ function lastVisibleMessage() {
 }
 
 /**
- * Open and pending tickets: the agent's, nobody's, and all of them.
+ * Open and pending tickets: the agent's, nobody's, their groups', and all of
+ * them — every one within what the agent may see, so a count is always the
+ * length of the list its view opens.
  *
  * Asked twice by one inbox render — the console layout for the rail's badge,
  * the inbox frame for its views — so the work is memoised for the request. The
- * key is the agent's id and the one permission the count depends on rather than
- * the agent, because every `requireAgent()` returns a fresh object and a cache
- * keyed on it would never hit. Outside a server render (`/api/inbox-counts`)
- * `cache` memoises nothing, which is the behaviour that route already had.
+ * key is the agent's id and the scope `assignmentScope` answers — whether it is
+ * unrestricted, and whether it takes in their groups — rather than the agent,
+ * because every `requireAgent()` returns a fresh object and a cache keyed on it
+ * would never hit. Group membership is not in the key: it is read inside the
+ * query, and one request asks once. Outside a server render
+ * (`/api/inbox-counts`) `cache` memoises nothing, which is the behaviour that
+ * route already had.
  */
 export async function inboxCounts(agent: SessionAgent) {
-  return countsFor(agent.id, can(agent, 'ticket.view.all'));
+  const scope = assignmentScope(agent);
+  return countsFor(agent.id, !scope, scope?.includeGroups ?? false);
 }
 
-const countsFor = cache(async (agentId: string, viewAll: boolean) => {
+const countsFor = cache(async (agentId: string, viewAll: boolean, viewGroups: boolean) => {
   const base = [isNull(conversations.deletedAt), isNull(conversations.mergedIntoId)];
   if (!viewAll) {
-    base.push(eq(conversations.assigneeAgentId, agentId));
+    base.push(heldByOrInGroupsOf(agentId, viewGroups));
   }
 
   // The nav badge counts what is waiting on the team, so a restricted channel is
@@ -426,11 +441,12 @@ const countsFor = cache(async (agentId: string, viewAll: boolean) => {
     .select({
       mine: sql<number>`count(*) FILTER (WHERE ${conversations.assigneeAgentId} = ${agentId})::int`,
       unassigned: sql<number>`count(*) FILTER (WHERE ${conversations.assigneeAgentId} IS NULL)::int`,
+      groups: sql<number>`count(*) FILTER (WHERE ${inGroupsOf(agentId)})::int`,
       all: sql<number>`count(*)::int`,
     })
     .from(conversations)
     .innerJoin(ticketStatuses, eq(ticketStatuses.id, conversations.statusId))
     .where(and(...base, inArray(ticketStatuses.category, ['open', 'pending'])));
 
-  return rows[0] ?? { mine: 0, unassigned: 0, all: 0 };
+  return rows[0] ?? { mine: 0, unassigned: 0, groups: 0, all: 0 };
 });

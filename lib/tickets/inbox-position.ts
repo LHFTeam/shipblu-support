@@ -44,9 +44,14 @@ let remembered: InboxPosition | null = null;
  * position is stored under cannot drift apart — they are the same question.
  */
 export function inboxSignature(filters: InboxFilters): string {
-  return [filters.view, filters.statusCategory, filters.channel, filters.rating, filters.q].join(
-    '|',
-  );
+  return [
+    filters.view,
+    filters.statusCategory,
+    filters.channel,
+    filters.rating,
+    filters.group ?? '',
+    filters.q,
+  ].join('|');
 }
 
 export function readInboxPosition(signature: string): InboxPosition | null {

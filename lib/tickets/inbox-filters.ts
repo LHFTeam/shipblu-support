@@ -11,7 +11,8 @@ import { FILTERABLE_CHANNELS, type FilterableChannel } from './channel-policy';
  */
 
 export type InboxFilters = {
-  view: 'all' | 'mine' | 'unassigned';
+  /** `groups`: tickets in the groups the agent belongs to, whoever holds them. */
+  view: 'all' | 'mine' | 'unassigned' | 'groups';
   statusCategory: 'open' | 'pending' | 'resolved' | 'closed' | 'all' | 'unresolved';
   channel: 'all' | 'email' | 'whatsapp' | 'webchat' | 'facebook' | 'instagram' | 'whatsapp_bot';
   /**
@@ -20,6 +21,12 @@ export type InboxFilters = {
    * "Rated 1–2" view does, and the list says so while it is on.
    */
   rating: 'any' | 'low';
+  /**
+   * One group's tickets, by id, or null for every group. A group view sets it;
+   * no select does. `listInbox` applies it inside visibility, so naming a group
+   * the agent cannot see returns nothing rather than widening anything.
+   */
+  group: string | null;
   q: string;
 };
 
@@ -85,9 +92,10 @@ export function parseFilters(params: Record<string, string | string[] | undefine
   const statusCategory = one('status');
   const channel = one('channel');
   const rating = one('rating');
+  const group = one('group');
 
   return {
-    view: view === 'mine' || view === 'unassigned' ? view : 'all',
+    view: view === 'mine' || view === 'unassigned' || view === 'groups' ? view : 'all',
     statusCategory:
       statusCategory === 'open' ||
       statusCategory === 'pending' ||
@@ -102,6 +110,9 @@ export function parseFilters(params: Record<string, string | string[] | undefine
       ? (channel as FilterableChannel)
       : 'all',
     rating: rating === 'low' ? 'low' : 'any',
+    // Checked here rather than left to Postgres, which answers a malformed uuid
+    // with 22P02 — a page that fails rather than a list that is empty.
+    group: group && UUID_PATTERN.test(group) ? group.toLowerCase() : null,
     q: (one('q') ?? '').trim(),
   };
 }

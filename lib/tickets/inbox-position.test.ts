@@ -21,6 +21,7 @@ function filters(overrides: Partial<InboxFilters> = {}): InboxFilters {
     statusCategory: 'unresolved',
     channel: 'all',
     rating: 'any',
+    group: null,
     q: '',
     ...overrides,
   };

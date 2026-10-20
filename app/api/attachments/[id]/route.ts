@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { eq, sql } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import {
   attachments,
@@ -8,11 +8,11 @@ import {
   sideConversationMessages,
   sideConversations,
 } from '@/db/schema';
-import { can } from '@/lib/auth/permissions';
 import { getSessionAgent } from '@/lib/auth/session';
 import { ATTACHMENT_URL_TTL_SECONDS } from '@/lib/attachments/signed-url';
 import { isUuid } from '@/lib/http/uuid';
 import { canSeeChannel } from '@/lib/tickets/channel-policy';
+import { assignmentVisibility } from '@/lib/tickets/visibility';
 import { signedUrl } from '@/lib/storage';
 
 export const dynamic = 'force-dynamic';
@@ -46,7 +46,6 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   const rows = await db
     .select({
       storagePath: attachments.storagePath,
-      assigneeAgentId: conversations.assigneeAgentId,
       channel: conversations.channel,
     })
     .from(attachments)
@@ -63,17 +62,14 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
         sql`COALESCE(${messages.conversationId}, ${sideConversations.conversationId})`,
       ),
     )
-    .where(eq(attachments.id, id))
+    // Same visibility rule as the ticket the file hangs off — otherwise an
+    // attachment id would be a way around it. In the query, so a file on a
+    // ticket the agent may not see answers exactly as one that does not exist.
+    .where(and(eq(attachments.id, id), assignmentVisibility(agent)))
     .limit(1);
 
   const attachment = rows[0];
   if (!attachment) return NextResponse.json({ error: 'not found' }, { status: 404 });
-
-  // Same visibility rule as the ticket the file hangs off — otherwise an
-  // attachment id would be a way around it.
-  if (!can(agent, 'ticket.view.all') && attachment.assigneeAgentId !== agent.id) {
-    return NextResponse.json({ error: 'not found' }, { status: 404 });
-  }
 
   // And the channel rule, which this route had no reason to check while every
   // attachment came from email: a bot transcript's media is on a channel an

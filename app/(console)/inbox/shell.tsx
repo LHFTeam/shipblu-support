@@ -5,7 +5,8 @@ import { LiveUpdates } from '@/components/live-updates';
 import { ViewsPanel, type ViewsPanelSection } from '@/components/views-panel';
 import { inboxCounts, listInbox } from '@/lib/tickets/inbox';
 import { parseFilters } from '@/lib/tickets/inbox-filters';
-import { activeViewId, inboxViews, viewHref } from '@/lib/tickets/inbox-views';
+import { assignmentScope, inboxGroupsFor } from '@/lib/tickets/visibility';
+import { activeViewId, inboxViews, seesGroupQueues, viewHref } from '@/lib/tickets/inbox-views';
 import { InboxList, KnowledgeBaseLink } from './list';
 
 /**
@@ -43,20 +44,26 @@ export async function InboxShell({
   const filters = parseFilters(searchParams);
   // The counts are the ones the console layout already asked for on this
   // request; `inboxCounts` memoises them, so the views cost no second query.
-  const [{ rows, nextCursor }, counts] = await Promise.all([
+  // The groups are one small read, for the group views' names.
+  const [{ rows, nextCursor }, counts, groups] = await Promise.all([
     listInbox(agent, filters),
     inboxCounts(agent),
+    inboxGroupsFor(agent),
   ]);
 
   const viewingTicket = activeNumber !== undefined;
-  const canViewAll = can(agent, 'ticket.view.all');
+  // From the scope `listInbox` and `inboxCounts` are drawn from, so a view is
+  // offered for exactly what the lists can hold.
+  const scope = assignmentScope(agent);
+  const canViewAll = !scope;
+  const canViewGroups = scope?.includeGroups ?? false;
   const canSeeBot = can(agent, 'ticket.view.bot');
   const canSeeRatings = can(agent, 'report.view');
 
   // A view keeps the open ticket open, as the Status and Channel selects do.
   const base = viewingTicket ? `/inbox/${activeNumber}` : '/inbox';
-  const views = inboxViews({ canSeeBot, canViewAll, canSeeRatings });
-  const activeView = activeViewId(views, filters, { canViewAll });
+  const views = inboxViews({ canSeeBot, canViewAll, canViewGroups, groups, canSeeRatings });
+  const activeView = activeViewId(views, filters, { canViewAll, canViewGroups, groups });
   const sections: ViewsPanelSection[] = views.map((section) => ({
     title: section.title,
     items: section.items.map((view) => ({
@@ -98,6 +105,8 @@ export async function InboxShell({
           canSeeBot={canSeeBot}
           canSeeRatings={canSeeRatings}
           canViewAll={canViewAll}
+          seesGroupQueues={seesGroupQueues(canViewGroups, groups)}
+          groupName={groups.find((group) => group.id === filters.group)?.name ?? null}
           canCreate={can(agent, 'ticket.create')}
           canViewContacts={can(agent, 'contact.view')}
         />

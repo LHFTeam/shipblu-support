@@ -1,8 +1,9 @@
 'use server';
 
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { db } from '@/db/client';
-import { agents, businessHours, groups, conversations } from '@/db/schema';
+import { agents, businessHours, groups } from '@/db/schema';
+import { deleteGroupIfUnused } from '@/lib/admin/group-uses';
 import { requirePermission } from '@/lib/auth/guard';
 import { ok } from '@/lib/http/action-state';
 import { optionalMinutes, text, uuidField } from '@/lib/http/form-data';
@@ -99,17 +100,12 @@ export async function deleteGroup(
   if (!id) return { error: 'Nothing to delete' };
 
   // Tickets keep a group id; deleting one out from under them would leave the
-  // inbox filtering on a group nobody can name.
-  const inUse = await db
-    .select({ count: sql<number>`count(*)::int` })
-    .from(conversations)
-    .where(eq(conversations.groupId, id));
+  // inbox filtering on a group nobody can name. Channels and forms that start
+  // their tickets in it, and rules, policies and skills that name it, are the
+  // same question asked of where tickets will go next (`groupUses`).
+  const refusal = await deleteGroupIfUnused(id);
+  if (refusal) return { error: refusal };
 
-  if ((inUse[0]?.count ?? 0) > 0) {
-    return { error: `That group is on ${inUse[0]!.count} ticket(s). Reassign them first.` };
-  }
-
-  await db.delete(groups).where(eq(groups.id, id));
   refresh('/admin/groups');
   // Same reason as `saveGroup`, and the easier one to forget: the catalogue
   // holds `groups.business_hours_id` as its override map, so a deleted group

@@ -340,7 +340,16 @@ export function GroupsTable({
             <Cell className="text-(--color-text-secondary)">{members}</Cell>
             <Cell className="text-(--color-text-secondary)">{tickets}</Cell>
             <Cell className="text-end">
-              <DangerAction action={deleteGroup} id={group.id} />
+              {/*
+                The group's rows in the daily report rollups go with it (they
+                cascade; `groupUses` says why they cannot be kept), so the
+                confirmation says so before the second press.
+              */}
+              <DangerAction
+                action={deleteGroup}
+                id={group.id}
+                confirmLabel="Delete it and its report history?"
+              />
             </Cell>
           </Row>
         ))}

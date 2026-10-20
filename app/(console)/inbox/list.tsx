@@ -48,6 +48,8 @@ export function InboxList({
   canSeeBot = false,
   canSeeRatings = false,
   canViewAll = false,
+  seesGroupQueues = false,
+  groupName = null,
   canCreate = false,
   canViewContacts = false,
 }: {
@@ -61,8 +63,15 @@ export function InboxList({
   canSeeBot?: boolean;
   /** `report.view`: without it `listInbox` answers the rated view with nothing. */
   canSeeRatings?: boolean;
-  /** `ticket.view.all`: without it every list is the agent's own tickets. */
+  /**
+   * `ticket.view.all`: without it the list is the agent's own tickets, and
+   * their groups' as well when `seesGroupQueues`.
+   */
   canViewAll?: boolean;
+  /** `seesGroupQueues()`: `ticket.view.group` and a member of at least one group. */
+  seesGroupQueues?: boolean;
+  /** The name of the group `filters.group` names, when it is one the agent is offered. */
+  groupName?: string | null;
   canCreate?: boolean;
   /** The avatar route answers 404 without `contact.view`, so the tile is not asked for one. */
   canViewContacts?: boolean;
@@ -258,6 +267,22 @@ export function InboxList({
             </Button>
           </p>
         ) : null}
+
+        {/*
+          The same for a group view, for the same reason: the selects carry
+          `group`, so Status or Channel changed inside one reads "Custom
+          filter" over a list still cut to that group. A group the agent is not
+          offered (a hand-typed `?group=`) has no name to give here, and the
+          list holds only their own tickets in it.
+        */}
+        {filters.group ? (
+          <p className="flex flex-wrap items-center gap-x-2 text-xs text-(--color-text-secondary)">
+            {groupName ? `Only tickets in ${groupName}.` : 'Only tickets in one group.'}
+            <Button variant="ghost" size="sm" onClick={() => setParams({ group: '' })}>
+              Stop filtering by group
+            </Button>
+          </p>
+        ) : null}
       </div>
 
       <ol
@@ -273,7 +298,7 @@ export function InboxList({
                 activeView === 'rated-low' && !filters.q
                   ? // Said of what the list can reach: an agent who sees only
                     // their own tickets hears about theirs, not the team's.
-                    `${canViewAll ? 'No ticket' : 'None of your tickets'} was rated ${LOW_RATINGS_IN_WORDS} in the last ${RATED_LOW_DAYS} days.`
+                    `${canViewAll ? 'No ticket' : seesGroupQueues ? 'None of your or your groups’ tickets' : 'None of your tickets'} was rated ${LOW_RATINGS_IN_WORDS} in the last ${RATED_LOW_DAYS} days.`
                   : 'Nothing matches those filters.'
               }
             />

@@ -34,12 +34,14 @@ const TRIGGER_HINT: Record<string, string> = {
 export default async function AutomationsPage() {
   await requirePermission('admin.automations');
 
+  const agents = listActiveAgents();
+  const groups = listGroupNames();
   const [rules, agentList, groupList, canned, fieldOptions] = await Promise.all([
     listAutomationRules(),
-    listActiveAgents(),
-    listGroupNames(),
+    agents,
+    groups,
     listCannedTitles(),
-    ticketFieldOptions(),
+    ticketFieldOptions({ agents, groups }),
   ]);
 
   const agentChoices = agentList.map((agent) => ({

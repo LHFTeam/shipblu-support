@@ -151,7 +151,7 @@ export type BeginOutcome =
   | { ok: false; error: string; wait?: true };
 
 /** The `error` on an attempt a newer one retired. */
-const SUPERSEDED = 'superseded';
+export const SUPERSEDED = 'superseded';
 
 const ALREADY_CONNECTING =
   'This number is already being connected — watch the progress below. If it stops ' +

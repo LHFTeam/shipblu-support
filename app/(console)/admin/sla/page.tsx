@@ -16,11 +16,12 @@ export const dynamic = 'force-dynamic';
 export default async function SlaPage() {
   await requirePermission('admin.sla');
 
+  const agents = listActiveAgents();
   const [policies, schedules, agentList, fieldOptions] = await Promise.all([
     listSlaPolicies(),
     listScheduleNames(),
-    listActiveAgents(),
-    ticketFieldOptions(),
+    agents,
+    ticketFieldOptions({ agents }),
   ]);
 
   const agentChoices = agentList.map((agent) => ({

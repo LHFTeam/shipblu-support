@@ -31,6 +31,11 @@ export type FieldOption = {
   label: string;
   kind: 'text' | 'number' | 'choice';
   choices?: { value: string; label: string }[];
+  /**
+   * Values no longer offered that can still be named — a deactivated agent —
+   * so a condition holding one says who, not "Unknown: <uuid>" (`shownChoices`).
+   */
+  retired?: { value: string; label: string }[];
 };
 
 const OPERATORS: {
@@ -118,10 +123,11 @@ export function ConditionBuilder({
 
           {rows.map((row, index) => {
             const field = fields.find((f) => f.value === row.field) ?? fields[0]!;
-            const operators = OPERATORS.filter((op) => op.kinds.includes(field.kind));
+            const operators = shownOperators(field, row);
             const unary = OPERATORS.find((op) => op.value === row.op)?.unary;
             const listOperator = isListOperator(row.op);
             const selectedChoices = listOperator ? listValue(row.value) : [];
+            const choices = field.choices ? shownChoices(field, row) : undefined;
 
             return (
               <div key={index} className="flex flex-wrap items-center gap-2">
@@ -152,7 +158,7 @@ export function ConditionBuilder({
                   ))}
                 </Select>
 
-                {unary ? null : field.choices && listOperator ? (
+                {unary ? null : choices && listOperator ? (
                   // A native multiple select makes desktop users hold Ctrl/Cmd
                   // and behaves differently again on a phone. The console is
                   // used on both, so make every member of the set an explicit
@@ -162,12 +168,12 @@ export function ConditionBuilder({
                     aria-label={`${field.label} options`}
                     className="flex max-h-40 w-48 flex-col gap-1.5 overflow-y-auto rounded-md border border-(--color-border-subtle) bg-(--color-background-surface) p-2"
                   >
-                    {field.choices.length === 0 ? (
+                    {choices.length === 0 ? (
                       <span className="text-xs text-(--color-text-secondary)">
                         No options available
                       </span>
                     ) : (
-                      field.choices.map((choice) => (
+                      choices.map((choice) => (
                         <label key={choice.value} className="flex items-center gap-2 text-sm">
                           <input
                             type="checkbox"
@@ -188,14 +194,14 @@ export function ConditionBuilder({
                       ))
                     )}
                   </div>
-                ) : field.choices ? (
+                ) : choices ? (
                   <Select
                     value={scalarValue(row.value)}
                     onChange={(event) => update(index, { ...row, value: event.target.value })}
                     className="w-48!"
                   >
                     <option value="">Choose…</option>
-                    {field.choices.map((choice) => (
+                    {choices.map((choice) => (
                       <option key={choice.value} value={choice.value}>
                         {choice.label}
                       </option>
@@ -380,8 +386,22 @@ export function valueForOperator(
   op: Operator,
   field?: FieldOption,
 ): Row['value'] {
-  if (isListOperator(op)) return listValue(value);
-  if (field?.choices) return listValue(value)[0] ?? '';
+  // A choice can have a comma in it (a custom field's option is anything up to
+  // a pipe), so a scalar that is one of the field's choices becomes a set of
+  // one rather than being split. Anything else still splits: a comma list is
+  // how a set was typed before the field was a choice.
+  if (isListOperator(op)) {
+    const whole = typeof value === 'string' ? value.trim() : null;
+    if (whole && field?.choices?.some((choice) => choice.value === whole)) return [whole];
+    return listValue(value);
+  }
+  // Only a set collapses. A stored scalar stays whole even with a comma in it:
+  // split, it would load as its first piece — "Unknown: Care" for a policy
+  // holding "Care, Merchant" from when the field was free text — and the next
+  // save would write that piece back over a condition nobody edited. Trimmed,
+  // as the engine compares it (`text()` in `lib/rules/conditions.ts`), so a
+  // stray space does not turn a real option into "Unknown".
+  if (field?.choices) return Array.isArray(value) ? (value[0] ?? '') : value.trim();
   return textValue(value);
 }
 
@@ -408,6 +428,51 @@ export function rowForField(row: Row, fieldValue: string, fields: FieldOption[])
     // condition the control is not displaying.
     value: isListOperator(op) ? [] : (field.choices?.[0]?.value ?? ''),
   };
+}
+
+/**
+ * The operators a row offers: the field kind's own, plus the one the row holds
+ * when the kind does not offer it.
+ *
+ * The operator twin of `shownChoices`, for the same failure. A condition saved
+ * while its field was free text — `group.id contains …`, before groups were a
+ * picker — keeps `contains` after the field becomes a choice. Left out of the
+ * list, the dropdown draws its first option, "is", over an operator it is not
+ * holding, and every save writes the hidden one back. Shown and selected, it is
+ * on screen, and picking any other operator replaces it.
+ */
+export function shownOperators(field: FieldOption, row: Row): { value: Operator; label: string }[] {
+  const own = OPERATORS.filter((op) => op.kinds.includes(field.kind));
+  if (own.some((op) => op.value === row.op)) return own;
+  const held = OPERATORS.find((op) => op.value === row.op);
+  return [{ value: row.op, label: `${held?.label ?? row.op} (not offered here)` }, ...own];
+}
+
+/**
+ * The choices a row offers: the field's own, plus whatever the row holds that
+ * is not one of them.
+ *
+ * A stored value can stop being a choice, or never have been one: a group
+ * condition typed by name before `group.id` was a picker, a form slug renamed
+ * since, a custom field's option removed. Offered only the field's own
+ * choices, the dropdown shows "Choose…" over a value it cannot display, and a
+ * set keeps a member with no checkbox — both written back on every save, and
+ * both conditions that silently never match. Shown instead, the stale value is
+ * on screen where an admin can see it and take it out: by the name `retired`
+ * still has for it (a deactivated agent), and as "Unknown" when nothing does.
+ */
+export function shownChoices(field: FieldOption, row: Row): { value: string; label: string }[] {
+  const own = field.choices ?? [];
+  const known = new Set(own.map((choice) => choice.value));
+  const held = isListOperator(row.op) ? listValue(row.value) : [scalarValue(row.value)];
+  const stale = held
+    .filter((value) => value !== '' && !known.has(value))
+    .map((value) => ({
+      value,
+      label:
+        field.retired?.find((retired) => retired.value === value)?.label ?? `Unknown: ${value}`,
+    }));
+  return [...stale, ...own];
 }
 
 function listValue(value: Row['value']): string[] {
