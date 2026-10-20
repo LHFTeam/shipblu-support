@@ -1680,6 +1680,8 @@ answered.
 17. **SLA by category.** Before the first response, the policy is re-selected
     whenever the category or the group changes. Should Sales tickets get their
     own targets? And are the four existing policies restructured in Stage 0.2
-    as proposed?
+    as proposed? 
+    That's a good idea - so the SLA of an incoming ticket can be determined by: its category and/or its channel and/or its group. If there is anything not clear or confusing about this, let me know.
+    Yes, the existing policies should be restructured as proposed in Stage 0.2.
 18. **TypeSafe's data-processing terms** cover a second per-message call
     carrying customer text. **This needs a yes before 4.2.** Support Lead Answer: Yes.
