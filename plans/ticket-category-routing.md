@@ -53,9 +53,11 @@ merchant number goes to Merchant Care".
 The rest of this file covers what the research found, the decisions and what
 each one rules out, the deploy rules every stage obeys, the work in the order it
 has to ship, how each stage is verified and rolled back, and the questions only
-the support lead can answer. A first draft was reviewed adversarially against
-the code through five lenses before this version: deploy order, rollback,
-migrations, routing races and the classifier. Its findings are folded in.
+the support lead can answer. The plan went through two rounds of adversarial
+review against the code before this version. The first covered deploy order,
+rollback, migrations, routing races and the classifier. The second covered the
+redesigned routing hold and consistency between sections. Every finding that
+held is folded in.
 
 ## What production says (read-only, 2026-10-19/20)
 
@@ -331,21 +333,27 @@ The category and the subcategories are independent judgements in this plan:
 Whether a subcategory should also carry a "usually this category" link for the
 picker is a [question](#questions-for-the-support-lead), not a dependency.
 
-**SLA policies can key on the category, everywhere.**
-`applySlaOnCreate` selects the policy before any category exists. So the
-policy is selected again whenever the category is first set before the first
-response, on every channel and whoever sets it. It is also selected again when
-a route moves the group before the first response (decision 5). Both go through
-one function, `reselectPolicyBeforeFirstResponse`. It reuses the pause crediting
-in `recomputeOwedClocks`, so a pause taken in those minutes is not lost.
+**Before the first response, the SLA policy follows the ticket's category and
+group.** `applySlaOnCreate` selects the policy before any category exists. So
+one function, `reselectPolicyBeforeFirstResponse`, selects it again whenever
+the category or the group changes before `first_responded_at` is set. Who made
+the change does not matter: Jev, a rule, a form, a person or the router. The
+one exception is `backfill_category_ai`, which labels an old backlog and never
+retargets it. The function can create clocks where the ticket had none, so it
+is built from the pause-crediting helpers (`completedPauses`, `excusedSince`),
+not on `recomputeOwedClocks`, which returns early without due dates
+(`lib/sla/index.ts:617-643`).
 
 `onGroupChanged` deliberately never re-selects the policy
 (`lib/sla/index.ts:551-575`), because "which targets a ticket is held to is what
-an agent was told when it arrived". Before the first response nobody has been
-told anything, so this is the same principle applied to the moment it was
-written for. The function's doc comment says exactly where it applies. Without
-it, a category-keyed policy would match only on routed tickets: the same
-unreachable-policy failure Stage 0.2 exists to fix.
+an agent was told when it arrived". That stays true after the first response.
+Before it, nobody has been told anything, so this is the same principle applied
+to the moment it was written for. The change reaches group moves before a first
+response too, which today only re-time: a rule or an agent moving a fresh
+ticket to Merchant Care should get Merchant Care's targets as surely as the
+router doing it. The doc comments on both functions say exactly where each
+applies. Without this, a category-keyed policy would match only on routed
+tickets, which is the same unreachable-policy failure Stage 0.2 exists to fix.
 
 ### 4. Jev's category classifier is its own module, beside priority
 
@@ -419,8 +427,24 @@ The classifier's rules, and what each one closes:
   has not settled by the first human reply is a person's call.
 - **One threshold on the winner's share,** default 0.6, as for priority. It
   starts as a guess, and the shadow period is what calibrates it.
-- **Every answer is a row.** The row records mode, prediction, the full
-  distribution, outcome, latency, tokens and a `request_fingerprint`.
+- **Every answer is a row, and its outcome is one of a closed list:**
+  - `applied`
+  - `would_apply` (shadow)
+  - `unknown`
+  - `below_threshold`
+  - `owned`
+  - `after_settle`
+  - `capped`
+  - `failed`
+
+  The row also records the run label, mode, prediction, the full distribution,
+  latency, tokens and a `request_fingerprint`:
+  - **Run label.** Live runs carry the label `live`. Each archive backfill
+    carries its own label, and the unique index is on (`run_label`,
+    `message_id`), as `backfill_categorise_ai`'s table is
+    (`db/schema/categorise-ai.ts:54-64,123`). So the same message can be
+    measured again under a new question. Settling and the ownership test read
+    only `live` rows.
   - **Fingerprint:** a hash of the serialised `questions` object exactly as
     sent (keys, criterion strings, the `unknown` criterion, instructions),
     plus a `STATE_VERSION` constant bumped whenever `state` changes shape. An
@@ -468,54 +492,73 @@ byte-identical, and a test asserts it. The new classifier is told
 `category_shadow` is per channel because the channels are at different points.
 Messenger is read-only until the Freshworks swap, so routing it live moves
 copies of tickets that somebody in Freshchat is answering. Instagram and the
-comment channels are answerable today. `saveChannel` refuses either category
-mode on a coexistence row: its replies are typed on the phone, so routing its
-tickets changes nothing about who answers them.
+comment channels are answerable today.
 
-**Which tickets route.** Only a ticket created by an inbound ingest path on a
-`category` channel: email, WhatsApp, Meta DM or comment, or the widget. Tickets
-created through `createTicket` never route; that is forms, the portal and
-agent-opened tickets, each of which brings its own group. Nor do continuations,
-reopens, imported history or echo-first conversations.
+**Coexistence numbers never route.** Their replies are typed on the phone, so
+routing a ticket changes nothing about who answers it. Code reads a channel's
+mode only through `routingModeOf(channel)`, which answers `default_group` for
+any row whose config parses as coexistence, whatever the column says. It is
+also enforced at both writers:
+
+- `saveChannel` refuses a category mode on such a row;
+- `complete_coexistence_onboarding` resets the column when it adopts an
+  existing row (`lib/whatsapp/onboarding-complete.ts:662-689`).
+
+Those two keep the column from contradicting the answer.
+
+**Which tickets route.** Only a ticket created by an inbound ingest path (email,
+WhatsApp, Meta DM or comment, or the widget) on a channel in `category` mode,
+**while the classifier is in `apply`**. With the classifier off or in shadow
+there is nothing to wait for. Such a ticket is not held, and the channel page
+warns that the mode is idle. Tickets created through `createTicket` never route:
+forms, the portal and agent-opened tickets each bring their own group. Nor do
+continuations, reopens, imported history or echo-first conversations.
 
 **State lives in two places.**
 
 - **Two columns on `conversations`,** `routing_window_ends_at` and
   `routing_decided_at`. These are what the hold is computed from. They sit on
   the row because `assignConversation` already selects the whole row, so the
-  check costs nothing even across 500 tickets a sweep.
-- **A `routing_decisions` table,** one row per ticket that entered routing:
-  - live or shadow;
-  - outcome: `category`, `fallback`, `manual`, `rule`, `released`,
-    `not_open`, or `no_route_for_category`;
-  - from and to group, category, Jev's probability;
-  - window end and decision time.
+  check costs nothing even across 500 tickets a sweep. Both are added to the
+  realtime trigger's `queue_relevant` list, so the inbox's "Routing…" badge
+  appears and clears without waiting for an unrelated change.
+- **A `routing_decisions` table,** one row per ticket that entered routing,
+  live or shadow:
+  - `stage`: `pending`, then `holding`, then `decided`;
+  - `outcome`, from the list below;
+  - the from and to group, the category, Jev's probability, and who decided;
+  - the window's end, the phase-one time and the decision time.
 
-  The report reads this table. The timeline gets one `routed` event per
-  decision, naming the category, the group, the probability and the outcome,
-  including a decision that moved nothing. Today `group_changed` says only
-  "moved the ticket to another group", and nothing else reads that event.
+  For a shadow row, the outcome, to-group and decision time are the would-be
+  values. The report reads this table. The timeline gets one `routed` event per
+  live decision, naming the category, the group, the probability and the
+  outcome, including a decision that moved nothing. Today `group_changed` says
+  only "moved the ticket to another group", and nothing else reads that event.
 
-**The creation pass begins routing.** A new step, `beginRouting`, runs in
-`afterInboundMessage(created=true)` right after the `on_create` rules and before
-the SLA. Under the row lock, for a `category` channel:
+**The hold starts when the ticket is inserted.** The ingest path's transaction
+that inserts the conversation, through one helper (`startRouting(tx, …)`),
+writes three things:
 
-- **A rule already decided.** If an `on_create` rule moved the group or
-  assigned the ticket, the outcome is `rule`, and nothing is held.
-- **A category already exists.** It may have been set by a rule's
-  `set_category`, or by Jev answering before the creation pass finished. The
-  ticket routes now, and the SLA, assignment and reply that follow see the
-  routed group.
-- **Otherwise it is held.** It writes `routing_window_ends_at = max(created_at,
-now()) + window`. The anchor is processing time, not `created_at`, so an
-  email processed late after a worker pause still gets its full window. It
-  then enqueues `settle_routing` for that instant.
+- `routing_window_ends_at = now() + window`;
+- a `pending` decision row;
+- the `settle_routing` job for that instant, enqueued `on: tx`.
 
-For `category_shadow` it writes only a shadow `routing_decisions` row and the
-same job, and holds nothing. Because the window is written at the end of the
-creation pass, a classifier answer that lands before it finds no window and
-records `wait`. `beginRouting` then routes on that answer, so a rule always
-gets the first word.
+All three commit with the ticket or not at all.
+
+Starting it there, rather than after the creation pass, is what stops the
+things that can assign a ticket in its first second from assigning it in the
+default group before routing has had its say:
+
+- the priority classifier's `on_update` pass and autoAssign, which is enqueued
+  at the same instant and can beat the creation pass
+  (`lib/priority-ai/run.ts:286-299`);
+- an `on_create` rule's group-less `auto_assign`;
+- a sweep;
+- a second message ingested concurrently.
+
+The window is anchored on processing time, not `created_at`, so an email
+processed late after a worker pause still gets its full window. A shadow
+channel gets the same row (marked shadow) and the same job, and no window.
 
 **The hold.** A ticket is held exactly while all of these are true:
 
@@ -542,80 +585,150 @@ classification. It was rejected because it breaks "never overwrites an
 assignee" (`lib/assignment/index.ts:29-33`), and the ticket would appear in one
 agent's queue and then vanish.
 
-**What ends a hold, and how.** One helper, `endHold(tx, id, outcome)`, does it.
-It writes `routing_decided_at = coalesce(routing_decided_at, now())` and the
-decision row's outcome only when it was not already set, so a later pass never
-overwrites an outcome. It is called in the same transaction as the write that
-ends the hold, **before** anything that assigns:
+**The creation pass calls `beginRouting` after the `on_create` rules.** Under the
+row lock it does one of three things:
 
-- **`manual` (a person).** The console's group, assignee, reply and category
-  edits.
-  - A category edit during the hold ends it without moving the ticket, and the
-    sidebar offers the move in one click ("Sales tickets go to Inbound Sales
-    Team — move?").
-  - A person's assignment carries over from today unchanged: an agent who takes
-    a held ticket from their group's queue ends the hold. The queue therefore
-    marks a held ticket "Routing…" with the time the hold ends (Stage 0.5).
-- **`rule` (the automation engine).** It stamps before it calls
-  `assignConversation` for `auto_assign` with a group, and before `assign_group`
-  writes. Otherwise the new `awaiting_route` skip, which sits beside the other
-  early returns, would swallow a rule's `auto_assign` before its group move.
-  The ticket would then be stamped `rule` while still in the default group. An
-  `auto_assign` with no group means "assign within the current group", so it
-  does not end the hold; it is held like any other assignment.
-- **A rule's `set_category` during the hold** does not end it. The router
-  routes on that category when it settles, because a rule's category is the
-  admin's routing configuration speaking.
+- **A rule already decided.** If an action stamped the ticket (see `endHold`
+  below), there is nothing more to do.
+- **A category is already settled.** It may have been set by a rule's
+  `set_category`, or by Jev answering before the creation pass got here. The
+  ticket goes to `apply.ts` now, which runs the whole sequence below, and the
+  creation pass ends.
+- **Otherwise the row moves to `holding`.** The creation pass carries on: SLA
+  on the default group, autoAssign (held), out-of-hours reply (held).
+
+`beginRouting` is best-effort, like every other lifecycle step. If it throws,
+the hold stays and `settle_routing` decides at the window's end, treating
+`pending` as `holding`.
+
+**What the classifier does after an applied answer** depends only on the
+ticket's routing row:
+
+| State                                                        | What the classifier does                                                                                 |
+| ------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------- |
+| `pending` (the creation pass has not reached `beginRouting`) | Writes the category and nothing else. `beginRouting` routes on it, so a rule always gets the first word. |
+| `holding`                                                    | Calls `apply.ts` **instead of** `afterTicketUpdate`, which would be a second `on_update` pass.           |
+| An undecided shadow row                                      | Calls `apply.ts` in shadow mode to record the would-be decision, then `afterTicketUpdate` as usual.      |
+| Anything else (never entered routing, or already decided)    | `reselectPolicyBeforeFirstResponse`, then `afterTicketUpdate`, as priority does.                         |
+
+**A decision is made in two phases, and the hold lasts until the rules have
+run.**
+
+1. Under the row lock, `decide.ts` returns an outcome and `apply.ts` writes it:
+   the group move if there is one, the decision row's outcome, and the `routed`
+   event. `routing_decided_at` stays null, so the ticket is still held.
+2. The `on_update` pass runs. It runs after every live decision that settled
+   a category or moved the group, not only after a move, because the
+   classifier no longer runs its own pass. So "sales on the merchant number →
+   Merchant Care", and any rule keyed on `category.id`, run before anybody is
+   assigned. Nothing else can assign in between, because the ticket is still
+   held.
+3. Under the lock, `routing_decided_at` is set, the row moves to `decided`, and
+   `reselectPolicyBeforeFirstResponse` runs on the group as it now stands.
+4. `assignConversation` runs, then the held out-of-hours reply.
+
+This is the creation pass's own order (`lib/tickets/lifecycle.ts:26-43,93-99`).
+The other way round leaves a Sales agent holding a Merchant Care ticket.
+`assign_group` never touches the assignee, and `auto_assign` returns
+`already_assigned` before it moves anything. It would also tell the customer
+Sales' hours.
+
+If the process dies between phases 1 and 3, the hold lasts until
+`settle_routing`. That job completes a decision whose phase 1 is more than a
+minute old. A younger one belongs to a caller still in flight, and the job
+leaves it alone.
+
+**`decide.ts`'s outcomes**, tested in this order under the lock:
+
+| Outcome                 | When                                                                                                                                    | What happens                                                                |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| `taken`                 | The ticket already has an assignee, from something that assigns without stamping, such as the sweep after the grace, or a stuck worker. | Never moves. Recorded so the report shows it.                               |
+| `not_open`              | Resolved, closed, spam or deleted.                                                                                                      | Nothing is moved, re-selected, assigned or sent.                            |
+| `released`              | The channel's mode, re-read now through `routingModeOf`, is no longer `category`.                                                       | Nothing moves. Assignment and the held reply go ahead in the current group. |
+| `category`              | A settled category (by Jev, a person or a rule) whose route group differs from the current group.                                       | The ticket moves.                                                           |
+| `no_route_for_category` | A settled category with no route group, or whose route group is the current one.                                                        | It stays.                                                                   |
+| `fallback`              | No category settled by the window's end.                                                                                                | It stays.                                                                   |
+
+`endHold` writes two more outcomes, `manual` and `rule`. `unknown` is never a
+settled category.
+
+**What ends a hold early: `endHold(tx, id, outcome)`.**
+
+- **Which tickets it touches.** Only a ticket with an undecided routing row. On
+  any other ticket it does nothing, so the console paths can call it
+  unconditionally. On a live row it writes `routing_decided_at` with
+  `coalesce`, and the outcome only if none is set yet. On a shadow row it
+  records the would-be outcome.
+- **When it runs.** In the same transaction as the write that ends the hold,
+  before anything that assigns.
+
+Its callers:
+
+- **`manual` (a person).** The console's group change, assignee change and
+  agent reply. A Business-app echo cannot reach a held ticket, since
+  coexistence channels never route.
+- **`rule` (the automation engine).** Only when an action actually changes
+  something, compared against the locked row rather than the pass's stale
+  snapshot:
+  - `assign_group` to a different group;
+  - `auto_assign` naming a group different from the current one;
+  - `assign_agent` with an agent.
+
+  A level-triggered rule naming the group the ticket is already in must not
+  end every hold on its channel. Production has one priority pass and one
+  further `on_update` pass per customer message inside the window. An
+  `auto_assign` with no group means "assign within the current group", and it
+  is held like any other assignment.
+
+**A category set during the hold routes; a category set after it does not.**
+
+- **A person's category edit during the hold** does not stamp. It settles the
+  category, and the console's category case calls `apply.ts` instead of
+  `afterTicketUpdate`, so the ticket routes now, as it would on Jev's answer.
+  While the system is still deciding where a ticket goes, a person saying what
+  it is about is the best signal there is.
+- **A rule's `set_category` during the hold** settles the category without
+  stamping. `settle_routing` routes on it at the latest at the window's end.
+  It cannot route immediately, because that would need the engine to call the
+  router mid-pass, and actions never re-enter the engine.
+- **After the hold, a category edit relabels only.** The sidebar then offers
+  **"Hand to <group>"**, gated by `ticket.assign`. It is one action that moves
+  the group, clears the assignee and assigns in the new group. Without the
+  clearing, the move would keep the old assignee, since `assign_group` and the
+  console's group case both leave it, which is the cross-team holder this
+  design exists to avoid.
 
 **`settle_routing` is the end of the window by definition.** It never waits.
-Under the row lock, `decide.ts` returns one outcome:
 
-- **`category`.** The category is settled (by Jev, or by a rule) and names a
-  route group. The ticket moves.
-- **`no_route_for_category`.** The category is settled but has no route group.
-  The ticket stays in its default group.
-- **`fallback`.** No category was settled in the window. The ticket stays in
-  its default group.
-- **`released`.** The channel is no longer in `category` mode, or the classifier
-  is no longer in `apply`. This is re-read at decision time, so switching
-  either off moves nothing more.
-- **`not_open`.** The ticket was resolved, closed, marked spam or deleted
-  during the window. Nothing is moved, re-selected, assigned or sent.
-
-A classifier answer inside the window calls the same `apply.ts`. A late answer,
-after the settle, finds `routing_decided_at` set and keeps the ticket where it
-is. That matters because Jev's retries back off 10, 40, 90 and 160 s. The
-dedupe key `settle_routing:<id>` is spent for good, which is correct because
-routing is once ever per ticket. The job is conversation-scoped, so it joins
-`send_csat` in `lib/admin/purge-jobs.ts`, and its handler ends via
-`subjectGone` on a purged ticket.
-
-**After a decision commits, the order is the creation pass's order**
-(`lib/tickets/lifecycle.ts:26-43,93-99`):
-
-1. **The `on_update` pass,** if the ticket moved. That way "sales on the
-   merchant number → Merchant Care" runs before anybody is assigned.
-2. **`reselectPolicyBeforeFirstResponse`,** on the group as it stands after
-   the rules.
-3. **`assignConversation`.**
-4. **The held out-of-hours reply.**
-
-Doing it the other way round leaves a Sales agent holding a Merchant Care
-ticket. `assign_group` never touches the assignee, and `auto_assign` returns
-`already_assigned` before it moves anything. It would also tell the customer
-Sales' hours. When the classifier's answer is what routed the ticket, the
-classifier does **not** also call `afterTicketUpdate`. One owner per pass,
-or level-triggered rules write their tagging and watcher events twice.
+- **Priority.** Its queue priority is 40: behind `classify_category`'s 30, so
+  an answer already queued at the window's end is applied first, and ahead of
+  the default 100.
+- **Once ever.** Its dedupe key `settle_routing:<id>` is spent for good, which
+  is correct because routing happens once per ticket.
+- **Late answers.** A late classifier answer, after the settle, finds the
+  ticket decided and keeps it where it is. That matters because Jev's retries
+  back off 10, 40, 90 and 160 s.
+- **Purge.** It is conversation-scoped, so it joins `send_csat` in
+  `lib/admin/purge-jobs.ts`, and its handler ends via `subjectGone` on a purged
+  ticket.
+- **Recovery.** If the job ever dies, `npm run job -- settle_routing
+conversationId=…` runs it by hand. It records the outcome, assigns and sends
+  the held reply.
 
 **The held reply is owed by state, not by one caller.** Whatever ends a hold —
 `endHold`'s callers, `apply.ts`, `settle_routing` whatever its outcome — calls
 `maybeSendAutoResponse` after its commit. The claim on `auto_responded_at`
-keeps it to one send. It gains a status check, because its documented
+keeps it to one send. It gains two guards, because its documented
 precondition, that every caller has just reopened the ticket
-(`lib/auto-response/index.ts:255-260`), no longer holds once a job calls it.
+(`lib/auto-response/index.ts:255-260`), no longer holds once a job calls it:
+
+- **Status.** The ticket must be open or pending.
+- **A person has already answered.** It skips when
+  `last_agent_message_at ≥ last_customer_message_at`. Otherwise an agent's
+  23:00 reply to a held ticket would be followed by "we are closed".
 
 **The window defaults to 5 minutes, adjustable from 1 to 30,** and is copied
-onto the ticket at creation. Changing the setting never moves a window already
+onto the ticket at insert. Changing the setting never moves a window already
 running. Of 257 short chat openers, 191 had a follow-up within 2 minutes and
 195 within 10. The shadow period records time to decision per ticket, which is
 what tunes it. For context, today's median time to _assignment_ is 40 hours.
@@ -623,11 +736,11 @@ what tunes it. For context, today's median time to _assignment_ is 40 hours.
 **Shadow is defined, not assumed.** In `category_shadow`:
 
 - Nothing is held, so assignment on arrival and the sweep go ahead.
-- The shadow decision ignores machine assignments (`auto_assign`,
-  `assign_sweep`), which a live hold would have prevented, and still counts
-  manual and rule moves.
-- It records `shadow_decided_at` when the classifier settles, as well as at
-  `settle_routing`.
+- The would-be decision is recorded when the classifier settles, through
+  `apply.ts` in shadow mode, or at `settle_routing`, whichever is first.
+- It ignores machine assignments (`auto_assign`, `assign_sweep`), which a live
+  hold would have prevented, and counts manual and rule moves through
+  `endHold`'s shadow branch.
 - It never writes `routing_decided_at`, so moving a channel to `category`
   later starts clean.
 
@@ -664,12 +777,16 @@ follow:
    deploying web first never queues a job the worker does not know.
 4. **A stage is "deployed" when web, worker and all four crons run it.** Each
    stage's last check confirms the deployed commit on all six services.
-5. **No migration, now or later, may reference a new enum value.** Drizzle
-   applies every pending migration in one transaction, which on a fresh
-   database (CI, `shipblu_test`) is all of them, so the value would be used in
-   the transaction that adds it (55P04). Anything naming a new value — a
-   default, a partial index, a CHECK — goes in `db/sql`, which runs after the
-   commit.
+5. **No migration, now or later, may use a value added to an existing enum by
+   `ALTER TYPE … ADD VALUE`.** Today that means `facebook_comment` and
+   `instagram_comment`. Drizzle applies every pending migration in one
+   transaction, which on a fresh database (CI, `shipblu_test`) is all of them,
+   so the value would be used in the transaction that adds it (55P04).
+   Anything naming one — a default, a partial index, a CHECK — goes in
+   `db/sql`, which runs after the commit. The rule does not cover a new enum
+   _type_. `routing_mode`, the routing outcome and the classifier mode are
+   created with `CREATE TYPE`, whose values may be used and defaulted in the
+   migration that creates them.
 6. **Every PR follows `AGENTS.md`:**
    - It runs `typecheck`, `lint`, `lint:strict`, `test`, `knip`, `build` and
      `repo-rules` (with new files staged) before pushing.
@@ -975,11 +1092,18 @@ readers are harmless.
   `subcategory_added|confirmed|rejected|removed`, with `subcategoryKey` in the
   event data and actor `subcategory-detector`. `event-labels.ts` reads both the
   old and new strings.
-- **Handbook.** Three articles name the taxonomy: `categorising`, the ticket
-  fields list (`lib/kb/handbook.ts:203`) and the administration article
-  (`:424-426`). Their content changes but their keys stay the same, and their
-  Arabic moves to the agreed subcategory word. Then
-  `seed_console_handbook overwrite=true` runs.
+- **Handbook.** Its Arabic moves to the agreed subcategory word, and its keys
+  stay the same. That covers four articles, plus three descriptions:
+  - the `categorising` article;
+  - the ticket fields list (`lib/kb/handbook.ts:203`);
+  - the supervision folder's `reports` article (`:315-326`), which says
+    التصنيف for the subcategory report;
+  - the administration article (`:424-426`);
+  - the folder and article descriptions at `:136`, `:365` and `:416`.
+
+  Then `seed_console_handbook overwrite=true` runs. The role lists at `:380`
+  and `:454` are re-read once both admin pages exist.
+
 - **Docs.**
   - `AGENTS.md` §"Ticket categorisation".
   - `AGENTS.md` §"The one AI provider", which names `lib/categorise-ai/`,
@@ -1106,9 +1230,9 @@ cannot parse.
   - A badge in the header, because the sidebar renders only from `lg` up.
   - `ConversationDetail` carries the field.
   - A new `updateTicket` case writes the column and a `category_changed` event
-    in one transaction, with the stamp of decision 3. It then re-selects the
-    SLA policy if there has been no first response yet, and runs
-    `afterTicketUpdate`.
+    in one transaction, with the stamp of decision 3. It then calls
+    `reselectPolicyBeforeFirstResponse` and runs `afterTicketUpdate`. From
+    Stage 5, on a held ticket, it calls `apply.ts` instead (decision 5).
   - It is gated by a new permission, `ticket.set_category`, which agents get
     by default.
   - The new event string `category_changed` cannot collide with the old
@@ -1118,14 +1242,17 @@ cannot parse.
 - **Rules.** The `category.id` fact appears in the condition builder as a
   choice of registry rows. There is also a `set_category` automation action, so
   a rule such as "anything on the merchant number is merchant support" can set
-  the category and be respected as owned.
-- **SLA.** `reselectPolicyBeforeFirstResponse` lands here, called on every
-  category change before the first response (decision 3).
+  the category and be respected as owned. The action calls
+  `reselectPolicyBeforeFirstResponse` after the pass, as the console does.
+- **SLA.** `reselectPolicyBeforeFirstResponse` lands here (decision 3). It is
+  wired to every category writer except the backfill. It is also wired to the
+  group moves that happen before a first response: the console's group case,
+  `assign_group`, and a grouped `auto_assign` that moves.
 - **Inbox.** A category filter axis, views, and a row badge.
 - **Docs.**
   - `AGENTS.md` gains a section next to the subcategory one: the routing-label
-    framing, the ownership rules, the event stamp, and the reuse of the
-    `ticket_categories` name after the gate.
+    framing, the ownership rules, the event stamp, the SLA re-selection rule,
+    and the reuse of the `ticket_categories` name after the gate.
   - A handbook article on the Category field.
 
 **3.2 — Where a person sets it at creation.** Web, worker and crons; no schema
@@ -1160,27 +1287,38 @@ enqueued, so no job type is ever unknown.
     2026-08-18. That lets labelled evaluation start now rather than after weeks
     of new traffic, following the `backfill_categorise_ai` precedent.
   - **`apply`.** It sets the column and its `category_changed` event (actor
-    `jev:category`) on open tickets, and nothing else. It never calls
-    `afterTicketUpdate`, `lib/routing/apply.ts` or an SLA hook, so it neither
-    fires rules nor moves the 207-ticket backlog. Its dry run reports how many
-    open tickets each `on_update` rule keyed on `category.id` would match.
-- **Runs table.** `ai_category_runs`, which has a unique `message_id` and the
-  same upsert-over-`failed` discipline as `ai_priority_runs`. Its name is free
-  after the gate.
-- **Settings.** `category_ai_settings` is a one-row table holding the mode, the
-  threshold and the routing window, read through a 30-second memo. The
-  "Categories" admin page shows the mode switch, the key's presence, and
-  per-category readiness (route group, strategy, members accepting now).
+    `jev:category`) on open tickets, and nothing else.
+    - **It respects ownership.** Under the row lock, it applies the same test
+      as the live classifier and skips owned tickets, reporting them as
+      skipped. Supervisors will have hand-labelled some of them by then.
+    - **It fires nothing.** It never calls `afterTicketUpdate`,
+      `lib/routing/apply.ts` or an SLA hook, so it neither fires `on_update`
+      rules nor moves the 207-ticket backlog.
+    - **Its dry run shows what would follow.** It reports how many open tickets
+      each `on_update` **and `time_based`** rule keyed on `category.id` would
+      match. The time-based sweep re-evaluates every live ticket every 15
+      minutes, so such a rule would act on the whole backlog within one run.
+- **Runs table.** `ai_category_runs`, whose name is free after the gate.
+  - The unique index is on (`run_label`, `message_id`), with the
+    upsert-over-`failed` discipline applying within a label.
+  - Settling and ownership read only the `live` label.
+- **Settings and admin.** `category_ai_settings` is a one-row table holding the
+  mode, the threshold (0–1) and the routing window (1–30 minutes), read through
+  a 30-second memo. The "Categories" admin page gets:
+  - a control for each, through one server action under `admin.categories`;
+  - the key's presence;
+  - per-category readiness: route group, strategy, members accepting now.
 - **Wiring.** `afterMessageStored` enqueues the job in its own `try/catch`,
   beside priority's.
 - **After commit.**
-  - Until Stage 5: an applied answer calls `afterTicketUpdate`, as priority's
-    does.
-  - From Stage 5: if the ticket is held, the classifier calls
-    `lib/routing/apply.ts` **instead**; otherwise it calls `afterTicketUpdate`.
+  - **Until Stage 5:** an applied answer calls
+    `reselectPolicyBeforeFirstResponse`, then `afterTicketUpdate`, as
+    priority's does.
+  - **From Stage 5:** the four cases in decision 5's table, chosen by the
+    ticket's routing row.
 - **Tests.**
-  - `decide.test.ts` covers every rule in decision 4: the greeting, `unknown`,
-    and shadow settling.
+  - `decide.test.ts` covers every rule in decision 4 and every outcome in its
+    list: the greeting, `unknown`, and shadow settling.
   - `run.db.test.ts` covers:
     - ownership;
     - settling by the earliest message, with jobs out of order;
@@ -1188,7 +1326,9 @@ enqueued, so no job type is ever unknown.
     - the cap, including an out-of-hours acknowledgement followed by a second
       customer message that is still classified;
     - the requester-only skip;
-    - the upsert.
+    - the upsert within a run label;
+    - a `record` backfill and a live run on the same message, which do not
+      collide.
   - A request test asserts the priority request is byte-identical to before.
 - **Docs.** `lib/typesafe/client.ts` and `lib/env.ts`, whose comments list
   every TypeSafe user and so get a fourth entry; `docs/PROJECT-STATE.md`,
@@ -1197,32 +1337,41 @@ enqueued, so no job type is ever unknown.
 
 **4.2 — Shadow, then evaluate, then apply.** Operations, plus the report.
 
-- Run `backfill_category_ai mode=record` over the archive, then switch the live
-  classifier to `shadow` for at least two weeks.
-- **Ground truth is made, not assumed.** Nobody has ever reviewed a
-  subcategory (1 confirmed, 0 rejected), so labels cannot be expected to
-  appear on their own.
-  - **Where labels come from.** A supervisor labels a sample through the
-    Category select from 3.1, stratified by Jev's predicted class so the rare
-    class is represented. Ground truth is **only** a `category_changed` event
-    with an `actor_agent_id`. Never the column, which also holds rule and form
-    writes, and on the merchant number those would inflate merchant precision.
-  - **The report.** `/reports/category-ai` grades **one settling answer per
-    ticket** against that label and against the rules baseline, per channel:
-    - a confusion matrix;
-    - coverage;
-    - the share of `unknown`;
-    - the share of tickets settled on their first message, which catches
-      greetings settling a class.
+1. Run `backfill_category_ai mode=record` over the archive, then switch the
+   live classifier to `shadow` for at least two weeks.
+2. **Ground truth is made, not assumed.** Nobody has ever reviewed a
+   subcategory (1 confirmed, 0 rejected), so labels cannot be expected to
+   appear on their own.
+   - **Where labels come from.** A supervisor labels a sample through the
+     Category select from 3.1, stratified by Jev's predicted class so the rare
+     class is represented. Ground truth is **only** a `category_changed` event
+     with an `actor_agent_id`. Never the column, which also holds rule and form
+     writes, and on the merchant number those would inflate merchant precision.
+   - **The report.** `/reports/category-ai` grades **one settling answer per
+     ticket** against that label and against the rules baseline, per channel:
+     - a confusion matrix;
+     - coverage;
+     - the share of `unknown`;
+     - the share of tickets settled on their first message, which catches
+       greetings settling a class.
 
-    It counts only one `request_fingerprint` at a time, chosen by the reader.
-- **Criteria to move to `apply`** (proposed):
-  - 90% precision on `sales`, with sales recall reported beside it, on at least
-    30 labelled tickets.
-  - The threshold set from the report.
-  - Merchant support is expected to stay below 30 labelled tickets for a long
-    time: 2 of 126 in September. Until it reaches 30, the report says so, and
-    Q5 decides whether merchant answers may route before then.
+     It counts only one run label and `request_fingerprint` at a time, chosen
+     by the reader.
+3. **Criteria to move to `apply`** (proposed):
+   - 90% precision on `sales`, with sales recall reported beside it, on at
+     least 30 labelled tickets.
+   - The threshold set from the report.
+   - Merchant support is expected to stay below 30 labelled tickets for a long
+     time: 2 of 126 in September. Its routing gate is its route group, which
+     stays empty until it qualifies (Q5).
+4. Switch the classifier to `apply`.
+5. **Optionally, back-classify the open backlog (Q12).** Preconditions:
+   - Q12 has been answered;
+   - the classifier has been in `apply` for a week;
+   - `backfill_category_ai mode=apply dryRun=true` has been read, including
+     which rules it would wake.
+
+   Then run it without `dryRun`.
 
 ### Stage 5 — routing by category
 
@@ -1233,73 +1382,100 @@ enqueues `settle_routing` until an admin changes a channel's mode.
 
 - **Schema.**
   - `channels.routing_mode`, an enum `not null default 'default_group'`.
-  - `conversations.routing_window_ends_at` and `routing_decided_at`.
+  - `conversations.routing_window_ends_at` and `routing_decided_at`, both added
+    to `queue_relevant` in `db/sql/001`.
   - The `routing_decisions` table (decision 5).
 
-  No backfill is needed. The window column is only ever written for tickets
-  created after a channel enters a category mode, so the existing backlog is
-  untouched by construction.
+  No backfill is needed. Routing state is only ever written for tickets created
+  after a channel enters a category mode, so the existing backlog is untouched
+  by construction.
 
 - **`lib/routing/`.**
-  - `hold.ts` and `decide.ts` are pure.
-  - `begin.ts` is the creation-pass step.
-  - `apply.ts` holds the row lock, decides, writes, and runs the after-commit
-    order.
+  - `mode.ts` (`routingModeOf`, with the coexistence rule), `hold.ts` and
+    `decide.ts` are pure.
+  - `start.ts` (`startRouting`) is called by each ingest path inside its insert
+    transaction: email, WhatsApp, Meta DM and comment, and the widget, which
+    ingests on the web service.
+  - `begin.ts` (`beginRouting`) is the creation-pass step, placed after the
+    `on_create` rules. Its docstring explains why there.
+  - `apply.ts` holds the row lock and runs the two-phase decision.
   - `end-hold.ts` is the stamp helper.
-- **`lib/tickets/lifecycle.ts`.** `beginRouting` runs after the `on_create`
-  rules and before `applySlaOnCreate`. Its docstring explains the order.
 - **The hold.**
   - `lib/assignment/index.ts` gains `awaiting_route`, kept out of
     `WORTH_RECORDING`, plus the group re-read under the group lock.
-  - `lib/auto-response/index.ts` skips while held and re-checks the ticket's
-    status.
+  - `lib/auto-response/index.ts` skips while held, and gains the status and
+    answered-since guards.
 - **Stamps.** `endHold` is called from:
-  - the console's group, assignee, reply and category paths (`manual`), in the
-    same transaction as their write;
-  - the automation engine's `assign_group` and grouped `auto_assign` (`rule`),
-    before it assigns.
+  - the console's group, assignee and reply paths (`manual`), in the same
+    transaction as their write;
+  - the automation engine's `assign_group`, grouped `auto_assign` and
+    `assign_agent` (`rule`), only when the action changes something, compared
+    against the locked row, and before it assigns.
+- **The console.**
+  - The category case calls `apply.ts` on a held ticket.
+  - The sidebar's **"Hand to <group>"** action moves the group, clears the
+    assignee and assigns in the new group in one server action, gated by
+    `ticket.assign`. It is offered after a category edit on a ticket that is
+    no longer held, and its result is recorded as `group_changed` plus
+    `unassigned` plus `assigned`.
 - **The fallback job.** `settle_routing {conversationId}`:
-  - a strict payload, enqueued at `routing_window_ends_at`;
+  - a strict payload, queue priority 40, enqueued at `routing_window_ends_at`;
   - conversation-scoped in `purge-jobs`;
   - `subjectGone` on a missing ticket;
   - a `skip:` line in `db-jobs.txt`.
+
+  It also completes an interrupted two-phase decision.
+
+- **The onboarding job.** `complete_coexistence_onboarding` resets
+  `routing_mode` to `default_group` when it adopts an existing row.
 - **Timeline.** `event-labels.ts` gives `routed` a sentence for every outcome
   in decision 5.
 - **Admin.**
   - The channel editor gets a routing-mode control with an `InfoTip`. Every one
     of the three forms that post to `saveChannel` carries it, and an absent
     field means "unchanged" (the trap `forms.tsx:431-433` already guards).
-  - `saveChannel` refuses a category mode on a coexistence row.
+  - `saveChannel` refuses a category mode on a coexistence row, and warns when
+    the classifier is not in `apply`, since the mode would then hold nothing.
   - A readiness panel shows, per category, the classifier mode, the route
     group, its strategy, members accepting now and hours, and warns on
     anything that would leave routed tickets unassigned.
 - **Tests.**
-  - **`decide.test.ts`:**
-    - every outcome;
-    - `unknown` waiting;
-    - a classifier answer before the creation pass;
-    - a rule's `set_category` during the hold;
-    - a person's category edit during the hold;
-    - an `auto_assign` with and without a group;
-    - resolved and spam during the window;
-    - the channel or classifier switched off mid-window;
-    - a late Jev retry after the settle;
-    - a window setting changed after enqueue;
-    - shadow ignoring machine assignments.
+  - **`decide.test.ts`** covers every outcome and its precedence, and these
+    cases:
+    - shadow ignoring machine assignments;
+    - a coexistence row whose column says `category`.
   - **`apply.db.test.ts`:**
-    - the row lock;
-    - an `on_update` rule moving a routed ticket. It asserts the assignee comes
-      from the final group, and so does the out-of-hours reply's calendar;
-    - the held reply sent once for every way a hold ends;
-    - SLA re-selection with pause credit.
+    - **The race into the creation pass.** The hold is in place from the
+      insert. The priority classifier's `afterTicketUpdate`, an `on_create`
+      group-less `auto_assign`, and an early category answer each land before
+      `beginRouting` and assign nobody.
+    - **A rule gets the first word.** `beginRouting` routes on an early
+      category, and an `on_create` `set_category` routes immediately.
+    - **The two-phase order.** An `on_update` rule moves a routed ticket and
+      the assignee comes from the final group, as does the out-of-hours
+      reply's calendar. A `no_route_for_category` decision still runs
+      category-keyed rules before assignment. A concurrent `assignConversation`
+      between phases 1 and 3 assigns nobody.
+    - **What ends a hold early.** A no-op `assign_group` during the hold
+      leaves it in place. An `assign_agent` during the hold ends it as `rule`,
+      and a later settle records nothing new. A person's category edit during
+      the hold routes now.
+    - **Hand to <group>.** After the hold it lands the ticket with a member of
+      the target group.
+    - **The held reply.** It is sent once for every way a hold ends, and not
+      at all after an agent replied during the hold out of hours.
+    - **SLA.** Re-selection carries pause credit.
+    - **Recovery.** An interrupted decision is completed by `settle_routing`.
   - **An assignment `*.db.test.ts`:**
     - `awaiting_route` covering the sweep;
-    - `settle_routing` interleaved with `assign_sweep` at the window's end.
+    - `settle_routing` interleaved with `assign_sweep` at the window's end;
+    - the grace lapsing on a stuck job, followed by a settle that records
+      `taken`.
 - **Docs.**
   - `README.md:352-357` is amended, with the reasons at the top of this file.
   - `AGENTS.md` gets a "Routing by category" section with decision 5's rules.
-  - The handbook gets an article on routing, the hold and the "Routing…"
-    badge.
+  - The handbook gets an article on routing, the hold, the "Routing…" badge
+    and "Hand to <group>".
 
 **5.2 — Turning it on, channel by channel (operations).**
 
@@ -1310,6 +1486,9 @@ enqueues `settle_routing` until an admin changes a channel's mode.
    - 0.7's cause is known, and the sweep has assigned something in the last
      day.
    - The classifier is in `apply`, with category route groups set.
+   - The comment channel rows exist (Q11), and the count of comment tickets
+     whose `channel_id` is not a comment row is 0. Until then, a comment ticket
+     takes its routing mode from the DM channel's row.
 2. The Instagram DM channel and the comment channels go to `category_shadow`
    for a week. Read `routing_decisions` against the agents' own moves.
 3. Then they go to `category`.
@@ -1317,13 +1496,13 @@ enqueues `settle_routing` until an admin changes a channel's mode.
    Freshworks swap. Before the swap it would route copies of tickets that
    Freshchat agents are answering.
 5. Email and webchat follow on the same evidence. The coexistence numbers
-   stay `default_group`; `saveChannel` enforces it.
+   stay `default_group`; `routingModeOf` enforces it.
 
 **Rollback.** Set a channel's mode back to `default_group`. New tickets are
-never held again. Tickets already held settle at their window's end, at most 5
-minutes later, as `released`, and are assigned in their current group with
-their held reply sent. Already-routed tickets stay where they are, which is
-correct.
+never held again. Tickets already held settle at the end of their own window
+(up to the configured window) as `released`, and are assigned in their current
+group with their held reply sent. Already-routed tickets stay where they are,
+which is correct.
 
 ### Stage 6 — reporting
 
@@ -1338,7 +1517,7 @@ Web first (it migrates `metrics_daily`), then the worker and crons, with
 - `/reports/routing` shows, per channel:
   - routes by outcome;
   - time to decision against the window;
-  - the fallback share;
+  - the fallback and `taken` shares;
   - routed tickets still unassigned.
 
   Those are the numbers that say whether the window and the threshold are
@@ -1354,11 +1533,12 @@ Web first (it migrates `metrics_daily`), then the worker and crons, with
 | 2     | Detector still writing                                    | `subcategorised` events in the last hour > 0 during traffic                                                                                           |
 | 2     | Old names gone                                            | No `pg_class` relation named `ticket_categories%`, `conversation_categories%`, `category_metrics_daily%` or `ai_category_runs%` before Stage 3        |
 | 3     | Registry seeded                                           | 3 active rows; every `route_group_id` resolves to a non-manual group                                                                                  |
-| 4     | Classifier healthy                                        | `ai_category_runs` errors = 0; p90 message→run < 10 s; `unknown` share per channel; calls per ticket                                                  |
+| 4     | Classifier healthy                                        | `ai_category_runs` (label `live`) errors = 0; p90 message→run < 10 s; `unknown` share per channel; calls per ticket                                   |
 | 4     | Ownership honoured                                        | No `jev:category` event after a non-Jev `category_changed` on the same ticket, ordered by the stamped `created_at`                                    |
-| 5     | Nothing stranded                                          | Tickets with `routing_window_ends_at` set, `routing_decided_at` null, and `now() > routing_window_ends_at + 10 min` = 0                               |
-| 5     | Routes match categories                                   | `routing_decisions.outcome='category'` whose `to_group_id` ≠ the category's `route_group_id` at decision time = 0                                     |
+| 5     | Nothing stranded                                          | Live `routing_decisions` rows not `decided` whose window ended more than 10 minutes ago = 0                                                           |
+| 5     | Routes match categories                                   | `outcome='category'` rows whose `to_group_id` ≠ the category's `route_group_id` at decision time = 0                                                  |
 | 5     | Routed means assigned                                     | `outcome='category'` tickets still unassigned N minutes after `decided_at`, broken down by group and strategy                                         |
+| 5     | Nothing taken by accident                                 | `outcome='taken'` per week, which should be near 0; each one is read                                                                                  |
 
 ## Risks not closed by the design
 
@@ -1370,6 +1550,12 @@ Web first (it migrates `metrics_daily`), then the worker and crons, with
   rates (`commercial.pricing_enquiry`) can write the same sentence, and no
   record tells them apart in production. Expect merchant support to be the
   weakest class until shipping accounts are linked.
+- **A wrong answer settles.** Merchant support answers still label and settle a
+  ticket while its route group is empty. A false merchant answer on the first
+  message therefore stops a later, correct sales answer from routing. The cost
+  is a ticket left in the default group, as on a fallback, labelled wrong until
+  a person fixes it. If that proves too costly, a per-category "may settle"
+  flag makes a class record-only, behaving like `unknown`.
 - **Customer text goes to TypeSafe a second time per message.** The
   data-processing caveat recorded for canned suggestions
   (`docs/PROJECT-STATE.md`, the canned-suggestion section) applies, and needs
@@ -1377,8 +1563,7 @@ Web first (it migrates `metrics_daily`), then the worker and crons, with
 - **Two classifiers each run an `on_update` pass at creation.** A rule "group
   is Sales and priority is urgent" fires on whichever pass comes last. Rules
   are level-triggered, so the last pass sees both facts. The router's own pass
-  is not a third, because the classifier that routed does not call
-  `afterTicketUpdate` as well.
+  replaces the category classifier's pass rather than adding a third.
 - **The webchat widget's open/closed line uses the channel's default group's
   calendar** (`lib/widget/session.ts:98`), before any category exists. On a
   `category` webchat channel it can disagree with the routed group's
@@ -1394,6 +1579,10 @@ Web first (it migrates `metrics_daily`), then the worker and crons, with
   who opens a held ticket from "My groups" and assigns it ends the hold. The
   "Routing…" badge says what they are doing, and nothing stops them, which is
   deliberate: a person is never overruled.
+- **Re-selecting the SLA before the first response changes today's behaviour**
+  for a group move made before anyone answered. That is deliberate (decision
+  3), but anyone reading the old `onGroupChanged` comment needs the new one
+  beside it.
 
 ## Questions for the support lead
 
@@ -1422,23 +1611,28 @@ answered.
 5. **Where each category routes, and when merchant support may route.**
    **Default:**
    - Sales → Inbound Sales Team
-   - Merchant support → Merchant Care, routing only once its own evaluation
-     gate is met; until then it stays in the default group
+   - Merchant support → no route group until its own evaluation reaches 30
+     labels, then Merchant Care. Until then its answers still label and settle
+     a ticket and leave it in the default group (see Risks).
    - Customer support → Customer Care, or Support?
 
    What is Support for once those three are staffed?
 
 6. **The hold window.** **Default: 5 minutes,** tuned from the shadow data.
-7. **A person changing the category.** **Default: relabel only, with a
-   one-click "move to <group>" offer,** including during the hold, which it
-   ends. The alternative is an automatic re-route.
+7. **A person changing the category.** **Default:**
+   - **during the hold:** it routes the ticket, as Jev's answer would;
+   - **after the hold:** it relabels only, and the sidebar offers "Hand to
+     <group>", which moves and re-assigns.
+
+   The alternative is to re-route automatically after the hold too.
+
 8. **Agents see their groups' tickets** (Stage 0.5). The permission is already
    granted to every agent role, and implementing it switches it on.
    **Default: keep it.** "No" means removing it from the `AGENT` role in the
    same PR. Without it, a routed ticket nobody is free to take is invisible to
    the group.
 9. **Coexistence numbers stay on their default group.** **Default: yes,
-   enforced.** They are answered on the phone.
+   enforced in code.** They are answered on the phone.
 10. **Messenger routes in shadow until the Freshworks swap**, and Instagram and
     the comment channels go live first. **Default: yes.**
 11. **The comment channels:**
@@ -1454,15 +1648,15 @@ answered.
     - **Reports.** Rebuild them for the comment split from 2026-08-29.
       **Default: yes.**
     - **The open backlog.** Back-classify its category, without routing it.
-      **Default: yes, after the shadow period.**
+      **Default: yes, as 4.2's last step.**
 13. **The rename reaches the database, URLs, permission keys, the job name and
     the `CATEGORISE_*` variables, keeping stored history.** **Default: yes.**
     The cost is one maintenance window of a few minutes, off-hours.
 14. **Who may change a ticket's category, and who manages the list.**
     **Default: every agent changes it; admins manage it.**
-15. **SLA by category.** Policies can key on the category, and the policy is
-    re-selected whenever the category is first set before the first response.
-    Should Sales tickets get their own targets? And are the four existing
-    policies restructured in Stage 0.2 as proposed?
+15. **SLA by category.** Before the first response, the policy is re-selected
+    whenever the category or the group changes. Should Sales tickets get their
+    own targets? And are the four existing policies restructured in Stage 0.2
+    as proposed?
 16. **TypeSafe's data-processing terms** cover a second per-message call
     carrying customer text. **This needs a yes before 4.2.**
