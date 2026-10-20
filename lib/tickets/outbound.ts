@@ -282,11 +282,15 @@ export async function deliverAutomatedReply(reply: AutomatedReply): Promise<stri
  * did not recognise to email, which is how a new channel would have mailed its
  * replies to contacts with no address; now a channel added to the enum does not
  * compile until somebody says what carries it. Web chat and the customer bot
- * keep the answer they always had, `send_email`, though neither is carried by
- * it: a web chat message is never queued, because its row is its delivery, and
- * the bot is never written to. `enqueueAutomatedDelivery` and `sendsByEmail`
- * set web chat aside by name; `writeAutomatedReply` does not, so an automated
- * web chat reply is stored with an email's HTML part, as it always was.
+ * keep the answer they always had, `send_email`, and neither is meant to be
+ * carried by it. A web chat message is never queued, because its row is its
+ * delivery: `enqueueAutomatedDelivery`, `storeAgentReply` and `sendsByEmail` set
+ * web chat aside by name, and `writeAutomatedReply` names it only for the
+ * delivery status, so an automated web chat message is stored with the
+ * requester's address and whatever HTML its sender passed, as it always was.
+ * The bot's conversations are not answered from the console, but nothing on
+ * the `on_update` automation path refuses one, so a rule's `send_reply` there
+ * would be queued here as an email — a gap older than this switch.
  */
 export function carrierFor(
   channel: ConversationChannel,

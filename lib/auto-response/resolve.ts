@@ -54,6 +54,8 @@ export type AutoResponseRule = {
  * Rules the caller has already filtered to `isActive`; an inactive rule is not
  * a match at all, so a ticket falls through to the next broadest one rather
  * than to silence — which is what makes turning a rule off a safe thing to do.
+ * A comment is the exception, below: past its comment channel's rules there is
+ * nothing broader it may fall to, and silence is the safe direction there.
  *
  * **A public comment matches only a rule that names its comment channel.** A
  * reply on a comment ticket is posted under the customer's comment, where
@@ -61,21 +63,24 @@ export type AutoResponseRule = {
  * company-wide out-of-hours message written for a private inbox would go out in
  * public. A rule with no channel — every channel, or every channel in a group —
  * is "every channel except public comments" for that reason, and says so on the
- * admin page. `scope.channel` is `ruleChannel`'s answer, never the column read
- * raw.
+ * admin page.
+ *
+ * It takes the ticket's channel and external id as stored and decides which
+ * channel to match on itself (`ruleChannel`), so no caller can hand it the
+ * column read raw — which would undo the comment exclusion for every comment
+ * ticket still filed on its platform, and nothing would fail.
  */
 export function pickRule(
   rules: AutoResponseRule[],
-  scope: { groupId: string | null; channel: ConversationChannel },
+  scope: { groupId: string | null; channel: ConversationChannel; externalId: string | null },
 ): AutoResponseRule | null {
+  const channel = ruleChannel(scope.channel, scope.externalId);
   let best: AutoResponseRule | null = null;
   let bestScore = -1;
 
   for (const rule of rules) {
     if (rule.groupId !== null && rule.groupId !== scope.groupId) continue;
-    if (rule.channel === null ? isCommentChannel(scope.channel) : rule.channel !== scope.channel) {
-      continue;
-    }
+    if (rule.channel === null ? isCommentChannel(channel) : rule.channel !== channel) continue;
 
     // Channel 2, group 1: a rule naming both scores 3 and outranks either alone.
     const score = (rule.channel !== null ? 2 : 0) + (rule.groupId !== null ? 1 : 0);
@@ -100,10 +105,7 @@ export function pickRule(
  * the backfill ran. Once a CHECK makes the column and the external id one answer
  * (Stage 1.3) this returns its input.
  */
-export function ruleChannel(
-  channel: ConversationChannel,
-  externalId: string | null,
-): ConversationChannel {
+function ruleChannel(channel: ConversationChannel, externalId: string | null): ConversationChannel {
   if (isMetaChannel(channel) && !isCommentChannel(channel) && rootCommentId(externalId)) {
     return commentChannelOf(metaPlatformOf(channel));
   }

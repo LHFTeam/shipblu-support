@@ -599,9 +599,10 @@ Three are Messenger's feedback card — the `feedback_template` case of
 `automatedReplyBlocked`, `decideSurvey` choosing the card and `send_meta`
 sending it — which exists only in a Messenger thread. The fourth is
 `recordMetaFeedback` matching a tapped rating's platform against its survey's
-ticket, so that a tap can never thank a commenter on the public thread. A
-TypeSafe request sends the platform rather than the channel, so the vocabulary
-the model was asked in does not move under it.
+ticket; beside it, it refuses a comment by its external id too, so a tap can
+never thank a commenter on the public thread. A TypeSafe request sends the
+platform rather than the channel, so the vocabulary the model was asked in does
+not move under it.
 
 Until the CHECK constraint in `plans/ticket-category-routing.md` §1.3 lands, a
 comment ticket can still sit on its platform's channel — every one ingested
@@ -611,10 +612,11 @@ comment is the channel test _or_ the external id**
 The auto-response picker is the one reader where the difference is public: a
 rule with no channel matches every channel _except_ the comment ones, because
 its reply would be posted under the customer's comment where anybody reading
-the post sees it, and only a rule naming a comment channel answers there. It
-matches on `ruleChannel`, which reads a comment still filed on its platform as
-the comment channel it is moving to, so a rule naming the platform answers
-that platform's direct messages and nothing posted in public.
+the post sees it, and only a rule naming a comment channel answers there.
+`pickRule` takes the stored channel and external id and reads a comment still
+filed on its platform as the comment channel it is moving to, so a rule naming
+the platform answers that platform's direct messages and nothing posted in
+public — and no caller can hand it the column read raw.
 
 Graph request shapes are written down in `lib/meta/comments.ts` and
 `lib/meta/send.ts` rather than built inline, and asserted there against Meta's

@@ -320,7 +320,9 @@ async function deliverFeedbackCard(
 ): Promise<string | null> {
   // The literal, not the platform: the card belongs to a Messenger
   // conversation, and a `facebook_comment` ticket rides the same Page without
-  // being one. CSAT never surveys a comment, and this refuses one regardless.
+  // being one. CSAT never surveys a comment, and this refuses a comment channel
+  // regardless; a comment still filed on `facebook` would at worst be sent the
+  // card privately, through the Send API, never on the post.
   if (row.conversation.channel !== 'facebook') {
     throw new MetaSendRefusal('Messenger’s feedback card can only be sent on Facebook.');
   }

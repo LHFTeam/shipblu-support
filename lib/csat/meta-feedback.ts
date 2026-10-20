@@ -3,6 +3,7 @@ import { db } from '@/db/client';
 import { conversations, csatSurveys } from '@/db/schema';
 import { logger } from '@/lib/log';
 import { configuredAccountId } from '@/lib/meta/client';
+import { rootCommentId } from '@/lib/meta/comments';
 import { metaConnection } from '@/lib/meta/connection';
 import { metaThreadState } from '@/lib/meta/thread';
 import type { NormalisedFeedback } from '@/lib/meta/types';
@@ -56,10 +57,13 @@ export async function recordMetaFeedback(feedback: NormalisedFeedback): Promise<
     .innerJoin(conversations, eq(conversations.id, csatSurveys.conversationId))
     .where(eq(csatSurveys.id, feedback.surveyId))
     .limit(1);
-  // The ticket's channel against the tap's platform, strictly and on purpose:
-  // a survey on a comment channel (none is ever sent) fails it, so a tap can
-  // never thank a commenter, which `send_meta` would post on the public thread.
-  if (!survey || survey.channel !== feedback.platform) return 'unknown_survey';
+  // The ticket's channel against the tap's platform, strictly and on purpose,
+  // and never a comment ticket — by its channel, or by its external id while it
+  // still carries its platform's. No survey is ever sent on one, and a thanks
+  // there is one `send_meta` would post on the public thread.
+  if (!survey || survey.channel !== feedback.platform || rootCommentId(survey.externalId)) {
+    return 'unknown_survey';
+  }
 
   const contactId = await findContactByIdentity(feedback.platform, feedback.from);
   if (!contactId || contactId !== survey.requesterContactId) return 'not_requester';

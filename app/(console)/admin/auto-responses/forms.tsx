@@ -196,7 +196,7 @@ function Fields({ rule, groups }: { rule?: Rule; groups: Group[] }) {
       <Toggle
         name="isActive"
         label="Active"
-        hint="Turned off, this rule stops matching and its tickets fall back to the next broadest one — not to silence."
+        hint="Turned off, this rule stops matching and its tickets fall back to the next broadest one — not to silence. A public comment falls back only to another rule for its comment channel, and with none it is not acknowledged."
         defaultChecked={rule?.isActive ?? true}
       />
     </>

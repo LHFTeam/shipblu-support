@@ -286,12 +286,11 @@ export function readOnlyChannels(): ConversationChannel[] {
  * fallback — beside the latest message it would put the first message and the
  * last on one card.
  *
- * A named list rather than `sendsByEmail()`, which asks how a reply travels:
- * `carrierFor` answers `send_email` for web chat and the customer bot too, and
- * neither has a subject anybody wrote, so a predicate borrowed from the carrier
- * would let the next channel it sends by email default to "has a written
- * subject" and bring the duplicate back without anything failing. `api` is out for the same reason — nothing writes one yet,
- * so there is no subject to vouch for.
+ * A named list rather than `sendsByEmail()`, which asks how a reply travels and
+ * answers yes for `api`, whose tickets nothing writes yet and so have no subject
+ * to vouch for. It would also answer yes for the next channel answered by
+ * email, which would then default to "has a written subject" and bring the
+ * duplicate back without anything failing.
  */
 const WRITTEN_SUBJECT: readonly ConversationChannel[] = ['email', 'portal'];
 

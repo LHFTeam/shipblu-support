@@ -1080,7 +1080,9 @@ worker and all four crons. 1.2 does not start until all six run 1.1.
     in a Messenger thread, so widening them through `metaPlatformOf` would let
     a comment channel through the one door that must stay shut to it. The
     fourth is `recordMetaFeedback` matching a tap's platform against its
-    survey's ticket, so a tap can never thank a commenter in public.
+    survey's ticket, which also refuses a comment by its external id, so a tap
+    can never thank a commenter in public (no survey on a comment ticket
+    exists, 2026-10-20; the check is the second line).
   - **`refreshRequesterProfile` and `claimThreadControl` refuse a comment
     ticket** (by channel or external id), rather than mapping it to its
     platform. The console offers neither on a comment — the header hides the
@@ -1088,9 +1090,10 @@ worker and all four crons. 1.2 does not start until all six run 1.1.
     standby refusal, which a comment ticket never has — so a request reaching
     them is a stale tab or a forged form, and both say the comment is answered
     on the post.
-  - **The auto-response picker matches on `ruleChannel`**, which reads a
-    comment ticket still filed on `facebook`/`instagram` as the comment channel
-    it is moving to. Matching the column raw, a rule naming the platform would
+  - **The auto-response picker reads a comment ticket still filed on
+    `facebook`/`instagram` as the comment channel it is moving to**: `pickRule`
+    takes the stored channel and external id and maps them itself
+    (`ruleChannel`), so no caller can pass the column raw. Matching the column raw, a rule naming the platform would
     post its wording under a comment and a rule naming a comment channel would
     match nothing until the backfill. The form names the platform's scope
     "Facebook messages" / "Instagram messages" beside "… comments" for the same
@@ -1146,7 +1149,12 @@ deploy it with web and the crons.
 - The admin channels page can create "Facebook comments" and "Instagram
   comments" rows. They need no credentials, since they ride the Page and
   Instagram tokens, and their config is `{}`. The page's four type allowlists
-  and its config branch learn the new types.
+  and its config branch learn the new types. The form's and the action's
+  `type === 'facebook' || type === 'instagram'` tests (`forms.tsx`, the
+  address field, and `actions.ts`, the stored config) become `isMetaChannel`,
+  or a comment row falls through to the email address field and is stored as
+  `{ address }` rather than `{}`. The page's own address column already asks
+  `isMetaChannel` (1.1).
 - **Backfill job `split_comment_channels`** (strict payload, `dryRun`).
   - **What it moves.** Existing comment tickets (52 today) move to the new
     values, and `channel_id` is set to the comment row where one exists; 13 of
@@ -1766,15 +1774,19 @@ Web first (it migrates `metrics_daily`), then the worker and crons, with
   who opens a held ticket from "My groups" and assigns it ends the hold. The
   "Routing…" badge says what they are doing, and nothing stops them, which is
   deliberate: a person is never overruled.
-- **An automation's `send_reply` with no channel condition would answer a
-  comment in public.** The auto-response picker keeps an every-channel rule off
-  comments (1.1); the automation engine has no such guard, and
-  `deliverAutomatedReply` on a comment ticket goes out through `send_meta` as a
-  comment reply. Q11 keeps conditions on the platform, which after 1.2 stops a
-  `channel is facebook` rule matching a comment — but a rule naming no channel
-  at all still would. Latent: production has three automation rules and none
-  sends a reply (2026-10-20). Closing it is a guard in the engine or a refusal
-  in the rule editor, in its own change.
+- **An automation's `send_reply` can answer a comment in public.** The
+  auto-response picker keeps an every-channel rule off comments (1.1); the
+  automation engine has no such guard, and `deliverAutomatedReply` on a comment
+  ticket goes out through `send_meta` as a comment reply. The engine's
+  `channel` fact is the stored column (`lib/rules/facts.ts`), so any rule a
+  comment ticket satisfies reaches it: one naming no channel, one saying
+  `channel is not email`, and — until the backfill moves the old rows — one
+  saying `channel is facebook`. Q11 keeps conditions on the platform, which
+  after 1.2 stops only the last. Latent: production has three automation rules
+  and none sends a reply (read 2026-10-20). Closing it is a refusal in
+  `sendCannedReply` itself, by channel or external id — not a rule-editor check,
+  which `channel is not email` walks past — and whether a comment may ever be
+  answered by a rule is the support lead's call, in its own change.
 - **Re-selecting the SLA before the first response changes today's behaviour**
   for a group move made before anyone answered. That is deliberate (decision
   3), but anyone reading the old `onGroupChanged` comment needs the new one

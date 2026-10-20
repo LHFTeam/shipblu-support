@@ -44,11 +44,16 @@ async function statusId(name: string): Promise<string> {
   return row.id;
 }
 
-/** A resolved DM ticket whose customer is `psid` on `platform`, surveyed as `delivery`. */
+/**
+ * A resolved ticket whose customer is `psid` on `platform`, surveyed as
+ * `delivery`: a DM unless `channel` and `externalId` say it is a comment.
+ */
 async function surveyedTicket(input: {
   platform: 'facebook' | 'instagram';
   delivery: 'meta_template' | 'meta_quick_reply';
   lastWroteAt?: Date;
+  channel?: 'facebook' | 'instagram' | 'facebook_comment' | 'instagram_comment';
+  externalId?: string;
 }) {
   const [contact] = await db
     .insert(contacts)
@@ -62,7 +67,8 @@ async function surveyedTicket(input: {
   const [ticket] = await db
     .insert(conversations)
     .values({
-      channel: input.platform,
+      channel: input.channel ?? input.platform,
+      externalId: input.externalId ?? null,
       statusId: await statusId('Resolved'),
       requesterContactId: contact!.id,
       lastCustomerMessageAt: lastWroteAt,
@@ -234,6 +240,27 @@ describe('recordMetaFeedback', () => {
     );
 
     expect(await surveyRow(ticket.surveyId)).toMatchObject({ status: 'sent', rating: null });
+  });
+
+  // No survey is ever sent on a comment; this is the second line, for a row
+  // that got there anyway. A thanks on one would be posted under the post.
+  it('takes no answer on a comment ticket, by its channel or its external id', async () => {
+    const legacy = await surveyedTicket({
+      platform: 'instagram',
+      delivery: 'meta_quick_reply',
+      externalId: 'instagram:comment:17890',
+    });
+    expect(await recordMetaFeedback(answer(legacy.surveyId))).toBe('unknown_survey');
+
+    // The same ticket once 1.2 has moved it: the channel alone refuses it.
+    await db
+      .update(conversations)
+      .set({ channel: 'instagram_comment', externalId: null })
+      .where(eq(conversations.id, legacy.conversationId));
+    expect(await recordMetaFeedback(answer(legacy.surveyId))).toBe('unknown_survey');
+
+    expect(await surveyRow(legacy.surveyId)).toMatchObject({ status: 'sent', rating: null });
+    expect(await thanks(legacy.conversationId, legacy.messageId)).toEqual([]);
   });
 
   it('records a tap made after the window closed, without a reply that could not send', async () => {

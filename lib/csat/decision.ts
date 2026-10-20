@@ -250,6 +250,8 @@ export function decideSurvey(input: DecisionInput, settings: CsatSettings): Deci
       return { kind: 'skip', reason: 'comment_thread' };
     }
 
+    // The literal, not the platform: the card is Messenger's alone, and a
+    // comment never reaches this line (above).
     if (input.channel === 'facebook') {
       // Messenger's own survey card, for the seven days its tag allows — which
       // Graph refuses without a privacy link. With none, the 24 hours still

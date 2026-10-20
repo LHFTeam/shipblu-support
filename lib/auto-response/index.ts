@@ -12,7 +12,7 @@ import {
   lacksEmailRecipient,
 } from '@/lib/tickets/outbound';
 import { requesterLocale } from '@/lib/tickets/locale';
-import { pickBody, pickRule, ruleChannel, substitute, type AutoResponseRule } from './resolve';
+import { pickBody, pickRule, substitute, type AutoResponseRule } from './resolve';
 import { logger } from '@/lib/log';
 
 const log = logger('auto-response');
@@ -89,7 +89,8 @@ async function send(conversationId: string, at: Date): Promise<void> {
 
   const rule = pickRule(rules, {
     groupId: ticket.groupId,
-    channel: ruleChannel(ticket.channel, ticket.externalId),
+    channel: ticket.channel,
+    externalId: ticket.externalId,
   });
   if (!rule || rule.silent) return;
 
@@ -169,8 +170,10 @@ async function send(conversationId: string, at: Date): Promise<void> {
   // English first in the log line — the audience is whoever is reading Render's
   // logs, not the customer — falling back to the Arabic name when that is the
   // only one the calendar carries.
+  // The rule's channel where it names one: a comment still filed on its
+  // platform was matched as its comment channel, and is logged as one.
   log.info(
-    `acknowledged #${ticket.number} on ${ticket.channel}` +
+    `acknowledged #${ticket.number} on ${rule.channel ?? ticket.channel}` +
       `${holiday ? ` (${holidayName(holiday, 'en') ?? 'holiday'})` : ''}`,
   );
 }
