@@ -621,8 +621,9 @@ external id, so none can skip the mapping by forgetting it. **The automation
 engine does not handle it yet**: its `channel` fact is the stored column, so a
 `send_reply` rule a comment ticket satisfies — no channel condition,
 `channel is not email`, or `channel is facebook` until the backfill — posts in
-public. No rule sends a reply today; the risk and its fix are in
-`plans/ticket-category-routing.md` under "Risks not closed by the design".
+public. The risk, how latent it was when last read, and its fix are in
+`plans/ticket-category-routing.md` under "Risks not closed by the design";
+check production for a `send_reply` rule before relying on it being latent.
 
 Graph request shapes are written down in `lib/meta/comments.ts` and
 `lib/meta/send.ts` rather than built inline, and asserted there against Meta's

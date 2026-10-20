@@ -1096,9 +1096,9 @@ worker and all four crons. 1.2 does not start until all six run 1.1.
     (`ruleChannel`), so every caller must supply the external id and none can
     skip the mapping by forgetting it. Matched on the bare column, a rule naming
     the platform would post its wording under a comment and a rule naming a
-    comment channel would match nothing until the backfill. The form names the platform's scope
-    "Facebook messages" / "Instagram messages" beside "… comments" for the same
-    reason. Production holds one rule, null-scoped and inactive (2026-10-20).
+    comment channel would match nothing until the backfill. The form names the
+    platform's scope "Facebook messages" / "Instagram messages" beside
+    "… comments" for the same reason. Production holds one rule, null-scoped and inactive (2026-10-20).
   - **The filter, the Channels views and the condition builder offer the
     comment values now**, and they match nothing until 1.2 writes them: the 52
     comment tickets stay under Facebook and Instagram until the backfill.
@@ -1113,7 +1113,8 @@ worker and all four crons. 1.2 does not start until all six run 1.1.
     know three channels and print the enum value for the rest.
   - **The condition builder offers the comment values** under their badge names,
     and its comment says a condition on `facebook` stops reaching a comment once
-    the backfill has moved it — and reaches every one until then. Nothing stored
+    the backfill has moved it — and reaches every one ingested before 1.2 until
+    then. Nothing stored
     names them yet; Q11 says nothing will.
   - **`send_meta` maps its source rather than casting it**: `meta.platform`,
     else the ticket's channel, through `metaPlatformOf`, so a comment value that

@@ -66,7 +66,8 @@ export async function ticketFieldOptions(
       // values, so once `split_comment_channels` has moved the old rows a
       // condition on `facebook` does not reach a Facebook comment, and a rule
       // that should names `facebook_comment` as well. Until then every comment
-      // ticket still carries its platform's value and matches it.
+      // ticket ingested before 1.2 still carries its platform's value and
+      // matches it.
       choices: CONDITION_CHANNELS.map((channel) => ({
         value: channel,
         label: CHANNEL_LABELS[channel],

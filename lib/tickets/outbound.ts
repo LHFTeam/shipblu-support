@@ -129,7 +129,7 @@ export type AutomatedReply = {
   /** The requester's address; used where the carrier is email and there is nowhere else to send. */
   requesterEmail: string | null;
   bodyText: string;
-  /** Ignored on any channel whose carrier is not `send_email`, which sends text. */
+  /** Ignored on any channel `carrierFor` does not answer `send_email` for, which sends text. */
   bodyHtml: string | null;
   /** Shown on the timeline in place of an agent's name: `automation:Out of hours`. */
   actorLabel: string;
@@ -326,9 +326,9 @@ export function carrierFor(
  * `carrierFor` answers `send_email` for two kinds of channel that do not send
  * by email, so they are excluded by name rather than by carrier. Web chat has no
  * carrier at all — writing its row is its delivery. A read-only channel
- * (`whatsapp_bot`) is not answered from the console, and the acknowledgement,
- * the survey and the priority classifier refuse it before they ask; the
- * `on_update` automation path does not (`carrierFor` says what follows).
+ * (`whatsapp_bot`) is not answered from the console, and the acknowledgement
+ * and the survey refuse it before they ask; the `on_update` automation path
+ * does not (`carrierFor` says what follows).
  * Answering "email" for it would only be true by accident. `api` does go out by
  * email, and is written as email.
  */
