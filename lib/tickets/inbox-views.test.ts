@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { FILTERABLE_CHANNELS } from './channel-policy';
 import { parseFilters } from './inbox-filters';
-import { activeViewId, inboxViews, seesGroupQueues, viewHref } from './inbox-views';
+import { activeViewId, inboxViews, viewHref } from './inbox-views';
 
 const everything = { canSeeBot: true, canViewAll: true, canSeeRatings: true };
 
@@ -188,20 +188,21 @@ describe('activeViewId', () => {
   });
 
   it('keeps All and Mine apart for an agent who sees their groups', () => {
-    const team = { canViewAll: false, canViewGroups: true };
-    const theirs = inboxViews({
-      canSeeBot: false,
-      canSeeRatings: false,
+    const team = {
+      canViewAll: false,
+      canViewGroups: true,
       groups: [{ id: CUSTOMER_CARE, name: 'Customer Care', member: true }],
-      ...team,
-    });
+    };
+    const theirs = inboxViews({ canSeeBot: false, canSeeRatings: false, ...team });
     expect(activeViewId(theirs, parseFilters({}), team)).toBe('all');
     expect(activeViewId(theirs, parseFilters({ view: 'mine' }), team)).toBe('mine');
     expect(activeViewId(theirs, parseFilters({ view: 'groups' }), team)).toBe('groups');
   });
 
+  // Given the bare permission, as every caller holds it: the function, not the
+  // caller, decides that a member of no group sees only their own.
   it('reads All as Mine for an agent who may see their groups and is in none', () => {
-    const own = { canViewAll: false, canViewGroups: seesGroupQueues(true, []) };
+    const own = { canViewAll: false, canViewGroups: true, groups: [] };
     const theirs = inboxViews({ canSeeBot: false, canSeeRatings: false, ...own });
     expect(activeViewId(theirs, parseFilters({}), own)).toBe('mine');
     expect(activeViewId(theirs, parseFilters({ view: 'mine', channel: 'email' }), own)).toBe(

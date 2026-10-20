@@ -17,7 +17,7 @@ import { agents, conversations, contacts, messages, ticketStatuses } from '@/db/
 import type { SessionAgent } from '@/lib/auth/session';
 import { can } from '@/lib/auth/permissions';
 import { heldByOrInGroupsOf, inGroupsOf } from './assignment-scope';
-import { assignmentVisibility } from './visibility';
+import { assignmentScope, assignmentVisibility } from './visibility';
 import { hiddenChannels, restrictedChannels } from './channel-policy';
 import { notReaction } from './not-reaction';
 import { rootCommentId } from '@/lib/meta/comments';
@@ -421,7 +421,8 @@ function lastVisibleMessage() {
  * route already had.
  */
 export async function inboxCounts(agent: SessionAgent) {
-  return countsFor(agent.id, can(agent, 'ticket.view.all'), can(agent, 'ticket.view.group'));
+  const scope = assignmentScope(agent);
+  return countsFor(agent.id, !scope, scope?.includeGroups ?? false);
 }
 
 const countsFor = cache(async (agentId: string, viewAll: boolean, viewGroups: boolean) => {

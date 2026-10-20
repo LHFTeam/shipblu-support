@@ -22,10 +22,11 @@ export const dynamic = 'force-dynamic';
 export default async function SkillsPage() {
   await requirePermission('admin.skills');
 
+  const agents = listActiveAgents();
   const [rows, agentList, fields, routingGroups] = await Promise.all([
     listSkills(),
-    listActiveAgents(),
-    ticketFieldOptions(),
+    agents,
+    ticketFieldOptions({ agents }),
     listSkillRoutingGroups(),
   ]);
 

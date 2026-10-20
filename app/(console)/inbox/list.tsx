@@ -48,7 +48,7 @@ export function InboxList({
   canSeeBot = false,
   canSeeRatings = false,
   canViewAll = false,
-  canViewGroups = false,
+  seesGroupQueues = false,
   canCreate = false,
   canViewContacts = false,
 }: {
@@ -62,10 +62,13 @@ export function InboxList({
   canSeeBot?: boolean;
   /** `report.view`: without it `listInbox` answers the rated view with nothing. */
   canSeeRatings?: boolean;
-  /** `ticket.view.all`: without it every list is the agent's own tickets. */
+  /**
+   * `ticket.view.all`: without it the list is the agent's own tickets, and
+   * their groups' as well when `seesGroupQueues`.
+   */
   canViewAll?: boolean;
-  /** `ticket.view.group`: their groups' tickets as well as their own. */
-  canViewGroups?: boolean;
+  /** `seesGroupQueues()`: `ticket.view.group` and a member of at least one group. */
+  seesGroupQueues?: boolean;
   canCreate?: boolean;
   /** The avatar route answers 404 without `contact.view`, so the tile is not asked for one. */
   canViewContacts?: boolean;
@@ -276,7 +279,7 @@ export function InboxList({
                 activeView === 'rated-low' && !filters.q
                   ? // Said of what the list can reach: an agent who sees only
                     // their own tickets hears about theirs, not the team's.
-                    `${canViewAll ? 'No ticket' : canViewGroups ? 'None of your or your groups’ tickets' : 'None of your tickets'} was rated ${LOW_RATINGS_IN_WORDS} in the last ${RATED_LOW_DAYS} days.`
+                    `${canViewAll ? 'No ticket' : seesGroupQueues ? 'None of your or your groups’ tickets' : 'None of your tickets'} was rated ${LOW_RATINGS_IN_WORDS} in the last ${RATED_LOW_DAYS} days.`
                   : 'Nothing matches those filters.'
               }
             />

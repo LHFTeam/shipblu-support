@@ -382,7 +382,11 @@ export function valueForOperator(
   field?: FieldOption,
 ): Row['value'] {
   if (isListOperator(op)) return listValue(value);
-  if (field?.choices) return listValue(value)[0] ?? '';
+  // Only a set collapses. A stored scalar stays whole even with a comma in it:
+  // split, it would load as its first piece — "Unknown: Care" for a policy
+  // holding "Care, Merchant" from when the field was free text — and the next
+  // save would write that piece back over a condition nobody edited.
+  if (field?.choices) return Array.isArray(value) ? (value[0] ?? '') : value;
   return textValue(value);
 }
 

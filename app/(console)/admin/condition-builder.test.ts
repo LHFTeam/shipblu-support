@@ -183,7 +183,19 @@ describe('ConditionBuilder', () => {
       '<option value="not_contains" selected="">does not contain (not offered here)</option>',
     );
     expect(html).toContain('<option value="eq">is</option>');
-    expect(hiddenValue(html)).toContain('not_contains');
+    expect(posted(html)).toEqual({ field: 'group.id', op: 'not_contains', value: 'Merchant' });
+  });
+
+  // A free-text value can hold a comma, and the field it was typed into may
+  // be a choice now. Opened and saved untouched, it must post what it holds.
+  it('keeps a stale value with a comma in it whole', () => {
+    const initial = { field: 'group.id', op: 'contains', value: 'Care, Merchant' };
+    const html = renderToStaticMarkup(
+      createElement(ConditionBuilder, { name: 'conditions', fields, initial }),
+    );
+
+    expect(posted(html)).toEqual(initial);
+    expect(html).toContain('Unknown: Care, Merchant');
   });
 
   it('adds no operator when the field offers the one held', () => {
@@ -211,6 +223,11 @@ describe('ConditionBuilder', () => {
     expect(shownChoices(group, { field: 'group.id', op: 'eq', value: '' })).toEqual(group.choices);
   });
 });
+
+/** The document the builder would post, as the server reads it. */
+function posted(html: string): unknown {
+  return JSON.parse(hiddenValue(html).replaceAll('&quot;', '"').replaceAll('&amp;', '&'));
+}
 
 function hiddenValue(html: string): string {
   return html.match(/<input type="hidden" name="conditions" value="([^"]*)"/)?.[1] ?? '';

@@ -8,6 +8,7 @@ import {
   contacts,
   conversations,
   csatSurveys,
+  groups,
   messages,
   ticketStatuses,
 } from '@/db/schema';
@@ -569,8 +570,18 @@ describe('listInbox search', () => {
 
   it('does not reach a ticket by number that the agent could not open from the list', async () => {
     const agent = await signedIn('agent', 'sara@shipblu.test');
-    // Unassigned, and an agent without ticket.view.all sees only their own.
+    // Unassigned, and waiting in a group she is not in: an agent without
+    // ticket.view.all sees her own tickets and her groups', and this is
+    // neither. The baseline's Support group, which she is not a member of.
     const [theirs] = await tickets([{ name: 'Not yours' }]);
+    const [support] = await db
+      .select({ id: groups.id })
+      .from(groups)
+      .where(eq(groups.name, 'Support'));
+    await db
+      .update(conversations)
+      .set({ groupId: support!.id })
+      .where(eq(conversations.id, theirs!.id));
 
     const { rows } = await listInbox(agent, parseFilters({ q: `#${theirs!.number}` }));
 

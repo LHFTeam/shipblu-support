@@ -30,27 +30,38 @@ export function conversationVisibility(agent: SessionAgent): SQL[] {
 }
 
 /**
- * Which tickets an agent may see by who holds them: undefined for every ticket,
- * otherwise their own, and — with `ticket.view.group` — every ticket sitting in
- * a group they belong to, whoever holds it or whether anybody does.
+ * Which tickets an agent may see by who holds them, decided from their
+ * permissions: undefined for every ticket, otherwise their own, and — with
+ * `ticket.view.group` — every ticket sitting in a group they belong to,
+ * whoever holds it or whether anybody does.
  *
  * The group half is what makes a group a queue. Without it a ticket routed into
  * a group and not yet assigned (out of hours, everybody at capacity, nobody
  * accepting) was visible to no agent-role user at all, since every one of them
  * saw only what was assigned to them. Seven places used to spell "assigned to
- * me unless `ticket.view.all`" out for themselves; the inbox list and counts,
- * the ticket page, the action guard, the attachment route and the shipment
- * read model now all ask this, or its row-level twin `canSeeAssignment`, so a
- * group member who can list a ticket can also open it, act on it and download
- * what is attached to it.
+ * me unless `ticket.view.all`" out for themselves. Now this is the one place
+ * the permissions are read: the inbox list, the ticket page and the action
+ * guard take it as SQL (`assignmentVisibility`), the attachment route as a
+ * yes or no about one row (`canSeeAssignment`), the counts as the primitives
+ * their request cache is keyed on, and the shipment read model as its
+ * `onlyVisibleTo` (`scopeForAgent`) — so a group member who can list a ticket
+ * can also open it, act on it and download what is attached to it.
  *
  * Membership is read in the query rather than carried on the session, so
  * taking an agent out of a group takes the group's tickets away at their next
  * request rather than at their next sign-in.
  */
-export function assignmentVisibility(agent: SessionAgent): SQL | undefined {
+export function assignmentScope(
+  agent: SessionAgent,
+): { agentId: string; includeGroups: boolean } | undefined {
   if (can(agent, 'ticket.view.all')) return undefined;
-  return heldByOrInGroupsOf(agent.id, can(agent, 'ticket.view.group'));
+  return { agentId: agent.id, includeGroups: can(agent, 'ticket.view.group') };
+}
+
+/** `assignmentScope` as a condition on `conversations`. */
+export function assignmentVisibility(agent: SessionAgent): SQL | undefined {
+  const scope = assignmentScope(agent);
+  return scope && heldByOrInGroupsOf(scope.agentId, scope.includeGroups);
 }
 
 /**
@@ -63,14 +74,15 @@ export async function canSeeAssignment(
   agent: SessionAgent,
   ticket: { assigneeAgentId: string | null; groupId: string | null },
 ): Promise<boolean> {
-  if (can(agent, 'ticket.view.all')) return true;
-  if (ticket.assigneeAgentId === agent.id) return true;
-  if (!can(agent, 'ticket.view.group') || !ticket.groupId) return false;
+  const scope = assignmentScope(agent);
+  if (!scope) return true;
+  if (ticket.assigneeAgentId === scope.agentId) return true;
+  if (!scope.includeGroups || !ticket.groupId) return false;
 
   const rows = await db
     .select({ one: sql<number>`1` })
     .from(groupMembers)
-    .where(and(eq(groupMembers.agentId, agent.id), eq(groupMembers.groupId, ticket.groupId)))
+    .where(and(eq(groupMembers.agentId, scope.agentId), eq(groupMembers.groupId, ticket.groupId)))
     .limit(1);
   return rows.length > 0;
 }
@@ -114,9 +126,7 @@ export async function inboxGroupsFor(
 export function scopeForAgent(agent: SessionAgent, overrides: ReadScope = {}): ReadScope {
   return {
     excludeChannels: hiddenChannels(agent),
-    onlyVisibleTo: can(agent, 'ticket.view.all')
-      ? undefined
-      : { agentId: agent.id, includeGroups: can(agent, 'ticket.view.group') },
+    onlyVisibleTo: assignmentScope(agent),
     includeClosed: true,
     ...overrides,
   };

@@ -63,6 +63,8 @@ export type InboxGroup = { id: string; name: string; member: boolean };
  * agent without it. So the views, the active view and the list's empty state
  * all ask this rather than the permission, or such an agent is offered two
  * lists that never hold anything and a channel view that never lights up.
+ * `inboxViews` and `activeViewId` take the permission and the groups and ask it
+ * themselves, so no caller can hand either the bare permission by mistake.
  */
 export function seesGroupQueues(canViewGroups: boolean, groups: InboxGroup[]): boolean {
   return canViewGroups && groups.some((group) => group.member);
@@ -229,9 +231,13 @@ export function viewHref(base: string, filters: ViewFilters, q: string): string 
 export function activeViewId(
   sections: InboxViewSection[],
   filters: InboxFilters,
-  { canViewAll, canViewGroups = false }: { canViewAll: boolean; canViewGroups?: boolean },
+  {
+    canViewAll,
+    canViewGroups = false,
+    groups = [],
+  }: { canViewAll: boolean; canViewGroups?: boolean; groups?: InboxGroup[] },
 ): string | null {
-  const seesOnlyOwn = !canViewAll && !canViewGroups;
+  const seesOnlyOwn = !canViewAll && !seesGroupQueues(canViewGroups, groups);
   const scope = (view: InboxFilters['view']) => (seesOnlyOwn && view === 'all' ? 'mine' : view);
 
   for (const section of sections) {
