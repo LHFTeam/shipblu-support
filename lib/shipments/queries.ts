@@ -12,6 +12,7 @@ import {
   shippingAccounts,
   ticketStatuses,
 } from '@/db/schema';
+import { heldByOrInGroupsOf } from '@/lib/tickets/assignment-scope';
 import type { ConversationChannel } from '@/lib/tickets/channel-policy';
 import { couldBeReference, normaliseSbid, normaliseTrackingNumber } from './format';
 import { deriveRequesterRole, type RequesterRole } from './roles';
@@ -35,7 +36,12 @@ import { cleanQuery, textMatches, textPatterns } from '@/lib/search/text';
 
 export type ReadScope = {
   excludeChannels?: readonly ConversationChannel[];
-  onlyAssigneeAgentId?: string;
+  /**
+   * Only the conversations this agent holds and, with `includeGroups`, those
+   * sitting in a group they belong to. An id rather than a `SessionAgent`, for
+   * the reason above; the console fills it from `scopeForAgent`.
+   */
+  onlyVisibleTo?: { agentId: string; includeGroups: boolean };
   includeClosed?: boolean;
   limit?: number;
 };
@@ -155,8 +161,8 @@ function scopeClauses(scope: ReadScope): SQL[] {
   if (scope.excludeChannels?.length) {
     where.push(notInArray(conversations.channel, [...scope.excludeChannels]));
   }
-  if (scope.onlyAssigneeAgentId) {
-    where.push(eq(conversations.assigneeAgentId, scope.onlyAssigneeAgentId));
+  if (scope.onlyVisibleTo) {
+    where.push(heldByOrInGroupsOf(scope.onlyVisibleTo.agentId, scope.onlyVisibleTo.includeGroups));
   }
   if (!scope.includeClosed) {
     where.push(notInArray(ticketStatuses.category, ['closed']));

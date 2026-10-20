@@ -3,9 +3,9 @@ import { LOW_RATINGS_RANGE } from '@/lib/csat/limits';
 import type { InboxFilters } from './inbox-filters';
 
 /**
- * The inbox's views — Mine, Unassigned, All open, one per channel, Pending,
- * Resolved and Rated 1–2 — as presets over the filters the URL already
- * carries.
+ * The inbox's views — Mine, Unassigned, All open, My groups, one per group,
+ * one per channel, Pending, Resolved and Rated 1–2 — as presets over the
+ * filters the URL already carries.
  *
  * A view sets every axis at once rather than toggling one, so choosing one
  * always lands on the same list whatever was selected before it, and the link
@@ -23,9 +23,9 @@ import type { InboxFilters } from './inbox-filters';
  * left to `channelInfo()`, so a view and a badge cannot name a channel twice.
  */
 
-type ViewFilters = Pick<InboxFilters, 'view' | 'statusCategory' | 'channel' | 'rating'>;
+type ViewFilters = Pick<InboxFilters, 'view' | 'statusCategory' | 'channel' | 'rating' | 'group'>;
 
-export type ViewIcon = 'user' | 'inbox' | 'list' | 'clock' | 'check' | 'thumbs-down';
+export type ViewIcon = 'user' | 'users' | 'inbox' | 'list' | 'clock' | 'check' | 'thumbs-down';
 
 export type InboxView = {
   id: string;
@@ -35,11 +35,11 @@ export type InboxView = {
   channel?: FilterableChannel;
   filters: ViewFilters;
   /**
-   * Which of `inboxCounts()`' numbers belongs beside it. Only these three have
+   * Which of `inboxCounts()`' numbers belongs beside it. Only these four have
    * one: the counts are open and pending tickets over every unrestricted
    * channel, which is exactly these views' list and nobody else's.
    */
-  count?: 'mine' | 'unassigned' | 'all';
+  count?: 'mine' | 'unassigned' | 'groups' | 'all';
   /** Drawn as the coral count: an unassigned ticket is waiting on somebody to take it. */
   attention?: boolean;
 };
@@ -51,15 +51,24 @@ const OPEN_WORK: ViewFilters = {
   statusCategory: 'unresolved',
   channel: 'all',
   rating: 'any',
+  group: null,
 };
+
+export type InboxGroup = { id: string; name: string; member: boolean };
 
 export function inboxViews({
   canSeeBot,
   canViewAll,
+  canViewGroups = false,
+  groups = [],
   canSeeRatings,
 }: {
   canSeeBot: boolean;
   canViewAll: boolean;
+  /** `ticket.view.group`: their groups' tickets as well as their own. */
+  canViewGroups?: boolean;
+  /** `inboxGroupsFor()`: every group for `canViewAll`, the agent's own otherwise. */
+  groups?: InboxGroup[];
   /** `report.view`, which `listInbox` requires of the rated view too. */
   canSeeRatings: boolean;
 }): InboxViewSection[] {
@@ -71,13 +80,18 @@ export function inboxViews({
     count: 'mine',
   };
 
+  // An agent who sees only their own tickets has an Unassigned that is always
+  // empty and an All that is their own list again — `listInbox` forces the
+  // assignee for them — so they are offered neither. One who sees their groups'
+  // has both, each inside what they may see: Unassigned is what is waiting in
+  // their groups, which is the reason a group is a queue at all.
+  const seesTeam = canViewAll || canViewGroups;
+  const memberOf = groups.filter((group) => group.member);
+
   return [
     {
       title: null,
-      // An agent who sees only their own tickets has an Unassigned that is
-      // always empty and an All that is their own list again — `listInbox`
-      // forces the assignee for them — so they are offered neither.
-      items: canViewAll
+      items: seesTeam
         ? [
             mine,
             {
@@ -89,9 +103,36 @@ export function inboxViews({
               attention: true,
             },
             { id: 'all', label: 'All open', icon: 'list', filters: OPEN_WORK, count: 'all' },
+            ...(memberOf.length
+              ? [
+                  {
+                    id: 'groups',
+                    label: 'My groups',
+                    icon: 'users' as const,
+                    filters: { ...OPEN_WORK, view: 'groups' as const },
+                    count: 'groups' as const,
+                  },
+                ]
+              : []),
           ]
         : [mine],
     },
+    // One view per group, for whoever has more than one to tell apart: a
+    // supervisor reading each team's queue, or an agent in several groups.
+    // An agent in one group already has it as "My groups".
+    ...(seesTeam && groups.length > 1
+      ? [
+          {
+            title: 'Groups',
+            items: groups.map((group) => ({
+              id: `group-${group.id}`,
+              label: group.name,
+              icon: 'users' as const,
+              filters: { ...OPEN_WORK, group: group.id },
+            })),
+          },
+        ]
+      : []),
     {
       title: 'Channels',
       // The same list the Channel select is built from, so a view cannot exist
@@ -157,6 +198,7 @@ export function viewHref(base: string, filters: ViewFilters, q: string): string 
   }
   if (filters.channel !== OPEN_WORK.channel) params.set('channel', filters.channel);
   if (filters.rating !== OPEN_WORK.rating) params.set('rating', filters.rating);
+  if (filters.group) params.set('group', filters.group);
   if (q) params.set('q', q);
 
   const query = params.toString();
@@ -169,14 +211,16 @@ export function viewHref(base: string, filters: ViewFilters, q: string): string 
  *
  * For an agent who sees only their own tickets, "all" and "mine" are the same
  * list, so they are compared as one: their bare inbox is Mine, and a channel
- * view stays recognisable from either spelling.
+ * view stays recognisable from either spelling. Not for one who sees their
+ * groups' tickets, whose All is wider than Mine.
  */
 export function activeViewId(
   sections: InboxViewSection[],
   filters: InboxFilters,
-  { canViewAll }: { canViewAll: boolean },
+  { canViewAll, canViewGroups = false }: { canViewAll: boolean; canViewGroups?: boolean },
 ): string | null {
-  const scope = (view: InboxFilters['view']) => (!canViewAll && view === 'all' ? 'mine' : view);
+  const seesOnlyOwn = !canViewAll && !canViewGroups;
+  const scope = (view: InboxFilters['view']) => (seesOnlyOwn && view === 'all' ? 'mine' : view);
 
   for (const section of sections) {
     for (const item of section.items) {
@@ -184,7 +228,8 @@ export function activeViewId(
         scope(item.filters.view) === scope(filters.view) &&
         item.filters.statusCategory === filters.statusCategory &&
         item.filters.channel === filters.channel &&
-        item.filters.rating === filters.rating
+        item.filters.rating === filters.rating &&
+        item.filters.group === filters.group
       ) {
         return item.id;
       }

@@ -60,8 +60,20 @@ describe('parseFilters', () => {
       statusCategory: 'unresolved',
       channel: 'all',
       rating: 'any',
+      group: null,
       q: '',
     });
+  });
+
+  it('reads the groups view and a group by id, and refuses an id that is not one', () => {
+    const id = '0861A48B-8BD8-4EA0-B288-54460A63DEEE';
+    expect(parseFilters({ view: 'groups', group: id })).toMatchObject({
+      view: 'groups',
+      group: id.toLowerCase(),
+    });
+    // Postgres answers a malformed uuid with 22P02, which would fail the page
+    // rather than answer with an empty list.
+    expect(parseFilters({ group: 'Merchant Care' }).group).toBeNull();
   });
 
   it('no longer carries a page number', () => {
@@ -84,6 +96,7 @@ describe('parseFilters', () => {
       statusCategory: 'resolved',
       channel: 'whatsapp',
       rating: 'low',
+      group: null,
       q: '#42',
     });
   });

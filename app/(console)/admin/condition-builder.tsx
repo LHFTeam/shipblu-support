@@ -122,6 +122,7 @@ export function ConditionBuilder({
             const unary = OPERATORS.find((op) => op.value === row.op)?.unary;
             const listOperator = isListOperator(row.op);
             const selectedChoices = listOperator ? listValue(row.value) : [];
+            const choices = field.choices ? shownChoices(field, row) : undefined;
 
             return (
               <div key={index} className="flex flex-wrap items-center gap-2">
@@ -152,7 +153,7 @@ export function ConditionBuilder({
                   ))}
                 </Select>
 
-                {unary ? null : field.choices && listOperator ? (
+                {unary ? null : choices && listOperator ? (
                   // A native multiple select makes desktop users hold Ctrl/Cmd
                   // and behaves differently again on a phone. The console is
                   // used on both, so make every member of the set an explicit
@@ -162,12 +163,12 @@ export function ConditionBuilder({
                     aria-label={`${field.label} options`}
                     className="flex max-h-40 w-48 flex-col gap-1.5 overflow-y-auto rounded-md border border-(--color-border-subtle) bg-(--color-background-surface) p-2"
                   >
-                    {field.choices.length === 0 ? (
+                    {choices.length === 0 ? (
                       <span className="text-xs text-(--color-text-secondary)">
                         No options available
                       </span>
                     ) : (
-                      field.choices.map((choice) => (
+                      choices.map((choice) => (
                         <label key={choice.value} className="flex items-center gap-2 text-sm">
                           <input
                             type="checkbox"
@@ -188,14 +189,14 @@ export function ConditionBuilder({
                       ))
                     )}
                   </div>
-                ) : field.choices ? (
+                ) : choices ? (
                   <Select
                     value={scalarValue(row.value)}
                     onChange={(event) => update(index, { ...row, value: event.target.value })}
                     className="w-48!"
                   >
                     <option value="">Choose…</option>
-                    {field.choices.map((choice) => (
+                    {choices.map((choice) => (
                       <option key={choice.value} value={choice.value}>
                         {choice.label}
                       </option>
@@ -408,6 +409,28 @@ export function rowForField(row: Row, fieldValue: string, fields: FieldOption[])
     // condition the control is not displaying.
     value: isListOperator(op) ? [] : (field.choices?.[0]?.value ?? ''),
   };
+}
+
+/**
+ * The choices a row offers: the field's own, plus whatever the row holds that
+ * is not one of them.
+ *
+ * A stored value can stop being a choice, or never have been one: a group
+ * condition typed by name before `group.id` was a picker, a form slug renamed
+ * since, a custom field's option removed. Offered only the field's own
+ * choices, the dropdown shows "Choose…" over a value it cannot display, and a
+ * set keeps a member with no checkbox — both written back on every save, and
+ * both conditions that silently never match. Named "Unknown" instead, the
+ * stale value is on screen where an admin can see it and take it out.
+ */
+export function shownChoices(field: FieldOption, row: Row): { value: string; label: string }[] {
+  const own = field.choices ?? [];
+  const known = new Set(own.map((choice) => choice.value));
+  const held = isListOperator(row.op) ? listValue(row.value) : [scalarValue(row.value)];
+  const stale = held
+    .filter((value) => value !== '' && !known.has(value))
+    .map((value) => ({ value, label: `Unknown: ${value}` }));
+  return [...stale, ...own];
 }
 
 function listValue(value: Row['value']): string[] {

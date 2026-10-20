@@ -16,13 +16,13 @@ import { formName } from '@/lib/forms/naming';
 import { suppressedBy, ticketSurveyState, type TicketSurveyState } from '@/lib/csat';
 import type { SuppressedBy } from '@/lib/csat/decision';
 import type { SessionAgent } from '@/lib/auth/session';
-import { can } from '@/lib/auth/permissions';
 import { configuredAccountId } from '@/lib/meta/client';
 import { metaConnection } from '@/lib/meta/connection';
 import { metaThreadStateFromMessage, type MetaThreadState } from '@/lib/meta/thread';
 import type { CustomFieldValues } from './custom-fields';
 import { threadControlTakenAt } from './meta-thread';
 import { hiddenChannels } from './channel-policy';
+import { assignmentVisibility } from './visibility';
 import { metaIndex } from './message-media';
 import {
   foldReactions,
@@ -192,9 +192,8 @@ export async function getConversation(
   number: number,
 ): Promise<ConversationDetail | null> {
   const where = [eq(conversations.number, number), isNull(conversations.deletedAt)];
-  if (!can(agent, 'ticket.view.all')) {
-    where.push(eq(conversations.assigneeAgentId, agent.id));
-  }
+  const assignment = assignmentVisibility(agent);
+  if (assignment) where.push(assignment);
 
   // In the query, not after it: a ticket the agent may not see must not be
   // loaded and then hidden, or reachable by typing its number into the URL.

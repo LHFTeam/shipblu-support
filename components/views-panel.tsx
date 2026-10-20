@@ -2,7 +2,15 @@ import Link from 'next/link';
 import type { ReactNode } from 'react';
 import type { ViewIcon } from '@/lib/tickets/inbox-views';
 import { channelInfo } from './channel';
-import { CheckIcon, ClockIcon, InboxIcon, ListIcon, ThumbsDownIcon, UserIcon } from './icons';
+import {
+  CheckIcon,
+  ClockIcon,
+  InboxIcon,
+  ListIcon,
+  ThumbsDownIcon,
+  UserIcon,
+  UsersIcon,
+} from './icons';
 import { CountBadge } from './ui';
 
 export type ViewsPanelItem = {
@@ -21,6 +29,7 @@ export type ViewsPanelSection = { title: string | null; items: ViewsPanelItem[] 
 
 const ICONS: Record<ViewIcon, (props: { size: number; className: string }) => ReactNode> = {
   user: UserIcon,
+  users: UsersIcon,
   inbox: InboxIcon,
   list: ListIcon,
   clock: ClockIcon,

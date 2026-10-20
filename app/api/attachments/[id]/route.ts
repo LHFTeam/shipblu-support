@@ -8,11 +8,11 @@ import {
   sideConversationMessages,
   sideConversations,
 } from '@/db/schema';
-import { can } from '@/lib/auth/permissions';
 import { getSessionAgent } from '@/lib/auth/session';
 import { ATTACHMENT_URL_TTL_SECONDS } from '@/lib/attachments/signed-url';
 import { isUuid } from '@/lib/http/uuid';
 import { canSeeChannel } from '@/lib/tickets/channel-policy';
+import { canSeeAssignment } from '@/lib/tickets/visibility';
 import { signedUrl } from '@/lib/storage';
 
 export const dynamic = 'force-dynamic';
@@ -47,6 +47,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     .select({
       storagePath: attachments.storagePath,
       assigneeAgentId: conversations.assigneeAgentId,
+      groupId: conversations.groupId,
       channel: conversations.channel,
     })
     .from(attachments)
@@ -71,7 +72,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
 
   // Same visibility rule as the ticket the file hangs off — otherwise an
   // attachment id would be a way around it.
-  if (!can(agent, 'ticket.view.all') && attachment.assigneeAgentId !== agent.id) {
+  if (!(await canSeeAssignment(agent, attachment))) {
     return NextResponse.json({ error: 'not found' }, { status: 404 });
   }
 

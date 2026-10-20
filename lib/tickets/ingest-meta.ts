@@ -1,4 +1,4 @@
-import { and, desc, eq, isNull } from 'drizzle-orm';
+import { and, asc, desc, eq, isNull } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { channels, conversationEvents, conversations, messages, ticketStatuses } from '@/db/schema';
 import type {
@@ -573,10 +573,15 @@ async function findByExternalId(externalId: string): Promise<FoundConversation |
 }
 
 async function channelFor(platform: MetaPlatform) {
+  // Ordered, as `webchatChannel` is (`lib/widget/session.ts`): nothing stops an
+  // admin adding a second row of a type, and without an order Postgres may hand
+  // back either — so which group a new ticket starts in would depend on the
+  // plan Postgres happened to pick. Oldest wins, the row that has been routing.
   const rows = await db
     .select({ id: channels.id, defaultGroupId: channels.defaultGroupId })
     .from(channels)
     .where(and(eq(channels.type, platform), eq(channels.isActive, true)))
+    .orderBy(asc(channels.createdAt), asc(channels.id))
     .limit(1);
 
   return rows[0] ?? null;

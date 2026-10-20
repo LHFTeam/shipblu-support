@@ -1,4 +1,9 @@
-import { listActiveTicketFields, listFormNames } from '@/lib/admin/settings';
+import {
+  listActiveAgents,
+  listActiveTicketFields,
+  listFormNames,
+  listGroupNames,
+} from '@/lib/admin/settings';
 import { formName } from '@/lib/forms/naming';
 import { PRIORITY_CHOICES } from '@/lib/tickets/vocabulary';
 import type { FieldOption } from './condition-builder';
@@ -12,7 +17,12 @@ import type { FieldOption } from './condition-builder';
  * absent, which silently never matches.
  */
 export async function ticketFieldOptions(): Promise<FieldOption[]> {
-  const [custom, forms] = await Promise.all([listActiveTicketFields(), listFormNames()]);
+  const [custom, forms, groupNames, agentNames] = await Promise.all([
+    listActiveTicketFields(),
+    listFormNames(),
+    listGroupNames(),
+    listActiveAgents(),
+  ]);
 
   const base: FieldOption[] = [
     {
@@ -61,8 +71,23 @@ export async function ticketFieldOptions(): Promise<FieldOption[]> {
         label: formName(form, 'en'),
       })),
     },
-    { value: 'group.id', label: 'Group', kind: 'text' },
-    { value: 'assignee.id', label: 'Assignee', kind: 'text' },
+    // Choices, because the facts hold uuids (`lib/rules/facts.ts`) and nobody
+    // types one. Offered as free text, production's SLA policies were written
+    // against group *names* — "Merchant Care" — which never equal a uuid, so
+    // every group condition in them was silently false. A stored name now
+    // shows as "Unknown: Merchant Care" (`shownChoices`) so it can be replaced.
+    {
+      value: 'group.id',
+      label: 'Group',
+      kind: 'choice',
+      choices: groupNames.map((group) => ({ value: group.id, label: group.name })),
+    },
+    {
+      value: 'assignee.id',
+      label: 'Assignee',
+      kind: 'choice',
+      choices: agentNames.map((agent) => ({ value: agent.id, label: agent.name })),
+    },
     {
       value: 'is_assigned',
       label: 'Is assigned',

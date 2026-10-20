@@ -1,4 +1,4 @@
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, asc, eq, inArray } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { channels, conversations, messages } from '@/db/schema';
 import { enqueue } from '@/lib/queue';
@@ -745,7 +745,10 @@ export async function resolveWhatsAppChannel(
       config: channels.config,
     })
     .from(channels)
-    .where(and(inArray(channels.type, ['whatsapp', 'whatsapp_bot']), eq(channels.isActive, true)));
+    .where(and(inArray(channels.type, ['whatsapp', 'whatsapp_bot']), eq(channels.isActive, true)))
+    // Ordered for the fallback below. A number matches at most one row, but
+    // "the support channel" for a number with none is a choice among rows.
+    .orderBy(asc(channels.createdAt), asc(channels.id));
 
   const byNumber = phoneNumberId
     ? rows.find((c) => c.config?.phoneNumberId === phoneNumberId)
@@ -762,8 +765,13 @@ export async function resolveWhatsAppChannel(
 
   // No row for this number. Only ever the support channel — a bot number is
   // known by its row, and inferring "bot" from the absence of one would hide
-  // real customer messages from the team.
-  const support = rows.find((c) => c.type === 'whatsapp');
+  // real customer messages from the team. And a support number rather than a
+  // coexistence one where there is a choice: a coexistence row is somebody's
+  // phone, with a default group of its own (production's Merchant Care
+  // number), and a message on a number no row names is not its traffic.
+  const support =
+    rows.find((c) => c.type === 'whatsapp' && parseCoexistence(c.config) === null) ??
+    rows.find((c) => c.type === 'whatsapp');
   // Not coexistence, whatever the support row is: the event came in on a
   // number no row names, and only a number's own row can say it is on the app.
   return {

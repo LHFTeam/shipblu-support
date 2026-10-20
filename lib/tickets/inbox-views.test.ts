@@ -5,6 +5,13 @@ import { activeViewId, inboxViews, viewHref } from './inbox-views';
 
 const everything = { canSeeBot: true, canViewAll: true, canSeeRatings: true };
 
+const CUSTOMER_CARE = '0861a48b-8bd8-4ea0-b288-54460a63deee';
+const MERCHANT_CARE = 'b080b5d9-4237-45f3-a514-a6a8bc88e604';
+const GROUPS = [
+  { id: CUSTOMER_CARE, name: 'Customer Care', member: true },
+  { id: MERCHANT_CARE, name: 'Merchant Care', member: false },
+];
+
 function parsed(href: string) {
   const query = href.split('?')[1] ?? '';
   return parseFilters(Object.fromEntries(new URLSearchParams(query)));
@@ -12,7 +19,7 @@ function parsed(href: string) {
 
 describe('inboxViews', () => {
   it('links every view to filters the parser reads back exactly', () => {
-    for (const section of inboxViews(everything)) {
+    for (const section of inboxViews({ ...everything, groups: GROUPS })) {
       for (const item of section.items) {
         const filters = parsed(viewHref('/inbox', item.filters, ''));
         expect({
@@ -20,6 +27,7 @@ describe('inboxViews', () => {
           statusCategory: filters.statusCategory,
           channel: filters.channel,
           rating: filters.rating,
+          group: filters.group,
         }).toEqual(item.filters);
       }
     }
@@ -60,7 +68,41 @@ describe('inboxViews', () => {
       statusCategory: 'all',
       channel: 'all',
       rating: 'low',
+      group: null,
     });
+  });
+
+  // `ticket.view.group` is what makes a group a queue: a ticket routed into a
+  // group and not yet assigned is in nobody's Mine, so without Unassigned and
+  // My groups an agent in that group had no list that showed it.
+  it('gives an agent who sees their groups Unassigned, All and My groups', () => {
+    const ids = inboxViews({
+      canSeeBot: false,
+      canViewAll: false,
+      canViewGroups: true,
+      groups: [{ id: CUSTOMER_CARE, name: 'Customer Care', member: true }],
+      canSeeRatings: false,
+    })[0]!.items.map((item) => item.id);
+    expect(ids).toEqual(['mine', 'unassigned', 'all', 'groups']);
+  });
+
+  it('offers My groups only to a member of one, and a view per group only where there are several', () => {
+    const items = (groups: typeof GROUPS) =>
+      inboxViews({ ...everything, groups }).flatMap((section) => section.items);
+
+    expect(items([]).map((item) => item.id)).not.toContain('groups');
+    expect(items([{ ...GROUPS[1]!, member: false }]).map((item) => item.id)).not.toContain(
+      'groups',
+    );
+
+    const several = items(GROUPS);
+    expect(several.map((item) => item.id)).toEqual(
+      expect.arrayContaining(['groups', `group-${CUSTOMER_CARE}`, `group-${MERCHANT_CARE}`]),
+    );
+    expect(several.find((item) => item.id === `group-${MERCHANT_CARE}`)?.filters.group).toBe(
+      MERCHANT_CARE,
+    );
+    expect(items([GROUPS[0]!]).map((item) => item.id)).not.toContain(`group-${CUSTOMER_CARE}`);
   });
 });
 
@@ -70,7 +112,7 @@ describe('viewHref', () => {
     expect(
       viewHref(
         '/inbox/812',
-        { view: 'mine', statusCategory: 'unresolved', channel: 'all', rating: 'any' },
+        { view: 'mine', statusCategory: 'unresolved', channel: 'all', rating: 'any', group: null },
         '',
       ),
     ).toBe('/inbox/812?view=mine');
@@ -79,7 +121,7 @@ describe('viewHref', () => {
   it('carries the search across a change of view', () => {
     const href = viewHref(
       '/inbox',
-      { view: 'all', statusCategory: 'pending', channel: 'all', rating: 'any' },
+      { view: 'all', statusCategory: 'pending', channel: 'all', rating: 'any', group: null },
       'أحمد',
     );
     expect(parsed(href)).toMatchObject({ statusCategory: 'pending', q: 'أحمد' });
@@ -130,5 +172,26 @@ describe('activeViewId', () => {
       'ch-email',
     );
     expect(activeViewId(theirs, parseFilters({ view: 'unassigned' }), own)).toBe(null);
+  });
+
+  it('keeps All and Mine apart for an agent who sees their groups', () => {
+    const team = { canViewAll: false, canViewGroups: true };
+    const theirs = inboxViews({
+      canSeeBot: false,
+      canSeeRatings: false,
+      groups: [{ id: CUSTOMER_CARE, name: 'Customer Care', member: true }],
+      ...team,
+    });
+    expect(activeViewId(theirs, parseFilters({}), team)).toBe('all');
+    expect(activeViewId(theirs, parseFilters({ view: 'mine' }), team)).toBe('mine');
+    expect(activeViewId(theirs, parseFilters({ view: 'groups' }), team)).toBe('groups');
+  });
+
+  it('tells one group’s view from the unfiltered list', () => {
+    const sections = inboxViews({ ...everything, groups: GROUPS });
+    expect(activeViewId(sections, parseFilters({ group: MERCHANT_CARE }), everything)).toBe(
+      `group-${MERCHANT_CARE}`,
+    );
+    expect(activeViewId(sections, parseFilters({}), everything)).toBe('all');
   });
 });

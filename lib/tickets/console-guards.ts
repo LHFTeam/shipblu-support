@@ -8,12 +8,12 @@ import {
   ticketCategories,
   ticketStatuses,
 } from '@/db/schema';
-import { can } from '@/lib/auth/permissions';
 import type { SessionAgent } from '@/lib/auth/session';
 import { CAUSE_REQUIRED_AREAS } from '@/lib/categorise/taxonomy';
 import type { ActionState } from '@/lib/http/action-state';
 import { isUuid } from '@/lib/http/uuid';
 import { canSeeChannel, consoleReplyReason, readOnlyReason } from '@/lib/tickets/channel-policy';
+import { canSeeAssignment } from '@/lib/tickets/visibility';
 import { listLabels, missingRequired } from '@/lib/tickets/custom-fields';
 import { listTicketFields } from '@/lib/tickets/lookups';
 import { changeStatus } from '@/lib/tickets/status';
@@ -57,9 +57,7 @@ export async function loadConversation(agent: SessionAgent, conversationId: stri
 
   // Same visibility rule as the read path, re-checked here: an action is a
   // separate entry point and must not trust that the page filtered anything.
-  if (!can(agent, 'ticket.view.all') && row.conversation.assigneeAgentId !== agent.id) {
-    return null;
-  }
+  if (!(await canSeeAssignment(agent, row.conversation))) return null;
 
   if (!canSeeChannel(agent, row.conversation.channel)) return null;
 

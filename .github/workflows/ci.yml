@@ -132,9 +132,24 @@ jobs:
       # migration would then be diffed against a schema state the database was
       # never in. `drizzle-kit generate` opens no connection, so this needs no
       # database.
+      #
+      # A rename is the case the diff alone cannot see. drizzle-kit asks
+      # interactively whether a table or column was renamed or replaced, and
+      # without a terminal it prints "Interactive prompts require a TTY", writes
+      # nothing and exits 0 — so a schema rename committed with no migration
+      # left db/migrations untouched and this step green, and only db:seed and
+      # the database tests failed later, with errors about a missing relation.
+      # The output is therefore read as well as the tree; the remedy is to run
+      # generate at a real terminal and answer the prompts.
       - name: Migrations match db/schema
         run: |
-          npx drizzle-kit generate
+          set -o pipefail
+          npx drizzle-kit generate < /dev/null 2>&1 | tee "$RUNNER_TEMP/drizzle-generate.log"
+          if grep -q 'Interactive prompts require a TTY' "$RUNNER_TEMP/drizzle-generate.log"; then
+            echo "::error::drizzle-kit needs an answer about a rename and could not ask."
+            echo "Run 'npm run db:generate' at a terminal, answer its prompts, and commit the migration it writes."
+            exit 1
+          fi
           if ! git diff --quiet -- db/migrations; then
             echo "::error::db/migrations is out of sync with db/schema."
             echo "Run 'npm run db:generate' and commit the result; never hand-edit a migration."

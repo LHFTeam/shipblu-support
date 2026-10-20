@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import {
   ConditionBuilder,
   rowForField,
+  shownChoices,
   valueForOperator,
   type FieldOption,
 } from './condition-builder';
@@ -29,6 +30,15 @@ const fields: FieldOption[] = [
     ],
   },
   { value: 'subject', label: 'Subject', kind: 'text' },
+  {
+    value: 'group.id',
+    label: 'Group',
+    kind: 'choice',
+    choices: [
+      { value: '0861a48b-8bd8-4ea0-b288-54460a63deee', label: 'Customer Care' },
+      { value: 'b080b5d9-4237-45f3-a514-a6a8bc88e604', label: 'Merchant Care' },
+    ],
+  },
 ];
 
 describe('ConditionBuilder', () => {
@@ -117,6 +127,55 @@ describe('ConditionBuilder', () => {
     expect(row.op).not.toBe('contains');
     expect(['eq', 'ne', 'in', 'not_in', 'is_set', 'is_empty']).toContain(row.op);
     expect(row.value).toBe('low');
+  });
+
+  // Production's SLA policies were written while `group.id` was free text, and
+  // hold group names. Once it is a choice, a name matches no option: the
+  // dropdown would show "Choose…" over it and the save would write it back,
+  // still never matching. Shown as "Unknown", it is visible and replaceable.
+  it('shows a stored value that is not a choice, rather than hiding it', () => {
+    const html = renderToStaticMarkup(
+      createElement(ConditionBuilder, {
+        name: 'conditions',
+        fields,
+        initial: { field: 'group.id', op: 'eq', value: 'Merchant Care' },
+      }),
+    );
+
+    expect(html).toContain(
+      '<option value="Merchant Care" selected="">Unknown: Merchant Care</option>',
+    );
+    expect(html).toContain('>Merchant Care</option>');
+  });
+
+  it('gives a stale member of a set a checkbox it can be unticked from', () => {
+    const html = renderToStaticMarkup(
+      createElement(ConditionBuilder, {
+        name: 'conditions',
+        fields,
+        initial: {
+          field: 'group.id',
+          op: 'in',
+          value: ['Customer Care', '0861a48b-8bd8-4ea0-b288-54460a63deee'],
+        },
+      }),
+    );
+
+    expect(inputFor(html, 'Customer Care')).toContain('checked=""');
+    expect(html).toContain('Unknown: Customer Care');
+    expect(inputFor(html, '0861a48b-8bd8-4ea0-b288-54460a63deee')).toContain('checked=""');
+  });
+
+  it('adds nothing when every held value is a choice', () => {
+    const group = fields[3]!;
+    expect(
+      shownChoices(group, {
+        field: 'group.id',
+        op: 'eq',
+        value: '0861a48b-8bd8-4ea0-b288-54460a63deee',
+      }),
+    ).toEqual(group.choices);
+    expect(shownChoices(group, { field: 'group.id', op: 'eq', value: '' })).toEqual(group.choices);
   });
 });
 

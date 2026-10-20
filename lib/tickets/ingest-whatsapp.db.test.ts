@@ -292,6 +292,43 @@ describe('ingestWhatsAppMessage', () => {
     expect(await db.select().from(jobs)).toEqual([]);
   });
 
+  // The fallback for a number no row names is "the support channel". With a
+  // coexistence phone and a plain support number both on file, an unordered
+  // pick could hand the message to the phone's row — and its default group —
+  // and an ordered one still would if the phone's row were older, as
+  // production's is not but could be.
+  it('files a number no row names under the support row, never a coexistence phone', async () => {
+    const [phone, support] = await db
+      .insert(channels)
+      .values([
+        {
+          type: 'whatsapp',
+          name: 'Somebody’s phone',
+          createdAt: new Date('2026-09-01T00:00:00Z'),
+          config: {
+            phoneNumberId: '106540352242922',
+            coexistence: { onboardedAt: '2026-09-01T00:00:00.000Z', wabaId: 'waba', syncs: {} },
+          },
+        },
+        {
+          type: 'whatsapp',
+          name: 'WhatsApp Support',
+          createdAt: new Date('2026-09-02T00:00:00Z'),
+          config: { phoneNumberId: '100000000000999' },
+        },
+      ])
+      .returning({ id: channels.id });
+
+    const result = await ingestWhatsAppMessage(inbound());
+
+    const [row] = await db
+      .select({ channelId: conversations.channelId })
+      .from(conversations)
+      .where(eq(conversations.id, result.conversationId));
+    expect(row?.channelId).toBe(support!.id);
+    expect(row?.channelId).not.toBe(phone!.id);
+  });
+
   it('continues the customer’s live conversation: the thread is the number', async () => {
     const first = await ingestWhatsAppMessage(inbound());
     const second = await ingestWhatsAppMessage(
