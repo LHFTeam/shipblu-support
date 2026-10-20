@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { FILTERABLE_CHANNELS } from './channel-policy';
 import { parseFilters } from './inbox-filters';
-import { activeViewId, inboxViews, viewHref } from './inbox-views';
+import { activeViewId, inboxViews, seesGroupQueues, viewHref } from './inbox-views';
 
 const everything = { canSeeBot: true, canViewAll: true, canSeeRatings: true };
 
@@ -84,6 +84,19 @@ describe('inboxViews', () => {
       canSeeRatings: false,
     })[0]!.items.map((item) => item.id);
     expect(ids).toEqual(['mine', 'unassigned', 'all', 'groups']);
+  });
+
+  // The agent role holds `ticket.view.group` whether or not anybody has put
+  // the agent in a group, and for one in none it widens nothing.
+  it('gives an agent who may see their groups, and is in none, only Mine', () => {
+    const ids = inboxViews({
+      canSeeBot: false,
+      canViewAll: false,
+      canViewGroups: true,
+      groups: [],
+      canSeeRatings: false,
+    })[0]!.items.map((item) => item.id);
+    expect(ids).toEqual(['mine']);
   });
 
   it('offers My groups only to a member of one, and a view per group only where there are several', () => {
@@ -185,6 +198,15 @@ describe('activeViewId', () => {
     expect(activeViewId(theirs, parseFilters({}), team)).toBe('all');
     expect(activeViewId(theirs, parseFilters({ view: 'mine' }), team)).toBe('mine');
     expect(activeViewId(theirs, parseFilters({ view: 'groups' }), team)).toBe('groups');
+  });
+
+  it('reads All as Mine for an agent who may see their groups and is in none', () => {
+    const own = { canViewAll: false, canViewGroups: seesGroupQueues(true, []) };
+    const theirs = inboxViews({ canSeeBot: false, canSeeRatings: false, ...own });
+    expect(activeViewId(theirs, parseFilters({}), own)).toBe('mine');
+    expect(activeViewId(theirs, parseFilters({ view: 'mine', channel: 'email' }), own)).toBe(
+      'ch-email',
+    );
   });
 
   it('tells one group’s view from the unfiltered list', () => {

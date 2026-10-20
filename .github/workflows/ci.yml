@@ -150,6 +150,14 @@ jobs:
             echo "Run 'npm run db:generate' at a terminal, answer its prompts, and commit the migration it writes."
             exit 1
           fi
+          # And it must say it finished, one way or the other. The TTY line is
+          # the one silent exit seen so far; any other way generate can stop
+          # without writing would pass the diff below just as quietly.
+          if ! grep -qE 'No schema changes, nothing to migrate|Your SQL migration file' "$RUNNER_TEMP/drizzle-generate.log"; then
+            echo "::error::drizzle-kit generate stopped without saying it compared the schema."
+            echo "Run 'npm run db:generate' at a terminal and read what it asks or reports."
+            exit 1
+          fi
           if ! git diff --quiet -- db/migrations; then
             echo "::error::db/migrations is out of sync with db/schema."
             echo "Run 'npm run db:generate' and commit the result; never hand-edit a migration."

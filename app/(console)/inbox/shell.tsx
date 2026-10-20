@@ -6,7 +6,7 @@ import { ViewsPanel, type ViewsPanelSection } from '@/components/views-panel';
 import { inboxCounts, listInbox } from '@/lib/tickets/inbox';
 import { parseFilters } from '@/lib/tickets/inbox-filters';
 import { inboxGroupsFor } from '@/lib/tickets/visibility';
-import { activeViewId, inboxViews, viewHref } from '@/lib/tickets/inbox-views';
+import { activeViewId, inboxViews, seesGroupQueues, viewHref } from '@/lib/tickets/inbox-views';
 import { InboxList, KnowledgeBaseLink } from './list';
 
 /**
@@ -53,7 +53,7 @@ export async function InboxShell({
 
   const viewingTicket = activeNumber !== undefined;
   const canViewAll = can(agent, 'ticket.view.all');
-  const canViewGroups = can(agent, 'ticket.view.group');
+  const canViewGroups = seesGroupQueues(can(agent, 'ticket.view.group'), groups);
   const canSeeBot = can(agent, 'ticket.view.bot');
   const canSeeRatings = can(agent, 'report.view');
 

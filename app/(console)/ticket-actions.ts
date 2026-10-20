@@ -268,6 +268,14 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
   await afterTicketUpdate(conversationId);
 
   refresh(row.conversation.number);
+
+  // An agent who sees their own and their groups' tickets can hand this one to
+  // somebody in another group, or move it there, and so out of their own sight.
+  // The revalidation re-renders the ticket page in this same response, and that
+  // page would now call notFound() — so, as `purgeTicket` does, the response
+  // carries the inbox instead. Asked after the observer rules, because one of
+  // them may have moved it too. `redirect` throws, so it stays outside any try.
+  if (!(await loadConversation(agent, conversationId))) redirect('/inbox');
   return ok();
 }
 

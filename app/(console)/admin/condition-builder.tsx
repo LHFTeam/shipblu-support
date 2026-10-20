@@ -118,7 +118,7 @@ export function ConditionBuilder({
 
           {rows.map((row, index) => {
             const field = fields.find((f) => f.value === row.field) ?? fields[0]!;
-            const operators = OPERATORS.filter((op) => op.kinds.includes(field.kind));
+            const operators = shownOperators(field, row);
             const unary = OPERATORS.find((op) => op.value === row.op)?.unary;
             const listOperator = isListOperator(row.op);
             const selectedChoices = listOperator ? listValue(row.value) : [];
@@ -409,6 +409,24 @@ export function rowForField(row: Row, fieldValue: string, fields: FieldOption[])
     // condition the control is not displaying.
     value: isListOperator(op) ? [] : (field.choices?.[0]?.value ?? ''),
   };
+}
+
+/**
+ * The operators a row offers: the field kind's own, plus the one the row holds
+ * when the kind does not offer it.
+ *
+ * The operator twin of `shownChoices`, for the same failure. A condition saved
+ * while its field was free text — `group.id contains …`, before groups were a
+ * picker — keeps `contains` after the field becomes a choice. Left out of the
+ * list, the dropdown draws its first option, "is", over an operator it is not
+ * holding, and every save writes the hidden one back. Shown and selected, it is
+ * on screen, and picking any other operator replaces it.
+ */
+export function shownOperators(field: FieldOption, row: Row): { value: Operator; label: string }[] {
+  const own = OPERATORS.filter((op) => op.kinds.includes(field.kind));
+  if (own.some((op) => op.value === row.op)) return own;
+  const held = OPERATORS.find((op) => op.value === row.op);
+  return [{ value: row.op, label: `${held?.label ?? row.op} (not offered here)` }, ...own];
 }
 
 /**

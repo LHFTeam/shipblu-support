@@ -56,6 +56,18 @@ const OPEN_WORK: ViewFilters = {
 
 export type InboxGroup = { id: string; name: string; member: boolean };
 
+/**
+ * Whether `ticket.view.group` widens anything for this agent. The permission is
+ * granted to the whole agent role, and an agent in no group holds it as well:
+ * for them Unassigned is always empty and All is Mine again, exactly as for an
+ * agent without it. So the views, the active view and the list's empty state
+ * all ask this rather than the permission, or such an agent is offered two
+ * lists that never hold anything and a channel view that never lights up.
+ */
+export function seesGroupQueues(canViewGroups: boolean, groups: InboxGroup[]): boolean {
+  return canViewGroups && groups.some((group) => group.member);
+}
+
 export function inboxViews({
   canSeeBot,
   canViewAll,
@@ -85,7 +97,7 @@ export function inboxViews({
   // assignee for them — so they are offered neither. One who sees their groups'
   // has both, each inside what they may see: Unassigned is what is waiting in
   // their groups, which is the reason a group is a queue at all.
-  const seesTeam = canViewAll || canViewGroups;
+  const seesTeam = canViewAll || seesGroupQueues(canViewGroups, groups);
   const memberOf = groups.filter((group) => group.member);
 
   return [

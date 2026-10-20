@@ -5,6 +5,7 @@ import {
   ConditionBuilder,
   rowForField,
   shownChoices,
+  shownOperators,
   valueForOperator,
   type FieldOption,
 } from './condition-builder';
@@ -164,6 +165,38 @@ describe('ConditionBuilder', () => {
     expect(inputFor(html, 'Customer Care')).toContain('checked=""');
     expect(html).toContain('Unknown: Customer Care');
     expect(inputFor(html, '0861a48b-8bd8-4ea0-b288-54460a63deee')).toContain('checked=""');
+  });
+
+  // The same policies could hold `group.id does not contain …`, an operator a
+  // choice field does not offer. Left off the list, the select would draw "is"
+  // over it and every save would write the hidden one back.
+  it('shows a stored operator the field does not offer, selected', () => {
+    const html = renderToStaticMarkup(
+      createElement(ConditionBuilder, {
+        name: 'conditions',
+        fields,
+        initial: { field: 'group.id', op: 'not_contains', value: 'Merchant' },
+      }),
+    );
+
+    expect(html).toContain(
+      '<option value="not_contains" selected="">does not contain (not offered here)</option>',
+    );
+    expect(html).toContain('<option value="eq">is</option>');
+    expect(hiddenValue(html)).toContain('not_contains');
+  });
+
+  it('adds no operator when the field offers the one held', () => {
+    const group = fields[3]!;
+    const offered = shownOperators(group, { field: 'group.id', op: 'eq', value: '' });
+    expect(offered.map((op) => op.value)).toEqual([
+      'eq',
+      'ne',
+      'in',
+      'not_in',
+      'is_set',
+      'is_empty',
+    ]);
   });
 
   it('adds nothing when every held value is a choice', () => {
