@@ -9,12 +9,13 @@ import { RATING_COLUMNS, type ReportWindow } from './rollup';
 /**
  * Read models for the reports page.
  *
- * Every figure here reads `metrics_daily`. That is the whole point of the
+ * Every figure here reads `metrics_daily`, which `byAgent` and `byGroup` join
+ * to `agents` and `groups` only for their names. That is the whole point of the
  * nightly rollup: the page stays fast as the archive grows, and opening it can
  * never put an aggregate over the full message history in front of the
- * database. The one other table is `rollup_days`, which says how far the rollup
- * has reached (`lastWholeDay`, `lastWholeRollup`) — the question
- * `metrics_daily` cannot answer, since a day nobody worked has no rows in it.
+ * database. What is not a figure reads `rollup_days`: how far the rollup has
+ * reached (`lastWholeDay`, `lastWholeRollup`), the question `metrics_daily`
+ * cannot answer, since a day nobody worked has no rows in it.
  */
 
 export type Totals = {

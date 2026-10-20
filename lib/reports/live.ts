@@ -157,7 +157,10 @@ export async function todaySoFar(
   context: ReportingContext,
   now: Date = new Date(),
 ): Promise<{ day: string; bucket: Bucket }> {
-  const day = todayIn(context.zone);
+  // Named at `now`, the instant the slices are cut at: from the wall clock, a
+  // render that straddled the team's midnight named the new day and cut it
+  // before it began, drawing it as zeros beside the old day's hours.
+  const day = todayIn(context.zone, now);
   const slices = await computeDay(day, context, now);
 
   return { day, bucket: totalsOf(slices) };
@@ -284,7 +287,11 @@ export type SystemHealth = {
   oldestPendingSince: Date | null;
   webhooksUnprocessed: number;
   oldestWebhookSince: Date | null;
-  /** The newest day the rollup has computed whole, worked or not (`lastComputedDay`). */
+  /**
+   * The newest day the rollup has computed whole, worked or not
+   * (`lastComputedDay`); in the `metrics_daily` fallback, the newest day
+   * before today with any figures, which a quiet day never is.
+   */
   rollupDay: string | null;
   /**
    * When the rollup began computing `rollupDay`; in the `metrics_daily`
