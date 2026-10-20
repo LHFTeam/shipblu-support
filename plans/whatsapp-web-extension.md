@@ -110,21 +110,24 @@ an agent who is busy in WhatsApp, and the user asked for an explicit sign-in.
 All under `app/api/extension/`, JSON, logic in `lib/extension/` per the layer
 rule:
 
-| Route                                  | Does                                                                   |
-| -------------------------------------- | ---------------------------------------------------------------------- |
-| `POST/DELETE session`                  | sign in / sign out                                                     |
-| `GET numbers`                          | the coexistence numbers this agent may see, with `displayPhoneNumber`  |
-| `POST resolve`                         | message keys + number → ticket (number, subject, status, requester)    |
-| `GET tickets/[id]/shipments`           | `shipmentsForConversation`, plus `agentTracking()` for the detail view |
-| `GET tickets/[id]/side-conversations`  | `sideConversationsForConversation`                                     |
-| `GET side-conversation-recipients`     | `listSideConversationRecipients`                                       |
-| `POST tickets/[id]/side-conversations` | start one; `POST …/[sideId]/reply`, `…/done` for the follow-ups        |
+| Route                                     | Does                                                           |
+| ----------------------------------------- | -------------------------------------------------------------- |
+| `POST/GET/DELETE session`                 | sign in / who am I / sign out                                  |
+| `GET numbers`                             | the coexistence numbers this agent may see (stage 2)           |
+| `POST resolve`                            | message keys + number → ticket (stage 2)                       |
+| `GET tickets/[id]/shipments`              | the parcels, each with the console sidebar's `shipmentCard()`  |
+| `GET tickets/[id]/shipments/[shipmentId]` | `agentTrackingFor`, behind `contact.view`, linked parcels only |
+| `GET tickets/[id]/side-conversations`     | the threads, and whether this agent may write                  |
+| `POST tickets/[id]/side-conversations`    | start one                                                      |
+| `POST side-conversations/[id]/replies`    | a follow-up                                                    |
+| `POST side-conversations/[id]/state`      | done / reopen                                                  |
+| `GET side-conversation-recipients`        | the picker's directory                                         |
 
 The side-conversation writes must not be a second copy of the action.
 `startSideConversation`'s body — recipient resolution from the directory, the
-three refusals, the anchor quote, the insert and the enqueue — moves into
-`lib/side-conversations/start.ts`, and both the server action and the route
-call it. Two copies of "who may receive this" is the failure
+three refusals, the anchor quote, the insert and the enqueue — moved into
+`lib/side-conversations/write.ts` with the reply and the state change, and
+both the server actions and the routes call it. Two copies of "who may receive this" is the failure
 `lib/side-conversations/guard.ts` exists to prevent.
 
 The shipment detail goes through `agentTracking()` and nothing else, so the
@@ -183,13 +186,26 @@ carry both.
 2. **Server: resolve** — `messages.wa_key`, ingest writes it, backfill job,
    `resolve` + `numbers` routes, `*.db.test.ts` for the lookup and its
    visibility rule.
-3. **Server: read + write** — shipments and side-conversation routes;
-   `lib/side-conversations/start.ts` extracted and the action moved onto it.
+3. **Server: read + write** — built. The routes above,
+   `lib/extension/tickets.ts` for the reads, `lib/side-conversations/write.ts`
+   shared with the console's actions, and `lib/extension/tickets.db.test.ts`
+   for visibility, permission and the customer's-address refusal.
 4. **Extension** — skeleton, sign-in, number detection, chat resolution,
    Shipments tab.
 5. **Extension** — Side conversations tab and composer.
 6. **Ship** — CI step for `extension/`, packaging, the Ubuntu policy file, a
    page in the console handbook.
+
+### Who sees which ticket
+
+The extension applies the console's visibility rule unchanged
+(`loadConversation`): a supervisor or admin sees every ticket, and an agent
+with the plain `agent` role sees only tickets **assigned to them**. On a
+coexistence number that is a real limit — a reply typed on the phone or in
+WhatsApp Web assigns nothing, so an agent answering an unassigned chat would
+see "not found" in the panel. Widening it is a product decision, not a
+side effect of this feature, and the options are: assign on reply from the
+panel, a per-number permission, or none. Open with the user.
 
 ## Decisions taken with the user
 
