@@ -1,39 +1,10 @@
 'use server';
 
-import { and, eq } from 'drizzle-orm';
-import { db } from '@/db/client';
-import {
-  contactIdentities,
-  contacts,
-  conversationEvents,
-  internalRecipients,
-  locations,
-  messages,
-  sideConversationMessages,
-  sideConversations,
-} from '@/db/schema';
 import { requireAgent } from '@/lib/auth/guard';
 import { text } from '@/lib/http/form-data';
 import { ok } from '@/lib/http/action-state';
-import { env } from '@/lib/env';
-import { can } from '@/lib/auth/permissions';
-import { enqueue } from '@/lib/queue';
-import { holdEntry } from '@/lib/side-conversations/directory';
-import { quoteAnchor, sideSubject } from '@/lib/side-conversations/format';
-import {
-  normaliseAddress,
-  parseAddressList,
-  refuseRecipient,
-  refuseRecipients,
-} from '@/lib/side-conversations/guard';
-import { lastSideMessageId, loadSideConversation } from '@/lib/side-conversations/queries';
-import { isReaction } from '@/lib/whatsapp/reaction';
-import {
-  applyStatusCategory,
-  loadConversation,
-  refresh,
-  refuseIfReadOnly,
-} from '@/lib/tickets/console-guards';
+import * as side from '@/lib/side-conversations/write';
+import { refresh } from '@/lib/tickets/console-guards';
 import type { ActionState } from './action-state';
 
 // --- Side conversations -----------------------------------------------------
@@ -41,212 +12,33 @@ import type { ActionState } from './action-state';
 /**
  * The thread an agent opens with a hub, a warehouse or a vendor.
  *
- * Every write here re-runs `loadConversation`, so a thread is only reachable
- * through a ticket the agent may see. Reaching a side conversation by id alone
- * would be a way past the ticket visibility rule, which is the same bug
- * `loadConversation` exists to prevent on the ticket itself.
+ * The writes themselves live in `lib/side-conversations/write.ts`, shared with
+ * the WhatsApp Web extension's routes, so the permission, the ticket's
+ * visibility rule and the refusal of the customer's own address are checked by
+ * one copy whichever surface the agent used. What is left here is reading the
+ * form and refreshing the ticket.
  */
-
-/** Every address we know the requester by — the addresses a send is refused for. */
-async function requesterAddresses(contactId: string): Promise<string[]> {
-  const rows = await db
-    .select({
-      primaryEmail: contacts.primaryEmail,
-      identifier: contactIdentities.identifier,
-      channel: contactIdentities.channel,
-    })
-    .from(contacts)
-    .leftJoin(contactIdentities, eq(contactIdentities.contactId, contacts.id))
-    .where(eq(contacts.id, contactId));
-
-  const addresses = new Set<string>();
-  for (const row of rows) {
-    if (row.primaryEmail) addresses.add(row.primaryEmail.toLowerCase());
-    // Only the email identities: a phone number is not an address this could be
-    // sent to, and including it would refuse nothing while looking like it did.
-    if (row.channel === 'email' && row.identifier) addresses.add(row.identifier.toLowerCase());
-  }
-
-  return [...addresses];
-}
 
 export async function startSideConversation(
   _state: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
   const agent = await requireAgent();
-  if (!can(agent, 'ticket.side_conversation')) {
-    return { error: 'You do not have permission to start a side conversation' };
-  }
 
-  const conversationId = String(formData.get('conversationId') ?? '');
-  const body = text(formData, 'body');
-  if (!body) return { error: 'Write your question first' };
-
-  const row = await loadConversation(agent, conversationId);
-  if (!row) return { error: 'Ticket not found' };
-
-  // A bot transcript is a copy of somebody else's conversation. Escalating one
-  // to a hub means asking them to act on a thread nobody here is working.
-  const readOnly = refuseIfReadOnly(row.conversation.channel);
-  if (readOnly) return readOnly;
-
-  const conversation = row.conversation;
-
-  // --- Who it goes to ------------------------------------------------------
-
-  /*
-   * The picker offers two registers in one list, so its value carries which:
-   * `location:<uuid>` for one of the places ShipBlu works out of,
-   * `recipient:<uuid>` for a party that is not a place, `other` for free text.
-   *
-   * The address is re-read from the row here rather than taken from a hidden
-   * form field. A field would be an address the browser supplied, and the whole
-   * point of a directory is that the address comes from somewhere an admin
-   * controls — otherwise the picker is a text box wearing a dropdown.
-   */
-  const picked = String(formData.get('recipientId') ?? '');
-  const typedAddress = String(formData.get('toAddress') ?? '');
-
-  let toAddress: string;
-  let resolvedRecipientId: string | null = null;
-  let resolvedLocationId: string | null = null;
-
-  if (picked.startsWith('location:')) {
-    const id = picked.slice('location:'.length);
-    const rows = await db
-      .select({ id: locations.id, email: locations.email })
-      .from(locations)
-      .where(and(eq(locations.id, id), eq(locations.isActive, true)))
-      .limit(1);
-
-    const place = rows[0];
-    if (!place) return { error: 'That location is no longer available' };
-
-    resolvedLocationId = place.id;
-    toAddress = place.email;
-  } else if (picked.startsWith('recipient:')) {
-    const id = picked.slice('recipient:'.length);
-    const rows = await db
-      .select({ id: internalRecipients.id, email: internalRecipients.email })
-      .from(internalRecipients)
-      .where(and(eq(internalRecipients.id, id), eq(internalRecipients.isActive, true)))
-      .limit(1);
-
-    const recipient = rows[0];
-    if (!recipient) return { error: 'That recipient is no longer available' };
-
-    resolvedRecipientId = recipient.id;
-    toAddress = recipient.email;
-  } else {
-    // `other`, and also the picker's unchosen "Choose…", which `required` stops
-    // in the browser. Sent anyway, it arrives with no typed address either —
-    // the field is only rendered for `other` — and `refuseRecipient` answers it.
-    toAddress = normaliseAddress(typedAddress);
-  }
-
-  const ccAddresses = parseAddressList(String(formData.get('ccAddresses') ?? ''));
-
-  // Re-checked here and not only in the composer. Hiding a control stops the
-  // honest path; this stops the others — a stale tab, a resubmitted form, a
-  // hand-made POST — and this is the refusal that keeps an internal thread away
-  // from the person it is about.
-  const check = {
-    ourAddresses: [env().EMAIL_FROM_ADDRESS].filter((a): a is string => Boolean(a)),
-    requesterAddresses: await requesterAddresses(conversation.requesterContactId),
-  };
-
-  const refusal = refuseRecipient(toAddress, check) ?? refuseRecipients(ccAddresses, check) ?? null;
-  if (refusal) return { error: refusal };
-
-  // --- What it says --------------------------------------------------------
-
-  const subject = sideSubject(text(formData, 'subject'), conversation.subject);
-
-  const anchorMessageId = String(formData.get('anchorMessageId') ?? '') || null;
-
-  let outboundBody = body;
-  if (formData.get('includeAnchor') === 'on' && anchorMessageId) {
-    const quoted = await quotedAnchorMessage(conversationId, anchorMessageId);
-    if (quoted) outboundBody = `${body}\n\n${quoted}`;
-  }
-
-  const created = await db.transaction(async (tx) => {
-    // Checked again, under a lock, because the read that resolved the address
-    // took none: an admin could delete or retire the hub since, and the insert
-    // would then die on the foreign key or go to a hub just marked not operating.
-    // `holdEntry` says how the lock and the delete's wait for each other.
-    const open = resolvedLocationId
-      ? await holdEntry(tx, 'location', resolvedLocationId)
-      : resolvedRecipientId
-        ? await holdEntry(tx, 'recipient', resolvedRecipientId)
-        : true;
-    if (!open) return null;
-
-    const inserted = await tx
-      .insert(sideConversations)
-      .values({
-        conversationId,
-        anchorMessageId,
-        channel: 'email',
-        subject,
-        recipientId: resolvedRecipientId,
-        locationId: resolvedLocationId,
-        toAddresses: [toAddress],
-        ccAddresses,
-        createdByAgentId: agent.id,
-        lastMessageAt: new Date(),
-      })
-      .returning({ id: sideConversations.id, number: sideConversations.number });
-
-    const side = inserted[0]!;
-
-    const message = await tx
-      .insert(sideConversationMessages)
-      .values({
-        sideConversationId: side.id,
-        direction: 'outbound',
-        authorAgentId: agent.id,
-        toAddresses: [toAddress],
-        ccAddresses,
-        bodyText: outboundBody,
-        deliveryStatus: 'pending',
-      })
-      .returning({ id: sideConversationMessages.id });
-
-    await tx.insert(conversationEvents).values({
-      conversationId,
-      type: 'side_conversation_started',
-      actorAgentId: agent.id,
-      data: { sideConversationNumber: side.number, to: toAddress, subject },
-    });
-
-    return { ...side, messageId: message[0]!.id };
+  const result = await side.startSideConversation(agent, {
+    conversationId: String(formData.get('conversationId') ?? ''),
+    body: text(formData, 'body'),
+    recipientId: String(formData.get('recipientId') ?? ''),
+    toAddress: String(formData.get('toAddress') ?? ''),
+    ccAddresses: String(formData.get('ccAddresses') ?? ''),
+    subject: text(formData, 'subject'),
+    anchorMessageId: String(formData.get('anchorMessageId') ?? '') || null,
+    includeAnchor: formData.get('includeAnchor') === 'on',
+    setPending: formData.get('setPending') === 'on',
   });
+  if (result.error !== null) return { error: result.error };
 
-  if (!created) {
-    return {
-      error: resolvedLocationId
-        ? 'That location is no longer available'
-        : 'That recipient is no longer available',
-    };
-  }
-
-  await enqueue(
-    'send_side_email',
-    { messageId: created.messageId },
-    { priority: 10, dedupeKey: `send_side:${created.messageId}` },
-  );
-
-  // Offered rather than done silently. The agent asked somebody a question, so
-  // the ticket is genuinely waiting on a third party — but pausing an SLA clock
-  // behind a thread the customer cannot see would make the report stop matching
-  // what the customer experienced, so the status is theirs to set.
-  if (formData.get('setPending') === 'on') {
-    await applyStatusCategory(agent, conversationId, 'pending');
-  }
-
-  refresh(conversation.number);
+  refresh(result.conversationNumber);
   return ok();
 }
 
@@ -255,58 +47,14 @@ export async function replyToSideConversation(
   formData: FormData,
 ): Promise<ActionState> {
   const agent = await requireAgent();
-  if (!can(agent, 'ticket.side_conversation')) {
-    return { error: 'You do not have permission to write in a side conversation' };
-  }
 
-  const sideConversationId = String(formData.get('sideConversationId') ?? '');
-  const body = text(formData, 'body');
-  if (!body) return { error: 'Write something first' };
+  const result = await side.replyToSideConversation(agent, {
+    sideConversationId: String(formData.get('sideConversationId') ?? ''),
+    body: text(formData, 'body'),
+  });
+  if (result.error !== null) return { error: result.error };
 
-  const side = await loadSideConversation(sideConversationId);
-  if (!side) return { error: 'Side conversation not found' };
-
-  // The ticket's own visibility rule, applied to the thread hanging off it.
-  const row = await loadConversation(agent, side.side.conversationId);
-  if (!row) return { error: 'Side conversation not found' };
-
-  const parentMessageId = await lastSideMessageId(sideConversationId);
-
-  const inserted = await db
-    .insert(sideConversationMessages)
-    .values({
-      sideConversationId,
-      direction: 'outbound',
-      authorAgentId: agent.id,
-      toAddresses: side.side.toAddresses,
-      ccAddresses: side.side.ccAddresses,
-      bodyText: body,
-      inReplyTo: parentMessageId,
-      deliveryStatus: 'pending',
-    })
-    .returning({ id: sideConversationMessages.id });
-
-  const messageId = inserted[0]!.id;
-
-  await db
-    .update(sideConversations)
-    .set({
-      lastMessageAt: new Date(),
-      // Answering reopens a thread the agent had marked done, because they have
-      // just asked something else on it.
-      ...(side.side.state === 'done'
-        ? { state: 'open' as const, closedAt: null, closedByAgentId: null }
-        : {}),
-    })
-    .where(eq(sideConversations.id, sideConversationId));
-
-  await enqueue(
-    'send_side_email',
-    { messageId },
-    { priority: 10, dedupeKey: `send_side:${messageId}` },
-  );
-
-  refresh(row.conversation.number);
+  refresh(result.conversationNumber);
   return ok();
 }
 
@@ -316,65 +64,13 @@ export async function setSideConversationState(
   formData: FormData,
 ): Promise<ActionState> {
   const agent = await requireAgent();
-  if (!can(agent, 'ticket.side_conversation')) {
-    return { error: 'You do not have permission to change a side conversation' };
-  }
 
-  const sideConversationId = String(formData.get('sideConversationId') ?? '');
-  const state = String(formData.get('state') ?? '');
-  if (state !== 'open' && state !== 'done') return { error: 'Unknown state' };
+  const result = await side.setSideConversationState(agent, {
+    sideConversationId: String(formData.get('sideConversationId') ?? ''),
+    state: String(formData.get('state') ?? ''),
+  });
+  if (result.error !== null) return { error: result.error };
 
-  const side = await loadSideConversation(sideConversationId);
-  if (!side) return { error: 'Side conversation not found' };
-
-  const row = await loadConversation(agent, side.side.conversationId);
-  if (!row) return { error: 'Side conversation not found' };
-
-  await db
-    .update(sideConversations)
-    .set(
-      state === 'done'
-        ? { state, closedAt: new Date(), closedByAgentId: agent.id }
-        : { state, closedAt: null, closedByAgentId: null },
-    )
-    .where(eq(sideConversations.id, sideConversationId));
-
-  refresh(row.conversation.number);
+  refresh(result.conversationNumber);
   return ok();
-}
-
-/**
- * The customer's message, as the hub will see it quoted.
- *
- * Scoped by conversation id as well as message id: the anchor arrives from a
- * form field, and a message id from another ticket must not be quotable into
- * this one's side conversation.
- */
-async function quotedAnchorMessage(
-  conversationId: string,
-  messageId: string,
-): Promise<string | null> {
-  const rows = await db
-    .select({
-      bodyText: messages.bodyText,
-      kind: messages.kind,
-      meta: messages.meta,
-      createdAt: messages.createdAt,
-      contactName: contacts.name,
-    })
-    .from(messages)
-    .leftJoin(contacts, eq(contacts.id, messages.authorContactId))
-    .where(and(eq(messages.id, messageId), eq(messages.conversationId, conversationId)))
-    .limit(1);
-
-  const message = rows[0];
-  if (!message) return null;
-  // A private note is ours, not the customer's, and forwarding one to a hub
-  // under the heading "the customer wrote" would be a lie about who said it.
-  if (message.kind === 'note') return null;
-  // Nor is a reaction anything they wrote: the composer leaves it out, and the
-  // id is a form field.
-  if (isReaction(message.meta)) return null;
-
-  return quoteAnchor(message.contactName, message.bodyText, message.createdAt);
 }

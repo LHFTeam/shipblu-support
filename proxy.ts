@@ -73,6 +73,10 @@ const PUBLIC_PREFIXES = [
   // /login that the widget cannot follow.
   '/api/widget',
   '/widget',
+  // The WhatsApp Web extension sends a bearer token, never the console cookie,
+  // so the cookie check here would redirect every call to /login. Each route
+  // authorises through `extensionAgentFor` instead.
+  '/api/extension',
   '/robots.txt',
   '/sitemap.xml',
   '/_next',

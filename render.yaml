@@ -220,6 +220,21 @@ projects:
             #   WHATSAPP_CREDENTIAL_KEY_PREVIOUS
             #                            the key being retired, set only while
             #                            rotate_whatsapp_credentials runs
+            #   EXTENSION_SIGNING_KEY    the RSA key that signs the WhatsApp Web
+            #                            extension (extension/pack.mjs), read by
+            #                            the web service's build and by no
+            #                            running code, so it is not in lib/env.ts.
+            #                            The key is the extension's identity:
+            #                            its id is derived from it and named in
+            #                            the policy on every laptop, so a new key
+            #                            is a new extension to reinstall
+            #                            everywhere. Generated once off this
+            #                            system (`openssl genpkey -algorithm RSA
+            #                            -pkeyopt rsa_keygen_bits:2048`), kept
+            #                            with the team's other secrets, never
+            #                            committed. Unset, the build packs
+            #                            nothing and /api/extension/package/*
+            #                            answers 404.
             #   META_EMBEDDED_SIGNUP_CONFIG_ID
             #                            the Facebook Login for Business
             #                            configuration Embedded Signup opens
@@ -282,7 +297,11 @@ projects:
             # Matches the dashboard. Nothing in production deploys itself — a
             # deploy is triggered by hand (docs/PROJECT-STATE.md §2).
             autoDeployTrigger: 'off' # quoted: bare off is YAML 1.1 for false
-            buildCommand: npm ci --include=dev && npm run build
+            # `extension:pack` signs the WhatsApp Web extension the console
+            # serves to the laptops (/api/extension/package/*); on this service
+            # alone, because it is the one that serves it. Without
+            # EXTENSION_SIGNING_KEY it packs nothing and the build goes on.
+            buildCommand: npm ci --include=dev && npm run build && npm run extension:pack
             # Runs after build, before traffic shifts. Migrations are idempotent,
             # so a rolled-back deploy re-running them is safe.
             preDeployCommand: npm run db:migrate

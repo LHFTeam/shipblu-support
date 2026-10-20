@@ -92,6 +92,12 @@ jobs:
             # optional. A build failing with "Cannot read properties of null
             # (reading 'useContext')" is the environment, not the React version.
             run: npm run build
+          - name: extension
+            # The WhatsApp Web extension bundles the console's own components
+            # and pure `lib/` modules, so a change to one of those can break a
+            # package nothing else builds. Typecheck alone would not catch an
+            # import esbuild cannot bundle, or a stylesheet Tailwind refuses.
+            run: npm run extension:build
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
