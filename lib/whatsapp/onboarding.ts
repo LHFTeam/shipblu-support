@@ -1,6 +1,6 @@
-import { and, eq, gt, ne, sql } from 'drizzle-orm';
+import { and, eq, gt, inArray, ne, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
-import { groups, jobs, whatsappOnboardings } from '@/db/schema';
+import { channels, groups, jobs, whatsappOnboardings } from '@/db/schema';
 import { env, metaAppSecret } from '@/lib/env';
 import { errorMessage } from '@/lib/errors';
 import { isTimeout } from '@/lib/http/deadline';
@@ -8,8 +8,9 @@ import { logger } from '@/lib/log';
 import { inspectToken, type TokenInspection } from '@/lib/meta/debug-token';
 import { GRAPH_BASE, graphTimeout } from '@/lib/meta/graph';
 import { enqueue } from '@/lib/queue';
-import { ensureAccountForWaba } from './accounts';
+import { ensureAccountForWaba, listAccounts } from './accounts';
 import { callGraph, WhatsAppApiError } from './client';
+import { parseCoexistence } from './coexistence';
 import {
   credentialKeyProblem,
   REQUIRED_BUSINESS_TOKEN_SCOPES,
@@ -169,8 +170,8 @@ const ALREADY_CONNECTING =
  */
 const JOB_WAITING =
   'A job to connect this number is still waiting in the queue, and no worker has finished it in ' +
-  'fifteen minutes — the worker service is what to check. Nothing is lost: the sign-in and ' +
-  'its credential are saved, and the job carries on as soon as a worker picks it up.';
+  'fifteen minutes — the worker service is what to check. Nothing is lost: the attempt and ' +
+  'anything it stored are saved, and the job carries on as soon as a worker picks it up.';
 
 /**
  * The first phase. Never throws for anything a person could cause: every
@@ -289,24 +290,7 @@ export async function beginCoexistenceOnboarding(
 
   const committed = await db
     .transaction(async (tx) => {
-      // A stale attempt — its job dead, or never picked up — is retired here,
-      // in the same transaction as the insert that replaces it, so a worker
-      // that never ran cannot lock a number out short of SQL.
-      await tx
-        .update(whatsappOnboardings)
-        .set({
-          status: 'failed',
-          error: SUPERSEDED,
-          finishedAt: new Date(),
-          updatedAt: new Date(),
-        })
-        .where(
-          and(
-            eq(whatsappOnboardings.phoneNumberId, phoneNumberId),
-            eq(whatsappOnboardings.status, 'exchanged'),
-            sql`not (${liveAttempt()})`,
-          ),
-        );
+      await retireStaleAttempts(tx, phoneNumberId);
 
       const account = await ensureAccountForWaba(tx, claim.wabaId, wabaName);
       const stored = await storeBusinessToken(tx, {
@@ -395,6 +379,212 @@ export async function beginCoexistenceOnboarding(
 }
 
 class AlreadyConnecting extends Error {}
+
+/**
+ * A stale attempt on the number — its job dead, or never picked up — retired
+ * in the same transaction as the insert that replaces it, so a worker that
+ * never ran cannot lock a number out short of SQL.
+ */
+async function retireStaleAttempts(tx: typeof db, phoneNumberId: string): Promise<void> {
+  await tx
+    .update(whatsappOnboardings)
+    .set({
+      status: 'failed',
+      error: SUPERSEDED,
+      finishedAt: new Date(),
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(whatsappOnboardings.phoneNumberId, phoneNumberId),
+        eq(whatsappOnboardings.status, 'exchanged'),
+        sql`not (${liveAttempt()})`,
+      ),
+    );
+}
+
+/** What the admin typed to add a number already connected in Meta's own interface. */
+export type AdoptClaim = {
+  accountId: string;
+  phoneNumberId: string;
+  defaultGroupId: string | null;
+};
+
+/**
+ * Adds a WhatsApp Business-app number the business connected to Cloud API in
+ * Meta's own interface — WhatsApp Manager or Business Suite — rather than
+ * through the Connect button, so it works exactly like one that came through
+ * Meta's window: subscribed, a channel with the `coexistence` object that
+ * makes phone-typed replies the team's, and the contacts and chats asked for.
+ *
+ * Nothing here can be the first phase's work, because there is nothing to
+ * exchange: Meta minted no code for this app and no token was handed over. So
+ * this only records the attempt as `adopted` and queues the same job, which
+ * connects the number with the business account's own credential — its stored
+ * one, or the `WHATSAPP_TOKEN_*` variable it names (`credentialFor` in
+ * `./onboarding-complete`). Every Graph call is the job's, since only the
+ * worker may resolve a token (`credential-confinement`), and the job's number
+ * step is what proves the token reaches the number this form names.
+ *
+ * Refused here, before anything is queued, for what the job would only refuse
+ * later: an account switched off or with no credential the job may use, the
+ * bot's number, and a number with an attempt still live. Every claim is
+ * re-read — the account by its id, never the WABA id from the form.
+ *
+ * Meta's 24 hours for the copy began when the number was connected there, not
+ * now; the business account row's form says so, and the job asks as soon as
+ * the channel exists.
+ */
+export async function adoptBusinessAppNumber(
+  claim: AdoptClaim,
+  actor: { id: string; name: string },
+): Promise<BeginOutcome> {
+  if (!env().META_APP_ID) {
+    return {
+      ok: false,
+      error:
+        'META_APP_ID is not set in this environment, so the subscription to the number cannot ' +
+        'be made or checked.',
+    };
+  }
+
+  const phoneNumberId = claim.phoneNumberId.trim();
+  if (!isMetaId(phoneNumberId)) {
+    return {
+      ok: false,
+      error:
+        'The phone number ID is the numeric id WhatsApp Manager shows for the number (API ' +
+        'Setup, or the number’s settings) — not the phone number itself.',
+    };
+  }
+
+  const account = (await listAccounts()).find((candidate) => candidate.id === claim.accountId);
+  if (!account)
+    return { ok: false, error: 'That business account no longer exists — reload the page.' };
+  if (!account.isActive) {
+    return {
+      ok: false,
+      error: `Business account "${account.name}" is switched off. Switch it on first.`,
+    };
+  }
+  if (!account.hasStoredToken && !account.tokenEnvVar) {
+    return {
+      ok: false,
+      error:
+        `Business account "${account.name}" names no token variable, so there is nothing to ` +
+        `connect the number with — the shared META_PAGE_ACCESS_TOKEN is the Facebook Page's and ` +
+        `reaches no WhatsApp account. Edit the account and name the WHATSAPP_TOKEN_… variable ` +
+        `holding a system user token assigned business account ${account.wabaId}.`,
+    };
+  }
+
+  if (claim.defaultGroupId) {
+    const [group] = await db
+      .select({ id: groups.id })
+      .from(groups)
+      .where(eq(groups.id, claim.defaultGroupId))
+      .limit(1);
+    if (!group)
+      return { ok: false, error: 'That default group no longer exists — reload the page.' };
+  }
+
+  const onNumber = await db
+    .select({ type: channels.type, name: channels.name, config: channels.config })
+    .from(channels)
+    .where(
+      and(
+        inArray(channels.type, ['whatsapp', 'whatsapp_bot']),
+        sql`${channels.config} ->> 'phoneNumberId' = ${phoneNumberId}`,
+      ),
+    );
+  // The job refuses this too, but only after subscribing the number: asked
+  // here so a mistyped id names the bot before anything at Meta changes.
+  if (onNumber.some((channel) => channel.type === 'whatsapp_bot')) {
+    return {
+      ok: false,
+      error:
+        `Number ${phoneNumberId} is the customer bot's channel, which another service ` +
+        `answers. Check the phone number ID.`,
+    };
+  }
+  // A number already connected here, and still connected on the phone. The
+  // job would take this as a reconnect and start its copies afresh — every
+  // button offering six months of chats Meta has already sent, under a 24-hour
+  // window that is not Meta's. One the phone disconnected is the case adding it
+  // again is for, so that one passes.
+  const connected = onNumber.find((channel) => {
+    const coexistence = parseCoexistence(channel.config);
+    return coexistence !== null && !coexistence.disconnected;
+  });
+  if (connected) {
+    return {
+      ok: false,
+      error:
+        `Number ${phoneNumberId} is already connected, as channel "${connected.name}". ` +
+        `Nothing needs adding.`,
+    };
+  }
+
+  const live = await liveAttemptOn(phoneNumberId);
+  if (live) return { ok: false, error: liveRefusal(live), wait: true };
+
+  const committed = await db
+    .transaction(async (tx) => {
+      await retireStaleAttempts(tx, phoneNumberId);
+      const [row] = await tx
+        .insert(whatsappOnboardings)
+        .values({
+          whatsappAccountId: account.id,
+          wabaId: account.wabaId,
+          phoneNumberId,
+          defaultGroupId: claim.defaultGroupId,
+          status: 'exchanged',
+          origin: 'adopted',
+          startedByAgentId: actor.id,
+          startedByLabel: actor.name,
+        })
+        // The partial unique index, as in the first phase: an attempt that
+        // became live since the check above.
+        .onConflictDoNothing()
+        .returning({ id: whatsappOnboardings.id });
+      if (!row) throw new AlreadyConnecting();
+      return row;
+    })
+    .catch((error: unknown) => {
+      if (error instanceof AlreadyConnecting) return null;
+      throw error;
+    });
+
+  if (!committed) {
+    return { ok: false, error: liveRefusal(await liveAttemptOn(phoneNumberId)), wait: true };
+  }
+
+  await enqueue(
+    'complete_coexistence_onboarding',
+    { onboardingId: committed.id },
+    { priority: 10 },
+  );
+
+  log.info('adopted', {
+    onboardingId: committed.id,
+    accountId: account.id,
+    wabaId: account.wabaId,
+    phoneNumberId,
+    agentId: actor.id,
+    credential: account.hasStoredToken ? 'stored' : 'variable',
+  });
+
+  return {
+    ok: true,
+    onboardingId: committed.id,
+    accountId: account.id,
+    notice:
+      `Adding number ${phoneNumberId} to business account "${account.name}" with ${
+        account.hasStoredToken ? 'its stored credential' : account.tokenEnvVar
+      }. Keep the WhatsApp Business app open on the phone: its contacts and chats are asked ` +
+      `for as soon as the channel exists.`,
+  };
+}
 
 /**
  * The number on a WABA that has exactly one, or why it cannot be chosen.

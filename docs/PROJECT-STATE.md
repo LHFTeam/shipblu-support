@@ -1525,6 +1525,20 @@ expires_at, inspected_at` — never `envelope`, and a null `expires_at` means
   staging has none (§2); without one the first live test is on production,
   with a test number.
 
+  **A number connected in Meta's own interface is adopted, built 2026-10-20
+  and not yet run live.** WhatsApp Manager / Business Suite can connect a
+  Business-app number to Cloud API with no Embedded Signup: no code, no stored
+  token, and our app not subscribed to the WABA — so nothing from it arrives.
+  First case: WABA `939397892570697`, number `1278460782026250`, connected in
+  Business Suite on 2026-10-20. Adding it: a business account row for the WABA
+  naming a `WHATSAPP_TOKEN_*` variable whose system user is assigned the WABA,
+  then "Add a number connected in Meta" on that row with the phone number id.
+  The same job runs (`origin = 'adopted'`) with that variable. Unconfirmed
+  until it runs: whether Meta accepts `smb_app_data` for a number it onboarded
+  itself rather than through a partner's Embedded Signup — a refusal is
+  recorded on the step and the number stays connected — and the 24 hours
+  count from Meta's connection, not ours.
+
   Known, and not built — none of it reachable until a number is live:
   - **A conversation the business starts from the phone never gets an SLA
     policy** — LHFTeam/shipblu-support#352.

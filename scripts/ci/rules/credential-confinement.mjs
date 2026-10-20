@@ -71,7 +71,7 @@ const IMPORTERS = new Map([
 const RESOLVER_IMPORTERS = new Map([
   [
     'lib/whatsapp/onboarding-complete.ts',
-    'the second phase of connecting a number through Embedded Signup — subscribing, creating the channel, requesting the copy — runs in complete_coexistence_onboarding with the stored credential; it lives in lib/ beside the first phase, which the server action runs',
+    'the second phase of connecting a number — through Embedded Signup, or adopted from Meta’s own interface — subscribing, creating the channel, requesting the copy, runs in complete_coexistence_onboarding with the account’s credential; it lives in lib/ beside the first phase, which the server action runs',
   ],
 ]);
 

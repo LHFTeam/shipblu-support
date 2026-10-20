@@ -32,6 +32,7 @@ export async function listLatestOnboardings(): Promise<OnboardingView[]> {
     .selectDistinctOn([whatsappOnboardings.phoneNumberId], {
       id: whatsappOnboardings.id,
       status: whatsappOnboardings.status,
+      origin: whatsappOnboardings.origin,
       steps: whatsappOnboardings.steps,
       attempts: whatsappOnboardings.attempts,
       nextAttemptAt: whatsappOnboardings.nextAttemptAt,

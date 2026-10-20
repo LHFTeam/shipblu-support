@@ -38,7 +38,9 @@ export const META_SYNC_TYPE: Record<SyncType, 'smb_app_state_sync' | 'history'> 
  * seconds before that, inside its window, so the window here closes a few
  * seconds late: a request in those seconds is refused by Meta (2593108) and
  * says so, which is the cheaper side to be wrong on than refusing the one
- * request a business gets.
+ * request a business gets. For an `adopted` number the same reasoning covers
+ * hours rather than seconds: Meta's clock started when it was connected in
+ * Meta's own interface, which nothing here is told.
  */
 export const SYNC_WINDOW_MS = 24 * 60 * 60 * 1000;
 
@@ -119,6 +121,15 @@ export type Coexistence = {
    * those are asked for again.
    */
   carriedOver?: SyncType[];
+  /**
+   * The business connected this number to Cloud API in Meta's own interface
+   * and it was added here afterwards (`OnboardingOrigin`), so `onboardedAt` is
+   * when it was added, not when Meta's 24 hours began — those started earlier,
+   * at a moment nothing here was told about. The window drawn from it can
+   * therefore outlast Meta's, which is the cheaper side to be wrong on: a copy
+   * asked for late is refused by Meta (2593108) and says so on the row.
+   */
+  adopted?: true;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -173,6 +184,7 @@ export function parseCoexistence(config: unknown): Coexistence | null {
     // Only a literal `true`: a hand-written "false" string must not stop a copy.
     ...(raw.notOnBusinessApp === true ? { notOnBusinessApp: true as const } : {}),
     ...(carriedOver.length > 0 ? { carriedOver } : {}),
+    ...(raw.adopted === true ? { adopted: true as const } : {}),
   };
 }
 
@@ -491,7 +503,11 @@ export type CoexistenceBadge = {
  * row. The pure half of the admin page; `CoexistenceBadges` draws these.
  */
 export function coexistenceBadges(coexistence: Coexistence, now: Date): CoexistenceBadge[] {
-  const connectedOn = `Connected through Meta on ${formatDateTime(coexistence.onboardedAt)}.`;
+  const connectedOn = coexistence.adopted
+    ? `Connected to Cloud API in Meta's own interface, and added here on ${formatDateTime(
+        coexistence.onboardedAt,
+      )}.`
+    : `Connected through Meta on ${formatDateTime(coexistence.onboardedAt)}.`;
   const badges: CoexistenceBadge[] = [
     // A number Meta says is not on the Business app has no phone typing
     // replies and nothing to copy, so the badge that promises both would be

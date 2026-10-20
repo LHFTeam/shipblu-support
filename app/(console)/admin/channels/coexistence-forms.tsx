@@ -15,7 +15,7 @@ import { SubmitButton } from '@/components/submit-button';
 import { useActionForm } from '@/components/use-action-form';
 import { CheckIcon, ClockIcon, XIcon } from '@/components/icons';
 import { InfoTip } from '@/components/tooltip';
-import { Badge, Button, Card, ErrorText, Field, Select, SuccessText } from '@/components/ui';
+import { Badge, Button, Card, ErrorText, Field, Input, Select, SuccessText } from '@/components/ui';
 import { formatDateTime } from '@/lib/format';
 import {
   type Coexistence,
@@ -58,6 +58,7 @@ import {
 import { DangerAction } from '../forms-shared';
 import type { AdminState } from '../settings-shared';
 import {
+  adoptCoexistenceNumber,
   connectBusinessAppNumber,
   forgetStoredCredential,
   requestCoexistenceSync,
@@ -1152,9 +1153,15 @@ function ConnectedSummary({
 }) {
   const number = coexistence?.displayPhoneNumber ?? onboarding.phoneNumberId;
   const verified = coexistence?.verifiedName ? ` (${coexistence.verifiedName})` : '';
+  // An adopted number never had a credential stored for it: it sends with the
+  // variable its account names, which the job refused to go without, so its
+  // absence here is the design rather than something gone missing.
+  const adopted = onboarding.origin === 'adopted';
   const stored = credential
     ? `credential stored (${expiryLabel(credential)})`
-    : 'credential not stored';
+    : adopted
+      ? "sends with the account's token variable"
+      : 'credential not stored';
 
   const stepSentence = (step: 'contacts' | 'history') =>
     onboarding.steps.find((candidate) => candidate.step === step)?.sentence ?? 'not requested';
@@ -1178,7 +1185,7 @@ function ConnectedSummary({
       : `History: ${history.percent}% (${history.chunks} chunk${history.chunks === 1 ? '' : 's'}).`;
 
   const { todo, notes } = connectedFollowUps(onboarding);
-  const allClear = todo.length === 0 && credential !== null;
+  const allClear = todo.length === 0 && (credential !== null || adopted);
 
   return (
     <div className="flex flex-col gap-1 rounded-md border border-(--color-feedback-success-border) bg-(--color-feedback-success-bg) px-3 py-2 text-sm text-(--color-feedback-success-fg)">
@@ -1237,7 +1244,7 @@ function ConnectedSummary({
           {/* Not "press Reconnect": an account with no stored credential may
               still send with a token the environment names, which the account
               row shows. */}
-          {credential === null ? (
+          {credential === null && !adopted ? (
             <p>
               No credential is stored for this business account now, so it sends with a token from
               the environment, if one is set — the account&rsquo;s row above names which.
@@ -1359,6 +1366,109 @@ export function RequestSyncAgain({
       {state.notice ? (
         <span className="max-w-xs text-xs text-(--color-text-secondary)">{state.notice}</span>
       ) : null}
+    </form>
+  );
+}
+
+/**
+ * "Add a number connected in Meta" under a business account: a Business-app
+ * number the business connected to Cloud API in WhatsApp Manager or Business
+ * Suite instead of through Meta's window here. Nothing opens at Meta; the
+ * action queues the same job the window does, which connects the number with
+ * this account's own credential, and the progress card above the accounts
+ * follows it like any other.
+ *
+ * An uncontrolled id box and a group select, so it goes through
+ * `useActionForm` and clears on its key after a success, keeping what was typed
+ * after a refusal. The notice is drawn from the state, which outlives the reset.
+ */
+export function AdoptBusinessAppNumber({
+  accountId,
+  wabaId,
+  credentialLabel,
+  groups,
+  suggestedGroupId,
+  disabled,
+}: {
+  accountId: string;
+  wabaId: string;
+  /** What the job will send with: "its stored credential", or the variable's name — null when neither. */
+  credentialLabel: string | null;
+  groups: Choice[];
+  suggestedGroupId: string | null;
+  disabled: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  // Closed on a success, which unmounts the form — so it needs no key to clear
+  // on — and leaves the notice beside the button that opens it again.
+  const { state, form } = useActionForm(adoptCoexistenceNumber, INITIAL, {
+    onSuccess: () => setOpen(false),
+  });
+
+  if (!open) {
+    return (
+      <div className="flex flex-col items-start gap-1">
+        <Button variant="secondary" size="sm" onClick={() => setOpen(true)} disabled={disabled}>
+          Add a number connected in Meta
+        </Button>
+        {state.notice ? <SuccessText>{state.notice}</SuccessText> : null}
+      </div>
+    );
+  }
+
+  return (
+    <form {...form} className="flex w-full flex-col gap-3">
+      <input type="hidden" name="accountId" value={accountId} />
+      <p className="text-xs text-(--color-text-secondary)">
+        For a number on the WhatsApp Business app that was connected to Cloud API in WhatsApp
+        Manager or Business Suite rather than with &ldquo;Connect a WhatsApp number&rdquo;. It is
+        subscribed, gets a channel whose phone-typed replies count as the team&rsquo;s, and the
+        phone is asked for its contacts and up to six months of chats — which Meta allows only in
+        the 24 hours after the number was connected there, so add it soon after.
+      </p>
+      {credentialLabel ? null : (
+        <ErrorText>
+          This account names no token variable, so there is nothing to connect a number with. Edit
+          it and name the WHATSAPP_TOKEN_… variable holding a system user token assigned business
+          account {wabaId}.
+        </ErrorText>
+      )}
+      <div className="flex flex-wrap gap-3">
+        <Field
+          label="Phone number ID"
+          className="sm:w-56"
+          hint="From WhatsApp Manager — the number's ID, not the phone number."
+        >
+          <Input name="phoneNumberId" inputMode="numeric" autoComplete="off" required />
+        </Field>
+        <Field
+          label="Default group"
+          className="sm:w-56"
+          hint="Where tickets from this number start. Changeable on the channel afterwards."
+        >
+          <Select name="defaultGroupId" defaultValue={suggestedGroupId ?? ''}>
+            <option value="">None</option>
+            {groups.map((group) => (
+              <option key={group.id} value={group.id}>
+                {group.name}
+              </option>
+            ))}
+          </Select>
+        </Field>
+      </div>
+      {credentialLabel ? (
+        <p className="text-xs text-(--color-text-secondary)">
+          Connected with {credentialLabel}, whose system user must be assigned business account{' '}
+          {wabaId} in Meta&rsquo;s Business settings.
+        </p>
+      ) : null}
+      <ErrorText>{state.error}</ErrorText>
+      <div className="flex items-center gap-2">
+        <SubmitButton idle="Add number" busy="Adding…" />
+        <Button variant="ghost" size="sm" onClick={() => setOpen(false)}>
+          Cancel
+        </Button>
+      </div>
     </form>
   );
 }

@@ -15,7 +15,13 @@ import {
   WHATSAPP_OBJECT,
 } from '@/lib/meta/subscriptions';
 import { type ClaimedJob, enqueue, isFinalAttempt, retryDelaySeconds } from '@/lib/queue';
-import { credentialsForAccount, listAccounts } from './accounts';
+import {
+  credentialsForAccount,
+  listAccounts,
+  TokenVariableError,
+  type WhatsAppAccount,
+  type WhatsAppCredentials,
+} from './accounts';
 import { callGraph, type GraphRequest, WhatsAppApiError } from './client';
 import {
   canRequestSync,
@@ -44,8 +50,11 @@ const log = logger('complete_coexistence_onboarding');
  * Connecting a WhatsApp Business-app number — the half that runs in the worker.
  *
  * `./onboarding` has already exchanged Meta's code, stored the business token
- * and inserted the attempt as `exchanged`. This takes it from there, with the
- * stored credential, in six steps, each recorded on the row as it lands:
+ * and inserted the attempt as `exchanged` — or, for a number the business
+ * connected in Meta's own interface, inserted an `adopted` attempt with nothing
+ * exchanged (`adoptBusinessAppNumber`). This takes it from there, with the
+ * credential `credentialFor` allows, in six steps, each recorded on the row as
+ * it lands:
  *
  *   number     the number is on the WABA the browser named, read with the token
  *   subscribe  this app is subscribed to the WABA's webhooks — read back, since
@@ -337,24 +346,7 @@ async function runSteps(
     );
   }
 
-  // Asked before resolving, because resolving would fall through to another
-  // credential: connecting the number with the shared token instead would be a
-  // different connection than the one the admin signed for, and a missing
-  // shared token would fail with a sentence about the wrong thing.
-  if (!account.hasStoredToken) {
-    throw new StepFailed(
-      'The credential stored when this number was signed in through Meta has since been ' +
-        'forgotten. Connect the number again.',
-    );
-  }
-  const credentials = await credentialsForAccount(account);
-  if (credentials.source !== 'stored') {
-    throw new StepFailed(
-      'The credential stored when this number was signed in through Meta has since been ' +
-        'forgotten. Connect the number again.',
-    );
-  }
-  const token = credentials.token;
+  const credentials = await credentialFor(row, account);
 
   const wants = (step: OnboardingStep) => (only ? only.includes(step) : true);
   const done = (step: OnboardingStep) => !only && row.steps[step]?.ok === true;
@@ -363,13 +355,13 @@ async function runSteps(
   let facts: NumberFacts = { displayPhoneNumber: null, verifiedName: null, onBusinessApp: true };
   if (!only) {
     progress.step = 'number';
-    facts = await numberStep(row, token);
+    facts = await numberStep(row, credentials);
   }
 
   let subscribedAt = row.steps.subscribe?.ok ? row.steps.subscribe.at : null;
   if (wants('subscribe') && !done('subscribe')) {
     progress.step = 'subscribe';
-    subscribedAt = await subscribeStep(row, token);
+    subscribedAt = await subscribeStep(row, credentials);
   }
 
   let channel: ConnectedChannel | null = row.channelId
@@ -413,13 +405,74 @@ async function runSteps(
       });
       continue;
     }
-    await syncStep(row, channel.id, type, token);
+    await syncStep(row, channel.id, type, credentials);
   }
 
   if (wants('templates') && !done('templates')) {
     progress.step = 'templates';
     await queueTemplateSync(row.id);
   }
+}
+
+/**
+ * The credential this attempt may connect the number with, or why there is none.
+ *
+ * **Through Meta's window, only the one it stored.** Asked before resolving,
+ * because resolving would fall through to another credential: connecting the
+ * number with the shared token instead would be a different connection than
+ * the one the admin signed for, and a missing shared token would fail with a
+ * sentence about the wrong thing.
+ *
+ * **Adopted, the account's one source — never the shared token.** Nothing was
+ * signed for, so the business account's own configuration is the connection:
+ * its stored credential where it holds one (a second number on a WABA connected
+ * through Meta's window), else the `WHATSAPP_TOKEN_*` variable it names. Not
+ * `META_PAGE_ACCESS_TOKEN`, which is the Facebook Page's own token
+ * (`docs/PROJECT-STATE.md` §6.28) and reaches no WhatsApp business account:
+ * refused by name here rather than by Meta's sentence about a permission three
+ * steps later. Whether the source that is allowed actually reaches the number
+ * is the number step's question — it lists the account's numbers with it.
+ */
+async function credentialFor(
+  row: Onboarding,
+  account: WhatsAppAccount,
+): Promise<WhatsAppCredentials> {
+  if (row.origin === 'adopted') {
+    // A variable named but not set is the admin's to fix in Render — retrying
+    // the same process cannot set it — so it fails the attempt with the
+    // sentence, and Retry runs it again once the variable is there.
+    const credentials = await credentialsForAccount(account).catch((error: unknown) => {
+      if (error instanceof TokenVariableError) {
+        throw new StepFailed(`${error.message} Then Retry connection.`);
+      }
+      throw error;
+    });
+    if (credentials.source === 'shared') {
+      throw new StepFailed(
+        `Business account "${account.name}" holds no stored credential and names no token ` +
+          `variable, so there is nothing to connect the number with — the shared ` +
+          `META_PAGE_ACCESS_TOKEN is the Facebook Page's and reaches no WhatsApp account. Name ` +
+          `the WHATSAPP_TOKEN_… variable holding a system user token for business account ` +
+          `${account.wabaId} on the account, then Retry connection.`,
+      );
+    }
+    return credentials;
+  }
+
+  const forgotten = new StepFailed(
+    'The credential stored when this number was signed in through Meta has since been ' +
+      'forgotten. Connect the number again.',
+  );
+  if (!account.hasStoredToken) throw forgotten;
+  const credentials = await credentialsForAccount(account);
+  if (credentials.source !== 'stored') throw forgotten;
+  return credentials;
+}
+
+/** The credential in words, for a sentence that has to say which one Meta refused. */
+function credentialName(credentials: WhatsAppCredentials): string {
+  if (credentials.source === 'stored') return 'the credential stored for it';
+  return credentials.tokenEnvVar ?? 'META_PAGE_ACCESS_TOKEN';
 }
 
 /**
@@ -432,30 +485,46 @@ async function queueTemplateSync(onboardingId: string): Promise<void> {
   await recordStep(onboardingId, 'templates', { ok: true, detail: 'Template sync queued.' });
 }
 
-/** A refusal of the token itself is not a step to retry: it needs a person. */
-function refusedToken(error: unknown): void {
+/**
+ * A refusal of the token itself is not a step to retry: it needs a person —
+ * and the sentence names the credential this attempt actually used, which for
+ * an adopted number is a variable rather than anything Meta's window stored.
+ */
+function refusedToken(error: unknown, credentials: WhatsAppCredentials): void {
   if (error instanceof WhatsAppApiError && error.code === ACCESS_TOKEN_CODE) {
-    throw new StepFailed(explainAuthError(error.code, error.message, { source: 'stored' }));
+    throw new StepFailed(
+      explainAuthError(error.code, error.message, {
+        source: credentials.source,
+        tokenEnvVar: credentials.tokenEnvVar,
+      }),
+    );
   }
 }
 
 /** A Meta refusal no retry changes, as the attempt's failure. */
-function permanently(error: unknown, what: string): never {
-  refusedToken(error);
+function permanently(error: unknown, what: string, credentials: WhatsAppCredentials): never {
+  refusedToken(error, credentials);
   if (error instanceof WhatsAppApiError && !error.isTransient) {
     throw new StepFailed(`${what}: ${error.message}`);
   }
   throw error;
 }
 
-async function numberStep(row: Onboarding, token: string): Promise<NumberFacts> {
+async function numberStep(row: Onboarding, credentials: WhatsAppCredentials): Promise<NumberFacts> {
+  const { token } = credentials;
   let listed: {
     data?: { id?: string; display_phone_number?: string; verified_name?: string }[];
   } | null;
   try {
     listed = await askGraph(phoneNumbersRequest(row.wabaId), token);
   } catch (error) {
-    permanently(error, `Meta would not list the numbers on business account ${row.wabaId}`);
+    permanently(
+      error,
+      `Meta would not list the numbers on business account ${row.wabaId}${
+        row.origin === 'adopted' ? ` to ${credentialName(credentials)}` : ''
+      }`,
+      credentials,
+    );
   }
 
   const numbers = listed?.data ?? [];
@@ -464,7 +533,10 @@ async function numberStep(row: Onboarding, token: string): Promise<NumberFacts> 
     throw new StepFailed(
       `Number ${row.phoneNumberId} is not on business account ${row.wabaId} — Meta lists ` +
         `${numbers.map((candidate) => candidate.id).join(', ') || 'no numbers'} there. ` +
-        `Connect again and choose the number the WhatsApp Business app uses.`,
+        (row.origin === 'adopted'
+          ? `Check the phone number ID in WhatsApp Manager, and that the number is on this ` +
+            `business account, then add it again.`
+          : `Connect again and choose the number the WhatsApp Business app uses.`),
       NUMBER_NOT_ON_ACCOUNT,
     );
   }
@@ -497,7 +569,7 @@ async function numberStep(row: Onboarding, token: string): Promise<NumberFacts> 
       );
     }
   } catch (error) {
-    refusedToken(error);
+    refusedToken(error, credentials);
     warnings.push(
       `Could not confirm the number is on the WhatsApp Business app: ${describe(error)}.`,
     );
@@ -511,7 +583,8 @@ async function numberStep(row: Onboarding, token: string): Promise<NumberFacts> 
   return facts;
 }
 
-async function subscribeStep(row: Onboarding, token: string): Promise<string> {
+async function subscribeStep(row: Onboarding, credentials: WhatsAppCredentials): Promise<string> {
+  const { token } = credentials;
   const appId = env().META_APP_ID;
   if (!appId) {
     throw new StepFailed('META_APP_ID is not set, so the subscription cannot be checked.');
@@ -523,7 +596,11 @@ async function subscribeStep(row: Onboarding, token: string): Promise<string> {
     await askGraph(subscribeAppRequest(row.wabaId), token);
     apps = await askGraph(subscribedAppsRequest(row.wabaId), token);
   } catch (error) {
-    permanently(error, `Meta refused to subscribe this app to business account ${row.wabaId}`);
+    permanently(
+      error,
+      `Meta refused to subscribe this app to business account ${row.wabaId}`,
+      credentials,
+    );
   }
 
   if (!apps?.data?.some((entry) => entry.whatsapp_business_api_data?.id === appId)) {
@@ -620,6 +697,7 @@ async function channelStep(
     // buttons read this object, and without it a number with no phone to copy
     // from is offered a copy, and a day later a reconnect for one it missed.
     ...(facts.onBusinessApp ? {} : { notOnBusinessApp: true as const }),
+    ...(row.origin === 'adopted' ? { adopted: true as const } : {}),
   };
 
   const current = existing[0];
@@ -768,8 +846,9 @@ async function syncStep(
   row: Onboarding,
   channelId: string,
   type: SyncType,
-  token: string,
+  credentials: WhatsAppCredentials,
 ): Promise<void> {
+  const { token } = credentials;
   const [channel] = await db
     .select({ config: channels.config })
     .from(channels)
@@ -823,7 +902,7 @@ async function syncStep(
   try {
     answer = await askGraph(smbAppDataRequest(row.phoneNumberId, type), token);
   } catch (error) {
-    refusedToken(error);
+    refusedToken(error, credentials);
     if (error instanceof WhatsAppApiError && askedBefore && error.code === ALREADY_REQUESTED) {
       await recordSyncRequest(channelId, type, { requestId: 'unconfirmed' }, at);
       await recordStep(row.id, type, {

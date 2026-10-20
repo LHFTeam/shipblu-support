@@ -290,7 +290,9 @@ const RECONNECTING = new Set(['ACCOUNT_RECONNECTED']);
  * would badge a number that has since come back; and a `PARTNER_REMOVED` about
  * the connection before a reconnect would badge the new one and refuse its
  * fresh credential. So an event is applied only when it is at least as new as
- * the connection (`onboardedAt`, the exchange) and as the last event applied
+ * the connection (`onboardedAt`: the exchange, or for an adopted number the
+ * moment it was added here — an event from before that is about a number no
+ * channel answered yet) and as the last event applied
  * to it (`accountEventAt`, a high-water mark kept beside the badge — the badge
  * itself cannot be the mark, because `ACCOUNT_RECONNECTED` deletes it and
  * leaves a late `ACCOUNT_OFFBOARDED` nothing to compare against). Both are

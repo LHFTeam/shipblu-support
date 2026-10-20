@@ -312,6 +312,7 @@ describe('OnboardingProgress', () => {
   const attempt = (overrides: Partial<OnboardingView> = {}): OnboardingView => ({
     id: 'o-1',
     status: 'exchanged',
+    origin: 'embedded_signup',
     steps: [],
     attempts: 1,
     nextAttemptAt: serverAt(30_000).toISOString(),

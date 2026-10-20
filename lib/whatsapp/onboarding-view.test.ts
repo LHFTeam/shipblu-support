@@ -51,6 +51,7 @@ const failed = (ms: number, error: string): OnboardingStepRecord => ({
 const row = (overrides: Partial<OnboardingRow> = {}): OnboardingRow => ({
   id: 'o-1',
   status: 'exchanged',
+  origin: 'embedded_signup',
   steps: {},
   attempts: 0,
   nextAttemptAt: null,
@@ -152,6 +153,19 @@ const printed = (subject: OnboardingView, now: Date) =>
   describeOnboarding(subject, now).map((line) => lineText(line, now));
 
 describe('describeOnboarding', () => {
+  // A number added from its account's row has no sign-in to have saved, so
+  // the lines that reassure the admin about one must not appear on its card.
+  it('promises an adopted attempt nothing about a sign-in', () => {
+    const stalled = view({ origin: 'adopted' });
+    expect(printed(stalled, at(STALL_AFTER_MS + 1)).join(' ')).not.toMatch(/sign-in|Meta's window/);
+    expect(printed(stalled, at(LIVE_ATTEMPT_MS + 1)).join(' ')).toMatch(
+      /with the business account's own credential/,
+    );
+    expect(printed(view(), at(LIVE_ATTEMPT_MS + 1)).join(' ')).toMatch(
+      /the credential saved at sign-in/,
+    );
+  });
+
   it('reads the queue’s backoff off the row instead of showing a spinner', () => {
     const backing = view({
       steps: { number: ok(1_000) },
@@ -291,6 +305,25 @@ describe('retryable and recoveryFor', () => {
       connect: false,
     });
     expect(recoveryFor(view({ status: 'connected' }), at(0), true)).toEqual({
+      retry: false,
+      connect: false,
+    });
+  });
+
+  /**
+   * An adopted number never had a sign-in: its failures are fixed outside the
+   * page — a system user assigned the account, a variable set — and then Retry
+   * is the whole recovery, whatever is stored, while Meta's window fixes none.
+   */
+  it('offers an adopted failure Retry alone, credential or not', () => {
+    const failed = view({
+      status: 'failed',
+      origin: 'adopted',
+      error: 'WHATSAPP_TOKEN_X is not set',
+    });
+    expect(recoveryFor(failed, at(0), false)).toEqual({ retry: true, connect: false });
+    expect(recoveryFor(failed, at(0), true)).toEqual({ retry: true, connect: false });
+    expect(recoveryFor(view({ origin: 'adopted' }), at(0), false)).toEqual({
       retry: false,
       connect: false,
     });

@@ -23,7 +23,11 @@ import {
   storedCredentialEditRefusal,
   storedCredentialRemovalRefusal,
 } from '@/lib/whatsapp/credentials';
-import { beginCoexistenceOnboarding, retryOnboarding } from '@/lib/whatsapp/onboarding';
+import {
+  adoptBusinessAppNumber,
+  beginCoexistenceOnboarding,
+  retryOnboarding,
+} from '@/lib/whatsapp/onboarding';
 import { copyRequestRefusal } from '@/lib/whatsapp/onboarding-reads';
 import { GONE, refresh, type SettingsState, type AdminState } from '../settings-shared';
 import { revalidatePath } from 'next/cache';
@@ -297,10 +301,13 @@ export async function saveChannel(_state: AdminState, formData: FormData): Promi
       : null;
     if (chosen !== existing.whatsappAccountId) {
       return {
-        error:
-          `This number was connected through Meta to business account ${coexistence.wabaId} ` +
-          `and sends with the credential stored for it, so it cannot be moved to another here. ` +
-          `To move it, connect it again through Meta and choose the other business account.`,
+        error: coexistence.adopted
+          ? `This number was added from business account ${coexistence.wabaId} and sends with ` +
+            `that account's credential, so it cannot be moved to another here. To move it, add ` +
+            `it again from the other business account's row.`
+          : `This number was connected through Meta to business account ${coexistence.wabaId} ` +
+            `and sends with the credential stored for it, so it cannot be moved to another here. ` +
+            `To move it, connect it again through Meta and choose the other business account.`,
       };
     }
   } else if (isWhatsApp) {
@@ -434,6 +441,38 @@ export async function connectBusinessAppNumber(
     { id: agent.id, name: agent.name },
   );
 
+  if (!outcome.ok) return { error: outcome.error, wait: outcome.wait };
+
+  refresh('/admin/channels');
+  return { ...ok(), notice: outcome.notice, onboardingId: outcome.onboardingId };
+}
+
+/**
+ * "Add a number connected in Meta" on a business account: a WhatsApp
+ * Business-app number the business connected to Cloud API in Meta's own
+ * interface, made to work here as one connected through Meta's window does.
+ *
+ * `admin.channels.connect`, as the window is: it subscribes the number, turns
+ * phone-typed replies into the team's and asks the phone for six months of
+ * chats. The account is re-read by its id and the WABA taken from the row,
+ * never from the form; nothing here calls Meta — the job does, as the worker,
+ * with the account's own credential.
+ */
+export async function adoptCoexistenceNumber(
+  _state: AdminState,
+  formData: FormData,
+): Promise<AdminState> {
+  const agent = await requirePermission('admin.channels.connect');
+
+  const accountId = uuidField(formData, 'accountId');
+  if (!accountId) return { error: GONE };
+  const defaultGroupId = uuidField(formData, 'defaultGroupId');
+  if (defaultGroupId === undefined) return { error: 'Unknown default group' };
+
+  const outcome = await adoptBusinessAppNumber(
+    { accountId, phoneNumberId: text(formData, 'phoneNumberId'), defaultGroupId },
+    { id: agent.id, name: agent.name },
+  );
   if (!outcome.ok) return { error: outcome.error, wait: outcome.wait };
 
   refresh('/admin/channels');

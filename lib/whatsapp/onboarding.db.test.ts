@@ -15,9 +15,9 @@ import { stubFetch } from '@/lib/testing/fetch';
 import { canRequestSync, parseCoexistence } from './coexistence';
 import { recordContactSync, recordHistoryProgress, recordSyncRequest } from './coexistence-state';
 import { credentialStatuses, forgetStoredCredential } from './credentials';
-import { beginCoexistenceOnboarding, retryOnboarding } from './onboarding';
+import { adoptBusinessAppNumber, beginCoexistenceOnboarding, retryOnboarding } from './onboarding';
 import { completeOnboarding } from './onboarding-complete';
-import { copyRequestRefusal } from './onboarding-reads';
+import { copyRequestRefusal, listLatestOnboardings } from './onboarding-reads';
 import { NUMBER_NOT_ON_ACCOUNT } from './onboarding-view';
 
 /**
@@ -1485,5 +1485,340 @@ describe('the second phase, when Graph echoes what it was sent', () => {
       expect(logs()).not.toContain(secret);
       expect(thrown).not.toContain(secret);
     }
+  });
+});
+
+/**
+ * A number the business connected to Cloud API in Meta's own interface, added
+ * from its business account's row. Nothing was exchanged or stored, so what is
+ * pinned is the credential: the account's variable, or its stored one, and
+ * never the shared Page token — and the sentences that say which.
+ */
+describe('adopting a number connected in Meta’s own interface', () => {
+  const VARIABLE = 'WHATSAPP_TOKEN_ADOPTED';
+  const VARIABLE_TOKEN = 'EAAGsystemUserTokenForTheAdoptedNumber0123456789';
+  const SECOND = '108765432109';
+
+  async function account(tokenEnvVar: string | null = VARIABLE) {
+    const [row] = await db
+      .insert(whatsappAccounts)
+      .values({ name: 'ShipBlu Sales', wabaId: WABA, tokenEnvVar })
+      .returning({ id: whatsappAccounts.id });
+    return row!.id;
+  }
+
+  async function adopted(accountId: string, phoneNumberId = PHONE) {
+    const outcome = await adoptBusinessAppNumber(
+      { accountId, phoneNumberId, defaultGroupId: null },
+      await admin(),
+    );
+    if (!outcome.ok) throw new Error(outcome.error);
+    return outcome.onboardingId;
+  }
+
+  /** The bearer tokens Graph was sent for the number and its WABA — not the app's own reads. */
+  function bearersFor(fetch: ReturnType<typeof graph>, ...ids: string[]) {
+    return fetch.mock.calls
+      .filter(([url]) => ids.some((id) => new URL(String(url)).pathname.includes(`/${id}`)))
+      .map(([, init]) => (init?.headers as Record<string, string> | undefined)?.Authorization);
+  }
+
+  beforeEach(() => {
+    process.env[VARIABLE] = VARIABLE_TOKEN;
+  });
+
+  it('connects with the variable the account names, and marks the channel adopted', async () => {
+    const accountId = await account();
+    const id = await adopted(accountId);
+
+    const row = await onboardingRow(id);
+    expect(row).toMatchObject({ origin: 'adopted', status: 'exchanged', wabaId: WABA });
+    // The job is handed the attempt and nothing else — no token, no origin.
+    expect(await queued('complete_coexistence_onboarding')).toEqual([
+      { payload: { onboardingId: id } },
+    ]);
+    expect((await listLatestOnboardings())[0]).toMatchObject({ id, origin: 'adopted' });
+
+    const fetch = graph(completeRoutes());
+    expect(await completeOnboarding(id, { job: JOB })).toBe('connected');
+
+    const sent = bearersFor(fetch, WABA, PHONE);
+    expect(sent.length).toBeGreaterThan(0);
+    expect(new Set(sent)).toEqual(new Set([`Bearer ${VARIABLE_TOKEN}`]));
+
+    const channel = await channelFor();
+    expect(channel).toMatchObject({ whatsappAccountId: accountId, isActive: true });
+    expect(parseCoexistence(channel!.config)).toMatchObject({
+      onboardingId: id,
+      onboardedAt: row.createdAt.toISOString(),
+      adopted: true,
+      syncs: {
+        contacts: { requestId: 'req-smb_app_state_sync' },
+        history: { requestId: 'req-history' },
+      },
+    });
+    // Nothing was stored, and the account still names its variable.
+    expect(await credentialStatuses()).toEqual(new Map());
+    const [after] = await db
+      .select({ tokenEnvVar: whatsappAccounts.tokenEnvVar })
+      .from(whatsappAccounts)
+      .where(eq(whatsappAccounts.id, accountId));
+    expect(after!.tokenEnvVar).toBe(VARIABLE);
+  });
+
+  it('takes over a plain channel already made for the number by hand', async () => {
+    const accountId = await account();
+    const [plain] = await db
+      .insert(channels)
+      .values({
+        type: 'whatsapp',
+        name: 'Sales line',
+        whatsappAccountId: accountId,
+        config: { phoneNumberId: PHONE },
+      })
+      .returning({ id: channels.id });
+    const id = await adopted(accountId);
+
+    graph(completeRoutes());
+    expect(await completeOnboarding(id, { job: JOB })).toBe('connected');
+
+    const channel = await channelFor();
+    expect(channel!.id).toBe(plain!.id);
+    expect(channel!.name).toBe('Sales line');
+    expect(parseCoexistence(channel!.config)).toMatchObject({ onboardingId: id, adopted: true });
+  });
+
+  it('refuses, queueing nothing, what the job could only refuse later', async () => {
+    const mona = await admin();
+    const adopt = (accountId: string, phoneNumberId = PHONE) =>
+      adoptBusinessAppNumber({ accountId, phoneNumberId, defaultGroupId: null }, mona);
+
+    const shared = await account(null);
+    expect(await adopt(shared)).toMatchObject({
+      ok: false,
+      error: expect.stringMatching(/names no token variable/),
+    });
+
+    await db
+      .update(whatsappAccounts)
+      .set({ tokenEnvVar: VARIABLE })
+      .where(eq(whatsappAccounts.id, shared));
+    expect(await adopt(shared, '+20 10 1234 5678')).toMatchObject({
+      ok: false,
+      error: expect.stringMatching(/not the phone number itself/),
+    });
+    expect(await adopt(crypto.randomUUID())).toMatchObject({
+      ok: false,
+      error: expect.stringMatching(/no longer exists/),
+    });
+
+    await db.insert(channels).values({
+      type: 'whatsapp_bot',
+      name: 'Bot',
+      config: { phoneNumberId: SECOND },
+    });
+    expect(await adopt(shared, SECOND)).toMatchObject({
+      ok: false,
+      error: expect.stringMatching(/customer bot's channel/),
+    });
+
+    await db
+      .update(whatsappAccounts)
+      .set({ isActive: false })
+      .where(eq(whatsappAccounts.id, shared));
+    expect(await adopt(shared)).toMatchObject({
+      ok: false,
+      error: expect.stringMatching(/is switched off/),
+    });
+
+    expect(await db.select().from(whatsappOnboardings)).toEqual([]);
+    expect(await queued('complete_coexistence_onboarding')).toEqual([]);
+  });
+
+  it('refuses a number already connected, and adds one the phone disconnected', async () => {
+    const accountId = await account();
+    const first = await adopted(accountId);
+    graph(completeRoutes());
+    await completeOnboarding(first, { job: JOB });
+
+    const again = await adoptBusinessAppNumber(
+      { accountId, phoneNumberId: PHONE, defaultGroupId: null },
+      await admin(),
+    );
+    expect(again).toMatchObject({ ok: false, error: expect.stringMatching(/already connected/) });
+
+    const channel = await channelFor();
+    await db
+      .update(channels)
+      .set({
+        config: sql`jsonb_set(${channels.config}, '{coexistence,disconnected}', ${JSON.stringify({
+          at: new Date().toISOString(),
+          event: 'ACCOUNT_OFFBOARDED',
+          reason: null,
+          initiatedBy: null,
+        })}::jsonb)`,
+      })
+      .where(eq(channels.id, channel!.id));
+    expect(
+      (
+        await adoptBusinessAppNumber(
+          { accountId, phoneNumberId: PHONE, defaultGroupId: null },
+          await admin(),
+        )
+      ).ok,
+    ).toBe(true);
+  });
+
+  it('refuses a second attempt while the first is live', async () => {
+    const accountId = await account();
+    await adopted(accountId);
+    expect(
+      await adoptBusinessAppNumber(
+        { accountId, phoneNumberId: PHONE, defaultGroupId: null },
+        await admin(),
+      ),
+    ).toMatchObject({ ok: false, wait: true });
+  });
+
+  it('fails with a sentence when the variable is not set, and Retry runs it once it is', async () => {
+    const accountId = await account('WHATSAPP_TOKEN_NOT_SET_YET');
+    const id = await adopted(accountId);
+    const fetch = graph(completeRoutes());
+
+    expect(await completeOnboarding(id, { job: JOB })).toBe('failed');
+    expect(await onboardingRow(id)).toMatchObject({
+      status: 'failed',
+      error: expect.stringMatching(/WHATSAPP_TOKEN_NOT_SET_YET .*is not set.*Retry connection/s),
+    });
+    expect(fetch).not.toHaveBeenCalled();
+
+    process.env.WHATSAPP_TOKEN_NOT_SET_YET = VARIABLE_TOKEN;
+    expect(await retryOnboarding(id)).toEqual({ ok: true });
+    expect(await completeOnboarding(id, { job: JOB })).toBe('connected');
+  });
+
+  it('never falls back to the shared Page token', async () => {
+    const accountId = await account();
+    const id = await adopted(accountId);
+    // The variable cleared after the attempt was queued: the account now
+    // resolves to META_PAGE_ACCESS_TOKEN, which reaches no WhatsApp account.
+    await db
+      .update(whatsappAccounts)
+      .set({ tokenEnvVar: null })
+      .where(eq(whatsappAccounts.id, accountId));
+    process.env.META_PAGE_ACCESS_TOKEN = 'page-token';
+    resetEnvCache();
+    const fetch = graph(completeRoutes());
+
+    expect(await completeOnboarding(id, { job: JOB })).toBe('failed');
+    expect(await onboardingRow(id)).toMatchObject({
+      error: expect.stringMatching(/META_PAGE_ACCESS_TOKEN is the Facebook Page's/),
+    });
+    expect(fetch).not.toHaveBeenCalled();
+    expect(await channelFor()).toBeNull();
+  });
+
+  it('names the variable, not Meta’s window, when Meta refuses the token', async () => {
+    const accountId = await account();
+    const id = await adopted(accountId);
+    graph(
+      completeRoutes({
+        numbers: {
+          method: 'GET',
+          path: new RegExp(`/${WABA}/phone_numbers\\?`),
+          status: 401,
+          answer: () => ({ error: { message: 'Error validating access token', code: 190 } }),
+        },
+      }),
+    );
+
+    expect(await completeOnboarding(id, { job: JOB })).toBe('failed');
+    const { error } = await onboardingRow(id);
+    expect(error).toContain(VARIABLE);
+    expect(error).not.toMatch(/reconnected through Meta/);
+    expect(error).not.toContain(VARIABLE_TOKEN);
+  });
+
+  it('says to check the id when the number is not on the account', async () => {
+    const accountId = await account();
+    const id = await adopted(accountId, SECOND);
+    graph(completeRoutes());
+
+    expect(await completeOnboarding(id, { job: JOB })).toBe('failed');
+    const row = await onboardingRow(id);
+    expect(row.steps.number).toMatchObject({ ok: false, outcome: NUMBER_NOT_ON_ACCOUNT });
+    expect(row.error).toMatch(/Check the phone number ID in WhatsApp Manager/);
+  });
+
+  it('connects a second number on a WABA connected through Meta’s window with its stored credential', async () => {
+    const first = await exchanged();
+    await completeOnboarding(first, { job: JOB });
+    const { whatsappAccountId } = await onboardingRow(first);
+
+    const id = await adopted(whatsappAccountId, SECOND);
+    const fetch = graph([
+      {
+        method: 'GET',
+        path: new RegExp(`/${WABA}/phone_numbers\\?`),
+        answer: () => ({
+          data: [
+            { id: PHONE, display_phone_number: '+20 10 1234 5678', verified_name: 'ShipBlu' },
+            { id: SECOND, display_phone_number: '+20 10 8765 4321', verified_name: 'ShipBlu Two' },
+          ],
+        }),
+      },
+      {
+        method: 'GET',
+        path: new RegExp(`/${SECOND}\\?fields=is_on_biz_app,platform_type$`),
+        answer: () => ({ is_on_biz_app: true, platform_type: 'CLOUD_API', id: SECOND }),
+      },
+      ...completeRoutes().filter(
+        (route) => route.method === 'POST' || /subscri/.test(route.path.source),
+      ),
+      {
+        method: 'POST',
+        path: new RegExp(`/${SECOND}/smb_app_data$`),
+        answer: (_url, body) => ({
+          messaging_product: 'whatsapp',
+          request_id: `second-${(body as { sync_type: string }).sync_type}`,
+        }),
+      },
+    ]);
+
+    expect(await completeOnboarding(id, { job: JOB })).toBe('connected');
+    expect(new Set(bearersFor(fetch, WABA, SECOND))).toEqual(new Set([`Bearer ${TOKEN}`]));
+    expect(parseCoexistence((await channelFor(SECOND))!.config)).toMatchObject({
+      onboardingId: id,
+      adopted: true,
+      syncs: { history: { requestId: 'second-history' } },
+    });
+    // The first number's connection is untouched.
+    expect(parseCoexistence((await channelFor(PHONE))!.config)?.adopted).toBeUndefined();
+  });
+
+  it('runs "copy again" with the variable once Meta refused the first request', async () => {
+    const accountId = await account();
+    const id = await adopted(accountId);
+    graph(
+      completeRoutes({
+        sync: {
+          method: 'POST',
+          path: new RegExp(`/${PHONE}/smb_app_data$`),
+          answer: (_url, body) =>
+            (body as { sync_type: string }).sync_type === 'history'
+              ? new Response(JSON.stringify({ error: { message: 'Not allowed yet', code: 100 } }), {
+                  status: 400,
+                })
+              : { messaging_product: 'whatsapp', request_id: 'req-contacts' },
+        },
+      }),
+    );
+    expect(await completeOnboarding(id, { job: JOB })).toBe('connected');
+    expect((await onboardingRow(id)).steps.history).toMatchObject({ ok: false });
+
+    const fetch = graph(completeRoutes());
+    expect(await completeOnboarding(id, { only: ['history'], job: JOB })).toBe('connected');
+    expect((await onboardingRow(id)).steps.history).toMatchObject({ ok: true });
+    expect(new Set(bearersFor(fetch, PHONE))).toEqual(new Set([`Bearer ${VARIABLE_TOKEN}`]));
   });
 });

@@ -1,4 +1,9 @@
-import type { OnboardingStatus, OnboardingStep, OnboardingStepRecord } from '@/db/schema';
+import type {
+  OnboardingOrigin,
+  OnboardingStatus,
+  OnboardingStep,
+  OnboardingStepRecord,
+} from '@/db/schema';
 import {
   canRequestSync,
   type Coexistence,
@@ -32,6 +37,7 @@ import { credentialBadges, type CredentialStatus } from './credential-status';
 export type OnboardingRow = {
   id: string;
   status: OnboardingStatus;
+  origin: OnboardingOrigin;
   steps: Partial<Record<OnboardingStep, OnboardingStepRecord>>;
   attempts: number;
   nextAttemptAt: Date | null;
@@ -68,6 +74,11 @@ export type OnboardingStepView = {
 export type OnboardingView = {
   id: string;
   status: OnboardingStatus;
+  /**
+   * Through Meta's window, or adopted from Meta's own interface — which decides
+   * what Retry runs with, and so what the card may promise about it.
+   */
+  origin: OnboardingOrigin;
   steps: OnboardingStepView[];
   attempts: number;
   nextAttemptAt: string | null;
@@ -132,6 +143,7 @@ export function toOnboardingView(
   return {
     id: row.id,
     status: row.status,
+    origin: row.origin,
     steps: order.map((step) => {
       const record = row.steps[step];
       return {
@@ -239,13 +251,25 @@ export function retryable(view: OnboardingView, now: Date): boolean {
  * an account without one, every time. A stalled attempt offers Retry alone; if
  * the credential has gone, the job's refusal says so and the card then offers
  * the sign-in.
+ *
+ * An adopted attempt is the other way round. It never had a sign-in, and its
+ * failures are fixed outside this page — a system user assigned the business
+ * account, a token variable named or set, a webhook field subscribed — after
+ * which Retry is exactly what is needed, whatever is stored: the job runs with
+ * the account's own credential and says so if it still has none. A wrong
+ * phone number id is added again from the account's row with the right one.
+ * Meta's window is not offered, because it is not what any of these fixes.
  */
 export function recoveryFor(
   view: OnboardingView,
   now: Date,
   hasCredential: boolean,
 ): { retry: boolean; connect: boolean } {
-  if (view.status === 'failed') return { retry: hasCredential, connect: true };
+  if (view.status === 'failed') {
+    return view.origin === 'adopted'
+      ? { retry: true, connect: false }
+      : { retry: hasCredential, connect: true };
+  }
   return { retry: retryable(view, now), connect: false };
 }
 
@@ -286,9 +310,12 @@ export function describeOnboarding(view: OnboardingView, now: Date): OnboardingL
         : []),
       sentence(
         'This connection has not finished in fifteen minutes and nothing is scheduled to carry it ' +
-          'on. Press Retry connection: it runs the remaining steps with the credential saved at ' +
-          "sign-in, without Meta's window. If a job for it is still queued, Retry says so, and the " +
-          'worker is what needs looking at.',
+          `on. Press Retry connection: it runs the remaining steps with ${
+            view.origin === 'adopted'
+              ? "the business account's own credential"
+              : "the credential saved at sign-in, without Meta's window"
+          }. If a job for it is still queued, Retry says so, and the worker is what needs ` +
+          'looking at.',
       ),
     ];
   }
@@ -300,9 +327,12 @@ export function describeOnboarding(view: OnboardingView, now: Date): OnboardingL
   if (stalled(view, now)) {
     return [
       sentence(
-        "No worker has picked this up yet. The sign-in and its credential are saved, so Meta's " +
-          'window is not needed again: if nothing moves within fifteen minutes of the start, Retry ' +
-          'connection appears on this card.',
+        `No worker has picked this up yet. ${
+          view.origin === 'adopted'
+            ? 'Nothing needs adding again'
+            : "The sign-in and its credential are saved, so Meta's window is not needed again"
+        }: if nothing moves within fifteen minutes of the start, Retry connection appears on ` +
+          'this card.',
       ),
     ];
   }

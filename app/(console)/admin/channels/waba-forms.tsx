@@ -6,6 +6,7 @@ import type { CredentialStatus } from '@/lib/whatsapp/credential-status';
 import { DangerAction, Disclosure, EditorForm } from '../forms-shared';
 import { deleteWhatsAppAccount, saveWhatsAppAccount } from './actions';
 import {
+  AdoptBusinessAppNumber,
   ConnectBusinessAppNumber,
   type ConnectReadiness,
   CredentialCard,
@@ -203,99 +204,116 @@ export function WhatsAppAccountEditor({
   }
 
   return (
-    <div className="flex flex-wrap items-start gap-3">
-      <div className="min-w-0 flex-1">
-        <h3 className="flex flex-wrap items-center gap-2 text-sm font-medium">
-          {account.name}
-          {account.isDefault ? <Badge tone="brand">Default</Badge> : null}
-          {!account.isActive ? <Badge tone="neutral">Off</Badge> : null}
-          {/* The failure this row exists to make visible. A connection whose
+    <div className="flex flex-col gap-3">
+      <div className="flex flex-wrap items-start gap-3">
+        <div className="min-w-0 flex-1">
+          <h3 className="flex flex-wrap items-center gap-2 text-sm font-medium">
+            {account.name}
+            {account.isDefault ? <Badge tone="brand">Default</Badge> : null}
+            {!account.isActive ? <Badge tone="neutral">Off</Badge> : null}
+            {/* The failure this row exists to make visible. A connection whose
               token cannot read it looks exactly like a working one on every
               other screen, and the difference only shows up when an agent's
               template send fails hours later. */}
-          {account.lastSyncError ? <Badge tone="danger">Sync failing</Badge> : null}
-          {account.isActive && !account.lastSyncedAt && !account.lastSyncError ? (
-            <Badge tone="warning">Never synced</Badge>
-          ) : null}
-          {/* A sync that succeeds and reads back nothing, every hour, for ever.
+            {account.lastSyncError ? <Badge tone="danger">Sync failing</Badge> : null}
+            {account.isActive && !account.lastSyncedAt && !account.lastSyncError ? (
+              <Badge tone="warning">Never synced</Badge>
+            ) : null}
+            {/* A sync that succeeds and reads back nothing, every hour, for ever.
               Meta answers 200 with an empty list both for a WABA that holds no
               templates and for an id that is not the WABA anybody meant — so on
               every other signal this row carries it is indistinguishable from a
               healthy one, which is why it needs a signal of its own. */}
-          {account.isActive &&
-          account.lastSyncedAt &&
-          !account.lastSyncError &&
-          account.templateTotal === 0 ? (
-            <Badge tone="warning">No templates</Badge>
-          ) : null}
-        </h3>
+            {account.isActive &&
+            account.lastSyncedAt &&
+            !account.lastSyncError &&
+            account.templateTotal === 0 ? (
+              <Badge tone="warning">No templates</Badge>
+            ) : null}
+          </h3>
 
-        <p className="mt-0.5 text-xs text-(--color-text-secondary)">
-          {account.wabaId}
-          {account.credential ? '' : ` · ${account.tokenEnvVar ?? 'META_PAGE_ACCESS_TOKEN'}`} ·{' '}
-          {account.numbers.length === 0 ? 'no numbers yet' : `${account.numbers.join(', ')}`} ·{' '}
-          {account.templateCount} template{account.templateCount === 1 ? '' : 's'}
-        </p>
+          <p className="mt-0.5 text-xs text-(--color-text-secondary)">
+            {account.wabaId}
+            {account.credential
+              ? ''
+              : ` · ${account.tokenEnvVar ?? 'META_PAGE_ACCESS_TOKEN'}`} ·{' '}
+            {account.numbers.length === 0 ? 'no numbers yet' : `${account.numbers.join(', ')}`} ·{' '}
+            {account.templateCount} template{account.templateCount === 1 ? '' : 's'}
+          </p>
 
-        {/* The credential's own line, in place of the variable's name: what it
+          {/* The credential's own line, in place of the variable's name: what it
             is, when it was stored and by whom, when it expires and which key
             sealed it — and never the credential, which `CredentialStatus`
             cannot carry. */}
-        {account.credential ? (
-          <div className="mt-1">
-            <CredentialCard status={account.credential} now={now} />
-          </div>
-        ) : null}
+          {account.credential ? (
+            <div className="mt-1">
+              <CredentialCard status={account.credential} now={now} />
+            </div>
+          ) : null}
 
-        {account.lastSyncError ? (
-          <p className="mt-1">
-            <ErrorText inline>{account.lastSyncError}</ErrorText>
-          </p>
-        ) : account.lastSyncedAt && account.templateTotal === 0 ? (
-          <p className="mt-1 text-xs text-(--color-feedback-warning-fg)">
-            Meta answered and returned no templates at all. Check that {account.wabaId} is the
-            WhatsApp Business Account ID from WhatsApp Manager — an id that is not a WABA, or one
-            belonging to a business this token cannot manage, answers exactly the same way an empty
-            account does.
-          </p>
-        ) : account.lastSyncedAt ? (
-          <p className="mt-1 text-xs text-(--color-text-secondary)">
-            Templates last synced{' '}
-            {account.lastSyncedAt.toISOString().replace('T', ' ').slice(0, 16)} UTC
-          </p>
-        ) : (
-          <p className="mt-1 text-xs text-(--color-text-secondary)">
-            Templates sync hourly; nothing has been read from this account yet.
-          </p>
-        )}
+          {account.lastSyncError ? (
+            <p className="mt-1">
+              <ErrorText inline>{account.lastSyncError}</ErrorText>
+            </p>
+          ) : account.lastSyncedAt && account.templateTotal === 0 ? (
+            <p className="mt-1 text-xs text-(--color-feedback-warning-fg)">
+              Meta answered and returned no templates at all. Check that {account.wabaId} is the
+              WhatsApp Business Account ID from WhatsApp Manager — an id that is not a WABA, or one
+              belonging to a business this token cannot manage, answers exactly the same way an
+              empty account does.
+            </p>
+          ) : account.lastSyncedAt ? (
+            <p className="mt-1 text-xs text-(--color-text-secondary)">
+              Templates last synced{' '}
+              {account.lastSyncedAt.toISOString().replace('T', ' ').slice(0, 16)} UTC
+            </p>
+          ) : (
+            <p className="mt-1 text-xs text-(--color-text-secondary)">
+              Templates sync hourly; nothing has been read from this account yet.
+            </p>
+          )}
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => setEditing(true)}
+            disabled={reconnecting}
+          >
+            Edit
+          </Button>
+          {account.credential && canConnect ? (
+            <>
+              <ConnectBusinessAppNumber
+                {...connect}
+                mode="reconnect"
+                onBusyChange={setReconnecting}
+              />
+              <ForgetCredential accountId={account.id} disabled={reconnecting} />
+            </>
+          ) : null}
+          <DangerAction
+            action={deleteWhatsAppAccount}
+            id={account.id}
+            label="Disconnect"
+            disabled={reconnecting}
+          />
+        </div>
       </div>
-
-      <div className="flex flex-wrap items-center gap-2">
-        <Button
-          variant="secondary"
-          size="sm"
-          onClick={() => setEditing(true)}
-          disabled={reconnecting}
-        >
-          Edit
-        </Button>
-        {account.credential && canConnect ? (
-          <>
-            <ConnectBusinessAppNumber
-              {...connect}
-              mode="reconnect"
-              onBusyChange={setReconnecting}
-            />
-            <ForgetCredential accountId={account.id} disabled={reconnecting} />
-          </>
-        ) : null}
-        <DangerAction
-          action={deleteWhatsAppAccount}
-          id={account.id}
-          label="Disconnect"
+      {/* A number already on Cloud API, connected in Meta's own interface. On
+        the account rather than the page header, so the WABA is the row's and
+        never a claim typed into the form. */}
+      {canConnect && account.isActive ? (
+        <AdoptBusinessAppNumber
+          accountId={account.id}
+          wabaId={account.wabaId}
+          credentialLabel={account.credential ? 'its stored credential' : account.tokenEnvVar}
+          groups={connect.groups}
+          suggestedGroupId={connect.suggestedGroupId}
           disabled={reconnecting}
         />
-      </div>
+      ) : null}
     </div>
   );
 }
