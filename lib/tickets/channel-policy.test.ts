@@ -3,6 +3,7 @@ import type { SessionAgent } from '@/lib/auth/session';
 import {
   answeredFromConsole,
   canSeeChannel,
+  commentChannelOf,
   consoleReplyNotice,
   consoleReplyReason,
   CONVERSATION_CHANNELS,
@@ -189,6 +190,14 @@ describe('the Meta channels', () => {
     expect(metaPlatformOf('facebook_comment')).toBe('facebook');
     expect(metaPlatformOf('instagram')).toBe('instagram');
     expect(metaPlatformOf('instagram_comment')).toBe('instagram');
+  });
+
+  it('file each platform’s comments on a comment channel of its own', () => {
+    expect(commentChannelOf('facebook')).toBe('facebook_comment');
+    expect(commentChannelOf('instagram')).toBe('instagram_comment');
+    for (const platform of ['facebook', 'instagram'] as const) {
+      expect(metaPlatformOf(commentChannelOf(platform))).toBe(platform);
+    }
   });
 
   it('are not prototype keys or near misses', () => {

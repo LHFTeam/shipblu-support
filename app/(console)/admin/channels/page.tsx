@@ -12,6 +12,7 @@ import { can } from '@/lib/auth/permissions';
 import { allLimited } from '@/lib/concurrency';
 import { env } from '@/lib/env';
 import { listFolderOptions } from '@/lib/kb/admin';
+import { isMetaChannel } from '@/lib/tickets/channel-policy';
 import {
   canRequestSync,
   needsReconnect,
@@ -299,7 +300,7 @@ export default async function ChannelsPage() {
                       ? `${(channel.config.phoneNumberId as string) || 'no phone number id'}${
                           account ? ` · ${account.name}` : ''
                         }`
-                      : channel.type === 'facebook' || channel.type === 'instagram'
+                      : isMetaChannel(channel.type)
                         ? 'hardcoded in server environment variables'
                         : channel.type === 'webchat'
                           ? 'the widget'

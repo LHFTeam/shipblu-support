@@ -5,6 +5,14 @@ import {
   type Holiday,
   type HoursConfig,
 } from '@/lib/hours';
+import { rootCommentId } from '@/lib/meta/comments';
+import {
+  commentChannelOf,
+  isCommentChannel,
+  isMetaChannel,
+  metaPlatformOf,
+  type ConversationChannel,
+} from '@/lib/tickets/channel-policy';
 
 /**
  * Choosing the out-of-hours message: which rule applies, which body it sends,
@@ -47,25 +55,27 @@ export type AutoResponseRule = {
  * a match at all, so a ticket falls through to the next broadest one rather
  * than to silence — which is what makes turning a rule off a safe thing to do.
  *
- * **A public comment matches only a rule that names its channel.** A reply on a
- * comment ticket is posted under the customer's comment, where anybody reading
- * the post sees it (`send_meta` infers the comment reply), so a company-wide
- * out-of-hours message written for a private inbox would go out in public. A
- * rule with no channel — every channel, or every channel in a group — is
- * "every channel except public comments" for that reason, and says so on the
- * admin page. `isComment` is the comment channel or the external id, so this
- * holds for a comment ticket that still carries its platform's channel.
+ * **A public comment matches only a rule that names its comment channel.** A
+ * reply on a comment ticket is posted under the customer's comment, where
+ * anybody reading the post sees it (`send_meta` infers the comment reply), so a
+ * company-wide out-of-hours message written for a private inbox would go out in
+ * public. A rule with no channel — every channel, or every channel in a group —
+ * is "every channel except public comments" for that reason, and says so on the
+ * admin page. `scope.channel` is `ruleChannel`'s answer, never the column read
+ * raw.
  */
 export function pickRule(
   rules: AutoResponseRule[],
-  scope: { groupId: string | null; channel: string; isComment: boolean },
+  scope: { groupId: string | null; channel: ConversationChannel },
 ): AutoResponseRule | null {
   let best: AutoResponseRule | null = null;
   let bestScore = -1;
 
   for (const rule of rules) {
     if (rule.groupId !== null && rule.groupId !== scope.groupId) continue;
-    if (rule.channel === null ? scope.isComment : rule.channel !== scope.channel) continue;
+    if (rule.channel === null ? isCommentChannel(scope.channel) : rule.channel !== scope.channel) {
+      continue;
+    }
 
     // Channel 2, group 1: a rule naming both scores 3 and outranks either alone.
     const score = (rule.channel !== null ? 2 : 0) + (rule.groupId !== null ? 1 : 0);
@@ -76,6 +86,28 @@ export function pickRule(
   }
 
   return best;
+}
+
+/**
+ * The channel a ticket's rules are matched on: a comment ticket still filed on
+ * its platform's channel answers as the comment channel it is moving to.
+ *
+ * Every comment ticket carries `facebook` or `instagram` until Stage 1.2 of
+ * `plans/ticket-category-routing.md` moves it, so matching the column read raw
+ * would do both wrong things the admin page now promises against: a rule the
+ * form names "Facebook messages" would post its out-of-hours wording publicly
+ * under a comment, and a rule for "Facebook comments" would match nothing until
+ * the backfill ran. Once a CHECK makes the column and the external id one answer
+ * (Stage 1.3) this returns its input.
+ */
+export function ruleChannel(
+  channel: ConversationChannel,
+  externalId: string | null,
+): ConversationChannel {
+  if (isMetaChannel(channel) && !isCommentChannel(channel) && rootCommentId(externalId)) {
+    return commentChannelOf(metaPlatformOf(channel));
+  }
+  return channel;
 }
 
 export type MessageContext = {

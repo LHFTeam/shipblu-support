@@ -5,19 +5,14 @@ import { loadHoursCatalog } from '@/lib/hours/catalog';
 import { groupHours } from '@/lib/hours/resolve';
 import { holidayName, holidayOn, isWithinBusinessHours, nextOpeningAt } from '@/lib/hours';
 import { textToHtml } from '@/lib/html/sanitize';
-import { rootCommentId } from '@/lib/meta/comments';
-import {
-  isCommentChannel,
-  isReadOnlyChannel,
-  type ConversationChannel,
-} from '@/lib/tickets/channel-policy';
+import { isReadOnlyChannel, type ConversationChannel } from '@/lib/tickets/channel-policy';
 import {
   automatedReplyBlocked,
   deliverAutomatedReply,
   lacksEmailRecipient,
 } from '@/lib/tickets/outbound';
 import { requesterLocale } from '@/lib/tickets/locale';
-import { pickBody, pickRule, substitute, type AutoResponseRule } from './resolve';
+import { pickBody, pickRule, ruleChannel, substitute, type AutoResponseRule } from './resolve';
 import { logger } from '@/lib/log';
 
 const log = logger('auto-response');
@@ -94,8 +89,7 @@ async function send(conversationId: string, at: Date): Promise<void> {
 
   const rule = pickRule(rules, {
     groupId: ticket.groupId,
-    channel: ticket.channel,
-    isComment: isCommentChannel(ticket.channel) || rootCommentId(ticket.externalId) !== null,
+    channel: ruleChannel(ticket.channel, ticket.externalId),
   });
   if (!rule || rule.silent) return;
 
@@ -255,7 +249,8 @@ async function loadTicket(conversationId: string): Promise<Ticket | null> {
       isSpam: conversations.isSpam,
       deletedAt: conversations.deletedAt,
       lastCustomerMessageAt: conversations.lastCustomerMessageAt,
-      // Only to tell a comment ticket from a direct message; the guard reads it.
+      // Only to tell a comment ticket from a direct message: the rule picker
+      // and the 24-hour guard both read it.
       externalId: conversations.externalId,
       autoRespondedAt: conversations.autoRespondedAt,
       contactEmail: contacts.primaryEmail,

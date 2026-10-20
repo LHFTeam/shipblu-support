@@ -1074,15 +1074,35 @@ worker and all four crons. 1.2 does not start until all six run 1.1.
   the CSAT skip keep their `rootCommentId(externalId)` test beside the new
   channel test.
 - **As built (2026-10-20).** Where 1.1 differs from the items above, and why.
-  - **Three comparisons stay strict**, and say so: the `feedback_template`
-    case of `automatedReplyBlocked`, `send_meta`'s feedback card and
-    `recordMetaFeedback`'s survey-to-tap match. Messenger's card exists only
+  - **Four comparisons stay strict**, and say so. Three are Messenger's
+    feedback card: the `feedback_template` case of `automatedReplyBlocked`,
+    `decideSurvey` choosing it and `send_meta` sending it. The card exists only
     in a Messenger thread, so widening them through `metaPlatformOf` would let
-    a comment channel through the one door that must stay shut to it.
-  - **The two thread-control actions refuse a comment ticket** (by channel or
-    external id), rather than mapping it to its platform. The header offers
-    neither on a comment, so a request reaching them is a stale tab or a forged
-    form, and both answer in words saying the comment is answered on the post.
+    a comment channel through the one door that must stay shut to it. The
+    fourth is `recordMetaFeedback` matching a tap's platform against its
+    survey's ticket, so a tap can never thank a commenter in public.
+  - **`refreshRequesterProfile` and `claimThreadControl` refuse a comment
+    ticket** (by channel or external id), rather than mapping it to its
+    platform. The console offers neither on a comment — the header hides the
+    profile refresh, and the composer shows thread control only under a
+    standby refusal, which a comment ticket never has — so a request reaching
+    them is a stale tab or a forged form, and both say the comment is answered
+    on the post.
+  - **The auto-response picker matches on `ruleChannel`**, which reads a
+    comment ticket still filed on `facebook`/`instagram` as the comment channel
+    it is moving to. Matching the column raw, a rule naming the platform would
+    post its wording under a comment and a rule naming a comment channel would
+    match nothing until the backfill. The form names the platform's scope
+    "Facebook messages" / "Instagram messages" beside "… comments" for the same
+    reason. Production holds one rule, null-scoped and inactive (2026-10-20).
+  - **The filter, the Channels views and the condition builder offer the
+    comment values now**, and they match nothing until 1.2 writes them: the 52
+    comment tickets stay under Facebook and Instagram until the backfill.
+    Intended, since the realtime topics and the filter's parser have to know
+    the values before any row carries one; the gap is as long as 1.1 and the
+    backfill are apart.
+  - **The admin channels page's address column** asks `isMetaChannel`, so a
+    comment row 1.2 creates reads as its platform's rather than "no address".
   - **The names live once**, in `lib/tickets/channel-labels.ts`, keyed by
     `ConversationChannel`: the badge and `channelLabel` read the same record, so
     a new channel does not compile until it has a name. `channelLabel` used to
@@ -1746,6 +1766,15 @@ Web first (it migrates `metrics_daily`), then the worker and crons, with
   who opens a held ticket from "My groups" and assigns it ends the hold. The
   "Routing…" badge says what they are doing, and nothing stops them, which is
   deliberate: a person is never overruled.
+- **An automation's `send_reply` with no channel condition would answer a
+  comment in public.** The auto-response picker keeps an every-channel rule off
+  comments (1.1); the automation engine has no such guard, and
+  `deliverAutomatedReply` on a comment ticket goes out through `send_meta` as a
+  comment reply. Q11 keeps conditions on the platform, which after 1.2 stops a
+  `channel is facebook` rule matching a comment — but a rule naming no channel
+  at all still would. Latent: production has three automation rules and none
+  sends a reply (2026-10-20). Closing it is a guard in the engine or a refusal
+  in the rule editor, in its own change.
 - **Re-selecting the SLA before the first response changes today's behaviour**
   for a group move made before anyone answered. That is deliberate (decision
   3), but anyone reading the old `onGroupChanged` comment needs the new one

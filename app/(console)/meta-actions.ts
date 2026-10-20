@@ -146,7 +146,9 @@ export async function refreshRequesterProfile(
   // reaching here is a stale tab or a hand-made request, refused as the screen
   // would have: a commenter is answered on the post, not looked up.
   if (isCommentChannel(channel) || rootCommentId(row.conversation.externalId)) {
-    return { error: 'A comment ticket has no Messenger profile to look up' };
+    return {
+      error: 'A comment ticket has no profile to look up; a commenter is answered on the post',
+    };
   }
   // The identity, the Graph call and the sentence below all name the platform.
   const platform = metaPlatformOf(channel);

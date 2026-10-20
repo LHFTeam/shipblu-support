@@ -31,9 +31,9 @@ const CHANNELS: { value: string; label: string }[] = [
   { value: 'email', label: 'Email' },
   { value: 'whatsapp', label: 'WhatsApp' },
   { value: 'webchat', label: 'Web chat' },
-  { value: 'facebook', label: 'Facebook' },
+  { value: 'facebook', label: 'Facebook messages' },
   { value: 'facebook_comment', label: 'Facebook comments' },
-  { value: 'instagram', label: 'Instagram' },
+  { value: 'instagram', label: 'Instagram messages' },
   { value: 'instagram_comment', label: 'Instagram comments' },
   { value: 'portal', label: 'Customer portal' },
 ];

@@ -594,11 +594,14 @@ every Graph call. A commenter is the same Facebook or Instagram user as the one
 in the inbox, and an identity split by channel would make them two contacts. So a conversation's channel is compared through
 `isMetaChannel`, `metaPlatformOf` and `isCommentChannel`
 (`lib/tickets/channel-policy.ts`), never as `=== 'facebook'`, which silently
-stops matching the comment half. Three comparisons stay strict on purpose — the
-`feedback_template` case of `automatedReplyBlocked`, `send_meta`'s feedback
-card and `lib/csat/meta-feedback.ts` — because Messenger's card exists only in
-a Messenger thread. A TypeSafe request sends the platform rather than the
-channel, so the vocabulary the model was asked in does not move under it.
+stops matching the comment half. Four comparisons stay strict on purpose.
+Three are Messenger's feedback card — the `feedback_template` case of
+`automatedReplyBlocked`, `decideSurvey` choosing the card and `send_meta`
+sending it — which exists only in a Messenger thread. The fourth is
+`recordMetaFeedback` matching a tapped rating's platform against its survey's
+ticket, so that a tap can never thank a commenter on the public thread. A
+TypeSafe request sends the platform rather than the channel, so the vocabulary
+the model was asked in does not move under it.
 
 Until the CHECK constraint in `plans/ticket-category-routing.md` §1.3 lands, a
 comment ticket can still sit on its platform's channel — every one ingested
@@ -608,7 +611,10 @@ comment is the channel test _or_ the external id**
 The auto-response picker is the one reader where the difference is public: a
 rule with no channel matches every channel _except_ the comment ones, because
 its reply would be posted under the customer's comment where anybody reading
-the post sees it, and only a rule naming a comment channel answers there.
+the post sees it, and only a rule naming a comment channel answers there. It
+matches on `ruleChannel`, which reads a comment still filed on its platform as
+the comment channel it is moving to, so a rule naming the platform answers
+that platform's direct messages and nothing posted in public.
 
 Graph request shapes are written down in `lib/meta/comments.ts` and
 `lib/meta/send.ts` rather than built inline, and asserted there against Meta's

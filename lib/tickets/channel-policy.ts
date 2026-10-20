@@ -129,6 +129,16 @@ export function metaPlatformOf(channel: MetaChannel): MetaPlatform {
   }
 }
 
+/** The channel a platform's public comments are filed on. */
+export function commentChannelOf(platform: MetaPlatform): CommentChannel {
+  switch (platform) {
+    case 'facebook':
+      return 'facebook_comment';
+    case 'instagram':
+      return 'instagram_comment';
+  }
+}
+
 /**
  * Channels the platform only observes.
  *
@@ -277,9 +287,10 @@ export function readOnlyChannels(): ConversationChannel[] {
  * last on one card.
  *
  * A named list rather than `sendsByEmail()`, which asks how a reply travels:
- * `carrierFor` sends anything unrecognised to email, so a channel added later
- * would default to "has a written subject" and bring the duplicate back without
- * anything failing. `api` is out for the same reason — nothing writes one yet,
+ * `carrierFor` answers `send_email` for web chat and the customer bot too, and
+ * neither has a subject anybody wrote, so a predicate borrowed from the carrier
+ * would let the next channel it sends by email default to "has a written
+ * subject" and bring the duplicate back without anything failing. `api` is out for the same reason — nothing writes one yet,
  * so there is no subject to vouch for.
  */
 const WRITTEN_SUBJECT: readonly ConversationChannel[] = ['email', 'portal'];
