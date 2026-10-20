@@ -1593,22 +1593,30 @@ answered.
    support). It does not mean making Jev's _subcategory_ answers live, which
    stay a shadow measurement. **Default: the new category only.** Promoting
    subcategories is a separate, argued change.
-2. **The on-screen name "Category"** sits beside "Status category" in the rule
+   Support Lead Answer: Yes, your default is acceptable.
+   
+3. **The on-screen name "Category"** sits beside "Status category" in the rule
    builder. **Default: "Category", with "Status category" unchanged.** Arabic
    wording for both "category" and "subcategory" is also needed. Suggested:
    التصنيف for category and التصنيف الفرعي for subcategory. Today's handbook
    uses التصنيف for what becomes the subcategory, so this decides 2.A's
    handbook text.
-3. **A fourth value for job applications, partnership and courier offers, and
+   Support Lead Answer: Yes, your default is acceptable.
+   
+4. **A fourth value for job applications, partnership and courier offers, and
    vendors.** Jev's shadow run found 11 such tickets on 126 Facebook DMs.
    **Default: no fourth value.** They answer `unknown` and stay in the
    default group. If "Other" is added later, its description must exclude
    greetings. Otherwise a greeting answered "other" would settle the ticket
    before its informative message arrives.
-4. **The category and subcategories are independent.** **Default: yes.**
+   Support Lead Answer: Let's add courier jobs (for couriers and outsourcing companies looking to work with or for ShipBlu) as a fourth value, and keep the 'unknown' option as per the scenario you listed.
+   
+6. **The category and subcategories are independent.** **Default: yes.**
    Alternatively, each subcategory could carry a "usually" category to narrow
    the picker.
-5. **Where each category routes, and when merchant support may route.**
+   Support Lead Answer: Yes, your default is acceptable.
+   
+7. **Where each category routes, and when merchant support may route.**
    **Default:**
    - Sales → Inbound Sales Team
    - Merchant support → no route group until its own evaluation reaches 30
@@ -1618,45 +1626,60 @@ answered.
 
    What is Support for once those three are staffed?
 
-6. **The hold window.** **Default: 5 minutes,** tuned from the shadow data.
-7. **A person changing the category.** **Default:**
+   Support Lead Answer:
+   - Sales → Inbound Sales Team
+   - Merchant support → Merchant Care.
+   - Customer support → Customer Care
+   Once those three are staffed, the Support group will be unused for now.
+
+8. **The hold window.** **Default: 5 minutes,** tuned from the shadow data.
+9. **A person changing the category.** **Default:**
    - **during the hold:** it routes the ticket, as Jev's answer would;
    - **after the hold:** it relabels only, and the sidebar offers "Hand to
      <group>", which moves and re-assigns.
 
    The alternative is to re-route automatically after the hold too.
 
-8. **Agents see their groups' tickets** (Stage 0.5). The permission is already
+   Support Lead Answer: Your default is acceptable.
+
+10. **Agents see their groups' tickets** (Stage 0.5). The permission is already
    granted to every agent role, and implementing it switches it on.
    **Default: keep it.** "No" means removing it from the `AGENT` role in the
    same PR. Without it, a routed ticket nobody is free to take is invisible to
    the group.
-9. **Coexistence numbers stay on their default group.** **Default: yes,
+   Support Lead Answer: Your default is acceptable.
+
+11. **Coexistence numbers stay on their default group.** **Default: yes,
    enforced in code.** They are answered on the phone.
-10. **Messenger routes in shadow until the Freshworks swap**, and Instagram and
+   Support Lead Answer: Your default is acceptable.
+
+12. **Messenger routes in shadow until the Freshworks swap**, and Instagram and
     the comment channels go live first. **Default: yes.**
-11. **The comment channels:**
-    - **Names.** **Default: "Facebook comments" / "Instagram comments".**
+   Support Lead Answer: Your default is acceptable.
+
+13. **The comment channels:**
+    - **Names.** **Default: "Facebook comments" / "Instagram comments".** Support Lead Answer: Your default is acceptable.
     - **Default group.** **Default: the same as their platform's, until you
-      choose otherwise.**
+      choose otherwise.** Support Lead Answer: Your default is acceptable.
     - **Out-of-hours replies on comments.** A reply there is posted publicly.
-      **Default: never, unless a rule names the comment channel.**
+      **Default: never, unless a rule names the comment channel.** Support Lead Answer: Your default is acceptable.
     - **Existing rules and policies.** For each rule and policy that names
       Facebook or Instagram (1.2's inventory): should it also name the comment
-      channel?
-12. **Historic data.**
+      channel? Support Lead Answer: No.
+      
+14. **Historic data.**
     - **Reports.** Rebuild them for the comment split from 2026-08-29.
-      **Default: yes.**
+      **Default: yes.** Support Lead Answer: Your default is acceptable.
     - **The open backlog.** Back-classify its category, without routing it.
-      **Default: yes, as 4.2's last step.**
-13. **The rename reaches the database, URLs, permission keys, the job name and
+      **Default: yes, as 4.2's last step.** Support Lead Answer: Your default is acceptable.
+15. **The rename reaches the database, URLs, permission keys, the job name and
     the `CATEGORISE_*` variables, keeping stored history.** **Default: yes.**
-    The cost is one maintenance window of a few minutes, off-hours.
-14. **Who may change a ticket's category, and who manages the list.**
-    **Default: every agent changes it; admins manage it.**
-15. **SLA by category.** Before the first response, the policy is re-selected
+    The cost is one maintenance window of a few minutes, off-hours. Support Lead Answer: Your default is acceptable.
+16. **Who may change a ticket's category, and who manages the list.**
+    **Default: every agent changes it; admins manage it.** Support Lead Answer: Your default is acceptable.
+17. **SLA by category.** Before the first response, the policy is re-selected
     whenever the category or the group changes. Should Sales tickets get their
     own targets? And are the four existing policies restructured in Stage 0.2
     as proposed?
-16. **TypeSafe's data-processing terms** cover a second per-message call
-    carrying customer text. **This needs a yes before 4.2.**
+18. **TypeSafe's data-processing terms** cover a second per-message call
+    carrying customer text. **This needs a yes before 4.2.** Support Lead Answer: Yes.
