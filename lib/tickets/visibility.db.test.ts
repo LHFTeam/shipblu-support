@@ -1,15 +1,13 @@
 import { eq } from 'drizzle-orm';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { db } from '@/db/client';
 import {
   agents,
-  attachments,
   contacts,
   conversationShipments,
   conversations,
   groupMembers,
   groups,
-  messages,
   shipments,
   ticketStatuses,
 } from '@/db/schema';
@@ -28,19 +26,10 @@ import { inboxGroupsFor, scopeForAgent, seesTicket } from './visibility';
  * places, and a group member must be admitted — and anybody else refused — by
  * every one of them, or a routed ticket is listed and then unopenable, or
  * openable and then unactionable. Each path is asked about the same four
- * tickets.
+ * tickets. The attachment route asks it too, and is driven beside the route
+ * (`app/api/attachments/[id]/route.db.test.ts`), since `lib/` may not import
+ * from `app/`.
  */
-
-// The attachment route reads its agent from the session cookie, and answers
-// with a signed storage URL: both stood in for, so the route's own query —
-// visibility and all — runs against Postgres as written.
-const session = vi.hoisted(() => ({ agent: null as SessionAgent | null }));
-vi.mock('@/lib/auth/session', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@/lib/auth/session')>()),
-  getSessionAgent: async () => session.agent,
-}));
-vi.mock('@/lib/storage', () => ({ signedUrl: async () => 'https://storage.example/signed' }));
-const { GET: getAttachment } = await import('@/app/api/attachments/[id]/route');
 
 withCleanDatabase();
 
@@ -164,50 +153,6 @@ describe('a group member', () => {
     expect(await loadConversation(member, tickets.merchantQueue)).toBeNull();
     expect(await canSubscribeToConversation(member, tickets.merchantQueue)).toBe(false);
     expect(await seesTicket(member, tickets.merchantQueue)).toBe(false);
-  });
-
-  it('downloads a file on a ticket in their group, and not on another group’s', async () => {
-    const [inCare, inMerchant] = await db
-      .insert(messages)
-      .values([
-        {
-          conversationId: tickets.careQueue,
-          direction: 'inbound',
-          bodyText: '[document: awb.pdf]',
-        },
-        {
-          conversationId: tickets.merchantQueue,
-          direction: 'inbound',
-          bodyText: '[document: awb.pdf]',
-        },
-      ])
-      .returning({ id: messages.id });
-    const [careFile, merchantFile] = await db
-      .insert(attachments)
-      .values(
-        [inCare!, inMerchant!].map((message, i) => ({
-          messageId: message.id,
-          storagePath: `attachments/${i}`,
-          filename: 'awb.pdf',
-          contentType: 'application/pdf',
-          sizeBytes: 1,
-        })),
-      )
-      .returning({ id: attachments.id });
-
-    const status = async (agent: SessionAgent, id: string) => {
-      session.agent = agent;
-      const response = await getAttachment(
-        new Request(`https://support.example/api/attachments/${id}`),
-        { params: Promise.resolve({ id }) },
-      );
-      return response.status;
-    };
-
-    expect(await status(member, careFile!.id)).toBe(307);
-    expect(await status(member, merchantFile!.id)).toBe(404);
-    expect(await status(outsider, careFile!.id)).toBe(404);
-    expect(await status(admin, merchantFile!.id)).toBe(307);
   });
 
   it('sees their group’s tickets on a shipment page, and not another group’s', async () => {
