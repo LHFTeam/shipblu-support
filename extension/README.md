@@ -55,6 +55,57 @@ the panel reads the active tab, which would be itself.
   `true_<chat>_<id>` key becomes `out:<id>`, the shape `wamidKey` gives our
   stored wamids.
 
+## Installing on the laptops
+
+Chrome on Ubuntu installs the extension from a managed policy, keeps it
+updated, pins it to the toolbar and does not let an agent remove it. The
+console serves everything Chrome needs, without a session:
+
+| URL                                          | What                                          |
+| -------------------------------------------- | --------------------------------------------- |
+| `/api/extension/package/updates.xml`         | the update manifest Chrome polls              |
+| `/api/extension/package/shipblu-support.crx` | the signed package it downloads               |
+| `/api/extension/package/policy.json`         | the policy `install/install-ubuntu.sh` writes |
+
+**Once, to set it up:**
+
+1. Generate the signing key on a trusted machine — not on Render, not in this
+   repository — and keep it with the team's other secrets:
+   ```bash
+   openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out shipblu-extension.pem
+   ```
+   The key **is** the extension's identity: its id is derived from it and named
+   in the policy on every laptop. Lose it and every laptop needs the new
+   extension installed; leak it and anyone can sign an update the laptops
+   accept from the update URL.
+2. Put the PEM in the `shipblu-support-production` group as
+   `EXTENSION_SIGNING_KEY` (Render keeps multi-line values; a PEM with `\n`
+   escapes or base64-encoded whole also works). The web service's build runs
+   `npm run extension:pack`, which signs the package for the console's own
+   `APP_URL` and writes it where the routes above serve it.
+3. Deploy, then check `/api/extension/package/policy.json` answers.
+
+**On each laptop:**
+
+```bash
+sudo ./install-ubuntu.sh            # from extension/install/
+```
+
+It fetches the policy from the console, refuses anything that is not one, and
+writes it into Google Chrome's managed policy directory (and Chromium's, if
+installed). Chrome picks it up on restart, or at once from `chrome://policy` →
+**Reload policies**. `sudo ./install-ubuntu.sh --remove` takes it away again.
+
+**Shipping a change:** bump `version` in `extension/manifest.json` and deploy.
+Chrome installs an update only when the advertised version is higher than the
+one it has, so a deploy that leaves the version alone leaves the laptops alone.
+
+This was proven against Chromium with a throwaway key: with no
+`--load-extension`, the policy alone installed the signed package as an
+`admin` extension that could not be disabled, pinned to the toolbar, with the
+side panel enabled on WhatsApp Web — so the signature, the id derivation, the
+update manifest and the policy shape are all ones Chrome accepts.
+
 ## Not done yet
 
 - **Matching a chat to its ticket** (`POST /api/extension/resolve`) is stage 2
@@ -62,7 +113,5 @@ the panel reads the active tab, which would be itself.
   it ships the panel says matching is not live yet.
 - **Reading the open chat** (`src/whatsapp/page.ts`) is provisional for the same
   reason.
-- **Installing on the laptops** (stage 6): a signing key so the extension id is
-  stable, a packed `.crx` with an update manifest, and the Ubuntu policy file
-  (`/etc/opt/chrome/policies/managed/`, `ExtensionInstallForcelist`). Until then,
-  load it unpacked.
+- **The signing key** has to be generated and set before the first deploy that
+  should serve the package (above).

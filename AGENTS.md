@@ -187,6 +187,7 @@ db/migrations/   generated — never hand-edit
 db/sql/          idempotent SQL Drizzle cannot express, replayed after migrating
 worker/handlers/ one file per job type, registered in worker/handlers/index.ts
 proxy.ts         Next 16 middleware: host routing + the signed-out redirect
+extension/       the WhatsApp Web Chrome extension; its own README and tsconfig
 ```
 
 Put logic in `lib/`, not in route files. A page or action authorises, calls into

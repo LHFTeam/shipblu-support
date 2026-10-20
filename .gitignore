@@ -5,6 +5,9 @@ node_modules
 out/
 build/
 dist/
+# The signed extension package: built on deploy, signed with a key that is
+# never committed (extension/pack.mjs).
+extension/package/
 
 .env
 .env.local

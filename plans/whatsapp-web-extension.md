@@ -204,8 +204,15 @@ carry both.
    Driven end to end in Chromium against a local console with only `resolve`
    stubbed: the writes landed as the console's do (assigned event, status to
    Pending, SLA paused, `send_side_email` queued).
-6. **Ship** — CI step for `extension/`, packaging, the Ubuntu policy file, a
-   page in the console handbook.
+6. **Ship** — built. `extension/crx.mjs` signs a CRX3 (tested against Node's
+   crypto); `extension:pack` runs in the web service's Render build with
+   `EXTENSION_SIGNING_KEY`, and the console serves the update manifest, the
+   package and the install policy under `/api/extension/package/`.
+   `extension/install/install-ubuntu.sh` writes the policy (`ExtensionSettings`:
+   force-installed, update URL overridden by policy, pinned). Proven in
+   Chromium with a throwaway key: installed by policy alone, `installType:
+admin`, locked, pinned. The real key is generated off-system and set in the
+   dashboard; nothing is served until it is.
 
 ### Who sees which ticket: assign on use
 
