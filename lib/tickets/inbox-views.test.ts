@@ -117,6 +117,16 @@ describe('inboxViews', () => {
     );
     expect(items([GROUPS[0]!]).map((item) => item.id)).not.toContain(`group-${CUSTOMER_CARE}`);
   });
+
+  // "My groups" lists only the agent's own, so a supervisor who belongs to
+  // none would otherwise have no way to the only group's queue.
+  it('offers a supervisor the only group when they are not in it', () => {
+    const ids = inboxViews({ ...everything, groups: [GROUPS[1]!] })
+      .flatMap((section) => section.items)
+      .map((item) => item.id);
+    expect(ids).toContain(`group-${MERCHANT_CARE}`);
+    expect(ids).not.toContain('groups');
+  });
 });
 
 describe('viewHref', () => {

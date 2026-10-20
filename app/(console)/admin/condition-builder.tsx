@@ -31,6 +31,11 @@ export type FieldOption = {
   label: string;
   kind: 'text' | 'number' | 'choice';
   choices?: { value: string; label: string }[];
+  /**
+   * Values no longer offered that can still be named — a deactivated agent —
+   * so a condition holding one says who, not "Unknown: <uuid>" (`shownChoices`).
+   */
+  retired?: { value: string; label: string }[];
 };
 
 const OPERATORS: {
@@ -452,8 +457,9 @@ export function shownOperators(field: FieldOption, row: Row): { value: Operator;
  * since, a custom field's option removed. Offered only the field's own
  * choices, the dropdown shows "Choose…" over a value it cannot display, and a
  * set keeps a member with no checkbox — both written back on every save, and
- * both conditions that silently never match. Named "Unknown" instead, the
- * stale value is on screen where an admin can see it and take it out.
+ * both conditions that silently never match. Shown instead, the stale value is
+ * on screen where an admin can see it and take it out: by the name `retired`
+ * still has for it (a deactivated agent), and as "Unknown" when nothing does.
  */
 export function shownChoices(field: FieldOption, row: Row): { value: string; label: string }[] {
   const own = field.choices ?? [];
@@ -461,7 +467,11 @@ export function shownChoices(field: FieldOption, row: Row): { value: string; lab
   const held = isListOperator(row.op) ? listValue(row.value) : [scalarValue(row.value)];
   const stale = held
     .filter((value) => value !== '' && !known.has(value))
-    .map((value) => ({ value, label: `Unknown: ${value}` }));
+    .map((value) => ({
+      value,
+      label:
+        field.retired?.find((retired) => retired.value === value)?.label ?? `Unknown: ${value}`,
+    }));
   return [...stale, ...own];
 }
 

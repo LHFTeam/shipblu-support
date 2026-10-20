@@ -65,7 +65,11 @@ type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
  * nothing (`sendCannedReply` logs a line and returns). One no rule sends goes
  * with the team, as it would if an admin deleted it by hand. Auto-responses and
  * CSAT rules scoped to the group cascade too and are left to: each only narrows
- * a broader row, which answers in its place.
+ * a broader row, which answers in its place. The group's slices of
+ * `metrics_daily` cascade as well — a null group there means "every group", so
+ * they cannot be kept under none — and the delete button says so before it is
+ * pressed rather than refusing, since refusing would keep every group that ever
+ * had a ticket for good.
  *
  * A WhatsApp onboarding that has not reached its `channel` step names the
  * default group the channel it will create should start in, and deleting the
@@ -106,10 +110,19 @@ export async function groupUses(
   // places for a question nobody is waiting on.
   const mentions = (column: AnyColumn) => sql`position(${groupId} in ${column}::text) > 0`;
 
+  // Live tickets only. A deleted or merged one is in no console list, so a
+  // refusal counting it asked the admin to move what nobody can open, and the
+  // group could never go; its `set null` foreign key empties it harmlessly.
   const [ticketCount] = await on
     .select({ count: sql<number>`count(*)::int` })
     .from(conversations)
-    .where(eq(conversations.groupId, groupId));
+    .where(
+      and(
+        eq(conversations.groupId, groupId),
+        isNull(conversations.deletedAt),
+        isNull(conversations.mergedIntoId),
+      ),
+    );
 
   const channelRows = await on
     .select({ name: channels.name })

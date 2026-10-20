@@ -106,6 +106,7 @@ export async function InboxShell({
           canSeeRatings={canSeeRatings}
           canViewAll={canViewAll}
           seesGroupQueues={seesGroupQueues(canViewGroups, groups)}
+          groupName={groups.find((group) => group.id === filters.group)?.name ?? null}
           canCreate={can(agent, 'ticket.create')}
           canViewContacts={can(agent, 'contact.view')}
         />

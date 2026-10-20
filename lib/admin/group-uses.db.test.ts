@@ -166,12 +166,33 @@ describe('groupUses', () => {
       .insert(contacts)
       .values({ name: 'Amira' })
       .returning({ id: contacts.id });
-    await db.insert(conversations).values({
-      statusId: status!.id,
-      channel: 'email',
-      groupId: sales,
-      requesterContactId: contact!.id,
-    });
+    const [live] = await db
+      .insert(conversations)
+      .values({
+        statusId: status!.id,
+        channel: 'email',
+        groupId: sales,
+        requesterContactId: contact!.id,
+      })
+      .returning({ id: conversations.id });
+    // Neither a deleted ticket nor one merged into another is in any list, so
+    // neither is something the admin could move.
+    await db.insert(conversations).values([
+      {
+        statusId: status!.id,
+        channel: 'email',
+        groupId: sales,
+        requesterContactId: contact!.id,
+        deletedAt: new Date(),
+      },
+      {
+        statusId: status!.id,
+        channel: 'email',
+        groupId: sales,
+        requesterContactId: contact!.id,
+        mergedIntoId: live!.id,
+      },
+    ]);
 
     const [stored, unstored, third] = await db
       .insert(whatsappAccounts)

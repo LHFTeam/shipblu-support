@@ -1,6 +1,7 @@
 import {
   listActiveAgents,
   listActiveTicketFields,
+  listDeactivatedAgents,
   listFormNames,
   listGroupNames,
 } from '@/lib/admin/settings';
@@ -29,11 +30,12 @@ export async function ticketFieldOptions(
     groups?: ReturnType<typeof listGroupNames>;
   } = {},
 ): Promise<FieldOption[]> {
-  const [custom, forms, groupNames, agentNames] = await Promise.all([
+  const [custom, forms, groupNames, agentNames, deactivated] = await Promise.all([
     listActiveTicketFields(),
     listFormNames(),
     given.groups ?? listGroupNames(),
     given.agents ?? listActiveAgents(),
+    listDeactivatedAgents(),
   ]);
 
   const base: FieldOption[] = [
@@ -99,6 +101,12 @@ export async function ticketFieldOptions(
       label: 'Assignee',
       kind: 'choice',
       choices: agentNames.map((agent) => ({ value: agent.id, label: agent.name })),
+      // Offered only while active, but a condition written before somebody
+      // left still names them, and says who rather than a bare uuid.
+      retired: deactivated.map((agent) => ({
+        value: agent.id,
+        label: `${agent.name} (deactivated)`,
+      })),
     },
     {
       value: 'is_assigned',

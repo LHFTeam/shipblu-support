@@ -980,7 +980,8 @@ migrations land one at a time.
     first comma-separated piece, and a choice with a comma in it becomes a set
     of one under "is any of" rather than being split. Production holds no such
     condition (the read above); these are safeguards, not repairs.
-  - **0.3** refuses for more than channels and forms. Tickets, as before;
+  - **0.3** refuses for more than channels and forms. Live tickets, as before
+    but no longer counting deleted or merged ones, which nobody can move;
     automation rules, SLA policies and skills that name the group; a canned
     response naming the group (its `group_id`, whatever its visibility) that a
     rule sends, which the cascade would otherwise delete from under the rule;
@@ -995,7 +996,9 @@ migrations land one at a time.
     in one transaction behind a lock on the group's row
     (`deleteGroupIfUnused`). Auto-responses and CSAT rules scoped to the group
     still cascade, by design: each narrows a broader row that answers instead.
-    Stage 3 adds category routes to `groupUses`.
+    So do the group's rows in `metrics_daily` (a null group there means every
+    group), and the delete's confirmation says its report history goes with
+    it. Stage 3 adds category routes to `groupUses`.
   - **0.4**: when no active channel row names a WhatsApp number, the fallback
     picks the oldest active support row that is not a coexistence phone, and a
     coexistence row only when no other active WhatsApp row exists. So an
@@ -1012,10 +1015,15 @@ migrations land one at a time.
     which narrows and never widens. Unassigned and All open appear for an
     agent who sees every ticket or is in at least one group, and My groups for
     a member of one: the permission is in the whole agent role, and for an
-    agent in no group those lists are empty or Mine again. Moving a ticket out of your own sight (another group, another
-    assignee) lands you on the inbox instead of a 404. The database test drives
-    `loadConversation`, the guard every ticket action passes, rather than an
-    action; Stage 5's "Routing…" badge goes on the list row.
+    agent in no group those lists are empty or Mine again. A group view's
+    narrowing is said on the list, with "Stop filtering by group", as the rated
+    view's is. Moving a ticket out of your own sight (another group, another
+    assignee) lands you on the inbox instead of a 404; somebody else moving it
+    while you have it open lands you on the ticket route's own not-found, which
+    says that is the likely reason and links back. The database test drives
+    `loadConversation`, the guard every ticket action passes, and the
+    attachment route rather than an action; Stage 5's "Routing…" badge goes on
+    the list row.
 
 ### Stage 1 — comment channels
 

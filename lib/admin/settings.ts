@@ -97,6 +97,15 @@ export async function listActiveAgents() {
     .orderBy(asc(agents.name));
 }
 
+/** Deactivated agents, by name: never offered, but named where a condition still holds one. */
+export async function listDeactivatedAgents() {
+  return db
+    .select({ id: agents.id, name: agents.name })
+    .from(agents)
+    .where(eq(agents.isActive, false))
+    .orderBy(asc(agents.name));
+}
+
 /**
  * Every group, with how many agents it has and how many tickets sit with it.
  *

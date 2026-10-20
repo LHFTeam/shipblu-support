@@ -233,6 +233,23 @@ describe('ConditionBuilder', () => {
     ]);
   });
 
+  it('names a stale value the field can still name, rather than calling it unknown', () => {
+    const assignee: FieldOption = {
+      value: 'assignee.id',
+      label: 'Assignee',
+      kind: 'choice',
+      choices: [{ value: 'a-active', label: 'Sara' }],
+      retired: [{ value: 'a-gone', label: 'Mona (deactivated)' }],
+    };
+    expect(shownChoices(assignee, { field: 'assignee.id', op: 'eq', value: 'a-gone' })).toEqual([
+      { value: 'a-gone', label: 'Mona (deactivated)' },
+      { value: 'a-active', label: 'Sara' },
+    ]);
+    expect(
+      shownChoices(assignee, { field: 'assignee.id', op: 'eq', value: 'a-unknown' })[0],
+    ).toEqual({ value: 'a-unknown', label: 'Unknown: a-unknown' });
+  });
+
   it('adds nothing when every held value is a choice', () => {
     const group = fields[3]!;
     expect(

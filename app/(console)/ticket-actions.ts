@@ -26,6 +26,7 @@ import {
   refuseIfNoRootCause,
 } from '@/lib/tickets/console-guards';
 import { changeStatus } from '@/lib/tickets/status';
+import { seesTicket } from '@/lib/tickets/visibility';
 import { scheduleSurvey, setSurveySuppressed } from '@/lib/csat';
 import type { ActionState } from './action-state';
 
@@ -274,8 +275,10 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
   // The revalidation re-renders the ticket page in this same response, and that
   // page would now call notFound() — so, as `purgeTicket` does, the response
   // carries the inbox instead. Asked after the observer rules, because one of
-  // them may have moved it too. `redirect` throws, so it stays outside any try.
-  if (!(await loadConversation(agent, conversationId))) redirect('/inbox');
+  // them may have moved it too; free for an agent who sees every ticket.
+  // `redirect` throws, so it stays outside any try, and `useFieldAction` takes
+  // the rejection it causes on the client as the navigation it is.
+  if (!(await seesTicket(agent, conversationId))) redirect('/inbox');
   return ok();
 }
 

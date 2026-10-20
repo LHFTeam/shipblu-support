@@ -131,10 +131,11 @@ export function inboxViews({
           ]
         : [mine],
     },
-    // One view per group, for whoever has more than one to tell apart: a
-    // supervisor reading each team's queue, or an agent in several groups.
-    // An agent in one group already has it as "My groups".
-    ...(seesTeam && groups.length > 1
+    // One view per group wherever "My groups" does not already cover them: a
+    // supervisor reading each team's queue (members or not — "My groups" is
+    // only their own), or an agent in several groups. An agent in one group,
+    // and nothing else offered, has it as "My groups".
+    ...(seesTeam && (groups.some((group) => !group.member) || memberOf.length > 1)
       ? [
           {
             title: 'Groups',

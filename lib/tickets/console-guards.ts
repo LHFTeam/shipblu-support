@@ -13,7 +13,7 @@ import { CAUSE_REQUIRED_AREAS } from '@/lib/categorise/taxonomy';
 import type { ActionState } from '@/lib/http/action-state';
 import { isUuid } from '@/lib/http/uuid';
 import { canSeeChannel, consoleReplyReason, readOnlyReason } from '@/lib/tickets/channel-policy';
-import { canSeeAssignment } from '@/lib/tickets/visibility';
+import { assignmentVisibility } from '@/lib/tickets/visibility';
 import { listLabels, missingRequired } from '@/lib/tickets/custom-fields';
 import { listTicketFields } from '@/lib/tickets/lookups';
 import { changeStatus } from '@/lib/tickets/status';
@@ -49,15 +49,14 @@ export async function loadConversation(agent: SessionAgent, conversationId: stri
     .from(conversations)
     .innerJoin(ticketStatuses, eq(ticketStatuses.id, conversations.statusId))
     .innerJoin(contacts, eq(contacts.id, conversations.requesterContactId))
-    .where(eq(conversations.id, conversationId))
+    // Same visibility rule as the read path, re-checked here: an action is a
+    // separate entry point and must not trust that the page filtered anything.
+    // The lists' own SQL, in this query, so the two cannot answer differently.
+    .where(and(eq(conversations.id, conversationId), assignmentVisibility(agent)))
     .limit(1);
 
   const row = rows[0];
   if (!row) return null;
-
-  // Same visibility rule as the read path, re-checked here: an action is a
-  // separate entry point and must not trust that the page filtered anything.
-  if (!(await canSeeAssignment(agent, row.conversation))) return null;
 
   if (!canSeeChannel(agent, row.conversation.channel)) return null;
 

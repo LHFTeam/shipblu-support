@@ -40,10 +40,10 @@ export function conversationVisibility(agent: SessionAgent): SQL[] {
  * accepting) was visible to no agent-role user at all, since every one of them
  * saw only what was assigned to them. Seven places used to spell "assigned to
  * me unless `ticket.view.all`" out for themselves. Now which tickets an agent
- * may see is decided here and nowhere else: the inbox list and the ticket page
- * take it as SQL (`assignmentVisibility`), the action guard and the attachment
- * route as a yes or no about one row (`canSeeAssignment`), the counts as the
- * primitives their request cache is keyed on, the shipment read model as its
+ * may see is decided here and nowhere else: the inbox list, the ticket page,
+ * the action guard and the attachment route take it as SQL in their own query
+ * (`assignmentVisibility`), an action that may have moved the ticket asks again
+ * (`seesTicket`), the counts as the primitives their request cache is keyed on, the shipment read model as its
  * `onlyVisibleTo` (`scopeForAgent`), and the inbox's group views — which groups
  * to offer (`inboxGroupsFor`) and which views — from the same answer. So a
  * group member who can list a ticket can also open it, act on it and download
@@ -68,24 +68,19 @@ export function assignmentVisibility(agent: SessionAgent): SQL | undefined {
 }
 
 /**
- * The row-level twin of `assignmentVisibility`, for the checks that have already
- * loaded one ticket and must decide about it: the action guard and the
- * attachment route. It answers exactly what the SQL would have, so a ticket an
- * agent can list is one they can act on, and the reverse.
+ * Whether the agent may still see one ticket by who holds it, read fresh — for
+ * an action that has just written something that can move it, as
+ * `updateTicket` reassigning or regrouping does. The same SQL the lists run
+ * rather than a JavaScript twin of it, so the two cannot drift, and no read at
+ * all for an agent who sees every ticket.
  */
-export async function canSeeAssignment(
-  agent: SessionAgent,
-  ticket: { assigneeAgentId: string | null; groupId: string | null },
-): Promise<boolean> {
-  const scope = assignmentScope(agent);
-  if (!scope) return true;
-  if (ticket.assigneeAgentId === scope.agentId) return true;
-  if (!scope.includeGroups || !ticket.groupId) return false;
-
+export async function seesTicket(agent: SessionAgent, conversationId: string): Promise<boolean> {
+  const visibility = assignmentVisibility(agent);
+  if (!visibility) return true;
   const rows = await db
     .select({ one: sql<number>`1` })
-    .from(groupMembers)
-    .where(and(eq(groupMembers.agentId, scope.agentId), eq(groupMembers.groupId, ticket.groupId)))
+    .from(conversations)
+    .where(and(eq(conversations.id, conversationId), visibility))
     .limit(1);
   return rows.length > 0;
 }

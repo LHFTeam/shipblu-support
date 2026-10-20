@@ -49,6 +49,7 @@ export function InboxList({
   canSeeRatings = false,
   canViewAll = false,
   seesGroupQueues = false,
+  groupName = null,
   canCreate = false,
   canViewContacts = false,
 }: {
@@ -69,6 +70,8 @@ export function InboxList({
   canViewAll?: boolean;
   /** `seesGroupQueues()`: `ticket.view.group` and a member of at least one group. */
   seesGroupQueues?: boolean;
+  /** The name of the group `filters.group` names, when it is one the agent is offered. */
+  groupName?: string | null;
   canCreate?: boolean;
   /** The avatar route answers 404 without `contact.view`, so the tile is not asked for one. */
   canViewContacts?: boolean;
@@ -261,6 +264,22 @@ export function InboxList({
               }
             >
               Stop filtering by rating
+            </Button>
+          </p>
+        ) : null}
+
+        {/*
+          The same for a group view, for the same reason: the selects carry
+          `group`, so Status or Channel changed inside one reads "Custom
+          filter" over a list still cut to that group. A group the agent is not
+          offered (a hand-typed `?group=`) has no name to give here, and the
+          list holds only their own tickets in it.
+        */}
+        {filters.group ? (
+          <p className="flex flex-wrap items-center gap-x-2 text-xs text-(--color-text-secondary)">
+            {groupName ? `Only tickets in ${groupName}.` : 'Only tickets in one group.'}
+            <Button variant="ghost" size="sm" onClick={() => setParams({ group: '' })}>
+              Stop filtering by group
             </Button>
           </p>
         ) : null}
