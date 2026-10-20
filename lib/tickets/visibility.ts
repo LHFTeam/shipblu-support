@@ -39,13 +39,16 @@ export function conversationVisibility(agent: SessionAgent): SQL[] {
  * a group and not yet assigned (out of hours, everybody at capacity, nobody
  * accepting) was visible to no agent-role user at all, since every one of them
  * saw only what was assigned to them. Seven places used to spell "assigned to
- * me unless `ticket.view.all`" out for themselves. Now this is the one place
- * the permissions are read: the inbox list, the ticket page and the action
- * guard take it as SQL (`assignmentVisibility`), the attachment route as a
- * yes or no about one row (`canSeeAssignment`), the counts as the primitives
- * their request cache is keyed on, and the shipment read model as its
- * `onlyVisibleTo` (`scopeForAgent`) — so a group member who can list a ticket
- * can also open it, act on it and download what is attached to it.
+ * me unless `ticket.view.all`" out for themselves. Now which tickets an agent
+ * may see is decided here and nowhere else: the inbox list and the ticket page
+ * take it as SQL (`assignmentVisibility`), the action guard and the attachment
+ * route as a yes or no about one row (`canSeeAssignment`), the counts as the
+ * primitives their request cache is keyed on, the shipment read model as its
+ * `onlyVisibleTo` (`scopeForAgent`), and the inbox's group views — which groups
+ * to offer (`inboxGroupsFor`) and which views — from the same answer. So a
+ * group member who can list a ticket can also open it, act on it and download
+ * what is attached to it, and is offered a view for exactly the groups whose
+ * tickets they can list.
  *
  * Membership is read in the query rather than carried on the session, so
  * taking an agent out of a group takes the group's tickets away at their next
@@ -98,8 +101,9 @@ export async function canSeeAssignment(
 export async function inboxGroupsFor(
   agent: SessionAgent,
 ): Promise<{ id: string; name: string; member: boolean }[]> {
-  const viewAll = can(agent, 'ticket.view.all');
-  if (!viewAll && !can(agent, 'ticket.view.group')) return [];
+  const scope = assignmentScope(agent);
+  const viewAll = !scope;
+  if (scope && !scope.includeGroups) return [];
 
   const member = exists(
     db

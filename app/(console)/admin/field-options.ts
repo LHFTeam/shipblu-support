@@ -17,10 +17,11 @@ import type { FieldOption } from './condition-builder';
  * absent, which silently never matches.
  *
  * A page that reads the agents or the groups for itself hands over the same
- * promise rather than having them read twice: every page that builds
- * conditions lists the agents, and the automations page the groups as well.
- * A promise rather than the list, so the read still runs beside the page's
- * others instead of after them.
+ * promise rather than having them read twice: the automations, SLA and skills
+ * pages list the agents, and the automations page the groups as well. A promise
+ * rather than the list, so the read still runs beside the page's others instead
+ * of after them. It is one read because the readers are async: a drizzle
+ * builder handed over instead would run its query again at every await.
  */
 export async function ticketFieldOptions(
   given: {

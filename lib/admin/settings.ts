@@ -81,8 +81,15 @@ export function listSavedPhrases() {
   return db.select({ key: shipmentPhrases.key, ar: shipmentPhrases.ar }).from(shipmentPhrases);
 }
 
-/** The agents a picker offers: active ones, by name. Groups, skills and SLA escalations each offer it. */
-export function listActiveAgents() {
+/**
+ * The agents a picker offers: active ones, by name. Groups, skills and SLA
+ * escalations each offer it.
+ *
+ * Async, so a call is a promise that runs its query once. A drizzle builder
+ * runs it again every time it is awaited, and the condition builder's pages
+ * share one call with `ticketFieldOptions` precisely to read it once.
+ */
+export async function listActiveAgents() {
   return db
     .select({ id: agents.id, name: agents.name, email: agents.email })
     .from(agents)
@@ -203,8 +210,11 @@ export function listScheduleNames() {
   return db.select({ id: businessHours.id, name: businessHours.name }).from(businessHours);
 }
 
-/** Group names for a picker, by name. Auto-responses, automations and forms each offer it. */
-export function listGroupNames() {
+/**
+ * Group names for a picker, by name. Auto-responses, automations and forms each
+ * offer it. Async for the reason `listActiveAgents` gives.
+ */
+export async function listGroupNames() {
   return db.select({ id: groups.id, name: groups.name }).from(groups).orderBy(asc(groups.name));
 }
 

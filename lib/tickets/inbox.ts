@@ -413,10 +413,11 @@ function lastVisibleMessage() {
  *
  * Asked twice by one inbox render — the console layout for the rail's badge,
  * the inbox frame for its views — so the work is memoised for the request. The
- * key is the agent's id and the two permissions the count depends on rather
- * than the agent, because every `requireAgent()` returns a fresh object and a
- * cache keyed on it would never hit. Group membership is not in the key: it is
- * read inside the query, and one request asks once. Outside a server render
+ * key is the agent's id and the scope `assignmentScope` answers — whether it is
+ * unrestricted, and whether it takes in their groups — rather than the agent,
+ * because every `requireAgent()` returns a fresh object and a cache keyed on it
+ * would never hit. Group membership is not in the key: it is read inside the
+ * query, and one request asks once. Outside a server render
  * (`/api/inbox-counts`) `cache` memoises nothing, which is the behaviour that
  * route already had.
  */

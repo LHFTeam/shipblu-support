@@ -188,6 +188,28 @@ describe('ConditionBuilder', () => {
 
   // A free-text value can hold a comma, and the field it was typed into may
   // be a choice now. Opened and saved untouched, it must post what it holds.
+  it('makes a choice with a comma in it a set of one, and still splits a typed list', () => {
+    const district: FieldOption = {
+      value: 'custom.district',
+      label: 'District',
+      kind: 'choice',
+      choices: [
+        { value: 'Cairo, Giza', label: 'Greater Cairo' },
+        { value: 'Alexandria', label: 'Alexandria' },
+      ],
+    };
+    expect(valueForOperator('Cairo, Giza', 'in', district)).toEqual(['Cairo, Giza']);
+    expect(valueForOperator('Alexandria, Cairo, Giza', 'in', district)).toEqual([
+      'Alexandria',
+      'Cairo',
+      'Giza',
+    ]);
+  });
+
+  it('trims a stored choice, as the engine compares it', () => {
+    expect(valueForOperator('high ', 'eq', fields[0]!)).toBe('high');
+  });
+
   it('keeps a stale value with a comma in it whole', () => {
     const initial = { field: 'group.id', op: 'contains', value: 'Care, Merchant' };
     const html = renderToStaticMarkup(

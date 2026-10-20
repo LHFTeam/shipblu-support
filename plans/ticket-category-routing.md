@@ -975,36 +975,44 @@ migrations land one at a time.
   - **0.2** made `assignee.id` a choice of active agents too, for the same
     reason as groups: the fact is a uuid and nobody types one. The builder shows
     a stored operator the field no longer offers (`contains` on a group, from
-    the free-text days) selected and marked "not offered here", and keeps a
-    stored value whole however many commas it holds. Production holds no
-    such condition (the read above); both are safeguards, not repairs.
+    the free-text days) selected and marked "not offered here". A stored
+    scalar on a choice field loads whole, commas and all, rather than as its
+    first comma-separated piece, and a choice with a comma in it becomes a set
+    of one under "is any of" rather than being split. Production holds no such
+    condition (the read above); these are safeguards, not repairs.
   - **0.3** refuses for more than channels and forms. Tickets, as before;
     automation rules, SLA policies and skills that name the group; a canned
-    response shared with the group that a rule sends, which the cascade would
-    otherwise delete from under the rule; and a WhatsApp connection running now
-    or failed and still offered Retry on the Channels page, with the group as
-    the default for the channel it would create. A failed attempt stops
-    counting when its number is connected again or a week after it failed, so
-    an abandoned one cannot hold a group for good. The check and the delete run
+    response naming the group (its `group_id`, whatever its visibility) that a
+    rule sends, which the cascade would otherwise delete from under the rule;
+    and a WhatsApp connection the Channels page shows with a way to finish it,
+    with the group as the default for the channel it would create: running
+    now, stalled, or failed and still offered Retry (by the page's own rules,
+    including hiding the wrong number picked once the right one connected). A
+    stalled or failed attempt stops counting when its number is connected
+    again with another group, and a failed one also a week after it failed,
+    when the page stops offering Retry; a stalled one stays on the page, with
+    Retry, until somebody acts on it. The check and the delete run
     in one transaction behind a lock on the group's row
     (`deleteGroupIfUnused`). Auto-responses and CSAT rules scoped to the group
     still cascade, by design: each narrows a broader row that answers instead.
     Stage 3 adds category routes to `groupUses`.
-  - **0.4**: when no channel row names a WhatsApp number, the fallback picks
-    the oldest support row that is not a coexistence phone, and a coexistence
-    row only when there is no other, so an unknown number cannot land in a
-    business's phone inbox.
-  - **0.5**: the permissions are read in one function, `assignmentScope`, and
-    the list, the counts, the ticket page, the action guard, the attachment
-    route and the shipment pages all take their answer from it. The counts'
-    request cache is keyed on the two permissions, not on membership: the
-    query reads membership itself, and one request asks once. The group filter
+  - **0.4**: when no active channel row names a WhatsApp number, the fallback
+    picks the oldest active support row that is not a coexistence phone, and a
+    coexistence row only when no other active WhatsApp row exists. So an
+    unknown number lands in a business's phone inbox only when that phone is
+    the sole WhatsApp channel.
+  - **0.5**: which tickets an agent may see is decided in one function,
+    `assignmentScope`, and the list, the counts, the ticket page, the action
+    guard, the attachment route, the shipment pages and the inbox's group
+    views all take their answer from it. The counts' request cache is keyed on
+    that answer (unrestricted, and whether it takes in groups), not on
+    membership: the query reads membership itself, and one request asks once. The group filter
     is a view per group, offered once there is more than one to tell apart (an
     agent in one group has it as "My groups"), and `?group=<id>` in the URL,
-    which narrows and never widens. The Team views (Unassigned, All open, My
-    groups) appear only for an agent in at least one group: the permission is
-    in the whole agent role, and for an agent in none those lists are empty or
-    Mine again. Moving a ticket out of your own sight (another group, another
+    which narrows and never widens. Unassigned and All open appear for an
+    agent who sees every ticket or is in at least one group, and My groups for
+    a member of one: the permission is in the whole agent role, and for an
+    agent in no group those lists are empty or Mine again. Moving a ticket out of your own sight (another group, another
     assignee) lands you on the inbox instead of a 404. The database test drives
     `loadConversation`, the guard every ticket action passes, rather than an
     action; Stage 5's "Routing…" badge goes on the list row.

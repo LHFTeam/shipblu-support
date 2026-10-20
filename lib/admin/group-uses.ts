@@ -7,6 +7,8 @@ import {
   gt,
   inArray,
   isNull,
+  ne,
+  not,
   notExists,
   or,
   sql,
@@ -28,7 +30,12 @@ import {
 import { formName } from '@/lib/forms/naming';
 import { storedCredentialExists } from '@/lib/whatsapp/credentials';
 import { SUPERSEDED } from '@/lib/whatsapp/onboarding';
-import { SHOW_FAILED_FOR_MS } from '@/lib/whatsapp/onboarding-view';
+import {
+  LIVE_ATTEMPT_MS,
+  NUMBER_NOT_ON_ACCOUNT,
+  SHOW_FAILED_FOR_MS,
+  STALL_AFTER_MS,
+} from '@/lib/whatsapp/onboarding-view';
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
@@ -52,36 +59,38 @@ type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
  * the requirement a skill puts on a ticket — never matches again. Each is a
  * routing decision going missing without anybody being told, so they count.
  *
- * Canned responses shared with the group are `on delete cascade`: the delete
- * takes them, text and all. One an automation rule sends counts, because the
- * rule would go on matching and quietly send nothing (`sendCannedReply` logs a
- * line and returns). One no rule sends goes with the team, as it would if an
- * admin deleted it by hand. Auto-responses and CSAT rules scoped to the group
- * cascade too and are left to: each only narrows a broader row, which answers
- * in its place.
+ * A canned response naming the group (`group_id`, whatever its visibility says)
+ * is `on delete cascade`: the delete takes it, text and all. One an automation
+ * rule sends counts, because the rule would go on matching and quietly send
+ * nothing (`sendCannedReply` logs a line and returns). One no rule sends goes
+ * with the team, as it would if an admin deleted it by hand. Auto-responses and
+ * CSAT rules scoped to the group cascade too and are left to: each only narrows
+ * a broader row, which answers in its place.
  *
  * A WhatsApp onboarding that has not reached its `channel` step names the
  * default group the channel it will create should start in, and deleting the
- * group would create that channel with none. Only an attempt that can still get
- * there without anybody going back through Meta's window counts: one running
- * now, and a failed one the Channels page still offers to retry — it holds a
- * stored credential, failed within `SHOW_FAILED_FOR_MS`, was neither retired as
- * superseded nor replaced by a newer attempt on its number. Counting every
- * failed attempt instead made one abandoned months ago block the group for
- * good, with nothing on the page left to press. An attempt whose number already
- * has a channel is a reconnect, which keeps that channel's own group, so it
- * never counts.
+ * group would create that channel with none. Only an attempt the Channels page
+ * shows with a way to finish it counts, in the page's own terms
+ * (`./onboarding-view`): one running now; one stalled, which `retryable()`
+ * offers Retry for; and a failed one `recoveryFor` and `shownOnboardings` still
+ * offer Retry for — its account holds a stored credential, it failed within
+ * `SHOW_FAILED_FOR_MS`, it was neither retired as superseded nor replaced by a
+ * newer attempt on its number, and it is not the wrong number picked in Meta's
+ * window once the right one connected. Counting every failed attempt instead
+ * made one abandoned months ago block the group for good, with nothing on the
+ * page left to press. An attempt whose number already has a channel is a
+ * reconnect, which keeps that channel's own group, so it never counts.
  */
 export type GroupUses = {
   tickets: number;
   channels: string[];
   forms: string[];
-  /** Attempts running now, and failed ones the Channels page offers to retry. */
-  onboardings: { connecting: number; retryable: number };
+  /** Attempts running, stalled, or failed and still offered Retry. */
+  onboardings: { connecting: number; stalled: number; retryable: number };
   automationRules: string[];
   slaPolicies: string[];
   skills: string[];
-  /** Shared with the group, and sent by an automation rule. */
+  /** Naming the group, so deleted with it, and sent by an automation rule. */
   cannedResponses: string[];
 };
 
@@ -115,9 +124,14 @@ export async function groupUses(
     .orderBy(asc(ticketForms.slug));
 
   const newer = alias(whatsappOnboardings, 'newer');
+  const sibling = alias(whatsappOnboardings, 'sibling');
   const failedSince = new Date(now.getTime() - SHOW_FAILED_FOR_MS).toISOString();
   const onboardingRows = await on
-    .select({ status: whatsappOnboardings.status, count: sql<number>`count(*)::int` })
+    .select({
+      status: whatsappOnboardings.status,
+      startedAt: whatsappOnboardings.startedAt,
+      nextAttemptAt: whatsappOnboardings.nextAttemptAt,
+    })
     .from(whatsappOnboardings)
     // Inner: an attempt whose account is gone has no credential to retry with.
     .innerJoin(whatsappAccounts, eq(whatsappAccounts.id, whatsappOnboardings.whatsappAccountId))
@@ -132,6 +146,30 @@ export async function groupUses(
             sql`${whatsappOnboardings.error} is distinct from ${SUPERSEDED}`,
             storedCredentialExists(),
             sql`coalesce(${whatsappOnboardings.finishedAt}, ${whatsappOnboardings.startedAt}) >= ${failedSince}::timestamptz`,
+            // `shownOnboardings`: the wrong number picked in Meta's window is
+            // hidden, Retry and all, once a later attempt on the same business
+            // account connected — the right number picked the second time.
+            not(
+              and(
+                // Never null, or `not` of an attempt with no number record
+                // and a connected sibling would be null and drop it.
+                sql`${whatsappOnboardings.steps} -> 'number' ->> 'outcome' is not distinct from ${NUMBER_NOT_ON_ACCOUNT}`,
+                sql`${whatsappOnboardings.steps} -> 'number' ->> 'ok' is distinct from 'true'`,
+                exists(
+                  on
+                    .select({ one: sql`1` })
+                    .from(sibling)
+                    .where(
+                      and(
+                        eq(sibling.wabaId, whatsappOnboardings.wabaId),
+                        ne(sibling.id, whatsappOnboardings.id),
+                        eq(sibling.status, 'connected'),
+                        gt(sibling.startedAt, whatsappOnboardings.startedAt),
+                      ),
+                    ),
+                ),
+              )!,
+            ),
           ),
         ),
         notExists(
@@ -157,10 +195,14 @@ export async function groupUses(
             ),
         ),
       ),
-    )
-    .groupBy(whatsappOnboardings.status);
-  const attempts = (status: string) =>
-    onboardingRows.find((row) => row.status === status)?.count ?? 0;
+    );
+  // `retryable()`'s stall: past `LIVE_ATTEMPT_MS` with no retry due within
+  // `STALL_AFTER_MS`. Nothing will move such an attempt but a Retry or a new
+  // sign-in, so the refusal has to say so rather than call it "being connected".
+  const stalled = (row: (typeof onboardingRows)[number]) =>
+    now.getTime() - row.startedAt.getTime() > LIVE_ATTEMPT_MS &&
+    !(row.nextAttemptAt && row.nextAttemptAt.getTime() >= now.getTime() - STALL_AFTER_MS);
+  const exchanged = onboardingRows.filter((row) => row.status === 'exchanged');
 
   const ruleRows = await on
     .select({ name: automationRules.name })
@@ -185,7 +227,8 @@ export async function groupUses(
     .from(cannedResponses)
     .where(
       and(
-        eq(cannedResponses.visibility, 'group'),
+        // The column the cascade follows, not the visibility: a response made
+        // global by hand with its `group_id` left behind goes with the group too.
         eq(cannedResponses.groupId, groupId),
         exists(
           on
@@ -203,7 +246,11 @@ export async function groupUses(
     tickets: ticketCount?.count ?? 0,
     channels: channelRows.map((row) => row.name),
     forms: formRows.map((row) => formName(row, 'en')),
-    onboardings: { connecting: attempts('exchanged'), retryable: attempts('failed') },
+    onboardings: {
+      connecting: exchanged.filter((row) => !stalled(row)).length,
+      stalled: exchanged.filter(stalled).length,
+      retryable: onboardingRows.filter((row) => row.status === 'failed').length,
+    },
     automationRules: ruleRows.map((row) => row.name),
     slaPolicies: policyRows.map((row) => row.name),
     skills: skillRows.map((row) => row.name),
@@ -251,9 +298,14 @@ function groupDeleteRefusal(uses: GroupUses): string | null {
   if (uses.tickets > 0) parts.push(`${uses.tickets} ticket(s)`);
   if (uses.channels.length) parts.push(`the default for ${list('channel', uses.channels)}`);
   if (uses.forms.length) parts.push(`the default for ${list('form', uses.forms)}`);
-  const { connecting, retryable } = uses.onboardings;
+  const { connecting, stalled, retryable } = uses.onboardings;
   if (connecting > 0) {
     parts.push(`the default for ${connecting} WhatsApp number(s) being connected now`);
+  }
+  if (stalled > 0) {
+    parts.push(
+      `the default for ${stalled} stalled WhatsApp connection(s) that “Retry connection” would finish`,
+    );
   }
   if (retryable > 0) {
     parts.push(
@@ -266,16 +318,20 @@ function groupDeleteRefusal(uses: GroupUses): string | null {
   if (uses.slaPolicies.length) parts.push(`named by ${list('SLA policy', uses.slaPolicies)}`);
   if (uses.skills.length) parts.push(`required by ${list('skill', uses.skills)}`);
   if (uses.cannedResponses.length) {
-    parts.push(`shared with ${list('canned response', uses.cannedResponses)} that a rule sends`);
+    parts.push(`the group of ${list('canned response', uses.cannedResponses)} that a rule sends`);
   }
 
   if (parts.length === 0) return null;
-  // A failed attempt cannot be moved, only replaced or outlived, so it says how
-  // it stops counting: connected again from the Channels page with another
-  // group, or past `SHOW_FAILED_FOR_MS`, when the page stops offering Retry.
+  // A stalled or failed attempt cannot be moved, only replaced — connected
+  // again from the Channels page with another group — or, if it failed,
+  // outlived: past `SHOW_FAILED_FOR_MS` the page stops offering Retry.
+  const kind = stalled && retryable ? 'stalled or failed' : stalled ? 'stalled' : 'failed';
+  const outlived = retryable
+    ? `${stalled ? ', and a failed one' : ', or'} a week after it failed`
+    : '';
   const failed =
-    retryable > 0
-      ? ' A failed connection stops counting once its number is connected again with another group, or a week after it failed.'
+    stalled || retryable
+      ? ` A ${kind} connection stops counting once its number is connected again with another group${outlived}.`
       : '';
   return `That group is still in use: ${parts.join('; ')}. Move them to another group first.${failed}`;
 }

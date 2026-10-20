@@ -5,7 +5,7 @@ import { LiveUpdates } from '@/components/live-updates';
 import { ViewsPanel, type ViewsPanelSection } from '@/components/views-panel';
 import { inboxCounts, listInbox } from '@/lib/tickets/inbox';
 import { parseFilters } from '@/lib/tickets/inbox-filters';
-import { inboxGroupsFor } from '@/lib/tickets/visibility';
+import { assignmentScope, inboxGroupsFor } from '@/lib/tickets/visibility';
 import { activeViewId, inboxViews, seesGroupQueues, viewHref } from '@/lib/tickets/inbox-views';
 import { InboxList, KnowledgeBaseLink } from './list';
 
@@ -52,8 +52,11 @@ export async function InboxShell({
   ]);
 
   const viewingTicket = activeNumber !== undefined;
-  const canViewAll = can(agent, 'ticket.view.all');
-  const canViewGroups = can(agent, 'ticket.view.group');
+  // From the scope `listInbox` and `inboxCounts` are drawn from, so a view is
+  // offered for exactly what the lists can hold.
+  const scope = assignmentScope(agent);
+  const canViewAll = !scope;
+  const canViewGroups = scope?.includeGroups ?? false;
   const canSeeBot = can(agent, 'ticket.view.bot');
   const canSeeRatings = can(agent, 'report.view');
 

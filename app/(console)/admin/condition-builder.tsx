@@ -381,12 +381,22 @@ export function valueForOperator(
   op: Operator,
   field?: FieldOption,
 ): Row['value'] {
-  if (isListOperator(op)) return listValue(value);
+  // A choice can have a comma in it (a custom field's option is anything up to
+  // a pipe), so a scalar that is one of the field's choices becomes a set of
+  // one rather than being split. Anything else still splits: a comma list is
+  // how a set was typed before the field was a choice.
+  if (isListOperator(op)) {
+    const whole = typeof value === 'string' ? value.trim() : null;
+    if (whole && field?.choices?.some((choice) => choice.value === whole)) return [whole];
+    return listValue(value);
+  }
   // Only a set collapses. A stored scalar stays whole even with a comma in it:
   // split, it would load as its first piece — "Unknown: Care" for a policy
   // holding "Care, Merchant" from when the field was free text — and the next
-  // save would write that piece back over a condition nobody edited.
-  if (field?.choices) return Array.isArray(value) ? (value[0] ?? '') : value;
+  // save would write that piece back over a condition nobody edited. Trimmed,
+  // as the engine compares it (`text()` in `lib/rules/conditions.ts`), so a
+  // stray space does not turn a real option into "Unknown".
+  if (field?.choices) return Array.isArray(value) ? (value[0] ?? '') : value.trim();
   return textValue(value);
 }
 
