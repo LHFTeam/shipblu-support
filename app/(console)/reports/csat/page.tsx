@@ -20,7 +20,6 @@ import { ratingLabels } from '@/lib/csat/wording';
 import { channelLabel, formatDateTime } from '@/lib/format';
 import {
   countedThrough,
-  daysUncounted,
   firstSend,
   latestComments,
   liveSurveys,
@@ -47,7 +46,7 @@ import {
   type Row as ReportRow,
   type Totals,
 } from '@/lib/reports/queries';
-import { rangeIn, reportingContext } from '@/lib/reports/rollup';
+import { daysUncounted, rangeIn, reportingContext } from '@/lib/reports/rollup';
 import { RangeNav } from '../range-nav';
 import { daysFrom, RANGES } from './ranges';
 

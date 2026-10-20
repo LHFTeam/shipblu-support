@@ -235,20 +235,6 @@ export function countedThrough(window: ReportWindow, lastWhole: string | null): 
   );
 }
 
-/**
- * The days between the last one the figures count and today, neither
- * included: 0 once tonight's run has reached yesterday, 1 before it, and
- * more only when the rollup has fallen behind — the page says so then, since
- * the end it prints is otherwise the only sign.
- */
-export function daysUncounted(window: Pick<ReportWindow, 'to'>, through: string): number {
-  const today = DateTime.fromISO(window.to, { zone: 'utc' });
-  return Math.max(
-    0,
-    Math.round(today.diff(DateTime.fromISO(through, { zone: 'utc' }), 'days').days) - 1,
-  );
-}
-
 export type LiveDay = { day: string; sent: number; skipped: number };
 
 /**

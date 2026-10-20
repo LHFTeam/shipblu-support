@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { emptyBucket, reconciles, slicesFor, type Slice } from './rollup';
+import { daysUncounted, emptyBucket, reconciles, slicesFor, todayIn, type Slice } from './rollup';
 
 /**
  * `metrics_daily` stores four slices per day — the totals, and then by group, by
@@ -108,5 +108,33 @@ describe('reconciles', () => {
       const [totals, ...rest] = day;
       expect(reconciles([surveys(null, { ...totals!.bucket, ...counts }), ...rest])).toBe(false);
     }
+  });
+});
+
+describe('todayIn', () => {
+  it('is the team’s date at the instant given, not the database’s or the server’s', () => {
+    // 21:30 UTC on the 19th is 00:30 on the 20th in Cairo, at UTC+3 that week.
+    expect(todayIn('Africa/Cairo', new Date('2026-10-19T21:30:00Z'))).toBe('2026-10-20');
+    expect(todayIn('UTC', new Date('2026-10-19T21:30:00Z'))).toBe('2026-10-19');
+  });
+
+  it('moves its midnight with the clock when Cairo leaves summer time', () => {
+    // From the 30th Cairo is UTC+2, so the same 21:30 UTC is still the day before.
+    expect(todayIn('Africa/Cairo', new Date('2026-10-30T21:30:00Z'))).toBe('2026-10-30');
+    expect(todayIn('Africa/Cairo', new Date('2026-10-30T22:30:00Z'))).toBe('2026-10-31');
+  });
+});
+
+describe('daysUncounted', () => {
+  const TODAY = { to: '2026-10-17' };
+
+  it('is 0 once tonight’s run has reached yesterday, and 1 before it', () => {
+    expect(daysUncounted(TODAY, '2026-10-16')).toBe(0);
+    expect(daysUncounted(TODAY, '2026-10-15')).toBe(1);
+  });
+
+  it('counts the days a stalled rollup has not reached, across a month boundary', () => {
+    expect(daysUncounted(TODAY, '2026-10-06')).toBe(10);
+    expect(daysUncounted({ to: '2026-11-02' }, '2026-10-30')).toBe(2);
   });
 });

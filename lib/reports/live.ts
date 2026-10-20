@@ -15,9 +15,15 @@ import {
 import { openBacklog } from '@/lib/tickets/backlog';
 import { readOnlyChannels } from '@/lib/tickets/channel-policy';
 import { notReaction } from '@/lib/tickets/not-reaction';
-import { daysUncounted } from './csat-queries';
 import { lastWholeRollup } from './queries';
-import { computeDay, todayIn, totalsOf, type Bucket, type ReportingContext } from './rollup';
+import {
+  computeDay,
+  daysUncounted,
+  todayIn,
+  totalsOf,
+  type Bucket,
+  type ReportingContext,
+} from './rollup';
 
 /**
  * Read models for the live dashboard.
@@ -280,7 +286,10 @@ export type SystemHealth = {
   oldestWebhookSince: Date | null;
   /** The newest day the rollup has computed whole, worked or not (`lastComputedDay`). */
   rollupDay: string | null;
-  /** When the rollup began computing `rollupDay`. */
+  /**
+   * When the rollup began computing `rollupDay`; in the `metrics_daily`
+   * fallback, when that day's figures were written, a few seconds later.
+   */
   rollupComputedAt: Date | null;
   /**
    * The days between `rollupDay` and today the rollup has not computed
@@ -375,7 +384,7 @@ async function lastComputedDay(
   zone: string,
   now: Date,
 ): Promise<{ day: string; computedAt: Date; behind: number | null } | null> {
-  const today = DateTime.fromJSDate(now, { zone }).toISODate()!;
+  const today = todayIn(zone, now);
   const whole = await lastWholeRollup({ to: today, zone });
   if (whole) return { ...whole, behind: daysUncounted({ to: today }, whole.day) };
 

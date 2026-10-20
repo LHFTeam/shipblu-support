@@ -89,9 +89,33 @@ function zoneOf(catalog: HoursCatalog): string {
   return defaultHours(catalog)?.timezone ?? FALLBACK_ZONE;
 }
 
-/** The team's current date, which is what "today" means everywhere below. */
-export function todayIn(zone: string): string {
-  return DateTime.now().setZone(zone).toISODate()!;
+/**
+ * The team's current date, which is what "today" means everywhere below. At
+ * `now` for a caller holding one instant for everything it reads, so the day
+ * it names and the queries it runs cannot fall either side of a midnight.
+ */
+export function todayIn(zone: string, now: Date = new Date()): string {
+  return DateTime.fromJSDate(now, { zone }).toISODate()!;
+}
+
+/**
+ * The days between the newest one the rollup has computed and today, neither
+ * included: 0 once tonight's run has reached yesterday, and 1 before it — all
+ * of the day after a night it missed included — so more only from the midnight
+ * after a missed night.
+ *
+ * Here, beside `todayIn`, because it is a fact about the rollup rather than
+ * about any one report: `/reports/csat` warns on it and the dashboard's health
+ * tile turns amber on it, and a copy in each would be two answers to whether
+ * the rollup has stopped. Calendar arithmetic on two dates, so in UTC, where
+ * no day is 23 or 25 hours long.
+ */
+export function daysUncounted(window: Pick<ReportWindow, 'to'>, through: string): number {
+  const today = DateTime.fromISO(window.to, { zone: 'utc' });
+  return Math.max(
+    0,
+    Math.round(today.diff(DateTime.fromISO(through, { zone: 'utc' }), 'days').days) - 1,
+  );
 }
 
 /**
