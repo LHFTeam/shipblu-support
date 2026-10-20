@@ -1,7 +1,7 @@
 import { cookies } from 'next/headers';
 import { and, eq, gt, inArray, lt, lte } from 'drizzle-orm';
 import { db } from '@/db/client';
-import { agents, sessions } from '@/db/schema';
+import { agents, extensionSessions, sessions } from '@/db/schema';
 import { shouldSignOut } from '@/lib/presence/idle';
 import { loadPresencePolicy } from '@/lib/presence/policy';
 import { SESSION_COOKIE } from './cookie';
@@ -180,9 +180,17 @@ export async function destroySession(): Promise<void> {
   store.delete(SESSION_COOKIE);
 }
 
-/** Sign the agent out everywhere — used on password change and offboarding. */
+/**
+ * Sign the agent out everywhere — used on password change and offboarding.
+ *
+ * Everywhere includes the WhatsApp Web extension. Its token is held in a
+ * browser profile for a week, and offboarding that left it working would leave
+ * a deactivated agent reading tickets until it ran out — `extensionAgentFor`
+ * also re-reads `is_active`, so this is the second of two locks, not the only.
+ */
 export async function destroyAllSessionsForAgent(agentId: string): Promise<void> {
   await db.delete(sessions).where(eq(sessions.agentId, agentId));
+  await db.delete(extensionSessions).where(eq(extensionSessions.agentId, agentId));
 }
 
 /**

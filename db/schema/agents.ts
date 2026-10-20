@@ -345,6 +345,42 @@ export const sessions = pgTable(
 );
 
 /**
+ * A sign-in from the WhatsApp Web extension (`extension/`), held apart from
+ * `sessions` because everything reading that table assumes a row is a console
+ * tab.
+ *
+ * The inactivity sign-out measures `sessions.last_activity_at`, which only a
+ * console tab's keystrokes move; an extension token in that table would be
+ * signed out under an agent busy in WhatsApp, by a timer nothing it does can
+ * feed. And `agentsWithLiveSessions` decides who shows as online, which a token
+ * sitting in a browser profile says nothing about.
+ *
+ * A fixed week from sign-in, never extended: the token is a bearer credential
+ * in a browser profile, and a lifetime that slides on use is one that never
+ * ends on a laptop used every day. Deactivating an agent deletes these with
+ * their console sessions (`destroyAllSessionsForAgent`), and every request
+ * re-reads `agents.is_active`, for the reason `getSessionAgent` gives.
+ */
+export const extensionSessions = pgTable(
+  'extension_sessions',
+  {
+    /** SHA-256 of the bearer token. The raw token is never stored. */
+    tokenHash: text('token_hash').primaryKey(),
+    agentId: uuid('agent_id')
+      .notNull()
+      .references(() => agents.id, { onDelete: 'cascade' }),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    userAgent: text('user_agent'),
+    ip: text('ip'),
+  },
+  (t) => [
+    index('extension_sessions_agent_idx').on(t.agentId),
+    index('extension_sessions_expires_idx').on(t.expiresAt),
+  ],
+);
+
+/**
  * When the console decides somebody has stopped working, and what it does about
  * it.
  *

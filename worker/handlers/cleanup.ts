@@ -2,6 +2,7 @@ import { lt, sql, type SQL } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { conversationPresence, jobs, webhookEvents } from '@/db/schema';
 import { deleteExpiredCustomerSessions } from '@/lib/auth/customer-session';
+import { deleteExpiredExtensionSessions } from '@/lib/auth/extension-session';
 import { deleteExpiredSessions } from '@/lib/auth/session';
 import { deleteExpiredContactTokens } from '@/lib/portal/accounts';
 import type { ClaimedJob } from '@/lib/queue';
@@ -91,6 +92,7 @@ export function completedJobRetentionFilter(): SQL {
 export async function cleanup(_job: ClaimedJob): Promise<void> {
   const expiredSessions = await deleteExpiredSessions();
   const expiredCustomerSessions = await deleteExpiredCustomerSessions();
+  const expiredExtensionSessions = await deleteExpiredExtensionSessions();
   // Spent and expired verification/reset links. They are useless once expired
   // and they are credentials-adjacent, so there is no reason to keep them.
   const expiredContactTokens = await deleteExpiredContactTokens();
@@ -136,6 +138,7 @@ export async function cleanup(_job: ClaimedJob): Promise<void> {
 
   log.info(
     `sessions=${expiredSessions} customer_sessions=${expiredCustomerSessions} ` +
+      `extension_sessions=${expiredExtensionSessions} ` +
       `contact_tokens=${expiredContactTokens} presence=${stalePresence.count} ` +
       `webhooks=${oldWebhooks.count} jobs=${oldJobs.count}`,
   );

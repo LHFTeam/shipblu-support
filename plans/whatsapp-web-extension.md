@@ -16,7 +16,7 @@ side panel shows two tabs for that customer's ticket — **Shipments** and **Sid
 conversations** — with the side-conversation composer the ticket page has.
 
 Constraints given by the user: company-owned devices only (no privacy
-expectation on the device), Chrome on Ubuntu first and Windows possibly.
+expectation on the device), Chrome on Ubuntu only for now.
 
 ## What is true today (checked, 2026-10-20)
 
@@ -89,12 +89,12 @@ an agent who is busy in WhatsApp, and the user asked for an explicit sign-in.
   inactivity policy, the presence stream and the "who is online" reads all
   assume a `sessions` row is a console tab, and an extension token living there
   would be signed out by a timer it cannot feed, or keep an agent "online"
-  while they are not. Its own lifetime (a shift, 12 hours, not sliding past
-  it), revoked by `destroyAllSessionsForAgent` too, so a password change or
-  deactivation ends it, and checked against `agents.is_active` on every call
-  for the reason `getSessionAgent` gives.
-- The token lives in `chrome.storage.session` (cleared when the browser
-  closes) and is sent only by the extension's service worker as
+  while they are not. Its own lifetime — **a week from sign-in, never
+  extended** (the user's answer) — revoked by `destroyAllSessionsForAgent` too,
+  so deactivation ends it, and checked against `agents.is_active` on every
+  call for the reason `getSessionAgent` gives.
+- The token lives in `chrome.storage.local`, so a week-long session survives
+  a browser restart, and is sent only by the extension's service worker as
   `Authorization: Bearer`. **The content script never holds it and never calls
   the API** — it runs inside web.whatsapp.com's page, and talks only to the
   service worker by `chrome.runtime` messaging.
@@ -153,7 +153,7 @@ extension adds no new reader of `shipments.data` (§6.38).
 
 ### 5. Where the code lives and how it ships
 
-**Recommended: an `extension/` directory in this repo**, with its own
+**An `extension/` directory in this repo** (the user's answer), with its own
 `package.json` and a small esbuild build, excluded from the app's `tsc`,
 `knip` and `repo-rules` scope and given its own lint/typecheck step in CI. The
 API it calls and the extension change together, so one PR should be able to
@@ -164,20 +164,22 @@ carry both.
 - Ubuntu: a JSON file in `/etc/opt/chrome/policies/managed/` (or
   `/etc/chromium/policies/managed/`), installable by whatever provisions the
   laptops. Self-hosted `.crx` plus an `update.xml` is allowed here.
-- Windows: Chrome refuses force-installed extensions from outside the Chrome
-  Web Store unless the machine is domain-joined or enrolled in Chrome Browser
-  Cloud Management. If the Windows devices are neither, the extension has to be
-  published to the Web Store (unlisted, or private to the Google Workspace
-  domain) — which then works for Ubuntu too and gives auto-update for free.
+- Windows is out of scope for now. When it comes in: Chrome refuses
+  force-installed extensions from outside the Chrome Web Store unless the
+  machine is domain-joined or enrolled in Chrome Browser Cloud Management, so
+  unmanaged Windows devices would need a Web Store listing (unlisted, or
+  private to a Google Workspace domain).
 
 ## Stages
 
 0. **Measure** — on a real coexistence chat, compare WhatsApp Web `data-id`s
    with the `channel_message_id`s and `wamidKey` of the same messages. Decides
    section 1's approach. No code merged.
-1. **Server: auth** — `extension_sessions`, `requireExtensionAgent`, the session
-   route, revocation in `destroyAllSessionsForAgent`, tests for agent-only
-   sign-in and revocation.
+1. **Server: auth** — built. `extension_sessions`, `extensionAgentFor`
+   (`lib/auth/extension-session.ts`), `app/api/extension/session`, revocation
+   in `destroyAllSessionsForAgent`, the cleanup sweep, and
+   `extension-session.db.test.ts` for agent-only sign-in, expiry, deactivation
+   and revocation.
 2. **Server: resolve** — `messages.wa_key`, ingest writes it, backfill job,
    `resolve` + `numbers` routes, `*.db.test.ts` for the lookup and its
    visibility rule.
@@ -186,15 +188,15 @@ carry both.
 4. **Extension** — skeleton, sign-in, number detection, chat resolution,
    Shipments tab.
 5. **Extension** — Side conversations tab and composer.
-6. **Ship** — CI step for `extension/`, packaging, the policy files for Ubuntu
-   (and Windows per the answer above), a page in the console handbook.
+6. **Ship** — CI step for `extension/`, packaging, the Ubuntu policy file, a
+   page in the console handbook.
 
-## Open questions for the user
+## Decisions taken with the user
 
-1. Are the Windows devices domain-joined or managed by Chrome Browser Cloud
-   Management? Decides self-hosted vs Chrome Web Store.
-2. Is there a Google Workspace domain to publish privately under, if it is the
-   Web Store?
-3. The extension session's lifetime — 12 hours non-sliding is proposed.
-4. If a customer has no open ticket on that number (all resolved), show the
-   most recent resolved one read-only, or nothing?
+- **Ubuntu only** for now; Windows later, with the Web Store question above.
+- **A week-long session**, not extended by use.
+- **Code in this repo**, under `extension/`.
+- **Which ticket**: every chat on a coexistence number has a ticket, so the
+  question is only which one when the customer has several. Matching by
+  message key answers it without a rule: the newest message on screen belongs
+  to exactly one ticket, open or resolved, and that is the one shown.
