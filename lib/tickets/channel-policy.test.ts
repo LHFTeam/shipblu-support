@@ -8,6 +8,7 @@ import {
   consoleReplyReason,
   CONVERSATION_CHANNELS,
   drawsMediaInline,
+  FILTERABLE_CHANNELS,
   hasWrittenSubject,
   hiddenChannels,
   isCommentChannel,
@@ -213,6 +214,13 @@ describe('the Meta channels', () => {
     // The prefix is anchored: ':comment:' elsewhere in an id is not a comment.
     expect(isCommentTicket('whatsapp', 'whatsapp:comment:1')).toBe(false);
     expect(isCommentTicket('email', 'x-facebook:comment:1')).toBe(false);
+  });
+
+  // Stage 1.1 reads the comment channels and offers them nowhere: the filter
+  // would be empty while every comment ticket sits under its platform. Stage
+  // 1.2 adds them with the ingest that writes them, and turns this around.
+  it('are not offered as a filter before anything writes them', () => {
+    expect(FILTERABLE_CHANNELS.filter(isCommentChannel)).toEqual([]);
   });
 
   it('are not prototype keys or near misses', () => {

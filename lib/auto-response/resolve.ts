@@ -100,10 +100,9 @@ export function pickRule(
  *
  * Every comment ticket carries `facebook` or `instagram` until Stage 1.2 of
  * `plans/ticket-category-routing.md` moves it, so matching the column read raw
- * would do both wrong things the admin page now promises against: a rule the
- * form names "Facebook messages" would post its out-of-hours wording publicly
- * under a comment, and a rule for "Facebook comments" would match nothing until
- * the backfill ran. Once a CHECK makes the column and the external id one answer
+ * would post the wording of a rule the form names "Facebook messages" publicly
+ * under a comment — and, once 1.2 offers "Facebook comments", leave that rule
+ * matching nothing until the backfill ran. Once a CHECK makes the column and the external id one answer
  * (Stage 1.3) this returns its input.
  */
 function ruleChannel(channel: ConversationChannel, externalId: string | null): ConversationChannel {

@@ -79,10 +79,10 @@ export type DecisionInput = {
   lacksRecipient: boolean;
   /**
    * On Facebook and Instagram, whether the ticket is a public comment thread
-   * (`rootCommentId` found one). A survey there would be posted on the comment
-   * edge, link and all, for anybody reading the post to answer. A comment
-   * channel is one whatever this says; it is asked for the comment tickets that
-   * still carry their platform's channel.
+   * (`isCommentTicket`: its channel, or its external id). A survey there would
+   * be posted on the comment edge, link and all, for anybody reading the post to
+   * answer. The channel is asked again below, so the pure decision holds for an
+   * input that names a comment channel and nothing else.
    */
   commentThread: boolean;
   /**

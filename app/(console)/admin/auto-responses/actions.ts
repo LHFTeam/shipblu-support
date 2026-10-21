@@ -65,7 +65,7 @@ export async function saveAutoResponse(
   const channel = autoResponseChannel(formData);
   if (channel === undefined) {
     return {
-      error: 'Pick a channel from the list, or none for every channel except public comments',
+      error: 'Pick a channel from the list, or “Every channel except public comments”',
     };
   }
 

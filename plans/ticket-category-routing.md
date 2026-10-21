@@ -1107,7 +1107,9 @@ worker and all four crons. 1.2 does not start until all six run 1.1.
     column; and an out-of-hours rule naming one was the first row to carry the
     value, which the editor before this stage, after a rollback, would list as
     company-wide and save back as every channel. So nothing 1.1 deploys writes
-    the values, and rolling it back is clean. Until 1.2 a comment is not
+    the values, and rolling it back is clean. The 1.1 editor in turn keeps a
+    stored channel it does not offer as a visible option, which the action
+    refuses, so a rollback from 1.2 cannot widen a comments rule either. Until 1.2 a comment is not
     acknowledged out of hours, which is the safe direction. The realtime topics
     still listen for them, so a web on 1.1 already hears a ticket the 1.2
     worker writes.
@@ -1159,8 +1161,13 @@ deploy it with web and the crons.
   and Channels views (`FILTERABLE_CHANNELS`), the condition builder
   (`CONDITION_CHANNELS` in `app/(console)/admin/field-options.ts`) and the
   out-of-hours form and its action's allowlist (`AUTO_RESPONSE_CHANNELS`). The
-  out-of-hours page then says a comment is acknowledged only by a rule naming
-  its comment channel, and `NO_CHANNEL_WHY` points at those rules again.
+  out-of-hours page, `NO_CHANNEL_WHY` and the Active toggle's hint then say a
+  comment is acknowledged only by a rule naming its comment channel.
+- **Order: web first, then the worker, then the crons.** The web brings the
+  pickers; the worker brings the writer. Worker first, a 1.1 web shows a new
+  comment ticket only under All channels — it has left Facebook and Instagram
+  and the 1.1 filter has no comment choice. Web first, the comment views are
+  empty for the minutes until the worker lands, which is the lesser gap.
 - The admin channels page can create "Facebook comments" and "Instagram
   comments" rows. They need no credentials, since they ride the Page and
   Instagram tokens, and their config is `{}`. The page's four type allowlists

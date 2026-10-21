@@ -98,6 +98,16 @@ function Fields({ rule, groups }: { rule?: Rule; groups: Group[] }) {
                 {channel.label}
               </option>
             ))}
+            {/*
+              A stored channel this list does not offer — a comment channel a
+              later version saved, read here after a rollback — stays selected
+              rather than falling to the first option, which would save the
+              rule back as every channel. The action refuses it, so the admin
+              has to choose.
+            */}
+            {rule?.channel && !CHANNELS.some((channel) => channel.value === rule.channel) ? (
+              <option value={rule.channel}>{`${rule.channel} (not offered here)`}</option>
+            ) : null}
           </Select>
         </Field>
       </div>
@@ -196,7 +206,7 @@ function Fields({ rule, groups }: { rule?: Rule; groups: Group[] }) {
       <Toggle
         name="isActive"
         label="Active"
-        hint="Turned off, this rule stops matching and its tickets fall back to the next broadest one — not to silence. A public comment falls back only to another rule for its comment channel, and with none it is not acknowledged."
+        hint="Turned off, this rule stops matching and its tickets fall back to the next broadest one — not to silence. A public comment is never acknowledged out of hours."
         defaultChecked={rule?.isActive ?? true}
       />
     </>
