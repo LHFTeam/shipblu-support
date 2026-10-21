@@ -819,11 +819,14 @@ signed in.** WhatsApp Manager and Business Suite can put a phone's number on
 Cloud API without Meta's window, so no code is exchanged and nothing is stored.
 "Add a number connected in Meta" on its business account's row
 (`adoptBusinessAppNumber`) records the attempt with `origin = 'adopted'` and
-queues the same `complete_coexistence_onboarding`, which then sends with the
-account's one source — its stored credential, or the `WHATSAPP_TOKEN_*`
-variable it names — and **never with `META_PAGE_ACCESS_TOKEN`**, the Page's own
-token, which reaches no WABA (`docs/PROJECT-STATE.md` §6.28); `credentialFor`
-refuses it by name. An
+queues the same `complete_coexistence_onboarding`, which then connects the
+number with the account's one source — its stored credential, or the
+`WHATSAPP_TOKEN_*` variable it names — and **never with
+`META_PAGE_ACCESS_TOKEN`**, the Page's own token, which reaches no WABA
+(`docs/PROJECT-STATE.md` §6.28); `credentialFor` refuses it by name. That is
+the job's rule: once connected, the number sends through `tokenForAccount` like
+any other, so an account whose variable is blanked afterwards falls to the
+shared token and its sends fail with the sentence naming it. An
 Embedded Signup attempt still uses only the credential it stored. The channel
 it makes carries `coexistence.adopted`, and its `onboardedAt` is when it was
 added here: Meta's 24 hours for the copy began earlier, when the number was
