@@ -129,10 +129,11 @@ const refusedByCheck = sql`
 /**
  * What 1.3's CHECK would refuse once this job has moved what it can: every
  * refused ticket `unmoved` does not match, which after the move is every
- * refused ticket. `coalesce` because `unmoved` is null on a null external id,
- * and NOT null would drop a comment channel with no comment behind it. The
- * first twenty numbers are named, for a person to look at, and the count is
- * whole.
+ * refused ticket. The `coalesce` is a guard rather than a fix: `unmoved` is
+ * null only for a platform-channel ticket with no external id, which the CHECK
+ * accepts, so nothing it would refuse is lost to a null today; it keeps a
+ * later change to either fragment from dropping rows silently. The first
+ * twenty numbers are named, for a person to look at, and the count is whole.
  */
 async function unmovable(run: Pick<typeof db, 'execute'>): Promise<Unmovable> {
   const [row] = await run.execute<{ tickets: number; numbers: (number | string)[] | null }>(sql`

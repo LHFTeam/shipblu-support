@@ -129,9 +129,9 @@ export type MessageContext = {
  * is what keeps one comment thread on one ticket. The requester is whoever's
  * comment on the thread was filed first, which is the root's author unless the
  * root failed to ingest before a reply to it did. The acknowledgement is
- * addressed to the requester by name and posted on that thread, so a
- * passer-by's comment must neither earn it nor spend the closed stretch the
- * requester's own next comment would. A direct message, an email or a chat has
+ * addressed to the requester and posted on that thread, so a passer-by's
+ * comment must neither earn it nor spend the closed stretch the requester's
+ * own next comment would. A direct message, an email or a chat has
  * one author on the customer's side, so the question does not arise.
  */
 export function answersRequester(input: {

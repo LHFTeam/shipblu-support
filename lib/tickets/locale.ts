@@ -1,7 +1,8 @@
-import { and, desc, eq, isNull, or } from 'drizzle-orm';
+import { and, desc, eq } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { contacts, conversations, messages } from '@/db/schema';
 import { carriesCustomerText } from './carries-customer-text';
+import { isCommentTicket } from './channel-policy';
 import { notReaction } from './not-reaction';
 
 /**
@@ -69,12 +70,17 @@ export function preferredLocale(contactLocale: string, sample: string | null): '
  * Five things narrow which message decides it, and each of them is a way the
  * answer went wrong:
  *
- * - **The requester's own.** On a public comment thread anybody may reply under
- *   the customer's comment, and the reply is filed on the customer's ticket; the
- *   acknowledgement is addressed to the requester, so a passer-by's English
- *   reply must not choose the language an Arabic customer is answered in when
- *   the customer's own newest comment was a photo. A row with no author — its
- *   contact purged — still counts, because it is nobody else's.
+ * - **On a public comment thread, the requester's own.** Anybody may reply
+ *   under the customer's comment, and the reply is filed on the customer's
+ *   ticket; the acknowledgement is addressed to the requester, so a passer-by's
+ *   English must not choose the language an Arabic customer is answered in when
+ *   her own newest comment was a photo. A row with no author does not count
+ *   there either: purging the requester deletes the ticket, so an authorless
+ *   row on a live one is a purged passer-by's — the same answer
+ *   `answersRequester` gives it. Anywhere else every customer row counts, as
+ *   it always has: an email's CC'd colleague or a second address writes in the
+ *   conversation's language, and narrowing there would leave a requester whose
+ *   own mail carried no words to `contacts.locale`, which nothing writes.
  * - **`reply` only.** One of our own system notices, like that attachment line,
  *   is written by us, not by the person we are about to write to. A mail
  *   server's bounce or out-of-office is not kept out by this: it arrives as
@@ -114,25 +120,34 @@ export async function requesterLocale(
   /** The requester's `contacts.locale` when the caller already read it, so it is not read twice. */
   contactLocale?: string | null,
 ): Promise<'ar' | 'en'> {
-  const [contact, words] = await Promise.all([
-    contactLocale === undefined
-      ? db
-          .select({ locale: contacts.locale })
-          .from(conversations)
-          .leftJoin(contacts, eq(contacts.id, conversations.requesterContactId))
-          .where(eq(conversations.id, conversationId))
-          .limit(1)
-      : Promise.resolve([{ locale: contactLocale }]),
-    newestRequesterWords(conversationId),
-  ]);
+  // The ticket first, because whether it is a comment thread decides which
+  // rows may speak for the requester — a second query, on a path that sends at
+  // most one message per closed stretch.
+  const [ticket] = await db
+    .select({
+      locale: contacts.locale,
+      channel: conversations.channel,
+      externalId: conversations.externalId,
+    })
+    .from(conversations)
+    .leftJoin(contacts, eq(contacts.id, conversations.requesterContactId))
+    .where(eq(conversations.id, conversationId))
+    .limit(1);
 
-  return preferredLocale(contact[0]?.locale ?? 'en', words);
+  const words =
+    ticket && isCommentTicket(ticket.channel, ticket.externalId)
+      ? await newestRequesterWords(conversationId)
+      : await newestCustomerWords(conversationId);
+
+  const locale = contactLocale === undefined ? ticket?.locale : contactLocale;
+  return preferredLocale(locale ?? 'en', words);
 }
 
 /**
- * `newestCustomerWords`, narrowed to the ticket's requester. Not that function
- * with an option: it is also what a canned suggestion records as the language
- * the page showed, and the page reads every customer row (`lastCustomerWords`).
+ * `newestCustomerWords`, narrowed to the ticket's requester, for a comment
+ * thread. Not that function with an option: it is also what a canned
+ * suggestion records as the language the page showed, and the page reads
+ * every customer row (`lastCustomerWords`).
  */
 async function newestRequesterWords(conversationId: string): Promise<string | null> {
   const [row] = await db
@@ -142,10 +157,7 @@ async function newestRequesterWords(conversationId: string): Promise<string | nu
     .where(
       and(
         customerWordsOn(conversationId),
-        or(
-          isNull(messages.authorContactId),
-          eq(messages.authorContactId, conversations.requesterContactId),
-        ),
+        eq(messages.authorContactId, conversations.requesterContactId),
       ),
     )
     .orderBy(desc(messages.createdAt), desc(messages.id))
