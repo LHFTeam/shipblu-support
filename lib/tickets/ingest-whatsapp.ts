@@ -171,7 +171,9 @@ export async function ingestWhatsAppMessage(
   // only: an older message processed late would restart it from its own
   // earlier instant and pull back a due date the newer one had set.
   if (!isReadOnlyChannel(channel.kind)) {
-    await afterInboundMessage(stored.conversationId, stored.createdConversation, customerWroteAt);
+    await afterInboundMessage(stored.conversationId, stored.createdConversation, customerWroteAt, {
+      id: stored.messageId,
+    });
   }
 
   return { ...stored, duplicate: false };

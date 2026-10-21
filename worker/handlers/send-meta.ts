@@ -12,7 +12,7 @@ import {
   sendDirectMessage,
   sendMessageRequest,
 } from '@/lib/meta/client';
-import { commentReplyTarget } from '@/lib/meta/comments';
+import { commentIdOf, commentReplyTarget } from '@/lib/meta/comments';
 import { metaConnection, type MetaConnection } from '@/lib/meta/connection';
 import {
   explainMetaSendError,
@@ -461,8 +461,8 @@ async function lastInboundCommentId(conversationId: string): Promise<string | nu
     .limit(10);
 
   for (const row of rows) {
-    const meta = (row.meta ?? {}) as { metaKind?: string; commentId?: string };
-    if (meta.metaKind === 'comment') return meta.commentId ?? row.channelMessageId;
+    const commentId = commentIdOf(row.meta, row.channelMessageId);
+    if (commentId) return commentId;
   }
 
   return null;

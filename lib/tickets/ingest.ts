@@ -269,6 +269,7 @@ export async function ingestInboundEmail(
   // by however far apart the two arrived.
   const { customerWroteAt, ...stored } = result;
   await afterInboundMessage(stored.conversationId, stored.createdConversation, customerWroteAt, {
+    id: stored.messageId,
     autoReply: automation.isAutoReply,
   });
 

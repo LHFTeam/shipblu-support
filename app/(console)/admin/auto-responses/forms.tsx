@@ -6,6 +6,7 @@ import { Badge, Button, Field, Select, Textarea, Toggle } from '@/components/ui'
 import { PLACEHOLDERS } from '@/lib/auto-response/resolve';
 import { DangerAction, Disclosure, EditorForm } from '../forms-shared';
 import { deleteAutoResponse, saveAutoResponse } from './actions';
+import { AUTO_RESPONSE_CHANNELS } from './channels';
 
 type Group = { id: string; name: string };
 
@@ -22,23 +23,6 @@ type Rule = {
 };
 
 /**
- * `whatsapp_bot` is missing on purpose: those conversations belong to the
- * customer bot and nothing is ever sent into them, and so are the comment
- * channels until Stage 1.2, for the reason `AUTO_RESPONSE_CHANNELS` gives. The
- * list matches the one the server action validates against — an option here
- * that the action rejects is a form that fails on save for no reason the admin
- * can see.
- */
-const CHANNELS: { value: string; label: string }[] = [
-  { value: 'email', label: 'Email' },
-  { value: 'whatsapp', label: 'WhatsApp' },
-  { value: 'webchat', label: 'Web chat' },
-  { value: 'facebook', label: 'Facebook messages' },
-  { value: 'instagram', label: 'Instagram messages' },
-  { value: 'portal', label: 'Customer portal' },
-];
-
-/**
  * A rule with no channel skips public comments (`pickRule`), so it is never
  * called "every channel": an admin reading that would expect a comment to be
  * acknowledged when it would not be, or write the company message believing it
@@ -46,12 +30,12 @@ const CHANNELS: { value: string; label: string }[] = [
  */
 const NO_CHANNEL = 'Every channel except public comments';
 const NO_CHANNEL_WHY =
-  'A reply to a comment is posted under it, where anybody who can see the post reads it, so a message for every channel is never sent there, and comments are not acknowledged out of hours.';
+  'A reply to a comment is posted under it, where anybody who can see the post reads it, so a message for every channel is never sent there. To acknowledge comments out of hours, add a rule for Facebook comments or Instagram comments.';
 
 function channelLabel(value: string | null): string {
   if (value === null) return NO_CHANNEL;
   // A stale value is shown as itself rather than as the company-wide scope.
-  return CHANNELS.find((channel) => channel.value === value)?.label ?? value;
+  return AUTO_RESPONSE_CHANNELS.find((channel) => channel.value === value)?.label ?? value;
 }
 
 const PLACEHOLDER_HELP = (
@@ -93,19 +77,20 @@ function Fields({ rule, groups }: { rule?: Rule; groups: Group[] }) {
         >
           <Select name="channel" defaultValue={rule?.channel ?? ''}>
             <option value="">{NO_CHANNEL}</option>
-            {CHANNELS.map((channel) => (
+            {AUTO_RESPONSE_CHANNELS.map((channel) => (
               <option key={channel.value} value={channel.value}>
                 {channel.label}
               </option>
             ))}
             {/*
-              A stored channel this list does not offer — a comment channel a
-              later version saved, read here after a rollback — stays selected
+              A stored channel this list does not offer — a value a later
+              version added, read here after a rollback — stays selected
               rather than falling to the first option, which would save the
               rule back as every channel. The action refuses it, so the admin
               has to choose.
             */}
-            {rule?.channel && !CHANNELS.some((channel) => channel.value === rule.channel) ? (
+            {rule?.channel &&
+            !AUTO_RESPONSE_CHANNELS.some((channel) => channel.value === rule.channel) ? (
               <option value={rule.channel}>{`${rule.channel} (not offered here)`}</option>
             ) : null}
           </Select>
@@ -206,7 +191,7 @@ function Fields({ rule, groups }: { rule?: Rule; groups: Group[] }) {
       <Toggle
         name="isActive"
         label="Active"
-        hint="Turned off, this rule stops matching and its tickets fall back to the next broadest one — not to silence. A public comment is never acknowledged out of hours."
+        hint="Turned off, this rule stops matching and its tickets fall back to the next broadest one — not to silence. A public comment falls back only to another rule for its comment channel, and with none it is not acknowledged."
         defaultChecked={rule?.isActive ?? true}
       />
     </>

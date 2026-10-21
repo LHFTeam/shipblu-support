@@ -12,7 +12,9 @@ import { requesterLocale } from './locale';
 
 withCleanDatabase();
 
-async function ticket(channel: 'whatsapp' | 'facebook' | 'email'): Promise<string> {
+async function ticket(
+  channel: 'whatsapp' | 'facebook' | 'facebook_comment' | 'email',
+): Promise<string> {
   const [contact] = await db.insert(contacts).values({ name: 'Amira' }).returning();
   const [open] = await db
     .select({ id: ticketStatuses.id })
@@ -184,6 +186,86 @@ describe('requesterLocale', () => {
         direction: 'inbound',
         bodyText: '\n\n',
         createdAt: new Date('2026-10-01T10:05:00Z'),
+      },
+    ]);
+
+    expect(await requesterLocale(id)).toBe('ar');
+  });
+
+  /** The ticket's requester, and a second contact who writes on it too. */
+  async function twoAuthors(id: string) {
+    const [requester] = await db
+      .select({ id: conversations.requesterContactId })
+      .from(conversations)
+      .where(eq(conversations.id, id));
+    const [other] = await db.insert(contacts).values({ name: 'Bob' }).returning();
+    return { requester: requester!.id, other: other!.id };
+  }
+
+  // On a comment thread a passer-by's reply is filed on the requester's
+  // ticket. The acknowledgement is addressed to the requester, so the
+  // passer-by's English does not choose its language when the requester's own
+  // newest comment carried no words — nor once the passer-by's contact is
+  // purged and the row has no author, since purging the requester would have
+  // deleted the ticket.
+  it('reads the requester’s words on a comment thread, not a passer-by’s', async () => {
+    const id = await ticket('facebook_comment');
+    const { requester, other } = await twoAuthors(id);
+    await db.insert(messages).values([
+      {
+        conversationId: id,
+        direction: 'inbound',
+        authorContactId: requester,
+        bodyText: 'فين شحنتي؟',
+        createdAt: new Date('2026-10-01T10:00:00Z'),
+      },
+      {
+        conversationId: id,
+        direction: 'inbound',
+        authorContactId: other,
+        bodyText: 'Same here, my parcel never came either',
+        createdAt: new Date('2026-10-01T10:10:00Z'),
+      },
+      {
+        conversationId: id,
+        direction: 'inbound',
+        authorContactId: null,
+        bodyText: 'Mine too, nobody answers the phone',
+        createdAt: new Date('2026-10-01T10:15:00Z'),
+      },
+      {
+        conversationId: id,
+        direction: 'inbound',
+        authorContactId: requester,
+        bodyText: '[empty comment]',
+        createdAt: new Date('2026-10-01T10:20:00Z'),
+      },
+    ]);
+
+    expect(await requesterLocale(id)).toBe('ar');
+  });
+
+  // Off a comment thread every customer row speaks, as it always has: a CC'd
+  // colleague on an email writes in the conversation's language, and a
+  // requester whose own mail carried no words would otherwise fall to
+  // `contacts.locale`, which nothing writes.
+  it('reads a second sender’s words on an email ticket', async () => {
+    const id = await ticket('email');
+    const { requester, other } = await twoAuthors(id);
+    await db.insert(messages).values([
+      {
+        conversationId: id,
+        direction: 'inbound',
+        authorContactId: requester,
+        bodyText: '[image]',
+        createdAt: new Date('2026-10-01T10:00:00Z'),
+      },
+      {
+        conversationId: id,
+        direction: 'inbound',
+        authorContactId: other,
+        bodyText: 'الشحنة وصلت مكسورة',
+        createdAt: new Date('2026-10-01T10:10:00Z'),
       },
     ]);
 

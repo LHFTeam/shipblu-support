@@ -14,7 +14,7 @@ import { assignConversation } from '@/lib/assignment';
 import { textToHtml } from '@/lib/html/sanitize';
 import { scheduleSurvey, suppressSurveyByRule } from '@/lib/csat';
 import { resolveLocale } from '@/lib/tickets/canned';
-import { readOnlyChannels } from '@/lib/tickets/channel-policy';
+import { isCommentTicket, readOnlyChannels } from '@/lib/tickets/channel-policy';
 import { requesterLocale } from '@/lib/tickets/locale';
 import { automatedReplyBlocked, deliverAutomatedReply } from '@/lib/tickets/outbound';
 import { matches } from '@/lib/rules/conditions';
@@ -435,6 +435,18 @@ async function sendCannedReply(
   ruleName: string,
 ): Promise<void> {
   const conversation = ticket.conversation;
+
+  // Never on a public comment thread. The reply is posted under a comment where
+  // anybody reading the post sees it, and nothing here knows whose comment set
+  // the rule off: an `on_update` rule fires on a passer-by's reply under the
+  // customer's comment as readily as on the customer's own, a time rule on
+  // nobody's, and `send_meta` posts under whichever comment came in last. The
+  // out-of-hours acknowledgement may answer a comment because it is handed the
+  // one that triggered it (`answersRequester`); this engine is handed a ticket.
+  if (isCommentTicket(conversation.channel, conversation.externalId)) {
+    log.warn(`"${ruleName}" skipped a reply: a rule does not answer a public comment`);
+    return;
+  }
 
   const rows = await db
     .select({

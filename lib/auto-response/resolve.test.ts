@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { cairo } from '@/lib/testing/time';
 import type { HoursConfig } from '@/lib/hours';
-import { pickBody, pickRule, substitute, type AutoResponseRule } from './resolve';
+import { answersRequester, pickBody, pickRule, substitute, type AutoResponseRule } from './resolve';
 
 /**
  * The decisions, not the plumbing: which rule wins when two match, which body a
@@ -186,6 +186,32 @@ describe('pickRule', () => {
     expect(
       pickRule(rules, { groupId: null, channel: 'email', externalId: 'facebook:comment:1_2' })?.id,
     ).toBe('email');
+  });
+});
+
+// Anybody may reply under a customer's comment, and the reply is filed on the
+// customer's ticket; the acknowledgement names the requester and is posted on
+// the thread, so only the requester's own comment earns it.
+describe('answersRequester', () => {
+  it('acknowledges the requester on a comment ticket, and nobody else', () => {
+    expect(
+      answersRequester({ isComment: true, requesterContactId: 'amira', authorContactId: 'amira' }),
+    ).toBe(true);
+    expect(
+      answersRequester({ isComment: true, requesterContactId: 'amira', authorContactId: 'bob' }),
+    ).toBe(false);
+    expect(
+      answersRequester({ isComment: true, requesterContactId: 'amira', authorContactId: null }),
+    ).toBe(false);
+  });
+
+  it('asks nothing of a direct message, an email or a chat', () => {
+    expect(
+      answersRequester({ isComment: false, requesterContactId: 'amira', authorContactId: 'bob' }),
+    ).toBe(true);
+    expect(
+      answersRequester({ isComment: false, requesterContactId: 'amira', authorContactId: null }),
+    ).toBe(true);
   });
 });
 

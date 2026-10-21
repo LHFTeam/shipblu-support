@@ -216,11 +216,15 @@ describe('the Meta channels', () => {
     expect(isCommentTicket('email', 'x-facebook:comment:1')).toBe(false);
   });
 
-  // Stage 1.1 reads the comment channels and offers them nowhere: the filter
-  // would be empty while every comment ticket sits under its platform. Stage
-  // 1.2 adds them with the ingest that writes them, and turns this around.
-  it('are not offered as a filter before anything writes them', () => {
-    expect(FILTERABLE_CHANNELS.filter(isCommentChannel)).toEqual([]);
+  // Offered with the ingest that writes them (Stage 1.2), so the views are
+  // never a queue of tickets nothing could file there.
+  it('are offered as filters, beside their platforms', () => {
+    expect(FILTERABLE_CHANNELS.filter(isMetaChannel)).toEqual([
+      'facebook',
+      'facebook_comment',
+      'instagram',
+      'instagram_comment',
+    ]);
   });
 
   it('are not prototype keys or near misses', () => {

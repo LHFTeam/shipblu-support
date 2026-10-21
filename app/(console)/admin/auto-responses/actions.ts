@@ -7,47 +7,14 @@ import { requirePermission } from '@/lib/auth/guard';
 import { ok } from '@/lib/http/action-state';
 import { text, uuidField } from '@/lib/http/form-data';
 import { refresh, type SettingsState } from '../settings-shared';
+import { isAutoResponseChannel, type AutoResponseChannel } from './channels';
 
 // --- Out-of-hours auto-responses --------------------------------------------
-
-/**
- * The channel values a rule may be scoped to.
- *
- * Read from the form and checked against this list rather than cast, because
- * the column is an enum: an unknown value is a Postgres error at write time,
- * and the error a customer-facing setting deserves is "pick a channel", not a
- * 500 in the log.
- *
- * `whatsapp_bot` is deliberately absent. Nothing is ever sent on it — the bot
- * owns those conversations — so offering it would be offering a setting that
- * cannot do anything.
- *
- * The comment channels are absent until Stage 1.2 of
- * `plans/ticket-category-routing.md`, the stage that writes them. A rule with no
- * channel already skips a public comment (`pickRule`), because its reply would
- * be posted under the comment for anybody reading the post to see, so until
- * then no out-of-hours message is posted on one — the safe direction. Accepted
- * earlier, a rule naming one is the first row to carry the value, and if this
- * deploy were rolled back the editor before it would list that rule as
- * company-wide and save it back as every channel, comments included.
- */
-const AUTO_RESPONSE_CHANNELS = [
-  'email',
-  'whatsapp',
-  'webchat',
-  'facebook',
-  'instagram',
-  'portal',
-] as const;
-
-type AutoResponseChannel = (typeof AUTO_RESPONSE_CHANNELS)[number];
 
 function autoResponseChannel(formData: FormData): AutoResponseChannel | null | undefined {
   const raw = text(formData, 'channel');
   if (!raw) return null;
-  return (AUTO_RESPONSE_CHANNELS as readonly string[]).includes(raw)
-    ? (raw as AutoResponseChannel)
-    : undefined;
+  return isAutoResponseChannel(raw) ? raw : undefined;
 }
 
 export async function saveAutoResponse(

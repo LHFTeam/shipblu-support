@@ -3,18 +3,19 @@
 import { useState } from 'react';
 import { Badge, Button, ErrorText, Field, Input, Select } from '@/components/ui';
 import { parseCoexistence } from '@/lib/whatsapp/coexistence';
-import type { ConversationChannel } from '@/lib/tickets/channel-policy';
+import {
+  isCommentChannel,
+  isMetaChannel,
+  metaPlatformOf,
+  type ConversationChannel,
+} from '@/lib/tickets/channel-policy';
 import type { AdminState } from '../settings-shared';
 import { saveChannel } from './actions';
 import { SubmitButton } from '@/components/submit-button';
 import { useActionForm } from '@/components/use-action-form';
+import { CHANNEL_TYPES, channelTypeLabel, isChannelType, type ChannelType } from './channel-types';
 
 const INITIAL: AdminState = { error: null };
-
-/** The types a form may create or save. Must match the list `saveChannel` accepts. */
-const EDITABLE = ['email', 'whatsapp', 'webchat', 'facebook', 'instagram', 'whatsapp_bot'] as const;
-
-type ChannelType = (typeof EDITABLE)[number];
 
 /**
  * A row as the column stores it, which is a wider set than a form can save.
@@ -22,9 +23,7 @@ type ChannelType = (typeof EDITABLE)[number];
  * `portal` and `api` channels are created by the product rather than by an
  * admin — the customer portal opens one on first use — and `saveChannel` refuses
  * both. Widening its allowlist to let this form reach them would also let a
- * forged `type` through the add form, so the editor declines them instead. The
- * comment channels are declined the same way until the form learns to create
- * them (Stage 1.2 of `plans/ticket-category-routing.md`).
+ * forged `type` through the add form, so the editor declines them instead.
  */
 export type ChannelRow = {
   id: string;
@@ -36,7 +35,7 @@ export type ChannelRow = {
 };
 
 function editableType(type: ChannelRow['type']): ChannelType | null {
-  return (EDITABLE as readonly string[]).includes(type) ? (type as ChannelType) : null;
+  return isChannelType(type) ? type : null;
 }
 
 type Choice = { id: string; name: string };
@@ -70,12 +69,11 @@ export function ChannelForm({
       <div className="flex flex-col gap-3 sm:flex-row">
         <Field label="Type" className="sm:w-40">
           <Select name="type" value={type} onChange={(e) => setType(e.target.value as ChannelType)}>
-            <option value="email">Email</option>
-            <option value="whatsapp">WhatsApp</option>
-            <option value="webchat">Web chat</option>
-            <option value="facebook">Facebook</option>
-            <option value="instagram">Instagram</option>
-            <option value="whatsapp_bot">WhatsApp — customer bot</option>
+            {CHANNEL_TYPES.map((choice) => (
+              <option key={choice.value} value={choice.value}>
+                {choice.label}
+              </option>
+            ))}
           </Select>
         </Field>
 
@@ -255,14 +253,18 @@ function AddressField({ type, config }: { type: ChannelType; config?: Record<str
     );
   }
 
-  if (type === 'facebook' || type === 'instagram') {
+  if (isMetaChannel(type)) {
     // The page and account ids live in the environment, because they are paired
     // with a token that must never be in the database. This row is routing only:
-    // which group a message from here lands in.
+    // which group a message from here lands in. A comments row rides the same
+    // Page or account as its platform's row, so it names the same variable.
+    const platform = metaPlatformOf(type);
+    const variable = platform === 'facebook' ? 'FACEBOOK_PAGE_ID' : 'INSTAGRAM_ACCOUNT_ID';
     return (
       <p className="text-xs text-(--color-text-secondary) sm:flex-1 sm:pt-6">
-        Configured by {type === 'facebook' ? 'FACEBOOK_PAGE_ID' : 'INSTAGRAM_ACCOUNT_ID'} in the
-        environment. This row only sets the default group.
+        {isCommentChannel(type)
+          ? `Public comments on the posts of the account configured by ${variable} in the environment. The oldest active comments row sets their default group, “None” included; until one exists they start in the ${channelTypeLabel(platform)} row’s group.`
+          : `Configured by ${variable} in the environment. This row only sets the default group.`}
       </p>
     );
   }

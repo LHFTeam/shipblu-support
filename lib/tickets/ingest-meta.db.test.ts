@@ -3,10 +3,12 @@ import { describe, expect, it } from 'vitest';
 import { db } from '@/db/client';
 import {
   agents,
+  channels,
   contactIdentities,
   contacts,
   conversationEvents,
   conversations,
+  groups,
   jobs,
   messages,
   slaPolicies,
@@ -28,7 +30,7 @@ import { applyMetaInteraction, ingestMetaComment, ingestMetaMessage } from './in
  * difference: a direct message threads on the person, like WhatsApp; a comment
  * threads on the comment it belongs to, keyed in `external_id`, and the two
  * never meet. No Facebook or Instagram channel is seeded, so neither kind of
- * ticket carries a channel or a group.
+ * ticket carries a channel or a group, except where a test adds the rows.
  */
 
 withCleanDatabase();
@@ -93,6 +95,14 @@ async function conversation(id: string) {
     .where(eq(conversations.id, id));
   if (!row) throw new Error(`no conversation ${id}`);
   return row;
+}
+
+async function groupOf(id: string) {
+  const [row] = await db
+    .select({ groupId: conversations.groupId })
+    .from(conversations)
+    .where(eq(conversations.id, id));
+  return row?.groupId ?? null;
 }
 
 async function messagesOf(conversationId: string) {
@@ -348,7 +358,7 @@ describe('ingestMetaComment', () => {
     expect(contact).toMatchObject({ name: 'Amira Hassan' });
 
     expect(await conversation(result.conversationId)).toMatchObject({
-      channel: 'facebook',
+      channel: 'facebook_comment',
       channelId: null,
       externalId: 'facebook:comment:post-1_c1',
       subject: 'My parcel never came',
@@ -452,7 +462,7 @@ describe('ingestMetaComment', () => {
     );
 
     expect(await conversation(result.conversationId)).toMatchObject({
-      channel: 'instagram',
+      channel: 'instagram_comment',
       externalId: 'instagram:comment:post-1_c1',
     });
     expect(
@@ -464,6 +474,87 @@ describe('ingestMetaComment', () => {
         data: { postId: 'post-1', rootCommentId: 'post-1_c1' },
       },
     ]);
+  });
+
+  // Until an admin adds a comments row, a comment ticket starts where it
+  // always did: in the platform row's group, recorded against that row.
+  it('starts a comment ticket from its comments row, or from the platform row without one', async () => {
+    const [platformGroup, social] = await db
+      .insert(groups)
+      .values([{ name: 'Platform default' }, { name: 'Social' }])
+      .returning({ id: groups.id });
+    const [facebookRow] = await db
+      .insert(channels)
+      .values({ type: 'facebook', name: 'Facebook', config: {}, defaultGroupId: platformGroup!.id })
+      .returning({ id: channels.id });
+
+    const before = await ingestMetaComment(comment());
+    expect(await conversation(before.conversationId)).toMatchObject({
+      channel: 'facebook_comment',
+      channelId: facebookRow!.id,
+    });
+    expect(await groupOf(before.conversationId)).toBe(platformGroup!.id);
+
+    // An inactive comments row routes nothing; an active one wins.
+    await db.insert(channels).values({
+      type: 'facebook_comment',
+      name: 'Old Facebook comments',
+      config: {},
+      defaultGroupId: platformGroup!.id,
+      isActive: false,
+    });
+    const [commentsRow] = await db
+      .insert(channels)
+      .values({
+        type: 'facebook_comment',
+        name: 'Facebook comments',
+        config: {},
+        defaultGroupId: social!.id,
+      })
+      .returning({ id: channels.id });
+
+    const after = await ingestMetaComment(
+      comment({ commentId: 'post-2_c1', postId: 'post-2', createdAt: LATER }),
+    );
+    expect(await conversation(after.conversationId)).toMatchObject({
+      channel: 'facebook_comment',
+      channelId: commentsRow!.id,
+    });
+    expect(await groupOf(after.conversationId)).toBe(social!.id);
+
+    // A direct message is the platform's, comments row or not.
+    const direct = await ingestMetaMessage(dm({ sentAt: LATER }));
+    expect(await conversation(direct.conversationId)).toMatchObject({
+      channel: 'facebook',
+      channelId: facebookRow!.id,
+    });
+  });
+
+  // A thread filed before Stage 1.2 is found by its external id like any
+  // other, and keeps its platform's channel until `split_comment_channels`
+  // moves it: a reply must not open a second ticket for the same comment.
+  it('puts a reply on a thread filed before comments had a channel, and leaves it there', async () => {
+    const [status] = await db
+      .select({ id: ticketStatuses.id })
+      .from(ticketStatuses)
+      .where(eq(ticketStatuses.name, 'Open'));
+    const [contact] = await db.insert(contacts).values({ name: 'Amira' }).returning();
+    const [legacy] = await db
+      .insert(conversations)
+      .values({
+        channel: 'facebook',
+        externalId: 'facebook:comment:post-1_c1',
+        statusId: status!.id,
+        requesterContactId: contact!.id,
+      })
+      .returning({ id: conversations.id });
+
+    const reply = await ingestMetaComment(
+      comment({ commentId: 'post-1_c2', parentCommentId: 'post-1_c1', createdAt: LATER }),
+    );
+
+    expect(reply).toMatchObject({ conversationId: legacy!.id, createdConversation: false });
+    expect(await conversation(legacy!.id)).toMatchObject({ channel: 'facebook' });
   });
 
   // Recorded, not endorsed: unlike a direct message, the lookup by

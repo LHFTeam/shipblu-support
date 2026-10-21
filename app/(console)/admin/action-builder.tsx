@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { PlusIcon } from '@/components/icons';
 import { Button, Select } from '@/components/ui';
+import { InfoTip } from '@/components/tooltip';
 import { PRIORITY_CHOICES } from '@/lib/tickets/vocabulary';
 
 /**
@@ -141,6 +142,14 @@ export function ActionBuilder({
   }
 }
 
+/**
+ * Said where the rule is written, because the refusal is otherwise silent: a
+ * rule aimed at comment tickets saves, matches, and never sends
+ * (`sendCannedReply` in lib/automations).
+ */
+const SEND_REPLY_SKIPS_COMMENTS =
+  'Never sent on a Facebook or Instagram comment ticket. A reply there is posted under a comment for anybody reading the post to see, and a rule cannot tell whose comment set it off, so it would land under whichever came in last.';
+
 function ValueInput({
   item,
   agents,
@@ -195,7 +204,12 @@ function ValueInput({
         </>
       );
     case 'send_reply':
-      return select(cannedResponses, 'Choose a response…');
+      return (
+        <>
+          {select(cannedResponses, 'Choose a response…')}
+          <InfoTip label="public comments">{SEND_REPLY_SKIPS_COMMENTS}</InfoTip>
+        </>
+      );
     case 'add_watchers':
       return select(agents, 'Choose an agent…');
     case 'mark_spam':

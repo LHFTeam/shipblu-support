@@ -277,7 +277,9 @@ export async function appendVisitorMessage(
     direction: 'inbound',
   });
 
-  await afterInboundMessage(result.conversationId, result.createdConversation, now);
+  await afterInboundMessage(result.conversationId, result.createdConversation, now, {
+    id: result.messageId,
+  });
 
   return result;
 }

@@ -843,15 +843,20 @@ context. This has already produced duplicated work: two sessions independently
 diagnosed and fixed the same percent-encoded-route bug, and a whole PR had to be
 thrown away. That is the single most likely way for you to waste an afternoon.
 
-- **`git fetch origin main` before you plan, not just before you push.** Main
-  moved by 20 commits during one session's context window.
-- **Read the log before claiming a bug.** `git log --oneline -30 origin/main`
-  costs nothing and would have caught both duplicates.
+- **`git fetch origin dev` before you plan, not just before you push.** `main`,
+  when it was the integration branch, moved by 20 commits during one session's
+  context window.
+- **Read the log before claiming a bug.** `git log --oneline -30 origin/dev`
+  costs nothing and would have caught both duplicates; `origin/main` is what
+  production runs.
 - **Claim your seam out loud** in the PR or to the user before starting on
   anything that takes more than one commit.
-- **Prefer rebasing onto main over merging main in.** The history reads as a
+- **Prefer rebasing onto `dev` over merging `dev` in.** The history reads as a
   sequence of intentions; merge commits from parallel sessions obscure it.
-- Never push to `main`. Commit → push → PR → merge → verify the deploy.
+- Never push to `dev` or `main`. Commit → push → PR into `dev` → merge. A change
+  deploys once `dev` is merged into `main`, which is what Render builds; verify
+  the deploy then. _Changed 2026-10-21:_ pull requests targeted `main` until
+  #387, the first merged into `dev`.
 
 Commit messages here carry the reasoning — the trade-off taken and what the
 naive alternative would have broken. They are the durable record of _why_, and

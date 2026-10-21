@@ -49,7 +49,7 @@ forwarding list, an origin that is not localhost).
 
 ## Alongside other agents
 
-- [ ] Rebased on current `origin/main`, and `git log --oneline -30 origin/main`
+- [ ] Rebased on current `origin/dev`, and `git log --oneline -30 origin/dev`
       shows nobody else has already fixed this
 - [ ] `AGENTS.md` / `docs/PROJECT-STATE.md` updated if this changed a convention,
       a command, or added a trap worth warning the next session about
