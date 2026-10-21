@@ -101,8 +101,8 @@ export function pickRule(
  * Every comment ticket carries `facebook` or `instagram` until Stage 1.2 of
  * `plans/ticket-category-routing.md` moves it, so matching the column read raw
  * would post the wording of a rule the form names "Facebook messages" publicly
- * under a comment — and, once 1.2 offers "Facebook comments", leave that rule
- * matching nothing until the backfill ran. Once a CHECK makes the column and the external id one answer
+ * under a comment, and leave a "Facebook comments" rule matching nothing until
+ * the backfill ran. Once a CHECK makes the column and the external id one answer
  * (Stage 1.3) this returns its input.
  */
 function ruleChannel(channel: ConversationChannel, externalId: string | null): ConversationChannel {
@@ -119,6 +119,28 @@ export type MessageContext = {
   ticketNumber: number;
   customerName: string | null;
 };
+
+/**
+ * Whether the message that arrived is the requester's, on a ticket where that
+ * is in doubt.
+ *
+ * On a public comment thread anybody may reply under the customer's comment,
+ * and ingest files the reply on the customer's ticket — threading on the root
+ * is what keeps one comment thread on one ticket. The requester is whoever's
+ * comment on the thread was filed first, which is the root's author unless the
+ * root failed to ingest before a reply to it did. The acknowledgement is
+ * addressed to the requester by name and posted on that thread, so a
+ * passer-by's comment must neither earn it nor spend the closed stretch the
+ * requester's own next comment would. A direct message, an email or a chat has
+ * one author on the customer's side, so the question does not arise.
+ */
+export function answersRequester(input: {
+  isComment: boolean;
+  requesterContactId: string;
+  authorContactId: string | null;
+}): boolean {
+  return !input.isComment || input.authorContactId === input.requesterContactId;
+}
 
 /**
  * The body to send, before substitution — or null when the rule has nothing to
@@ -242,5 +264,8 @@ export const PLACEHOLDERS = [
     describes: 'the name of the holiday, in the customer’s language, on a holiday',
   },
   { token: '{{ticket_number}}', describes: 'the ticket number' },
-  { token: '{{customer_name}}', describes: 'the customer’s name, blank if we do not know it' },
+  {
+    token: '{{customer_name}}',
+    describes: 'the customer’s name, blank if we do not know it and in a reply to a public comment',
+  },
 ] as const;

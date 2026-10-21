@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { commentReplyTarget, commentRequest, rootCommentId } from './comments';
+import { commentIdOf, commentReplyTarget, commentRequest, rootCommentId } from './comments';
 
 /**
  * Every assertion here is against Meta's reference rather than against
@@ -102,6 +102,23 @@ describe('deleting', () => {
       method: 'DELETE',
       path: 'fb-comment-1',
     });
+  });
+});
+
+describe('commentIdOf', () => {
+  it('reads the id ingest stored, and the row’s own id on a row from before it did', () => {
+    expect(commentIdOf({ metaKind: 'comment', commentId: 'post-1_c2' }, 'post-1_c2')).toBe(
+      'post-1_c2',
+    );
+    expect(commentIdOf({ metaKind: 'comment' }, 'post-1_c3')).toBe('post-1_c3');
+    // An empty id is no id: the row's own is what the comment edge accepts.
+    expect(commentIdOf({ metaKind: 'comment', commentId: '' }, 'post-1_c4')).toBe('post-1_c4');
+  });
+
+  it('is null for anything that is not a comment', () => {
+    expect(commentIdOf({ platform: 'facebook' }, 'm_abc')).toBeNull();
+    expect(commentIdOf(null, 'm_abc')).toBeNull();
+    expect(commentIdOf({ metaKind: 'comment' }, '')).toBeNull();
   });
 });
 

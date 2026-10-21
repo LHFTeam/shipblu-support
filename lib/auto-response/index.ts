@@ -1,18 +1,23 @@
-import { and, desc, eq, isNull } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { autoResponses, contacts, conversations, messages } from '@/db/schema';
 import { loadHoursCatalog } from '@/lib/hours/catalog';
 import { groupHours } from '@/lib/hours/resolve';
 import { holidayName, holidayOn, isWithinBusinessHours, nextOpeningAt } from '@/lib/hours';
 import { textToHtml } from '@/lib/html/sanitize';
-import { isReadOnlyChannel, type ConversationChannel } from '@/lib/tickets/channel-policy';
+import { commentIdOf } from '@/lib/meta/comments';
+import {
+  isCommentTicket,
+  isReadOnlyChannel,
+  type ConversationChannel,
+} from '@/lib/tickets/channel-policy';
 import {
   automatedReplyBlocked,
   deliverAutomatedReply,
   lacksEmailRecipient,
 } from '@/lib/tickets/outbound';
 import { requesterLocale } from '@/lib/tickets/locale';
-import { pickBody, pickRule, substitute, type AutoResponseRule } from './resolve';
+import { answersRequester, pickBody, pickRule, substitute, type AutoResponseRule } from './resolve';
 import { logger } from '@/lib/log';
 
 const log = logger('auto-response');
@@ -42,6 +47,7 @@ type Ticket = {
   deletedAt: Date | null;
   lastCustomerMessageAt: Date | null;
   externalId: string | null;
+  requesterContactId: string;
   autoRespondedAt: Date | null;
   contactEmail: string | null;
   contactName: string | null;
@@ -51,9 +57,10 @@ type Ticket = {
  * Send the out-of-hours acknowledgement for a customer's message, if one applies.
  *
  * Called from the ticket lifecycle for every inbound customer message on every
- * channel. Best-effort, like the other lifecycle hooks: this runs inside ingest
- * jobs, and throwing here would fail the job and have the retry re-run every
- * engine that already succeeded — including sending this reply again.
+ * channel, with the message that was just stored. Best-effort, like the other
+ * lifecycle hooks: this runs inside ingest jobs, and throwing here would fail
+ * the job and have the retry re-run every engine that already succeeded —
+ * including sending this reply again.
  *
  * `at` is the moment the reply goes out, and defaults to it. Deliberately not
  * the timestamp on the customer's message, which is when that message reached
@@ -63,21 +70,24 @@ type Ticket = {
  * we last answered — is a statement about now.
  */
 export async function maybeSendAutoResponse(
-  conversationId: string,
+  trigger: { conversationId: string; messageId: string },
   at: Date = new Date(),
 ): Promise<void> {
   try {
-    await send(conversationId, at);
+    await send(trigger, at);
   } catch (error) {
-    log.error(`failed on conversation ${conversationId}`, error);
+    log.error(`failed on conversation ${trigger.conversationId}`, error);
   }
 }
 
-async function send(conversationId: string, at: Date): Promise<void> {
+async function send(
+  { conversationId, messageId }: { conversationId: string; messageId: string },
+  at: Date,
+): Promise<void> {
   // The rules first, and on their own, because the overwhelmingly common answer
   // is "none configured" and that costs one indexed query on a table with a
-  // handful of rows. Everything below it — the calendar, the last inbound
-  // message — would be work done to reach the same conclusion.
+  // handful of rows. Everything below it — the calendar, the message that set
+  // this off — would be work done to reach the same conclusion.
   const [rules, ticket] = await Promise.all([activeRules(), loadTicket(conversationId)]);
   if (rules.length === 0 || !ticket) return;
 
@@ -105,8 +115,23 @@ async function send(conversationId: string, at: Date): Promise<void> {
   // the loop RFC 3834 exists to prevent — and a bounce is a machine that cannot
   // read the reply anyway. The classification was made at ingest, by the parser
   // that had the headers, and is on the message.
-  const inbound = await lastInboundMessage(conversationId);
+  const inbound = await triggeringMessage(conversationId, messageId);
   if (inbound?.isAutomated) return;
+
+  // Before the claim, so a passer-by's comment on the requester's thread does
+  // not spend the closed stretch either (`answersRequester`). Asked of the
+  // comment that set this off rather than of the newest one, so the requester's
+  // comment is answered even when it is stored after a passer-by's newer reply.
+  const isComment = isCommentTicket(ticket.channel, ticket.externalId);
+  if (
+    !answersRequester({
+      isComment,
+      requesterContactId: ticket.requesterContactId,
+      authorContactId: inbound?.authorContactId ?? null,
+    })
+  ) {
+    return;
+  }
 
   // WhatsApp, Facebook and Instagram all need the 24-hour window open for a
   // message the software wrote. The customer's message is what opened it, so
@@ -132,16 +157,20 @@ async function send(conversationId: string, at: Date): Promise<void> {
   const holiday = holidayOn(hours, at);
 
   const context = {
-    // Asked of `lib/tickets/locale`, not read off `inbound` above. That message
-    // is the last inbound row of any kind — including the English `system`
-    // notice we write when a form attachment fails — and answering an Arabic
-    // customer in English because of our own notice is exactly the divergence
-    // the shared module exists to close. It costs one indexed query, on a path
-    // that sends at most one message per closed stretch.
+    // Asked of `lib/tickets/locale`, not read off `inbound` above. That one
+    // message can carry none of the customer's words — a photo sent without a
+    // caption is stored as our own English `[image]` — and the language is a
+    // question about the newest words the requester wrote, which the shared
+    // module answers for every unattended sender alike. It costs one indexed
+    // query, on a path that sends at most one message per closed stretch.
     locale: await requesterLocale(conversationId),
     holiday,
     ticketNumber: ticket.number,
-    customerName: ticket.contactName,
+    // Never published under a post. The contact's name can have come from
+    // another channel — a merge with the customer's email contact, an agent's
+    // edit — and the commenter may never have used it in public; a greeting
+    // without one closes its gap (`substitute`).
+    customerName: isComment ? null : ticket.contactName,
   };
 
   const body = pickBody(rule, context);
@@ -164,7 +193,16 @@ async function send(conversationId: string, at: Date): Promise<void> {
     actorLabel: 'automation:out of hours',
     eventType: 'auto_replied',
     eventData: { reason: holiday ? 'holiday' : 'out_of_hours', ruleId: rule.id },
-    meta: { autoResponse: holiday ? 'holiday' : 'out_of_hours' },
+    // Posted under the customer's comment on a comment ticket, and badged as
+    // public on the timeline the way an agent's comment reply is. The comment
+    // is the one `answersRequester` passed, named here because `send_meta`
+    // would otherwise look up the newest comment when the job runs — which, if
+    // a passer-by has replied since, is theirs.
+    meta: {
+      autoResponse: holiday ? 'holiday' : 'out_of_hours',
+      ...(isComment ? { isPublic: true } : {}),
+      ...(isComment && inbound?.commentId ? { commentId: inbound.commentId } : {}),
+    },
   });
 
   // English first in the log line — the audience is whoever is reading Render's
@@ -255,6 +293,8 @@ async function loadTicket(conversationId: string): Promise<Ticket | null> {
       // Only to tell a comment ticket from a direct message: the rule picker
       // and the 24-hour guard both read it.
       externalId: conversations.externalId,
+      // Whose comment it was matters on a comment ticket (`answersRequester`).
+      requesterContactId: conversations.requesterContactId,
       autoRespondedAt: conversations.autoRespondedAt,
       contactEmail: contacts.primaryEmail,
       contactName: contacts.name,
@@ -277,21 +317,39 @@ async function loadTicket(conversationId: string): Promise<Ticket | null> {
 
 /**
  * The message that triggered this, for the automation classification the email
- * parser recorded on it.
+ * parser recorded on it, for who wrote it and, on a comment thread, for the
+ * comment the reply goes under.
  *
- * Read back rather than passed down through the lifecycle: three ingest paths
- * call that seam and only one of them has an RFC 3834 verdict to hand, so an
- * argument would be a parameter two callers pass null for — and the one that
- * matters would be the one somebody forgot to wire up.
+ * By id, never as the newest inbound row: deliveries are processed in no order,
+ * so the newest is another message whenever this one was stored late — a Meta
+ * batch retried whole, or a webhook delivered late — and on a comment thread
+ * that is a passer-by's reply as often as the requester's own. The verdict is
+ * still read back off the row rather than passed down through the lifecycle:
+ * only one ingest path has an RFC 3834 verdict to hand, and every one of them
+ * has the id.
  */
-async function lastInboundMessage(
+async function triggeringMessage(
   conversationId: string,
-): Promise<{ isAutomated: boolean } | null> {
+  messageId: string,
+): Promise<{
+  isAutomated: boolean;
+  authorContactId: string | null;
+  commentId: string | null;
+} | null> {
   const rows = await db
-    .select({ meta: messages.meta })
+    .select({
+      meta: messages.meta,
+      authorContactId: messages.authorContactId,
+      channelMessageId: messages.channelMessageId,
+    })
     .from(messages)
-    .where(and(eq(messages.conversationId, conversationId), eq(messages.direction, 'inbound')))
-    .orderBy(desc(messages.createdAt))
+    .where(
+      and(
+        eq(messages.id, messageId),
+        eq(messages.conversationId, conversationId),
+        eq(messages.direction, 'inbound'),
+      ),
+    )
     .limit(1);
 
   const row = rows[0];
@@ -299,5 +357,9 @@ async function lastInboundMessage(
 
   const meta = row.meta ?? {};
 
-  return { isAutomated: meta.isAutomated === true || meta.isBounce === true };
+  return {
+    isAutomated: meta.isAutomated === true || meta.isBounce === true,
+    authorContactId: row.authorContactId,
+    commentId: commentIdOf(meta, row.channelMessageId),
+  };
 }

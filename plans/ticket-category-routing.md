@@ -1109,8 +1109,8 @@ worker and all four crons. 1.2 does not start until all six run 1.1.
     company-wide and save back as every channel. So nothing 1.1 deploys writes
     the values, and rolling it back is clean. The 1.1 editor in turn keeps a
     stored channel it does not offer as a visible option, which the action
-    refuses, so a rollback from 1.2 cannot widen a comments rule either. Until 1.2 a comment is not
-    acknowledged out of hours, which is the safe direction. The realtime topics
+    refuses, so a rollback from 1.2 cannot widen a comments rule either. Until
+    1.2 a comment is not acknowledged out of hours, which is the safe direction. The realtime topics
     still listen for them, so a web on 1.1 already hears a ticket the 1.2
     worker writes.
   - **One test for a comment ticket**, `isCommentTicket(channel, externalId)`
@@ -1163,11 +1163,16 @@ deploy it with web and the crons.
   out-of-hours form and its action's allowlist (`AUTO_RESPONSE_CHANNELS`). The
   out-of-hours page, `NO_CHANNEL_WHY` and the Active toggle's hint then say a
   comment is acknowledged only by a rule naming its comment channel.
-- **Order: web first, then the worker, then the crons.** The web brings the
-  pickers; the worker brings the writer. Worker first, a 1.1 web shows a new
-  comment ticket only under All channels — it has left Facebook and Instagram
-  and the 1.1 filter has no comment choice. Web first, the comment views are
-  empty for the minutes until the worker lands, which is the lesser gap.
+- **Order: the worker first, then web, then the crons.** The worker brings the
+  writer; the web brings the pickers. Web first, a 1.2 web accepts a "Facebook
+  comments" out-of-hours rule that a 1.1 worker, where comments are ingested and
+  acknowledged, applies without the requester check — a reply addressed to the
+  customer posted under a passer-by's comment. Worker first, a 1.1 web shows a
+  new comment ticket only under All channels for the minutes until it lands —
+  it has left Facebook and Instagram and the 1.1 filter has no comment choice —
+  which is the lesser gap. (First written web first, for the opposite
+  judgement; reversed on review, since one gap is cosmetic and the other
+  public.)
 - The admin channels page can create "Facebook comments" and "Instagram
   comments" rows. They need no credentials, since they ride the Page and
   Instagram tokens, and their config is `{}`. The page's four type allowlists
@@ -1197,6 +1202,133 @@ deploy it with web and the crons.
 - Then run `rollup_metrics from=2026-08-29`, so historic reports show the
   split. Its reconcile check (channel slices sum to totals) is one
   verification. The CSAT columns per channel are the other.
+- **As built (2026-10-21).** Where 1.2 differs from the items above, what the
+  inventory found, and the runbook.
+  - **The inventory** (read-only, 2026-10-21, after 1.1 deployed). No
+    `automation_rules` condition and no `skills` condition names `facebook` or
+    `instagram`. The one `auto_responses` row is null-scoped and inactive. Two
+    `sla_policies` name them:
+    - **Live Support (Customer Care)**, position 1 and `is_default`: `any` of
+      `channel in [facebook, instagram, webchat, whatsapp]` or
+      `group.id eq "Customer Care"`.
+    - **Live Support (Merchant Care)**, position 4: `all` of the same channel
+      list and `group.id eq "Merchant Care"`.
+
+    All 52 comment tickets are in the Support group and carry Live Support
+    (Customer Care). A policy is selected when a ticket is created (and again
+    on a group move before the first response), so a moved ticket keeps the one
+    it has. A new comment ticket in the Support group matches none of the four:
+    the two Offline policies are email-only, the two Live ones list only the
+    platforms in their channel arm, and Live Support (Customer Care)'s group
+    arm compares a group id with the name "Customer Care", which matches no
+    ticket until that condition is re-saved through 0.2's picker. It takes the
+    default, the same Live Support (Customer Care), so for the tickets there are
+    the SLA does not change, as Q11 expected. A comments row defaulting to
+    Merchant Care would change it: its tickets would take the default too, where
+    a Facebook ticket in Merchant Care takes Live Support (Merchant Care) — Q11's
+    choice, stated so nobody is surprised by it. No condition gains the comment
+    values.
+
+  - **`channelFor` takes the channel**, and for a comment channel reads both
+    types in one query, preferring the oldest active comments row and falling
+    back to the platform's row. A direct message still reads its platform's
+    row only. A comment on a thread filed before 1.2 is found by its external
+    id, as every comment is, and keeps its platform's channel until the
+    backfill moves it (`ingest-meta.db.test.ts` pins both).
+  - **The admin page's allowlists are named** (`SAVEABLE_TYPES` in the action,
+    `EDITABLE` in the form, each naming the other). A comments row says it
+    covers the public comments on the account its variable configures, and
+    that without one they start in the platform row's group.
+  - **`split_comment_channels`** (`worker/handlers/split-comment-channels.ts`)
+    moves the tickets and both copies in one transaction:
+    - **Tickets.** It moves every ticket on `facebook`/`instagram` whose
+      external id is a comment, deleted ones included, because 1.3's CHECK reads
+      every row. Its `channel_id` goes to the oldest active comments row of its
+      type, else stays as it was, and its group is not touched.
+    - **Copies.** It moves the copies still on the platform beside a ticket
+      already on its comment channel. They are matched by the ticket's channel
+      as it stands, so a copy written late is caught by the next run.
+
+    A second run finds nothing. It is in `scripts/ci/db-jobs.txt` as
+    `dryRun=true`. Its dry-run selection, read-only against production on
+    2026-10-21: 43 Facebook and 9 Instagram tickets, none onto a comments row
+    (there is none), none deleted; 0 `csat_surveys` and 1 `canned_suggestions`
+    copy.
+
+  - **Runbook.**
+    1. Deploy the worker, then web, then the crons.
+    2. Confirm every service runs 1.2, since a worker still on 1.1 files new
+       comments on the platform channel.
+    3. `npm run job -- split_comment_channels dryRun=true` should report the
+       figures above, give or take what arrived since.
+    4. Run it without `dryRun`, then dry-run again, which must report nothing
+       to move and no ticket left that 1.3's CHECK would refuse.
+    5. `npm run job -- rollup_metrics from=2026-08-29`, then the two
+       verifications above.
+  - **Rollback** is the list after 1.3 below. Redeploying 1.1 (its step 2)
+    leaves tickets 1.2 wrote legible, since 1.1 reads the comment values, and
+    its out-of-hours editor keeps a comments rule's scope visible rather than
+    saving it as every channel — but 1.1 still acts on such a rule without the
+    requester check, so the step deactivates them first. Reversing the backfill (its step 3) is one
+    `UPDATE` each for `conversations`, `csat_surveys` and `canned_suggestions`
+    (`replace(channel::text, '_comment', '')::channel` where the channel is a
+    comment one), with `channel_id` set back to the platform row where it names
+    a comments row.
+  - **Out-of-hours on a comment thread answers the requester only**
+    (`answersRequester` in `lib/auto-response/resolve.ts`). Anybody may reply
+    under a customer's comment, and the reply is filed on the customer's ticket;
+    the acknowledgement names the requester and is posted on the thread, so a
+    passer-by's comment neither earns it nor spends the closed stretch. Found
+    on review: 1.2 is what lets an admin write a comments rule. The reply is
+    marked `isPublic`, so the timeline badges it "Posted publicly" as it does an
+    agent's comment reply. It judges the comment that set it off, which the
+    lifecycle now passes by id (`afterInboundMessage`'s `message`), not the
+    newest inbound row: a Meta batch retried whole stores the item that failed
+    after siblings newer than it, so the newest row can be a passer-by's reply
+    while the requester's comment goes unanswered (found on review). Every
+    inbound path passes it, so the out-of-office check reads the same row.
+  - **The dry run also names what it cannot move.** A ticket whose channel and
+    external id disagree anywhere but on its own platform's channel — a
+    comment's external id on `email` or on the other platform's channel, or a
+    comment channel without one — fails 1.3's CHECK or would land on the wrong
+    comment channel, and this job cannot tell which channel it belongs on. Nothing files
+    either (production, 2026-10-21: every one of the 52 refused rows is a
+    platform-channel comment the job moves), so the job names them by number on
+    every run and leaves them for a person. Found on review: a gate that counted
+    only what it moves would read clear with such a row still there.
+  - **Review, second round (2026-10-21).** Nothing found had reached
+    production, which then held 53 inbound comments, none without a `from` or an
+    author and none on a thread with a second commenter; three automation rules,
+    none sending a reply; and no ticket with an inbound reply by anybody but its
+    requester. Fixed:
+    - an automation's `send_reply` is refused on a comment ticket (the risk
+      below, now closed);
+    - `requesterLocale` reads the requester's own words, so a passer-by's
+      English does not choose the language an Arabic requester is answered in
+      when her newest comment was a photo;
+    - the acknowledgement leaves `{{customer_name}}` blank on a comment, since
+      the contact's name may have come from her email;
+    - one `commentIdOf` reads a stored comment's id for the acknowledgement and
+      `send_meta`'s fallback alike;
+    - `channelFor` runs only for a thread that opens a ticket;
+    - the admin pages' type lists are one module each (`channel-types.ts`,
+      `auto-responses/channels.ts`);
+    - the backfill moves a comment only onto its own platform's comment
+      channel, and names the rest;
+    - the deploy order is the worker first (above).
+
+    Kept as they are, with the reason on each thread: a commenter Meta sends
+    without `from` is a new contact per comment, so only the first is answered
+    — silence is the safe side of not knowing who wrote it; the priority
+    classifier counts an authorless row as the requester's and the
+    acknowledgement does not, because a trigger always has an author and the
+    two errors cost differently; and a moved ticket keeps the `channel_id` it
+    was moved with, as an ingested one keeps the row it was filed through.
+
+  - **A comments row's default group is its own, "None" included.** Without a
+    comments row, comments start in the platform row's group; with one, they
+    start in its group, and a row left on "None" starts them in none. The form
+    says so.
 
 **1.3 — Lock the invariant.** A CHECK in `db/sql`, idempotent and guarded by
 constraint name and table:
@@ -1208,7 +1340,8 @@ constraint name and table:
 
 The `coalesce` matters, because a regex on null is null and a CHECK passes on
 null. 1.3 deploys only after `split_comment_channels dryRun=true` reports
-nothing to move with all six services on 1.2. Adding the CHECK validates every
+nothing to move and no ticket left that the CHECK would refuse, with all six
+services on 1.2. Adding the CHECK validates every
 row, and one stray row would fail web's preDeploy. After that the pair can
 never disagree again, and the three ways the code detects a comment today
 become one answer.
@@ -1239,10 +1372,15 @@ readers are harmless.
    `db/sql`, then `ALTER TABLE conversations DROP CONSTRAINT …`. Dropping it
    by hand alone does not last, because every web deploy replays `db/sql`.
 2. **Revert 1.2's writers** and deploy web, worker and crons with 1.1's
-   readers still in place, so nothing writes comment values any more.
+   readers still in place, so nothing writes comment values any more. First
+   deactivate every `auto_responses` row naming a comment channel: 1.1 still
+   matches one, without `answersRequester`, so a passer-by's comment would earn
+   a public acknowledgement addressed to the requester.
 3. **Reverse the backfill** with an `UPDATE`, run as a `SELECT` first, that
    sets each comment channel back to its platform in `conversations`,
-   `csat_surveys` and `canned_suggestions`, and restores `channel_id`.
+   `csat_surveys` and `canned_suggestions`, and points `channel_id` back at the
+   platform row where it names a comments row. That is a remap, not a restore:
+   the job keeps no record of a null `channel_id` it filled.
 4. **Rebuild the reports** with `rollup_metrics from=2026-08-29`.
 
 ### Stage 2 — the subcategory rename
@@ -1799,7 +1937,13 @@ Web first (it migrates `metrics_daily`), then the worker and crons, with
   who opens a held ticket from "My groups" and assigns it ends the hold. The
   "Routing…" badge says what they are doing, and nothing stops them, which is
   deliberate: a person is never overruled.
-- **An automation's `send_reply` can answer a comment in public.** The
+- **Closed in 1.2, on review: an automation's `send_reply` could answer a
+  comment in public.** `sendCannedReply` now refuses one on any comment ticket
+  (`isCommentTicket`, so a comment still on its platform's channel too), before
+  1.2's condition builder offers the comment values that would aim a rule at
+  them. A rule may answer a comment again only with a trigger that names the
+  comment, which the engine does not have; that stays the support lead's call.
+  What follows is the risk as recorded before. The
   auto-response picker keeps an every-channel rule off comments (1.1); the
   automation engine has no such guard, and `deliverAutomatedReply` on a comment
   ticket goes out through `send_meta` as a comment reply. The engine's

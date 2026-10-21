@@ -13,14 +13,14 @@ wins over both.
 
 - Run `npm install` before anything else. A fresh clone has no `node_modules`
   and every check below fails with a module-resolution error until it does.
-- Never push to `main`. Branch → PR → merge.
+- Never push to `dev` or `main`. Branch → PR into `dev` → merge.
 - Sanitise attacker-controlled HTML on write, never on read.
 - Verify state before any write against live infrastructure. See
   [Tool use](#tool-use-and-live-infrastructure).
 
 Most of what this list used to carry is now enforced on every pull request — see
 [What CI checks](#what-ci-checks). What is left is what a machine cannot check: a
-push to `main` it cannot prevent, a sanitiser call it cannot place on the right
+push to `dev` or `main` it cannot prevent, a sanitiser call it cannot place on the right
 side of the read/write boundary, and a production write it cannot verify for
 you.
 
@@ -614,17 +614,26 @@ The difference is public wherever the software replies on its own, because a
 reply on a comment ticket is posted under the customer's comment where anybody
 reading the post sees it. The out-of-hours picker handles it: a rule with no
 channel matches every channel _except_ the comment ones, and only a rule naming
-a comment channel answers there. `pickRule` takes the stored channel and
+a comment channel answers there. The sender then answers only a comment from
+the ticket's own requester (`answersRequester`, in `maybeSendAutoResponse`),
+because anybody may reply under a customer's comment and that reply is filed
+on the customer's ticket; and it names that comment as the reply's target, so
+a reply written before the job runs does not become it. It judges the message
+the lifecycle hands it by id, never the newest inbound row, which after a
+batch retry is a passer-by's reply stored before the requester's older comment. `pickRule` takes the stored channel and
 external id and reads a comment still filed on its platform as the comment
 channel it is moving to, so a rule naming the platform answers that platform's
 direct messages and nothing posted in public; every caller must supply the
-external id, so none can skip the mapping by forgetting it. **The automation
-engine does not handle it yet**: its `channel` fact is the stored column, so a
-`send_reply` rule a comment ticket satisfies — no channel condition,
-`channel is not email`, or `channel is facebook` until the backfill — posts in
-public. The risk, how latent it was when last read, and its fix are in
-`plans/ticket-category-routing.md` under "Risks not closed by the design";
-check production for a `send_reply` rule before relying on it being latent.
+external id, so none can skip the mapping by forgetting it. Its reply leaves
+`{{customer_name}}` blank, because the contact's name can have come from a
+private channel and the reply is published under the post. **The automation
+engine never answers a comment**: `sendCannedReply` refuses a `send_reply` on
+a comment ticket, by `isCommentTicket`, because the engine is handed a ticket
+rather than the comment that set the rule off — an `on_update` rule fires on a
+passer-by's reply as readily as on the customer's — and its reply would be
+posted under whichever comment came in last. Whether a rule may ever answer a
+comment is the support lead's call, in its own change, with a trigger that
+names the comment.
 
 Graph request shapes are written down in `lib/meta/comments.ts` and
 `lib/meta/send.ts` rather than built inline, and asserted there against Meta's
@@ -1225,11 +1234,12 @@ Two different questions decide the language, and they are not the same module.
 **Anything that writes to a customer unattended goes through
 `lib/tickets/locale.ts`** — the out-of-hours acknowledgement and an automation's
 canned reply both call `requesterLocale()`, which picks the most recent inbound
-`reply` carrying words the customer wrote, outside any label of ours, and hands
+`reply` carrying words the requester wrote, outside any label of ours, and hands
 it to `preferredLocale()`. Each of those narrowings closes a way the answer goes
 wrong: the last inbound row of _any_ kind includes the English `system` notice
-we write when a form attachment fails, and a photo sent without a caption is
-stored as our own English `[image]`. A sender that reads the language off a
+we write when a form attachment fails, a photo sent without a caption is
+stored as our own English `[image]`, and on a public comment thread the newest
+words can be a passer-by's reply under the customer's comment. A sender that reads the language off a
 message it already happens to be holding is how the two came to disagree, so do
 not reintroduce that shortcut — one indexed query is the price of the invariant.
 
@@ -1502,18 +1512,28 @@ Verified before, then done, beats fast then reconstructed.
 
 ## Git and working alongside other agents
 
-Develop on a feature branch; **never push to `main`**. Commit → push → PR →
-merge → verify the deploy.
+Develop on a feature branch and open the pull request against **`dev`**, the
+integration branch; **never push to `dev` or `main`**. Commit → push → PR into
+`dev` → merge. `main` is what Render builds — every service in `render.yaml`
+names `branch: main` — so a change merged into `dev` reaches staging and
+production only once `dev` is merged into `main`. Verify the deploy then, not at
+the merge into `dev`, and say in a stage's plan which of the two a step waits
+for. CI runs on every pull request whatever its base, and on a push to `main`;
+a merge into `dev` runs nothing after it, so the pull request's own run is the
+only one a change gets before `main`.
 
 More than one agent session works on this repo at once and they share no
 context. Two sessions have already fixed the same bug independently and a whole
 PR was thrown away.
 
-- `git fetch origin main` before you plan, not just before you push. Main moved
-  20 commits inside one session's context window.
-- `git log --oneline -30 origin/main` before claiming a bug exists.
+- `git fetch origin dev` before you plan, not just before you push. `main`, when
+  it was the integration branch, moved 20 commits inside one session's context
+  window.
+- `git log --oneline -30 origin/dev` before claiming a bug exists — and
+  `origin/main` before claiming production has it, since a fix can sit on `dev`
+  for a while before it ships.
 - Claim your seam out loud before starting anything longer than one commit.
-- Prefer rebasing onto main over merging main in.
+- Prefer rebasing onto `dev` over merging `dev` in.
 
 `.github/pull_request_template.md` is the PR body's shape: why, how it was
 verified, what deploys with it and what rolls it back. Fill it in rather than

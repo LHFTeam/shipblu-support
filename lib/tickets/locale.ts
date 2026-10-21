@@ -1,4 +1,4 @@
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, isNull, or } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { contacts, conversations, messages } from '@/db/schema';
 import { carriesCustomerText } from './carries-customer-text';
@@ -66,9 +66,15 @@ export function preferredLocale(contactLocale: string, sample: string | null): '
  * on a path that sends at most one message per closed stretch is the right
  * price for that.
  *
- * Four things narrow which message decides it, and each of them is a way the
+ * Five things narrow which message decides it, and each of them is a way the
  * answer went wrong:
  *
+ * - **The requester's own.** On a public comment thread anybody may reply under
+ *   the customer's comment, and the reply is filed on the customer's ticket; the
+ *   acknowledgement is addressed to the requester, so a passer-by's English
+ *   reply must not choose the language an Arabic customer is answered in when
+ *   the customer's own newest comment was a photo. A row with no author — its
+ *   contact purged — still counts, because it is nobody else's.
  * - **`reply` only.** One of our own system notices, like that attachment line,
  *   is written by us, not by the person we are about to write to. A mail
  *   server's bounce or out-of-office is not kept out by this: it arrives as
@@ -117,10 +123,34 @@ export async function requesterLocale(
           .where(eq(conversations.id, conversationId))
           .limit(1)
       : Promise.resolve([{ locale: contactLocale }]),
-    newestCustomerWords(conversationId),
+    newestRequesterWords(conversationId),
   ]);
 
   return preferredLocale(contact[0]?.locale ?? 'en', words);
+}
+
+/**
+ * `newestCustomerWords`, narrowed to the ticket's requester. Not that function
+ * with an option: it is also what a canned suggestion records as the language
+ * the page showed, and the page reads every customer row (`lastCustomerWords`).
+ */
+async function newestRequesterWords(conversationId: string): Promise<string | null> {
+  const [row] = await db
+    .select({ bodyText: messages.bodyText })
+    .from(messages)
+    .innerJoin(conversations, eq(conversations.id, messages.conversationId))
+    .where(
+      and(
+        customerWordsOn(conversationId),
+        or(
+          isNull(messages.authorContactId),
+          eq(messages.authorContactId, conversations.requesterContactId),
+        ),
+      ),
+    )
+    .orderBy(desc(messages.createdAt), desc(messages.id))
+    .limit(1);
+  return row?.bodyText ?? null;
 }
 
 /**
@@ -136,16 +166,19 @@ export async function newestCustomerWords(conversationId: string): Promise<strin
   const [row] = await db
     .select({ bodyText: messages.bodyText })
     .from(messages)
-    .where(
-      and(
-        eq(messages.conversationId, conversationId),
-        eq(messages.direction, 'inbound'),
-        eq(messages.kind, 'reply'),
-        carriesCustomerText(),
-        notReaction(),
-      ),
-    )
+    .where(customerWordsOn(conversationId))
     .orderBy(desc(messages.createdAt), desc(messages.id))
     .limit(1);
   return row?.bodyText ?? null;
+}
+
+/** The rows either reader may pick from: a customer's reply that carries their words. */
+function customerWordsOn(conversationId: string) {
+  return and(
+    eq(messages.conversationId, conversationId),
+    eq(messages.direction, 'inbound'),
+    eq(messages.kind, 'reply'),
+    carriesCustomerText(),
+    notReaction(),
+  );
 }

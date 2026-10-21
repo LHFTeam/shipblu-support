@@ -301,7 +301,7 @@ export async function createTicket(contactId: string, input: NewTicket): Promise
     direction: 'inbound',
   });
 
-  await afterInboundMessage(created.id, true, now);
+  await afterInboundMessage(created.id, true, now, { id: created.messageId });
 
   return { number: created.number, conversationId: created.id, messageId: created.messageId };
 }
@@ -386,7 +386,7 @@ export async function appendReply(
     direction: 'inbound',
   });
 
-  await afterInboundMessage(result.id, false, now);
+  await afterInboundMessage(result.id, false, now, { id: result.messageId });
   return { ok: true };
 }
 
