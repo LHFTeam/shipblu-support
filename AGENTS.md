@@ -614,9 +614,11 @@ The difference is public wherever the software replies on its own, because a
 reply on a comment ticket is posted under the customer's comment where anybody
 reading the post sees it. The out-of-hours picker handles it: a rule with no
 channel matches every channel _except_ the comment ones, and only a rule naming
-a comment channel answers there — and only a comment from the ticket's own
-requester (`answersRequester`), because anybody may reply under a customer's
-comment and that reply is filed on the customer's ticket. `pickRule` takes the stored channel and
+a comment channel answers there. The sender then answers only a comment from
+the ticket's own requester (`answersRequester`, in `maybeSendAutoResponse`),
+because anybody may reply under a customer's comment and that reply is filed
+on the customer's ticket; and it names that comment as the reply's target, so
+a reply written before the job runs does not become it. `pickRule` takes the stored channel and
 external id and reads a comment still filed on its platform as the comment
 channel it is moving to, so a rule naming the platform answers that platform's
 direct messages and nothing posted in public; every caller must supply the

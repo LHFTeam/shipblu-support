@@ -1210,12 +1210,19 @@ deploy it with web and the crons.
       list and `group.id eq "Merchant Care"`.
 
     All 52 comment tickets are in the Support group and carry Live Support
-    (Customer Care). A policy is selected when a ticket is created, so a moved
-    ticket keeps the one it has. A new comment ticket matches none of the four
-    — the two Offline policies are email-only, and the two Live ones list only
-    the platforms — and takes the default, the same Live Support (Customer
-    Care). So the SLA does not change, as Q11 expected. No condition gains the
-    comment values.
+    (Customer Care). A policy is selected when a ticket is created (and again
+    on a group move before the first response), so a moved ticket keeps the one
+    it has. A new comment ticket in the Support group matches none of the four:
+    the two Offline policies are email-only, the two Live ones list only the
+    platforms in their channel arm, and Live Support (Customer Care)'s group
+    arm compares a group id with the name "Customer Care", which matches no
+    ticket until that condition is re-saved through 0.2's picker. It takes the
+    default, the same Live Support (Customer Care), so for the tickets there are
+    the SLA does not change, as Q11 expected. A comments row defaulting to
+    Merchant Care would change it: its tickets would take the default too, where
+    a Facebook ticket in Merchant Care takes Live Support (Merchant Care) — Q11's
+    choice, stated so nobody is surprised by it. No condition gains the comment
+    values.
 
   - **`channelFor` takes the channel**, and for a comment channel reads both
     types in one query, preferring the oldest active comments row and falling
@@ -1255,7 +1262,8 @@ deploy it with web and the crons.
   - **Rollback** is the list after 1.3 below. Redeploying 1.1 (its step 2)
     leaves tickets 1.2 wrote legible, since 1.1 reads the comment values, and
     its out-of-hours editor keeps a comments rule's scope visible rather than
-    saving it as every channel. Reversing the backfill (its step 3) is one
+    saving it as every channel — but 1.1 still acts on such a rule without the
+    requester check, so the step deactivates them first. Reversing the backfill (its step 3) is one
     `UPDATE` each for `conversations`, `csat_surveys` and `canned_suggestions`
     (`replace(channel::text, '_comment', '')::channel` where the channel is a
     comment one), with `channel_id` set back to the platform row where it names
@@ -1314,10 +1322,15 @@ readers are harmless.
    `db/sql`, then `ALTER TABLE conversations DROP CONSTRAINT …`. Dropping it
    by hand alone does not last, because every web deploy replays `db/sql`.
 2. **Revert 1.2's writers** and deploy web, worker and crons with 1.1's
-   readers still in place, so nothing writes comment values any more.
+   readers still in place, so nothing writes comment values any more. First
+   deactivate every `auto_responses` row naming a comment channel: 1.1 still
+   matches one, without `answersRequester`, so a passer-by's comment would earn
+   a public acknowledgement addressed to the requester.
 3. **Reverse the backfill** with an `UPDATE`, run as a `SELECT` first, that
    sets each comment channel back to its platform in `conversations`,
-   `csat_surveys` and `canned_suggestions`, and restores `channel_id`.
+   `csat_surveys` and `canned_suggestions`, and points `channel_id` back at the
+   platform row where it names a comments row. That is a remap, not a restore:
+   the job keeps no record of a null `channel_id` it filled.
 4. **Rebuild the reports** with `rollup_metrics from=2026-08-29`.
 
 ### Stage 2 — the subcategory rename

@@ -183,10 +183,14 @@ async function send(conversationId: string, at: Date): Promise<void> {
     eventType: 'auto_replied',
     eventData: { reason: holiday ? 'holiday' : 'out_of_hours', ruleId: rule.id },
     // Posted under the customer's comment on a comment ticket, and badged as
-    // public on the timeline the way an agent's comment reply is.
+    // public on the timeline the way an agent's comment reply is. The comment
+    // is the one `answersRequester` passed, named here because `send_meta`
+    // would otherwise look up the newest comment when the job runs — which, if
+    // a passer-by has replied since, is theirs.
     meta: {
       autoResponse: holiday ? 'holiday' : 'out_of_hours',
       ...(isComment ? { isPublic: true } : {}),
+      ...(isComment && inbound?.commentId ? { commentId: inbound.commentId } : {}),
     },
   });
 
@@ -309,23 +313,38 @@ async function loadTicket(conversationId: string): Promise<Ticket | null> {
  * argument would be a parameter two callers pass null for — and the one that
  * matters would be the one somebody forgot to wire up.
  */
-async function lastInboundMessage(
-  conversationId: string,
-): Promise<{ isAutomated: boolean; authorContactId: string | null } | null> {
+async function lastInboundMessage(conversationId: string): Promise<{
+  isAutomated: boolean;
+  authorContactId: string | null;
+  commentId: string | null;
+} | null> {
   const rows = await db
-    .select({ meta: messages.meta, authorContactId: messages.authorContactId })
+    .select({
+      meta: messages.meta,
+      authorContactId: messages.authorContactId,
+      channelMessageId: messages.channelMessageId,
+    })
     .from(messages)
     .where(and(eq(messages.conversationId, conversationId), eq(messages.direction, 'inbound')))
-    .orderBy(desc(messages.createdAt))
+    // The id breaks a tie between two messages of the same instant, so the
+    // row whose author is checked is one row, not whichever the plan returns.
+    .orderBy(desc(messages.createdAt), desc(messages.id))
     .limit(1);
 
   const row = rows[0];
   if (!row) return null;
 
   const meta = row.meta ?? {};
+  const commentId =
+    meta.metaKind === 'comment'
+      ? typeof meta.commentId === 'string'
+        ? meta.commentId
+        : row.channelMessageId
+      : null;
 
   return {
     isAutomated: meta.isAutomated === true || meta.isBounce === true,
     authorContactId: row.authorContactId,
+    commentId: commentId || null,
   };
 }

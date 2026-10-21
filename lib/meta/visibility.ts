@@ -2,8 +2,9 @@
  * Whether a Facebook or Instagram message was public, read off its `meta`.
  *
  * Its own module, and tested, because the answer is three states out of two
- * fields that are written in two places — `ingestMetaComment` for what arrives,
- * the reply action for what goes out — and read in a third. The console badges
+ * fields that are written in three places — `ingestMetaComment` for what
+ * arrives, the reply action and the out-of-hours acknowledgement
+ * (`lib/auto-response`) for what goes out — and read in a fourth. The console badges
  * the result, so being wrong here is not a cosmetic bug: it tells an agent that
  * a sentence meant for one person is sitting under the post for everyone, or the
  * reverse.
@@ -24,7 +25,7 @@ export type MetaMessageMeta = {
  * True when the message is on the public thread.
  *
  * `isPublic` decides it wherever it is present: it is written deliberately by
- * both producers and says exactly this. The fall back to `metaKind` is for rows
+ * every producer and says exactly this. The fall back to `metaKind` is for rows
  * older than the field — those predate the private-reply control, so an outbound
  * comment-thread message of that vintage really was a public reply, and an
  * inbound one is a comment either way.

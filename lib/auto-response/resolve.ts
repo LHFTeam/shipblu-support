@@ -126,7 +126,9 @@ export type MessageContext = {
  *
  * On a public comment thread anybody may reply under the customer's comment,
  * and ingest files the reply on the customer's ticket — threading on the root
- * is what keeps one post's conversation on one ticket. The acknowledgement is
+ * is what keeps one comment thread on one ticket. The requester is whoever's
+ * comment on the thread was filed first, which is the root's author unless the
+ * root failed to ingest before a reply to it did. The acknowledgement is
  * addressed to the requester by name and posted on that thread, so a
  * passer-by's comment must neither earn it nor spend the closed stretch the
  * requester's own next comment would. A direct message, an email or a chat has

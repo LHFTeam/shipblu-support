@@ -115,16 +115,18 @@ describe('splitCommentChannels', () => {
     const facebookRow = await channelRow('facebook', 'Facebook');
     const instagramRow = await channelRow('instagram', 'Instagram');
     // An inactive comments row routes nothing, so it is never landed on; of two
-    // active ones the oldest wins, as `channelFor` in ingest picks.
+    // active ones the oldest wins, as `channelFor` in ingest picks. The newer
+    // one is inserted first, so it is the ORDER BY that decides and not the
+    // order the rows happen to sit in the table.
     await channelRow('facebook_comment', 'Old Facebook comments', {
       isActive: false,
       createdAt: new Date('2026-08-01T00:00:00Z'),
     });
-    const facebookComments = await channelRow('facebook_comment', 'Facebook comments', {
-      createdAt: new Date('2026-09-10T00:00:00Z'),
-    });
     await channelRow('facebook_comment', 'Newer Facebook comments', {
       createdAt: new Date('2026-10-10T00:00:00Z'),
+    });
+    const facebookComments = await channelRow('facebook_comment', 'Facebook comments', {
+      createdAt: new Date('2026-09-10T00:00:00Z'),
     });
 
     const fbComment = await ticket({
@@ -264,29 +266,32 @@ describe('splitCommentChannels', () => {
   it('reports on a dry run what the real run then moves, and nothing after', async () => {
     await archive();
     const lines = vi.spyOn(console, 'log').mockImplementation(() => {});
-    const said = () => lines.mock.calls.map((call) => String(call[0]));
+    try {
+      const said = () => lines.mock.calls.map((call) => String(call[0]));
 
-    await splitCommentChannels(job({ dryRun: true }));
-    expect(said()).toEqual([
-      '[split_comment_channels] facebook: 2 tickets would move to facebook_comment, 2 onto a comments row',
-      '[split_comment_channels] instagram: 2 tickets would move to instagram_comment, 0 onto a comments row',
-      '[split_comment_channels] dry run: 4 comment tickets, 1 csat_surveys and 1 canned_suggestions would move',
-    ]);
+      await splitCommentChannels(job({ dryRun: true }));
+      expect(said()).toEqual([
+        '[split_comment_channels] facebook: 2 tickets would move to facebook_comment, 2 onto a comments row',
+        '[split_comment_channels] instagram: 2 tickets would move to instagram_comment, 0 onto a comments row',
+        '[split_comment_channels] dry run: 4 comment tickets, 1 csat_surveys and 1 canned_suggestions would move',
+      ]);
 
-    lines.mockClear();
-    await splitCommentChannels(job());
-    expect(said()).toEqual([
-      '[split_comment_channels] facebook: 2 tickets moved to facebook_comment, 2 onto a comments row',
-      '[split_comment_channels] instagram: 2 tickets moved to instagram_comment, 0 onto a comments row',
-      '[split_comment_channels] 4 comment tickets, 1 csat_surveys and 1 canned_suggestions moved',
-    ]);
+      lines.mockClear();
+      await splitCommentChannels(job());
+      expect(said()).toEqual([
+        '[split_comment_channels] facebook: 2 tickets moved to facebook_comment, 2 onto a comments row',
+        '[split_comment_channels] instagram: 2 tickets moved to instagram_comment, 0 onto a comments row',
+        '[split_comment_channels] 4 comment tickets, 1 csat_surveys and 1 canned_suggestions moved',
+      ]);
 
-    lines.mockClear();
-    await splitCommentChannels(job({ dryRun: true }));
-    expect(said()).toEqual([
-      '[split_comment_channels] dry run: 0 comment tickets, 0 csat_surveys and 0 canned_suggestions would move',
-    ]);
-    lines.mockRestore();
+      lines.mockClear();
+      await splitCommentChannels(job({ dryRun: true }));
+      expect(said()).toEqual([
+        '[split_comment_channels] dry run: 0 comment tickets, 0 csat_surveys and 0 canned_suggestions would move',
+      ]);
+    } finally {
+      lines.mockRestore();
+    }
   });
 
   it('refuses an option it does not know, rather than running without it', async () => {
