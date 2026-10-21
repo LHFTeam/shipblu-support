@@ -6,6 +6,7 @@ import { configuredAccountId } from '@/lib/meta/client';
 import { metaConnection } from '@/lib/meta/connection';
 import { metaThreadState } from '@/lib/meta/thread';
 import type { NormalisedFeedback } from '@/lib/meta/types';
+import { isCommentTicket, type ConversationChannel } from '@/lib/tickets/channel-policy';
 import { findContactByIdentity } from '@/lib/tickets/contacts';
 import {
   automatedReplyBlocked,
@@ -55,7 +56,17 @@ export async function recordMetaFeedback(feedback: NormalisedFeedback): Promise<
     .innerJoin(conversations, eq(conversations.id, csatSurveys.conversationId))
     .where(eq(csatSurveys.id, feedback.surveyId))
     .limit(1);
-  if (!survey || survey.channel !== feedback.platform) return 'unknown_survey';
+  // The ticket's channel against the tap's platform, strictly and on purpose,
+  // and never a comment ticket — by its channel, or by its external id while it
+  // still carries its platform's. No survey is ever sent on one, and a thanks
+  // there is one `send_meta` would post on the public thread.
+  if (
+    !survey ||
+    survey.channel !== feedback.platform ||
+    isCommentTicket(survey.channel, survey.externalId)
+  ) {
+    return 'unknown_survey';
+  }
 
   const contactId = await findContactByIdentity(feedback.platform, feedback.from);
   if (!contactId || contactId !== survey.requesterContactId) return 'not_requester';
@@ -111,7 +122,7 @@ async function thankForTap(
     conversationId: string;
     locale: string | null;
     ruleId: string | null;
-    channel: string;
+    channel: ConversationChannel;
     externalId: string | null;
     lastCustomerMessageAt: Date | null;
   },

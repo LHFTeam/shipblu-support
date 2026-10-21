@@ -553,8 +553,9 @@ author)` takes the author as a required argument, `send_meta` derives it from
 recording the person is the only thing that can substantiate the claim — and
 `automatedReplyBlocked` in `lib/tickets/outbound.ts` stops **every** automated
 sender — the automation engine, the out-of-hours acknowledgement, the CSAT
-survey and the survey's thanks after a tapped rating — at **24 hours** on
-`facebook` and `instagram`, not at seven days. The seven days belong to a human.
+survey and the survey's thanks after a tapped rating — at **24 hours** on a
+Facebook or Instagram direct message, not at seven days. The seven days belong
+to a human.
 It is shared with WhatsApp's template rule because a guard only some of the
 senders apply is not a guard, and it refuses before the row is written:
 delivery refuses it too, but by then the customer's timeline carries a reply
@@ -573,12 +574,57 @@ pass that kind; on Instagram, which has no card, it changes nothing.
 
 Two things it must be given rather than guess. **A Meta comment ticket has no
 messaging window**: it is answered on the comment edge, which `send_meta` reaches
-before it consults the clock, so the guard takes the ticket's `external_id` and
-never blocks one. And **the clock is the real one** — the ingest lifecycle hands
+before it consults the clock, so the guard takes the ticket's channel and
+`external_id` and never blocks one — a `facebook_comment` or `instagram_comment`
+ticket by its channel, and one still filed on its platform's channel by its
+`external_id`. And **the clock is the real one** — the ingest lifecycle hands
 a message's own `sentAt` down as its timestamp, and that is exactly
 `lastCustomerMessageAt`, so passing it as `now` compares a value with itself and
 reports every window open. That is precisely the replayed backlog the guard is
 for.
+
+**A comment is a channel; the platform is not.** `facebook_comment` and
+`instagram_comment` are values of the `channel` enum, so what is keyed on a
+conversation's channel — `conversations.channel`, `channels.type`, the copies
+frozen into `csat_surveys` and `canned_suggestions`, rules, auto-responses and
+reports — can tell a public comment from a direct message. What names where a
+delivery came from keeps the platform: `contact_identities.channel`,
+`webhook_events`, `messages.meta.platform`, the `external_id` prefix and
+every Graph call. A commenter is the same Facebook or Instagram user as the one
+in the inbox, and an identity split by channel would make them two contacts. So a conversation's channel is compared through
+`isMetaChannel`, `metaPlatformOf` and `isCommentChannel`
+(`lib/tickets/channel-policy.ts`), never as `=== 'facebook'`, which silently
+stops matching the comment half. Four comparisons stay strict on purpose.
+Three are Messenger's feedback card — the `feedback_template` case of
+`automatedReplyBlocked`, `decideSurvey` choosing the card and `send_meta`
+sending it — which exists only in a Messenger thread. The fourth is
+`recordMetaFeedback` matching a tapped rating's platform against its survey's
+ticket; beside it, it refuses a comment by its external id too, so a tap can
+never thank a commenter on the public thread. A TypeSafe request sends the
+platform rather than the channel, so the vocabulary the model was asked in does
+not move under it.
+
+Until the CHECK constraint in `plans/ticket-category-routing.md` §1.3 lands, a
+comment ticket can still sit on its platform's channel — every one ingested
+before 1.2 does, and `split_comment_channels` moves them — so **detecting a
+comment is the channel test _or_ the external id**
+— `isCommentTicket(channel, externalId)` in `lib/tickets/channel-policy.ts`, the
+one copy every reader calls — never either alone.
+The difference is public wherever the software replies on its own, because a
+reply on a comment ticket is posted under the customer's comment where anybody
+reading the post sees it. The out-of-hours picker handles it: a rule with no
+channel matches every channel _except_ the comment ones, and only a rule naming
+a comment channel answers there. `pickRule` takes the stored channel and
+external id and reads a comment still filed on its platform as the comment
+channel it is moving to, so a rule naming the platform answers that platform's
+direct messages and nothing posted in public; every caller must supply the
+external id, so none can skip the mapping by forgetting it. **The automation
+engine does not handle it yet**: its `channel` fact is the stored column, so a
+`send_reply` rule a comment ticket satisfies — no channel condition,
+`channel is not email`, or `channel is facebook` until the backfill — posts in
+public. The risk, how latent it was when last read, and its fix are in
+`plans/ticket-category-routing.md` under "Risks not closed by the design";
+check production for a `send_reply` rule before relying on it being latent.
 
 Graph request shapes are written down in `lib/meta/comments.ts` and
 `lib/meta/send.ts` rather than built inline, and asserted there against Meta's

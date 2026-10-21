@@ -35,6 +35,7 @@ import { isFinalAttempt, type ClaimedJob } from '@/lib/queue';
 import { parseJobPayload } from '@/lib/queue/payloads';
 import { alreadySent } from './already-sent';
 import { subjectGone } from './subject-gone';
+import { isMetaChannel, metaPlatformOf } from '@/lib/tickets/channel-policy';
 import { metaReplyTarget } from '@/lib/tickets/meta-thread';
 import { errorMessage } from '@/lib/errors';
 import { logger } from '@/lib/log';
@@ -114,11 +115,16 @@ export async function sendMeta(job: ClaimedJob): Promise<void> {
   if (alreadySent('send_meta', messageId, row.message.deliveryStatus)) return;
 
   const meta = (row.message.meta ?? {}) as SendMeta;
-  const platform = (meta.platform ?? row.conversation.channel) as MetaPlatform;
-
-  if (platform !== 'facebook' && platform !== 'instagram') {
-    throw new Error(`send_meta cannot deliver on "${platform}"`);
+  // The platform it goes out on: `meta.platform` where the console wrote one,
+  // the ticket's channel where an automated sender wrote none. Mapped either
+  // way rather than cast, because a comment channel rides its platform's Page
+  // or account, and a comment value that reached `meta.platform` is normalised
+  // here rather than dead-lettering the reply.
+  const source: string = meta.platform ?? row.conversation.channel;
+  if (!isMetaChannel(source)) {
+    throw new Error(`send_meta cannot deliver on "${source}"`);
   }
+  const platform = metaPlatformOf(source);
 
   const sendKind = meta.sendKind ?? (await inferSendKind(row.conversation.id));
   const attempt: Attempt = { sendKind, tag: null, final: isFinalAttempt(job) };
@@ -312,6 +318,11 @@ async function deliverFeedbackCard(
   connection: MetaConnection,
   attempt: Attempt,
 ): Promise<string | null> {
+  // The literal, not the platform: the card belongs to a Messenger
+  // conversation, and a `facebook_comment` ticket rides the same Page without
+  // being one. CSAT never surveys a comment, and this refuses a comment channel
+  // regardless; a comment still filed on `facebook` would at worst be sent the
+  // card privately, through the Send API, never on the post.
   if (row.conversation.channel !== 'facebook') {
     throw new MetaSendRefusal('Messenger’s feedback card can only be sent on Facebook.');
   }

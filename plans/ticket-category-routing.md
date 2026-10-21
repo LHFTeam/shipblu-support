@@ -1073,6 +1073,66 @@ worker and all four crons. 1.2 does not start until all six run 1.1.
 - **The external id stays a safeguard.** The send path, the 24-hour guard and
   the CSAT skip keep their `rootCommentId(externalId)` test beside the new
   channel test.
+- **As built (2026-10-20).** Where 1.1 differs from the items above, and why.
+  - **Four comparisons stay strict**, and say so. Three are Messenger's
+    feedback card: the `feedback_template` case of `automatedReplyBlocked`,
+    `decideSurvey` choosing it and `send_meta` sending it. The card exists only
+    in a Messenger thread, so widening them through `metaPlatformOf` would let
+    a comment channel through the one door that must stay shut to it. The
+    fourth is `recordMetaFeedback` matching a tap's platform against its
+    survey's ticket, which also refuses a comment by its external id, so a tap
+    can never thank a commenter in public (no survey on a comment ticket
+    exists, 2026-10-20; the check is the second line).
+  - **`refreshRequesterProfile` and `claimThreadControl` refuse a comment
+    ticket** (by channel or external id), rather than mapping it to its
+    platform. The console offers neither on a comment — the header hides the
+    profile refresh, and the composer shows thread control only under a
+    standby refusal, which a comment ticket never has — so a request reaching
+    them is a stale tab or a forged form, and both say the comment is answered
+    on the post.
+  - **The auto-response picker reads a comment ticket still filed on
+    `facebook`/`instagram` as the comment channel it is moving to**: `pickRule`
+    takes the stored channel and external id and maps them itself
+    (`ruleChannel`), so every caller must supply the external id and none can
+    skip the mapping by forgetting it. Matched on the bare column, a rule
+    naming the platform would post its wording under a comment. The form names
+    the platform's scope "Facebook messages" / "Instagram messages" for the same
+    reason. Production holds one rule, null-scoped and inactive (2026-10-20).
+  - **No picker offers the comment values yet** — not the out-of-hours form or
+    its action's allowlist, not the condition builder, not the inbox filter or
+    the Channels views. Moved to 1.2 on review of #387: offered in 1.1, the
+    views and the filter were empty while every comment ticket sat under
+    Facebook or Instagram badged "Public comment"; a condition naming one
+    matched nothing, because the rules engine's `channel` fact is the stored
+    column; and an out-of-hours rule naming one was the first row to carry the
+    value, which the editor before this stage, after a rollback, would list as
+    company-wide and save back as every channel. So nothing 1.1 deploys writes
+    the values, and rolling it back is clean. The 1.1 editor in turn keeps a
+    stored channel it does not offer as a visible option, which the action
+    refuses, so a rollback from 1.2 cannot widen a comments rule either. Until 1.2 a comment is not
+    acknowledged out of hours, which is the safe direction. The realtime topics
+    still listen for them, so a web on 1.1 already hears a ticket the 1.2
+    worker writes.
+  - **One test for a comment ticket**, `isCommentTicket(channel, externalId)`
+    in `channel-policy.ts`, built on `rootCommentId`. Every reader that needs it
+    calls it; the inbox decides `isComment` once and the badges read that. It
+    replaces a dozen copies in two spellings — the anchored `rootCommentId` and
+    a bare `includes(':comment:')` — so 1.3 changes one function, not each copy.
+  - **The admin channels page's address column** asks `isMetaChannel`, so a
+    comment row 1.2 creates reads as its platform's rather than "no address".
+  - **The names live once**, in `lib/tickets/channel-labels.ts`, keyed by
+    `ConversationChannel`: the badge and `channelLabel` read the same record, so
+    a new channel does not compile until it has a name. `channelLabel` used to
+    know three channels and print the enum value for the rest.
+  - **`send_meta` maps its source rather than casting it**: `meta.platform`,
+    else the ticket's channel, through `metaPlatformOf`, so a comment value that
+    reached `meta.platform` goes out on its platform instead of dead-lettering
+    the reply.
+  - **The admin channels page reads the comment types and declines them** as it
+    declines `portal` and `api`, until 1.2 teaches the form to create them.
+  - **The marks are the platform glyph with a globe on a disc**, cut out of the
+    glyph so it reads at 12px, drawn from new
+    `--color-channel-*-comment-bg/fg` tokens that alias the platform's for now.
 
 **1.2 — Stored configuration, then writers.** The worker carries the writer;
 deploy it with web and the crons.
@@ -1097,10 +1157,29 @@ deploy it with web and the crons.
   if none exists. Until an admin creates a comment channel, its tickets keep
   today's default group.
 - `resolveContact` stays on the platform.
+- **The pickers gain the comment values, with the writer.** The inbox filter
+  and Channels views (`FILTERABLE_CHANNELS`), the condition builder
+  (`CONDITION_CHANNELS` in `app/(console)/admin/field-options.ts`) and the
+  out-of-hours form and its action's allowlist (`AUTO_RESPONSE_CHANNELS`). The
+  out-of-hours page, `NO_CHANNEL_WHY` and the Active toggle's hint then say a
+  comment is acknowledged only by a rule naming its comment channel.
+- **Order: web first, then the worker, then the crons.** The web brings the
+  pickers; the worker brings the writer. Worker first, a 1.1 web shows a new
+  comment ticket only under All channels — it has left Facebook and Instagram
+  and the 1.1 filter has no comment choice. Web first, the comment views are
+  empty for the minutes until the worker lands, which is the lesser gap.
 - The admin channels page can create "Facebook comments" and "Instagram
   comments" rows. They need no credentials, since they ride the Page and
   Instagram tokens, and their config is `{}`. The page's four type allowlists
-  and its config branch learn the new types.
+  and its config branch learn the new types. The form's and the action's
+  `type === 'facebook' || type === 'instagram'` tests (`forms.tsx`, the
+  address field, and `actions.ts`, the stored config) become `isMetaChannel`,
+  or a comment row falls through to the email address field and is stored as
+  `{ address }` rather than `{}`. The address field's
+  `type === 'facebook' ? 'FACEBOOK_PAGE_ID' : 'INSTAGRAM_ACCOUNT_ID'` becomes
+  `metaPlatformOf(type) === 'facebook'`, or a Facebook comment row names
+  Instagram's variable. The page's own address column already asks
+  `isMetaChannel` (1.1).
 - **Backfill job `split_comment_channels`** (strict payload, `dryRun`).
   - **What it moves.** Existing comment tickets (52 today) move to the new
     values, and `channel_id` is set to the comment row where one exists; 13 of
@@ -1720,6 +1799,19 @@ Web first (it migrates `metrics_daily`), then the worker and crons, with
   who opens a held ticket from "My groups" and assigns it ends the hold. The
   "Routing…" badge says what they are doing, and nothing stops them, which is
   deliberate: a person is never overruled.
+- **An automation's `send_reply` can answer a comment in public.** The
+  auto-response picker keeps an every-channel rule off comments (1.1); the
+  automation engine has no such guard, and `deliverAutomatedReply` on a comment
+  ticket goes out through `send_meta` as a comment reply. The engine's
+  `channel` fact is the stored column (`lib/rules/facts.ts`), so any rule a
+  comment ticket satisfies reaches it: one naming no channel, one saying
+  `channel is not email`, and — until the backfill moves the old rows — one
+  saying `channel is facebook`. Q11 keeps conditions on the platform, which
+  after 1.2 stops only the last. Latent: production has three automation rules
+  and none sends a reply (read 2026-10-20). Closing it is a refusal in
+  `sendCannedReply` itself, by channel or external id — not a rule-editor check,
+  which `channel is not email` walks past — and whether a comment may ever be
+  answered by a rule is the support lead's call, in its own change.
 - **Re-selecting the SLA before the first response changes today's behaviour**
   for a group move made before anyone answered. That is deliberate (decision
   3), but anyone reading the old `onGroupChanged` comment needs the new one

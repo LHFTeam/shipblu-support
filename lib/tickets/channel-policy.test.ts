@@ -3,14 +3,20 @@ import type { SessionAgent } from '@/lib/auth/session';
 import {
   answeredFromConsole,
   canSeeChannel,
+  commentChannelOf,
   consoleReplyNotice,
   consoleReplyReason,
   CONVERSATION_CHANNELS,
   drawsMediaInline,
+  FILTERABLE_CHANNELS,
   hasWrittenSubject,
   hiddenChannels,
+  isCommentChannel,
+  isCommentTicket,
+  isMetaChannel,
   isReadOnlyChannel,
   isRestrictedChannel,
+  metaPlatformOf,
   readOnlyChannels,
   readOnlyReason,
   restrictedChannels,
@@ -26,7 +32,9 @@ it('lists every database channel, including ones only shown through all', () => 
     'whatsapp',
     'webchat',
     'facebook',
+    'facebook_comment',
     'instagram',
+    'instagram_comment',
     'portal',
     'api',
     'whatsapp_bot',
@@ -157,7 +165,67 @@ it('draws files inline only on a chat, so email and anything added later stay at
     'whatsapp',
     'webchat',
     'facebook',
+    'facebook_comment',
     'instagram',
+    'instagram_comment',
     'whatsapp_bot',
   ]);
+});
+
+describe('the Meta channels', () => {
+  // Over every channel, so a new one is placed here rather than defaulting.
+  it('are the two platforms and their comments', () => {
+    expect(CONVERSATION_CHANNELS.filter(isMetaChannel)).toEqual([
+      'facebook',
+      'facebook_comment',
+      'instagram',
+      'instagram_comment',
+    ]);
+    expect(CONVERSATION_CHANNELS.filter(isCommentChannel)).toEqual([
+      'facebook_comment',
+      'instagram_comment',
+    ]);
+  });
+
+  it('ride their platform', () => {
+    expect(metaPlatformOf('facebook')).toBe('facebook');
+    expect(metaPlatformOf('facebook_comment')).toBe('facebook');
+    expect(metaPlatformOf('instagram')).toBe('instagram');
+    expect(metaPlatformOf('instagram_comment')).toBe('instagram');
+  });
+
+  it('file each platform’s comments on a comment channel of its own', () => {
+    expect(commentChannelOf('facebook')).toBe('facebook_comment');
+    expect(commentChannelOf('instagram')).toBe('instagram_comment');
+    for (const platform of ['facebook', 'instagram'] as const) {
+      expect(metaPlatformOf(commentChannelOf(platform))).toBe(platform);
+    }
+  });
+
+  // One test for every reader, so the composer and the guards cannot disagree
+  // about a ticket the way two spellings of the external-id test once could.
+  it('tell a comment ticket by its channel, or by its external id until 1.2 moves it', () => {
+    expect(isCommentTicket('facebook_comment', null)).toBe(true);
+    expect(isCommentTicket('instagram_comment', 'instagram:comment:17890')).toBe(true);
+    expect(isCommentTicket('facebook', 'facebook:comment:1_2')).toBe(true);
+    expect(isCommentTicket('instagram', 'instagram:comment:17890')).toBe(true);
+    // A direct message carries no external id.
+    expect(isCommentTicket('facebook', null)).toBe(false);
+    // The prefix is anchored: ':comment:' elsewhere in an id is not a comment.
+    expect(isCommentTicket('whatsapp', 'whatsapp:comment:1')).toBe(false);
+    expect(isCommentTicket('email', 'x-facebook:comment:1')).toBe(false);
+  });
+
+  // Stage 1.1 reads the comment channels and offers them nowhere: the filter
+  // would be empty while every comment ticket sits under its platform. Stage
+  // 1.2 adds them with the ingest that writes them, and turns this around.
+  it('are not offered as a filter before anything writes them', () => {
+    expect(FILTERABLE_CHANNELS.filter(isCommentChannel)).toEqual([]);
+  });
+
+  it('are not prototype keys or near misses', () => {
+    expect(isMetaChannel('toString')).toBe(false);
+    expect(isMetaChannel('facebook_comments')).toBe(false);
+    expect(isCommentChannel('facebook')).toBe(false);
+  });
 });

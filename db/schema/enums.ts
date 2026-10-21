@@ -19,6 +19,18 @@ export const channelEnum = pgEnum('channel', [
   // is per channel: sharing `whatsapp` would collapse a customer's bot
   // transcript and their support ticket into one conversation.
   'whatsapp_bot',
+  // The public comments on a Facebook Page's or an Instagram account's posts,
+  // apart from the platform's direct messages, for the bot's reason: filters,
+  // views, rules, SLA policies, auto-responses and reports all key on this
+  // column, so a comment is "separate" only if it is a value of its own. Only
+  // a conversation's channel takes them — `conversations.channel`,
+  // `channels.type` and the tables that copy a ticket's channel. Contact
+  // identities, webhook deliveries, `messages.meta.platform`, job payloads and
+  // the external id name the platform and keep `facebook`/`instagram`
+  // (`metaPlatformOf` in lib/tickets/channel-policy.ts maps one to the other).
+  // Appended, so the migration adds them without reordering anything.
+  'facebook_comment',
+  'instagram_comment',
 ]);
 
 export const directionEnum = pgEnum('direction', ['inbound', 'outbound']);

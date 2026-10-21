@@ -13,7 +13,9 @@ describe('queue topics', () => {
       'conversation_queue_whatsapp',
       'conversation_queue_webchat',
       'conversation_queue_facebook',
+      'conversation_queue_facebook_comment',
       'conversation_queue_instagram',
+      'conversation_queue_instagram_comment',
       'conversation_queue_portal',
       'conversation_queue_api',
     ]);

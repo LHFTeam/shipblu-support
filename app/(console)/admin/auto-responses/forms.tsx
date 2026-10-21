@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { InfoTip } from '@/components/tooltip';
 import { Badge, Button, Field, Select, Textarea, Toggle } from '@/components/ui';
 import { PLACEHOLDERS } from '@/lib/auto-response/resolve';
 import { DangerAction, Disclosure, EditorForm } from '../forms-shared';
@@ -22,21 +23,35 @@ type Rule = {
 
 /**
  * `whatsapp_bot` is missing on purpose: those conversations belong to the
- * customer bot and nothing is ever sent into them. The list matches the one the
- * server action validates against — an option here that the action rejects is a
- * form that fails on save for no reason the admin can see.
+ * customer bot and nothing is ever sent into them, and so are the comment
+ * channels until Stage 1.2, for the reason `AUTO_RESPONSE_CHANNELS` gives. The
+ * list matches the one the server action validates against — an option here
+ * that the action rejects is a form that fails on save for no reason the admin
+ * can see.
  */
 const CHANNELS: { value: string; label: string }[] = [
   { value: 'email', label: 'Email' },
   { value: 'whatsapp', label: 'WhatsApp' },
   { value: 'webchat', label: 'Web chat' },
-  { value: 'facebook', label: 'Facebook' },
-  { value: 'instagram', label: 'Instagram' },
+  { value: 'facebook', label: 'Facebook messages' },
+  { value: 'instagram', label: 'Instagram messages' },
   { value: 'portal', label: 'Customer portal' },
 ];
 
+/**
+ * A rule with no channel skips public comments (`pickRule`), so it is never
+ * called "every channel": an admin reading that would expect a comment to be
+ * acknowledged when it would not be, or write the company message believing it
+ * reaches comments in words they would not want posted publicly.
+ */
+const NO_CHANNEL = 'Every channel except public comments';
+const NO_CHANNEL_WHY =
+  'A reply to a comment is posted under it, where anybody who can see the post reads it, so a message for every channel is never sent there, and comments are not acknowledged out of hours.';
+
 function channelLabel(value: string | null): string {
-  return CHANNELS.find((channel) => channel.value === value)?.label ?? 'Every channel';
+  if (value === null) return NO_CHANNEL;
+  // A stale value is shown as itself rather than as the company-wide scope.
+  return CHANNELS.find((channel) => channel.value === value)?.label ?? value;
 }
 
 const PLACEHOLDER_HELP = (
@@ -74,15 +89,25 @@ function Fields({ rule, groups }: { rule?: Rule; groups: Group[] }) {
 
         <Field
           label="Channel"
-          explain="Scope the wording to one medium. An email can carry three paragraphs where a WhatsApp message should be two lines, which is the usual reason to add a second rule."
+          explain={`Scope the wording to one medium. An email can carry three paragraphs where a WhatsApp message should be two lines, which is the usual reason to add a second rule. ${NO_CHANNEL_WHY}`}
         >
           <Select name="channel" defaultValue={rule?.channel ?? ''}>
-            <option value="">Every channel</option>
+            <option value="">{NO_CHANNEL}</option>
             {CHANNELS.map((channel) => (
               <option key={channel.value} value={channel.value}>
                 {channel.label}
               </option>
             ))}
+            {/*
+              A stored channel this list does not offer — a comment channel a
+              later version saved, read here after a rollback — stays selected
+              rather than falling to the first option, which would save the
+              rule back as every channel. The action refuses it, so the admin
+              has to choose.
+            */}
+            {rule?.channel && !CHANNELS.some((channel) => channel.value === rule.channel) ? (
+              <option value={rule.channel}>{`${rule.channel} (not offered here)`}</option>
+            ) : null}
           </Select>
         </Field>
       </div>
@@ -181,7 +206,7 @@ function Fields({ rule, groups }: { rule?: Rule; groups: Group[] }) {
       <Toggle
         name="isActive"
         label="Active"
-        hint="Turned off, this rule stops matching and its tickets fall back to the next broadest one — not to silence."
+        hint="Turned off, this rule stops matching and its tickets fall back to the next broadest one — not to silence. A public comment is never acknowledged out of hours."
         defaultChecked={rule?.isActive ?? true}
       />
     </>
@@ -221,6 +246,9 @@ export function AutoResponseEditor({ rule, groups }: { rule: Rule; groups: Group
       <div className="min-w-0 flex-1">
         <h2 className="flex flex-wrap items-center gap-2 text-sm font-semibold">
           {channelLabel(rule.channel)}
+          {rule.channel === null ? (
+            <InfoTip label="public comments">{NO_CHANNEL_WHY}</InfoTip>
+          ) : null}
           <span className="font-normal text-(--color-text-secondary)">·</span>
           {group ? group.name : 'Every group'}
           {rule.silent ? <Badge>Sends nothing</Badge> : null}

@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { Badge, Button, ErrorText, Field, Input, Select } from '@/components/ui';
 import { parseCoexistence } from '@/lib/whatsapp/coexistence';
+import type { ConversationChannel } from '@/lib/tickets/channel-policy';
 import type { AdminState } from '../settings-shared';
 import { saveChannel } from './actions';
 import { SubmitButton } from '@/components/submit-button';
@@ -21,11 +22,13 @@ type ChannelType = (typeof EDITABLE)[number];
  * `portal` and `api` channels are created by the product rather than by an
  * admin — the customer portal opens one on first use — and `saveChannel` refuses
  * both. Widening its allowlist to let this form reach them would also let a
- * forged `type` through the add form, so the editor declines them instead.
+ * forged `type` through the add form, so the editor declines them instead. The
+ * comment channels are declined the same way until the form learns to create
+ * them (Stage 1.2 of `plans/ticket-category-routing.md`).
  */
 export type ChannelRow = {
   id: string;
-  type: ChannelType | 'portal' | 'api';
+  type: ConversationChannel;
   name: string;
   config: Record<string, unknown>;
   defaultGroupId: string | null;

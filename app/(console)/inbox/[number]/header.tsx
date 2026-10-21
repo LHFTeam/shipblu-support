@@ -8,7 +8,7 @@ import { ChevronLeftIcon } from '@/components/icons';
 import { RelativeTime } from '@/components/relative-time';
 import { Badge } from '@/components/ui';
 import { ago } from '@/lib/format';
-import { answeredFromConsole } from '@/lib/tickets/channel-policy';
+import { answeredFromConsole, isCommentTicket, isMetaChannel } from '@/lib/tickets/channel-policy';
 import type { ConversationDetail } from '@/lib/tickets/conversation';
 import { ProfileRefresh } from './profile-refresh';
 import { MetaWindowIndicator, WindowIndicator } from './window-indicator';
@@ -22,8 +22,8 @@ export function Header({
   canEditContact: boolean;
   canViewContact: boolean;
 }) {
-  const isMeta = conversation.channel === 'facebook' || conversation.channel === 'instagram';
-  const isComment = Boolean(conversation.externalId?.includes(':comment:'));
+  const isMeta = isMetaChannel(conversation.channel);
+  const isComment = isCommentTicket(conversation.channel, conversation.externalId);
 
   // The filters live in the query string, and the rows link forward carrying it,
   // so the way back has to carry it too. A bare `/inbox` reset the list to "all

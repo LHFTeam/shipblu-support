@@ -1075,7 +1075,12 @@ export const autoResponses = pgTable(
 
     /** Null means every group, including tickets that have none. */
     groupId: uuid('group_id').references(() => groups.id, { onDelete: 'cascade' }),
-    /** Null means every channel. */
+    /**
+     * Null means every channel except the two comment channels, which only a
+     * rule naming them could reach — and the form offers them from Stage 1.2 of
+     * `plans/ticket-category-routing.md` — because a comment's reply is posted
+     * publicly (`pickRule` in lib/auto-response/resolve.ts).
+     */
     channel: channelEnum('channel'),
 
     /**

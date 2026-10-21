@@ -1,5 +1,7 @@
 import type { conversations } from '@/db/schema';
 import type { SessionAgent } from '@/lib/auth/session';
+import type { MetaPlatform } from '@/lib/meta/types';
+import { rootCommentId } from '@/lib/meta/comments';
 import { can } from '@/lib/auth/permissions';
 
 /**
@@ -35,7 +37,9 @@ export const CONVERSATION_CHANNELS = [
   'whatsapp',
   'webchat',
   'facebook',
+  'facebook_comment',
   'instagram',
+  'instagram_comment',
   'portal',
   'api',
   'whatsapp_bot',
@@ -58,6 +62,12 @@ void allChannelsAreListed;
  * One list, so the dropdown is built from exactly what the parser accepts. They
  * drifted apart once already and Facebook and Instagram spent a phase silently
  * resetting themselves to "all channels".
+ *
+ * The comment channels join it in Stage 1.2 of
+ * `plans/ticket-category-routing.md`, with the ingest that writes them. Offered
+ * before, their views and the filter are empty while every comment ticket sits
+ * under Facebook or Instagram, badged "Public comment" — a queue that answers
+ * the agent wrongly for as long as the stages are apart.
  */
 export const FILTERABLE_CHANNELS = [
   'email',
@@ -69,6 +79,85 @@ export const FILTERABLE_CHANNELS = [
 ] as const satisfies readonly ConversationChannel[];
 
 export type FilterableChannel = (typeof FILTERABLE_CHANNELS)[number];
+
+/**
+ * The Meta channels: each platform's direct messages and the public comments
+ * on its posts. A Facebook or Instagram comment is a channel of its own
+ * (`db/schema/enums.ts` says why), and the four ask two different questions of
+ * one value:
+ *
+ * - **Which platform carries it** — the Page or the Instagram account, its
+ *   token, its Graph host, its contact identity. `metaPlatformOf` answers, and
+ *   everything that names the platform takes that answer rather than the
+ *   channel: contact identities, webhook deliveries, `messages.meta.platform`,
+ *   job payloads and the external id never hold a comment value.
+ * - **Whether it is a public comment** — answered on the post, with no
+ *   messaging window, never surveyed, never sent an every-channel
+ *   acknowledgement. `isCommentChannel` answers.
+ *
+ * Everything that compared a channel with `'facebook' || 'instagram'` asks one
+ * of these instead, because that comparison is silently false for a comment
+ * channel, and most of the places that made it are typed `string` with a
+ * default arm the compiler cannot see past (`carrierFor` sent the rest to
+ * email). Comment tickets carried `facebook`/`instagram` until Stage 1.2 of
+ * `plans/ticket-category-routing.md` moves them, so wherever being a comment
+ * matters the external id (`rootCommentId`) is asked too, beside the channel —
+ * the safeguard stays until a CHECK makes the two one answer (Stage 1.3).
+ */
+const META_CHANNELS = [
+  'facebook',
+  'facebook_comment',
+  'instagram',
+  'instagram_comment',
+] as const satisfies readonly ConversationChannel[];
+
+export type MetaChannel = (typeof META_CHANNELS)[number];
+export type CommentChannel = Extract<MetaChannel, `${string}_comment`>;
+
+export function isMetaChannel(channel: string): channel is MetaChannel {
+  return (META_CHANNELS as readonly string[]).includes(channel);
+}
+
+export function isCommentChannel(channel: string): channel is CommentChannel {
+  return channel === 'facebook_comment' || channel === 'instagram_comment';
+}
+
+/** The platform a Meta channel rides: its Page or account, token and host. */
+export function metaPlatformOf(channel: MetaChannel): MetaPlatform {
+  switch (channel) {
+    case 'facebook':
+    case 'facebook_comment':
+      return 'facebook';
+    case 'instagram':
+    case 'instagram_comment':
+      return 'instagram';
+  }
+}
+
+/**
+ * Whether a ticket is a public comment thread: by its channel, or by its
+ * external id while it still carries its platform's channel.
+ *
+ * The one copy of the test. It was written out at every reader that needed it,
+ * in two spellings — the anchored `rootCommentId` in some, a bare
+ * `includes(':comment:')` in others — which could already disagree about an id
+ * and would each have needed changing by hand at Stage 1.3 of
+ * `plans/ticket-category-routing.md`, when the CHECK makes the channel and the
+ * external id one answer and this becomes the channel test alone.
+ */
+export function isCommentTicket(channel: string, externalId: string | null): boolean {
+  return isCommentChannel(channel) || rootCommentId(externalId) !== null;
+}
+
+/** The channel a platform's public comments are filed on. */
+export function commentChannelOf(platform: MetaPlatform): CommentChannel {
+  switch (platform) {
+    case 'facebook':
+      return 'facebook_comment';
+    case 'instagram':
+      return 'instagram_comment';
+  }
+}
 
 /**
  * Channels the platform only observes.
@@ -217,11 +306,11 @@ export function readOnlyChannels(): ConversationChannel[] {
  * fallback — beside the latest message it would put the first message and the
  * last on one card.
  *
- * A named list rather than `sendsByEmail()`, which asks how a reply travels:
- * `carrierFor` sends anything unrecognised to email, so a channel added later
- * would default to "has a written subject" and bring the duplicate back without
- * anything failing. `api` is out for the same reason — nothing writes one yet,
- * so there is no subject to vouch for.
+ * A named list rather than `sendsByEmail()`, which asks how a reply travels and
+ * answers yes for `api`, whose tickets nothing writes yet and so have no subject
+ * to vouch for. It would also answer yes for the next channel answered by
+ * email, which would then default to "has a written subject" and bring the
+ * duplicate back without anything failing.
  */
 const WRITTEN_SUBJECT: readonly ConversationChannel[] = ['email', 'portal'];
 
@@ -246,7 +335,9 @@ const CHAT_MEDIA: readonly ConversationChannel[] = [
   'whatsapp',
   'whatsapp_bot',
   'facebook',
+  'facebook_comment',
   'instagram',
+  'instagram_comment',
   'webchat',
 ];
 

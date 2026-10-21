@@ -7,7 +7,12 @@ import type { ConversationDetail } from '@/lib/tickets/conversation';
 import type { CannedResponseOption } from '@/lib/tickets/lookups';
 import type { CannedLocale } from '@/lib/tickets/canned';
 import { describeWindow, metaWindowState } from '@/lib/meta/window';
-import { consoleReplyNotice, consoleReplyReason } from '@/lib/tickets/channel-policy';
+import {
+  consoleReplyNotice,
+  consoleReplyReason,
+  isCommentTicket,
+  isMetaChannel,
+} from '@/lib/tickets/channel-policy';
 import { isReaction } from '@/lib/whatsapp/reaction';
 import { formatRemaining, windowState } from '@/lib/whatsapp/window';
 import type { PickerEntry } from '@/lib/side-conversations/queries';
@@ -54,11 +59,9 @@ export function Composer({
   // Not answered from the console at all: no reply box and no template, only
   // the two tabs that never reach the customer. See `consoleReplyReason`.
   const replyBlocked = consoleReplyReason(conversation.channel);
-  const isMeta = conversation.channel === 'facebook' || conversation.channel === 'instagram';
-  // A comment ticket carries the root comment in its external id; a direct
-  // message ticket has none. That is what decides whether the agent is writing
-  // in public or in private.
-  const isCommentThread = Boolean(conversation.externalId?.includes(':comment:'));
+  const isMeta = isMetaChannel(conversation.channel);
+  // Whether the agent is writing in public or in private.
+  const isCommentThread = isCommentTicket(conversation.channel, conversation.externalId);
   const now = useNow();
 
   const state = windowState(

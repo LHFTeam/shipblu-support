@@ -8,6 +8,8 @@
 
 import { TEAM_TIME_ZONE } from '@/lib/hours/zone';
 import type { Locale } from '@/lib/kb/locale';
+import { CHANNEL_LABELS } from '@/lib/tickets/channel-labels';
+import type { ConversationChannel } from '@/lib/tickets/channel-policy';
 
 /**
  * An instant written from the fields a formatter reads off it, joined by
@@ -208,8 +210,14 @@ export function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+/**
+ * A channel's name in text, the badge's own (`CHANNEL_LABELS`). A value that is
+ * no channel prints as itself, as a report row of an unknown value should.
+ */
 export function channelLabel(channel: string): string {
-  return { email: 'Email', whatsapp: 'WhatsApp', webchat: 'Web chat' }[channel] ?? channel;
+  return Object.hasOwn(CHANNEL_LABELS, channel)
+    ? CHANNEL_LABELS[channel as ConversationChannel]
+    : channel;
 }
 
 /**
