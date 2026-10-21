@@ -28,9 +28,9 @@ import { requireDefaultOpenStatusId } from './statuses';
  *
  * Two threading rules, because the two kinds of event are not the same thing:
  *
- * - A **direct message** threads on the customer, exactly like WhatsApp. One
- *   live conversation per person per platform, so the console reads as a chat
- *   rather than as a ticket per message.
+ * - A **direct message** threads on the customer, as WhatsApp does on each of
+ *   our numbers. One live conversation per person per platform, so the console
+ *   reads as a chat rather than as a ticket per message.
  *
  * - A **comment** threads on the comment it belongs to. One ticket per
  *   top-level comment and its replies, keyed on the root comment id, so a

@@ -1,6 +1,7 @@
 import { and, asc, eq, inArray } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { channels, conversations, messages } from '@/db/schema';
+import { logger } from '@/lib/log';
 import { enqueue } from '@/lib/queue';
 import { onAgentReply } from '@/lib/sla';
 import { afterInboundMessage, afterMessageStored } from '@/lib/tickets/lifecycle';
@@ -24,7 +25,12 @@ import { isReadOnlyChannel } from './channel-policy';
 import { findContactByIdentity, resolveContact } from './contacts';
 import { UNNAMED_SUBJECT } from './customer-text';
 import { latest } from './latest';
-import { findLiveConversation, findNewestConversation } from './live-conversation';
+import {
+  findLiveConversation,
+  findNewestConversation,
+  lockThread,
+  type ThreadKey,
+} from './live-conversation';
 import { reopenResolved } from './reopen';
 import { requireDefaultOpenStatusId, requireResolvedStatusId } from './statuses';
 
@@ -32,10 +38,15 @@ import { requireDefaultOpenStatusId, requireResolvedStatusId } from './statuses'
  * Inbound WhatsApp → conversation.
  *
  * The email pipeline threads on Message-ID; WhatsApp has no equivalent, so the
- * thread *is* the customer. A new message continues that customer's live
- * WhatsApp conversation, which is what makes the console read like Freshchat
- * rather than opening a fresh ticket per message.
+ * thread is the customer and the number of ours they wrote to (`ThreadKey`). A
+ * new message continues that customer's live conversation on that number, which
+ * is what makes the console read like Freshchat rather than opening a fresh
+ * ticket per message — and a customer writing to two of our numbers has two
+ * conversations, because a number can be one team member's phone and each
+ * answers, and is measured on, its own.
  */
+
+const log = logger('whatsapp_ingest');
 
 export type WhatsAppIngestResult = {
   conversationId: string;
@@ -60,12 +71,18 @@ export async function ingestWhatsAppMessage(
   });
 
   const channel = await resolveWhatsAppChannel(message.phoneNumberId);
-  const existing = await findLiveConversation(contactId, channel.kind);
+  const thread = threadKey(channel);
 
   const result = await db.transaction(async (tx) => {
     let conversationId: string;
     let conversationNumber: number;
     let createdConversation = false;
+
+    // Found inside the transaction, behind the thread's lock, so a second
+    // delivery for this customer and number waits for this one to commit and
+    // continues its ticket instead of opening another (`lockThread`).
+    await lockThread(tx, contactId, thread);
+    const existing = await findLiveConversation(contactId, thread, tx);
 
     if (existing) {
       conversationId = existing.id;
@@ -287,15 +304,23 @@ export async function ingestWhatsAppEcho(echo: NormalisedEcho): Promise<WhatsApp
 
   // The identity is still a WhatsApp one: it is the same person and the same
   // phone number whichever of our numbers they wrote to, so they resolve to one
-  // contact and both conversations show on their record.
+  // contact and both conversations show on their record. The conversation is
+  // the number's (`threadKey`), so a reply typed on one phone never lands on —
+  // or stops the clocks of — the customer's ticket with another.
   const { contactId } = await resolveContact({ channel: 'whatsapp', identifier: echo.to });
-
-  const existing = await findLiveConversation(contactId, channel.kind);
+  const thread = threadKey(channel);
 
   const result = await db.transaction(async (tx) => {
     let conversationId: string;
     let conversationNumber: number;
     let createdConversation = false;
+
+    // The same lock as an inbound message's, on the same key: the customer's
+    // message and the phone's reply to it, processed at once, would otherwise
+    // each open a ticket — and the half the reply did not land on keeps a
+    // first-response clock nothing will stop.
+    await lockThread(tx, contactId, thread);
+    const existing = await findLiveConversation(contactId, thread, tx);
 
     if (existing) {
       conversationId = existing.id;
@@ -484,20 +509,24 @@ function echoRow(
  * and nothing downstream of a message runs — no SLA, automation, assignment,
  * out-of-hours reply, categorisation, priority classification or shipment
  * linking, none of which has anything to read in a 👍. With no conversation to
- * file it on — the person has no conversation on this channel, or the newest
+ * file it on — the person has no conversation on this number, or the newest
  * one is a copied history — it is not stored at all, and no contact is made
  * for it: a ticket whose only content is a reaction is one nobody can answer.
  *
- * **It goes on the person's newest conversation, closed or not.** A reaction is
- * nearly always to something recent, which is on that ticket, and filing it there
- * changes nothing about it — the reason a message does not continue a closed
- * ticket is that it would reopen it. When the message it names is on an older
- * ticket, the reaction lands on this one with nothing here to pair it with,
- * which is the cheap way to be wrong about something rare.
+ * **It goes on the person's newest conversation with that number, closed or
+ * not.** A reaction is nearly always to something recent, which is on that
+ * ticket, and filing it there changes nothing about it — the reason a message
+ * does not continue a closed ticket is that it would reopen it. When the
+ * message it names is on an older ticket, the reaction lands on this one with
+ * nothing here to pair it with, which is the cheap way to be wrong about
+ * something rare. It is never filed on a ticket with another of our numbers:
+ * that is a conversation the person had with somebody else's phone.
  *
  * Processed in no order like everything else, so a reaction handled before the
  * message that opens the person's first conversation finds nothing and is not
- * stored. That is a reaction lost, which is the cheap side of the trade.
+ * stored. That is a reaction lost, which is the cheap side of the trade. No
+ * lock, because nothing here creates a conversation for another delivery to
+ * race.
  */
 export type WhatsAppReactionResult = {
   conversationId: string | null;
@@ -506,7 +535,7 @@ export type WhatsAppReactionResult = {
   duplicate: boolean;
   /**
    * Why nothing was stored: an echo from a number whose echoes are our own
-   * sends, or nowhere to file it — no conversation on the channel, or a copied
+   * sends, or nowhere to file it — no conversation on the number, or a copied
    * history newest of all.
    */
   skipped: 'not_mirrored' | 'no_conversation' | null;
@@ -534,7 +563,7 @@ export async function ingestWhatsAppReaction(
   // A copied history newest of all is what the reaction is most likely about,
   // and a live row does not join a record — so it is not filed on the native
   // ticket before it either, which may be closed and months old.
-  const conversation = await findNewestConversation(contactId, channel.kind);
+  const conversation = await findNewestConversation(contactId, threadKey(channel));
   if (!conversation || conversation.imported) return skipped('no_conversation');
 
   const [row] = await db
@@ -727,6 +756,18 @@ export type ResolvedChannel = {
 };
 
 /**
+ * The thread an event on this channel belongs to: the customer and our number
+ * on ordinary WhatsApp; the customer alone on the bot, which has one number.
+ * One helper for all three paths, so the message, the echo and the reaction
+ * cannot be filed by different keys.
+ */
+function threadKey(channel: ResolvedChannel): ThreadKey {
+  return channel.kind === 'whatsapp'
+    ? { channel: 'whatsapp', channelId: channel.id }
+    : { channel: 'whatsapp_bot' };
+}
+
+/**
  * Which of our numbers this event arrived on, and therefore what kind of
  * conversation it belongs to.
  *
@@ -767,13 +808,20 @@ export async function resolveWhatsAppChannel(
 
   // No row for this number. Only ever the support channel — a bot number is
   // known by its row, and inferring "bot" from the absence of one would hide
-  // real customer messages from the team. And a support number rather than a
-  // coexistence one where there is a choice: a coexistence row is somebody's
-  // phone, with a default group of its own (production's Merchant Care
-  // number), and a message on a number no row names is not its traffic.
-  const support =
-    rows.find((c) => c.type === 'whatsapp' && parseCoexistence(c.config) === null) ??
-    rows.find((c) => c.type === 'whatsapp');
+  // real customer messages from the team. And never a coexistence row, even
+  // when there is nothing else: a coexistence row is somebody's phone, with a
+  // default group of its own (production's Merchant Care number), and the
+  // conversation is threaded on the row (`threadKey`), so handing its id out
+  // here would file a number no row names onto that person's tickets — and
+  // their clocks. With no plain support row the event files under no row at
+  // all, which threads only with other events no row names.
+  const support = rows.find((c) => c.type === 'whatsapp' && parseCoexistence(c.config) === null);
+  // Said once per event, because the usual cause is a number connected at Meta
+  // and never added under /admin/channels — invisible otherwise, since its
+  // traffic still reaches the inbox.
+  log.warn(
+    `no channel row for phone_number_id=${phoneNumberId ?? 'none'}; filed under ${support ? `the support row ${support.id}` : 'no row'}`,
+  );
   // Not coexistence, whatever the support row is: the event came in on a
   // number no row names, and only a number's own row can say it is on the app.
   return {

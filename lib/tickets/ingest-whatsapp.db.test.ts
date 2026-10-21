@@ -1,5 +1,5 @@
 import { asc, eq } from 'drizzle-orm';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { db } from '@/db/client';
 import {
   agents,
@@ -1282,6 +1282,236 @@ describe('ingestWhatsAppEcho on a number connected through coexistence', () => {
       ]);
       expect(await db.select().from(messages)).toHaveLength(1);
     });
+  });
+});
+
+/**
+ * A WhatsApp conversation is the customer's thread with one of our numbers, and
+ * a number can be one team member's phone. A merchant writing to two members is
+ * two tickets, each answered from its own phone and measured against its own
+ * person — so nothing that arrives on one number may land on, or move the
+ * clocks of, the other's ticket.
+ */
+describe('a customer writing to two of our numbers', () => {
+  const NUMBER_A = '106540352242922';
+  const NUMBER_B = '106540352242933';
+
+  /** A team member's phone, connected through coexistence. */
+  async function phone(name: string, phoneNumberId: string) {
+    const [row] = await db
+      .insert(channels)
+      .values({
+        type: 'whatsapp',
+        name,
+        config: {
+          phoneNumberId,
+          coexistence: {
+            onboardedAt: '2026-09-19T08:00:00.000Z',
+            wabaId: `waba-${phoneNumberId}`,
+            syncs: {},
+          },
+        },
+      })
+      .returning({ id: channels.id });
+    return row!.id;
+  }
+
+  const phoneEcho = (phoneNumberId: string, overrides: Partial<NormalisedEcho> = {}) =>
+    echo({
+      wamid: `wamid.phone-${phoneNumberId}`,
+      from: '15550783881',
+      phoneNumberId,
+      text: 'On its way — it leaves the hub this afternoon.',
+      sentAt: LATER,
+      ...overrides,
+    });
+
+  async function clocks(id: string) {
+    const [row] = await db
+      .select({
+        lastAgentMessageAt: conversations.lastAgentMessageAt,
+        firstRespondedAt: conversations.firstRespondedAt,
+        lastMessageAt: conversations.lastMessageAt,
+      })
+      .from(conversations)
+      .where(eq(conversations.id, id));
+    return row!;
+  }
+
+  it('opens a ticket on each number, each filed under its own row', async () => {
+    const a = await phone('Nayera', NUMBER_A);
+    const b = await phone('Omar', NUMBER_B);
+
+    const toA = await ingestWhatsAppMessage(inbound({ phoneNumberId: NUMBER_A }));
+    const toB = await ingestWhatsAppMessage(
+      inbound({ wamid: 'wamid.second', phoneNumberId: NUMBER_B, sentAt: LATER }),
+    );
+
+    expect(toB).toMatchObject({ createdConversation: true });
+    expect(toB.conversationId).not.toBe(toA.conversationId);
+    expect(await conversation(toA.conversationId)).toMatchObject({
+      channelId: a,
+      lastCustomerMessageAt: SENT,
+    });
+    expect(await conversation(toB.conversationId)).toMatchObject({
+      channelId: b,
+      lastCustomerMessageAt: LATER,
+    });
+    // One person, on both tickets.
+    expect(await db.select().from(contacts)).toHaveLength(1);
+    expect(await messagesOf(toA.conversationId)).toHaveLength(1);
+    expect(await messagesOf(toB.conversationId)).toHaveLength(1);
+
+    // And each number goes on continuing its own.
+    const again = await ingestWhatsAppMessage(
+      inbound({
+        wamid: 'wamid.third',
+        phoneNumberId: NUMBER_A,
+        sentAt: new Date('2026-09-20T12:00:00Z'),
+      }),
+    );
+    expect(again).toMatchObject({ conversationId: toA.conversationId, createdConversation: false });
+  });
+
+  // Keyed on the person alone, the phone's reply went on the customer's newest
+  // live ticket — the other number's — and stopped that ticket's clocks.
+  it('files a reply typed on one phone on that number’s ticket, and stops no other clock', async () => {
+    await phone('Nayera', NUMBER_A);
+    await phone('Omar', NUMBER_B);
+    const toB = await ingestWhatsAppMessage(
+      inbound({ phoneNumberId: NUMBER_B, sentAt: new Date('2026-09-20T09:00:00Z') }),
+    );
+    // A's ticket is the newer of the two.
+    const toA = await ingestWhatsAppMessage(
+      inbound({ wamid: 'wamid.second', phoneNumberId: NUMBER_A, sentAt: SENT }),
+    );
+
+    const answered = await ingestWhatsAppEcho(phoneEcho(NUMBER_B));
+
+    expect(answered).toMatchObject({
+      conversationId: toB.conversationId,
+      createdConversation: false,
+    });
+    expect(await clocks(toB.conversationId)).toMatchObject({
+      lastAgentMessageAt: LATER,
+      firstRespondedAt: LATER,
+    });
+    expect(await clocks(toA.conversationId)).toEqual({
+      lastAgentMessageAt: null,
+      firstRespondedAt: null,
+      lastMessageAt: SENT,
+    });
+    expect(await messagesOf(toA.conversationId)).toHaveLength(1);
+  });
+
+  it('opens the phone’s own ticket when the customer has one only with the other number', async () => {
+    await phone('Nayera', NUMBER_A);
+    const b = await phone('Omar', NUMBER_B);
+    const toA = await ingestWhatsAppMessage(inbound({ phoneNumberId: NUMBER_A }));
+
+    const opened = await ingestWhatsAppEcho(phoneEcho(NUMBER_B));
+
+    expect(opened).toMatchObject({ createdConversation: true });
+    expect(await conversation(opened.conversationId!)).toMatchObject({
+      channelId: b,
+      status: 'Resolved',
+    });
+    expect(await clocks(toA.conversationId)).toMatchObject({
+      lastAgentMessageAt: null,
+      firstRespondedAt: null,
+    });
+  });
+
+  it('files a reaction on that number’s thread, never the other’s', async () => {
+    await phone('Nayera', NUMBER_A);
+    await phone('Omar', NUMBER_B);
+
+    // With a ticket only on A, a reaction on B has nowhere to go.
+    const toA = await ingestWhatsAppMessage(inbound({ phoneNumberId: NUMBER_A, sentAt: SENT }));
+    expect(
+      await ingestWhatsAppReaction(customerReaction('👍', { phoneNumberId: NUMBER_B })),
+    ).toMatchObject({ skipped: 'no_conversation' });
+
+    // B's ticket is the older one; the reaction still goes there.
+    const toB = await ingestWhatsAppMessage(
+      inbound({
+        wamid: 'wamid.second',
+        phoneNumberId: NUMBER_B,
+        sentAt: new Date('2026-09-20T09:00:00Z'),
+      }),
+    );
+    const reacted = await ingestWhatsAppReaction(
+      customerReaction('🙏', { wamid: 'wamid.reaction-b', phoneNumberId: NUMBER_B }),
+    );
+
+    expect(reacted).toMatchObject({ conversationId: toB.conversationId, skipped: null });
+    expect(await messagesOf(toA.conversationId)).toHaveLength(1);
+    expect(await messagesOf(toB.conversationId)).toHaveLength(2);
+  });
+
+  // Production has four pairs of tickets on one number created 35–120 ms
+  // apart: two deliveries each found no live ticket and each opened one. Every
+  // customer here sends a message while the phone answers it, all at once.
+  it('opens one ticket for a message and a reply processed at the same moment', async () => {
+    const b = await phone('Omar', NUMBER_B);
+    const customers = ['201001110001', '201001110002', '201001110003', '201001110004'];
+
+    await Promise.all(
+      customers.flatMap((customer) => [
+        ingestWhatsAppMessage(
+          inbound({ wamid: `wamid.in-${customer}`, from: customer, phoneNumberId: NUMBER_B }),
+        ),
+        ingestWhatsAppEcho(phoneEcho(NUMBER_B, { wamid: `wamid.out-${customer}`, to: customer })),
+      ]),
+    );
+
+    const rows = await db
+      .select({ id: conversations.id, channelId: conversations.channelId })
+      .from(conversations);
+    expect(rows).toHaveLength(customers.length);
+    for (const row of rows) {
+      expect(row.channelId).toBe(b);
+      expect(await messagesOf(row.id)).toHaveLength(2);
+    }
+  });
+
+  // The fallback for a number no row names hands out the plain support row, and
+  // never a coexistence one even when nothing else exists: the thread is keyed
+  // on the row, so that row's id would file a stranger's number onto somebody's
+  // phone and its tickets.
+  it('never threads a number no row names onto a coexistence phone', async () => {
+    const a = await phone('Nayera', NUMBER_A);
+    const toA = await ingestWhatsAppMessage(inbound({ phoneNumberId: NUMBER_A }));
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    try {
+      const unknown = await ingestWhatsAppMessage(
+        inbound({ wamid: 'wamid.second', phoneNumberId: SUPPORT_NUMBER, sentAt: LATER }),
+      );
+
+      expect(unknown).toMatchObject({ createdConversation: true });
+      expect(await conversation(unknown.conversationId)).toMatchObject({ channelId: null });
+      expect(await conversation(toA.conversationId)).toMatchObject({
+        channelId: a,
+        lastCustomerMessageAt: SENT,
+      });
+      // Said, so a number connected at Meta and never added as a channel shows.
+      expect(warn).toHaveBeenCalledWith(
+        `[whatsapp_ingest] no channel row for phone_number_id=${SUPPORT_NUMBER}; filed under no row`,
+      );
+
+      // Events on numbers no row names still thread with each other.
+      const more = await ingestWhatsAppMessage(
+        inbound({
+          wamid: 'wamid.third',
+          phoneNumberId: SUPPORT_NUMBER,
+          sentAt: new Date('2026-09-20T12:00:00Z'),
+        }),
+      );
+      expect(more.conversationId).toBe(unknown.conversationId);
+    } finally {
+      warn.mockRestore();
+    }
   });
 });
 
