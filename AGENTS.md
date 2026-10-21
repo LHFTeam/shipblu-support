@@ -13,14 +13,14 @@ wins over both.
 
 - Run `npm install` before anything else. A fresh clone has no `node_modules`
   and every check below fails with a module-resolution error until it does.
-- Never push to `main`. Branch → PR → merge.
+- Never push to `dev` or `main`. Branch → PR into `dev` → merge.
 - Sanitise attacker-controlled HTML on write, never on read.
 - Verify state before any write against live infrastructure. See
   [Tool use](#tool-use-and-live-infrastructure).
 
 Most of what this list used to carry is now enforced on every pull request — see
 [What CI checks](#what-ci-checks). What is left is what a machine cannot check: a
-push to `main` it cannot prevent, a sanitiser call it cannot place on the right
+push to `dev` or `main` it cannot prevent, a sanitiser call it cannot place on the right
 side of the read/write boundary, and a production write it cannot verify for
 you.
 
@@ -1502,18 +1502,28 @@ Verified before, then done, beats fast then reconstructed.
 
 ## Git and working alongside other agents
 
-Develop on a feature branch; **never push to `main`**. Commit → push → PR →
-merge → verify the deploy.
+Develop on a feature branch and open the pull request against **`dev`**, the
+integration branch; **never push to `dev` or `main`**. Commit → push → PR into
+`dev` → merge. `main` is what Render builds — every service in `render.yaml`
+names `branch: main` — so a change merged into `dev` reaches staging and
+production only once `dev` is merged into `main`. Verify the deploy then, not at
+the merge into `dev`, and say in a stage's plan which of the two a step waits
+for. CI runs on every pull request whatever its base, and on a push to `main`;
+a merge into `dev` runs nothing after it, so the pull request's own run is the
+only one a change gets before `main`.
 
 More than one agent session works on this repo at once and they share no
 context. Two sessions have already fixed the same bug independently and a whole
 PR was thrown away.
 
-- `git fetch origin main` before you plan, not just before you push. Main moved
-  20 commits inside one session's context window.
-- `git log --oneline -30 origin/main` before claiming a bug exists.
+- `git fetch origin dev` before you plan, not just before you push. `main`, when
+  it was the integration branch, moved 20 commits inside one session's context
+  window.
+- `git log --oneline -30 origin/dev` before claiming a bug exists — and
+  `origin/main` before claiming production has it, since a fix can sit on `dev`
+  for a while before it ships.
 - Claim your seam out loud before starting anything longer than one commit.
-- Prefer rebasing onto main over merging main in.
+- Prefer rebasing onto `dev` over merging `dev` in.
 
 `.github/pull_request_template.md` is the PR body's shape: why, how it was
 verified, what deploys with it and what rolls it back. Fill it in rather than
