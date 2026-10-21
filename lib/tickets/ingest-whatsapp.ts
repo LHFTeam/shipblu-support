@@ -14,6 +14,12 @@ import {
 import { parseCoexistence } from '@/lib/whatsapp/coexistence';
 import { lastInboundPhoneNumberId } from '@/lib/whatsapp/conversation';
 import { ACCESS_TOKEN_CODE, explainDeliveryError, type TokenOrigin } from '@/lib/whatsapp/errors';
+import {
+  alignAccountable,
+  lockedOwnerId,
+  ownerStamp,
+  recordOwnerAssigned,
+} from '@/lib/whatsapp/number-owner';
 import type {
   NormalisedEcho,
   NormalisedInboundMessage,
@@ -44,6 +50,13 @@ import { requireDefaultOpenStatusId, requireResolvedStatusId } from './statuses'
  * ticket per message — and a customer writing to two of our numbers has two
  * conversations, because a number can be one team member's phone and each
  * answers, and is measured on, its own.
+ *
+ * On such a number a ticket is its owner's from the insert that creates it —
+ * assigned to them and accountable to them — and a resolved one the customer
+ * reopens is brought back in line if the number changed hands meanwhile
+ * (`lib/whatsapp/number-owner.ts`). Nothing else here touches who a ticket
+ * belongs to: continuing an open ticket, an echo onto one, a reaction and a
+ * status leave it as they found it.
  */
 
 const log = logger('whatsapp_ingest');
@@ -88,15 +101,32 @@ export async function ingestWhatsAppMessage(
       conversationId = existing.id;
       conversationNumber = existing.number;
 
+      // A reopen is the one moment a ticket that already exists takes its
+      // number's owner again: if the number changed hands while the ticket sat
+      // resolved, the person now holding the phone is the one who can answer
+      // it. A message continuing an open ticket never does — the handover
+      // already moved those, and anything since is a deliberate reassignment.
       if (existing.statusCategory === 'resolved') {
-        await reopenResolved(
+        // Read before the reopen writes the ticket, so this transaction takes
+        // the channel's lock before any ticket's, in the order a handover does.
+        const ownerId = await numberOwner(tx, channel);
+        const reopened = await reopenResolved(
           tx,
           { id: conversationId, reopenCount: existing.reopenCount },
           { actorLabel: 'inbound_whatsapp', reason: 'customer_replied' },
         );
+        if (reopened) {
+          await alignAccountable(tx, {
+            conversationId,
+            ownerId,
+            channelId: channel.id,
+            reason: 'reopened_after_handover',
+          });
+        }
       }
     } else {
       const statusId = await requireDefaultOpenStatusId(tx);
+      const ownerId = await numberOwner(tx, channel);
 
       const inserted = await tx
         .insert(conversations)
@@ -111,12 +141,19 @@ export async function ingestWhatsAppMessage(
           groupId: channel.defaultGroupId,
           lastMessageAt: message.sentAt,
           lastCustomerMessageAt: message.sentAt,
+          // The number's owner's from the start, in the insert rather than by
+          // the assignment that runs after it (`ownerStamp` says why).
+          ...ownerStamp(ownerId, new Date()),
         })
         .returning({ id: conversations.id, number: conversations.number });
 
       conversationId = inserted[0]!.id;
       conversationNumber = inserted[0]!.number;
       createdConversation = true;
+
+      if (ownerId) {
+        await recordOwnerAssigned(tx, { conversationId, ownerId, channelId: channel.id });
+      }
     }
 
     const insertedMessage = await tx
@@ -342,6 +379,13 @@ export async function ingestWhatsAppEcho(echo: NormalisedEcho): Promise<WhatsApp
         ? await requireResolvedStatusId(tx)
         : await requireDefaultOpenStatusId(tx);
 
+      // Stamped with the number's owner like a customer's first message,
+      // although nothing is owed yet: the owner wrote this from their phone,
+      // and the customer's answer reopens a ticket that is already theirs
+      // rather than one the rota hands to somebody without the phone. The bot's
+      // number has no owner, so its transcripts stay nobody's.
+      const ownerId = await numberOwner(tx, channel);
+
       const inserted = await tx
         .insert(conversations)
         .values({
@@ -353,12 +397,17 @@ export async function ingestWhatsAppEcho(echo: NormalisedEcho): Promise<WhatsApp
           groupId: channel.defaultGroupId,
           lastMessageAt: echo.sentAt,
           ...(fromBusinessApp ? { lastAgentMessageAt: echo.sentAt } : {}),
+          ...ownerStamp(ownerId, new Date()),
         })
         .returning({ id: conversations.id, number: conversations.number });
 
       conversationId = inserted[0]!.id;
       conversationNumber = inserted[0]!.number;
       createdConversation = true;
+
+      if (ownerId) {
+        await recordOwnerAssigned(tx, { conversationId, ownerId, channelId: channel.id });
+      }
     }
 
     const insertedMessage = await tx
@@ -753,7 +802,26 @@ export type ResolvedChannel = {
    * echo on it is the business typing on the phone rather than our own send.
    */
   coexistence: boolean;
+  /**
+   * Whether the event came in on this row's own number, and the row is a
+   * plain one — the only case in which the number's owner, if it has one,
+   * answers it. False for the bot, which nobody owns, and for a number no row
+   * names: that is filed on the support row without being the support row's
+   * number, and the support number's owner holds a different phone. Who the
+   * owner is is read inside the ingest's transaction (`numberOwner`).
+   */
+  ownable: boolean;
 };
+
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+/**
+ * Who a ticket being created or reopened by this event belongs to: the
+ * number's owner while active (`lockedOwnerId`), or nobody.
+ */
+async function numberOwner(tx: Tx, channel: ResolvedChannel): Promise<string | null> {
+  return channel.ownable && channel.id ? lockedOwnerId(tx, channel.id) : null;
+}
 
 /**
  * The thread an event on this channel belongs to: the customer and our number
@@ -803,6 +871,7 @@ export async function resolveWhatsAppChannel(
       defaultGroupId: byNumber.defaultGroupId,
       kind: byNumber.type === 'whatsapp_bot' ? 'whatsapp_bot' : 'whatsapp',
       coexistence: byNumber.type === 'whatsapp' && parseCoexistence(byNumber.config) !== null,
+      ownable: byNumber.type === 'whatsapp',
     };
   }
 
@@ -824,11 +893,15 @@ export async function resolveWhatsAppChannel(
   );
   // Not coexistence, whatever the support row is: the event came in on a
   // number no row names, and only a number's own row can say it is on the app.
+  // And nobody's, for the same reason: the support row's owner answers the
+  // support number, not a number that was never handed to anybody, and
+  // stamping them would charge them for traffic on a phone they do not hold.
   return {
     id: support?.id ?? null,
     defaultGroupId: support?.defaultGroupId ?? null,
     kind: 'whatsapp',
     coexistence: false,
+    ownable: false,
   };
 }
 

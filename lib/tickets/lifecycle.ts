@@ -99,7 +99,9 @@ export async function afterTicketUpdate(conversationId: string): Promise<void> {
 }
 
 /**
- * Hand the ticket to somebody, if its group is configured to do that.
+ * Hand the ticket to somebody, if its group is configured to do that — or, on
+ * a WhatsApp number that belongs to somebody, to them whatever the group says,
+ * which is how an owned ticket somebody unassigned goes straight back.
  *
  * Last, and after the automations, because a rule that moves the ticket to
  * another group is describing where the work belongs — assigning first would

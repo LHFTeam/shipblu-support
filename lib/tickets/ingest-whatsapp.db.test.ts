@@ -15,7 +15,9 @@ import {
   whatsappAccounts,
 } from '@/db/schema';
 import { withCleanDatabase } from '@/lib/testing/db';
+import { holdNextTransaction, untilWaitingOnALock } from '@/lib/testing/hold-transaction';
 import { storeBusinessToken } from '@/lib/whatsapp/credentials';
+import { handOverNumber } from '@/lib/whatsapp/number-owner';
 import type {
   NormalisedEcho,
   NormalisedInboundMessage,
@@ -1512,6 +1514,276 @@ describe('a customer writing to two of our numbers', () => {
     } finally {
       warn.mockRestore();
     }
+  });
+});
+
+/**
+ * A number handed to one team member: the tickets arriving on it are theirs to
+ * answer and to answer for, from the moment ingest creates them — and only then,
+ * at a handover, or when a resolved one comes back after one.
+ */
+describe('a number that belongs to a team member', () => {
+  const OWNED = '106540352242944';
+
+  async function person(name: string, values: Partial<typeof agents.$inferInsert> = {}) {
+    const [row] = await db
+      .insert(agents)
+      .values({ name, email: `${name.toLowerCase().replace(/\s+/g, '.')}@shipblu.test`, ...values })
+      .returning({ id: agents.id });
+    return row!.id;
+  }
+
+  /** The owner's phone, connected through coexistence. */
+  async function ownedPhone(ownerAgentId: string | null) {
+    const [row] = await db
+      .insert(channels)
+      .values({
+        type: 'whatsapp',
+        name: 'Nayera Mohamed',
+        ownerAgentId,
+        config: {
+          phoneNumberId: OWNED,
+          coexistence: { onboardedAt: '2026-09-19T08:00:00.000Z', wabaId: 'waba', syncs: {} },
+        },
+      })
+      .returning({ id: channels.id });
+    return row!.id;
+  }
+
+  async function holders(id: string) {
+    const [row] = await db
+      .select({
+        accountable: conversations.accountableAgentId,
+        assignee: conversations.assigneeAgentId,
+        assigned: conversations.assignedAt,
+      })
+      .from(conversations)
+      .where(eq(conversations.id, id));
+    return {
+      accountable: row!.accountable,
+      assignee: row!.assignee,
+      assigned: row!.assigned !== null,
+    };
+  }
+
+  /** The events that say whose a ticket is, oldest first. */
+  async function ownership(id: string) {
+    const rows = await db
+      .select({
+        type: conversationEvents.type,
+        actorAgentId: conversationEvents.actorAgentId,
+        actorLabel: conversationEvents.actorLabel,
+        data: conversationEvents.data,
+      })
+      .from(conversationEvents)
+      .where(eq(conversationEvents.conversationId, id))
+      .orderBy(asc(conversationEvents.createdAt), asc(conversationEvents.type));
+    return rows.filter((row) =>
+      ['assigned', 'unassigned', 'accountable_changed', 'assignment_skipped'].includes(row.type),
+    );
+  }
+
+  const toOwned = (overrides: Partial<NormalisedInboundMessage> = {}) =>
+    inbound({ phoneNumberId: OWNED, ...overrides });
+
+  it('gives a new ticket to the owner: theirs to answer, and theirs to answer for', async () => {
+    const nayera = await person('Nayera Mohamed');
+    const channelId = await ownedPhone(nayera);
+
+    const result = await ingestWhatsAppMessage(toOwned());
+
+    expect(await holders(result.conversationId)).toEqual({
+      accountable: nayera,
+      assignee: nayera,
+      assigned: true,
+    });
+    // Nobody chose it, and the assignment that runs after ingest found it
+    // already placed and said nothing.
+    expect(await ownership(result.conversationId)).toEqual([
+      {
+        type: 'assigned',
+        actorAgentId: null,
+        actorLabel: 'number_owner',
+        data: { to: nayera, reason: 'number_owner', channelId },
+      },
+    ]);
+  });
+
+  it('stamps nobody while the owner is deactivated', async () => {
+    const nayera = await person('Nayera Mohamed', { isActive: false });
+    await ownedPhone(nayera);
+
+    const result = await ingestWhatsAppMessage(toOwned());
+
+    expect(await holders(result.conversationId)).toEqual({
+      accountable: null,
+      assignee: null,
+      assigned: false,
+    });
+    expect(await ownership(result.conversationId)).toEqual([]);
+  });
+
+  // The fallback files a number no row names under the support row, but that
+  // row's owner holds the support number's phone, not this one.
+  it('stamps nobody on a number no row names, or on the bot, whoever owns the support row', async () => {
+    const nayera = await person('Nayera Mohamed');
+    const [support] = await db
+      .insert(channels)
+      .values({
+        type: 'whatsapp',
+        name: 'WhatsApp Support',
+        ownerAgentId: nayera,
+        config: { phoneNumberId: '100000000000099' },
+      })
+      .returning({ id: channels.id });
+
+    const unknown = await ingestWhatsAppMessage(inbound());
+    const bot = await ingestWhatsAppMessage(
+      inbound({ wamid: 'wamid.bot', phoneNumberId: BOT_NUMBER }),
+    );
+
+    expect(await conversation(unknown.conversationId)).toMatchObject({ channelId: support!.id });
+    for (const id of [unknown.conversationId, bot.conversationId]) {
+      expect(await holders(id)).toEqual({ accountable: null, assignee: null, assigned: false });
+      expect(await ownership(id)).toEqual([]);
+    }
+  });
+
+  it('stamps a ticket the owner opened from the phone, resolved as it is', async () => {
+    const nayera = await person('Nayera Mohamed');
+    await ownedPhone(nayera);
+
+    const opened = await ingestWhatsAppEcho(
+      echo({ wamid: 'wamid.phone', from: '15550783881', phoneNumberId: OWNED }),
+    );
+
+    expect(opened).toMatchObject({ createdConversation: true });
+    expect(await conversation(opened.conversationId!)).toMatchObject({ status: 'Resolved' });
+    expect(await holders(opened.conversationId!)).toEqual({
+      accountable: nayera,
+      assignee: nayera,
+      assigned: true,
+    });
+    expect((await ownership(opened.conversationId!)).map((e) => e.data.reason)).toEqual([
+      'number_owner',
+    ]);
+  });
+
+  // The handover moved the open tickets and left this one, because it was
+  // resolved. The customer writing again is when it follows the phone.
+  it("brings a resolved ticket over to the number's new owner when its customer writes again", async () => {
+    const admin = await person('Mona Admin', { role: 'admin' });
+    const nayera = await person('Nayera Mohamed');
+    const ali = await person('Ali Nasser');
+    const channelId = await ownedPhone(nayera);
+
+    const first = await ingestWhatsAppMessage(toOwned());
+    await setStatus(first.conversationId, 'Resolved');
+    await handOverNumber({ channelId, toAgentId: ali, actor: { id: admin, label: 'Mona Admin' } });
+    expect(await holders(first.conversationId)).toMatchObject({
+      accountable: nayera,
+      assignee: nayera,
+    });
+
+    const again = await ingestWhatsAppMessage(toOwned({ wamid: 'wamid.second', sentAt: LATER }));
+
+    expect(again).toMatchObject({
+      conversationId: first.conversationId,
+      createdConversation: false,
+    });
+    expect(await conversation(first.conversationId)).toMatchObject({
+      status: 'Open',
+      reopenCount: 1,
+    });
+    expect(await holders(first.conversationId)).toMatchObject({ accountable: ali, assignee: ali });
+    expect((await ownership(first.conversationId)).slice(1)).toEqual([
+      {
+        type: 'accountable_changed',
+        actorAgentId: null,
+        actorLabel: 'number_owner',
+        data: { from: nayera, to: ali, channelId, reason: 'reopened_after_handover' },
+      },
+      {
+        type: 'assigned',
+        actorAgentId: null,
+        actorLabel: 'number_owner',
+        data: { to: ali, reason: 'number_owner', channelId },
+      },
+    ]);
+  });
+
+  it('reopens a ticket as it was when the number has not changed hands', async () => {
+    const nayera = await person('Nayera Mohamed');
+    const bob = await person('Bob Supervisor');
+    await ownedPhone(nayera);
+
+    const first = await ingestWhatsAppMessage(toOwned());
+    // A supervisor gave it to somebody else before it was resolved.
+    await setStatus(first.conversationId, 'Resolved', { assigneeAgentId: bob });
+
+    await ingestWhatsAppMessage(toOwned({ wamid: 'wamid.second', sentAt: LATER }));
+
+    expect(await conversation(first.conversationId)).toMatchObject({ status: 'Open' });
+    expect(await holders(first.conversationId)).toMatchObject({
+      accountable: nayera,
+      assignee: bob,
+    });
+    expect((await ownership(first.conversationId)).map((e) => e.type)).toEqual(['assigned']);
+  });
+
+  // Read before the transaction, the owner was the one the handover was about
+  // to replace, and the ticket landed after the handover had collected the
+  // number's tickets: left with somebody who no longer has the phone.
+  it('stamps a message arriving mid-handover with the owner the handover leaves', async () => {
+    const admin = await person('Mona Admin', { role: 'admin' });
+    const nayera = await person('Nayera Mohamed');
+    const ali = await person('Ali Nasser');
+    const channelId = await ownedPhone(nayera);
+
+    const hold = holdNextTransaction('after');
+    const handover = handOverNumber({
+      channelId,
+      toAgentId: ali,
+      actor: { id: admin, label: 'Mona Admin' },
+    });
+    await hold.atHold;
+
+    const arriving = ingestWhatsAppMessage(toOwned());
+    await untilWaitingOnALock(db);
+    hold.release();
+    const [, result] = await Promise.all([handover, arriving]);
+
+    expect(await holders(result.conversationId)).toMatchObject({
+      accountable: ali,
+      assignee: ali,
+    });
+  });
+
+  // An open ticket's accountability moves only in a handover, which moves it
+  // in the same transaction as the number; a message arriving on it afterwards
+  // finds nothing to correct. Here the column is changed behind the
+  // handover's back, to show the message would not have corrected it anyway.
+  it('continues an open ticket without changing whose it is', async () => {
+    const nayera = await person('Nayera Mohamed');
+    const ali = await person('Ali Nasser');
+    const bob = await person('Bob Supervisor');
+    const channelId = await ownedPhone(nayera);
+
+    const first = await ingestWhatsAppMessage(toOwned());
+    await db
+      .update(conversations)
+      .set({ assigneeAgentId: bob })
+      .where(eq(conversations.id, first.conversationId));
+    await db.update(channels).set({ ownerAgentId: ali }).where(eq(channels.id, channelId));
+
+    const again = await ingestWhatsAppMessage(toOwned({ wamid: 'wamid.second', sentAt: LATER }));
+
+    expect(again).toMatchObject({ conversationId: first.conversationId });
+    expect(await holders(first.conversationId)).toMatchObject({
+      accountable: nayera,
+      assignee: bob,
+    });
+    expect((await ownership(first.conversationId)).map((e) => e.type)).toEqual(['assigned']);
   });
 });
 

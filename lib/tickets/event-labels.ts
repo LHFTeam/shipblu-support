@@ -39,8 +39,34 @@ export function describeEvent(type: string, data: Record<string, unknown>): stri
       return typeof data.probability === 'number'
         ? `set priority to ${String(data.to ?? '')} (${Math.round(data.probability * 100)}% likely)`
         : `set priority to ${String(data.to ?? '')}`;
+    /*
+     * The two ways a ticket becomes a WhatsApp number's owner's say so, because
+     * otherwise "why is this hers?" has no answer on the page: nobody clicked
+     * anything, and the actor printed ahead of the sentence is a mechanism.
+     */
     case 'assigned':
+      if (data.reason === 'number_owner') {
+        return 'gave the ticket to the owner of the WhatsApp number it arrived on';
+      }
+      if (data.reason === 'number_handover') {
+        return 'gave the ticket to the new owner of its WhatsApp number';
+      }
       return 'reassigned the ticket';
+    /*
+     * Who answers for the ticket's SLA, which is not who holds it: a number's
+     * owner stays accountable through every reassignment, so this changes only
+     * when the number itself changes hands. Said in full, because the sidebar
+     * shows the result and not the reason.
+     */
+    case 'accountable_changed':
+      if (data.reason === 'reopened_after_handover') {
+        return data.to
+          ? 'made the owner of its WhatsApp number accountable for the ticket when the customer wrote again: the number changed hands while it was resolved'
+          : 'cleared who is accountable for the ticket when the customer wrote again: its WhatsApp number has no active owner now, so breaches count against whoever holds it';
+      }
+      return data.to
+        ? 'made the new owner of its WhatsApp number accountable for the ticket: breaches on it count against them'
+        : 'cleared who is accountable for the ticket: its WhatsApp number has no owner now, so breaches count against whoever holds it';
     case 'unassigned':
       return 'unassigned the ticket';
     case 'group_changed':
