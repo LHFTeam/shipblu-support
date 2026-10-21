@@ -72,6 +72,12 @@ describe('parseCoexistence', () => {
     expect(connected({}, { carriedOver: 'contacts' }).carriedOver).toBeUndefined();
     expect(connected().carriedOver).toBeUndefined();
   });
+
+  it('reads "adopted" only as a literal true', () => {
+    expect(connected({}, { adopted: true }).adopted).toBe(true);
+    expect(connected({}, { adopted: 'true' }).adopted).toBeUndefined();
+    expect(connected().adopted).toBeUndefined();
+  });
 });
 
 describe('canRequestSync', () => {
@@ -289,6 +295,16 @@ describe('coexistenceBadges', () => {
     expect(badges[0]).toMatchObject({ label: 'WhatsApp Business app', tone: 'neutral' });
     expect(badges[0]!.explain).toMatch(/phone-typed|typed there/);
     for (const badge of badges) expect(badge.explain.length).toBeGreaterThan(20);
+  });
+
+  // Its `onboardedAt` is when it was added here, so the badge must not call
+  // that the moment Meta connected it.
+  it('says an adopted number was connected in Meta and added here', () => {
+    const [badge] = coexistenceBadges(connected({}, { adopted: true }), at(60_000));
+    expect(badge).toMatchObject({ label: 'WhatsApp Business app' });
+    expect(badge!.explain).toMatch(
+      /^Connected to Cloud API in Meta's own interface, and added here on/,
+    );
   });
 
   /**

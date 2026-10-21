@@ -15,7 +15,7 @@ import { SubmitButton } from '@/components/submit-button';
 import { useActionForm } from '@/components/use-action-form';
 import { CheckIcon, ClockIcon, XIcon } from '@/components/icons';
 import { InfoTip } from '@/components/tooltip';
-import { Badge, Button, Card, ErrorText, Field, Select, SuccessText } from '@/components/ui';
+import { Badge, Button, Card, ErrorText, Field, Input, Select, SuccessText } from '@/components/ui';
 import { formatDateTime } from '@/lib/format';
 import {
   type Coexistence,
@@ -51,6 +51,7 @@ import {
   connectedFollowUps,
   describeOnboarding,
   lineText,
+  noAdoptCredential,
   type OnboardingView,
   phoneRepliesUnconfirmed,
   recoveryFor,
@@ -58,6 +59,7 @@ import {
 import { DangerAction } from '../forms-shared';
 import type { AdminState } from '../settings-shared';
 import {
+  adoptCoexistenceNumber,
   connectBusinessAppNumber,
   forgetStoredCredential,
   requestCoexistenceSync,
@@ -987,6 +989,7 @@ export function OnboardingProgress({
   channelName,
   accountName,
   credential,
+  tokenEnvVar,
   canConnect,
   connect,
   now,
@@ -996,6 +999,8 @@ export function OnboardingProgress({
   channelName: string | null;
   accountName: string | null;
   credential: CredentialStatus | null;
+  /** The variable the account names, which an adopted number sends with when nothing is stored. */
+  tokenEnvVar: string | null;
   canConnect: boolean;
   /**
    * What the connect card needs, so a failed attempt can offer a new sign-in in
@@ -1118,6 +1123,7 @@ export function OnboardingProgress({
           channelName={channelName}
           accountName={accountName}
           credential={credential}
+          tokenEnvVar={tokenEnvVar}
         />
       ) : null}
     </Card>
@@ -1132,8 +1138,9 @@ export function OnboardingProgress({
  * admin away from the one thing still to do — and the card, with the warning on
  * it, leaves the page after a day. So the phone-replies sentence is printed
  * only when the number and subscribe steps say nothing against it, and "Nothing
- * else to do" only when no step failed or asked for something and the
- * credential is stored. What Meta says about the number — not on the Business
+ * else to do" only when no step failed or asked for something and the number
+ * has a credential to send with: the one stored, or — for an adopted number —
+ * the variable its account names. What Meta says about the number — not on the Business
  * app, another platform — is printed as a note and does not hold that line
  * back: nothing on this page changes it (`connectedFollowUps`).
  */
@@ -1143,18 +1150,27 @@ function ConnectedSummary({
   channelName,
   accountName,
   credential,
+  tokenEnvVar,
 }: {
   onboarding: OnboardingView;
   coexistence: Coexistence | null;
   channelName: string | null;
   accountName: string | null;
   credential: CredentialStatus | null;
+  tokenEnvVar: string | null;
 }) {
   const number = coexistence?.displayPhoneNumber ?? onboarding.phoneNumberId;
   const verified = coexistence?.verifiedName ? ` (${coexistence.verifiedName})` : '';
+  // An adopted number never had a credential stored for it: it sends with the
+  // variable its account names, which the job refused to go without, so its
+  // absence here is the design rather than something gone missing — while the
+  // account still names one. Forgotten or blanked since, it is missing again.
+  const variable = onboarding.origin === 'adopted' ? tokenEnvVar : null;
   const stored = credential
     ? `credential stored (${expiryLabel(credential)})`
-    : 'credential not stored';
+    : variable
+      ? `sends with ${variable}`
+      : 'credential not stored';
 
   const stepSentence = (step: 'contacts' | 'history') =>
     onboarding.steps.find((candidate) => candidate.step === step)?.sentence ?? 'not requested';
@@ -1178,7 +1194,7 @@ function ConnectedSummary({
       : `History: ${history.percent}% (${history.chunks} chunk${history.chunks === 1 ? '' : 's'}).`;
 
   const { todo, notes } = connectedFollowUps(onboarding);
-  const allClear = todo.length === 0 && credential !== null;
+  const allClear = todo.length === 0 && (credential !== null || variable !== null);
 
   return (
     <div className="flex flex-col gap-1 rounded-md border border-(--color-feedback-success-border) bg-(--color-feedback-success-bg) px-3 py-2 text-sm text-(--color-feedback-success-fg)">
@@ -1237,7 +1253,7 @@ function ConnectedSummary({
           {/* Not "press Reconnect": an account with no stored credential may
               still send with a token the environment names, which the account
               row shows. */}
-          {credential === null ? (
+          {credential === null && variable === null ? (
             <p>
               No credential is stored for this business account now, so it sends with a token from
               the environment, if one is set — the account&rsquo;s row above names which.
@@ -1359,6 +1375,164 @@ export function RequestSyncAgain({
       {state.notice ? (
         <span className="max-w-xs text-xs text-(--color-text-secondary)">{state.notice}</span>
       ) : null}
+    </form>
+  );
+}
+
+/**
+ * "Add a number connected in Meta" under a business account: a Business-app
+ * number the business connected to Cloud API in WhatsApp Manager or Business
+ * Suite instead of through Meta's window here. Nothing opens at Meta; the
+ * action queues the same job the window does, which connects the number with
+ * this account's own credential, and the progress card above the accounts
+ * follows it like any other.
+ *
+ * The form is mounted only while it is open, so Cancel and a success both
+ * throw its state away with it: reopening starts from an empty form rather
+ * than the last refusal. A refusal keeps what was typed, since the form goes
+ * through `useActionForm`. The success notice outlives the form here, beside
+ * the button that opens it again.
+ */
+export function AdoptBusinessAppNumber({
+  accountId,
+  accountName,
+  wabaId,
+  credentialLabel,
+  groups,
+  suggestedGroupId,
+  disabled,
+  onBusyChange,
+}: {
+  accountId: string;
+  accountName: string;
+  wabaId: string;
+  /** What the job will send with: "its stored credential", or the variable's name — null when neither. */
+  credentialLabel: string | null;
+  groups: Choice[];
+  suggestedGroupId: string | null;
+  disabled: boolean;
+  /** Told while the action runs, so the row's controls that would unmount this one wait. */
+  onBusyChange: (busy: boolean) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  if (!open) {
+    return (
+      <div className="flex flex-col items-start gap-1">
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={() => {
+            setNotice(null);
+            setOpen(true);
+          }}
+          disabled={disabled}
+        >
+          Add a number connected in Meta
+        </Button>
+        {notice ? <SuccessText>{notice}</SuccessText> : null}
+      </div>
+    );
+  }
+
+  return (
+    <AdoptForm
+      accountId={accountId}
+      accountName={accountName}
+      wabaId={wabaId}
+      credentialLabel={credentialLabel}
+      groups={groups}
+      suggestedGroupId={suggestedGroupId}
+      onBusyChange={onBusyChange}
+      onCancel={() => setOpen(false)}
+      onDone={(sentence) => {
+        setNotice(sentence);
+        setOpen(false);
+      }}
+    />
+  );
+}
+
+function AdoptForm({
+  accountId,
+  accountName,
+  wabaId,
+  credentialLabel,
+  groups,
+  suggestedGroupId,
+  onBusyChange,
+  onCancel,
+  onDone,
+}: {
+  accountId: string;
+  accountName: string;
+  wabaId: string;
+  credentialLabel: string | null;
+  groups: Choice[];
+  suggestedGroupId: string | null;
+  onBusyChange: (busy: boolean) => void;
+  onCancel: () => void;
+  onDone: (notice: string | null) => void;
+}) {
+  // `: void` by hand: the handler reads the state this same call returns, and
+  // TypeScript cannot infer a return type through that loop.
+  const { state, form, pending } = useActionForm(adoptCoexistenceNumber, INITIAL, {
+    onSuccess: (): void => onDone(state.notice ?? null),
+  });
+  useEffect(() => {
+    onBusyChange(pending);
+  }, [pending, onBusyChange]);
+  // Unmounted mid-submit — a success closes it — leaves nothing to report busy.
+  useEffect(() => () => onBusyChange(false), [onBusyChange]);
+
+  return (
+    <form {...form} className="flex w-full flex-col gap-3">
+      <input type="hidden" name="accountId" value={accountId} />
+      <p className="text-xs text-(--color-text-secondary)">
+        For a number on the WhatsApp Business app that was connected to Cloud API in WhatsApp
+        Manager or Business Suite rather than with &ldquo;Connect a WhatsApp number&rdquo;. It is
+        subscribed, gets a channel whose phone-typed replies count as the team&rsquo;s, and the
+        phone is asked for its contacts and up to six months of chats — which Meta allows only in
+        the 24 hours after the number was connected there, so add it soon after.
+      </p>
+      {credentialLabel ? null : <ErrorText>{noAdoptCredential(accountName, wabaId)}.</ErrorText>}
+      <div className="flex flex-wrap gap-3">
+        <Field
+          label="Phone number ID"
+          className="sm:w-56"
+          hint="From WhatsApp Manager — the number's ID, not the phone number."
+        >
+          <Input name="phoneNumberId" inputMode="numeric" autoComplete="off" required />
+        </Field>
+        <Field
+          label="Default group"
+          className="sm:w-56"
+          hint="Where tickets from this number start. Changeable on the channel afterwards."
+        >
+          <Select name="defaultGroupId" defaultValue={suggestedGroupId ?? ''}>
+            <option value="">None</option>
+            {groups.map((group) => (
+              <option key={group.id} value={group.id}>
+                {group.name}
+              </option>
+            ))}
+          </Select>
+        </Field>
+      </div>
+      {credentialLabel ? (
+        <p className="text-xs text-(--color-text-secondary)">
+          Connected with {credentialLabel}, which must be a system user token for this Meta app
+          whose system user is assigned business account {wabaId} in Meta&rsquo;s Business settings.
+        </p>
+      ) : null}
+      <ErrorText>{state.error}</ErrorText>
+      <div className="flex items-center gap-2">
+        <SubmitButton idle="Add number" busy="Adding…" />
+        <Button variant="ghost" size="sm" onClick={onCancel} disabled={pending}>
+          Cancel
+        </Button>
+      </div>
     </form>
   );
 }

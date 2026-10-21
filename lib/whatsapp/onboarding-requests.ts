@@ -113,9 +113,10 @@ export function numberPlatformRequest(phoneNumberId: string): GraphRequest {
 
 /**
  * Subscribes this app to the WABA's webhooks: `POST /{WABA-ID}/subscribed_apps`,
- * no body. A body-less subscribe also clears any WABA-level callback override;
- * this app sets none, and the WABA was just handed to it, so there is none to
- * clear.
+ * no body. A body-less subscribe also clears any WABA-level callback override
+ * of this app's; this app sets none, so there is none to clear — whether the
+ * WABA was just handed to it through Meta's window or was set up in Meta's own
+ * interface and adopted here, since an override belongs to the app that set it.
  */
 export function subscribeAppRequest(wabaId: string): GraphRequest {
   return { method: 'POST', path: `${id(wabaId, 'the WABA id')}/subscribed_apps` };

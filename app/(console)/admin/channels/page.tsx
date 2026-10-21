@@ -183,7 +183,9 @@ export default async function ChannelsPage() {
           webhook and one verify token answers every handshake. A number connected through
           Meta&rsquo;s window is under this app by construction — the window is opened as it, and
           the credential it mints is stored sealed. An account added by its ids sends with the
-          shared token, or with a variable it names.
+          shared token, or with a variable it names — and a Business-app number connected in
+          WhatsApp Manager or Business Suite instead is added from its account&rsquo;s row, where it
+          sends with that account&rsquo;s credential or variable, never the shared token.
         </p>
 
         <div className="flex flex-col gap-2">
@@ -230,6 +232,7 @@ export default async function ChannelsPage() {
                   channelName={channel?.name ?? null}
                   accountName={account?.name ?? null}
                   credential={account ? (credentials.get(account.id) ?? null) : null}
+                  tokenEnvVar={account?.tokenEnvVar ?? null}
                   canConnect={canConnect}
                   // A failed attempt's new sign-in: an attempt that reached a
                   // channel suggests that channel's group, as the row's own

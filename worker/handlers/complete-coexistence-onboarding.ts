@@ -5,8 +5,10 @@ import { subjectGone } from './subject-gone';
 
 /**
  * The second phase of connecting a WhatsApp Business-app number: everything
- * after Meta's sign-in code was exchanged and the credential stored. The steps
- * and what each records are `lib/whatsapp/onboarding-complete.ts`.
+ * after Meta's sign-in code was exchanged and the credential stored — or, for a
+ * number connected in Meta's own interface, everything after it was added
+ * from its business account's row. The steps and what each records are
+ * `lib/whatsapp/onboarding-complete.ts`.
  *
  *   npm run job -- complete_coexistence_onboarding onboardingId=<uuid> [steps=history]
  *

@@ -1,4 +1,9 @@
-import type { OnboardingStatus, OnboardingStep, OnboardingStepRecord } from '@/db/schema';
+import type {
+  OnboardingOrigin,
+  OnboardingStatus,
+  OnboardingStep,
+  OnboardingStepRecord,
+} from '@/db/schema';
 import {
   canRequestSync,
   type Coexistence,
@@ -32,6 +37,7 @@ import { credentialBadges, type CredentialStatus } from './credential-status';
 export type OnboardingRow = {
   id: string;
   status: OnboardingStatus;
+  origin: OnboardingOrigin;
   steps: Partial<Record<OnboardingStep, OnboardingStepRecord>>;
   attempts: number;
   nextAttemptAt: Date | null;
@@ -68,6 +74,11 @@ export type OnboardingStepView = {
 export type OnboardingView = {
   id: string;
   status: OnboardingStatus;
+  /**
+   * Through Meta's window, or adopted from Meta's own interface — which decides
+   * what Retry runs with, and so what the card may promise about it.
+   */
+  origin: OnboardingOrigin;
   steps: OnboardingStepView[];
   attempts: number;
   nextAttemptAt: string | null;
@@ -80,6 +91,23 @@ export type OnboardingView = {
   finishedAt: string | null;
   startedByLabel: string | null;
 };
+
+/**
+ * Why a business account cannot have a number adopted onto it: it holds no
+ * stored credential and names no token variable. One sentence for the three
+ * places that say it — the account row's form, the action that refuses, and
+ * the job that refuses again — so the instruction cannot drift between them.
+ * Without the full stop, for a caller to say what to do next.
+ */
+export function noAdoptCredential(accountName: string, wabaId: string): string {
+  return (
+    `Business account "${accountName}" holds no stored credential and names no token ` +
+    `variable, so there is nothing to connect a number with — the shared ` +
+    `META_PAGE_ACCESS_TOKEN is the Facebook Page's own token, not a WhatsApp one. Edit the ` +
+    `account and name the WHATSAPP_TOKEN_… variable holding a system user token for this Meta ` +
+    `app that is assigned business account ${wabaId}`
+  );
+}
 
 /** What each step is doing, in the words the card prints beside it. */
 export const STEP_LABELS: Record<OnboardingStep, string> = {
@@ -132,6 +160,7 @@ export function toOnboardingView(
   return {
     id: row.id,
     status: row.status,
+    origin: row.origin,
     steps: order.map((step) => {
       const record = row.steps[step];
       return {
@@ -239,13 +268,27 @@ export function retryable(view: OnboardingView, now: Date): boolean {
  * an account without one, every time. A stalled attempt offers Retry alone; if
  * the credential has gone, the job's refusal says so and the card then offers
  * the sign-in.
+ *
+ * An adopted attempt is the other way round. It never had a sign-in, and its
+ * failures are fixed outside this page — a system user assigned the business
+ * account, a token variable named or set, a webhook field subscribed — after
+ * which Retry is exactly what is needed, whatever is stored: the job runs with
+ * the account's own credential and says so if it still has none. A wrong
+ * phone number id is the exception: Meta would list the same numbers again, so
+ * Retry is not offered for it, and the number is added again from the
+ * account's row with an id the failure names. Meta's window is not offered,
+ * because it is not what any of these fixes.
  */
 export function recoveryFor(
   view: OnboardingView,
   now: Date,
   hasCredential: boolean,
 ): { retry: boolean; connect: boolean } {
-  if (view.status === 'failed') return { retry: hasCredential, connect: true };
+  if (view.status === 'failed') {
+    return view.origin === 'adopted'
+      ? { retry: !numberNotOnAccount(view), connect: false }
+      : { retry: hasCredential, connect: true };
+  }
   return { retry: retryable(view, now), connect: false };
 }
 
@@ -286,9 +329,12 @@ export function describeOnboarding(view: OnboardingView, now: Date): OnboardingL
         : []),
       sentence(
         'This connection has not finished in fifteen minutes and nothing is scheduled to carry it ' +
-          'on. Press Retry connection: it runs the remaining steps with the credential saved at ' +
-          "sign-in, without Meta's window. If a job for it is still queued, Retry says so, and the " +
-          'worker is what needs looking at.',
+          `on. Press Retry connection: it runs the remaining steps with ${
+            view.origin === 'adopted'
+              ? "the business account's own credential"
+              : "the credential saved at sign-in, without Meta's window"
+          }. If a job for it is still queued, Retry says so, and the worker is what needs ` +
+          'looking at.',
       ),
     ];
   }
@@ -300,9 +346,12 @@ export function describeOnboarding(view: OnboardingView, now: Date): OnboardingL
   if (stalled(view, now)) {
     return [
       sentence(
-        "No worker has picked this up yet. The sign-in and its credential are saved, so Meta's " +
-          'window is not needed again: if nothing moves within fifteen minutes of the start, Retry ' +
-          'connection appears on this card.',
+        `No worker has picked this up yet. ${
+          view.origin === 'adopted'
+            ? 'Nothing needs adding again'
+            : "The sign-in and its credential are saved, so Meta's window is not needed again"
+        }: if nothing moves within fifteen minutes of the start, Retry connection appears on ` +
+          'this card.',
       ),
     ];
   }

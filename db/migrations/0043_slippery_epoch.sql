@@ -1,0 +1,1 @@
+ALTER TABLE "whatsapp_onboardings" ADD COLUMN "origin" text DEFAULT 'embedded_signup' NOT NULL;

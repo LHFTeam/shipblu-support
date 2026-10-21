@@ -875,6 +875,18 @@ export const whatsappCredentialEvents = pgTable(
 
 export type OnboardingStatus = 'exchanged' | 'connected' | 'failed';
 
+/**
+ * How an attempt began. `embedded_signup` is Meta's window opened from the
+ * Channels page: the code was exchanged and the token Meta minted is stored
+ * sealed, so the job sends with that credential and nothing else.
+ * `adopted` is a number the business connected to Cloud API in Meta's own
+ * interface (WhatsApp Manager / Business Suite) and then added here: nothing
+ * was exchanged or stored, so the job sends with whatever the business account
+ * is configured with — its stored credential or the variable it names, never
+ * the shared token (`lib/whatsapp/onboarding-complete.ts` says why).
+ */
+export type OnboardingOrigin = 'embedded_signup' | 'adopted';
+
 /** The steps the onboarding job takes, in the order it takes them. */
 export const ONBOARDING_STEPS = [
   'number',
@@ -919,10 +931,12 @@ export type OnboardingStepRecord = {
 };
 
 /**
- * One attempt to connect a WhatsApp number through Meta's Embedded Signup, and
- * the progress the admin screen polls while it runs.
+ * One attempt to connect a WhatsApp number through Meta's Embedded Signup — or
+ * to adopt one already connected in Meta's own interface (`origin`) — and the
+ * progress the admin screen polls while it runs.
  *
- * Two phases share the row. The server action that receives Meta's sign-in code
+ * Two phases share the row. An adopted attempt has no first phase: the action
+ * inserts it `exchanged` with nothing exchanged, and the job does the rest. The server action that receives Meta's sign-in code
  * exchanges it, stores the credential and inserts this row as `exchanged` — all
  * inside the thirty seconds the code lives. Everything after that is the
  * `complete_coexistence_onboarding` job, which records each step in `steps` as
@@ -956,6 +970,8 @@ export const whatsappOnboardings = pgTable(
     }),
 
     status: text('status').$type<OnboardingStatus>().notNull(),
+    /** Every row before adoption existed came through Meta's window, hence the default. */
+    origin: text('origin').$type<OnboardingOrigin>().notNull().default('embedded_signup'),
     steps: jsonb('steps')
       .$type<Partial<Record<OnboardingStep, OnboardingStepRecord>>>()
       .notNull()

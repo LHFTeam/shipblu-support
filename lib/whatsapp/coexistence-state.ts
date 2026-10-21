@@ -182,6 +182,26 @@ export async function findCoexistenceChannel(
 }
 
 /**
+ * Every WhatsApp channel on `phoneNumberId`, active or not, support or bot —
+ * what connecting a number has to look at first: a bot channel it must not
+ * take, a plain one it takes over, one already connected it must not restart.
+ * One query for both halves of a connection, the adopt action's pre-check
+ * (`./onboarding`) and the job's channel step (`./onboarding-complete`), so
+ * the two cannot match a number differently.
+ */
+export async function channelsOnNumber(phoneNumberId: string) {
+  return db
+    .select({ id: channels.id, type: channels.type, name: channels.name, config: channels.config })
+    .from(channels)
+    .where(
+      and(
+        inArray(channels.type, ['whatsapp', 'whatsapp_bot']),
+        sql`${channels.config} ->> 'phoneNumberId' = ${phoneNumberId}`,
+      ),
+    );
+}
+
+/**
  * One history chunk processed: count it, and move its phase's progress
  * forward — never back, because chunks arrive in no order (Meta's own words:
  * "chunks can arrive out of order"), and a late chunk at 40% must not undo a
@@ -290,7 +310,9 @@ const RECONNECTING = new Set(['ACCOUNT_RECONNECTED']);
  * would badge a number that has since come back; and a `PARTNER_REMOVED` about
  * the connection before a reconnect would badge the new one and refuse its
  * fresh credential. So an event is applied only when it is at least as new as
- * the connection (`onboardedAt`, the exchange) and as the last event applied
+ * the connection (`onboardedAt`: the exchange, or for an adopted number the
+ * moment it was added here — an event from before that is about a number no
+ * channel answered yet) and as the last event applied
  * to it (`accountEventAt`, a high-water mark kept beside the badge — the badge
  * itself cannot be the mark, because `ACCOUNT_RECONNECTED` deletes it and
  * leaves a late `ACCOUNT_OFFBOARDED` nothing to compare against). Both are

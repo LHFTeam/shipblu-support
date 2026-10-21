@@ -814,6 +814,29 @@ both mean "reconnect"). And `saveChannel` carries `coexistence` and the stored
 which is how a rename used to wipe the connection while the number kept
 routing.
 
+**A Business-app number connected in Meta's own interface is adopted, not
+signed in.** WhatsApp Manager and Business Suite can put a phone's number on
+Cloud API without Meta's window, so no code is exchanged and nothing is stored.
+"Add a number connected in Meta" on its business account's row
+(`adoptBusinessAppNumber`) records the attempt with `origin = 'adopted'` and
+queues the same `complete_coexistence_onboarding`, which then connects the
+number with the account's one source — its stored credential, or the
+`WHATSAPP_TOKEN_*` variable it names — and **never with
+`META_PAGE_ACCESS_TOKEN`**, the Page's own token, which reaches no WABA
+(`docs/PROJECT-STATE.md` §6.28); `credentialFor` refuses it by name. That is
+the job's rule: once connected, the number sends through `tokenForAccount` like
+any other, so an account whose variable is blanked afterwards falls to the
+shared token and its sends fail with the sentence naming it. An
+Embedded Signup attempt still uses only the credential it stored. The channel
+it makes carries `coexistence.adopted`, and its `onboardedAt` is when it was
+added here: Meta's 24 hours for the copy began earlier, when the number was
+connected there, so the window drawn can outlast Meta's and a late request is
+refused by Meta (2593108) on the row. The variable must hold a system user
+token generated for this app and assigned the WABA in Meta's Business settings:
+a token for another app is refused before anything is subscribed, since the
+subscribe would otherwise subscribe that app, and the number step proves the
+assignment.
+
 The same message can reach us under two wamids — the business app's echo of a
 reply names it from one chat, a customer's reaction to that reply from another
 — so pairing one WhatsApp message with another tries the exact string and then

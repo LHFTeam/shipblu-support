@@ -158,6 +158,14 @@ export function resolveCredentialSource(
 }
 
 /**
+ * The variable an account names cannot be used: not a `WHATSAPP_TOKEN_*` name,
+ * or not set in this process. Its own class so a caller that can say so to a
+ * person — the onboarding job's card — can tell it from a failure a retry
+ * might cure. Every other caller sees an `Error`, as before.
+ */
+export class TokenVariableError extends Error {}
+
+/**
  * The access token for an account, and which credential it is.
  *
  * Worker-only, with the other resolvers below: only modules under `worker/`
@@ -195,11 +203,13 @@ export async function tokenForAccount(
   // Re-checked on read, not only on write: the row could predate the rule, or
   // have been edited straight in the database.
   const parsed = parseTokenEnvVar(name);
-  if (!parsed.ok) throw new Error(`${name} is not a usable token variable. ${parsed.error}`);
+  if (!parsed.ok) {
+    throw new TokenVariableError(`${name} is not a usable token variable. ${parsed.error}`);
+  }
 
   const value = parsed.value ? process.env[parsed.value] : env().META_PAGE_ACCESS_TOKEN;
   if (!value) {
-    throw new Error(
+    throw new TokenVariableError(
       `${name} names the access token for this WhatsApp business account, but it is not set. ` +
         `Add it to the shipblu-support-production environment group.`,
     );
