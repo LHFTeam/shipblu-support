@@ -81,7 +81,7 @@ export async function InboxShell({
     <div className="flex h-full md:gap-(--console-gap) md:bg-(--color-background-console) md:px-(--console-gap) md:pb-(--console-gap)">
       <LiveUpdates channel={filters.channel} conversationId={activeConversationId} />
 
-      <div className="app-scroll hidden w-(--views-width) shrink-0 overflow-y-auto rounded-(--console-panel-radius) bg-(--color-background-surface) min-[1366px]:block">
+      <div className="app-scroll relative hidden w-(--views-width) shrink-0 overflow-y-auto rounded-(--console-panel-radius) bg-(--color-background-surface) min-[1366px]:block">
         <ViewsPanel
           title="Inbox"
           sections={sections}

@@ -280,7 +280,7 @@ export function Composer({
           ) : null}
         </div>
 
-        <div className="app-scroll min-h-0 flex-1 overflow-y-auto p-3">
+        <div className="app-scroll relative min-h-0 flex-1 overflow-y-auto p-3">
           {tab === 'reply' ? (
             /*
               The explanation stands in for the textarea rather than sitting

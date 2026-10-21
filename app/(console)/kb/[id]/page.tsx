@@ -65,7 +65,7 @@ export default async function ArticlePage({ params }: { params: Promise<{ id: st
 
   if (!mayEdit) {
     return (
-      <div className="app-scroll mx-auto flex h-full max-w-3xl flex-col gap-4 overflow-y-auto p-4 sm:p-6">
+      <div className="app-scroll relative mx-auto flex h-full max-w-3xl flex-col gap-4 overflow-y-auto p-4 sm:p-6">
         <nav className="text-sm text-(--color-text-secondary)">
           <Link
             href="/kb"
@@ -157,7 +157,7 @@ export default async function ArticlePage({ params }: { params: Promise<{ id: st
   ]);
 
   return (
-    <div className="app-scroll mx-auto flex h-full max-w-6xl gap-6 overflow-y-auto p-4 sm:p-6">
+    <div className="app-scroll relative mx-auto flex h-full max-w-6xl gap-6 overflow-y-auto p-4 sm:p-6">
       <div className="min-w-0 flex-1">
         <nav className="mb-4 text-sm text-(--color-text-secondary)">
           <Link

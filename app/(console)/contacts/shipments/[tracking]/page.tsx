@@ -69,7 +69,7 @@ export default async function ShipmentPage({ params }: { params: Promise<{ track
   const editable = can(agent, 'contact.edit');
 
   return (
-    <div className="app-scroll h-full overflow-y-auto p-4 md:p-6">
+    <div className="app-scroll relative h-full overflow-y-auto p-4 md:p-6">
       <PageHeader
         title={shipment.trackingNumber}
         description={shipment.statusLabel ?? undefined}

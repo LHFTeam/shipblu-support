@@ -210,7 +210,12 @@ row below the fold is rendered where nobody can scroll to it, and the page reads
 as half-finished rather than as broken (§6.53). `admin/layout.tsx` supplies one
 for everything beneath it; nothing else does. CI checks it (`console-scroll`):
 every other console page either says `overflow-y-auto` or renders
-`<InboxShell>`, which owns its panes.
+`<InboxShell>`, which owns its panes. **A scroll container is also `relative`.**
+`sr-only` is `position: absolute`, so inside an unpositioned pane it is placed
+against the document, past every `overflow-hidden`, and stretches the page under
+the shell. Scrolling past the end of the pane then moves the whole console
+(§6.81, twice). CI refuses a class list that scrolls vertically without a
+position utility (`scroll-positioned`).
 
 ## Do not edit
 

@@ -144,7 +144,7 @@ export function Sidebar({
   return (
     <aside
       aria-label="Ticket details"
-      className="app-scroll hidden w-(--details-width) shrink-0 overflow-y-auto rounded-(--console-panel-radius) bg-(--color-background-surface) lg:block"
+      className="app-scroll relative hidden w-(--details-width) shrink-0 overflow-y-auto rounded-(--console-panel-radius) bg-(--color-background-surface) lg:block"
     >
       <div className="flex items-center gap-3 px-(--density-row-x) pt-[18px] pb-4">
         <Avatar

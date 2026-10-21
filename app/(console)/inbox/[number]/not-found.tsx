@@ -14,7 +14,7 @@ import { buttonClass, Card } from '@/components/ui';
  */
 export default function TicketNotFound() {
   return (
-    <div className="app-scroll h-full overflow-y-auto p-6">
+    <div className="app-scroll relative h-full overflow-y-auto p-6">
       <Card className="mx-auto mt-10 max-w-md text-center">
         <h1 className="text-lg font-semibold text-(--color-text-primary)">
           No ticket you can see has this number

@@ -15,7 +15,7 @@ export default async function NewArticlePage() {
   const folders = await listFolderOptionsForRole(agent.role);
 
   return (
-    <div className="app-scroll mx-auto h-full max-w-5xl overflow-y-auto p-4 sm:p-6">
+    <div className="app-scroll relative mx-auto h-full max-w-5xl overflow-y-auto p-4 sm:p-6">
       <nav className="mb-4 text-sm text-(--color-text-secondary)">
         <Link
           href="/kb"

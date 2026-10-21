@@ -166,7 +166,7 @@ export function ConditionBuilder({
                   <div
                     role="group"
                     aria-label={`${field.label} options`}
-                    className="flex max-h-40 w-48 flex-col gap-1.5 overflow-y-auto rounded-md border border-(--color-border-subtle) bg-(--color-background-surface) p-2"
+                    className="relative flex max-h-40 w-48 flex-col gap-1.5 overflow-y-auto rounded-md border border-(--color-border-subtle) bg-(--color-background-surface) p-2"
                   >
                     {choices.length === 0 ? (
                       <span className="text-xs text-(--color-text-secondary)">
