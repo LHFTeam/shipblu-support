@@ -9,8 +9,7 @@ import { surveyText } from '@/lib/csat/wording';
 import { cardRefusalStands, decideSurvey, type SurveyTrigger } from '@/lib/csat/decision';
 import { carriesLink } from '@/lib/csat/delivery';
 import { readCsatSettings } from '@/lib/csat/settings';
-import { rootCommentId } from '@/lib/meta/comments';
-import { isCommentChannel, isMetaChannel, isReadOnlyChannel } from '@/lib/tickets/channel-policy';
+import { isCommentTicket, isMetaChannel, isReadOnlyChannel } from '@/lib/tickets/channel-policy';
 import { requesterLocale } from '@/lib/tickets/locale';
 import { notReaction } from '@/lib/tickets/not-reaction';
 import { automatedReplyBlocked, lacksEmailRecipient, sendsByEmail } from '@/lib/tickets/outbound';
@@ -108,7 +107,7 @@ export async function sendCsat(job: ClaimedJob): Promise<void> {
       suppressedBy: ticket.suppressedBy,
       resolvedByRule: ticket.resolvedByRule,
       lacksRecipient: lacksEmailRecipient(ticket.channel, ticket.contactEmail),
-      commentThread: isCommentChannel(ticket.channel) || rootCommentId(ticket.externalId) !== null,
+      commentThread: isCommentTicket(ticket.channel, ticket.externalId),
       // The third automated sender, through the same guard as the other two:
       // past 24 hours only `HUMAN_AGENT` sends on these platforms, and that tag
       // is reserved for a message a person wrote.

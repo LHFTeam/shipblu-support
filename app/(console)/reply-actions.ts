@@ -9,7 +9,7 @@ import { canonicalUuid } from '@/lib/http/uuid';
 import { ok } from '@/lib/http/action-state';
 import { can } from '@/lib/auth/permissions';
 import { sendsByEmail } from '@/lib/tickets/outbound';
-import { isCommentChannel, isMetaChannel, metaPlatformOf } from '@/lib/tickets/channel-policy';
+import { isCommentTicket, isMetaChannel, metaPlatformOf } from '@/lib/tickets/channel-policy';
 import { htmlToText, sanitiseEmailHtml, textToHtml } from '@/lib/html/sanitize';
 import { afterMessageStored } from '@/lib/tickets/lifecycle';
 import { recordCannedUse } from '@/lib/tickets/canned-usage';
@@ -123,11 +123,7 @@ export async function sendReply(_state: ActionState, formData: FormData): Promis
     ? metaPlatformOf(conversation.channel)
     : null;
   const isMeta = platform !== null;
-  // A public comment by its channel, or by its external id: the safeguard for a
-  // comment ticket that still carries its platform's channel.
-  const isCommentThread =
-    isCommentChannel(conversation.channel) ||
-    Boolean(conversation.externalId?.includes(':comment:'));
+  const isCommentThread = isCommentTicket(conversation.channel, conversation.externalId);
 
   // A comment ticket can be answered in public, or taken private exactly once.
   // A direct-message ticket only has the one option.

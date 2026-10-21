@@ -17,8 +17,7 @@ import {
 import { describeProfileRefresh, refreshChannelProfile } from '@/lib/meta/profile-refresh';
 import { MetaApiError, takeThreadControl } from '@/lib/meta/client';
 import { explainTakeControlError } from '@/lib/meta/errors';
-import { rootCommentId } from '@/lib/meta/comments';
-import { isCommentChannel, isMetaChannel, metaPlatformOf } from '@/lib/tickets/channel-policy';
+import { isCommentTicket, isMetaChannel, metaPlatformOf } from '@/lib/tickets/channel-policy';
 import { metaReplyTarget, THREAD_CONTROL_TAKEN } from '@/lib/tickets/meta-thread';
 import { loadConversation, refresh, refuseIfReadOnly } from '@/lib/tickets/console-guards';
 import type { ActionState } from './action-state';
@@ -145,7 +144,7 @@ export async function refreshRequesterProfile(
   // The header offers this only on a direct-message ticket, so a comment ticket
   // reaching here is a stale tab or a hand-made request, refused as the screen
   // would have: a commenter is answered on the post, not looked up.
-  if (isCommentChannel(channel) || rootCommentId(row.conversation.externalId)) {
+  if (isCommentTicket(channel, row.conversation.externalId)) {
     return {
       error: 'A comment ticket has no profile to look up; a commenter is answered on the post',
     };
@@ -247,7 +246,7 @@ export async function claimThreadControl(
   // Thread control is a direct message's, and the composer never offers it on
   // a comment: refused here in the same terms rather than taken on a thread
   // the reply would not go into.
-  if (isCommentChannel(channel) || rootCommentId(row.conversation.externalId)) {
+  if (isCommentTicket(channel, row.conversation.externalId)) {
     return { error: 'A comment thread has no thread control; it is answered on the post' };
   }
   const platform = metaPlatformOf(channel);

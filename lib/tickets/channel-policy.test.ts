@@ -11,6 +11,7 @@ import {
   hasWrittenSubject,
   hiddenChannels,
   isCommentChannel,
+  isCommentTicket,
   isMetaChannel,
   isReadOnlyChannel,
   isRestrictedChannel,
@@ -198,6 +199,20 @@ describe('the Meta channels', () => {
     for (const platform of ['facebook', 'instagram'] as const) {
       expect(metaPlatformOf(commentChannelOf(platform))).toBe(platform);
     }
+  });
+
+  // One test for every reader, so the composer and the guards cannot disagree
+  // about a ticket the way two spellings of the external-id test once could.
+  it('tell a comment ticket by its channel, or by its external id until 1.2 moves it', () => {
+    expect(isCommentTicket('facebook_comment', null)).toBe(true);
+    expect(isCommentTicket('instagram_comment', 'instagram:comment:17890')).toBe(true);
+    expect(isCommentTicket('facebook', 'facebook:comment:1_2')).toBe(true);
+    expect(isCommentTicket('instagram', 'instagram:comment:17890')).toBe(true);
+    // A direct message carries no external id.
+    expect(isCommentTicket('facebook', null)).toBe(false);
+    // The prefix is anchored: ':comment:' elsewhere in an id is not a comment.
+    expect(isCommentTicket('whatsapp', 'whatsapp:comment:1')).toBe(false);
+    expect(isCommentTicket('email', 'x-facebook:comment:1')).toBe(false);
   });
 
   it('are not prototype keys or near misses', () => {

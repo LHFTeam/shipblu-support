@@ -1,11 +1,10 @@
 import { eq } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { conversationEvents, conversations, messages } from '@/db/schema';
-import { rootCommentId } from '@/lib/meta/comments';
 import { feedbackTemplateTag, metaWindowState } from '@/lib/meta/window';
 import { enqueue } from '@/lib/queue';
 import {
-  isCommentChannel,
+  isCommentTicket,
   isMetaChannel,
   isReadOnlyChannel,
   type ConversationChannel,
@@ -71,8 +70,8 @@ import { windowState as whatsappWindowState } from '@/lib/whatsapp/window';
  * before it ever consults the clock, so blocking one on the customer's last
  * message would silently stop every automated reply on a public thread older
  * than a day — a reply that would have posted perfectly well. The ticket is
- * identified by its channel (`isCommentChannel`) or, the way the send path
- * identifies it, by `rootCommentId` over its external id. Both, because comment
+ * identified by `isCommentTicket`: its channel, or, the way the send path
+ * identifies it, the root comment in its external id. Both, because comment
  * tickets carried the platform's channel until they were given their own, and
  * the external id stays the safeguard until a CHECK makes the two one answer.
  *
@@ -101,7 +100,7 @@ export function automatedReplyBlocked(
   }
 
   if (isMetaChannel(ticket.channel)) {
-    if (isCommentChannel(ticket.channel) || rootCommentId(ticket.externalId)) return null;
+    if (isCommentTicket(ticket.channel, ticket.externalId)) return null;
 
     const window = metaWindowState(ticket.lastCustomerMessageAt, now);
     // The literal, not the platform: Messenger's card is for a Facebook
@@ -306,7 +305,7 @@ export function carrierFor(
     case 'email':
     case 'portal':
     case 'api':
-      return 'send_email';
+    // Neither is carried by it; the docstring says why they answer it anyway.
     case 'webchat':
     case 'whatsapp_bot':
       return 'send_email';

@@ -1,6 +1,7 @@
 import type { conversations } from '@/db/schema';
 import type { SessionAgent } from '@/lib/auth/session';
 import type { MetaPlatform } from '@/lib/meta/types';
+import { rootCommentId } from '@/lib/meta/comments';
 import { can } from '@/lib/auth/permissions';
 
 /**
@@ -61,15 +62,19 @@ void allChannelsAreListed;
  * One list, so the dropdown is built from exactly what the parser accepts. They
  * drifted apart once already and Facebook and Instagram spent a phase silently
  * resetting themselves to "all channels".
+ *
+ * The comment channels join it in Stage 1.2 of
+ * `plans/ticket-category-routing.md`, with the ingest that writes them. Offered
+ * before, their views and the filter are empty while every comment ticket sits
+ * under Facebook or Instagram, badged "Public comment" — a queue that answers
+ * the agent wrongly for as long as the stages are apart.
  */
 export const FILTERABLE_CHANNELS = [
   'email',
   'whatsapp',
   'webchat',
   'facebook',
-  'facebook_comment',
   'instagram',
-  'instagram_comment',
   'whatsapp_bot',
 ] as const satisfies readonly ConversationChannel[];
 
@@ -127,6 +132,21 @@ export function metaPlatformOf(channel: MetaChannel): MetaPlatform {
     case 'instagram_comment':
       return 'instagram';
   }
+}
+
+/**
+ * Whether a ticket is a public comment thread: by its channel, or by its
+ * external id while it still carries its platform's channel.
+ *
+ * The one copy of the test. It was written out at every reader that needed it,
+ * in two spellings — the anchored `rootCommentId` in some, a bare
+ * `includes(':comment:')` in others — which could already disagree about an id
+ * and would each have needed changing by hand at Stage 1.3 of
+ * `plans/ticket-category-routing.md`, when the CHECK makes the channel and the
+ * external id one answer and this becomes the channel test alone.
+ */
+export function isCommentTicket(channel: string, externalId: string | null): boolean {
+  return isCommentChannel(channel) || rootCommentId(externalId) !== null;
 }
 
 /** The channel a platform's public comments are filed on. */

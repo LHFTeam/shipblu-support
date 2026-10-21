@@ -61,17 +61,17 @@ describe('rowBadges', () => {
     ]);
   });
 
-  it('gives a comment channel no window and calls it public, by its channel alone', () => {
+  // `listInbox` decides `isComment` once, through `isCommentTicket`, which is
+  // true on a comment channel whatever its external id; the badges read it.
+  it('gives a comment channel no window and calls it public', () => {
     for (const channel of ['facebook_comment', 'instagram_comment']) {
-      for (const isComment of [true, false]) {
-        expect(
-          rowBadges(
-            row({ channel, isComment, lastCustomerMessageAt: hoursAgo(200) }),
-            NOW,
-            'avatar',
-          ),
-        ).toEqual([{ key: 'comment', tone: 'public', label: 'Public comment' }]);
-      }
+      expect(
+        rowBadges(
+          row({ channel, isComment: true, lastCustomerMessageAt: hoursAgo(200) }),
+          NOW,
+          'avatar',
+        ),
+      ).toEqual([{ key: 'comment', tone: 'public', label: 'Public comment' }]);
     }
   });
 

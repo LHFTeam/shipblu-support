@@ -608,7 +608,8 @@ Until the CHECK constraint in `plans/ticket-category-routing.md` §1.3 lands, a
 comment ticket can still sit on its platform's channel — every one ingested
 before 1.2 does, and `split_comment_channels` moves them — so **detecting a
 comment is the channel test _or_ the external id**
-(`isCommentChannel(channel) || rootCommentId(externalId)`), never either alone.
+— `isCommentTicket(channel, externalId)` in `lib/tickets/channel-policy.ts`, the
+one copy every reader calls — never either alone.
 The difference is public wherever the software replies on its own, because a
 reply on a comment ticket is posted under the customer's comment where anybody
 reading the post sees it. The out-of-hours picker handles it: a rule with no

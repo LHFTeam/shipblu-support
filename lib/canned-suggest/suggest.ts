@@ -5,7 +5,7 @@ import type { SessionAgent } from '@/lib/auth/session';
 import { errorMessage } from '@/lib/errors';
 import { detectLocale } from '@/lib/kb/language';
 import { logger } from '@/lib/log';
-import { answeredFromConsole, isCommentChannel } from '@/lib/tickets/channel-policy';
+import { answeredFromConsole, isCommentTicket } from '@/lib/tickets/channel-policy';
 import { loadConversation } from '@/lib/tickets/console-guards';
 import { subjectWords } from '@/lib/tickets/customer-text';
 import { newestCustomerWords } from '@/lib/tickets/locale';
@@ -143,9 +143,7 @@ export async function suggestFor(
       history.messages,
       {
         channel: conversation.channel,
-        isPublicComment:
-          isCommentChannel(conversation.channel) ||
-          Boolean(conversation.externalId?.includes(':comment:')),
+        isPublicComment: isCommentTicket(conversation.channel, conversation.externalId),
         emailSubject: sendsByEmail(conversation.channel) ? conversation.subject : null,
       },
       options,

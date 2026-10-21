@@ -1094,28 +1094,34 @@ worker and all four crons. 1.2 does not start until all six run 1.1.
     `facebook`/`instagram` as the comment channel it is moving to**: `pickRule`
     takes the stored channel and external id and maps them itself
     (`ruleChannel`), so every caller must supply the external id and none can
-    skip the mapping by forgetting it. Matched on the bare column, a rule naming
-    the platform would post its wording under a comment and a rule naming a
-    comment channel would match nothing until the backfill. The form names the
-    platform's scope "Facebook messages" / "Instagram messages" beside
-    "… comments" for the same reason. Production holds one rule, null-scoped and inactive (2026-10-20).
-  - **The filter, the Channels views and the condition builder offer the
-    comment values now**, and they match nothing until 1.2 writes them: the 52
-    comment tickets stay under Facebook and Instagram until the backfill.
-    Intended, since the realtime topics and the filter's parser have to know
-    the values before any row carries one; the gap is as long as 1.1 and the
-    backfill are apart.
+    skip the mapping by forgetting it. Matched on the bare column, a rule
+    naming the platform would post its wording under a comment. The form names
+    the platform's scope "Facebook messages" / "Instagram messages" for the same
+    reason. Production holds one rule, null-scoped and inactive (2026-10-20).
+  - **No picker offers the comment values yet** — not the out-of-hours form or
+    its action's allowlist, not the condition builder, not the inbox filter or
+    the Channels views. Moved to 1.2 on review of #387: offered in 1.1, the
+    views and the filter were empty while every comment ticket sat under
+    Facebook or Instagram badged "Public comment"; a condition naming one
+    matched nothing, because the rules engine's `channel` fact is the stored
+    column; and an out-of-hours rule naming one was the first row to carry the
+    value, which the editor before this stage, after a rollback, would list as
+    company-wide and save back as every channel. So nothing 1.1 deploys writes
+    the values, and rolling it back is clean. Until 1.2 a comment is not
+    acknowledged out of hours, which is the safe direction. The realtime topics
+    still listen for them, so a web on 1.1 already hears a ticket the 1.2
+    worker writes.
+  - **One test for a comment ticket**, `isCommentTicket(channel, externalId)`
+    in `channel-policy.ts`, built on `rootCommentId`. Every reader that needs it
+    calls it; the inbox decides `isComment` once and the badges read that. It
+    replaces a dozen copies in two spellings — the anchored `rootCommentId` and
+    a bare `includes(':comment:')` — so 1.3 changes one function, not each copy.
   - **The admin channels page's address column** asks `isMetaChannel`, so a
     comment row 1.2 creates reads as its platform's rather than "no address".
   - **The names live once**, in `lib/tickets/channel-labels.ts`, keyed by
     `ConversationChannel`: the badge and `channelLabel` read the same record, so
     a new channel does not compile until it has a name. `channelLabel` used to
     know three channels and print the enum value for the rest.
-  - **The condition builder offers the comment values** under their badge names,
-    and its comment says a condition on `facebook` stops reaching a comment once
-    the backfill has moved it — and reaches every one ingested before 1.2 until
-    then. Nothing stored
-    names them yet; Q11 says nothing will.
   - **`send_meta` maps its source rather than casting it**: `meta.platform`,
     else the ticket's channel, through `metaPlatformOf`, so a comment value that
     reached `meta.platform` goes out on its platform instead of dead-lettering
@@ -1149,6 +1155,12 @@ deploy it with web and the crons.
   if none exists. Until an admin creates a comment channel, its tickets keep
   today's default group.
 - `resolveContact` stays on the platform.
+- **The pickers gain the comment values, with the writer.** The inbox filter
+  and Channels views (`FILTERABLE_CHANNELS`), the condition builder
+  (`CONDITION_CHANNELS` in `app/(console)/admin/field-options.ts`) and the
+  out-of-hours form and its action's allowlist (`AUTO_RESPONSE_CHANNELS`). The
+  out-of-hours page then says a comment is acknowledged only by a rule naming
+  its comment channel, and `NO_CHANNEL_WHY` points at those rules again.
 - The admin channels page can create "Facebook comments" and "Instagram
   comments" rows. They need no credentials, since they ride the Page and
   Instagram tokens, and their config is `{}`. The page's four type allowlists

@@ -23,7 +23,7 @@ import type { CustomFieldValues } from './custom-fields';
 import { threadControlTakenAt } from './meta-thread';
 import {
   hiddenChannels,
-  isCommentChannel,
+  isCommentTicket,
   isMetaChannel,
   metaPlatformOf,
   type ConversationChannel,
@@ -375,8 +375,7 @@ export async function getConversation(
     neither of the two refusals applies to it.
   */
   const channel = row.conversation.channel;
-  const isCommentThread =
-    isCommentChannel(channel) || Boolean(row.conversation.externalId?.includes(':comment:'));
+  const isCommentThread = isCommentTicket(channel, row.conversation.externalId);
 
   let metaThread: MetaThreadState | null = null;
   if (isMetaChannel(channel) && !isCommentThread) {

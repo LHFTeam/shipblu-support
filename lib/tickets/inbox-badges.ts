@@ -1,6 +1,6 @@
 import { metaWindowState } from '@/lib/meta/window';
 import { formatRemaining, windowState } from '@/lib/whatsapp/window';
-import { answeredFromConsole, isCommentChannel, isMetaChannel } from './channel-policy';
+import { answeredFromConsole, isMetaChannel } from './channel-policy';
 import type { InboxRow } from './inbox';
 
 /**
@@ -68,7 +68,7 @@ function windowBadge(row: BadgeRow, now: Date | null): RowBadge | null {
 
   // A comment ticket is answered on the comment edge and has no messaging
   // window. The first 24 hours are unremarkable, so nothing is drawn for them.
-  if (isMetaChannel(row.channel) && !isCommentChannel(row.channel) && !row.isComment) {
+  if (isMetaChannel(row.channel) && !row.isComment) {
     const state = metaWindowState(last, now);
     if (state.isClosed) return { key: 'window', tone: 'window-closed', label: 'Window closed' };
     if (state.needsHumanAgentTag) return { key: 'window', tone: 'warning', label: 'Outside 24h' };
@@ -116,10 +116,9 @@ export function rowBadges(
   // Answered in public, on the post. The comment channels have marks of their
   // own, but both row layouts draw the mark without its label, and a shape is
   // not a sentence: the words say it, as colour alone never may.
-  const comment: RowBadge | null =
-    row.isComment || isCommentChannel(row.channel)
-      ? { key: 'comment', tone: 'public', label: 'Public comment' }
-      : null;
+  const comment: RowBadge | null = row.isComment
+    ? { key: 'comment', tone: 'public', label: 'Public comment' }
+    : null;
 
   const ordered =
     layout === 'ticket'

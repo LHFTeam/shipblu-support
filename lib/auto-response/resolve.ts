@@ -5,10 +5,10 @@ import {
   type Holiday,
   type HoursConfig,
 } from '@/lib/hours';
-import { rootCommentId } from '@/lib/meta/comments';
 import {
   commentChannelOf,
   isCommentChannel,
+  isCommentTicket,
   isMetaChannel,
   metaPlatformOf,
   type ConversationChannel,
@@ -107,7 +107,7 @@ export function pickRule(
  * (Stage 1.3) this returns its input.
  */
 function ruleChannel(channel: ConversationChannel, externalId: string | null): ConversationChannel {
-  if (isMetaChannel(channel) && !isCommentChannel(channel) && rootCommentId(externalId)) {
+  if (isMetaChannel(channel) && isCommentTicket(channel, externalId)) {
     return commentChannelOf(metaPlatformOf(channel));
   }
   return channel;

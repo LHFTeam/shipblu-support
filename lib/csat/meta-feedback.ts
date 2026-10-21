@@ -3,11 +3,10 @@ import { db } from '@/db/client';
 import { conversations, csatSurveys } from '@/db/schema';
 import { logger } from '@/lib/log';
 import { configuredAccountId } from '@/lib/meta/client';
-import { rootCommentId } from '@/lib/meta/comments';
 import { metaConnection } from '@/lib/meta/connection';
 import { metaThreadState } from '@/lib/meta/thread';
 import type { NormalisedFeedback } from '@/lib/meta/types';
-import type { ConversationChannel } from '@/lib/tickets/channel-policy';
+import { isCommentTicket, type ConversationChannel } from '@/lib/tickets/channel-policy';
 import { findContactByIdentity } from '@/lib/tickets/contacts';
 import {
   automatedReplyBlocked,
@@ -61,7 +60,11 @@ export async function recordMetaFeedback(feedback: NormalisedFeedback): Promise<
   // and never a comment ticket — by its channel, or by its external id while it
   // still carries its platform's. No survey is ever sent on one, and a thanks
   // there is one `send_meta` would post on the public thread.
-  if (!survey || survey.channel !== feedback.platform || rootCommentId(survey.externalId)) {
+  if (
+    !survey ||
+    survey.channel !== feedback.platform ||
+    isCommentTicket(survey.channel, survey.externalId)
+  ) {
     return 'unknown_survey';
   }
 

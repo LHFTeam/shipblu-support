@@ -11,15 +11,21 @@ import type { ConversationChannel } from '@/lib/tickets/channel-policy';
 import { PRIORITY_CHOICES } from '@/lib/tickets/vocabulary';
 import type { FieldOption } from './condition-builder';
 
-/** The channels a condition can name: those rules and policies work on. */
+/**
+ * The channels a condition can name: those rules and policies work on.
+ *
+ * The comment channels join it in Stage 1.2 of
+ * `plans/ticket-category-routing.md`, with the rows that carry them. Offered
+ * before, a condition naming one matches nothing — the engine's `channel` fact
+ * is the stored column, and every comment ticket still carries its platform's —
+ * while a condition on `facebook` reaches every comment as well.
+ */
 const CONDITION_CHANNELS: readonly ConversationChannel[] = [
   'email',
   'whatsapp',
   'webchat',
   'facebook',
-  'facebook_comment',
   'instagram',
-  'instagram_comment',
 ];
 
 /**
@@ -62,12 +68,7 @@ export async function ticketFieldOptions(
       value: 'channel',
       label: 'Channel',
       kind: 'choice',
-      // Named as the badges name them. The comment channels are their own
-      // values, so once `split_comment_channels` has moved the old rows a
-      // condition on `facebook` does not reach a Facebook comment, and a rule
-      // that should names `facebook_comment` as well. Until then every comment
-      // ticket ingested before 1.2 still carries its platform's value and
-      // matches it.
+      // Named as the badges name them.
       choices: CONDITION_CHANNELS.map((channel) => ({
         value: channel,
         label: CHANNEL_LABELS[channel],
