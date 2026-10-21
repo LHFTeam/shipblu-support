@@ -7,49 +7,14 @@ import { requirePermission } from '@/lib/auth/guard';
 import { ok } from '@/lib/http/action-state';
 import { text, uuidField } from '@/lib/http/form-data';
 import { refresh, type SettingsState } from '../settings-shared';
+import { isAutoResponseChannel, type AutoResponseChannel } from './channels';
 
 // --- Out-of-hours auto-responses --------------------------------------------
-
-/**
- * The channel values a rule may be scoped to.
- *
- * Read from the form and checked against this list rather than cast, because
- * the column is an enum: an unknown value is a Postgres error at write time,
- * and the error a customer-facing setting deserves is "pick a channel", not a
- * 500 in the log.
- *
- * `whatsapp_bot` is deliberately absent. Nothing is ever sent on it — the bot
- * owns those conversations — so offering it would be offering a setting that
- * cannot do anything.
- *
- * The comment channels are here because naming one is the only way a public
- * comment is acknowledged at all: a rule with no channel skips them
- * (`pickRule`), since the reply is posted under the comment for anybody reading
- * the post to see. They arrived with the stage that writes them (Stage 1.2 of
- * `plans/ticket-category-routing.md`): accepted in 1.1, a rule naming one would
- * have been the first row to carry the value, and rolling 1.1 back would have
- * put it in front of an editor that lists it as company-wide and saves it back
- * as every channel.
- */
-const AUTO_RESPONSE_CHANNELS = [
-  'email',
-  'whatsapp',
-  'webchat',
-  'facebook',
-  'facebook_comment',
-  'instagram',
-  'instagram_comment',
-  'portal',
-] as const;
-
-type AutoResponseChannel = (typeof AUTO_RESPONSE_CHANNELS)[number];
 
 function autoResponseChannel(formData: FormData): AutoResponseChannel | null | undefined {
   const raw = text(formData, 'channel');
   if (!raw) return null;
-  return (AUTO_RESPONSE_CHANNELS as readonly string[]).includes(raw)
-    ? (raw as AutoResponseChannel)
-    : undefined;
+  return isAutoResponseChannel(raw) ? raw : undefined;
 }
 
 export async function saveAutoResponse(

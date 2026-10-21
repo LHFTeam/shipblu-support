@@ -190,6 +190,44 @@ describe('requesterLocale', () => {
     expect(await requesterLocale(id)).toBe('ar');
   });
 
+  // On a comment thread a passer-by's reply is filed on the requester's
+  // ticket. The acknowledgement is addressed to the requester, so the
+  // passer-by's English does not choose its language when the requester's own
+  // newest comment carried no words.
+  it('reads the requester’s words, not a passer-by’s', async () => {
+    const id = await ticket('facebook');
+    const [requester] = await db
+      .select({ id: conversations.requesterContactId })
+      .from(conversations)
+      .where(eq(conversations.id, id));
+    const [bob] = await db.insert(contacts).values({ name: 'Bob' }).returning();
+    await db.insert(messages).values([
+      {
+        conversationId: id,
+        direction: 'inbound',
+        authorContactId: requester!.id,
+        bodyText: 'فين شحنتي؟',
+        createdAt: new Date('2026-10-01T10:00:00Z'),
+      },
+      {
+        conversationId: id,
+        direction: 'inbound',
+        authorContactId: bob!.id,
+        bodyText: 'Same here, my parcel never came either',
+        createdAt: new Date('2026-10-01T10:10:00Z'),
+      },
+      {
+        conversationId: id,
+        direction: 'inbound',
+        authorContactId: requester!.id,
+        bodyText: '[empty comment]',
+        createdAt: new Date('2026-10-01T10:20:00Z'),
+      },
+    ]);
+
+    expect(await requesterLocale(id)).toBe('ar');
+  });
+
   // The rows that carry no `whatsappType` at all are the ones a careless
   // spelling of that rule would drop, and every ticket would read English.
   it('still reads a message with no WhatsApp type', async () => {

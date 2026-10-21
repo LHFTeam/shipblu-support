@@ -45,22 +45,26 @@ async function commentTicket(requester: string) {
 }
 
 async function comment(conversationId: string, author: string, commentId: string, createdAt: Date) {
-  await db.insert(messages).values({
-    conversationId,
-    direction: 'inbound',
-    kind: 'reply',
-    authorContactId: author,
-    bodyText: 'My parcel never came',
-    channelMessageId: commentId,
-    deliveryStatus: 'delivered',
-    meta: { metaKind: 'comment', platform: 'facebook', commentId, isPublic: true },
-    createdAt,
-  });
+  const [row] = await db
+    .insert(messages)
+    .values({
+      conversationId,
+      direction: 'inbound',
+      kind: 'reply',
+      authorContactId: author,
+      bodyText: 'My parcel never came',
+      channelMessageId: commentId,
+      deliveryStatus: 'delivered',
+      meta: { metaKind: 'comment', platform: 'facebook', commentId, isPublic: true },
+      createdAt,
+    })
+    .returning({ id: messages.id });
+  return { conversationId, messageId: row!.id };
 }
 
 async function acknowledgements(conversationId: string) {
   return db
-    .select({ meta: messages.meta })
+    .select({ bodyText: messages.bodyText, meta: messages.meta })
     .from(messages)
     .where(and(eq(messages.conversationId, conversationId), eq(messages.direction, 'outbound')));
 }
@@ -77,22 +81,26 @@ describe('maybeSendAutoResponse on a comment ticket', () => {
   it('answers the requester, not a passer-by, and posts under the requester’s comment', async () => {
     await db.insert(autoResponses).values({
       channel: 'facebook_comment',
-      bodyEn: 'Thanks for your comment — we will reply when we open.',
+      bodyEn: 'Hi {{customer_name}}, thanks for your comment — we will reply when we open.',
     });
     const amira = await contact('Amira');
     const bob = await contact('Bob');
     const ticket = await commentTicket(amira);
 
     // Bob replies under Amira's comment, and his reply is filed on her ticket.
-    await comment(ticket, bob, 'post-1_c2', cairo('2026-10-21T22:50'));
-    await maybeSendAutoResponse(ticket, NIGHT);
+    await maybeSendAutoResponse(
+      await comment(ticket, bob, 'post-1_c2', cairo('2026-10-21T22:50')),
+      NIGHT,
+    );
 
     expect(await acknowledgements(ticket)).toEqual([]);
     // Nor did it spend the closed stretch Amira's own next comment is owed.
     expect(await respondedAt(ticket)).toBeNull();
 
-    await comment(ticket, amira, 'post-1_c3', cairo('2026-10-21T22:55'));
-    await maybeSendAutoResponse(ticket, NIGHT);
+    await maybeSendAutoResponse(
+      await comment(ticket, amira, 'post-1_c3', cairo('2026-10-21T22:55')),
+      NIGHT,
+    );
 
     const sent = await acknowledgements(ticket);
     expect(sent).toHaveLength(1);
@@ -103,6 +111,39 @@ describe('maybeSendAutoResponse on a comment ticket', () => {
       isPublic: true,
       commentId: 'post-1_c3',
     });
+    // Public, so the contact's name — which may have come from her email — is
+    // left out rather than published under the post.
+    expect(sent[0]!.bodyText).toBe('Hi, thanks for your comment — we will reply when we open.');
     expect(await respondedAt(ticket)).toEqual(NIGHT);
+  });
+
+  // A Meta batch is retried whole when one item fails, so the item that failed
+  // is stored after siblings newer than it: here Amira's comment lands after
+  // Bob's later reply. Judged by the newest row, her comment would be Bob's and
+  // go unanswered.
+  it('answers the requester’s comment when it is stored after a passer-by’s newer one', async () => {
+    await db.insert(autoResponses).values({
+      channel: 'facebook_comment',
+      bodyEn: 'Thanks for your comment — we will reply when we open.',
+    });
+    const amira = await contact('Amira');
+    const bob = await contact('Bob');
+    const ticket = await commentTicket(amira);
+
+    await maybeSendAutoResponse(
+      await comment(ticket, bob, 'post-1_c3', cairo('2026-10-21T22:51')),
+      NIGHT,
+    );
+    expect(await acknowledgements(ticket)).toEqual([]);
+
+    await maybeSendAutoResponse(
+      await comment(ticket, amira, 'post-1_c2', cairo('2026-10-21T22:50')),
+      NIGHT,
+    );
+
+    const sent = await acknowledgements(ticket);
+    expect(sent).toHaveLength(1);
+    // Under her comment, not under Bob's newer one.
+    expect(sent[0]!.meta).toMatchObject({ isPublic: true, commentId: 'post-1_c2' });
   });
 });

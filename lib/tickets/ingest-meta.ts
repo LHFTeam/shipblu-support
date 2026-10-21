@@ -171,7 +171,9 @@ export async function ingestMetaMessage(
     direction: 'inbound',
   });
 
-  await afterInboundMessage(result.conversationId, result.createdConversation, message.sentAt);
+  await afterInboundMessage(result.conversationId, result.createdConversation, message.sentAt, {
+    id: result.messageId,
+  });
 
   return { ...result, duplicate: false };
 }
@@ -194,7 +196,6 @@ export async function ingestMetaComment(comment: NormalisedComment): Promise<Met
   // writes to the inbox. A comment on a thread filed before Stage 1.2 lands on
   // that ticket and keeps its channel until `split_comment_channels` moves it.
   const commentChannel = commentChannelOf(comment.platform);
-  const channel = await channelFor(commentChannel);
 
   // The root of the thread is what the ticket is about. A reply to a comment
   // belongs on the same ticket as the comment it answers.
@@ -202,6 +203,9 @@ export async function ingestMetaComment(comment: NormalisedComment): Promise<Met
   const externalId = `${comment.platform}:comment:${rootId}`;
 
   const existing = await findByExternalId(externalId);
+  // Read only for a thread that opens a ticket: a reply joining one keeps the
+  // ticket's row and group, and on a busy post that is most comments.
+  const channel = existing ? null : await channelFor(commentChannel);
 
   const result = await db.transaction(async (tx) => {
     let conversationId: string;
@@ -301,7 +305,9 @@ export async function ingestMetaComment(comment: NormalisedComment): Promise<Met
     direction: 'inbound',
   });
 
-  await afterInboundMessage(result.conversationId, result.createdConversation, comment.createdAt);
+  await afterInboundMessage(result.conversationId, result.createdConversation, comment.createdAt, {
+    id: result.messageId,
+  });
 
   return { ...result, duplicate: false };
 }

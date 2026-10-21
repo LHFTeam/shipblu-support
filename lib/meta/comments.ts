@@ -159,6 +159,23 @@ export function commentReplyTarget(input: {
 }
 
 /**
+ * The comment a stored message is, or null when it is not one: the id ingest
+ * wrote on `meta.commentId`, and the row's own `channel_message_id` for a row
+ * written before it did, since a comment's id is that column too.
+ *
+ * One reading for every caller that names the comment a reply goes under — the
+ * out-of-hours acknowledgement and `send_meta`'s own fallback both do — so the
+ * two cannot hang their replies off different comments of the same row.
+ */
+export function commentIdOf(meta: unknown, channelMessageId: string | null): string | null {
+  if (!meta || typeof meta !== 'object') return null;
+  const { metaKind, commentId } = meta as { metaKind?: unknown; commentId?: unknown };
+  if (metaKind !== 'comment') return null;
+  if (typeof commentId === 'string' && commentId) return commentId;
+  return channelMessageId || null;
+}
+
+/**
  * The root comment id out of a comment ticket's `external_id`.
  *
  * Null for anything else, including a direct-message ticket, so a caller can

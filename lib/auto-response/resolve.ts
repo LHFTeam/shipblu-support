@@ -264,5 +264,8 @@ export const PLACEHOLDERS = [
     describes: 'the name of the holiday, in the customer’s language, on a holiday',
   },
   { token: '{{ticket_number}}', describes: 'the ticket number' },
-  { token: '{{customer_name}}', describes: 'the customer’s name, blank if we do not know it' },
+  {
+    token: '{{customer_name}}',
+    describes: 'the customer’s name, blank if we do not know it and in a reply to a public comment',
+  },
 ] as const;

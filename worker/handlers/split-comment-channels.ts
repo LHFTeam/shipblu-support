@@ -19,10 +19,13 @@ const log = logger('split_comment_channels');
  * the CHECK reads every row.
  *
  * A moved ticket's `channel_id` points at the oldest active comments row of its
- * type where an admin has added one, as `channelFor` in ingest would have
- * chosen; with none it keeps the row it had. Its group is not touched: a ticket
- * stays where it is being worked, and a comments row's default group applies to
- * the tickets that arrive after it.
+ * type if an admin has added one by the time this runs, as `channelFor` in
+ * ingest would have chosen then; with none it keeps the row it had. That is
+ * once, at the move, as ingest chooses once, at filing: `channel_id` is the row
+ * a ticket was filed through, so a comments row added later is the row of the
+ * tickets that arrive after it, as its default group is, and a moved ticket is
+ * not re-pointed. Its group is not touched either: a ticket stays where it is
+ * being worked.
  *
  * The frozen copies move with it, the ones taken from the ticket's channel when
  * they were written: a CSAT survey's and a canned suggestion's. Left on the
@@ -37,6 +40,15 @@ const log = logger('split_comment_channels');
  * service runs 1.2 — a worker still on 1.1 files new comments on the platform
  * channel — and again until `dryRun=true` reports nothing to move; then
  * `rollup_metrics from=2026-08-29`, so the history shows the split.
+ *
+ * Every run also names the tickets 1.3's CHECK would refuse that this job does
+ * not move: a comment's external id on any channel but its own platform's — a
+ * non-Meta one, or the other platform's — or a comment channel without one.
+ * Nothing files any of them today, and none is a comment this job can tell the
+ * channel of, so they are left for a person — but the dry run is what 1.3
+ * waits on, and a gate that counted only what it can move would read clear
+ * with a row left that fails the constraint as it is added, and web's
+ * preDeploy with it.
  */
 export async function splitCommentChannels(job: ClaimedJob): Promise<void> {
   const { dryRun = false } = parseJobPayload(job, 'split_comment_channels');
@@ -53,10 +65,24 @@ export async function splitCommentChannels(job: ClaimedJob): Promise<void> {
       `${counts.surveys} csat_surveys and ${counts.suggestions} canned_suggestions ` +
       `${dryRun ? 'would move' : 'moved'}`,
   );
+
+  const { tickets, numbers } = counts.unmovable;
+  const named = numbers.map((number) => `#${number}`).join(', ');
+  const more = tickets > numbers.length ? ` and ${tickets - numbers.length} more` : '';
+  log.info(
+    `${tickets} ${tickets === 1 ? 'ticket' : 'tickets'} left that this job cannot move ` +
+      `and Stage 1.3's CHECK would refuse${tickets ? `: ${named}${more}` : ''}`,
+  );
 }
 
 type TicketCount = { channel: string; tickets: number; onto_row: number };
-type Counts = { tickets: TicketCount[]; surveys: number; suggestions: number };
+type Unmovable = { tickets: number; numbers: number[] };
+type Counts = {
+  tickets: TicketCount[];
+  surveys: number;
+  suggestions: number;
+  unmovable: Unmovable;
+};
 
 const sum = (rows: TicketCount[]) => rows.reduce((total, row) => total + row.tickets, 0);
 
@@ -72,10 +98,15 @@ const commentsRow = sql`(
   LIMIT 1
 )`;
 
-/** A ticket filed on its platform's channel whose external id says it is a comment. */
+/**
+ * A ticket filed on its platform's channel whose external id says it is a
+ * comment on that platform. The platforms are matched, not merely both Meta: a
+ * Facebook comment's id on an Instagram ticket would otherwise move to
+ * `instagram_comment`, which the CHECK accepts and nothing would ever correct.
+ */
 const unmoved = sql`
   c.channel IN ('facebook', 'instagram')
-  AND c.external_id ~ '^(facebook|instagram):comment:'
+  AND c.external_id ~ ('^' || c.channel::text || ':comment:')
 `;
 
 /** A copy still on its platform although its ticket has moved to the comment channel. */
@@ -83,6 +114,35 @@ const copyBehind = sql`
   copy.channel IN ('facebook', 'instagram')
   AND c.channel::text = copy.channel::text || '_comment'
 `;
+
+/**
+ * A ticket Stage 1.3's CHECK refuses: its channel is a comment channel, or its
+ * external id names a comment, but not both. Spelled as the plan spells the
+ * constraint, `coalesce` included, so a null external id is "not a comment"
+ * rather than a null that would pass it.
+ */
+const refusedByCheck = sql`
+  (coalesce(c.external_id, '') ~ '^(facebook|instagram):comment:')
+    <> (c.channel IN ('facebook_comment', 'instagram_comment'))
+`;
+
+/**
+ * What 1.3's CHECK would refuse once this job has moved what it can: every
+ * refused ticket `unmoved` does not match, which after the move is every
+ * refused ticket. `coalesce` because `unmoved` is null on a null external id,
+ * and NOT null would drop a comment channel with no comment behind it. The
+ * first twenty numbers are named, for a person to look at, and the count is
+ * whole.
+ */
+async function unmovable(run: Pick<typeof db, 'execute'>): Promise<Unmovable> {
+  const [row] = await run.execute<{ tickets: number; numbers: (number | string)[] | null }>(sql`
+    SELECT count(*)::int AS tickets,
+      coalesce((array_agg(c.number ORDER BY c.number))[1:20], '{}') AS numbers
+    FROM conversations c
+    WHERE ${refusedByCheck} AND NOT coalesce((${unmoved}), false)
+  `);
+  return { tickets: row?.tickets ?? 0, numbers: (row?.numbers ?? []).map(Number) };
+}
 
 async function wouldMove(): Promise<Counts> {
   const tickets = await db.execute<TicketCount>(sql`
@@ -107,6 +167,7 @@ async function wouldMove(): Promise<Counts> {
     tickets: [...tickets],
     surveys: copies?.surveys ?? 0,
     suggestions: copies?.suggestions ?? 0,
+    unmovable: await unmovable(db),
   };
 }
 
@@ -147,6 +208,11 @@ async function move(): Promise<Counts> {
       RETURNING copy.id
     `);
 
-    return { tickets: [...tickets], surveys: surveys.length, suggestions: suggestions.length };
+    return {
+      tickets: [...tickets],
+      surveys: surveys.length,
+      suggestions: suggestions.length,
+      unmovable: await unmovable(tx),
+    };
   });
 }

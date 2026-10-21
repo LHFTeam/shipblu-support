@@ -32,24 +32,7 @@ import { canonicalUuid } from '@/lib/http/uuid';
 import { listFolderOptions } from '@/lib/kb/admin';
 import { LOCALES } from '@/lib/kb/locale';
 import { resolveFaqFolders } from '@/lib/widget/config';
-
-/**
- * The types an admin may create or save. `portal` and `api` rows are the
- * product's, so they are not here, and neither is a type a forged form names.
- * The comment rows need no credentials — they ride the Page and Instagram
- * tokens — and exist to give public comments a default group of their own.
- * Must match `EDITABLE` in ./forms.tsx.
- */
-const SAVEABLE_TYPES = [
-  'email',
-  'whatsapp',
-  'webchat',
-  'facebook',
-  'facebook_comment',
-  'instagram',
-  'instagram_comment',
-  'whatsapp_bot',
-] as const;
+import { isChannelType } from './channel-types';
 
 // --- WhatsApp business accounts ---------------------------------------------
 
@@ -287,7 +270,7 @@ export async function saveChannel(_state: AdminState, formData: FormData): Promi
   const whatsappAccountId = String(formData.get('whatsappAccountId') ?? '') || null;
 
   if (!name) return { error: 'Give the channel a name' };
-  if (!(SAVEABLE_TYPES as readonly string[]).includes(type)) {
+  if (!isChannelType(type)) {
     return { error: id ? 'This channel is not edited here' : 'Unknown channel type' };
   }
 

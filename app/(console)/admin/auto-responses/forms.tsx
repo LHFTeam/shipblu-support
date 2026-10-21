@@ -6,6 +6,7 @@ import { Badge, Button, Field, Select, Textarea, Toggle } from '@/components/ui'
 import { PLACEHOLDERS } from '@/lib/auto-response/resolve';
 import { DangerAction, Disclosure, EditorForm } from '../forms-shared';
 import { deleteAutoResponse, saveAutoResponse } from './actions';
+import { AUTO_RESPONSE_CHANNELS } from './channels';
 
 type Group = { id: string; name: string };
 
@@ -22,23 +23,6 @@ type Rule = {
 };
 
 /**
- * `whatsapp_bot` is missing on purpose: those conversations belong to the
- * customer bot and nothing is ever sent into them. The list matches the one the
- * server action validates against — an option here that the action rejects is a
- * form that fails on save for no reason the admin can see.
- */
-const CHANNELS: { value: string; label: string }[] = [
-  { value: 'email', label: 'Email' },
-  { value: 'whatsapp', label: 'WhatsApp' },
-  { value: 'webchat', label: 'Web chat' },
-  { value: 'facebook', label: 'Facebook messages' },
-  { value: 'facebook_comment', label: 'Facebook comments' },
-  { value: 'instagram', label: 'Instagram messages' },
-  { value: 'instagram_comment', label: 'Instagram comments' },
-  { value: 'portal', label: 'Customer portal' },
-];
-
-/**
  * A rule with no channel skips public comments (`pickRule`), so it is never
  * called "every channel": an admin reading that would expect a comment to be
  * acknowledged when it would not be, or write the company message believing it
@@ -51,7 +35,7 @@ const NO_CHANNEL_WHY =
 function channelLabel(value: string | null): string {
   if (value === null) return NO_CHANNEL;
   // A stale value is shown as itself rather than as the company-wide scope.
-  return CHANNELS.find((channel) => channel.value === value)?.label ?? value;
+  return AUTO_RESPONSE_CHANNELS.find((channel) => channel.value === value)?.label ?? value;
 }
 
 const PLACEHOLDER_HELP = (
@@ -93,7 +77,7 @@ function Fields({ rule, groups }: { rule?: Rule; groups: Group[] }) {
         >
           <Select name="channel" defaultValue={rule?.channel ?? ''}>
             <option value="">{NO_CHANNEL}</option>
-            {CHANNELS.map((channel) => (
+            {AUTO_RESPONSE_CHANNELS.map((channel) => (
               <option key={channel.value} value={channel.value}>
                 {channel.label}
               </option>
@@ -105,7 +89,8 @@ function Fields({ rule, groups }: { rule?: Rule; groups: Group[] }) {
               rule back as every channel. The action refuses it, so the admin
               has to choose.
             */}
-            {rule?.channel && !CHANNELS.some((channel) => channel.value === rule.channel) ? (
+            {rule?.channel &&
+            !AUTO_RESPONSE_CHANNELS.some((channel) => channel.value === rule.channel) ? (
               <option value={rule.channel}>{`${rule.channel} (not offered here)`}</option>
             ) : null}
           </Select>

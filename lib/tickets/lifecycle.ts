@@ -55,28 +55,36 @@ const log = logger('lifecycle');
  * hours slow could be overdue before the mail had arrived. The create branch
  * takes no `at` because its clocks count from the ticket's `created_at`, which
  * email ingest sets to the same receipt.
+ *
+ * `message` is the row that was just stored, by id, because the acknowledgement
+ * judges that message — whether a machine sent it, and on a comment thread whose
+ * it is — and the newest inbound row is not always it: deliveries are processed
+ * in no order (§6.77), and a Meta batch retried whole stores the item that
+ * failed after siblings newer than it.
  */
 export async function afterInboundMessage(
   conversationId: string,
   createdConversation: boolean,
-  at: Date = new Date(),
-  options: { autoReply?: boolean } = {},
+  at: Date,
+  message: { id: string; autoReply?: boolean },
 ): Promise<void> {
+  const trigger = { conversationId, messageId: message.id };
+
   if (createdConversation) {
     await runAutomations('on_create', conversationId);
     await applySlaOnCreate(conversationId);
     await autoAssign(conversationId);
-    await maybeSendAutoResponse(conversationId);
+    await maybeSendAutoResponse(trigger);
     return;
   }
 
   // An out-of-office asks nothing of the team, so it does not restart the
   // next-response clock: an agent who had answered would otherwise owe a reply
   // to the customer's mail server, and breach on it.
-  if (!options.autoReply) await onCustomerReply(conversationId, at);
+  if (!message.autoReply) await onCustomerReply(conversationId, at);
   await runAutomations('on_update', conversationId);
   await autoAssign(conversationId);
-  await maybeSendAutoResponse(conversationId);
+  await maybeSendAutoResponse(trigger);
 }
 
 /**

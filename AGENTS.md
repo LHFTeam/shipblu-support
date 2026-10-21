@@ -618,17 +618,22 @@ a comment channel answers there. The sender then answers only a comment from
 the ticket's own requester (`answersRequester`, in `maybeSendAutoResponse`),
 because anybody may reply under a customer's comment and that reply is filed
 on the customer's ticket; and it names that comment as the reply's target, so
-a reply written before the job runs does not become it. `pickRule` takes the stored channel and
+a reply written before the job runs does not become it. It judges the message
+the lifecycle hands it by id, never the newest inbound row, which after a
+batch retry is a passer-by's reply stored before the requester's older comment. `pickRule` takes the stored channel and
 external id and reads a comment still filed on its platform as the comment
 channel it is moving to, so a rule naming the platform answers that platform's
 direct messages and nothing posted in public; every caller must supply the
-external id, so none can skip the mapping by forgetting it. **The automation
-engine does not handle it yet**: its `channel` fact is the stored column, so a
-`send_reply` rule a comment ticket satisfies — no channel condition,
-`channel is not email`, or `channel is facebook` until the backfill — posts in
-public. The risk, how latent it was when last read, and its fix are in
-`plans/ticket-category-routing.md` under "Risks not closed by the design";
-check production for a `send_reply` rule before relying on it being latent.
+external id, so none can skip the mapping by forgetting it. Its reply leaves
+`{{customer_name}}` blank, because the contact's name can have come from a
+private channel and the reply is published under the post. **The automation
+engine never answers a comment**: `sendCannedReply` refuses a `send_reply` on
+a comment ticket, by `isCommentTicket`, because the engine is handed a ticket
+rather than the comment that set the rule off — an `on_update` rule fires on a
+passer-by's reply as readily as on the customer's — and its reply would be
+posted under whichever comment came in last. Whether a rule may ever answer a
+comment is the support lead's call, in its own change, with a trigger that
+names the comment.
 
 Graph request shapes are written down in `lib/meta/comments.ts` and
 `lib/meta/send.ts` rather than built inline, and asserted there against Meta's
@@ -1229,11 +1234,12 @@ Two different questions decide the language, and they are not the same module.
 **Anything that writes to a customer unattended goes through
 `lib/tickets/locale.ts`** — the out-of-hours acknowledgement and an automation's
 canned reply both call `requesterLocale()`, which picks the most recent inbound
-`reply` carrying words the customer wrote, outside any label of ours, and hands
+`reply` carrying words the requester wrote, outside any label of ours, and hands
 it to `preferredLocale()`. Each of those narrowings closes a way the answer goes
 wrong: the last inbound row of _any_ kind includes the English `system` notice
-we write when a form attachment fails, and a photo sent without a caption is
-stored as our own English `[image]`. A sender that reads the language off a
+we write when a form attachment fails, a photo sent without a caption is
+stored as our own English `[image]`, and on a public comment thread the newest
+words can be a passer-by's reply under the customer's comment. A sender that reads the language off a
 message it already happens to be holding is how the two came to disagree, so do
 not reintroduce that shortcut — one indexed query is the price of the invariant.
 

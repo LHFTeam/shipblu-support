@@ -13,22 +13,9 @@ import type { AdminState } from '../settings-shared';
 import { saveChannel } from './actions';
 import { SubmitButton } from '@/components/submit-button';
 import { useActionForm } from '@/components/use-action-form';
+import { CHANNEL_TYPES, channelTypeLabel, isChannelType, type ChannelType } from './channel-types';
 
 const INITIAL: AdminState = { error: null };
-
-/** The types a form may create or save. Must match `SAVEABLE_TYPES` in ./actions.ts. */
-const EDITABLE = [
-  'email',
-  'whatsapp',
-  'webchat',
-  'facebook',
-  'facebook_comment',
-  'instagram',
-  'instagram_comment',
-  'whatsapp_bot',
-] as const;
-
-type ChannelType = (typeof EDITABLE)[number];
 
 /**
  * A row as the column stores it, which is a wider set than a form can save.
@@ -48,7 +35,7 @@ export type ChannelRow = {
 };
 
 function editableType(type: ChannelRow['type']): ChannelType | null {
-  return (EDITABLE as readonly string[]).includes(type) ? (type as ChannelType) : null;
+  return isChannelType(type) ? type : null;
 }
 
 type Choice = { id: string; name: string };
@@ -82,14 +69,11 @@ export function ChannelForm({
       <div className="flex flex-col gap-3 sm:flex-row">
         <Field label="Type" className="sm:w-40">
           <Select name="type" value={type} onChange={(e) => setType(e.target.value as ChannelType)}>
-            <option value="email">Email</option>
-            <option value="whatsapp">WhatsApp</option>
-            <option value="webchat">Web chat</option>
-            <option value="facebook">Facebook</option>
-            <option value="facebook_comment">Facebook comments</option>
-            <option value="instagram">Instagram</option>
-            <option value="instagram_comment">Instagram comments</option>
-            <option value="whatsapp_bot">WhatsApp — customer bot</option>
+            {CHANNEL_TYPES.map((choice) => (
+              <option key={choice.value} value={choice.value}>
+                {choice.label}
+              </option>
+            ))}
           </Select>
         </Field>
 
@@ -274,12 +258,12 @@ function AddressField({ type, config }: { type: ChannelType; config?: Record<str
     // with a token that must never be in the database. This row is routing only:
     // which group a message from here lands in. A comments row rides the same
     // Page or account as its platform's row, so it names the same variable.
-    const variable =
-      metaPlatformOf(type) === 'facebook' ? 'FACEBOOK_PAGE_ID' : 'INSTAGRAM_ACCOUNT_ID';
+    const platform = metaPlatformOf(type);
+    const variable = platform === 'facebook' ? 'FACEBOOK_PAGE_ID' : 'INSTAGRAM_ACCOUNT_ID';
     return (
       <p className="text-xs text-(--color-text-secondary) sm:flex-1 sm:pt-6">
         {isCommentChannel(type)
-          ? `Public comments on the posts of the account configured by ${variable} in the environment. The oldest active comments row sets their default group, “None” included; until one exists they start in the ${metaPlatformOf(type) === 'facebook' ? 'Facebook' : 'Instagram'} row’s group.`
+          ? `Public comments on the posts of the account configured by ${variable} in the environment. The oldest active comments row sets their default group, “None” included; until one exists they start in the ${channelTypeLabel(platform)} row’s group.`
           : `Configured by ${variable} in the environment. This row only sets the default group.`}
       </p>
     );

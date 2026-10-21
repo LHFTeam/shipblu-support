@@ -86,6 +86,14 @@ async function survey(conversationId: string, channel: ConversationChannel) {
   return row!.id;
 }
 
+async function numberOf(id: string) {
+  const [row] = await db
+    .select({ number: conversations.number })
+    .from(conversations)
+    .where(eq(conversations.id, id));
+  return row!.number;
+}
+
 async function ticketState(id: string) {
   const [row] = await db
     .select({ channel: conversations.channel, channelId: conversations.channelId })
@@ -151,9 +159,19 @@ describe('splitCommentChannels', () => {
       deleted: true,
     });
     const dm = await ticket({ channel: 'facebook', channelId: facebookRow });
+    // Three that 1.3's CHECK refuses and this job cannot move: a comment's
+    // external id on a channel that is not a Meta one, a comment channel with no
+    // comment behind it, and a Facebook comment's id on an Instagram ticket,
+    // which moved would land on the wrong platform's comment channel. Nothing
+    // files any of them; the job names them rather than guessing.
     const email = await ticket({
       channel: 'email',
       externalId: 'facebook:comment:not-a-meta-ticket',
+    });
+    const stray = await ticket({ channel: 'facebook_comment' });
+    const crossed = await ticket({
+      channel: 'instagram',
+      externalId: 'facebook:comment:post-9_c1',
     });
 
     return {
@@ -166,6 +184,8 @@ describe('splitCommentChannels', () => {
       deletedComment,
       dm,
       email,
+      stray,
+      crossed,
       copies: {
         fbSuggestion: await suggestion(fbComment, 'facebook'),
         igSurvey: await survey(igComment, 'instagram'),
@@ -216,6 +236,8 @@ describe('splitCommentChannels', () => {
     // A direct message and anything not on a Meta channel stay where they are.
     expect(await ticketState(a.dm)).toEqual({ channel: 'facebook', channelId: a.facebookRow });
     expect((await ticketState(a.email)).channel).toBe('email');
+    expect(await ticketState(a.stray)).toEqual({ channel: 'facebook_comment', channelId: null });
+    expect((await ticketState(a.crossed)).channel).toBe('instagram');
     expect(await suggestionChannel(a.copies.dmSuggestion)).toBe('facebook');
     expect(await surveyChannel(a.copies.dmSurvey)).toBe('facebook');
   });
@@ -262,9 +284,11 @@ describe('splitCommentChannels', () => {
 
   // The dry run is what the runbook reads before writing, and what says there
   // is nothing left before 1.3 adds its CHECK, so its figures are pinned to the
-  // real run's.
-  it('reports on a dry run what the real run then moves, and nothing after', async () => {
-    await archive();
+  // real run's — and it names what the CHECK would still refuse once nothing is
+  // left to move, which is the half a count of moves cannot see.
+  it('reports on a dry run what the real run then moves, and what the CHECK would still refuse', async () => {
+    const a = await archive();
+    const left = `3 tickets left that this job cannot move and Stage 1.3's CHECK would refuse: #${await numberOf(a.email)}, #${await numberOf(a.stray)}, #${await numberOf(a.crossed)}`;
     const lines = vi.spyOn(console, 'log').mockImplementation(() => {});
     try {
       const said = () => lines.mock.calls.map((call) => String(call[0]));
@@ -274,6 +298,7 @@ describe('splitCommentChannels', () => {
         '[split_comment_channels] facebook: 2 tickets would move to facebook_comment, 2 onto a comments row',
         '[split_comment_channels] instagram: 2 tickets would move to instagram_comment, 0 onto a comments row',
         '[split_comment_channels] dry run: 4 comment tickets, 1 csat_surveys and 1 canned_suggestions would move',
+        `[split_comment_channels] ${left}`,
       ]);
 
       lines.mockClear();
@@ -282,13 +307,29 @@ describe('splitCommentChannels', () => {
         '[split_comment_channels] facebook: 2 tickets moved to facebook_comment, 2 onto a comments row',
         '[split_comment_channels] instagram: 2 tickets moved to instagram_comment, 0 onto a comments row',
         '[split_comment_channels] 4 comment tickets, 1 csat_surveys and 1 canned_suggestions moved',
+        `[split_comment_channels] ${left}`,
       ]);
 
       lines.mockClear();
       await splitCommentChannels(job({ dryRun: true }));
       expect(said()).toEqual([
         '[split_comment_channels] dry run: 0 comment tickets, 0 csat_surveys and 0 canned_suggestions would move',
+        `[split_comment_channels] ${left}`,
       ]);
+    } finally {
+      lines.mockRestore();
+    }
+  });
+
+  it('says there is nothing the CHECK would refuse once there is not', async () => {
+    await ticket({ channel: 'facebook', externalId: 'facebook:comment:post-1_c1' });
+    await ticket({ channel: 'email' });
+    const lines = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      await splitCommentChannels(job());
+      expect(lines.mock.calls.map((call) => String(call[0])).at(-1)).toBe(
+        "[split_comment_channels] 0 tickets left that this job cannot move and Stage 1.3's CHECK would refuse",
+      );
     } finally {
       lines.mockRestore();
     }
