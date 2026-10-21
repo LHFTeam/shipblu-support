@@ -1269,7 +1269,8 @@ deploy it with web and the crons.
     leaves tickets 1.2 wrote legible, since 1.1 reads the comment values, and
     its out-of-hours editor keeps a comments rule's scope visible rather than
     saving it as every channel — but 1.1 still acts on such a rule without the
-    requester check, so the step deactivates them first. Reversing the backfill (its step 3) is one
+    requester check, and its automation engine has no comment refusal, so the
+    step deactivates both kinds of rule first. Reversing the backfill (its step 3) is one
     `UPDATE` each for `conversations`, `csat_surveys` and `canned_suggestions`
     (`replace(channel::text, '_comment', '')::channel` where the channel is a
     comment one), with `channel_id` set back to the platform row where it names
@@ -1303,9 +1304,12 @@ deploy it with web and the crons.
     requester. Fixed:
     - an automation's `send_reply` is refused on a comment ticket (the risk
       below, now closed);
-    - `requesterLocale` reads the requester's own words, so a passer-by's
-      English does not choose the language an Arabic requester is answered in
-      when her newest comment was a photo;
+    - `requesterLocale` reads the requester's own words on a comment thread
+      (and not an authorless row there, which is a purged passer-by's), so a
+      passer-by's English does not choose the language an Arabic requester is
+      answered in when her newest comment was a photo; elsewhere every customer
+      row still counts, so a CC'd colleague's words answer for an email whose
+      requester wrote none;
     - the acknowledgement leaves `{{customer_name}}` blank on a comment, since
       the contact's name may have come from her email;
     - one `commentIdOf` reads a stored comment's id for the acknowledgement and
@@ -1375,7 +1379,13 @@ readers are harmless.
    readers still in place, so nothing writes comment values any more. First
    deactivate every `auto_responses` row naming a comment channel: 1.1 still
    matches one, without `answersRequester`, so a passer-by's comment would earn
-   a public acknowledgement addressed to the requester.
+   a public acknowledgement addressed to the requester. Then the same for
+   automation rules, since 1.1's `sendCannedReply` has no comment refusal: list
+   the active rules with a `send_reply` action as a `SELECT` first
+   (`actions::text like '%send_reply%' and is_active`), and deactivate each
+   one a comment ticket could satisfy — a comment channel named, no channel
+   condition, or a channel condition that excludes rather than names — unless
+   the support lead approves it by name.
 3. **Reverse the backfill** with an `UPDATE`, run as a `SELECT` first, that
    sets each comment channel back to its platform in `conversations`,
    `csat_surveys` and `canned_suggestions`, and points `channel_id` back at the

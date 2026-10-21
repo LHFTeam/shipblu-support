@@ -1234,12 +1234,15 @@ Two different questions decide the language, and they are not the same module.
 **Anything that writes to a customer unattended goes through
 `lib/tickets/locale.ts`** — the out-of-hours acknowledgement and an automation's
 canned reply both call `requesterLocale()`, which picks the most recent inbound
-`reply` carrying words the requester wrote, outside any label of ours, and hands
-it to `preferredLocale()`. Each of those narrowings closes a way the answer goes
+`reply` carrying words the customer wrote, outside any label of ours — on a
+public comment thread, the requester's own — and hands it to
+`preferredLocale()`. Each of those narrowings closes a way the answer goes
 wrong: the last inbound row of _any_ kind includes the English `system` notice
 we write when a form attachment fails, a photo sent without a caption is
-stored as our own English `[image]`, and on a public comment thread the newest
-words can be a passer-by's reply under the customer's comment. A sender that reads the language off a
+stored as our own English `[image]`, and on a comment thread the newest words
+can be a passer-by's reply under the customer's comment. Only there: an
+email's CC'd colleague still speaks for the conversation, or a requester whose
+own mail carried no words would fall to `contacts.locale`. A sender that reads the language off a
 message it already happens to be holding is how the two came to disagree, so do
 not reintroduce that shortcut — one indexed query is the price of the invariant.
 
