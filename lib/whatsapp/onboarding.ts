@@ -1,6 +1,6 @@
-import { and, eq, gt, inArray, ne, sql } from 'drizzle-orm';
+import { and, eq, gt, ne, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
-import { channels, groups, jobs, whatsappOnboardings } from '@/db/schema';
+import { groups, jobs, whatsappOnboardings } from '@/db/schema';
 import { env, metaAppSecret } from '@/lib/env';
 import { errorMessage } from '@/lib/errors';
 import { isTimeout } from '@/lib/http/deadline';
@@ -8,9 +8,10 @@ import { logger } from '@/lib/log';
 import { inspectToken, type TokenInspection } from '@/lib/meta/debug-token';
 import { GRAPH_BASE, graphTimeout } from '@/lib/meta/graph';
 import { enqueue } from '@/lib/queue';
-import { ensureAccountForWaba, listAccounts } from './accounts';
+import { ensureAccountForWaba, listAccounts, parseTokenEnvVar } from './accounts';
 import { callGraph, WhatsAppApiError } from './client';
 import { parseCoexistence } from './coexistence';
+import { channelsOnNumber } from './coexistence-state';
 import {
   credentialKeyProblem,
   REQUIRED_BUSINESS_TOKEN_SCOPES,
@@ -23,7 +24,7 @@ import {
   readWabaRequest,
   tokenExchangeUrl,
 } from './onboarding-requests';
-import { LIVE_ATTEMPT_MS } from './onboarding-view';
+import { LIVE_ATTEMPT_MS, noAdoptCredential } from './onboarding-view';
 
 const log = logger('coexistence');
 
@@ -467,15 +468,11 @@ export async function adoptBusinessAppNumber(
       error: `Business account "${account.name}" is switched off. Switch it on first.`,
     };
   }
-  if (!account.hasStoredToken && !account.tokenEnvVar) {
-    return {
-      ok: false,
-      error:
-        `Business account "${account.name}" names no token variable, so there is nothing to ` +
-        `connect the number with — the shared META_PAGE_ACCESS_TOKEN is the Facebook Page's and ` +
-        `reaches no WhatsApp account. Edit the account and name the WHATSAPP_TOKEN_… variable ` +
-        `holding a system user token assigned business account ${account.wabaId}.`,
-    };
+  // The job's own test (`credentialFor`): a variable naming the shared token
+  // the long way round is no variable.
+  const named = account.tokenEnvVar ? parseTokenEnvVar(account.tokenEnvVar) : null;
+  if (!account.hasStoredToken && (named === null || (named.ok && named.value === null))) {
+    return { ok: false, error: `${noAdoptCredential(account.name, account.wabaId)}.` };
   }
 
   if (claim.defaultGroupId) {
@@ -488,15 +485,7 @@ export async function adoptBusinessAppNumber(
       return { ok: false, error: 'That default group no longer exists — reload the page.' };
   }
 
-  const onNumber = await db
-    .select({ type: channels.type, name: channels.name, config: channels.config })
-    .from(channels)
-    .where(
-      and(
-        inArray(channels.type, ['whatsapp', 'whatsapp_bot']),
-        sql`${channels.config} ->> 'phoneNumberId' = ${phoneNumberId}`,
-      ),
-    );
+  const onNumber = await channelsOnNumber(phoneNumberId);
   // The job refuses this too, but only after subscribing the number: asked
   // here so a mistyped id names the bot before anything at Meta changes.
   if (onNumber.some((channel) => channel.type === 'whatsapp_bot')) {
@@ -514,19 +503,30 @@ export async function adoptBusinessAppNumber(
   // the case adding it again is for, and so is one connected through another
   // WABA: a number is on the one WABA Meta lists it under, so it has moved, and
   // the job's number step proves it is on this one before anything changes.
-  const connected = onNumber.find((channel) => {
+  // `ACCOUNT_OFFBOARDED` is not a disconnection to act on: Meta undoes it by
+  // itself within minutes, and the row's badge says to wait.
+  for (const channel of onNumber) {
     const coexistence = parseCoexistence(channel.config);
-    return (
-      coexistence !== null && !coexistence.disconnected && coexistence.wabaId === account.wabaId
-    );
-  });
-  if (connected) {
-    return {
-      ok: false,
-      error:
-        `Number ${phoneNumberId} is already connected, as channel "${connected.name}". ` +
-        `Nothing needs adding.`,
-    };
+    if (!coexistence || coexistence.wabaId !== account.wabaId) continue;
+    if (coexistence.disconnected?.event === 'ACCOUNT_OFFBOARDED') {
+      return {
+        ok: false,
+        error:
+          `Meta reported number ${phoneNumberId} offboarded on the phone, which it usually ` +
+          `undoes by itself within minutes — wait for the badge on channel "${channel.name}" to ` +
+          `clear before doing anything.`,
+      };
+    }
+    if (!coexistence.disconnected) {
+      return {
+        ok: false,
+        error:
+          `Number ${phoneNumberId} is already connected, as channel "${channel.name}", so ` +
+          `nothing needs adding. To connect it again — to copy its chats once more — disconnect ` +
+          `it from the business platform on the phone first; once Meta reports it disconnected, ` +
+          `it can be added here again.`,
+      };
+    }
   }
 
   const live = await liveAttemptOn(phoneNumberId);

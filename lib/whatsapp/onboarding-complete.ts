@@ -1,7 +1,8 @@
-import { and, eq, inArray, sql } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import {
   channels,
+  ONBOARDING_STEPS,
   type OnboardingStep,
   type OnboardingStepRecord,
   whatsappOnboardings,
@@ -9,7 +10,7 @@ import {
 import { env, metaAppSecret } from '@/lib/env';
 import { errorMessage } from '@/lib/errors';
 import { logger } from '@/lib/log';
-import { inspectToken } from '@/lib/meta/debug-token';
+import { DebugTokenError, inspectToken, type TokenInspection } from '@/lib/meta/debug-token';
 import {
   COEXISTENCE_WHATSAPP_FIELDS,
   readSubscription,
@@ -19,6 +20,7 @@ import { type ClaimedJob, enqueue, isFinalAttempt, retryDelaySeconds } from '@/l
 import {
   credentialsForAccount,
   listAccounts,
+  parseTokenEnvVar,
   TokenVariableError,
   type WhatsAppAccount,
   type WhatsAppCredentials,
@@ -31,7 +33,11 @@ import {
   parseCoexistence,
   type SyncType,
 } from './coexistence';
-import { recordSyncRequest, writeOnboardedCoexistence } from './coexistence-state';
+import {
+  channelsOnNumber,
+  recordSyncRequest,
+  writeOnboardedCoexistence,
+} from './coexistence-state';
 import { CredentialKeyError } from './credential-envelope';
 import { ACCESS_TOKEN_CODE, explainAuthError } from './errors';
 import { redact } from './onboarding';
@@ -43,7 +49,7 @@ import {
   subscribeAppRequest,
   subscribedAppsRequest,
 } from './onboarding-requests';
-import { NUMBER_NOT_ON_ACCOUNT } from './onboarding-view';
+import { NUMBER_NOT_ON_ACCOUNT, noAdoptCredential } from './onboarding-view';
 
 const log = logger('complete_coexistence_onboarding');
 
@@ -166,11 +172,15 @@ export async function completeOnboarding(
         error instanceof CredentialKeyError
           ? `The stored credential could not be opened: ${error.message}`
           : error.message;
-      // Where it failed — or, for a targeted run that failed before reaching
-      // any step, on each step it was asked for, so the button that asked
-      // shows why nothing happened.
+      // Where it failed — or, for a run that failed before reaching any step,
+      // on each step it would have run, so the card shows why nothing
+      // happened: the steps a targeted run was asked for, or the ones a
+      // connected attempt's retry had still to finish. An attempt not yet
+      // connected carries the sentence as its own error instead.
       const failedSteps =
-        progress.step !== 'credential' ? [progress.step] : targeted ? options.only! : [];
+        progress.step !== 'credential'
+          ? [progress.step]
+          : stepsStillToRun(row, options.only, progress.connected);
       const outcome = error instanceof StepFailed ? error.outcome : undefined;
       for (const step of failedSteps)
         await recordStep(row.id, step, {
@@ -195,9 +205,11 @@ export async function completeOnboarding(
       if (targeted || progress.connected) {
         // The number works; the step that would not finish says so, and the
         // row stops promising a retry the queue is not going to make.
-        if (progress.step !== 'credential') {
-          await recordStep(row.id, progress.step, { ok: false, error: gaveUp });
-        }
+        const gaveUpOn =
+          progress.step !== 'credential'
+            ? [progress.step]
+            : stepsStillToRun(row, options.only, progress.connected);
+        for (const step of gaveUpOn) await recordStep(row.id, step, { ok: false, error: gaveUp });
         if (!targeted && !row.steps.templates?.ok) await queueTemplateSync(row.id);
         await finish(row.id, targeted);
         log.warn(`${onboardingId} connected; ${gaveUp}`);
@@ -216,6 +228,22 @@ export async function completeOnboarding(
     }
     throw error;
   }
+}
+
+/**
+ * The steps a run that failed before reaching any of them would have run: a
+ * targeted run's own, or — on a connected attempt's retry — those not yet
+ * done. Nothing for an attempt not yet connected, whose failure is the
+ * attempt's own error.
+ */
+function stepsStillToRun(
+  row: Onboarding,
+  only: OnboardingStep[] | undefined,
+  connected: boolean,
+): OnboardingStep[] {
+  if (only) return only;
+  if (!connected) return [];
+  return ONBOARDING_STEPS.filter((step) => row.steps[step]?.ok !== true);
 }
 
 /** The attempt is done: connected for a full run, left as it was for a targeted one. */
@@ -443,17 +471,17 @@ async function credentialFor(
     // What runs the attempt again: Retry on a failed card, or the channel's
     // copy button for a copy asked for on a connected number, which has none.
     const next = targeted ? 'ask for the copy again' : 'Retry connection';
-    const none = new StepFailed(
-      `Business account "${account.name}" holds no stored credential and names no token ` +
-        `variable, so there is nothing to connect the number with — the shared ` +
-        `META_PAGE_ACCESS_TOKEN is the Facebook Page's own token, not a WhatsApp one. Name the ` +
-        `WHATSAPP_TOKEN_… variable holding a system user token for business account ` +
-        `${account.wabaId} on the account, then ${next}.`,
-    );
+    const none = () =>
+      new StepFailed(`${noAdoptCredential(account.name, account.wabaId)}, then ${next}.`);
+    // A variable that names the shared token the long way round — a row
+    // edited straight in the database — is no variable: it resolves to the
+    // Page token while reporting itself as a variable.
+    const named = account.tokenEnvVar ? parseTokenEnvVar(account.tokenEnvVar) : null;
+    const namesVariable = named !== null && !(named.ok && named.value === null);
     // Asked before resolving as well as after: resolving an account with no
     // source reads the shared token, and where that is unset it throws a
     // sentence about the shared token that the queue would retry for an hour.
-    if (!account.hasStoredToken && !account.tokenEnvVar) throw none;
+    if (!account.hasStoredToken && !namesVariable) throw none();
     // A variable named but not set is the admin's to fix in Render — retrying
     // the same process cannot set it — so it fails the attempt with the
     // sentence, and runs again once the variable is there.
@@ -464,54 +492,70 @@ async function credentialFor(
       throw error;
     });
     // A stored credential forgotten between the listing and the read.
-    if (credentials.source === 'shared') throw none;
-    await refuseOtherApp(credentials);
+    if (credentials.source === 'shared' || (credentials.source === 'variable' && !namesVariable)) {
+      throw none();
+    }
+    // Only a variable can hold another app's token — a stored one was minted by
+    // Meta's window for this app — and only a full run subscribes with it.
+    if (credentials.source === 'variable' && !targeted) await refuseOtherApp(credentials);
     return credentials;
   }
 
-  const forgotten = new StepFailed(
-    'The credential stored when this number was signed in through Meta has since been ' +
-      'forgotten. Connect the number again.',
-  );
-  if (!account.hasStoredToken) throw forgotten;
+  const forgotten = () =>
+    new StepFailed(
+      'The credential stored when this number was signed in through Meta has since been ' +
+        'forgotten. Connect the number again.',
+    );
+  if (!account.hasStoredToken) throw forgotten();
   const credentials = await credentialsForAccount(account);
-  if (credentials.source !== 'stored') throw forgotten;
+  if (credentials.source !== 'stored') throw forgotten();
   return credentials;
 }
 
 /**
- * Refuses a token issued for another Meta app, before anything is subscribed.
+ * Refuses a variable's token unless Meta says it is a valid token of this app,
+ * before anything is subscribed with it.
  *
- * Meta's window can only mint a token for this app, so only an adopted
- * attempt needs asking: its variable holds whatever token somebody pasted into
- * Render, and a system user token is generated for one app of the admin's
- * choosing. The subscribe step would otherwise subscribe *that* app to the
- * WABA — a change at Meta nobody asked for — and then wait for this one to
- * appear in the list, through every retry, while Meta's 24 hours for the copy
- * run out. Only what `debug_token` says is held against it: an inspection that
- * does not answer costs the check, not the connection, since the subscribe
- * step's read-back still refuses an app that is not this one.
+ * A variable holds whatever token somebody pasted into Render, and a system
+ * user token is generated for one app of the admin's choosing. The subscribe
+ * step would otherwise subscribe *that* app to the WABA — a change at Meta
+ * nobody asked for — and then wait for this one to appear in the list,
+ * through every retry, while Meta's 24 hours for the copy run out. So "could
+ * not tell" is never "allowed": Meta refusing to inspect the token, which is
+ * how it usually answers for another app's ("The App_id in the input_token did
+ * not match the Viewing App"), refuses the attempt; a call that did not get an
+ * answer is retried by the queue, before anything at Meta has changed.
  */
 async function refuseOtherApp(credentials: WhatsAppCredentials): Promise<void> {
   const appId = env().META_APP_ID;
-  let inspected: string | null;
+  const name = credentialName(credentials);
+  const generate = `Generate the system user token for app ${appId ?? 'META_APP_ID'}, set it as ${name}, then Retry connection.`;
+
+  let inspection: TokenInspection;
   try {
-    inspected = (await inspectToken(credentials.token)).appId;
+    inspection = await inspectToken(credentials.token);
   } catch (error) {
-    log.warn(
-      `could not inspect ${credentialName(credentials)}: ${redact(
-        errorMessage(error),
-        secretsOf(credentials.token),
-      )}`,
-    );
-    return;
+    const said = redact(errorMessage(error), secretsOf(credentials.token));
+    if (error instanceof DebugTokenError && error.status >= 400 && error.status < 500) {
+      throw new StepFailed(
+        `Meta would not inspect the token in ${name} for this app (${said}), which is how it ` +
+          `answers for a token issued to another app. ${generate}`,
+      );
+    }
+    throw new Error(`Could not inspect the token in ${name}: ${said}`);
   }
-  if (appId && inspected && inspected !== appId) {
+
+  if (!inspection.isValid) {
     throw new StepFailed(
-      `${credentialName(credentials)} holds a token issued for Meta app ${inspected}, not this ` +
-        `one (${appId}), so subscribing with it would subscribe that app instead. Generate the ` +
-        `system user token for app ${appId}, set it as ${credentialName(credentials)}, then try ` +
-        `again.`,
+      `Meta says the token in ${name} is not valid${
+        inspection.error ? `: ${redact(inspection.error, secretsOf(credentials.token))}` : ''
+      }. ${generate}`,
+    );
+  }
+  if (appId && inspection.appId && inspection.appId !== appId) {
+    throw new StepFailed(
+      `${name} holds a token issued for Meta app ${inspection.appId}, not this one (${appId}), ` +
+        `so subscribing with it would subscribe that app instead. ${generate}`,
     );
   }
 }
@@ -712,15 +756,7 @@ async function channelStep(
   facts: NumberFacts,
   subscribedAt: string | null,
 ): Promise<ConnectedChannel> {
-  const existing = await db
-    .select({ id: channels.id, type: channels.type, name: channels.name, config: channels.config })
-    .from(channels)
-    .where(
-      and(
-        inArray(channels.type, ['whatsapp', 'whatsapp_bot']),
-        sql`${channels.config} ->> 'phoneNumberId' = ${row.phoneNumberId}`,
-      ),
-    );
+  const existing = await channelsOnNumber(row.phoneNumberId);
 
   if (existing.some((channel) => channel.type === 'whatsapp_bot')) {
     throw new StepFailed(

@@ -92,6 +92,23 @@ export type OnboardingView = {
   startedByLabel: string | null;
 };
 
+/**
+ * Why a business account cannot have a number adopted onto it: it holds no
+ * stored credential and names no token variable. One sentence for the three
+ * places that say it — the account row's form, the action that refuses, and
+ * the job that refuses again — so the instruction cannot drift between them.
+ * Without the full stop, for a caller to say what to do next.
+ */
+export function noAdoptCredential(accountName: string, wabaId: string): string {
+  return (
+    `Business account "${accountName}" holds no stored credential and names no token ` +
+    `variable, so there is nothing to connect a number with — the shared ` +
+    `META_PAGE_ACCESS_TOKEN is the Facebook Page's own token, not a WhatsApp one. Edit the ` +
+    `account and name the WHATSAPP_TOKEN_… variable holding a system user token for this Meta ` +
+    `app that is assigned business account ${wabaId}`
+  );
+}
+
 /** What each step is doing, in the words the card prints beside it. */
 export const STEP_LABELS: Record<OnboardingStep, string> = {
   number: 'Checking the number is on the business account',
@@ -257,8 +274,10 @@ export function retryable(view: OnboardingView, now: Date): boolean {
  * account, a token variable named or set, a webhook field subscribed — after
  * which Retry is exactly what is needed, whatever is stored: the job runs with
  * the account's own credential and says so if it still has none. A wrong
- * phone number id is added again from the account's row with the right one.
- * Meta's window is not offered, because it is not what any of these fixes.
+ * phone number id is the exception: Meta would list the same numbers again, so
+ * Retry is not offered for it, and the number is added again from the
+ * account's row with an id the failure names. Meta's window is not offered,
+ * because it is not what any of these fixes.
  */
 export function recoveryFor(
   view: OnboardingView,
@@ -267,7 +286,7 @@ export function recoveryFor(
 ): { retry: boolean; connect: boolean } {
   if (view.status === 'failed') {
     return view.origin === 'adopted'
-      ? { retry: true, connect: false }
+      ? { retry: !numberNotOnAccount(view), connect: false }
       : { retry: hasCredential, connect: true };
   }
   return { retry: retryable(view, now), connect: false };

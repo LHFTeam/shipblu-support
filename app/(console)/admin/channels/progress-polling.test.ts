@@ -351,7 +351,7 @@ describe('OnboardingProgress', () => {
       text: () => container.textContent ?? '',
       countdown: () => /retrying (in \d+ (s|min)|now)/.exec(container.textContent ?? '')?.[0],
       rerender: (next: OnboardingView, nextNow: Date) =>
-        act(() => root.render(card(next, nextNow))),
+        act(() => root.render(card(next, nextNow, tokenEnvVar))),
     };
   }
 

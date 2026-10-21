@@ -51,6 +51,7 @@ import {
   connectedFollowUps,
   describeOnboarding,
   lineText,
+  noAdoptCredential,
   type OnboardingView,
   phoneRepliesUnconfirmed,
   recoveryFor,
@@ -1137,8 +1138,9 @@ export function OnboardingProgress({
  * admin away from the one thing still to do — and the card, with the warning on
  * it, leaves the page after a day. So the phone-replies sentence is printed
  * only when the number and subscribe steps say nothing against it, and "Nothing
- * else to do" only when no step failed or asked for something and the
- * credential is stored. What Meta says about the number — not on the Business
+ * else to do" only when no step failed or asked for something and the number
+ * has a credential to send with: the one stored, or — for an adopted number —
+ * the variable its account names. What Meta says about the number — not on the Business
  * app, another platform — is printed as a note and does not hold that line
  * back: nothing on this page changes it (`connectedFollowUps`).
  */
@@ -1385,43 +1387,104 @@ export function RequestSyncAgain({
  * this account's own credential, and the progress card above the accounts
  * follows it like any other.
  *
- * An uncontrolled id box and a group select, so it goes through
- * `useActionForm` and clears on its key after a success, keeping what was typed
- * after a refusal. The notice is drawn from the state, which outlives the reset.
+ * The form is mounted only while it is open, so Cancel and a success both
+ * throw its state away with it: reopening starts from an empty form rather
+ * than the last refusal. A refusal keeps what was typed, since the form goes
+ * through `useActionForm`. The success notice outlives the form here, beside
+ * the button that opens it again.
  */
 export function AdoptBusinessAppNumber({
   accountId,
+  accountName,
   wabaId,
   credentialLabel,
   groups,
   suggestedGroupId,
   disabled,
+  onBusyChange,
 }: {
   accountId: string;
+  accountName: string;
   wabaId: string;
   /** What the job will send with: "its stored credential", or the variable's name — null when neither. */
   credentialLabel: string | null;
   groups: Choice[];
   suggestedGroupId: string | null;
   disabled: boolean;
+  /** Told while the action runs, so the row's controls that would unmount this one wait. */
+  onBusyChange: (busy: boolean) => void;
 }) {
   const [open, setOpen] = useState(false);
-  // Closed on a success, which unmounts the form — so it needs no key to clear
-  // on — and leaves the notice beside the button that opens it again.
-  const { state, form } = useActionForm(adoptCoexistenceNumber, INITIAL, {
-    onSuccess: () => setOpen(false),
-  });
+  const [notice, setNotice] = useState<string | null>(null);
 
   if (!open) {
     return (
       <div className="flex flex-col items-start gap-1">
-        <Button variant="secondary" size="sm" onClick={() => setOpen(true)} disabled={disabled}>
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={() => {
+            setNotice(null);
+            setOpen(true);
+          }}
+          disabled={disabled}
+        >
           Add a number connected in Meta
         </Button>
-        {state.notice ? <SuccessText>{state.notice}</SuccessText> : null}
+        {notice ? <SuccessText>{notice}</SuccessText> : null}
       </div>
     );
   }
+
+  return (
+    <AdoptForm
+      accountId={accountId}
+      accountName={accountName}
+      wabaId={wabaId}
+      credentialLabel={credentialLabel}
+      groups={groups}
+      suggestedGroupId={suggestedGroupId}
+      onBusyChange={onBusyChange}
+      onCancel={() => setOpen(false)}
+      onDone={(sentence) => {
+        setNotice(sentence);
+        setOpen(false);
+      }}
+    />
+  );
+}
+
+function AdoptForm({
+  accountId,
+  accountName,
+  wabaId,
+  credentialLabel,
+  groups,
+  suggestedGroupId,
+  onBusyChange,
+  onCancel,
+  onDone,
+}: {
+  accountId: string;
+  accountName: string;
+  wabaId: string;
+  credentialLabel: string | null;
+  groups: Choice[];
+  suggestedGroupId: string | null;
+  onBusyChange: (busy: boolean) => void;
+  onCancel: () => void;
+  onDone: (notice: string | null) => void;
+}) {
+  // `: void` by hand: the handler reads the state this same call returns, and
+  // TypeScript cannot infer a return type through that loop.
+  const { state, form, pending } = useActionForm(adoptCoexistenceNumber, INITIAL, {
+    onSuccess: (): void => onDone(state.notice ?? null),
+  });
+  useEffect(() => {
+    onBusyChange(pending);
+  }, [pending, onBusyChange]);
+  // Unmounted mid-submit — a success closes it — leaves nothing to report busy.
+  useEffect(() => () => onBusyChange(false), [onBusyChange]);
 
   return (
     <form {...form} className="flex w-full flex-col gap-3">
@@ -1433,13 +1496,7 @@ export function AdoptBusinessAppNumber({
         phone is asked for its contacts and up to six months of chats — which Meta allows only in
         the 24 hours after the number was connected there, so add it soon after.
       </p>
-      {credentialLabel ? null : (
-        <ErrorText>
-          This account names no token variable, so there is nothing to connect a number with. Edit
-          it and name the WHATSAPP_TOKEN_… variable holding a system user token assigned business
-          account {wabaId}.
-        </ErrorText>
-      )}
+      {credentialLabel ? null : <ErrorText>{noAdoptCredential(accountName, wabaId)}.</ErrorText>}
       <div className="flex flex-wrap gap-3">
         <Field
           label="Phone number ID"
@@ -1465,14 +1522,14 @@ export function AdoptBusinessAppNumber({
       </div>
       {credentialLabel ? (
         <p className="text-xs text-(--color-text-secondary)">
-          Connected with {credentialLabel}, whose system user must be assigned business account{' '}
-          {wabaId} in Meta&rsquo;s Business settings.
+          Connected with {credentialLabel}, which must be a system user token for this Meta app
+          whose system user is assigned business account {wabaId} in Meta&rsquo;s Business settings.
         </p>
       ) : null}
       <ErrorText>{state.error}</ErrorText>
       <div className="flex items-center gap-2">
         <SubmitButton idle="Add number" busy="Adding…" />
-        <Button variant="ghost" size="sm" onClick={() => setOpen(false)}>
+        <Button variant="ghost" size="sm" onClick={onCancel} disabled={pending}>
           Cancel
         </Button>
       </div>

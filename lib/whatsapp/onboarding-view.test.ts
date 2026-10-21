@@ -327,6 +327,16 @@ describe('retryable and recoveryFor', () => {
       retry: false,
       connect: false,
     });
+
+    // A wrong phone number id: Meta would list the same numbers again.
+    const wrongNumber = view({
+      status: 'failed',
+      origin: 'adopted',
+      steps: {
+        number: { at: iso(1_000), ok: false, error: 'not on it', outcome: NUMBER_NOT_ON_ACCOUNT },
+      },
+    });
+    expect(recoveryFor(wrongNumber, at(0), false)).toEqual({ retry: false, connect: false });
   });
 });
 

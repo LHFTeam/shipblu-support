@@ -1635,38 +1635,45 @@ describe('adopting a number connected in Meta’s own interface', () => {
     expect(await queued('complete_coexistence_onboarding')).toEqual([]);
   });
 
-  it('refuses a number already connected, and adds one the phone disconnected', async () => {
+  it('refuses a number already connected, waits out an offboarding, and adds one the phone disconnected', async () => {
     const accountId = await account();
     const first = await adopted(accountId);
     graph(completeRoutes());
     await completeOnboarding(first, { job: JOB });
+    const adopt = async () =>
+      adoptBusinessAppNumber(
+        { accountId, phoneNumberId: PHONE, defaultGroupId: null },
+        await admin(),
+      );
 
-    const again = await adoptBusinessAppNumber(
-      { accountId, phoneNumberId: PHONE, defaultGroupId: null },
-      await admin(),
-    );
-    expect(again).toMatchObject({ ok: false, error: expect.stringMatching(/already connected/) });
+    expect(await adopt()).toMatchObject({
+      ok: false,
+      error: expect.stringMatching(/already connected.*disconnect it from the business platform/s),
+    });
 
     const channel = await channelFor();
-    await db
-      .update(channels)
-      .set({
-        config: sql`jsonb_set(${channels.config}, '{coexistence,disconnected}', ${JSON.stringify({
-          at: new Date().toISOString(),
-          event: 'ACCOUNT_OFFBOARDED',
-          reason: null,
-          initiatedBy: null,
-        })}::jsonb)`,
-      })
-      .where(eq(channels.id, channel!.id));
-    expect(
-      (
-        await adoptBusinessAppNumber(
-          { accountId, phoneNumberId: PHONE, defaultGroupId: null },
-          await admin(),
-        )
-      ).ok,
-    ).toBe(true);
+    const disconnect = (event: string) =>
+      db
+        .update(channels)
+        .set({
+          config: sql`jsonb_set(${channels.config}, '{coexistence,disconnected}', ${JSON.stringify({
+            at: new Date().toISOString(),
+            event,
+            reason: null,
+            initiatedBy: null,
+          })}::jsonb)`,
+        })
+        .where(eq(channels.id, channel!.id));
+
+    // Meta undoes this one by itself; adding the number now would restart its copies.
+    await disconnect('ACCOUNT_OFFBOARDED');
+    expect(await adopt()).toMatchObject({
+      ok: false,
+      error: expect.stringMatching(/usually undoes/),
+    });
+
+    await disconnect('PARTNER_REMOVED');
+    expect((await adopt()).ok).toBe(true);
   });
 
   it('refuses a second attempt while the first is live', async () => {
@@ -1800,6 +1807,136 @@ describe('adopting a number connected in Meta’s own interface', () => {
     expect(moved.ok).toBe(true);
   });
 
+  it('treats a variable naming the shared token the long way round as no variable', async () => {
+    const accountId = await account('meta_page_access_token');
+    expect(
+      await adoptBusinessAppNumber(
+        { accountId, phoneNumberId: PHONE, defaultGroupId: null },
+        await admin(),
+      ),
+    ).toMatchObject({ ok: false, error: expect.stringMatching(/holds no stored credential/) });
+
+    // A row edited after the attempt was queued: the job refuses it too.
+    await db
+      .update(whatsappAccounts)
+      .set({ tokenEnvVar: VARIABLE })
+      .where(eq(whatsappAccounts.id, accountId));
+    const id = await adopted(accountId);
+    await db
+      .update(whatsappAccounts)
+      .set({ tokenEnvVar: 'META_PAGE_ACCESS_TOKEN' })
+      .where(eq(whatsappAccounts.id, accountId));
+    process.env.META_PAGE_ACCESS_TOKEN = 'page-token';
+    resetEnvCache();
+    const fetch = graph(completeRoutes());
+
+    expect(await completeOnboarding(id, { job: JOB })).toBe('failed');
+    expect((await onboardingRow(id)).error).toMatch(/holds no stored credential/);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  /** Graph's answers for a token it will not vouch for, and one it could not be asked about. */
+  const debugAnswering = (status: number, body: unknown): Route => ({
+    method: 'GET',
+    path: /\/debug_token\?/,
+    status,
+    answer: () => body,
+  });
+  const subscribePosts = (fetch: ReturnType<typeof graph>) =>
+    fetch.mock.calls.filter(
+      ([url, init]) => init?.method === 'POST' && String(url).includes('/subscribed_apps'),
+    );
+
+  it('refuses a token Meta will not inspect for this app, before subscribing anything', async () => {
+    const accountId = await account();
+    const id = await adopted(accountId);
+    const fetch = graph(
+      completeRoutes({
+        debug: debugAnswering(400, {
+          error: {
+            message: 'The App_id in the input_token did not match the Viewing App',
+            code: 100,
+          },
+        }),
+      }),
+    );
+
+    expect(await completeOnboarding(id, { job: JOB })).toBe('failed');
+    const { error } = await onboardingRow(id);
+    expect(error).toMatch(/Meta would not inspect the token in WHATSAPP_TOKEN_ADOPTED/);
+    expect(error).toMatch(/did not match the Viewing App/);
+    expect(error).not.toContain(VARIABLE_TOKEN);
+    expect(subscribePosts(fetch)).toEqual([]);
+  });
+
+  it('refuses a token Meta says is not valid, before subscribing anything', async () => {
+    const accountId = await account();
+    const id = await adopted(accountId);
+    const fetch = graph(
+      completeRoutes({
+        debug: debugAnswering(200, {
+          data: { is_valid: false, error: { message: 'Session has expired', code: 190 } },
+        }),
+      }),
+    );
+
+    expect(await completeOnboarding(id, { job: JOB })).toBe('failed');
+    expect((await onboardingRow(id)).error).toMatch(/not valid: Session has expired/);
+    expect(subscribePosts(fetch)).toEqual([]);
+  });
+
+  it('retries, subscribing nothing, when the inspection does not get an answer', async () => {
+    const accountId = await account();
+    const id = await adopted(accountId);
+    const fetch = graph(completeRoutes({ debug: debugAnswering(503, { error: 'unavailable' }) }));
+
+    await expect(completeOnboarding(id, { job: JOB })).rejects.toThrow(/Could not inspect/);
+    expect(await onboardingRow(id)).toMatchObject({
+      status: 'exchanged',
+      lastTransientError: expect.stringMatching(
+        /Could not inspect the token in WHATSAPP_TOKEN_ADOPTED/,
+      ),
+    });
+    expect(subscribePosts(fetch)).toEqual([]);
+  });
+
+  it('says on the card why a retry after the channel exists could not carry on', async () => {
+    const accountId = await account();
+    const id = await adopted(accountId);
+    // The channel is made, then the history request fails transiently: the
+    // queue will run the attempt again, with steps still to finish.
+    graph(
+      completeRoutes({
+        sync: {
+          method: 'POST',
+          path: new RegExp(`/${PHONE}/smb_app_data$`),
+          answer: (_url, body) =>
+            (body as { sync_type: string }).sync_type === 'history'
+              ? new Response(JSON.stringify({ error: { message: 'Try later', code: 2 } }), {
+                  status: 503,
+                })
+              : { messaging_product: 'whatsapp', request_id: 'req-contacts' },
+        },
+      }),
+    );
+    await expect(completeOnboarding(id, { job: JOB })).rejects.toThrow();
+    expect((await onboardingRow(id)).steps.channel).toMatchObject({ ok: true });
+
+    // Before the retry, the variable goes.
+    delete process.env[VARIABLE];
+    expect(await completeOnboarding(id, { job: { attempts: 2, maxAttempts: 5 } })).toBe(
+      'connected',
+    );
+    const row = await onboardingRow(id);
+    for (const step of ['history', 'templates'] as const) {
+      expect(row.steps[step]).toMatchObject({
+        ok: false,
+        error: expect.stringMatching(/WHATSAPP_TOKEN_ADOPTED .*is not set/s),
+      });
+    }
+    expect(row.steps.contacts).toMatchObject({ ok: true });
+  });
+
   it('names the variable, not Meta’s window, when Meta refuses the token', async () => {
     const accountId = await account();
     const id = await adopted(accountId);
@@ -1869,6 +2006,8 @@ describe('adopting a number connected in Meta’s own interface', () => {
 
     expect(await completeOnboarding(id, { job: JOB })).toBe('connected');
     expect(new Set(bearersFor(fetch, WABA, SECOND))).toEqual(new Set([`Bearer ${TOKEN}`]));
+    // Meta's window minted it for this app, so nothing asks debug_token about it.
+    expect(fetch.mock.calls.some(([url]) => String(url).includes('/debug_token'))).toBe(false);
     expect(parseCoexistence((await channelFor(SECOND))!.config)).toMatchObject({
       onboardingId: id,
       adopted: true,

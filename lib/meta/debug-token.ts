@@ -93,6 +93,22 @@ function normalise(data: DebugTokenData): TokenInspection {
 }
 
 /**
+ * `debug_token` could not give an answer about the token, and why: `status` is
+ * the HTTP status Meta answered with, or 0 when nothing answered. Its own class
+ * so a caller can tell Meta refusing to inspect a token — a 4xx, which is how
+ * it answers for a token issued to another app — from a call that did not get
+ * through, which a retry may cure. Everyone else reads it as an `Error`.
+ */
+export class DebugTokenError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+  }
+}
+
+/**
  * What Meta says about `inputToken`.
  *
  * Throws when Meta could not be asked — the app credentials are missing, the
@@ -123,16 +139,17 @@ export async function inspectToken(inputToken: string): Promise<TokenInspection>
     // Re-said rather than rethrown: the network layer's own message is not
     // ours to vouch for, and the one thing that must not survive into it is
     // the token riding in the query string.
-    throw new Error(redact(errorMessage(error), inputToken));
+    throw new DebugTokenError(redact(errorMessage(error), inputToken), 0);
   }
 
   const { ok, status, body } = answer;
   if (!ok || !body?.data) {
-    throw new Error(
+    throw new DebugTokenError(
       redact(
         `debug_token failed (HTTP ${status}): ${JSON.stringify(body?.error ?? body)}`,
         inputToken,
       ),
+      status,
     );
   }
 

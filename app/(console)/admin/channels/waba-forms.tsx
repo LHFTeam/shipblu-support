@@ -189,6 +189,10 @@ export function WhatsAppAccountEditor({
   // answer arrives on, while the window stays open — the business would finish
   // the steps, and Meta unlink the phone's devices, for an answer nobody hears.
   const [reconnecting, setReconnecting] = useState(false);
+  // The same for an adopt request on its way: Edit and Disconnect would
+  // unmount the form, and with it the notice saying what was queued.
+  const [adopting, setAdopting] = useState(false);
+  const busy = reconnecting || adopting;
 
   if (editing) {
     return (
@@ -275,12 +279,7 @@ export function WhatsAppAccountEditor({
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={() => setEditing(true)}
-            disabled={reconnecting}
-          >
+          <Button variant="secondary" size="sm" onClick={() => setEditing(true)} disabled={busy}>
             Edit
           </Button>
           {account.credential && canConnect ? (
@@ -290,14 +289,14 @@ export function WhatsAppAccountEditor({
                 mode="reconnect"
                 onBusyChange={setReconnecting}
               />
-              <ForgetCredential accountId={account.id} disabled={reconnecting} />
+              <ForgetCredential accountId={account.id} disabled={busy} />
             </>
           ) : null}
           <DangerAction
             action={deleteWhatsAppAccount}
             id={account.id}
             label="Disconnect"
-            disabled={reconnecting}
+            disabled={busy}
           />
         </div>
       </div>
@@ -307,11 +306,13 @@ export function WhatsAppAccountEditor({
       {canConnect && account.isActive ? (
         <AdoptBusinessAppNumber
           accountId={account.id}
+          accountName={account.name}
           wabaId={account.wabaId}
           credentialLabel={account.credential ? 'its stored credential' : account.tokenEnvVar}
           groups={connect.groups}
           suggestedGroupId={connect.suggestedGroupId}
           disabled={reconnecting}
+          onBusyChange={setAdopting}
         />
       ) : null}
     </div>
