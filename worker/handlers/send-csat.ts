@@ -9,8 +9,7 @@ import { surveyText } from '@/lib/csat/wording';
 import { cardRefusalStands, decideSurvey, type SurveyTrigger } from '@/lib/csat/decision';
 import { carriesLink } from '@/lib/csat/delivery';
 import { readCsatSettings } from '@/lib/csat/settings';
-import { rootCommentId } from '@/lib/meta/comments';
-import { isReadOnlyChannel } from '@/lib/tickets/channel-policy';
+import { isCommentTicket, isMetaChannel, isReadOnlyChannel } from '@/lib/tickets/channel-policy';
 import { requesterLocale } from '@/lib/tickets/locale';
 import { notReaction } from '@/lib/tickets/not-reaction';
 import { automatedReplyBlocked, lacksEmailRecipient, sendsByEmail } from '@/lib/tickets/outbound';
@@ -92,7 +91,7 @@ export async function sendCsat(job: ClaimedJob): Promise<void> {
   // A read that fails fails the job, so the queue retries: "off" written on
   // the ticket would outlive the hiccup.
   const settings = await readCsatSettings();
-  const isMeta = ticket.channel === 'facebook' || ticket.channel === 'instagram';
+  const isMeta = isMetaChannel(ticket.channel);
   // Both of Meta's windows measured at one instant, so the decision cannot
   // see the card's seven days and the message's 24 hours at different times.
   const now = new Date();
@@ -108,7 +107,7 @@ export async function sendCsat(job: ClaimedJob): Promise<void> {
       suppressedBy: ticket.suppressedBy,
       resolvedByRule: ticket.resolvedByRule,
       lacksRecipient: lacksEmailRecipient(ticket.channel, ticket.contactEmail),
-      commentThread: rootCommentId(ticket.externalId) !== null,
+      commentThread: isCommentTicket(ticket.channel, ticket.externalId),
       // The third automated sender, through the same guard as the other two:
       // past 24 hours only `HUMAN_AGENT` sends on these platforms, and that tag
       // is reserved for a message a person wrote.

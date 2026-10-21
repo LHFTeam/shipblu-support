@@ -52,13 +52,17 @@ const context = {
 describe('pickRule', () => {
   it('matches a rule that names neither dimension against anything', () => {
     const company = rule({ id: 'company' });
-    expect(pickRule([company], { groupId: 'g1', channel: 'email' })?.id).toBe('company');
-    expect(pickRule([company], { groupId: null, channel: 'whatsapp' })?.id).toBe('company');
+    expect(pickRule([company], { groupId: 'g1', channel: 'email', externalId: null })?.id).toBe(
+      'company',
+    );
+    expect(pickRule([company], { groupId: null, channel: 'whatsapp', externalId: null })?.id).toBe(
+      'company',
+    );
   });
 
   it('does not match a rule scoped to another group or channel', () => {
     const rules = [rule({ id: 'returns', groupId: 'g2' }), rule({ id: 'wa', channel: 'whatsapp' })];
-    expect(pickRule(rules, { groupId: 'g1', channel: 'email' })).toBeNull();
+    expect(pickRule(rules, { groupId: 'g1', channel: 'email', externalId: null })).toBeNull();
   });
 
   it('prefers the channel rule over the group rule', () => {
@@ -67,7 +71,9 @@ describe('pickRule', () => {
       rule({ id: 'group', groupId: 'g1' }),
       rule({ id: 'channel', channel: 'whatsapp' }),
     ];
-    expect(pickRule(rules, { groupId: 'g1', channel: 'whatsapp' })?.id).toBe('channel');
+    expect(pickRule(rules, { groupId: 'g1', channel: 'whatsapp', externalId: null })?.id).toBe(
+      'channel',
+    );
   });
 
   it('prefers a rule naming both dimensions over either alone', () => {
@@ -76,19 +82,110 @@ describe('pickRule', () => {
       rule({ id: 'group', groupId: 'g1' }),
       rule({ id: 'both', groupId: 'g1', channel: 'whatsapp' }),
     ];
-    expect(pickRule(rules, { groupId: 'g1', channel: 'whatsapp' })?.id).toBe('both');
+    expect(pickRule(rules, { groupId: 'g1', channel: 'whatsapp', externalId: null })?.id).toBe(
+      'both',
+    );
   });
 
   // The fallback is what makes turning a rule off safe: an admin disabling the
   // WhatsApp wording should get the company message back, not silence.
   it('falls through to the broader rule when the specific one is filtered out', () => {
     const active = [rule({ id: 'company' })];
-    expect(pickRule(active, { groupId: 'g1', channel: 'whatsapp' })?.id).toBe('company');
+    expect(pickRule(active, { groupId: 'g1', channel: 'whatsapp', externalId: null })?.id).toBe(
+      'company',
+    );
   });
 
   it('matches a group rule for a ticket with no group only when the rule has none', () => {
     const rules = [rule({ id: 'group', groupId: 'g1' }), rule({ id: 'company' })];
-    expect(pickRule(rules, { groupId: null, channel: 'email' })?.id).toBe('company');
+    expect(pickRule(rules, { groupId: null, channel: 'email', externalId: null })?.id).toBe(
+      'company',
+    );
+  });
+
+  // A reply on a comment is posted under it, in public. So a message written
+  // for every channel — or every channel in a group — never goes there, and a
+  // comment is acknowledged only by a rule that names its comment channel.
+  it('keeps a rule with no channel off a public comment', () => {
+    const rules = [rule({ id: 'company' }), rule({ id: 'group', groupId: 'g1' })];
+    for (const channel of ['facebook_comment', 'instagram_comment'] as const) {
+      expect(pickRule(rules, { groupId: 'g1', channel, externalId: null })).toBeNull();
+    }
+    // The same rules still answer the platform's direct messages.
+    expect(pickRule(rules, { groupId: 'g1', channel: 'facebook', externalId: null })?.id).toBe(
+      'group',
+    );
+  });
+
+  it('acknowledges a comment with a rule that names its comment channel', () => {
+    const rules = [
+      rule({ id: 'company' }),
+      rule({ id: 'messages', channel: 'facebook' }),
+      rule({ id: 'comments', channel: 'facebook_comment' }),
+    ];
+    expect(
+      pickRule(rules, { groupId: null, channel: 'facebook_comment', externalId: null })?.id,
+    ).toBe('comments');
+    expect(
+      pickRule(rules, { groupId: null, channel: 'instagram_comment', externalId: null }),
+    ).toBeNull();
+    // The platform's rule is its direct messages', and only theirs.
+    expect(pickRule(rules, { groupId: null, channel: 'facebook', externalId: null })?.id).toBe(
+      'messages',
+    );
+  });
+
+  // Every comment ticket carries its platform's channel until Stage 1.2 moves
+  // it. Matched raw, a "Facebook messages" rule would be posted under the
+  // comment and a "Facebook comments" rule would never fire; matched as the
+  // comment it is, both answer as they will after the move.
+  it('matches a comment still filed on its platform as the comment it is', () => {
+    const rules = [
+      rule({ id: 'company' }),
+      rule({ id: 'messages', channel: 'facebook' }),
+      rule({ id: 'comments', channel: 'facebook_comment' }),
+    ];
+    const legacy = {
+      groupId: null,
+      channel: 'facebook',
+      externalId: 'facebook:comment:1_2',
+    } as const;
+    expect(pickRule(rules, legacy)?.id).toBe('comments');
+
+    const onlyPlatform = [rule({ id: 'company' }), rule({ id: 'messages', channel: 'facebook' })];
+    expect(pickRule(onlyPlatform, legacy)).toBeNull();
+
+    // And once the backfill has moved it, keeping its external id.
+    const moved = { ...legacy, channel: 'facebook_comment' } as const;
+    expect(pickRule(rules, moved)?.id).toBe('comments');
+    expect(pickRule(onlyPlatform, moved)).toBeNull();
+
+    const instagram = [rule({ id: 'ig-comments', channel: 'instagram_comment' })];
+    expect(
+      pickRule(instagram, {
+        groupId: null,
+        channel: 'instagram',
+        externalId: 'instagram:comment:17890',
+      })?.id,
+    ).toBe('ig-comments');
+  });
+
+  it('reads the external id only as a comment on a Meta channel', () => {
+    const rules = [
+      rule({ id: 'messages', channel: 'facebook' }),
+      rule({ id: 'email', channel: 'email' }),
+    ];
+    // A direct message's external id is null; any other shape is not a comment.
+    expect(pickRule(rules, { groupId: null, channel: 'facebook', externalId: null })?.id).toBe(
+      'messages',
+    );
+    expect(
+      pickRule(rules, { groupId: null, channel: 'facebook', externalId: 'facebook:123' })?.id,
+    ).toBe('messages');
+    // A comment-shaped id on a channel that is not Meta's moves nothing.
+    expect(
+      pickRule(rules, { groupId: null, channel: 'email', externalId: 'facebook:comment:1_2' })?.id,
+    ).toBe('email');
   });
 });
 

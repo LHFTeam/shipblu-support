@@ -1817,7 +1817,12 @@ on node type (User)` with no subcode, which that predicate declines by design,
     signature check, the Instagram comment parser and the ingest all work — and
     proves nothing about the account, because the test button posts straight to
     the callback whatever the account is subscribed to. **No real Instagram
-    comment has ever arrived.**
+    comment has ever arrived.** _Corrected 2026-10-20:_ they have since. Eight
+    real Instagram comment tickets exist, the first **#13745** on 2026-08-30 —
+    the day after this was written — and the latest three on 2026-10-15: nine
+    `instagram` rows whose `external_id` contains `:comment:`, less #10942.
+    What follows on App Review describes the gate as it was read that day;
+    which grant lifted it is not recorded here.
 
   **The `instagram` object is the right one, and the subscription is right.**
   Confirmed by running the job: `comments` is already in the app-level field

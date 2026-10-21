@@ -2,6 +2,7 @@ import { DateTime } from 'luxon';
 import { describe, expect, it, vi } from 'vitest';
 import {
   ago,
+  channelLabel,
   formatDateTime,
   formatDay,
   formatOpens,
@@ -162,6 +163,20 @@ describe('formatRelative', () => {
     // A row written after the clock reading it is compared with — a message
     // that landed between a server render and the bucket it is drawn against.
     expect(ago(-5 * MINUTE)).toBe('now');
+  });
+});
+
+describe('channelLabel', () => {
+  it('names every channel as its badge does, comments included', () => {
+    expect(channelLabel('facebook')).toBe('Facebook');
+    expect(channelLabel('facebook_comment')).toBe('Facebook comment');
+    expect(channelLabel('instagram_comment')).toBe('Instagram comment');
+    expect(channelLabel('whatsapp_bot')).toBe('Customer bot');
+  });
+
+  it('prints a value that is no channel as itself, and is not fooled by a prototype key', () => {
+    expect(channelLabel('fax')).toBe('fax');
+    expect(channelLabel('toString')).toBe('toString');
   });
 });
 

@@ -18,9 +18,8 @@ import type { SessionAgent } from '@/lib/auth/session';
 import { can } from '@/lib/auth/permissions';
 import { heldByOrInGroupsOf, inGroupsOf } from './assignment-scope';
 import { assignmentScope, assignmentVisibility } from './visibility';
-import { hiddenChannels, restrictedChannels } from './channel-policy';
+import { hiddenChannels, isCommentTicket, restrictedChannels } from './channel-policy';
 import { notReaction } from './not-reaction';
-import { rootCommentId } from '@/lib/meta/comments';
 import { sbidMatches, trackingMatches } from '@/lib/shipments/queries';
 import { cleanQuery, textMatches } from '@/lib/search/text';
 import { parseSearchTerm } from './search';
@@ -353,7 +352,8 @@ export async function listInbox(
       assigneeColor: row.assigneeColor,
       lastMessageAt: row.lastMessageAt,
       lastCustomerMessageAt: row.lastCustomerMessageAt,
-      isComment: rootCommentId(row.externalId) !== null,
+      // Decided once, here; the badges read it rather than asking again.
+      isComment: isCommentTicket(row.channel, row.externalId),
       tags: row.tags,
       preview: row.preview,
       lastFromUs: row.lastFromUs,

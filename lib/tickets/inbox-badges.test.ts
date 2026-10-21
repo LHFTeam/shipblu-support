@@ -61,6 +61,20 @@ describe('rowBadges', () => {
     ]);
   });
 
+  // `listInbox` decides `isComment` once, through `isCommentTicket`, which is
+  // true on a comment channel whatever its external id; the badges read it.
+  it('gives a comment channel no window and calls it public', () => {
+    for (const channel of ['facebook_comment', 'instagram_comment']) {
+      expect(
+        rowBadges(
+          row({ channel, isComment: true, lastCustomerMessageAt: hoursAgo(200) }),
+          NOW,
+          'avatar',
+        ),
+      ).toEqual([{ key: 'comment', tone: 'public', label: 'Public comment' }]);
+    }
+  });
+
   it('marks a Messenger thread outside 24 hours and after seven days', () => {
     expect(
       labels(row({ channel: 'instagram', lastCustomerMessageAt: hoursAgo(30) }), NOW, 'avatar'),

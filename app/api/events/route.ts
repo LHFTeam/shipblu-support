@@ -97,10 +97,11 @@ export async function GET(request: Request) {
       };
 
       // Wired before the connection is opened rather than after it is listening.
-      // The seven LISTEN round trips below are seven chances for the client to
-      // go away, and while this listener was registered after them there was
-      // nothing at all attached to the request lifecycle for that whole window
-      // — so an abort during it stranded the backend permanently (§62).
+      // The LISTEN round trips below, one per topic and so one per channel on
+      // the unfiltered queue, are as many chances for the client to go away,
+      // and while this listener was registered after them there was nothing at
+      // all attached to the request lifecycle for that whole window — so an
+      // abort during it stranded the backend permanently (§62).
       request.signal.addEventListener('abort', cleanup);
 
       // Armed early for the same reason: a stream that takes a while to start

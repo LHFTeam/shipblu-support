@@ -5,7 +5,7 @@ import { loadHoursCatalog } from '@/lib/hours/catalog';
 import { groupHours } from '@/lib/hours/resolve';
 import { holidayName, holidayOn, isWithinBusinessHours, nextOpeningAt } from '@/lib/hours';
 import { textToHtml } from '@/lib/html/sanitize';
-import { isReadOnlyChannel } from '@/lib/tickets/channel-policy';
+import { isReadOnlyChannel, type ConversationChannel } from '@/lib/tickets/channel-policy';
 import {
   automatedReplyBlocked,
   deliverAutomatedReply,
@@ -36,7 +36,7 @@ const log = logger('auto-response');
 type Ticket = {
   id: string;
   number: number;
-  channel: string;
+  channel: ConversationChannel;
   groupId: string | null;
   isSpam: boolean;
   deletedAt: Date | null;
@@ -87,7 +87,11 @@ async function send(conversationId: string, at: Date): Promise<void> {
   // number whose replies we do not receive.
   if (isReadOnlyChannel(ticket.channel)) return;
 
-  const rule = pickRule(rules, { groupId: ticket.groupId, channel: ticket.channel });
+  const rule = pickRule(rules, {
+    groupId: ticket.groupId,
+    channel: ticket.channel,
+    externalId: ticket.externalId,
+  });
   if (!rule || rule.silent) return;
 
   const hours = groupHours(await loadHoursCatalog(), ticket.groupId);
@@ -166,8 +170,10 @@ async function send(conversationId: string, at: Date): Promise<void> {
   // English first in the log line — the audience is whoever is reading Render's
   // logs, not the customer — falling back to the Arabic name when that is the
   // only one the calendar carries.
+  // The rule's channel where it names one: a comment still filed on its
+  // platform was matched as its comment channel, and is logged as one.
   log.info(
-    `acknowledged #${ticket.number} on ${ticket.channel}` +
+    `acknowledged #${ticket.number} on ${rule.channel ?? ticket.channel}` +
       `${holiday ? ` (${holidayName(holiday, 'en') ?? 'holiday'})` : ''}`,
   );
 }
@@ -246,7 +252,8 @@ async function loadTicket(conversationId: string): Promise<Ticket | null> {
       isSpam: conversations.isSpam,
       deletedAt: conversations.deletedAt,
       lastCustomerMessageAt: conversations.lastCustomerMessageAt,
-      // Only to tell a comment ticket from a direct message; the guard reads it.
+      // Only to tell a comment ticket from a direct message: the rule picker
+      // and the 24-hour guard both read it.
       externalId: conversations.externalId,
       autoRespondedAt: conversations.autoRespondedAt,
       contactEmail: contacts.primaryEmail,

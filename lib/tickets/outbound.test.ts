@@ -159,6 +159,28 @@ describe('automatedReplyBlocked', () => {
     }
   });
 
+  it('never blocks a comment channel, by the channel alone or with its external id', () => {
+    // The comment channels have no window either. The channel answers by itself,
+    // so a comment ticket is never blocked even with its external id missing;
+    // the external id is the safeguard beside it, not the only test.
+    for (const channel of ['facebook_comment', 'instagram_comment'] as const) {
+      for (const externalId of [null, `${channel.replace('_comment', '')}:comment:root-1`]) {
+        for (const kind of ['message', 'feedback_template'] as const) {
+          expect(
+            automatedReplyBlocked(
+              { channel, externalId, lastCustomerMessageAt: ago(30 * DAY) },
+              NOW,
+              kind,
+            ),
+          ).toBeNull();
+          expect(
+            automatedReplyBlocked({ channel, externalId, lastCustomerMessageAt: null }, NOW, kind),
+          ).toBeNull();
+        }
+      }
+    }
+  });
+
   it('stops every windowed channel when the customer has never written', () => {
     for (const channel of ['whatsapp', 'facebook', 'instagram']) {
       expect(automatedReplyBlocked(dm(channel, null), NOW)).not.toBeNull();
@@ -203,6 +225,13 @@ describe('carrierFor', () => {
     expect(carrierFor('email')).toBe('send_email');
     expect(carrierFor('portal')).toBe('send_email');
   });
+
+  it('sends a comment channel to send_meta, which answers it on the comment edge', () => {
+    // Missed, a comment reply would be queued as an email to a commenter with no
+    // address and fail on every retry.
+    expect(carrierFor('facebook_comment')).toBe('send_meta');
+    expect(carrierFor('instagram_comment')).toBe('send_meta');
+  });
 });
 
 describe('sendsByEmail', () => {
@@ -215,13 +244,20 @@ describe('sendsByEmail', () => {
   });
 
   it('writes nothing as an email for a channel another carrier takes, or none does', () => {
-    for (const channel of ['whatsapp', 'facebook', 'instagram', 'webchat']) {
+    for (const channel of [
+      'whatsapp',
+      'facebook',
+      'facebook_comment',
+      'instagram',
+      'instagram_comment',
+      'webchat',
+    ] as const) {
       expect(sendsByEmail(channel)).toBe(false);
     }
   });
 
-  // `carrierFor` sends anything it does not recognise to `send_email`, so these
-  // two are pinned rather than left to whatever that fallback happens to say.
+  // `carrierFor` answers `send_email` for the bot, which never sends by email, so
+  // these two are pinned rather than left to whatever that arm happens to say.
   it('writes an api message as an email, and nothing on the read-only bot channel', () => {
     expect(sendsByEmail('api')).toBe(true);
     expect(sendsByEmail('whatsapp_bot')).toBe(false);
@@ -240,6 +276,8 @@ describe('lacksEmailRecipient', () => {
     expect(lacksEmailRecipient('portal', 'customer@example.com')).toBe(false);
     expect(lacksEmailRecipient('whatsapp', null)).toBe(false);
     expect(lacksEmailRecipient('webchat', null)).toBe(false);
+    expect(lacksEmailRecipient('facebook_comment', null)).toBe(false);
+    expect(lacksEmailRecipient('instagram_comment', null)).toBe(false);
   });
 });
 

@@ -4,6 +4,7 @@ import { conversations, messages } from '@/db/schema';
 import { enqueue } from '@/lib/queue';
 import { onAgentReply } from '@/lib/sla';
 import { afterMessageStored } from '@/lib/tickets/lifecycle';
+import type { ConversationChannel } from '@/lib/tickets/channel-policy';
 import { carrierFor } from '@/lib/tickets/outbound';
 
 /** The row an agent's reply is stored as, less what every reply shares. */
@@ -29,7 +30,7 @@ export type AgentReplyMessage = Omit<
  */
 export async function storeAgentReply(
   conversationId: string,
-  channel: string,
+  channel: ConversationChannel,
   message: AgentReplyMessage,
 ): Promise<string> {
   const inserted = await db

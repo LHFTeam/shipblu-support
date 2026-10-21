@@ -325,14 +325,21 @@ export function LockIcon(props: IconProps) {
   );
 }
 
+/**
+ * The globe's three strokes, on the 24-unit grid every icon here is drawn on.
+ * Shared with the comment channels' marks (`components/channel.tsx`), which
+ * draw it over their platform's glyph, so "public" is one shape everywhere.
+ */
+export const GLOBE_SHAPES = (
+  <>
+    <circle cx="12" cy="12" r="8.5" />
+    <path d="M3.5 12h17" />
+    <path d="M12 3.5c2.3 2.4 3.5 5.2 3.5 8.5s-1.2 6.1-3.5 8.5c-2.3-2.4-3.5-5.2-3.5-8.5S9.7 5.9 12 3.5z" />
+  </>
+);
+
 export function GlobeIcon(props: IconProps) {
-  return (
-    <Icon {...props}>
-      <circle cx="12" cy="12" r="8.5" />
-      <path d="M3.5 12h17" />
-      <path d="M12 3.5c2.3 2.4 3.5 5.2 3.5 8.5s-1.2 6.1-3.5 8.5c-2.3-2.4-3.5-5.2-3.5-8.5S9.7 5.9 12 3.5z" />
-    </Icon>
-  );
+  return <Icon {...props}>{GLOBE_SHAPES}</Icon>;
 }
 
 export function ClockIcon(props: IconProps) {

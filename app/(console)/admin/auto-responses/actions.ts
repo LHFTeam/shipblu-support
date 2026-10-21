@@ -21,6 +21,15 @@ import { refresh, type SettingsState } from '../settings-shared';
  * `whatsapp_bot` is deliberately absent. Nothing is ever sent on it — the bot
  * owns those conversations — so offering it would be offering a setting that
  * cannot do anything.
+ *
+ * The comment channels are absent until Stage 1.2 of
+ * `plans/ticket-category-routing.md`, the stage that writes them. A rule with no
+ * channel already skips a public comment (`pickRule`), because its reply would
+ * be posted under the comment for anybody reading the post to see, so until
+ * then no out-of-hours message is posted on one — the safe direction. Accepted
+ * earlier, a rule naming one is the first row to carry the value, and if this
+ * deploy were rolled back the editor before it would list that rule as
+ * company-wide and save it back as every channel, comments included.
  */
 const AUTO_RESPONSE_CHANNELS = [
   'email',
@@ -54,7 +63,11 @@ export async function saveAutoResponse(
   }
 
   const channel = autoResponseChannel(formData);
-  if (channel === undefined) return { error: 'Pick a channel, or leave it on every channel' };
+  if (channel === undefined) {
+    return {
+      error: 'Pick a channel from the list, or “Every channel except public comments”',
+    };
+  }
 
   // Re-read rather than trusted, the way `saveChannel` re-reads the business
   // account it is handed: the id arrives in a FormData field, and a group

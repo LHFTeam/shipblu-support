@@ -153,6 +153,17 @@ describe('stateFor', () => {
     expect(message!.text.length).toBe(MAX_MESSAGE_CHARS + 1);
   });
 
+  it('names a comment channel by its platform, with the comment said by its flag', () => {
+    const history = [said('customer', 'hi')];
+    expect(
+      stateFor(history, { ...CONTEXT, channel: 'facebook_comment', isPublicComment: true }),
+    ).toEqual(stateFor(history, { ...CONTEXT, channel: 'facebook', isPublicComment: true }));
+    expect(
+      stateFor(history, { ...CONTEXT, channel: 'instagram_comment', isPublicComment: true })
+        .channel,
+    ).toBe('instagram');
+  });
+
   it('says when the reply will be public, and carries an email subject only when given one', () => {
     expect(stateFor([said('customer', 'hi')], { ...CONTEXT, isPublicComment: true })).toMatchObject(
       {

@@ -6,8 +6,27 @@ import {
   listGroupNames,
 } from '@/lib/admin/settings';
 import { formName } from '@/lib/forms/naming';
+import { CHANNEL_LABELS } from '@/lib/tickets/channel-labels';
+import type { ConversationChannel } from '@/lib/tickets/channel-policy';
 import { PRIORITY_CHOICES } from '@/lib/tickets/vocabulary';
 import type { FieldOption } from './condition-builder';
+
+/**
+ * The channels a condition can name: those rules and policies work on.
+ *
+ * The comment channels join it in Stage 1.2 of
+ * `plans/ticket-category-routing.md`, with the rows that carry them. Offered
+ * before, a condition naming one matches nothing — the engine's `channel` fact
+ * is the stored column, and every comment ticket still carries its platform's —
+ * while a condition on `facebook` reaches every comment as well.
+ */
+const CONDITION_CHANNELS: readonly ConversationChannel[] = [
+  'email',
+  'whatsapp',
+  'webchat',
+  'facebook',
+  'instagram',
+];
 
 /**
  * The vocabulary the condition builder offers.
@@ -49,13 +68,11 @@ export async function ticketFieldOptions(
       value: 'channel',
       label: 'Channel',
       kind: 'choice',
-      choices: [
-        { value: 'email', label: 'Email' },
-        { value: 'whatsapp', label: 'WhatsApp' },
-        { value: 'webchat', label: 'Web chat' },
-        { value: 'facebook', label: 'Facebook' },
-        { value: 'instagram', label: 'Instagram' },
-      ],
+      // Named as the badges name them.
+      choices: CONDITION_CHANNELS.map((channel) => ({
+        value: channel,
+        label: CHANNEL_LABELS[channel],
+      })),
     },
     {
       value: 'status.category',
