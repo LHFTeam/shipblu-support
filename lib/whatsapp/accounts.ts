@@ -158,6 +158,14 @@ export function resolveCredentialSource(
 }
 
 /**
+ * The variable an account names cannot be used: not a `WHATSAPP_TOKEN_*` name,
+ * or not set in this process. Its own class so a caller that can say so to a
+ * person — the onboarding job's card — can tell it from a failure a retry
+ * might cure. Every other caller sees an `Error`, as before.
+ */
+export class TokenVariableError extends Error {}
+
+/**
  * The access token for an account, and which credential it is.
  *
  * Worker-only, with the other resolvers below: only modules under `worker/`
@@ -176,14 +184,6 @@ export function resolveCredentialSource(
  * data, so it cannot appear in the Zod schema, and `env()` parses the whole
  * schema on first call. Same reasoning as `lib/shipments/detect.ts`.
  */
-/**
- * The variable an account names cannot be used: not a `WHATSAPP_TOKEN_*` name,
- * or not set in this process. Its own class so a caller that can say so to a
- * person — the onboarding job's card — can tell it from a failure a retry
- * might cure. Every other caller sees an `Error`, as before.
- */
-export class TokenVariableError extends Error {}
-
 export async function tokenForAccount(
   account: Pick<WhatsAppAccount, 'id' | 'wabaId' | 'tokenEnvVar'> | null,
 ): Promise<{ token: string; source: CredentialSource }> {

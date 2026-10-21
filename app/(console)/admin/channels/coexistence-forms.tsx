@@ -988,6 +988,7 @@ export function OnboardingProgress({
   channelName,
   accountName,
   credential,
+  tokenEnvVar,
   canConnect,
   connect,
   now,
@@ -997,6 +998,8 @@ export function OnboardingProgress({
   channelName: string | null;
   accountName: string | null;
   credential: CredentialStatus | null;
+  /** The variable the account names, which an adopted number sends with when nothing is stored. */
+  tokenEnvVar: string | null;
   canConnect: boolean;
   /**
    * What the connect card needs, so a failed attempt can offer a new sign-in in
@@ -1119,6 +1122,7 @@ export function OnboardingProgress({
           channelName={channelName}
           accountName={accountName}
           credential={credential}
+          tokenEnvVar={tokenEnvVar}
         />
       ) : null}
     </Card>
@@ -1144,23 +1148,26 @@ function ConnectedSummary({
   channelName,
   accountName,
   credential,
+  tokenEnvVar,
 }: {
   onboarding: OnboardingView;
   coexistence: Coexistence | null;
   channelName: string | null;
   accountName: string | null;
   credential: CredentialStatus | null;
+  tokenEnvVar: string | null;
 }) {
   const number = coexistence?.displayPhoneNumber ?? onboarding.phoneNumberId;
   const verified = coexistence?.verifiedName ? ` (${coexistence.verifiedName})` : '';
   // An adopted number never had a credential stored for it: it sends with the
   // variable its account names, which the job refused to go without, so its
-  // absence here is the design rather than something gone missing.
-  const adopted = onboarding.origin === 'adopted';
+  // absence here is the design rather than something gone missing — while the
+  // account still names one. Forgotten or blanked since, it is missing again.
+  const variable = onboarding.origin === 'adopted' ? tokenEnvVar : null;
   const stored = credential
     ? `credential stored (${expiryLabel(credential)})`
-    : adopted
-      ? "sends with the account's token variable"
+    : variable
+      ? `sends with ${variable}`
       : 'credential not stored';
 
   const stepSentence = (step: 'contacts' | 'history') =>
@@ -1185,7 +1192,7 @@ function ConnectedSummary({
       : `History: ${history.percent}% (${history.chunks} chunk${history.chunks === 1 ? '' : 's'}).`;
 
   const { todo, notes } = connectedFollowUps(onboarding);
-  const allClear = todo.length === 0 && (credential !== null || adopted);
+  const allClear = todo.length === 0 && (credential !== null || variable !== null);
 
   return (
     <div className="flex flex-col gap-1 rounded-md border border-(--color-feedback-success-border) bg-(--color-feedback-success-bg) px-3 py-2 text-sm text-(--color-feedback-success-fg)">
@@ -1244,7 +1251,7 @@ function ConnectedSummary({
           {/* Not "press Reconnect": an account with no stored credential may
               still send with a token the environment names, which the account
               row shows. */}
-          {credential === null && !adopted ? (
+          {credential === null && variable === null ? (
             <p>
               No credential is stored for this business account now, so it sends with a token from
               the environment, if one is set — the account&rsquo;s row above names which.

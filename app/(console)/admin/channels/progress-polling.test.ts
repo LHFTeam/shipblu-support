@@ -327,26 +327,28 @@ describe('OnboardingProgress', () => {
     ...overrides,
   });
 
-  function card(onboarding: OnboardingView, now: Date) {
+  function card(onboarding: OnboardingView, now: Date, tokenEnvVar: string | null = null) {
     return createElement(OnboardingProgress, {
       onboarding,
       coexistence: null,
       channelName: null,
       accountName: null,
       credential: null,
+      tokenEnvVar,
       canConnect: true,
       connect: { readiness: { ready: false, missing: [] }, groups: [], suggestedGroupId: null },
       now,
     });
   }
 
-  function show(onboarding: OnboardingView, now: Date) {
+  function show(onboarding: OnboardingView, now: Date, tokenEnvVar: string | null = null) {
     const container = document.createElement('div');
     document.body.append(container);
     const root = createRoot(container);
     roots.push(root);
-    act(() => root.render(card(onboarding, now)));
+    act(() => root.render(card(onboarding, now, tokenEnvVar)));
     return {
+      text: () => container.textContent ?? '',
       countdown: () => /retrying (in \d+ (s|min)|now)/.exec(container.textContent ?? '')?.[0],
       rerender: (next: OnboardingView, nextNow: Date) =>
         act(() => root.render(card(next, nextNow))),
@@ -390,5 +392,26 @@ describe('OnboardingProgress', () => {
     show(attempt({ lastTransientError: null, nextAttemptAt: null }), serverAt(0));
 
     expect(vi.getTimerCount()).toBe(0);
+  });
+
+  // An adopted number has no stored credential by design, and sends with the
+  // variable its account names — until the account stops naming one.
+  it('names the variable an adopted number sends with, and only while there is one', () => {
+    const connected = attempt({
+      origin: 'adopted',
+      status: 'connected',
+      lastTransientError: null,
+      nextAttemptAt: null,
+      finishedAt: serverAt(0).toISOString(),
+    });
+
+    const named = show(connected, serverAt(0), 'WHATSAPP_TOKEN_SALES');
+    expect(named.text()).toContain('sends with WHATSAPP_TOKEN_SALES');
+    expect(named.text()).toContain('Nothing else to do.');
+
+    const none = show(connected, serverAt(0), null);
+    expect(none.text()).toContain('credential not stored');
+    expect(none.text()).not.toContain('Nothing else to do.');
+    expect(none.text()).toContain('No credential is stored for this business account now');
   });
 });

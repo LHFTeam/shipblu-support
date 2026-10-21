@@ -828,9 +828,11 @@ Embedded Signup attempt still uses only the credential it stored. The channel
 it makes carries `coexistence.adopted`, and its `onboardedAt` is when it was
 added here: Meta's 24 hours for the copy began earlier, when the number was
 connected there, so the window drawn can outlast Meta's and a late request is
-refused by Meta (2593108) on the row. The variable's system user must be
-assigned the WABA in Meta's Business settings; the number step is what proves
-it.
+refused by Meta (2593108) on the row. The variable must hold a system user
+token generated for this app and assigned the WABA in Meta's Business settings:
+a token for another app is refused before anything is subscribed, since the
+subscribe would otherwise subscribe that app, and the number step proves the
+assignment.
 
 The same message can reach us under two wamids — the business app's echo of a
 reply names it from one chat, a customer's reaction to that reply from another

@@ -9,6 +9,7 @@ import {
 import { env, metaAppSecret } from '@/lib/env';
 import { errorMessage } from '@/lib/errors';
 import { logger } from '@/lib/log';
+import { inspectToken } from '@/lib/meta/debug-token';
 import {
   COEXISTENCE_WHATSAPP_FIELDS,
   readSubscription,
@@ -346,7 +347,7 @@ async function runSteps(
     );
   }
 
-  const credentials = await credentialFor(row, account);
+  const credentials = await credentialFor(row, account, only !== undefined);
 
   const wants = (step: OnboardingStep) => (only ? only.includes(step) : true);
   const done = (step: OnboardingStep) => !only && row.steps[step]?.ok === true;
@@ -436,26 +437,35 @@ async function runSteps(
 async function credentialFor(
   row: Onboarding,
   account: WhatsAppAccount,
+  targeted: boolean,
 ): Promise<WhatsAppCredentials> {
   if (row.origin === 'adopted') {
+    // What runs the attempt again: Retry on a failed card, or the channel's
+    // copy button for a copy asked for on a connected number, which has none.
+    const next = targeted ? 'ask for the copy again' : 'Retry connection';
+    const none = new StepFailed(
+      `Business account "${account.name}" holds no stored credential and names no token ` +
+        `variable, so there is nothing to connect the number with — the shared ` +
+        `META_PAGE_ACCESS_TOKEN is the Facebook Page's own token, not a WhatsApp one. Name the ` +
+        `WHATSAPP_TOKEN_… variable holding a system user token for business account ` +
+        `${account.wabaId} on the account, then ${next}.`,
+    );
+    // Asked before resolving as well as after: resolving an account with no
+    // source reads the shared token, and where that is unset it throws a
+    // sentence about the shared token that the queue would retry for an hour.
+    if (!account.hasStoredToken && !account.tokenEnvVar) throw none;
     // A variable named but not set is the admin's to fix in Render — retrying
     // the same process cannot set it — so it fails the attempt with the
-    // sentence, and Retry runs it again once the variable is there.
+    // sentence, and runs again once the variable is there.
     const credentials = await credentialsForAccount(account).catch((error: unknown) => {
       if (error instanceof TokenVariableError) {
-        throw new StepFailed(`${error.message} Then Retry connection.`);
+        throw new StepFailed(`${error.message} Then ${next}.`);
       }
       throw error;
     });
-    if (credentials.source === 'shared') {
-      throw new StepFailed(
-        `Business account "${account.name}" holds no stored credential and names no token ` +
-          `variable, so there is nothing to connect the number with — the shared ` +
-          `META_PAGE_ACCESS_TOKEN is the Facebook Page's and reaches no WhatsApp account. Name ` +
-          `the WHATSAPP_TOKEN_… variable holding a system user token for business account ` +
-          `${account.wabaId} on the account, then Retry connection.`,
-      );
-    }
+    // A stored credential forgotten between the listing and the read.
+    if (credentials.source === 'shared') throw none;
+    await refuseOtherApp(credentials);
     return credentials;
   }
 
@@ -467,6 +477,43 @@ async function credentialFor(
   const credentials = await credentialsForAccount(account);
   if (credentials.source !== 'stored') throw forgotten;
   return credentials;
+}
+
+/**
+ * Refuses a token issued for another Meta app, before anything is subscribed.
+ *
+ * Meta's window can only mint a token for this app, so only an adopted
+ * attempt needs asking: its variable holds whatever token somebody pasted into
+ * Render, and a system user token is generated for one app of the admin's
+ * choosing. The subscribe step would otherwise subscribe *that* app to the
+ * WABA — a change at Meta nobody asked for — and then wait for this one to
+ * appear in the list, through every retry, while Meta's 24 hours for the copy
+ * run out. Only what `debug_token` says is held against it: an inspection that
+ * does not answer costs the check, not the connection, since the subscribe
+ * step's read-back still refuses an app that is not this one.
+ */
+async function refuseOtherApp(credentials: WhatsAppCredentials): Promise<void> {
+  const appId = env().META_APP_ID;
+  let inspected: string | null;
+  try {
+    inspected = (await inspectToken(credentials.token)).appId;
+  } catch (error) {
+    log.warn(
+      `could not inspect ${credentialName(credentials)}: ${redact(
+        errorMessage(error),
+        secretsOf(credentials.token),
+      )}`,
+    );
+    return;
+  }
+  if (appId && inspected && inspected !== appId) {
+    throw new StepFailed(
+      `${credentialName(credentials)} holds a token issued for Meta app ${inspected}, not this ` +
+        `one (${appId}), so subscribing with it would subscribe that app instead. Generate the ` +
+        `system user token for app ${appId}, set it as ${credentialName(credentials)}, then try ` +
+        `again.`,
+    );
+  }
 }
 
 /** The credential in words, for a sentence that has to say which one Meta refused. */

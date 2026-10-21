@@ -303,8 +303,9 @@ export async function saveChannel(_state: AdminState, formData: FormData): Promi
       return {
         error: coexistence.adopted
           ? `This number was added from business account ${coexistence.wabaId} and sends with ` +
-            `that account's credential, so it cannot be moved to another here. To move it, add ` +
-            `it again from the other business account's row.`
+            `that account's credential, so it cannot be moved to another here. If the number ` +
+            `has moved to another business account in WhatsApp Manager, add it from that ` +
+            `account's row.`
           : `This number was connected through Meta to business account ${coexistence.wabaId} ` +
             `and sends with the credential stored for it, so it cannot be moved to another here. ` +
             `To move it, connect it again through Meta and choose the other business account.`,

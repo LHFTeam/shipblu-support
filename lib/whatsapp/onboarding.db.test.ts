@@ -1718,6 +1718,88 @@ describe('adopting a number connected in Meta’s own interface', () => {
     expect(await channelFor()).toBeNull();
   });
 
+  it('fails at once, naming the account, when there is no source and no shared token either', async () => {
+    const accountId = await account();
+    const id = await adopted(accountId);
+    await db
+      .update(whatsappAccounts)
+      .set({ tokenEnvVar: null })
+      .where(eq(whatsappAccounts.id, accountId));
+    delete process.env.META_PAGE_ACCESS_TOKEN;
+    resetEnvCache();
+    const fetch = graph(completeRoutes());
+
+    expect(await completeOnboarding(id, { job: JOB })).toBe('failed');
+    expect(await onboardingRow(id)).toMatchObject({
+      status: 'failed',
+      lastTransientError: null,
+      error: expect.stringMatching(/"ShipBlu Sales" holds no stored credential.*Retry connection/s),
+    });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('refuses a token issued for another Meta app before subscribing anything', async () => {
+    const accountId = await account();
+    const id = await adopted(accountId);
+    const fetch = graph(
+      completeRoutes({
+        debug: {
+          method: 'GET',
+          path: /\/debug_token\?/,
+          answer: () => ({
+            data: { app_id: '5550001112', is_valid: true, expires_at: 0, scopes: [] },
+          }),
+        },
+      }),
+    );
+
+    expect(await completeOnboarding(id, { job: JOB })).toBe('failed');
+    expect((await onboardingRow(id)).error).toMatch(
+      new RegExp(`${VARIABLE} holds a token issued for Meta app 5550001112, not this one`),
+    );
+    const subscribes = fetch.mock.calls.filter(
+      ([url, init]) => init?.method === 'POST' && String(url).includes('/subscribed_apps'),
+    );
+    expect(subscribes).toEqual([]);
+    expect(await channelFor()).toBeNull();
+  });
+
+  it('says to ask for the copy again, not to Retry, when a copy-again run has no credential', async () => {
+    const accountId = await account();
+    const id = await adopted(accountId);
+    graph(completeRoutes());
+    await completeOnboarding(id, { job: JOB });
+    await db
+      .update(whatsappAccounts)
+      .set({ tokenEnvVar: null })
+      .where(eq(whatsappAccounts.id, accountId));
+
+    expect(await completeOnboarding(id, { only: ['history'], job: JOB })).toBe('connected');
+    const row = await onboardingRow(id);
+    expect(row.status).toBe('connected');
+    expect(row.steps.history).toMatchObject({
+      ok: false,
+      error: expect.stringMatching(/then ask for the copy again\.$/),
+    });
+  });
+
+  it('adds a number connected here through another WABA, which has moved', async () => {
+    const accountId = await account();
+    const first = await adopted(accountId);
+    graph(completeRoutes());
+    await completeOnboarding(first, { job: JOB });
+
+    const [other] = await db
+      .insert(whatsappAccounts)
+      .values({ name: 'ShipBlu Ops', wabaId: '203040506070', tokenEnvVar: VARIABLE })
+      .returning({ id: whatsappAccounts.id });
+    const moved = await adoptBusinessAppNumber(
+      { accountId: other!.id, phoneNumberId: PHONE, defaultGroupId: null },
+      await admin(),
+    );
+    expect(moved.ok).toBe(true);
+  });
+
   it('names the variable, not Meta’s window, when Meta refuses the token', async () => {
     const accountId = await account();
     const id = await adopted(accountId);

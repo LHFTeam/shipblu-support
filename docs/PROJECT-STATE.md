@@ -1531,8 +1531,9 @@ expires_at, inspected_at` — never `envelope`, and a null `expires_at` means
   token, and our app not subscribed to the WABA — so nothing from it arrives.
   First case: WABA `939397892570697`, number `1278460782026250`, connected in
   Business Suite on 2026-10-20. Adding it: a business account row for the WABA
-  naming a `WHATSAPP_TOKEN_*` variable whose system user is assigned the WABA,
-  then "Add a number connected in Meta" on that row with the phone number id.
+  naming a `WHATSAPP_TOKEN_*` variable that holds a system user token generated
+  for this Meta app, whose system user is assigned the WABA, then "Add a number
+  connected in Meta" on that row with the phone number id.
   The same job runs (`origin = 'adopted'`) with that variable. Unconfirmed
   until it runs: whether Meta accepts `smb_app_data` for a number it onboarded
   itself rather than through a partner's Embedded Signup — a refusal is

@@ -122,7 +122,7 @@ function Fields({
               <code> shipblu-support-production</code> environment group on Render.
             </>
           }
-          hint="Leave blank when this account is reachable with the shared META_PAGE_ACCESS_TOKEN, which is the case whenever the accounts sit under one Meta app."
+          hint="Leave blank only if the shared META_PAGE_ACCESS_TOKEN reaches this account. Today that token is the Facebook Page's own, so a WhatsApp account needs a variable naming a system user token for this app that is assigned this business account."
         >
           <Input
             name="tokenEnvVar"

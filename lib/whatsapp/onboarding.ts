@@ -507,14 +507,18 @@ export async function adoptBusinessAppNumber(
         `answers. Check the phone number ID.`,
     };
   }
-  // A number already connected here, and still connected on the phone. The
-  // job would take this as a reconnect and start its copies afresh — every
-  // button offering six months of chats Meta has already sent, under a 24-hour
-  // window that is not Meta's. One the phone disconnected is the case adding it
-  // again is for, so that one passes.
+  // A number already connected here through this WABA, and still connected on
+  // the phone. The job would take this as a reconnect and start its copies
+  // afresh — every button offering six months of chats Meta has already sent,
+  // under a 24-hour window that is not Meta's. One the phone disconnected is
+  // the case adding it again is for, and so is one connected through another
+  // WABA: a number is on the one WABA Meta lists it under, so it has moved, and
+  // the job's number step proves it is on this one before anything changes.
   const connected = onNumber.find((channel) => {
     const coexistence = parseCoexistence(channel.config);
-    return coexistence !== null && !coexistence.disconnected;
+    return (
+      coexistence !== null && !coexistence.disconnected && coexistence.wabaId === account.wabaId
+    );
   });
   if (connected) {
     return {
