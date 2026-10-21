@@ -61,6 +61,190 @@ held is folded in. The support lead answered every open question on
 2026-10-20; [Decisions taken](#decisions-taken-with-the-support-lead-2026-10-20)
 records the answers, and the plan below already reflects them.
 
+## Status and handoff (2026-10-21, 17:45 UTC)
+
+A session picking this plan up starts here. Everything after this section is
+the design as it was reasoned and as each stage was built; this section says
+where the work stands, what comes next and how to do it, and what has already
+bitten. Whoever moves any of it updates this section in the same PR.
+
+### Where it stands
+
+| Stage | Code                                                                                                                                            | Production                                                                                                                                                                                                                                                                                   |
+| ----- | ----------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0     | Merged: #386 (`01488c9`)                                                                                                                        | Live since 2026-10-20. Its two operational steps were never done (below)                                                                                                                                                                                                                     |
+| 1.1   | Merged: #387, then `dev` → `main` in #389 (`1f89219`)                                                                                           | Live on all six services since 2026-10-21 10:13 UTC                                                                                                                                                                                                                                          |
+| 1.2   | Merged: #391 (`31f7379`) and its follow-up #392 (`7b7d276`), then `dev` → `main` in #393 (`634a28d`), which also carries another session's #390 | Deploy started by hand at 17:32 UTC in 1.2's order. At 17:37 the worker was live on `634a28d`, web was updating, two crons were building and two were still on `1f89219`. The backfill has not run: 52 comment tickets on `facebook`/`instagram`, none on a comment channel, no comments row |
+| 1.3   | Not started; decided below                                                                                                                      | —                                                                                                                                                                                                                                                                                            |
+| 2–6   | Not started                                                                                                                                     | —                                                                                                                                                                                                                                                                                            |
+
+**Stage 0's operational steps were never done.** Read on 2026-10-21:
+
+- **0.2's SLA reorder.** The policies are still in the "Now" order of 0.2's
+  table: Live Support (Customer Care) at position 1, and the default. Its
+  conditions match every chat ticket, so until the reorder a ticket routed to
+  Merchant Care gets Customer Care's policy. Due before 5.2 turns routing on. It
+  is a console change, made by a person, approved by the support lead (Q15).
+- **0.6's staffing.** Customer Care, Inbound Sales Team and Merchant Care have
+  no members. Support has three, none of whom `assign_sweep` may pick, and has
+  129 open unassigned tickets. Every channel defaults to Support except
+  "Nayera Mohamed" (Merchant Care) and the bot (none). `assign_sweep` last
+  assigned anything on 2026-10-07. This is operations, not code, and it blocks
+  Stage 5.
+
+### Next, in order
+
+Every production write below needs the user's go-ahead, given for that step,
+and the `AGENTS.md` sequence: read the state first, say the change, have the
+way back.
+
+1. **Finish the 1.2 deploy.** Confirm on Render (workspace
+   `tea-da1f2lgjo6nc738hobmg`) that every service runs `634a28d` or later:
+   - web `srv-da1jgtg1ne8s73ciqulg`;
+   - worker `srv-da1jgtg1ne8s73ciqujg`;
+   - crons `crn-da1jgtg1ne8s73ciqup0` (sla-sweep), `crn-da1jgtg1ne8s73ciquog`
+     (time-automations), `crn-da1jgtg1ne8s73ciqumg` (nightly) and
+     `crn-da1jgtg1ne8s73ciquk0` (template-sync).
+
+   Staging, `srv-da1jgtg1ne8s73ciqul0`, is suspended: leave it so
+   (`docs/PROJECT-STATE.md` §2 says why).
+
+2. **Run the backfill**, as 1.2's runbook says. A job reaches production one of
+   two ways:
+   - `npm run job -- split_comment_channels dryRun=true` from a shell carrying
+     production's environment, such as the worker's Render shell. Its lines
+     print there.
+   - A row the running worker claims within seconds:
+     `insert into jobs (type, payload) values ('split_comment_channels', '{"dryRun": true}')`.
+     Its lines land in the worker's Render log under `[split_comment_channels]`.
+     The insert is itself a production write.
+
+   The dry run should print 43 Facebook and 9 Instagram tickets, 0 onto a
+   comments row, 0 `csat_surveys` and 1 `canned_suggestions`. Its last line
+   should be `0 tickets left that this job cannot move and Stage 1.3's CHECK
+would refuse`. Nothing should be added since 2026-10-21, because a 1.2
+   worker files new comments on their comment channel. Then run it without
+   `dryRun`, then dry again, which must print zeros throughout. Then run
+   `rollup_metrics from=2026-08-29`, and the Stage 1 rows of
+   [Verification queries](#verification-queries-run-after-each-stage-read-only).
+
+3. **Build 1.3**, as decided under [1.3 as it will be
+   built](#13-as-it-will-be-built). Merge it only once step 2's last dry run has
+   printed zeros.
+4. **Stage 2** may start whenever it suits. It touches a different seam from
+   Stage 1, but its migrations land one at a time behind 1.3's (Deploy rules).
+5. **Before Stage 5**, a person does 0.2's reorder and 0.6's staffing, and the
+   support lead answers the two questions still open.
+
+### 1.3 as it will be built
+
+Decided here, so the next session does not re-derive it:
+
+- **The constraint.** `conversations_comment_channel_matches_external_id`, added
+  in `db/sql/003_constraints.sql` in that file's guard shape: `DO $$ … IF NOT
+EXISTS (SELECT 1 FROM pg_constraint WHERE conname = '…' AND conrelid =
+'conversations'::regclass) THEN ALTER TABLE conversations ADD CONSTRAINT …
+CHECK (…)`, with the predicate under 1.3 below, `coalesce` included. CI
+  replays `db/sql` twice on an empty database, which proves the guard, not the
+  data; production's data is proved by step 2's last dry run.
+- **The tests it breaks.** The test database replays `db/sql`, so a test that
+  inserts a row the CHECK refuses fails at the insert. Measured on 2026-10-21
+  by adding the CHECK to a local test database: 12 tests in 8 files.
+  - `worker/handlers/split-comment-channels.db.test.ts`: five tests, all of it,
+    because the job's whole input is such rows.
+  - `lib/tickets/ingest-meta.db.test.ts`: "puts a reply on a thread filed before
+    comments had a channel, and leaves it there".
+  - `lib/automations/send-reply.db.test.ts`: "is never sent on a public comment
+    thread", for its legacy case.
+  - `lib/csat/meta-feedback.db.test.ts`: "takes no answer on a comment ticket,
+    before 1.2 moves it or after".
+  - `lib/priority-ai/run.db.test.ts`: "asks only about what the ticket's own
+    customer wrote".
+  - `lib/tickets/inbox.db.test.ts`: "marks a Meta comment ticket, and not a
+    direct-message one".
+  - `worker/handlers/send-csat.db.test.ts`: "records why there was no survey, on
+    the ticket".
+  - `lib/tickets/locale.db.test.ts`: "reads the requester's words on a comment
+    thread, not a passer-by's", whose `facebook_comment` ticket has no external
+    id.
+
+  Each builds its row as 1.2 writes it: a comment channel with a comment
+  external id. A case that exists only to cover a pre-1.2 row goes, because
+  that row can no longer exist.
+
+- **`split_comment_channels` is retired in the same PR.** After the CHECK it can
+  never find anything, and its test cannot build its input. Retiring it
+  removes:
+  - the handler and its test;
+  - its `JobType` entry, its `JOB_PAYLOADS` entry and its registration in
+    `worker/handlers/index.ts`;
+  - its line in `scripts/ci/db-jobs.txt`.
+
+  CI holds those agreeing. It stays in git and in 1.2's as-built note.
+
+- **`isCommentTicket` keeps its external-id half, and `pickRule` keeps
+  `ruleChannel`.** With the CHECK, both always give the same answer as the
+  channel test. If 1.3 is rolled back, the external-id half is what keeps a
+  legacy row from being answered in public. Their comments that say "until
+  Stage 1.3" change to say so (`lib/tickets/channel-policy.ts`,
+  `lib/auto-response/resolve.ts`).
+- **Docs.** `AGENTS.md`'s paragraph "Until the CHECK constraint … lands" changes
+  to say the CHECK holds and why the external-id half stays. The 1.3 docs items
+  below are already done: `live-conversation.ts`'s comment and
+  `docs/PROJECT-STATE.md`'s Instagram figure were both corrected in 1.1.
+- **Deploy.** Web only, since `db/sql` replays in web's `preDeployCommand`
+  (`npm run db:migrate`, `render.yaml`). If a row still violates the CHECK, the
+  replay fails, the deploy fails, and the previous web keeps serving. That is
+  why step 2's dry run is the gate. Afterwards, run the first Stage 1
+  verification query, which must return 0.
+- **Rollback** is 1.3's list below, step 1.
+
+### Working on this repo without the outgoing session's context
+
+- **`dev` is the integration branch, and GitHub keeps deleting it.** The
+  repository's "Automatically delete head branches" setting removes `dev`
+  whenever a `dev` → `main` PR merges. It happened at #389 and again at #393, and
+  `dev` was recreated from `main` both times. If `git ls-remote origin dev`
+  prints nothing, ask the user before recreating it from `main`. Then branch,
+  open a PR into `dev`, and the user merges `dev` into `main`.
+- **Deploys are by hand.** `autoDeploy` is off on every production service, and
+  each stage names its order. 1.2's order is the worker first, which the review
+  reversed from web first.
+- **Production is read with `execute_sql` against Supabase
+  `nqbcfnvqqyqawmffgiql`**, `SELECT`s only, unless the user has said yes to a
+  specific write.
+- **The database tier locally.** Start Postgres with `pg_ctlcluster 16 main
+start` if it is down. Migrate `shipblu_test`
+  (`DATABASE_URL=$T DATABASE_URL_SESSION=$T npm run db:migrate`), then:
+
+  ```bash
+  T=postgresql://postgres:postgres@localhost:5432/shipblu_test
+  DATABASE_URL=$T DATABASE_URL_SESSION=$T TEST_DATABASE_URL=$T \
+    APP_SECRET=local-placeholder-secret-at-least-32-characters-long \
+    npx vitest run -c vitest.db.config.mts [file]
+  ```
+
+- **What every stage so far did before merging.**
+  - A read-only production inventory before anything wrote.
+  - At least two rounds of adversarial review, each finding checked against
+    the code before it was fixed.
+  - A mutation check on every new test: undo the fix and watch the test fail.
+  - The full suite: `typecheck`, `lint`, `lint:strict`, `format:check`, `knip`,
+    `repo-rules`, the unit tests, `build`, and the database tier.
+
+### Still open, and recorded elsewhere
+
+- **The support lead's three:**
+  - where courier jobs route;
+  - whether channel defaults move off Support (both under
+    [Still open](#still-open), before Stage 5);
+  - whether an automation may ever answer a public comment
+    ([Risks](#risks-not-closed-by-the-design)).
+- **A gap older than this plan.** An automation's `send_reply` on a
+  `whatsapp_bot` ticket would be queued as an email (`carrierFor`'s docstring
+  in `lib/tickets/outbound.ts`). It was found during 1.1, and nothing here
+  depends on it.
+
 ## What production says (read-only, 2026-10-19/20)
 
 Measured against `nqbcfnvqqyqawmffgiql` with SELECTs only; the numbers are small
@@ -1362,11 +1546,12 @@ become one answer.
 - contact identities;
 - the priority request's bytes.
 
-**Docs:** README.md (channels), `AGENTS.md` (the comment exemption wording, the
-`HUMAN_AGENT` section), and the stale comment in
-`lib/tickets/live-conversation.ts:19-23`. In `docs/PROJECT-STATE.md`, the
-claim that no Instagram comment has ever arrived is wrong: 9 Instagram comment
-tickets exist.
+**Docs:** README.md (channels), and `AGENTS.md` (the comment exemption wording,
+the `HUMAN_AGENT` section, and the paragraph that begins "Until the CHECK
+constraint … lands"). Two items once listed here were done in 1.1: the comment
+in `lib/tickets/live-conversation.ts`, and `docs/PROJECT-STATE.md`'s claim that
+no Instagram comment had ever arrived. What else 1.3 changes is decided in
+[1.3 as it will be built](#13-as-it-will-be-built).
 
 **Rollback, in this order.** 1.1 itself is never reverted. Its migration
 cannot be deleted (`scripts/ci/rules/generated-files.mjs:52-63`), and its
