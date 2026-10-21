@@ -63,18 +63,20 @@ void allChannelsAreListed;
  * drifted apart once already and Facebook and Instagram spent a phase silently
  * resetting themselves to "all channels".
  *
- * The comment channels join it in Stage 1.2 of
- * `plans/ticket-category-routing.md`, with the ingest that writes them. Offered
- * before, their views and the filter are empty while every comment ticket sits
- * under Facebook or Instagram, badged "Public comment" — a queue that answers
- * the agent wrongly for as long as the stages are apart.
+ * The comment channels joined it with the ingest that writes them (Stage 1.2 of
+ * `plans/ticket-category-routing.md`): offered before, their views were empty
+ * while every comment ticket sat under Facebook or Instagram. Until
+ * `split_comment_channels` has run, a comment ticket filed before that stage is
+ * still under its platform, badged "Public comment".
  */
 export const FILTERABLE_CHANNELS = [
   'email',
   'whatsapp',
   'webchat',
   'facebook',
+  'facebook_comment',
   'instagram',
+  'instagram_comment',
   'whatsapp_bot',
 ] as const satisfies readonly ConversationChannel[];
 

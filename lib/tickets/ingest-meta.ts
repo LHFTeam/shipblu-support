@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, isNull } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { channels, conversationEvents, conversations, messages, ticketStatuses } from '@/db/schema';
 import type {
@@ -9,6 +9,12 @@ import type {
   NormalisedReceipt,
 } from '@/lib/meta/types';
 import { enqueue, type EnqueueOptions } from '@/lib/queue';
+import {
+  commentChannelOf,
+  isCommentChannel,
+  metaPlatformOf,
+  type MetaChannel,
+} from './channel-policy';
 import { onCustomerReply } from '@/lib/sla';
 import { findContactByIdentity, needsChannelProfile, resolveContact } from './contacts';
 import { UNNAMED_SUBJECT } from './customer-text';
@@ -182,7 +188,13 @@ export async function ingestMetaComment(comment: NormalisedComment): Promise<Met
     displayName: comment.fromName,
   });
 
-  const channel = await channelFor(comment.platform);
+  // A comment is a channel of its own (`db/schema/enums.ts`), so a team can
+  // route and report public comments apart from direct messages; the person
+  // stays on the platform, above, because the commenter is the same user who
+  // writes to the inbox. A comment on a thread filed before Stage 1.2 lands on
+  // that ticket and keeps its channel until `split_comment_channels` moves it.
+  const commentChannel = commentChannelOf(comment.platform);
+  const channel = await channelFor(commentChannel);
 
   // The root of the thread is what the ticket is about. A reply to a comment
   // belongs on the same ticket as the comment it answers.
@@ -213,7 +225,7 @@ export async function ingestMetaComment(comment: NormalisedComment): Promise<Met
       const inserted = await tx
         .insert(conversations)
         .values({
-          channel: comment.platform,
+          channel: commentChannel,
           channelId: channel?.id ?? null,
           statusId,
           subject: subjectFrom(comment.text, UNNAMED_SUBJECT[`${comment.platform}Comment`]),
@@ -572,19 +584,34 @@ async function findByExternalId(externalId: string): Promise<FoundConversation |
   return rows[0] ?? null;
 }
 
-async function channelFor(platform: MetaPlatform) {
+/**
+ * The channel row a new ticket starts from: its default group, and the row it
+ * records in `channel_id`.
+ *
+ * A comment channel falls back to its platform's row, so until an admin adds a
+ * "Facebook comments" or "Instagram comments" row a comment ticket starts where
+ * it always did, in the Facebook or Instagram row's group. One query for both
+ * rather than a second on a miss, picked here in order: the comment row first,
+ * then the platform's.
+ */
+async function channelFor(type: MetaChannel) {
+  const candidates = isCommentChannel(type) ? [type, metaPlatformOf(type)] : [type];
+
   // Ordered, as `webchatChannel` is (`lib/widget/session.ts`): nothing stops an
   // admin adding a second row of a type, and without an order Postgres may hand
   // back either — so which group a new ticket starts in would depend on the
   // plan Postgres happened to pick. Oldest wins, the row that has been routing.
   const rows = await db
-    .select({ id: channels.id, defaultGroupId: channels.defaultGroupId })
+    .select({ id: channels.id, type: channels.type, defaultGroupId: channels.defaultGroupId })
     .from(channels)
-    .where(and(eq(channels.type, platform), eq(channels.isActive, true)))
-    .orderBy(asc(channels.createdAt), asc(channels.id))
-    .limit(1);
+    .where(and(inArray(channels.type, candidates), eq(channels.isActive, true)))
+    .orderBy(asc(channels.createdAt), asc(channels.id));
 
-  return rows[0] ?? null;
+  for (const candidate of candidates) {
+    const row = rows.find((found) => found.type === candidate);
+    if (row) return { id: row.id, defaultGroupId: row.defaultGroupId };
+  }
+  return null;
 }
 
 /** First line, trimmed to something that fits a ticket list. */

@@ -22,21 +22,21 @@ import { refresh, type SettingsState } from '../settings-shared';
  * owns those conversations — so offering it would be offering a setting that
  * cannot do anything.
  *
- * The comment channels are absent until Stage 1.2 of
- * `plans/ticket-category-routing.md`, the stage that writes them. A rule with no
- * channel already skips a public comment (`pickRule`), because its reply would
- * be posted under the comment for anybody reading the post to see, so until
- * then no out-of-hours message is posted on one — the safe direction. Accepted
- * earlier, a rule naming one is the first row to carry the value, and if this
- * deploy were rolled back the editor before it would list that rule as
- * company-wide and save it back as every channel, comments included.
+ * The comment channels are here because naming one is the only way a public
+ * comment is acknowledged at all: a rule with no channel skips them
+ * (`pickRule`), since the reply is posted under the comment for anybody reading
+ * the post to see. They arrived with the stage that writes them (Stage 1.2 of
+ * `plans/ticket-category-routing.md`): accepted earlier, a rule naming one would
+ * have been the first row to carry the value, ahead of any reader that knew it.
  */
 const AUTO_RESPONSE_CHANNELS = [
   'email',
   'whatsapp',
   'webchat',
   'facebook',
+  'facebook_comment',
   'instagram',
+  'instagram_comment',
   'portal',
 ] as const;
 

@@ -212,6 +212,10 @@ export const JOB_PAYLOADS = {
     /** Report the tickets and the instants they would get, write nothing. */
     dryRun: z.boolean().optional(),
   }),
+  split_comment_channels: z.strictObject({
+    /** Count the tickets and copies that would move, write nothing. */
+    dryRun: z.boolean().optional(),
+  }),
   seed_console_handbook: z.strictObject({
     /** Report what would change, write nothing. */
     dryRun: z.boolean().optional(),

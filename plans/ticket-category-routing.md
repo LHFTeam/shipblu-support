@@ -1197,6 +1197,66 @@ deploy it with web and the crons.
 - Then run `rollup_metrics from=2026-08-29`, so historic reports show the
   split. Its reconcile check (channel slices sum to totals) is one
   verification. The CSAT columns per channel are the other.
+- **As built (2026-10-21).** Where 1.2 differs from the items above, what the
+  inventory found, and the runbook.
+  - **The inventory** (read-only, 2026-10-21, after 1.1 deployed). No
+    `automation_rules` condition and no `skills` condition names `facebook` or
+    `instagram`. The one `auto_responses` row is null-scoped and inactive. Two
+    `sla_policies` name them:
+    - **Live Support (Customer Care)**, position 1 and `is_default`: `any` of
+      `channel in [facebook, instagram, webchat, whatsapp]` or
+      `group.id eq "Customer Care"`.
+    - **Live Support (Merchant Care)**, position 4: `all` of the same channel
+      list and `group.id eq "Merchant Care"`.
+
+    All 52 comment tickets are in the Support group and carry Live Support
+    (Customer Care), through its channel list. A moved ticket leaves that list
+    and falls through to the same policy as the default, so the SLA does not
+    change, as Q11 expected. The Merchant Care policy needs Merchant Care too,
+    and no comment ticket is in it. No condition gains the comment values.
+
+  - **`channelFor` takes the channel**, and for a comment channel reads both
+    types in one query, preferring the oldest active comments row and falling
+    back to the platform's row. A direct message still reads its platform's
+    row only. A comment on a thread filed before 1.2 is found by its external
+    id, as every comment is, and keeps its platform's channel until the
+    backfill moves it (`ingest-meta.db.test.ts` pins both).
+  - **The admin page's allowlists are named** (`SAVEABLE_TYPES` in the action,
+    `EDITABLE` in the form, each naming the other). A comments row says it
+    covers the public comments on the account its variable configures, and
+    that without one they start in the platform row's group.
+  - **`split_comment_channels`** (`worker/handlers/split-comment-channels.ts`)
+    moves the tickets and both copies in one transaction:
+    - **Tickets.** It moves every ticket on `facebook`/`instagram` whose
+      external id is a comment, deleted ones included, because 1.3's CHECK reads
+      every row. Its `channel_id` goes to the oldest active comments row of its
+      type, else stays as it was, and its group is not touched.
+    - **Copies.** It moves the copies still on the platform beside a ticket
+      already on its comment channel. They are matched by the ticket's channel
+      as it stands, so a copy written late is caught by the next run.
+
+    A second run finds nothing. It is in `scripts/ci/db-jobs.txt` as
+    `dryRun=true`. Its dry-run selection, read-only against production on
+    2026-10-21: 43 Facebook and 9 Instagram tickets, none onto a comments row
+    (there is none), none deleted; 0 `csat_surveys` and 1 `canned_suggestions`
+    copy.
+
+  - **Runbook.**
+    1. Deploy web, then the worker, then the crons.
+    2. Confirm every service runs 1.2, since a worker still on 1.1 files new
+       comments on the platform channel.
+    3. `npm run job -- split_comment_channels dryRun=true` should report the
+       figures above, give or take what arrived since.
+    4. Run it without `dryRun`, then dry-run again, which must report nothing.
+    5. `npm run job -- rollup_metrics from=2026-08-29`, then the two
+       verifications above.
+  - **Rollback.** Redeploy 1.1: it reads the comment values, so tickets 1.2
+    wrote stay legible, and its out-of-hours editor keeps a comments rule's
+    scope visible rather than saving it as every channel. Moving the tickets
+    back is one statement each for `conversations`, `csat_surveys` and
+    `canned_suggestions` (`replace(channel::text, '_comment', '')::channel`
+    where the channel is a comment one). Only 1.3 needs that, and it is not
+    worth doing otherwise.
 
 **1.3 — Lock the invariant.** A CHECK in `db/sql`, idempotent and guarded by
 constraint name and table:

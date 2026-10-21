@@ -65,12 +65,11 @@ describe('parseFilters', () => {
     });
   });
 
-  // A comment channel is not a filter until Stage 1.2 writes one; a bookmarked
-  // or hand-typed URL naming it reads as every channel rather than as an
-  // empty list.
-  it('reads a comment channel as every channel before it is a filter', () => {
-    expect(parseFilters({ channel: 'facebook_comment' }).channel).toBe('all');
+  it('reads a comment channel apart from its platform', () => {
+    expect(parseFilters({ channel: 'facebook_comment' }).channel).toBe('facebook_comment');
     expect(parseFilters({ channel: 'facebook' }).channel).toBe('facebook');
+    // Not a channel at all: every channel, rather than an empty list.
+    expect(parseFilters({ channel: 'facebook_comments' }).channel).toBe('all');
   });
 
   it('reads the groups view and a group by id, and refuses an id that is not one', () => {

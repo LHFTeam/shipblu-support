@@ -14,18 +14,20 @@ import type { FieldOption } from './condition-builder';
 /**
  * The channels a condition can name: those rules and policies work on.
  *
- * The comment channels join it in Stage 1.2 of
- * `plans/ticket-category-routing.md`, with the rows that carry them. Offered
- * before, a condition naming one matches nothing — the engine's `channel` fact
- * is the stored column, and every comment ticket still carries its platform's —
- * while a condition on `facebook` reaches every comment as well.
+ * A comment channel is its own value, so a condition on `facebook` does not
+ * reach a Facebook comment, and a rule that should names `facebook_comment` as
+ * well. The engine's `channel` fact is the stored column, so a comment ticket
+ * filed before Stage 1.2 of `plans/ticket-category-routing.md` still answers as
+ * its platform until `split_comment_channels` has moved it.
  */
 const CONDITION_CHANNELS: readonly ConversationChannel[] = [
   'email',
   'whatsapp',
   'webchat',
   'facebook',
+  'facebook_comment',
   'instagram',
+  'instagram_comment',
 ];
 
 /**

@@ -50,7 +50,7 @@ export default async function AutoResponsesPage() {
     <>
       <PageHeader
         title="Out-of-hours replies"
-        description="Sent once when a customer writes in outside their group’s working hours. The most specific rule wins: a channel beats a group, and a rule naming both beats either. A public comment is not acknowledged, because the reply would be posted under the post."
+        description="Sent once when a customer writes in outside their group’s working hours. The most specific rule wins: a channel beats a group, and a rule naming both beats either. A public comment is acknowledged only by a rule naming its comment channel, because the reply is posted under the post."
         actions={<NewAutoResponse groups={groupRows} />}
       />
 

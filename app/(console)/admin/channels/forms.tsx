@@ -3,7 +3,12 @@
 import { useState } from 'react';
 import { Badge, Button, ErrorText, Field, Input, Select } from '@/components/ui';
 import { parseCoexistence } from '@/lib/whatsapp/coexistence';
-import type { ConversationChannel } from '@/lib/tickets/channel-policy';
+import {
+  isCommentChannel,
+  isMetaChannel,
+  metaPlatformOf,
+  type ConversationChannel,
+} from '@/lib/tickets/channel-policy';
 import type { AdminState } from '../settings-shared';
 import { saveChannel } from './actions';
 import { SubmitButton } from '@/components/submit-button';
@@ -11,8 +16,17 @@ import { useActionForm } from '@/components/use-action-form';
 
 const INITIAL: AdminState = { error: null };
 
-/** The types a form may create or save. Must match the list `saveChannel` accepts. */
-const EDITABLE = ['email', 'whatsapp', 'webchat', 'facebook', 'instagram', 'whatsapp_bot'] as const;
+/** The types a form may create or save. Must match `SAVEABLE_TYPES` in ./actions.ts. */
+const EDITABLE = [
+  'email',
+  'whatsapp',
+  'webchat',
+  'facebook',
+  'facebook_comment',
+  'instagram',
+  'instagram_comment',
+  'whatsapp_bot',
+] as const;
 
 type ChannelType = (typeof EDITABLE)[number];
 
@@ -22,9 +36,7 @@ type ChannelType = (typeof EDITABLE)[number];
  * `portal` and `api` channels are created by the product rather than by an
  * admin — the customer portal opens one on first use — and `saveChannel` refuses
  * both. Widening its allowlist to let this form reach them would also let a
- * forged `type` through the add form, so the editor declines them instead. The
- * comment channels are declined the same way until the form learns to create
- * them (Stage 1.2 of `plans/ticket-category-routing.md`).
+ * forged `type` through the add form, so the editor declines them instead.
  */
 export type ChannelRow = {
   id: string;
@@ -74,7 +86,9 @@ export function ChannelForm({
             <option value="whatsapp">WhatsApp</option>
             <option value="webchat">Web chat</option>
             <option value="facebook">Facebook</option>
+            <option value="facebook_comment">Facebook comments</option>
             <option value="instagram">Instagram</option>
+            <option value="instagram_comment">Instagram comments</option>
             <option value="whatsapp_bot">WhatsApp — customer bot</option>
           </Select>
         </Field>
@@ -255,14 +269,18 @@ function AddressField({ type, config }: { type: ChannelType; config?: Record<str
     );
   }
 
-  if (type === 'facebook' || type === 'instagram') {
+  if (isMetaChannel(type)) {
     // The page and account ids live in the environment, because they are paired
     // with a token that must never be in the database. This row is routing only:
-    // which group a message from here lands in.
+    // which group a message from here lands in. A comments row rides the same
+    // Page or account as its platform's row, so it names the same variable.
+    const variable =
+      metaPlatformOf(type) === 'facebook' ? 'FACEBOOK_PAGE_ID' : 'INSTAGRAM_ACCOUNT_ID';
     return (
       <p className="text-xs text-(--color-text-secondary) sm:flex-1 sm:pt-6">
-        Configured by {type === 'facebook' ? 'FACEBOOK_PAGE_ID' : 'INSTAGRAM_ACCOUNT_ID'} in the
-        environment. This row only sets the default group.
+        {isCommentChannel(type)
+          ? `Public comments on the posts of the account configured by ${variable} in the environment. This row only sets their default group; without one they start in the ${metaPlatformOf(type) === 'facebook' ? 'Facebook' : 'Instagram'} row’s.`
+          : `Configured by ${variable} in the environment. This row only sets the default group.`}
       </p>
     );
   }

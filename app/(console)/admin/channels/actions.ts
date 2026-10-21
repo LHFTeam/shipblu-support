@@ -9,6 +9,7 @@ import { ok } from '@/lib/http/action-state';
 import { text, uuidField } from '@/lib/http/form-data';
 import { allow } from '@/lib/http/rate-limit';
 import { enqueue } from '@/lib/queue';
+import { isMetaChannel } from '@/lib/tickets/channel-policy';
 import { parseTokenEnvVar } from '@/lib/whatsapp/accounts';
 import {
   canRequestSync,
@@ -31,6 +32,24 @@ import { canonicalUuid } from '@/lib/http/uuid';
 import { listFolderOptions } from '@/lib/kb/admin';
 import { LOCALES } from '@/lib/kb/locale';
 import { resolveFaqFolders } from '@/lib/widget/config';
+
+/**
+ * The types an admin may create or save. `portal` and `api` rows are the
+ * product's, so they are not here, and neither is a type a forged form names.
+ * The comment rows need no credentials — they ride the Page and Instagram
+ * tokens — and exist to give public comments a default group of their own.
+ * Must match `EDITABLE` in ./forms.tsx.
+ */
+const SAVEABLE_TYPES = [
+  'email',
+  'whatsapp',
+  'webchat',
+  'facebook',
+  'facebook_comment',
+  'instagram',
+  'instagram_comment',
+  'whatsapp_bot',
+] as const;
 
 // --- WhatsApp business accounts ---------------------------------------------
 
@@ -268,7 +287,7 @@ export async function saveChannel(_state: AdminState, formData: FormData): Promi
   const whatsappAccountId = String(formData.get('whatsappAccountId') ?? '') || null;
 
   if (!name) return { error: 'Give the channel a name' };
-  if (!['email', 'whatsapp', 'webchat', 'facebook', 'instagram', 'whatsapp_bot'].includes(type)) {
+  if (!(SAVEABLE_TYPES as readonly string[]).includes(type)) {
     return { error: id ? 'This channel is not edited here' : 'Unknown channel type' };
   }
 
@@ -342,12 +361,12 @@ export async function saveChannel(_state: AdminState, formData: FormData): Promi
   // Non-secret settings only. Access tokens and app secrets stay in the
   // environment, so a database dump never contains a usable credential.
   // Facebook and Instagram are addressed by ids that live in the environment
-  // beside the token they are useless without, so their row carries routing
-  // only.
+  // beside the token they are useless without, so their rows — the comment
+  // rows included, which ride the same Page and account — carry routing only.
   const config =
     type === 'whatsapp' || type === 'whatsapp_bot'
       ? { phoneNumberId }
-      : type === 'facebook' || type === 'instagram'
+      : isMetaChannel(type)
         ? {}
         : type === 'webchat'
           ? // The widget has no address. The row used to store an empty one
