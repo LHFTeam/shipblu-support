@@ -5,14 +5,18 @@ import { loadHoursCatalog } from '@/lib/hours/catalog';
 import { groupHours } from '@/lib/hours/resolve';
 import { holidayName, holidayOn, isWithinBusinessHours, nextOpeningAt } from '@/lib/hours';
 import { textToHtml } from '@/lib/html/sanitize';
-import { isReadOnlyChannel, type ConversationChannel } from '@/lib/tickets/channel-policy';
+import {
+  isCommentTicket,
+  isReadOnlyChannel,
+  type ConversationChannel,
+} from '@/lib/tickets/channel-policy';
 import {
   automatedReplyBlocked,
   deliverAutomatedReply,
   lacksEmailRecipient,
 } from '@/lib/tickets/outbound';
 import { requesterLocale } from '@/lib/tickets/locale';
-import { pickBody, pickRule, substitute, type AutoResponseRule } from './resolve';
+import { answersRequester, pickBody, pickRule, substitute, type AutoResponseRule } from './resolve';
 import { logger } from '@/lib/log';
 
 const log = logger('auto-response');
@@ -42,6 +46,7 @@ type Ticket = {
   deletedAt: Date | null;
   lastCustomerMessageAt: Date | null;
   externalId: string | null;
+  requesterContactId: string;
   autoRespondedAt: Date | null;
   contactEmail: string | null;
   contactName: string | null;
@@ -108,6 +113,19 @@ async function send(conversationId: string, at: Date): Promise<void> {
   const inbound = await lastInboundMessage(conversationId);
   if (inbound?.isAutomated) return;
 
+  // Before the claim, so a passer-by's comment on the requester's thread does
+  // not spend the closed stretch either (`answersRequester`).
+  const isComment = isCommentTicket(ticket.channel, ticket.externalId);
+  if (
+    !answersRequester({
+      isComment,
+      requesterContactId: ticket.requesterContactId,
+      authorContactId: inbound?.authorContactId ?? null,
+    })
+  ) {
+    return;
+  }
+
   // WhatsApp, Facebook and Instagram all need the 24-hour window open for a
   // message the software wrote. The customer's message is what opened it, so
   // this only fires on a replay of something old — where sending would fail at
@@ -164,7 +182,12 @@ async function send(conversationId: string, at: Date): Promise<void> {
     actorLabel: 'automation:out of hours',
     eventType: 'auto_replied',
     eventData: { reason: holiday ? 'holiday' : 'out_of_hours', ruleId: rule.id },
-    meta: { autoResponse: holiday ? 'holiday' : 'out_of_hours' },
+    // Posted under the customer's comment on a comment ticket, and badged as
+    // public on the timeline the way an agent's comment reply is.
+    meta: {
+      autoResponse: holiday ? 'holiday' : 'out_of_hours',
+      ...(isComment ? { isPublic: true } : {}),
+    },
   });
 
   // English first in the log line — the audience is whoever is reading Render's
@@ -255,6 +278,8 @@ async function loadTicket(conversationId: string): Promise<Ticket | null> {
       // Only to tell a comment ticket from a direct message: the rule picker
       // and the 24-hour guard both read it.
       externalId: conversations.externalId,
+      // Whose comment it was matters on a comment ticket (`answersRequester`).
+      requesterContactId: conversations.requesterContactId,
       autoRespondedAt: conversations.autoRespondedAt,
       contactEmail: contacts.primaryEmail,
       contactName: contacts.name,
@@ -277,7 +302,7 @@ async function loadTicket(conversationId: string): Promise<Ticket | null> {
 
 /**
  * The message that triggered this, for the automation classification the email
- * parser recorded on it.
+ * parser recorded on it, and for who wrote it.
  *
  * Read back rather than passed down through the lifecycle: three ingest paths
  * call that seam and only one of them has an RFC 3834 verdict to hand, so an
@@ -286,9 +311,9 @@ async function loadTicket(conversationId: string): Promise<Ticket | null> {
  */
 async function lastInboundMessage(
   conversationId: string,
-): Promise<{ isAutomated: boolean } | null> {
+): Promise<{ isAutomated: boolean; authorContactId: string | null } | null> {
   const rows = await db
-    .select({ meta: messages.meta })
+    .select({ meta: messages.meta, authorContactId: messages.authorContactId })
     .from(messages)
     .where(and(eq(messages.conversationId, conversationId), eq(messages.direction, 'inbound')))
     .orderBy(desc(messages.createdAt))
@@ -299,5 +324,8 @@ async function lastInboundMessage(
 
   const meta = row.meta ?? {};
 
-  return { isAutomated: meta.isAutomated === true || meta.isBounce === true };
+  return {
+    isAutomated: meta.isAutomated === true || meta.isBounce === true,
+    authorContactId: row.authorContactId,
+  };
 }

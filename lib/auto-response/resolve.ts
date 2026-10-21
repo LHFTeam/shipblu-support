@@ -121,6 +121,26 @@ export type MessageContext = {
 };
 
 /**
+ * Whether the message that arrived is the requester's, on a ticket where that
+ * is in doubt.
+ *
+ * On a public comment thread anybody may reply under the customer's comment,
+ * and ingest files the reply on the customer's ticket — threading on the root
+ * is what keeps one post's conversation on one ticket. The acknowledgement is
+ * addressed to the requester by name and posted on that thread, so a
+ * passer-by's comment must neither earn it nor spend the closed stretch the
+ * requester's own next comment would. A direct message, an email or a chat has
+ * one author on the customer's side, so the question does not arise.
+ */
+export function answersRequester(input: {
+  isComment: boolean;
+  requesterContactId: string;
+  authorContactId: string | null;
+}): boolean {
+  return !input.isComment || input.authorContactId === input.requesterContactId;
+}
+
+/**
  * The body to send, before substitution — or null when the rule has nothing to
  * say in any language.
  *

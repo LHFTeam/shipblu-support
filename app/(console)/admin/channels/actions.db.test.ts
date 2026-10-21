@@ -229,7 +229,7 @@ describe('saveChannel on a number connected through Meta', () => {
 describe('saveChannel for a comments row', () => {
   // Rides the Page or account its platform's row does, so it carries routing
   // and nothing else — an address field submitted with it is ignored rather
-  // than stored as `{ address }`, which is what the email fallthrough wrote.
+  // than stored as `{ address }`, which the email fallthrough would write.
   it('creates a Facebook or Instagram comments row with an empty config', async () => {
     for (const type of ['facebook_comment', 'instagram_comment'] as const) {
       const result = await saveChannel(

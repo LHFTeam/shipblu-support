@@ -1109,8 +1109,8 @@ worker and all four crons. 1.2 does not start until all six run 1.1.
     company-wide and save back as every channel. So nothing 1.1 deploys writes
     the values, and rolling it back is clean. The 1.1 editor in turn keeps a
     stored channel it does not offer as a visible option, which the action
-    refuses, so a rollback from 1.2 cannot widen a comments rule either. Until 1.2 a comment is not
-    acknowledged out of hours, which is the safe direction. The realtime topics
+    refuses, so a rollback from 1.2 cannot widen a comments rule either. Until
+    1.2 a comment is not acknowledged out of hours, which is the safe direction. The realtime topics
     still listen for them, so a web on 1.1 already hears a ticket the 1.2
     worker writes.
   - **One test for a comment ticket**, `isCommentTicket(channel, externalId)`
@@ -1210,10 +1210,12 @@ deploy it with web and the crons.
       list and `group.id eq "Merchant Care"`.
 
     All 52 comment tickets are in the Support group and carry Live Support
-    (Customer Care), through its channel list. A moved ticket leaves that list
-    and falls through to the same policy as the default, so the SLA does not
-    change, as Q11 expected. The Merchant Care policy needs Merchant Care too,
-    and no comment ticket is in it. No condition gains the comment values.
+    (Customer Care). A policy is selected when a ticket is created, so a moved
+    ticket keeps the one it has. A new comment ticket matches none of the four
+    — the two Offline policies are email-only, and the two Live ones list only
+    the platforms — and takes the default, the same Live Support (Customer
+    Care). So the SLA does not change, as Q11 expected. No condition gains the
+    comment values.
 
   - **`channelFor` takes the channel**, and for a comment channel reads both
     types in one query, preferring the oldest active comments row and falling
@@ -1250,13 +1252,26 @@ deploy it with web and the crons.
     4. Run it without `dryRun`, then dry-run again, which must report nothing.
     5. `npm run job -- rollup_metrics from=2026-08-29`, then the two
        verifications above.
-  - **Rollback.** Redeploy 1.1: it reads the comment values, so tickets 1.2
-    wrote stay legible, and its out-of-hours editor keeps a comments rule's
-    scope visible rather than saving it as every channel. Moving the tickets
-    back is one statement each for `conversations`, `csat_surveys` and
-    `canned_suggestions` (`replace(channel::text, '_comment', '')::channel`
-    where the channel is a comment one). Only 1.3 needs that, and it is not
-    worth doing otherwise.
+  - **Rollback** is the list after 1.3 below. Redeploying 1.1 (its step 2)
+    leaves tickets 1.2 wrote legible, since 1.1 reads the comment values, and
+    its out-of-hours editor keeps a comments rule's scope visible rather than
+    saving it as every channel. Reversing the backfill (its step 3) is one
+    `UPDATE` each for `conversations`, `csat_surveys` and `canned_suggestions`
+    (`replace(channel::text, '_comment', '')::channel` where the channel is a
+    comment one), with `channel_id` set back to the platform row where it names
+    a comments row.
+  - **Out-of-hours on a comment thread answers the requester only**
+    (`answersRequester` in `lib/auto-response/resolve.ts`). Anybody may reply
+    under a customer's comment, and the reply is filed on the customer's ticket;
+    the acknowledgement names the requester and is posted on the thread, so a
+    passer-by's comment neither earns it nor spends the closed stretch. Found
+    on review: 1.2 is what lets an admin write a comments rule. The reply is
+    marked `isPublic`, so the timeline badges it "Posted publicly" as it does an
+    agent's comment reply.
+  - **A comments row's default group is its own, "None" included.** Without a
+    comments row, comments start in the platform row's group; with one, they
+    start in its group, and a row left on "None" starts them in none. The form
+    says so.
 
 **1.3 — Lock the invariant.** A CHECK in `db/sql`, idempotent and guarded by
 constraint name and table:

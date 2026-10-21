@@ -26,8 +26,10 @@ import { refresh, type SettingsState } from '../settings-shared';
  * comment is acknowledged at all: a rule with no channel skips them
  * (`pickRule`), since the reply is posted under the comment for anybody reading
  * the post to see. They arrived with the stage that writes them (Stage 1.2 of
- * `plans/ticket-category-routing.md`): accepted earlier, a rule naming one would
- * have been the first row to carry the value, ahead of any reader that knew it.
+ * `plans/ticket-category-routing.md`): accepted in 1.1, a rule naming one would
+ * have been the first row to carry the value, and rolling 1.1 back would have
+ * put it in front of an editor that lists it as company-wide and saves it back
+ * as every channel.
  */
 const AUTO_RESPONSE_CHANNELS = [
   'email',

@@ -279,7 +279,7 @@ function AddressField({ type, config }: { type: ChannelType; config?: Record<str
     return (
       <p className="text-xs text-(--color-text-secondary) sm:flex-1 sm:pt-6">
         {isCommentChannel(type)
-          ? `Public comments on the posts of the account configured by ${variable} in the environment. This row only sets their default group; without one they start in the ${metaPlatformOf(type) === 'facebook' ? 'Facebook' : 'Instagram'} row’s.`
+          ? `Public comments on the posts of the account configured by ${variable} in the environment. This row sets their default group, “None” included; until a comments row exists they start in the ${metaPlatformOf(type) === 'facebook' ? 'Facebook' : 'Instagram'} row’s group.`
           : `Configured by ${variable} in the environment. This row only sets the default group.`}
       </p>
     );

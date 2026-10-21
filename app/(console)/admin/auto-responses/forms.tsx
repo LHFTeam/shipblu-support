@@ -99,8 +99,8 @@ function Fields({ rule, groups }: { rule?: Rule; groups: Group[] }) {
               </option>
             ))}
             {/*
-              A stored channel this list does not offer — a comment channel a
-              later version saved, read here after a rollback — stays selected
+              A stored channel this list does not offer — a value a later
+              version added, read here after a rollback — stays selected
               rather than falling to the first option, which would save the
               rule back as every channel. The action refuses it, so the admin
               has to choose.

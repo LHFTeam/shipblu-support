@@ -1,5 +1,5 @@
 import { eq } from 'drizzle-orm';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { db } from '@/db/client';
 import {
   cannedSuggestions,
@@ -52,10 +52,20 @@ async function ticket(input: {
   return row!.id;
 }
 
-async function channelRow(type: ConversationChannel, name: string, isActive = true) {
+async function channelRow(
+  type: ConversationChannel,
+  name: string,
+  options: { isActive?: boolean; createdAt?: Date } = {},
+) {
   const [row] = await db
     .insert(channels)
-    .values({ type, name, config: {}, isActive })
+    .values({
+      type,
+      name,
+      config: {},
+      isActive: options.isActive ?? true,
+      createdAt: options.createdAt ?? new Date('2026-09-01T00:00:00Z'),
+    })
     .returning({ id: channels.id });
   return row!.id;
 }
@@ -103,19 +113,35 @@ async function surveyChannel(id: string) {
 describe('splitCommentChannels', () => {
   async function archive() {
     const facebookRow = await channelRow('facebook', 'Facebook');
-    // An inactive comments row routes nothing, so it is never landed on.
-    await channelRow('facebook_comment', 'Old Facebook comments', false);
-    const facebookComments = await channelRow('facebook_comment', 'Facebook comments');
+    const instagramRow = await channelRow('instagram', 'Instagram');
+    // An inactive comments row routes nothing, so it is never landed on; of two
+    // active ones the oldest wins, as `channelFor` in ingest picks.
+    await channelRow('facebook_comment', 'Old Facebook comments', {
+      isActive: false,
+      createdAt: new Date('2026-08-01T00:00:00Z'),
+    });
+    const facebookComments = await channelRow('facebook_comment', 'Facebook comments', {
+      createdAt: new Date('2026-09-10T00:00:00Z'),
+    });
+    await channelRow('facebook_comment', 'Newer Facebook comments', {
+      createdAt: new Date('2026-10-10T00:00:00Z'),
+    });
 
     const fbComment = await ticket({
       channel: 'facebook',
       externalId: 'facebook:comment:post-1_c1',
       channelId: facebookRow,
     });
-    // Predates the channel rows, and Instagram has no comments row yet.
+    // Instagram has no comments row: one ticket predates the channel rows, the
+    // other keeps the platform row it was filed against.
     const igComment = await ticket({
       channel: 'instagram',
       externalId: 'instagram:comment:17890',
+    });
+    const igCommentOnRow = await ticket({
+      channel: 'instagram',
+      externalId: 'instagram:comment:17892',
+      channelId: instagramRow,
     });
     const deletedComment = await ticket({
       channel: 'facebook',
@@ -130,9 +156,11 @@ describe('splitCommentChannels', () => {
 
     return {
       facebookRow,
+      instagramRow,
       facebookComments,
       fbComment,
       igComment,
+      igCommentOnRow,
       deletedComment,
       dm,
       email,
@@ -173,6 +201,10 @@ describe('splitCommentChannels', () => {
       channel: 'instagram_comment',
       channelId: null,
     });
+    expect(await ticketState(a.igCommentOnRow)).toEqual({
+      channel: 'instagram_comment',
+      channelId: a.instagramRow,
+    });
     // Deleted tickets too: Stage 1.3's CHECK reads every row.
     expect((await ticketState(a.deletedComment)).channel).toBe('facebook_comment');
 
@@ -211,9 +243,9 @@ describe('splitCommentChannels', () => {
     ).toEqual(before);
   });
 
-  // A suggestion written by a web still on 1.1 after its ticket moved: the
-  // next run catches it, because copies are matched by their ticket's channel
-  // as it stands, not by what this run moved.
+  // A copy written on the old channel by a request that read the ticket before
+  // it moved: the next run catches it, because copies are matched by their
+  // ticket's channel as it stands, not by what this run moved.
   it('moves a copy left behind on a ticket that has already moved', async () => {
     const moved = await ticket({
       channel: 'instagram_comment',
@@ -224,6 +256,37 @@ describe('splitCommentChannels', () => {
     await splitCommentChannels(job());
 
     expect(await suggestionChannel(behind)).toBe('instagram_comment');
+  });
+
+  // The dry run is what the runbook reads before writing, and what says there
+  // is nothing left before 1.3 adds its CHECK, so its figures are pinned to the
+  // real run's.
+  it('reports on a dry run what the real run then moves, and nothing after', async () => {
+    await archive();
+    const lines = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const said = () => lines.mock.calls.map((call) => String(call[0]));
+
+    await splitCommentChannels(job({ dryRun: true }));
+    expect(said()).toEqual([
+      '[split_comment_channels] facebook: 2 tickets would move to facebook_comment, 2 onto a comments row',
+      '[split_comment_channels] instagram: 2 tickets would move to instagram_comment, 0 onto a comments row',
+      '[split_comment_channels] dry run: 4 comment tickets, 1 csat_surveys and 1 canned_suggestions would move',
+    ]);
+
+    lines.mockClear();
+    await splitCommentChannels(job());
+    expect(said()).toEqual([
+      '[split_comment_channels] facebook: 2 tickets moved to facebook_comment, 2 onto a comments row',
+      '[split_comment_channels] instagram: 2 tickets moved to instagram_comment, 0 onto a comments row',
+      '[split_comment_channels] 4 comment tickets, 1 csat_surveys and 1 canned_suggestions moved',
+    ]);
+
+    lines.mockClear();
+    await splitCommentChannels(job({ dryRun: true }));
+    expect(said()).toEqual([
+      '[split_comment_channels] dry run: 0 comment tickets, 0 csat_surveys and 0 canned_suggestions would move',
+    ]);
+    lines.mockRestore();
   });
 
   it('refuses an option it does not know, rather than running without it', async () => {
