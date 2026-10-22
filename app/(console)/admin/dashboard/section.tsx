@@ -48,7 +48,7 @@ export function TableView({
       <summary className="cursor-pointer text-xs text-(--color-text-secondary) hover:text-(--color-text-primary)">
         {summary}
       </summary>
-      <div className="app-scroll mt-2 max-h-64 overflow-y-auto">
+      <div className="app-scroll relative mt-2 max-h-64 overflow-y-auto">
         <table className="w-full text-xs">
           <thead className="sticky top-0 bg-(--color-background-surface)">
             <tr className="border-b border-(--color-border-subtle)">

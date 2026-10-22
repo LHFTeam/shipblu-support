@@ -211,7 +211,7 @@ export function ArticleEditor({
             <div
               dir={locale === 'ar' ? 'rtl' : 'ltr'}
               lang={locale}
-              className="kb-article app-scroll max-h-[34rem] overflow-y-auto rounded-md border border-(--color-border-subtle) bg-(--color-background-surface) p-4 text-sm"
+              className="kb-article app-scroll relative max-h-[34rem] overflow-y-auto rounded-md border border-(--color-border-subtle) bg-(--color-background-surface) p-4 text-sm"
               // Preview only, and it renders the author's own unsaved draft in
               // their own browser — no other user's input reaches it. What gets
               // stored is sanitised server-side, which is the boundary that

@@ -62,7 +62,7 @@ export default async function NewTicketPage({
   const description = formDescription(form, 'en');
 
   return (
-    <div className="app-scroll h-full overflow-y-auto p-4 sm:p-6">
+    <div className="app-scroll relative h-full overflow-y-auto p-4 sm:p-6">
       <div className="mx-auto w-full max-w-2xl">
         <PageHeader title="New ticket" description={description || undefined} />
 

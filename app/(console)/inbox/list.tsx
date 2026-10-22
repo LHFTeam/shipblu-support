@@ -288,7 +288,7 @@ export function InboxList({
       <ol
         ref={listRef}
         onScroll={onScroll}
-        className="app-scroll min-h-0 flex-1 overflow-y-auto md:py-1.5"
+        className="app-scroll relative min-h-0 flex-1 overflow-y-auto md:py-1.5"
         aria-busy={loading}
       >
         {visible.length === 0 ? (

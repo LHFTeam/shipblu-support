@@ -205,12 +205,19 @@ function that reads it.
 **A page under `(console)` outside `admin/` brings its own scroll container.**
 The shell is `h-dvh overflow-hidden` so the inbox can own the full height and
 manage its own panes, which means a page that does not open an
-`app-scroll h-full overflow-y-auto p-6` wrapper is not merely unpadded — every
-row below the fold is rendered where nobody can scroll to it, and the page reads
-as half-finished rather than as broken (§6.53). `admin/layout.tsx` supplies one
-for everything beneath it; nothing else does. CI checks it (`console-scroll`):
-every other console page either says `overflow-y-auto` or renders
-`<InboxShell>`, which owns its panes.
+`app-scroll relative h-full overflow-y-auto p-6` wrapper is not merely unpadded —
+every row below the fold is rendered where nobody can scroll to it, and the page
+reads as half-finished rather than as broken (§6.53). `admin/layout.tsx`
+supplies one for everything beneath it; nothing else does. CI checks it
+(`console-scroll`): every other console page either says `overflow-y-auto` or
+renders `<InboxShell>`, which owns its panes. **A scroll container is also
+`relative`.** `sr-only` is `position: absolute`, so inside an unpositioned pane
+it is placed against the document, past every `overflow-hidden`, and stretches
+the page under the shell. Scrolling past the end of the pane then moves the
+whole console (§6.81, twice). CI refuses a class list that scrolls vertically
+unless a position applies wherever it scrolls — unprefixed or under the scroll's
+own variant, on every branch of the expression, with no `static` to take it
+back (`scroll-positioned`).
 
 ## Do not edit
 

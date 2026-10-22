@@ -412,16 +412,13 @@ function ReplyBody({
         phones, which have no Tab key.
       */}
       {suggest ? (
-        // `relative` because the key hint below can be `sr-only`, which is
-        // `position: absolute` — unpositioned, it is placed against the page
-        // and lengthens it (PROJECT-STATE §6.81). `empty:-mt-2` because, empty,
-        // it is still a flex item of the form's `gap-2` column, and the gap on
-        // both sides of a zero-height item pushed the picker down by one gap
-        // whenever nothing was suggested.
+        // `empty:-mt-2` because, empty, it is still a flex item of the form's
+        // `gap-2` column, and the gap on both sides of a zero-height item
+        // pushed the picker down by one gap whenever nothing was suggested.
         <div
           id={hintId}
           aria-live="polite"
-          className="relative text-xs text-(--color-text-secondary) empty:-mt-2"
+          className="text-xs text-(--color-text-secondary) empty:-mt-2"
         >
           {showing && suggested ? (
             <div className="flex items-center gap-2">

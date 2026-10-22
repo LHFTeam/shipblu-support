@@ -5176,6 +5176,19 @@ claude/shipblu-support-app-03p2we could not be found` — staging's pin to a
     mobile nav, which carries `app-scroll`. To check, compare the document's
     `scrollHeight` with its `clientHeight`; a `scrollTop` of 0 proves nothing.
 
+    _2026-10-21, reported by an admin._ It came back on `/admin/channels`,
+    because nothing enforced the sentence above. The admin layout's pane was
+    unpositioned, and a WhatsApp onboarding card states each step as an
+    `sr-only` span. Reproduced with seven business accounts
+    above one failed attempt: 1,641px of document under a 907px window, and
+    wheeling past the bottom of the page scrolled the window by 734px. Every
+    vertical scroll pane in the app is now `relative` (thirty were not), and the
+    `scroll-positioned` repo rule refuses a class list that scrolls vertically
+    without positioning. Positioning only the shell was measured too: the
+    document stopped growing, but the shell kept the same 734px of hidden
+    scroll range, and `scrollIntoView` on the span moved the whole console by
+    all of it. That reasoning is in the rule's header.
+
 82. **A media element never comes back through `/api/attachments`.**
     _2026-10-05, found before shipping inline voice notes and video._ The route
     answers 307 to a Storage URL signed for five minutes. An `<img>` fetches

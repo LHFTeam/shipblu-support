@@ -71,7 +71,7 @@ export default async function ReportsPage({
   const startsLate = rolledUp.first !== null && rolledUp.first > range.from;
 
   return (
-    <div className="app-scroll h-full overflow-y-auto p-4 sm:p-6">
+    <div className="app-scroll relative h-full overflow-y-auto p-4 sm:p-6">
       <PageHeader
         title="Reports"
         description={`${range.from} to ${range.to}, in ${zone}. Rolled up nightly — today is not included yet.`}

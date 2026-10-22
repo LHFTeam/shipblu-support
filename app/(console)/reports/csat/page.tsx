@@ -161,7 +161,7 @@ export default async function CsatReportPage({
   const surveyedDays = series.filter(hasSurveys);
 
   return (
-    <div className="app-scroll h-full overflow-y-auto p-4 sm:p-6">
+    <div className="app-scroll relative h-full overflow-y-auto p-4 sm:p-6">
       <PageHeader
         title="Customer satisfaction"
         description={`${range.from} to ${range.to}, in ${zone}. Rolled up nightly: the figures run to ${noFigures ? 'no day in this window' : through}; the comments, read live, to now.`}

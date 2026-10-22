@@ -16,7 +16,12 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   return (
     <div className="flex h-full min-h-0">
       <AdminNav />
-      <div className="app-scroll min-w-0 flex-1 overflow-y-auto">
+      {/* Positioned for the `sr-only` text on every admin page, which is
+          `position: absolute`: unpositioned, this pane let an onboarding
+          card's step states be placed against the document, and scrolling
+          past the end of /admin/channels took the whole console off the
+          screen (PROJECT-STATE §6.81, `scroll-positioned`). */}
+      <div className="app-scroll relative min-w-0 flex-1 overflow-y-auto">
         {/* The top padding clears the horizontal section strip that replaces
             the sidebar below `lg`. It is restated at `md` because `md:p-6`
             sets every side, top included, and on its own put the first row of

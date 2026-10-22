@@ -87,7 +87,7 @@ export default async function AgentProductivityPage({
   const team = totalsOf(summaries);
 
   return (
-    <div className="app-scroll h-full overflow-y-auto p-4 sm:p-6">
+    <div className="app-scroll relative h-full overflow-y-auto p-4 sm:p-6">
       <PageHeader
         title="Agent productivity"
         description={`${from} to ${to}, in ${zone}. Rolled up nightly — today is not included yet.`}

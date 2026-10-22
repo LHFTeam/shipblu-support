@@ -28,7 +28,7 @@ export default async function KbListPage({
   const mayEdit = can(agent, 'kb.edit');
 
   return (
-    <div className="app-scroll mx-auto flex h-full max-w-5xl flex-col overflow-y-auto p-4 sm:p-6">
+    <div className="app-scroll relative mx-auto flex h-full max-w-5xl flex-col overflow-y-auto p-4 sm:p-6">
       <PageHeader
         title="Knowledge base"
         actions={

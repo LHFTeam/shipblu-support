@@ -36,7 +36,7 @@ export default async function TeamAvailabilityPage() {
   const away = team.filter((agent) => agent.presence === 'away').length;
 
   return (
-    <div className="app-scroll h-full overflow-y-auto p-4 sm:p-6">
+    <div className="app-scroll relative h-full overflow-y-auto p-4 sm:p-6">
       <PageHeader
         title="Team availability"
         description={describePolicy(policy)}

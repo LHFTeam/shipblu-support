@@ -196,7 +196,7 @@ export function KnowledgePanel({
         <p className="mt-2 text-xs text-(--color-text-secondary)">Suggested for this ticket</p>
       ) : null}
 
-      <div className="app-scroll mt-1 max-h-56 overflow-y-auto">
+      <div className="app-scroll relative mt-1 max-h-56 overflow-y-auto">
         {shown.map((hit) => (
           <Hit key={hit.id} hit={hit} onInsert={onInsert} />
         ))}
