@@ -7,6 +7,7 @@ import {
   ticketStatuses,
 } from '@/db/schema';
 import { liveTicketsFilter, loadPolicies, type LoadedPolicy } from '@/lib/sla';
+import { accountableOrAssignee } from '@/lib/tickets/accountable';
 import { logger } from '@/lib/log';
 
 const log = logger('sla_sweep');
@@ -201,12 +202,13 @@ async function recordBreach(
   now: Date,
 ): Promise<void> {
   await db.transaction(async (tx) => {
-    await tx
+    const [breached] = await tx
       .update(conversations)
       .set(
         kind === 'first_response' ? { firstResponseBreached: true } : { resolutionBreached: true },
       )
-      .where(eq(conversations.id, conversationId));
+      .where(eq(conversations.id, conversationId))
+      .returning({ accountableAgentId: accountableOrAssignee() });
 
     await tx.insert(conversationEvents).values({
       conversationId,
@@ -216,6 +218,13 @@ async function recordBreach(
         kind,
         dueAt: dueAt?.toISOString() ?? null,
         breachedBySeconds: dueAt ? Math.round((now.getTime() - dueAt.getTime()) / 1000) : null,
+        // Whom the breach counted against when it happened — the number's
+        // owner, or whoever held the ticket — snapshotted as `reopened`
+        // snapshots its resolver: the ticket's columns move after this (a
+        // reassignment, a handover), and the event is the one record of the
+        // moment that does not. Read by the update that sets the flag, so it is
+        // the row the flag was set on.
+        accountableAgentId: breached?.accountableAgentId ?? null,
       },
     });
   });

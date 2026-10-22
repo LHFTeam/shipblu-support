@@ -1,6 +1,7 @@
 import { eq, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { agentBacklogSnapshots, agents, conversations, ticketStatuses } from '@/db/schema';
+import { breachedByAccountable } from '@/lib/tickets/accountable';
 import { openBacklog } from '@/lib/tickets/backlog';
 import { logger } from '@/lib/log';
 
@@ -40,15 +41,15 @@ export async function snapshotBacklog(): Promise<void> {
       category: ticketStatuses.category,
       lastCustomerMessageAt: conversations.lastCustomerMessageAt,
       lastAgentMessageAt: conversations.lastAgentMessageAt,
-      breached:
-        sql<boolean>`(${conversations.firstResponseBreached} or ${conversations.resolutionBreached})`.as(
-          'breached',
-        ),
     })
     .from(conversations)
     .innerJoin(ticketStatuses, eq(ticketStatuses.id, conversations.statusId))
     .where(openBacklog())
     .as('live');
+  // And the dashboard's "Breached", for the same reason: counted against whom
+  // each breach counts — an owned WhatsApp number's owner, whoever holds the
+  // ticket — rather than against whose queue it sits in, as the rest of the row is.
+  const breachedBy = breachedByAccountable();
 
   const awaiting = sql`${live.lastCustomerMessageAt} is not null
     and (${live.lastAgentMessageAt} is null
@@ -63,12 +64,13 @@ export async function snapshotBacklog(): Promise<void> {
       openCount: sql<number>`count(*) filter (where ${live.category} = 'open')::int`,
       pendingCount: sql<number>`count(*) filter (where ${live.category} = 'pending')::int`,
       awaitingReplyCount: sql<number>`count(*) filter (where ${awaiting})::int`,
-      breachedCount: sql<number>`count(*) filter (where ${live.breached})::int`,
+      breachedCount: sql<number>`coalesce(${breachedBy.count}, 0)`,
     })
     .from(agents)
     .leftJoin(live, eq(live.assigneeAgentId, agents.id))
+    .leftJoin(breachedBy, eq(breachedBy.agentId, agents.id))
     .where(eq(agents.isActive, true))
-    .groupBy(agents.id);
+    .groupBy(agents.id, breachedBy.count);
 
   if (rows.length === 0) {
     log.info('no active agents');

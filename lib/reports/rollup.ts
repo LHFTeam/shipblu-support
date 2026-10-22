@@ -20,6 +20,7 @@ import { businessMinutesBetween, type HoursConfig } from '@/lib/hours';
 import { loadHoursCatalog } from '@/lib/hours/catalog';
 import { defaultHours, ticketHours, type HoursCatalog } from '@/lib/hours/resolve';
 import { loadPolicies, type LoadedPolicy } from '@/lib/sla';
+import { accountableOrAssignee } from '@/lib/tickets/accountable';
 import { readOnlyChannels } from '@/lib/tickets/channel-policy';
 import { TEAM_TIME_ZONE } from '@/lib/hours/zone';
 import { logger } from '@/lib/log';
@@ -39,6 +40,16 @@ const log = logger('rollup');
  * and by channel — with null meaning "all" in each dimension. Storing every
  * combination instead would multiply the row count for cuts nobody asks for;
  * these four are the questions a support team actually has.
+ *
+ * The agent a ticket's figures belong to is the one its SLA counts against
+ * (`accountableOrAssignee()`): the owner of the WhatsApp number it arrived on,
+ * and otherwise whoever holds it. Every ticket figure in that slice — created,
+ * first response, resolved, reopened, met and breached — goes to the same
+ * person, so the "First response" and "Within SLA" columns beside each other
+ * still describe the same tickets. It reads the frozen column rather than the
+ * number's current owner, so the three days this rebuilds every night stay
+ * where they were filed when a number changes hands. Surveys are the
+ * exception: a score is the survey's own snapshot of who handled the ticket.
  */
 
 /**
@@ -174,10 +185,11 @@ export type Dimensions = { groupId: string | null; agentId: string | null; chann
  * The rows one ticket's numbers belong in: the totals, plus one row per
  * dimension the ticket actually has.
  *
- * A ticket with no assignee counts in the totals but not in a "by agent" row,
- * which would otherwise read as an agent called null. Exported because getting
- * this wrong is invisible in the output — it inflates every figure rather than
- * producing an obviously broken one — so it is worth a test of its own.
+ * A ticket nobody is accountable for and nobody holds counts in the totals but
+ * not in a "by agent" row, which would otherwise read as an agent called null.
+ * Exported because getting this wrong is invisible in the output — it inflates
+ * every figure rather than producing an obviously broken one — so it is worth
+ * a test of its own.
  */
 export function slicesFor(dims: Dimensions): Dimensions[] {
   const slices: Dimensions[] = [{ groupId: null, agentId: null, channel: null }];
@@ -284,7 +296,7 @@ export async function computeDay(
     .select({
       channel: conversations.channel,
       groupId: conversations.groupId,
-      agentId: conversations.assigneeAgentId,
+      agentId: accountableOrAssignee(),
     })
     .from(conversations)
     .where(
@@ -308,7 +320,7 @@ export async function computeDay(
     .select({
       channel: conversations.channel,
       groupId: conversations.groupId,
-      agentId: conversations.assigneeAgentId,
+      agentId: accountableOrAssignee(),
       createdAt: conversations.createdAt,
       firstRespondedAt: conversations.firstRespondedAt,
       firstResponseDueAt: conversations.firstResponseDueAt,
@@ -348,7 +360,7 @@ export async function computeDay(
     .select({
       channel: conversations.channel,
       groupId: conversations.groupId,
-      agentId: conversations.assigneeAgentId,
+      agentId: accountableOrAssignee(),
       createdAt: conversations.createdAt,
       resolvedAt: conversations.resolvedAt,
       resolutionDueAt: conversations.resolutionDueAt,
@@ -391,7 +403,7 @@ export async function computeDay(
     .select({
       channel: conversations.channel,
       groupId: conversations.groupId,
-      agentId: conversations.assigneeAgentId,
+      agentId: accountableOrAssignee(),
     })
     .from(conversationEvents)
     .innerJoin(conversations, eq(conversations.id, conversationEvents.conversationId))

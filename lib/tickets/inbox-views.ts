@@ -70,22 +70,39 @@ export function seesGroupQueues(canViewGroups: boolean, groups: InboxGroup[]): b
   return canViewGroups && groups.some((group) => group.member);
 }
 
-export function inboxViews({
-  canSeeBot,
-  canViewAll,
-  canViewGroups = false,
-  groups = [],
-  canSeeRatings,
-}: {
-  canSeeBot: boolean;
+type Reach = {
   canViewAll: boolean;
   /** `ticket.view.group`: their groups' tickets as well as their own. */
   canViewGroups?: boolean;
   /** `inboxGroupsFor()`: every group for `canViewAll`, the agent's own otherwise. */
   groups?: InboxGroup[];
+  /**
+   * `ownsANumber()`: the owner of a WhatsApp number sees its tickets whoever
+   * holds them, group or no group, so their All is wider than Mine too.
+   */
+  ownsNumbers?: boolean;
+};
+
+/**
+ * Whether the agent can see tickets that are not theirs, so that Unassigned
+ * and All open are lists of their own rather than Mine again. One answer for
+ * `inboxViews` and `activeViewId`, so the views offered and the view lit
+ * cannot disagree about it.
+ */
+function seesBeyondOwn({ canViewAll, canViewGroups = false, groups = [], ownsNumbers }: Reach) {
+  return canViewAll || ownsNumbers === true || seesGroupQueues(canViewGroups, groups);
+}
+
+export function inboxViews({
+  canSeeBot,
+  canSeeRatings,
+  ...reach
+}: Reach & {
+  canSeeBot: boolean;
   /** `report.view`, which `listInbox` requires of the rated view too. */
   canSeeRatings: boolean;
 }): InboxViewSection[] {
+  const { groups = [] } = reach;
   const mine: InboxView = {
     id: 'mine',
     label: 'Mine',
@@ -95,11 +112,14 @@ export function inboxViews({
   };
 
   // An agent who sees only their own tickets has an Unassigned that is always
-  // empty and an All that is their own list again — `listInbox` forces the
-  // assignee for them — so they are offered neither. One who sees their groups'
-  // has both, each inside what they may see: Unassigned is what is waiting in
-  // their groups, which is the reason a group is a queue at all.
-  const seesTeam = canViewAll || seesGroupQueues(canViewGroups, groups);
+  // empty and an All that is their own list again — visibility in `listInbox`
+  // leaves them nothing else — so they are offered neither. One who sees their
+  // groups' has both, each inside what they may see: Unassigned is what is
+  // waiting in their groups, which is the reason a group is a queue at all. So
+  // does the owner of a WhatsApp number, in no group: their Unassigned is what
+  // has arrived on it and nobody has taken, and their All includes what a
+  // colleague is working on it — both of which count against them.
+  const seesTeam = seesBeyondOwn(reach);
   const memberOf = groups.filter((group) => group.member);
 
   return [
@@ -227,18 +247,15 @@ export function viewHref(base: string, filters: ViewFilters, q: string): string 
  * For an agent who sees only their own tickets, "all" and "mine" are the same
  * list, so they are compared as one: their bare inbox is Mine, and a channel
  * view stays recognisable from either spelling. Not for one who sees their
- * groups' tickets, whose All is wider than Mine.
+ * groups' tickets or owns a number, whose All is wider than Mine — lighting
+ * Mine over it would put the count of their own beside a list of more.
  */
 export function activeViewId(
   sections: InboxViewSection[],
   filters: InboxFilters,
-  {
-    canViewAll,
-    canViewGroups = false,
-    groups = [],
-  }: { canViewAll: boolean; canViewGroups?: boolean; groups?: InboxGroup[] },
+  reach: Reach,
 ): string | null {
-  const seesOnlyOwn = !canViewAll && !seesGroupQueues(canViewGroups, groups);
+  const seesOnlyOwn = !seesBeyondOwn(reach);
   const scope = (view: InboxFilters['view']) => (seesOnlyOwn && view === 'all' ? 'mine' : view);
 
   for (const section of sections) {

@@ -232,7 +232,11 @@ export const metricsDaily = pgTable(
     id: uuid('id').primaryKey().defaultRandom(),
     day: date('day').notNull(),
 
-    /** Null in each dimension means "all" — the table stores rolled-up totals too. */
+    /**
+     * Null in each dimension means "all" — the table stores rolled-up totals
+     * too. The agent is the one a ticket's SLA counts against, not always its
+     * assignee: `accountableOrAssignee()` in `lib/tickets/accountable.ts`.
+     */
     groupId: uuid('group_id').references(() => groups.id, { onDelete: 'cascade' }),
     agentId: uuid('agent_id').references(() => agents.id, { onDelete: 'cascade' }),
     channel: channelEnum('channel'),
@@ -383,6 +387,12 @@ export const agentBacklogSnapshots = pgTable(
     pendingCount: integer('pending_count').notNull().default(0),
     /** Of those, the ones where the customer spoke last and is still waiting. */
     awaitingReplyCount: integer('awaiting_reply_count').notNull().default(0),
+    /**
+     * Open-backlog tickets past an SLA target that count against them
+     * (`accountableOrAssignee()`) — not "of those": the owner of a WhatsApp
+     * number answers for its tickets' breaches whoever holds them, so this is
+     * the one count on the row that is not about what they hold.
+     */
     breachedCount: integer('breached_count').notNull().default(0),
   },
   (t) => [index('agent_backlog_snapshots_agent_idx').on(t.agentId, t.at)],
@@ -466,10 +476,12 @@ export const agentMetricsDaily = pgTable(
      * resolved status themselves.
      *
      * Deliberately not `metrics_daily.tickets_resolved`, which counts tickets
-     * resolved *while assigned to* somebody. That is the right question for the
-     * queue and the wrong denominator for a reopen rate: a rate whose numerator
-     * counts one population and whose denominator counts another can exceed
-     * 100% without anything being broken, and then means nothing at all.
+     * resolved *while answerable to* somebody — held by them, or on the
+     * WhatsApp number they own (`accountableOrAssignee()`). That is the right
+     * question for the queue and the wrong denominator for a reopen rate: a
+     * rate whose numerator counts one population and whose denominator counts
+     * another can exceed 100% without anything being broken, and then means
+     * nothing at all.
      */
     resolutionsMade: integer('resolutions_made').notNull().default(0),
 
