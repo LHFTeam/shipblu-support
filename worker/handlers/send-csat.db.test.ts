@@ -54,7 +54,14 @@ async function switchOn(overrides: Partial<Parameters<typeof saveCsatSettings>[0
 }
 
 async function resolvedTicket(input: {
-  channel: 'email' | 'webchat' | 'facebook' | 'instagram' | 'whatsapp' | 'whatsapp_bot';
+  channel:
+    | 'email'
+    | 'webchat'
+    | 'facebook'
+    | 'facebook_comment'
+    | 'instagram'
+    | 'whatsapp'
+    | 'whatsapp_bot';
   email?: string | null;
   /** The customer's one message; null for none; a media stand-in is words too here. */
   customerText?: string | null;
@@ -213,7 +220,7 @@ describe('send_csat', () => {
     const bot = await resolvedTicket({ channel: 'whatsapp_bot' });
     // A public comment thread: the survey would be posted on the post.
     const comment = await resolvedTicket({
-      channel: 'facebook',
+      channel: 'facebook_comment',
       externalId: 'facebook:comment:123_456',
     });
 

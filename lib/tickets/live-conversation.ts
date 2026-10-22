@@ -19,10 +19,10 @@ export type LiveConversation = {
  * Its own export so a test can read the statement back through `toSQL()`: the
  * WhatsApp path and the widget each wrote these conditions out, and the point
  * of sharing them is that they cannot drift apart again. Meta's direct
- * messages are not here, on purpose — they must also skip comment threads, which
- * may still live on the same channel (until `split_comment_channels` has moved
- * them to `facebook_comment` / `instagram_comment`) and are told apart by
- * `external_id`.
+ * messages are not here, on purpose — they must also skip comment threads,
+ * which lived on the same channel until Stage 1.2 gave them
+ * `facebook_comment` / `instagram_comment`, and are told apart by `external_id`
+ * (`findLiveConversation` in `lib/tickets/ingest-meta.ts` skips any with one).
  *
  * Never an imported conversation: a WhatsApp Business app chat copied in after
  * a coexistence onboarding is filed resolved, and its newest message can be

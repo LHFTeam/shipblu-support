@@ -77,7 +77,7 @@ re-read before acting on one.
 | 0     | Merged: #386 (`01488c9`)                                                                                                                    | Live since 2026-10-20. Its two operational steps were never done (below)                                                                                                                           |
 | 1.1   | Merged: #387, then `dev` → `main` in #389 (`1f89219`)                                                                                       | Live since 2026-10-21 10:13 UTC                                                                                                                                                                    |
 | 1.2   | Merged: #391 (`31f7379`) and follow-up #392 (`7b7d276`), then `dev` → `main` in #393 (`634a28d`), which also carried another session's #390 | **Done.** All six services live on `634a28d` by 17:38 UTC, worker first. The user ran the backfill and the rollup from a shell, so neither left a `jobs` row. Every check that follows reads clean |
-| 1.3   | Not started. Decided below                                                                                                                  | —                                                                                                                                                                                                  |
+| 1.3   | Built in #395 (with this section), not merged. As built below                                                                               | —                                                                                                                                                                                                  |
 | 2–6   | Not started                                                                                                                                 | —                                                                                                                                                                                                  |
 
 **1.2's checks, read at 21:54 UTC.**
@@ -130,8 +130,8 @@ re-read before acting on one.
 Every production write needs the user's go-ahead for that step, and the
 `AGENTS.md` sequence: read the state first, say the change, have the way back.
 
-1. **Build 1.3**, as decided under
-   [1.3 as it will be built](#13-as-it-will-be-built), as a PR into `dev`.
+1. **Review and merge 1.3 into `dev`.** It is built, in #395, as recorded
+   under [1.3, as built](#13-as-built).
 2. **Merge `dev` into `main` only once 1.3's gate holds.** The gate is a
    read-only query. Read it on the day of the merge and quote it in the PR.
    The gate guards the merge rather than the deploy, because whoever next
@@ -143,10 +143,10 @@ Every production write needs the user's go-ahead for that step, and the
 5. **Before Stage 5**, a person does 0.2's reorder and 0.6's staffing, and the
    support lead answers the questions still open (below).
 
-### 1.3 as it will be built
+### 1.3, as built
 
-These are decided here, so the next session does not re-derive them. The
-reasons are given so that any of them can be argued with.
+Decided first, then built in #395 exactly so, which is why this section reads
+as instructions. The reasons are given so that any of them can be argued with.
 
 - **The constraint is a new file, `db/sql/008_comment_channel_check.sql`.** A
   file of its own means the migrate log names it if it fails ("Applying
@@ -218,6 +218,12 @@ reasons are given so that any of them can be argued with.
 
   Locally, migrate `shipblu_test` again before `npm run test:db`. A database
   migrated before the branch has no CHECK, and the suite passes on it.
+
+  As built: the seven fixtures were rewritten, and the one case that existed
+  only for a pre-1.2 row (ingest-meta's "a reply on a thread filed before
+  comments had a channel") went, with send-reply's and meta-feedback's legacy
+  halves. The new test has fourteen cases: seven refused, six accepted, and an
+  update that splits the pair.
 
 - **`split_comment_channels` is retired in the same PR.** After the CHECK it can
   match nothing, and its test cannot build a fixture. Remove all of it:
@@ -1706,7 +1712,7 @@ the `HUMAN_AGENT` section, and the paragraph that begins "Until the CHECK
 constraint … lands"). Two items once listed here were done in 1.1: the comment
 in `lib/tickets/live-conversation.ts`, and `docs/PROJECT-STATE.md`'s claim that
 no Instagram comment had ever arrived. What else 1.3 changes is decided in
-[1.3 as it will be built](#13-as-it-will-be-built).
+[1.3, as built](#13-as-built).
 
 **Rollback, in this order.** 1.1 itself is never reverted. Its migration
 cannot be deleted (`scripts/ci/rules/generated-files.mjs:52-63`), and its

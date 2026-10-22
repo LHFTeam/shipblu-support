@@ -22,7 +22,14 @@ async function ticket(
     .where(eq(ticketStatuses.name, 'Open'));
   const [row] = await db
     .insert(conversations)
-    .values({ channel, statusId: open!.id, requesterContactId: contact!.id })
+    .values({
+      channel,
+      // A comment ticket carries the thread's root, as ingest files it and as
+      // the comment-channel CHECK requires.
+      externalId: channel === 'facebook_comment' ? 'facebook:comment:post-1_c1' : null,
+      statusId: open!.id,
+      requesterContactId: contact!.id,
+    })
     .returning({ id: conversations.id });
   return row!.id;
 }

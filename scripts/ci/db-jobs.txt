@@ -31,7 +31,6 @@ run: backfill_shipment_links limit=1
 run: backfill_message_locations limit=1
 run: normalise_kb_formatting dryRun=true
 run: restore_resolved_at dryRun=true
-run: split_comment_channels dryRun=true
 run: backfill_categorise_ai dryRun=true limit=1
 run: send_csat conversationId=00000000-0000-0000-0000-000000000000
 run: seed_canned_responses dryRun=true

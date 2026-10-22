@@ -193,8 +193,8 @@ export async function ingestMetaComment(comment: NormalisedComment): Promise<Met
   // A comment is a channel of its own (`db/schema/enums.ts`), so a team can
   // route and report public comments apart from direct messages; the person
   // stays on the platform, above, because the commenter is the same user who
-  // writes to the inbox. A comment on a thread filed before Stage 1.2 lands on
-  // that ticket and keeps its channel until `split_comment_channels` moves it.
+  // writes to the inbox. The database refuses a comment ticket on any other
+  // channel (`db/sql/008_comment_channel_check.sql`).
   const commentChannel = commentChannelOf(comment.platform);
 
   // The root of the thread is what the ticket is about. A reply to a comment

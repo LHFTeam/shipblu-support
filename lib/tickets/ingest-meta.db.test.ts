@@ -530,33 +530,6 @@ describe('ingestMetaComment', () => {
     });
   });
 
-  // A thread filed before Stage 1.2 is found by its external id like any
-  // other, and keeps its platform's channel until `split_comment_channels`
-  // moves it: a reply must not open a second ticket for the same comment.
-  it('puts a reply on a thread filed before comments had a channel, and leaves it there', async () => {
-    const [status] = await db
-      .select({ id: ticketStatuses.id })
-      .from(ticketStatuses)
-      .where(eq(ticketStatuses.name, 'Open'));
-    const [contact] = await db.insert(contacts).values({ name: 'Amira' }).returning();
-    const [legacy] = await db
-      .insert(conversations)
-      .values({
-        channel: 'facebook',
-        externalId: 'facebook:comment:post-1_c1',
-        statusId: status!.id,
-        requesterContactId: contact!.id,
-      })
-      .returning({ id: conversations.id });
-
-    const reply = await ingestMetaComment(
-      comment({ commentId: 'post-1_c2', parentCommentId: 'post-1_c1', createdAt: LATER }),
-    );
-
-    expect(reply).toMatchObject({ conversationId: legacy!.id, createdConversation: false });
-    expect(await conversation(legacy!.id)).toMatchObject({ channel: 'facebook' });
-  });
-
   // Recorded, not endorsed: unlike a direct message, the lookup by
   // external_id does not skip a closed ticket, so a reply lands on it and it
   // stays closed — what email does, and the opposite of a DM.

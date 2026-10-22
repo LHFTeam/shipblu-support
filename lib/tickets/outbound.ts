@@ -72,8 +72,9 @@ import { windowState as whatsappWindowState } from '@/lib/whatsapp/window';
  * than a day — a reply that would have posted perfectly well. The ticket is
  * identified by `isCommentTicket`: its channel, or, the way the send path
  * identifies it, the root comment in its external id. Both, because comment
- * tickets carried the platform's channel until they were given their own, and
- * the external id stays the safeguard until a CHECK makes the two one answer.
+ * tickets carried the platform's channel until they were given their own; a
+ * CHECK makes the two one answer now, and the external id stays as the
+ * safeguard for the day it is dropped (`isCommentTicket`).
  *
  * `now` defaults to the real clock and callers should leave it alone outside a
  * test. It is deliberately *not* the instant of the message being handled: the

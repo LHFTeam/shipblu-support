@@ -142,7 +142,10 @@ Design decisions worth knowing before changing things:
   a private conversation — they differ in who can read the answer. The contact, the
   webhook and every Graph call stay on the platform, because the person commenting is
   the same Facebook or Instagram user who writes to the inbox, and splitting the
-  identity would make them two contacts.
+  identity would make them two contacts. The database keeps a comment on its comment
+  channel: a CHECK refuses a ticket whose channel and external id disagree, because the
+  one reader that asked only the channel would answer a public comment as a private
+  message.
 - **The two platforms agree about almost nothing under the surface.** One webhook, one
   parser and one send job cover both, but a comment on Instagram has a `replies` edge
   where Facebook has `comments`, is hidden with `hide` where Facebook uses `is_hidden`,

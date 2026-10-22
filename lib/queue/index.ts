@@ -36,7 +36,6 @@ export type JobType =
   | 'classify_priority'
   | 'normalise_kb_formatting'
   | 'restore_resolved_at'
-  | 'split_comment_channels'
   | 'seed_console_handbook'
   | 'seed_canned_responses'
   | 'rotate_whatsapp_credentials'

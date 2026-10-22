@@ -63,7 +63,15 @@ async function openStatusId(): Promise<string> {
 }
 
 async function ticket(
-  channel: 'facebook' | 'instagram' | 'whatsapp' | 'webchat' | 'email' | 'portal',
+  channel:
+    | 'facebook'
+    | 'facebook_comment'
+    | 'instagram'
+    | 'instagram_comment'
+    | 'whatsapp'
+    | 'webchat'
+    | 'email'
+    | 'portal',
   externalId: string | null,
   assigneeAgentId: string | null = null,
 ) {
@@ -84,8 +92,8 @@ async function ticket(
 describe('listInbox', () => {
   it('marks a Meta comment ticket, and not a direct-message one', async () => {
     const agent = await admin();
-    const comment = await ticket('instagram', 'instagram:comment:17900000000000001');
-    const facebookComment = await ticket('facebook', 'facebook:comment:123_456');
+    const comment = await ticket('instagram_comment', 'instagram:comment:17900000000000001');
+    const facebookComment = await ticket('facebook_comment', 'facebook:comment:123_456');
     const message = await ticket('facebook', null);
 
     const { rows } = await listInbox(agent, parseFilters({}));

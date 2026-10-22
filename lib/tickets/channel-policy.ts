@@ -65,9 +65,9 @@ void allChannelsAreListed;
  *
  * The comment channels joined it with the ingest that writes them (Stage 1.2 of
  * `plans/ticket-category-routing.md`): offered before, their views were empty
- * while every comment ticket sat under Facebook or Instagram. Until
- * `split_comment_channels` has run, a comment ticket filed before that stage is
- * still under its platform, badged "Public comment".
+ * while every comment ticket sat under Facebook or Instagram. Since Stage 1.3 a
+ * CHECK keeps every comment ticket on its comment channel, so these views hold
+ * all of them.
  */
 export const FILTERABLE_CHANNELS = [
   'email',
@@ -102,9 +102,13 @@ export type FilterableChannel = (typeof FILTERABLE_CHANNELS)[number];
  * channel, and most of the places that made it are typed `string` with a
  * default arm the compiler cannot see past (`carrierFor` sent the rest to
  * email). Comment tickets carried `facebook`/`instagram` until Stage 1.2 of
- * `plans/ticket-category-routing.md` moves them, so wherever being a comment
- * matters the external id (`rootCommentId`) is asked too, beside the channel —
- * the safeguard stays until a CHECK makes the two one answer (Stage 1.3).
+ * `plans/ticket-category-routing.md` moved them, and since Stage 1.3 a CHECK
+ * (`conversations_comment_channel_matches_external_id`, in
+ * `db/sql/008_comment_channel_check.sql`) makes the channel and the external id
+ * one answer. Wherever being a comment matters the external id
+ * (`rootCommentId`) is still asked beside the channel: it costs nothing while
+ * the CHECK holds, and if the CHECK is ever dropped — its rollback — it is what
+ * keeps a row written in the meantime from being answered as a private message.
  */
 const META_CHANNELS = [
   'facebook',
@@ -138,14 +142,14 @@ export function metaPlatformOf(channel: MetaChannel): MetaPlatform {
 
 /**
  * Whether a ticket is a public comment thread: by its channel, or by its
- * external id while it still carries its platform's channel.
+ * external id.
  *
  * The one copy of the test. It was written out at every reader that needed it,
  * in two spellings — the anchored `rootCommentId` in some, a bare
- * `includes(':comment:')` in others — which could already disagree about an id
- * and would each have needed changing by hand at Stage 1.3 of
- * `plans/ticket-category-routing.md`, when the CHECK makes the channel and the
- * external id one answer and this becomes the channel test alone.
+ * `includes(':comment:')` in others — which could already disagree about an id.
+ * Since Stage 1.3 of `plans/ticket-category-routing.md` the database keeps the
+ * two halves agreeing, and both are still asked on purpose (the note above
+ * `META_CHANNELS`): dropping the CHECK then needs no code change first.
  */
 export function isCommentTicket(channel: string, externalId: string | null): boolean {
   return isCommentChannel(channel) || rootCommentId(externalId) !== null;

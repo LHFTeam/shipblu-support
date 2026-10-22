@@ -95,15 +95,17 @@ export function pickRule(
 }
 
 /**
- * The channel a ticket's rules are matched on: a comment ticket still filed on
- * its platform's channel answers as the comment channel it is moving to.
+ * The channel a ticket's rules are matched on: a comment ticket filed on its
+ * platform's channel answers as its comment channel.
  *
- * Every comment ticket carries `facebook` or `instagram` until Stage 1.2 of
- * `plans/ticket-category-routing.md` moves it, so matching the column read raw
+ * Every comment ticket carried `facebook` or `instagram` until Stage 1.2 of
+ * `plans/ticket-category-routing.md` moved it, and matching that column raw
  * would post the wording of a rule the form names "Facebook messages" publicly
- * under a comment, and leave a "Facebook comments" rule matching nothing until
- * the backfill ran. Once a CHECK makes the column and the external id one answer
- * (Stage 1.3) this returns its input.
+ * under a comment. Since Stage 1.3 a CHECK keeps the column and the external id
+ * one answer, so this returns its input; it stays for the day the CHECK is
+ * dropped, its rollback, when a comment could again be written on its
+ * platform's channel and this is what would keep it out of a direct-message
+ * rule.
  */
 function ruleChannel(channel: ConversationChannel, externalId: string | null): ConversationChannel {
   if (isMetaChannel(channel) && isCommentTicket(channel, externalId)) {
