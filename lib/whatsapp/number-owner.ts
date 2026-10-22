@@ -8,6 +8,7 @@ import {
   conversations,
   ticketStatuses,
 } from '@/db/schema';
+import type { StatusCategory } from '@/lib/tickets/vocabulary';
 import { parseCoexistence } from './coexistence';
 
 /**
@@ -138,7 +139,58 @@ export async function recordOwnerAssigned(
 }
 
 /** Why a ticket's accountability was brought in line with its number. */
-export type AlignReason = 'reopened_after_handover';
+/**
+ * Why a ticket was realigned: its customer reopened it (ingest), or an agent or
+ * a rule moved it out of resolved (`ownerOnReopen`). Two reasons rather than
+ * one so the timeline can say which happened.
+ */
+export type AlignReason = 'reopened_after_handover' | 'reopened_by_status';
+
+/**
+ * The owner a ticket takes when an agent or a rule moves it out of resolved —
+ * or null when this move realigns nothing.
+ *
+ * The customer writing again is not the only way a resolved ticket comes back.
+ * The status picker and a rule's `set_status` reopen it too, and the customer's
+ * next message then continues an open ticket, which never realigns. Left to
+ * ingest alone, a ticket resolved across a handover and reopened by hand stays
+ * with the previous owner for good: Unassign hands it back to them, the sweep
+ * never reclaims it from them, and handing the number to the person who owns it
+ * now changes nothing. Only out of resolved, as the customer's reopen: closed
+ * and imported tickets stay where a handover leaves them.
+ *
+ * Call it before writing the status, inside the same transaction, so the
+ * channel's lock is taken before the ticket's — the order a handover takes
+ * them — and pass the answer to `alignAccountable` afterwards.
+ */
+export async function ownerOnReopen(
+  tx: Tx,
+  conversationId: string,
+  to: StatusCategory,
+): Promise<{ ownerId: string | null; channelId: string } | null> {
+  if (to !== 'open' && to !== 'pending') return null;
+
+  const [ticket] = await tx
+    .select({
+      channel: conversations.channel,
+      channelId: conversations.channelId,
+      sourceSystem: conversations.sourceSystem,
+      category: ticketStatuses.category,
+    })
+    .from(conversations)
+    .innerJoin(ticketStatuses, eq(ticketStatuses.id, conversations.statusId))
+    .where(eq(conversations.id, conversationId));
+
+  if (
+    !ticket?.channelId ||
+    ticket.channel !== 'whatsapp' ||
+    ticket.sourceSystem === 'import' ||
+    ticket.category !== 'resolved'
+  ) {
+    return null;
+  }
+  return { ownerId: await lockedOwnerId(tx, ticket.channelId), channelId: ticket.channelId };
+}
 
 /**
  * Bring a ticket back in line with its number's owner, when a customer reopens

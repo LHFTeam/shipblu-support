@@ -174,6 +174,44 @@ describe('assignConversation on a ticket whose WhatsApp number has an owner', ()
     ]);
   });
 
+  // Ingest stamps the owner into the insert, so this is the shape an `auto_assign`
+  // rule actually meets — the unassigned case above is only reached after an
+  // Unassign. Before the fix the call returned `already_assigned` first and the
+  // owned ticket never reached the rule's group.
+  it('moves a ticket its owner already holds to the group a rule named', async () => {
+    const nayera = await agent('Nayera Mohamed');
+    const merchantCare = await group('Merchant Care');
+    const ticket = await ownedTicket(nayera, { assigneeAgentId: nayera, assignedAt: new Date() });
+
+    const outcome = await assignConversation(ticket.id, {
+      groupId: merchantCare,
+      actorLabel: 'automation:Route merchants',
+    });
+
+    expect(outcome).toEqual({ assignedTo: null, reason: 'already_assigned' });
+    expect(await ticketRow(ticket.id)).toMatchObject({ assignee: nayera, groupId: merchantCare });
+    expect(await eventsOf(ticket.id, ['group_changed', 'assigned'])).toEqual([
+      {
+        type: 'group_changed',
+        actorAgentId: null,
+        actorLabel: 'automation:Route merchants',
+        data: { to: merchantCare },
+      },
+    ]);
+  });
+
+  it('leaves the group of an owned ticket somebody else was given', async () => {
+    const nayera = await agent('Nayera Mohamed');
+    const bob = await agent('Bob');
+    const merchantCare = await group('Merchant Care');
+    const ticket = await ownedTicket(nayera, { assigneeAgentId: bob, assignedAt: new Date() });
+
+    const outcome = await assignConversation(ticket.id, { groupId: merchantCare });
+
+    expect(outcome).toEqual({ assignedTo: null, reason: 'already_assigned' });
+    expect(await ticketRow(ticket.id)).toMatchObject({ assignee: bob, groupId: null });
+  });
+
   it('still gives it to the owner when the group a rule named is gone', async () => {
     const nayera = await agent('Nayera Mohamed');
     const ticket = await ownedTicket(nayera);

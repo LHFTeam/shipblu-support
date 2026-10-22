@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { db } from '@/db/client';
 import {
   agents,
+  automationRules,
   channelOwnerChanges,
   channels,
   contacts,
@@ -11,7 +12,9 @@ import {
   conversations,
   ticketStatuses,
 } from '@/db/schema';
+import { runAutomations } from '@/lib/automations';
 import { computeAgentDay } from '@/lib/reports/agent-rollup';
+import { changeStatus } from '@/lib/tickets/status';
 import { reportingContext } from '@/lib/reports/rollup';
 import { withCleanDatabase } from '@/lib/testing/db';
 import { alignAccountable, handOverNumber, numberOwnership } from './number-owner';
@@ -437,6 +440,96 @@ describe('alignAccountable', () => {
     // The number gone to nobody: accountability clears, the holder keeps it.
     expect(await align(hers, null)).toEqual({ changed: true, reassigned: false });
     expect(await holders(hers)).toEqual({ accountable: null, assignee: ali });
+  });
+});
+
+// The customer writing again is ingest's reopen. These are the other two: an
+// agent's status picker and a rule's set_status. Left out, a ticket resolved
+// across a handover and reopened by hand stayed with the previous owner for good.
+describe('a resolved ticket reopened by an agent or a rule', () => {
+  async function handedOver() {
+    const admin = await agent('Mona Admin', { role: 'admin' });
+    const nayera = await agent('Nayera Mohamed');
+    const ali = await agent('Ali Nasser');
+    const number = await phone('Nayera Mohamed', nayera);
+    const resolved = await ticket(number, 'Resolved', {
+      accountableAgentId: nayera,
+      assigneeAgentId: nayera,
+    });
+    await handOverNumber({
+      channelId: number,
+      toAgentId: ali,
+      actor: { id: admin, label: 'Mona' },
+    });
+    // Resolved, so the handover left it.
+    expect(await holders(resolved)).toEqual({ accountable: nayera, assignee: nayera });
+    return { admin, nayera, ali, number, resolved };
+  }
+
+  async function status(name: 'Open' | 'Pending' | 'Resolved' | 'Closed') {
+    const [row] = await db
+      .select({
+        id: ticketStatuses.id,
+        name: ticketStatuses.name,
+        category: ticketStatuses.category,
+        stopsSlaClock: ticketStatuses.stopsSlaClock,
+      })
+      .from(ticketStatuses)
+      .where(eq(ticketStatuses.name, name));
+    return row!;
+  }
+
+  it("brings it over to the number's owner when an agent moves it back to Open", async () => {
+    const { admin, nayera, ali, number, resolved } = await handedOver();
+
+    await changeStatus(admin, resolved, await status('Open'));
+
+    expect(await holders(resolved)).toEqual({ accountable: ali, assignee: ali });
+    expect((await eventsOf(resolved)).find((e) => e.type === 'accountable_changed')?.data).toEqual({
+      from: nayera,
+      to: ali,
+      channelId: number,
+      reason: 'reopened_by_status',
+    });
+  });
+
+  it('brings it over when a rule reopens it', async () => {
+    const { ali, resolved } = await handedOver();
+    await db.insert(automationRules).values({
+      name: 'Reopen on update',
+      trigger: 'on_update',
+      conditions: {},
+      actions: [{ type: 'set_status', category: 'open' }],
+      position: 0,
+    });
+
+    await runAutomations('on_update', resolved);
+
+    expect(await holders(resolved)).toEqual({ accountable: ali, assignee: ali });
+  });
+
+  it('moves nothing on any other move: resolving, closing, or out of Closed', async () => {
+    const { admin, nayera, number } = await handedOver();
+    const open = await ticket(number, 'Open', {
+      accountableAgentId: nayera,
+      assigneeAgentId: nayera,
+    });
+    const closed = await ticket(number, 'Closed', {
+      accountableAgentId: nayera,
+      assigneeAgentId: nayera,
+    });
+    // The handover moved the open one already; put it back to test the move.
+    await db
+      .update(conversations)
+      .set({ accountableAgentId: nayera, assigneeAgentId: nayera })
+      .where(eq(conversations.id, open));
+
+    await changeStatus(admin, open, await status('Pending'));
+    await changeStatus(admin, closed, await status('Open'));
+
+    for (const id of [open, closed]) {
+      expect(await holders(id)).toEqual({ accountable: nayera, assignee: nayera });
+    }
   });
 });
 

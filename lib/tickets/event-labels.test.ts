@@ -216,7 +216,7 @@ describe('describeEvent', () => {
         reason: 'reopened_after_handover',
       }),
     ).toBe(
-      'made the owner of its WhatsApp number accountable for the ticket when the customer wrote again: the number changed hands while it was resolved',
+      "made the owner of its WhatsApp number accountable for the ticket when the customer wrote again: it did not name the number's current owner",
     );
     expect(
       describeEvent('accountable_changed', {
@@ -226,6 +226,13 @@ describe('describeEvent', () => {
       }),
     ).toBe(
       'cleared who is accountable for the ticket when the customer wrote again: its WhatsApp number has no active owner now, so breaches count against whoever holds it',
+    );
+    // An agent or a rule reopening it says so, rather than crediting a message
+    // the customer never sent.
+    expect(
+      describeEvent('accountable_changed', { from: 'a', to: 'b', reason: 'reopened_by_status' }),
+    ).toBe(
+      "made the owner of its WhatsApp number accountable for the ticket when it was reopened: it did not name the number's current owner",
     );
   });
 

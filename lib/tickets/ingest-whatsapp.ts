@@ -115,7 +115,12 @@ export async function ingestWhatsAppMessage(
           { id: conversationId, reopenCount: existing.reopenCount },
           { actorLabel: 'inbound_whatsapp', reason: 'customer_replied' },
         );
-        if (reopened) {
+        // Only for the number's own traffic. A message on a number no row names
+        // is threaded onto the support row (`resolveWhatsAppChannel`) without
+        // being that row's, which is why ingest never stamps one: aligned
+        // here, it would clear the support row's owner off a ticket nobody
+        // handed over.
+        if (reopened && channel.ownable) {
           await alignAccountable(tx, {
             conversationId,
             ownerId,

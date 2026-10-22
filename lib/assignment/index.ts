@@ -126,19 +126,37 @@ export async function assignConversation(
   if (!ticket) return { assignedTo: null, reason: 'not_assignable' };
 
   const conversation = ticket.conversation;
-  if (conversation.assigneeAgentId) return { assignedTo: null, reason: 'already_assigned' };
 
   // A bot transcript is not work to hand out, and neither is a deleted, merged,
   // spam or finished ticket. Same population the dashboard calls the backlog.
-  if (
+  const assignable = !(
     conversation.deletedAt ||
     conversation.mergedIntoId ||
     conversation.isSpam ||
     isReadOnlyChannel(conversation.channel) ||
     !['open', 'pending'].includes(ticket.statusCategory)
-  ) {
-    return { assignedTo: null, reason: 'not_assignable' };
+  );
+
+  if (conversation.assigneeAgentId) {
+    // An owned ticket is assigned in the insert that creates it (`ownerStamp`),
+    // so a rule routing it meets it already held — by the owner, whom this
+    // call would have chosen anyway. The group the rule names still applies,
+    // as it does in the owner branch below: without it, an owned ticket never
+    // reaches the group whose SLA policy, hours and members the rule meant.
+    // Anybody else holding a ticket was given it on purpose, and a rule has
+    // never moved their ticket.
+    if (
+      assignable &&
+      options.groupId &&
+      options.groupId !== conversation.groupId &&
+      conversation.assigneeAgentId === conversation.accountableAgentId
+    ) {
+      await moveToGroup(conversationId, options.groupId, options.actorLabel);
+    }
+    return { assignedTo: null, reason: 'already_assigned' };
   }
+
+  if (!assignable) return { assignedTo: null, reason: 'not_assignable' };
 
   // The number's owner, ahead of everything the rota would ask — see the
   // module header for why none of it applies.

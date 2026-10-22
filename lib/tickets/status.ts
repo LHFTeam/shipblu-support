@@ -3,6 +3,7 @@ import { db } from '@/db/client';
 import { conversationEvents, conversations, type ticketStatuses } from '@/db/schema';
 import { onStatusChanged } from '@/lib/sla';
 import { afterTicketResolved } from '@/lib/tickets/lifecycle';
+import { alignAccountable, ownerOnReopen } from '@/lib/whatsapp/number-owner';
 import { resolveStamp } from './resolve-stamp';
 
 /** The status a ticket is moving to, as read from `ticket_statuses`. */
@@ -30,6 +31,8 @@ export async function changeStatus(
   via?: 'reply_and_resolve',
 ): Promise<void> {
   await db.transaction(async (tx) => {
+    const reopenOwner = await ownerOnReopen(tx, conversationId, status.category);
+
     await tx
       .update(conversations)
       .set({
@@ -49,6 +52,10 @@ export async function changeStatus(
       actorAgentId: agentId,
       data: { to: status.name, category: status.category, ...(via ? { via } : {}) },
     });
+
+    if (reopenOwner) {
+      await alignAccountable(tx, { conversationId, ...reopenOwner, reason: 'reopened_by_status' });
+    }
   });
 
   await onStatusChanged(conversationId, status.stopsSlaClock);

@@ -1649,6 +1649,40 @@ describe('a number that belongs to a team member', () => {
     }
   });
 
+  // The same fallback reopening a resolved ticket of the support row's own: the
+  // thread is the row's, the message is not, so accountability stays. Aligned,
+  // it was cleared to nobody under a reason naming a handover that never happened.
+  it("leaves a reopened ticket's owner alone when the message came in on a number no row names", async () => {
+    const nayera = await person('Nayera Mohamed');
+    await db.insert(channels).values({
+      type: 'whatsapp',
+      name: 'WhatsApp Support',
+      ownerAgentId: nayera,
+      config: { phoneNumberId: '100000000000099' },
+    });
+
+    const own = await ingestWhatsAppMessage(inbound({ phoneNumberId: '100000000000099' }));
+    expect(await holders(own.conversationId)).toMatchObject({ accountable: nayera });
+    await setStatus(own.conversationId, 'Resolved');
+
+    const viaFallback = await ingestWhatsAppMessage(
+      inbound({ wamid: 'wamid.unnamed', sentAt: LATER }),
+    );
+
+    expect(viaFallback).toMatchObject({
+      conversationId: own.conversationId,
+      createdConversation: false,
+    });
+    expect(await conversation(own.conversationId)).toMatchObject({ status: 'Open' });
+    expect(await holders(own.conversationId)).toMatchObject({
+      accountable: nayera,
+      assignee: nayera,
+    });
+    expect((await ownership(own.conversationId)).map((e) => e.type)).not.toContain(
+      'accountable_changed',
+    );
+  });
+
   it('stamps a ticket the owner opened from the phone, resolved as it is', async () => {
     const nayera = await person('Nayera Mohamed');
     await ownedPhone(nayera);
