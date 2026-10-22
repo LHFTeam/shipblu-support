@@ -1604,7 +1604,8 @@ deploy it with web and the crons.
     back to the platform's row. A direct message still reads its platform's
     row only. A comment on a thread filed before 1.2 is found by its external
     id, as every comment is, and keeps its platform's channel until the
-    backfill moves it (`ingest-meta.db.test.ts` pins both).
+    backfill moves it (`ingest-meta.db.test.ts` pinned both until 1.3, whose
+    CHECK cannot hold such a thread, deleted the second half).
   - **The admin page's allowlists are named** (`SAVEABLE_TYPES` in the action,
     `EDITABLE` in the form, each naming the other). A comments row says it
     covers the public comments on the account its variable configures, and
