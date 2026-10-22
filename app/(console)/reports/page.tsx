@@ -200,7 +200,7 @@ export default async function ReportsPage({
 
           <Breakdown
             title="By agent"
-            hint="A ticket on a WhatsApp number with an owner counts against that owner, whoever worked it; any other ticket against whoever held it."
+            hint="A ticket on a WhatsApp number with an owner counts against that owner, whoever worked it; any other ticket against whoever held it. CSAT is the exception: it stays with the agent each survey was about."
             rows={agentRows}
           />
           <Breakdown title="By group" rows={groupRows} />

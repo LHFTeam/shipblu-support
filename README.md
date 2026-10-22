@@ -117,8 +117,9 @@ Design decisions worth knowing before changing things:
   `accountable_agent_id` beside its assignee: reassigning moves the work, and the breach
   stays with the number's owner. It is frozen onto the ticket rather than read off the
   number when a report runs, because ownership changes and the nightly rollup rebuilds
-  three days from current state. Handing a number over is the exception to the bullet
-  above: it does replace an assignee, but only where the previous owner held the ticket.
+  three days from current state. Handing a number over, and reopening a ticket after
+  one, are the exceptions to the bullet above: each does replace an assignee, but only
+  where the previous owner or nobody held the ticket.
   See `plans/whatsapp-number-ownership.md`.
 - **Presence has exactly one writer.** `agents.presence` is set by the lightweight SSE
   stream at `/api/presence` and nothing else — a stream is open or it is not. Inbox

@@ -245,7 +245,7 @@ export function handlingSeconds(row: {
  *
  * Over `resolutionsMade`, not `ticketsResolved`. The two count different
  * populations — one is "they clicked resolve", the other "it was resolved while
- * assigned to them" — and dividing one by the other can exceed 100% with
+ * it counted against them" (accountable for it, else holding it) — and dividing one by the other can exceed 100% with
  * nothing broken, at which point the number means nothing.
  */
 export function reopenRate(row: {

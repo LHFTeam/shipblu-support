@@ -327,7 +327,10 @@ function OwnerForm({
         }
         hint={movesHint(movableTickets)}
       >
-        <Select name="ownerAgentId" defaultValue={owner?.id ?? ''}>
+        {/* Named outright: `Field` puts its InfoTip button inside the label,
+            and a label with no `for` names its first labelable descendant —
+            the button — so the select would reach a screen reader unnamed. */}
+        <Select name="ownerAgentId" defaultValue={owner?.id ?? ''} aria-label="Owner">
           <option value="">Nobody — team number</option>
           {owner && !listed ? (
             <option value={owner.id}>
@@ -365,10 +368,13 @@ function OwnerForm({
 /**
  * What a handover does to the number's tickets, under the picker: said before
  * the second click, because afterwards it has happened. The count is
- * `movesWithNumber`'s, so it is the set the handover then moves.
+ * `movesWithNumber`'s, so it is the set the handover then moves. Worded for
+ * both choices, because the select is uncontrolled and the hint cannot follow
+ * it: choosing Nobody moves the tickets' accountability and none of their work.
  */
 function movesHint(count: number): string {
-  const resolved = 'A resolved ticket follows only if its customer writes again.';
+  const resolved =
+    'A resolved ticket follows only if it is reopened. Choosing Nobody leaves every ticket with whoever holds it, and each counts against them.';
   if (count === 0) return `It has no open or pending tickets now. ${resolved}`;
   if (count === 1) {
     return `Its 1 open or pending ticket goes with it: from now it counts against the new owner, and is reassigned to them if the current owner or nobody holds it. ${resolved}`;

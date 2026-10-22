@@ -901,8 +901,11 @@ re-file the days before a handover onto somebody who did not hold the phone
 then. Both are written only in `lib/whatsapp/number-owner.ts`, and a ticket's
 accountability is written at three moments: ingest creating it on an owned number
 (`ownerStamp`, in the insert, assignee included), `handOverNumber` (the number's
-open and pending native tickets), and its customer reopening it after the number
-changed hands (`alignAccountable`). Six rules hold:
+open and pending native tickets), and its reopening after the number changed
+hands (`alignAccountable`) — by its customer writing again, or by an agent or a
+rule moving it out of resolved (`ownerOnReopen`, in `changeStatus` and
+`set_status`), since the customer's next message then continues an open ticket,
+which never realigns. Six rules hold:
 
 - **Reassignment moves the work, never the breach.** Assignment, reclaim, a
   supervisor's reassignment, an automation and a merge never write
@@ -923,7 +926,8 @@ changed hands (`alignAccountable`). Six rules hold:
   restores the number. `/admin/channels` warns.
 - **Whose breach it is reads `accountableOrAssignee()`**
   (`lib/tickets/accountable.ts`) everywhere that says so — the rollup's agent
-  slices, the live board's Breached, `agent_backlog_snapshots.breached_count`
+  slices (every figure but CSAT, which stays with the agent each survey was
+  about), the live board's Breached, `agent_backlog_snapshots.breached_count`
   and `sla_breached.data.accountableAgentId` — so the dashboard and tomorrow's
   report name one person. What somebody is carrying — open, awaiting a reply,
   the capacity check — stays on the assignee.
@@ -937,8 +941,9 @@ changed hands (`alignAccountable`). Six rules hold:
   `channel_owner_changes`, the append-only record of who owned a number when,
   which outlives the channel, the agents and any purged ticket.
 
-Only a plain `whatsapp` row may have an owner (`channels_owner_only_whatsapp` in
-`db/sql/003`): the bot and the shared inboxes are the whole team's. A number
+Only a `whatsapp` row may have an owner — a plain number or a coexistence one,
+never the bot (`channels_owner_only_whatsapp` in `db/sql/003`): the bot and the
+shared inboxes are the whole team's. A number
 changes hands through its own action, `setNumberOwner`, behind a two-click
 confirm that states how many tickets go with it, and never through
 `saveChannel`, which three forms post to. See

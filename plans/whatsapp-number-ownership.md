@@ -64,7 +64,9 @@ Each was put as a question with the alternatives below, and answered.
    handover back. The number's open and pending native tickets become the new
    owner's to answer for, and their assignee moves too where the previous owner
    or nobody held them. A resolved ticket follows only if its customer writes
-   again. Closed tickets and copied history stay where they are. Every handover
+   again — or, as review added, when an agent or a rule reopens it first, since
+   the customer's next message then continues an open ticket and would never
+   move it. Closed tickets and copied history stay where they are. Every handover
    is recorded. Reason: the chats go with the phone, so the previous owner
    cannot stop a breach on a ticket still in progress. Finished work keeps its
    history, which also leaves the last three days of resolution figures where
@@ -85,23 +87,23 @@ Each was put as a question with the alternatives below, and answered.
 
 ## Shape
 
-| Piece                                         | Where                                                                      |
-| --------------------------------------------- | -------------------------------------------------------------------------- |
-| The thread key, the finders, the lock         | `lib/tickets/live-conversation.ts` — `ThreadKey`, `lockThread`             |
-| Threading and stamping at ingest              | `lib/tickets/ingest-whatsapp.ts` — `threadKey()`, `resolveWhatsAppChannel` |
-| Tickets filed before their number had a row   | `db/sql/008_whatsapp_channel_backfill.sql`                                 |
-| The columns and the record                    | `db/schema/config.ts`, `db/schema/conversations.ts`, migration 0044        |
-| Only a plain WhatsApp row may have an owner   | `channels_owner_only_whatsapp`, `db/sql/003_constraints.sql`               |
-| Every write of ownership and accountability   | `lib/whatsapp/number-owner.ts`                                             |
-| The owner outside the rota                    | `assignConversation`, `lib/assignment/index.ts`                            |
-| The reclaim exemption                         | `reclaimAbandoned`, `worker/handlers/assign-sweep.ts`                      |
-| Whose breach it is                            | `lib/tickets/accountable.ts` — `accountableOrAssignee()`                   |
-| Reports, live board, hourly sample, the event | `rollup.ts`, `live.ts`, `snapshot-backlog.ts`, `sla-sweep.ts`              |
-| Who sees what                                 | `lib/tickets/assignment-scope.ts`, `visibility.ts`, `inbox-views.ts`       |
-| The ticket page                               | `lib/tickets/conversation.ts`, `header.tsx`, `sidebar.tsx`                 |
-| The line under "Accountable"                  | `lib/tickets/accountable-note.ts`                                          |
-| The handover                                  | `setNumberOwner` and `OwnerEditor`, `app/(console)/admin/channels/`        |
-| The timeline's words                          | `lib/tickets/event-labels.ts`                                              |
+| Piece                                                                       | Where                                                                      |
+| --------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| The thread key, the finders, the lock                                       | `lib/tickets/live-conversation.ts` — `ThreadKey`, `lockThread`             |
+| Threading and stamping at ingest                                            | `lib/tickets/ingest-whatsapp.ts` — `threadKey()`, `resolveWhatsAppChannel` |
+| Tickets filed before their number had a row                                 | `db/sql/008_whatsapp_channel_backfill.sql`                                 |
+| The columns and the record                                                  | `db/schema/config.ts`, `db/schema/conversations.ts`, migration 0044        |
+| Only a WhatsApp row (plain or coexistence, never the bot) may have an owner | `channels_owner_only_whatsapp`, `db/sql/003_constraints.sql`               |
+| Every write of ownership and accountability                                 | `lib/whatsapp/number-owner.ts`                                             |
+| The owner outside the rota                                                  | `assignConversation`, `lib/assignment/index.ts`                            |
+| The reclaim exemption                                                       | `reclaimAbandoned`, `worker/handlers/assign-sweep.ts`                      |
+| Whose breach it is                                                          | `lib/tickets/accountable.ts` — `accountableOrAssignee()`                   |
+| Reports, live board, hourly sample, the event                               | `rollup.ts`, `live.ts`, `snapshot-backlog.ts`, `sla-sweep.ts`              |
+| Who sees what                                                               | `lib/tickets/assignment-scope.ts`, `visibility.ts`, `inbox-views.ts`       |
+| The ticket page                                                             | `lib/tickets/conversation.ts`, `header.tsx`, `sidebar.tsx`                 |
+| The line under "Accountable"                                                | `lib/tickets/accountable-note.ts`                                          |
+| The handover                                                                | `setNumberOwner` and `OwnerEditor`, `app/(console)/admin/channels/`        |
+| The timeline's words                                                        | `lib/tickets/event-labels.ts`                                              |
 
 ## Threading on the number
 
@@ -167,8 +169,13 @@ accountability is set or moved at three moments:
   moves accountability on all of them, and the assignee where the previous owner
   or nobody held the ticket. It writes `accountable_changed` and `assigned`
   events and one `channel_owner_changes` row with both counts.
-- **`alignAccountable`**, when a customer reopens a resolved ticket and the
-  number has changed hands since. It is a no-op on nearly every reopen.
+- **`alignAccountable`**, when a resolved ticket is reopened and the number has
+  changed hands since: by its customer writing again (ingest), or by an agent or
+  a rule moving it out of resolved (`ownerOnReopen`, in `changeStatus` and the
+  `set_status` action). The second was added in review: a ticket an agent
+  reopened by hand was then continued by the customer's message as an open
+  ticket, which never realigns, so it stayed with the previous owner for good.
+  It is a no-op on nearly every reopen.
 
 Nothing else writes accountability: not assignment, reclaim, a supervisor's
 reassignment, an automation or a merge. That is what lets a reassignment move
@@ -260,7 +267,7 @@ different stories. Examples: a resolved ticket from before a handover, a
 deactivated owner, a team number whose ticket still names a former owner. It
 compares by id, because production has two active agents with one name.
 
-**The channels page.** Each plain WhatsApp row gains a line: "Owner: <name>" or
+**The channels page.** Each WhatsApp row, plain or coexistence, gains a line: "Owner: <name>" or
 "Team number", an "Owner deactivated" warning, "since <date>, set by <admin>",
 and the earlier owners in a `<details>`. Then `OwnerEditor`'s Set owner /
 Change owner opens a form: a select of "Nobody — team number" and the active

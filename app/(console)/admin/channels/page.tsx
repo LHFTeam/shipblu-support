@@ -283,7 +283,7 @@ export default async function ChannelsPage() {
             // the same window it was connected through — `needsReconnect`,
             // drawn from the same facts as the badge that says which.
             const reconnectable = coexistence !== null && needsReconnect(coexistence, now);
-            // Every plain WhatsApp number, and nothing else: the bot and the
+            // Every WhatsApp number, plain or coexistence, and nothing else: the bot and the
             // shared inboxes are the whole team's, and the database refuses an
             // owner on them (`channels_owner_only_whatsapp`).
             const ownership =
