@@ -47,7 +47,7 @@ async function statusId(name: string): Promise<string> {
 
 /**
  * A resolved ticket whose customer is `psid` on `platform`, surveyed as
- * `delivery`: a DM unless `externalId` names a comment.
+ * `delivery`: a DM unless given a `comment` to be filed under.
  */
 async function surveyedTicket(input: {
   platform: 'facebook' | 'instagram';
