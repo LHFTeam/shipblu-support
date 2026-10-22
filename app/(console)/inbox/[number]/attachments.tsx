@@ -228,8 +228,11 @@ export function AttachmentList({
     // and a box with no positioned ancestor is placed against the document —
     // past every `overflow-hidden` up to the shell — stretching the page under
     // the console until scrolling past the timeline's end took the console off
-    // the screen (PROJECT-STATE §6.81). The timeline pane is positioned now as
-    // well; this keeps the list safe wherever else it is mounted.
+    // the screen (PROJECT-STATE §6.81). Every scroll pane is positioned now
+    // (`scroll-positioned`), so what this still buys is the clip: the list is
+    // also mounted inside a side conversation's `overflow-hidden` card, and a
+    // region that belonged to the pane would escape the card and lengthen the
+    // pane by whatever the card hides.
     <div className="relative">
       <ul className={compact ? 'mt-1.5 flex flex-wrap gap-1.5' : 'flex flex-wrap gap-1.5'}>
         {files.map((file) => (

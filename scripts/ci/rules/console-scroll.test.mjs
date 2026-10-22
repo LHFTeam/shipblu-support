@@ -9,7 +9,7 @@ import { many, runRule } from '../fixture.mjs';
  */
 
 const WRAPPED = (i) =>
-  `export default function Page() {\n  return <div className="app-scroll h-full overflow-y-auto p-6">${i}</div>;\n}\n`;
+  `export default function Page() {\n  return <div className="app-scroll relative h-full overflow-y-auto p-6">${i}</div>;\n}\n`;
 
 /** Eight wrapped pages: the rule's floor, so a case is only its own change. */
 const PAGES = many(8, (i) => `app/(console)/area${i}/page.tsx`, WRAPPED);

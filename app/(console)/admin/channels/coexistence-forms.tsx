@@ -684,10 +684,7 @@ function ConnectCard({
   const status = copy && copy.tone !== 'error' ? copy.text : '';
 
   return (
-    // Positioned for the `sr-only` live region below, which is
-    // `position: absolute` and would otherwise be placed against the document
-    // (PROJECT-STATE §6.81).
-    <div className="relative flex flex-col gap-3 text-sm">
+    <div className="flex flex-col gap-3 text-sm">
       <ul className="flex flex-col gap-1 text-xs text-(--color-text-secondary)">
         <li>Sign in as an admin of the Business portfolio that owns the number.</li>
         <li>

@@ -249,16 +249,31 @@ export function directiveOf(file) {
  *
  * The rules that need more than a pattern read the syntax tree, for the reason
  * `rules/dom-title.mjs` gives; this is the one place that says how.
+ *
+ * Parsed once per file per run, like `edgesOf` and `directives`: six rules
+ * walk largely the same `.tsx` files, and `action-revalidates` reparses a
+ * shared helper for every action file that imports it — 1,405 parses of 406
+ * files without this. The key is the repo-relative path every caller already
+ * passes, and the extension in it decides the parse, so one key cannot mean
+ * two trees. No rule writes to a tree, the source cannot change while the
+ * rules run, and the fixture resets this module between cases.
  */
 export function parseSource(file) {
-  return ts.createSourceFile(
-    file,
-    read(file),
-    ts.ScriptTarget.Latest,
-    true,
-    file.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
-  );
+  let source = parsed.get(file);
+  if (!source) {
+    source = ts.createSourceFile(
+      file,
+      read(file),
+      ts.ScriptTarget.Latest,
+      true,
+      file.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
+    );
+    parsed.set(file, source);
+  }
+  return source;
 }
+
+const parsed = new Map();
 
 /** The 1-based line a node starts on, for an error message that points somewhere. */
 export function lineOfNode(source, node) {

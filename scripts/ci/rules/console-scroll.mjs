@@ -43,7 +43,7 @@ export function checkConsolePagesScroll() {
     fail(
       rule,
       page,
-      'no scroll container — the console shell clips its content column, so everything below the fold is unreachable; wrap the page in `app-scroll h-full overflow-y-auto p-6` (AGENTS.md, §6.53)',
+      'no scroll container — the console shell clips its content column, so everything below the fold is unreachable; wrap the page in `app-scroll relative h-full overflow-y-auto p-6` (AGENTS.md, §6.53, §6.81)',
     );
   }
 }
