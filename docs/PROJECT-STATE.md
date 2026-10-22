@@ -1132,11 +1132,12 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
     `phoneNumberId` `838961722630554`, the support line; it must **never** carry
     the bot's `128318316834446`, which would route 13,693 bot transcripts into
     the team's queue. `resolveWhatsAppChannel` matches the number exactly and
-    otherwise falls back to the plain (not coexistence) `whatsapp` row, so a
-    blank number is safe and a wrong one is only ever a fallback — the bot's
-    number is the single value that must not appear there. Since §6.99 a
-    fallback is never a coexistence row, which is somebody's phone and threads
-    its tickets on the row, and each one logs
+    otherwise files the event under no row, in the plain (not coexistence)
+    `whatsapp` row's default group, so a blank number is safe and a wrong one
+    is only ever a fallback — the bot's number is the single value that must
+    not appear there. Since §6.99 a fallback is never filed under any row: the
+    row is in the thread key and in every reader of whose number a ticket is
+    on, and each one logs
     `[whatsapp_ingest] no channel row for phone_number_id=…`.
   - **Only one agent has ever been online.** Presence gates eligibility, so round
     robin hands everything to whoever is connected. George has never signed in
@@ -6505,11 +6506,14 @@ dryRun=true`, then without, gives those two theirs back from their
       that names one, so #1 gets the support line and never the bot. Driven
       from the tickets still null, so its replay on every deploy reads only
       those.
-    - **The fallback for a number no row names must never be a coexistence
-      row.** It used to take the first `whatsapp` row when no plain one
-      existed; with the row in the key, that files an unknown number's traffic
-      onto somebody's phone's tickets, and onto their clocks. It now takes the
-      plain support row or none, and logs
+    - **The fallback for a number no row names must not hand out any row.**
+      It used to take the first `whatsapp` row when no plain one existed; with
+      the row in the key, that files an unknown number's traffic onto
+      somebody's phone's tickets, and onto their clocks. The support row's id
+      was no better once numbers have owners: visibility, a handover and a
+      reopen by hand read it as the support owner's ticket while ingest
+      stamped nobody. It now files under no row, keeps the plain support row's
+      default group for routing, and logs
       `[whatsapp_ingest] no channel row for phone_number_id=…`.
 
     Everything that was already per number is now right per ticket with no

@@ -115,11 +115,9 @@ export async function ingestWhatsAppMessage(
           { id: conversationId, reopenCount: existing.reopenCount },
           { actorLabel: 'inbound_whatsapp', reason: 'customer_replied' },
         );
-        // Only for the number's own traffic. A message on a number no row names
-        // is threaded onto the support row (`resolveWhatsAppChannel`) without
-        // being that row's, which is why ingest never stamps one: aligned
-        // here, it would clear the support row's owner off a ticket nobody
-        // handed over.
+        // Only for the number's own traffic: a number no row names is filed
+        // under no row (`resolveWhatsAppChannel`) and is nobody's, so there is
+        // nothing to align it with.
         if (reopened && channel.ownable) {
           await alignAccountable(tx, {
             conversationId,
@@ -808,11 +806,10 @@ export type ResolvedChannel = {
    */
   coexistence: boolean;
   /**
-   * Whether the event came in on this row's own number, and the row is a
-   * plain one — the only case in which the number's owner, if it has one,
-   * answers it. False for the bot, which nobody owns, and for a number no row
-   * names: that is filed on the support row without being the support row's
-   * number, and the support number's owner holds a different phone. Who the
+   * Whether the event came in on this row's own number and the row is a
+   * `whatsapp` one, plain or coexistence — the only case in which the number's
+   * owner, if it has one, answers it. False for the bot, which nobody owns,
+   * and for a number no row names, which is filed under no row at all. Who the
    * owner is is read inside the ingest's transaction (`numberOwner`).
    */
   ownable: boolean;
@@ -880,29 +877,31 @@ export async function resolveWhatsAppChannel(
     };
   }
 
-  // No row for this number. Only ever the support channel — a bot number is
-  // known by its row, and inferring "bot" from the absence of one would hide
-  // real customer messages from the team. And never a coexistence row, even
-  // when there is nothing else: a coexistence row is somebody's phone, with a
-  // default group of its own (production's Merchant Care number), and the
-  // conversation is threaded on the row (`threadKey`), so handing its id out
-  // here would file a number no row names onto that person's tickets — and
-  // their clocks. With no plain support row the event files under no row at
-  // all, which threads only with other events no row names.
+  // No row for this number. Ordinary WhatsApp — a bot number is known by its
+  // row, and inferring "bot" from the absence of one would hide real customer
+  // messages from the team — and filed under no row, whatever rows exist.
+  //
+  // A conversation is threaded on its row (`threadKey`), and every reader of
+  // whose number a ticket is on keys on `channel_id`: who owns it, who may see
+  // it, what a handover moves, what a reopen realigns, which number the ticket
+  // page names. Handing out a row's id here made the ticket that number's on
+  // some of those paths and not on others — a coexistence row's would file it
+  // onto somebody's phone and their clocks, and the support row's charged its
+  // owner on a handover or a reopen for a number they never held, while ingest
+  // stamped nobody. Under no row it is nobody's on every path, threads only
+  // with other events no row names, and `db/sql/008` files it under its
+  // number's row once one exists.
+  //
+  // The plain support row still lends its default group, so the message is
+  // routed where a support message would be — never a coexistence row's,
+  // which is one person's team.
   const support = rows.find((c) => c.type === 'whatsapp' && parseCoexistence(c.config) === null);
   // Said once per event, because the usual cause is a number connected at Meta
   // and never added under /admin/channels — invisible otherwise, since its
   // traffic still reaches the inbox.
-  log.warn(
-    `no channel row for phone_number_id=${phoneNumberId ?? 'none'}; filed under ${support ? `the support row ${support.id}` : 'no row'}`,
-  );
-  // Not coexistence, whatever the support row is: the event came in on a
-  // number no row names, and only a number's own row can say it is on the app.
-  // And nobody's, for the same reason: the support row's owner answers the
-  // support number, not a number that was never handed to anybody, and
-  // stamping them would charge them for traffic on a phone they do not hold.
+  log.warn(`no channel row for phone_number_id=${phoneNumberId ?? 'none'}; filed under no row`);
   return {
-    id: support?.id ?? null,
+    id: null,
     defaultGroupId: support?.defaultGroupId ?? null,
     kind: 'whatsapp',
     coexistence: false,

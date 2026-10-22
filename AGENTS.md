@@ -884,10 +884,13 @@ the statement they always did. The message and echo paths take `lockThread`,
 then look for the live conversation inside their transaction: looked for before
 it, a customer's message and the phone's reply processed at once each opened a
 ticket, and the half the reply missed kept a clock nothing could stop (§6.100).
-A number no row names falls back to the plain support row, or to no row at all,
-and **never to a coexistence row**, which is somebody's phone, and its tickets
-theirs. Each such
-event logs `[whatsapp_ingest] no channel row for phone_number_id=…`, which
+A number no row names is filed under **no row**, and only borrows the plain
+support row's default group for routing. Every reader of whose number a ticket
+is on — owner, visibility, a handover, a reopen, the ticket page — keys on
+`channel_id`, so a row's id handed out there makes the ticket that number's on
+some paths and not others: a coexistence row's files a stranger onto somebody's
+phone, and the support row's charged its owner for a number they never held.
+Each such event logs `[whatsapp_ingest] no channel row for phone_number_id=…`, which
 usually means a number connected at Meta and never added under
 `/admin/channels`. `db/sql/008_whatsapp_channel_backfill.sql` gives a ticket
 filed before its number had a row the row it belongs to.
@@ -903,8 +906,8 @@ accountability is written at three moments: ingest creating it on an owned numbe
 (`ownerStamp`, in the insert, assignee included), `handOverNumber` (the number's
 open and pending native tickets), and its reopening after the number changed
 hands (`alignAccountable`) — by its customer writing again, or by an agent or a
-rule moving it out of resolved (`ownerOnReopen`, in `changeStatus` and
-`set_status`), since the customer's next message then continues an open ticket,
+rule moving it out of resolved, or by a reply through the help-centre portal
+(`ownerOnReopen`, in `changeStatus`, `set_status` and `appendReply`), since the customer's next message then continues an open ticket,
 which never realigns. Six rules hold:
 
 - **Reassignment moves the work, never the breach.** Assignment, reclaim, a

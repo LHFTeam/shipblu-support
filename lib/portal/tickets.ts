@@ -13,6 +13,7 @@ import { readOnlyChannels } from '@/lib/tickets/channel-policy';
 import { notReaction } from '@/lib/tickets/not-reaction';
 import { afterInboundMessage, afterMessageStored } from '@/lib/tickets/lifecycle';
 import { reopenResolved } from '@/lib/tickets/reopen';
+import { alignAccountable, ownerOnReopen } from '@/lib/whatsapp/number-owner';
 import { requireDefaultOpenStatusId } from '@/lib/tickets/statuses';
 
 /**
@@ -347,11 +348,23 @@ export async function appendReply(
     if (!ticket || ticket.statusCategory === 'closed') return null;
 
     if (ticket.statusCategory === 'resolved') {
+      // A WhatsApp ticket can be answered here too, by a customer the portal
+      // knows by email. Reopened, it takes its number's owner as a reopen
+      // through WhatsApp would — read first, so the channel's lock comes before
+      // the ticket's (`ownerOnReopen`).
+      const reopenOwner = await ownerOnReopen(tx, ticket.id, 'open');
       await reopenResolved(
         tx,
         { id: ticket.id, reopenCount: ticket.reopenCount },
         { actorLabel: 'portal', reason: 'customer_replied' },
       );
+      if (reopenOwner) {
+        await alignAccountable(tx, {
+          conversationId: ticket.id,
+          ...reopenOwner,
+          reason: 'reopened_after_handover',
+        });
+      }
     }
 
     const insertedMessage = await tx

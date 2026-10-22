@@ -140,19 +140,20 @@ export async function recordOwnerAssigned(
 
 /** Why a ticket's accountability was brought in line with its number. */
 /**
- * Why a ticket was realigned: its customer reopened it (ingest), or an agent or
- * a rule moved it out of resolved (`ownerOnReopen`). Two reasons rather than
- * one so the timeline can say which happened.
+ * Why a ticket was realigned: its customer reopened it (WhatsApp ingest or the
+ * portal), or an agent or a rule moved it out of resolved. Two reasons rather
+ * than one so the timeline can say which happened.
  */
 export type AlignReason = 'reopened_after_handover' | 'reopened_by_status';
 
 /**
- * The owner a ticket takes when an agent or a rule moves it out of resolved —
- * or null when this move realigns nothing.
+ * The owner a ticket takes when it is moved out of resolved anywhere but
+ * WhatsApp ingest — an agent's status picker, a rule's `set_status`, a reply
+ * through the help-centre portal — or null when this move realigns nothing.
  *
- * The customer writing again is not the only way a resolved ticket comes back.
- * The status picker and a rule's `set_status` reopen it too, and the customer's
- * next message then continues an open ticket, which never realigns. Left to
+ * The customer writing on WhatsApp is not the only way a resolved ticket comes
+ * back, and after any of the others the customer's next message continues an
+ * open ticket, which never realigns. Left to
  * ingest alone, a ticket resolved across a handover and reopened by hand stays
  * with the previous owner for good: Unassign hands it back to them, the sweep
  * never reclaims it from them, and handing the number to the person who owns it

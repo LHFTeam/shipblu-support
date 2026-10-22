@@ -127,11 +127,15 @@ The message, the echo and the reaction all build the key through one
 for the live conversation inside their transaction (§6.100). The reaction takes
 no lock, because it never creates a conversation.
 
-`resolveWhatsAppChannel`'s fallback, for a number no row names, now returns the
-plain support row or no row, never a coexistence row. A coexistence row is
-somebody's phone, and with the row in the key, an unknown number's traffic
-would land on their tickets and their clocks. Each fallback logs
-`[whatsapp_ingest] no channel row for phone_number_id=…`.
+`resolveWhatsAppChannel`'s fallback, for a number no row names, now files the
+event under no row, borrowing only the plain support row's default group. With
+the row in the key, a coexistence row's id would land an unknown number's
+traffic on somebody's phone, its tickets and their clocks. The support row's id
+was the first version, and review found it inconsistent: ingest stamped nobody,
+while visibility, a handover and a reopen by hand — all keyed on `channel_id` —
+treated the ticket as the support owner's. Under no row it is nobody's on every
+path, and `db/sql/008` files it under its number's row once one exists. Each
+fallback logs `[whatsapp_ingest] no channel row for phone_number_id=…`.
 
 Everything that was already per number is now right per ticket with no change
 of its own: `sendingNumberFor`, the 24-hour window, `send_whatsapp`,
@@ -171,8 +175,9 @@ accountability is set or moved at three moments:
   events and one `channel_owner_changes` row with both counts.
 - **`alignAccountable`**, when a resolved ticket is reopened and the number has
   changed hands since: by its customer writing again (ingest), or by an agent or
-  a rule moving it out of resolved (`ownerOnReopen`, in `changeStatus` and the
-  `set_status` action). The second was added in review: a ticket an agent
+  a rule moving it out of resolved, or by a reply through the help-centre portal
+  (`ownerOnReopen`, in `changeStatus`, the `set_status` action and
+  `appendReply`). The second was added in review: a ticket an agent
   reopened by hand was then continued by the customer's message as an open
   ticket, which never realigns, so it stayed with the previous owner for good.
   It is a no-op on nearly every reopen.
