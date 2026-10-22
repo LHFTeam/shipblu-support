@@ -1,9 +1,11 @@
 import Link from 'next/link';
 import { ChannelBadge } from '@/components/channel';
 import { Badge, Card, PageHeader } from '@/components/ui';
+import { InfoTip } from '@/components/tooltip';
 import {
   countTemplatesByAccount,
   listAccountsForAdmin,
+  listActiveAgents,
   listChannelsForAdmin,
   listGroupNames,
 } from '@/lib/admin/settings';
@@ -11,6 +13,7 @@ import { requirePermission } from '@/lib/auth/guard';
 import { can } from '@/lib/auth/permissions';
 import { allLimited } from '@/lib/concurrency';
 import { env } from '@/lib/env';
+import { formatDateTime } from '@/lib/format';
 import { listFolderOptions } from '@/lib/kb/admin';
 import { isMetaChannel } from '@/lib/tickets/channel-policy';
 import {
@@ -20,6 +23,7 @@ import {
   SYNC_TYPES,
 } from '@/lib/whatsapp/coexistence';
 import { credentialStatuses } from '@/lib/whatsapp/credentials';
+import { numberOwnership, type NumberOwnership } from '@/lib/whatsapp/number-owner';
 import { coexistenceReadiness } from '@/lib/whatsapp/onboarding';
 import { listLatestOnboardings } from '@/lib/whatsapp/onboarding-reads';
 import {
@@ -35,7 +39,13 @@ import {
   OnboardingProgress,
   RequestSyncAgain,
 } from './coexistence-forms';
-import { ChannelEditor, ChannelForm, WebchatSettings } from './forms';
+import {
+  ChannelEditor,
+  ChannelForm,
+  OwnerEditor,
+  WebchatSettings,
+  type OwnerChoice,
+} from './forms';
 import { NewWhatsAppAccount, WhatsAppAccountEditor, type WhatsAppAccountRow } from './waba-forms';
 
 export const dynamic = 'force-dynamic';
@@ -47,8 +57,8 @@ export default async function ChannelsPage() {
   // offers the button, the copy buttons and "forget" only to those who have it.
   const canConnect = can(agent, 'admin.channels.connect');
 
-  // Three at a time rather than all seven at once. The layouts' own reads run
-  // beside these, and seven together would take most of the gate's eight
+  // Three at a time rather than all nine at once. The layouts' own reads run
+  // beside these, and nine together would take every one of the gate's eight
   // places from every other request for the length of a render. On 2026-10-11,
   // before the gate, the onboarding's click set off two of these renders at
   // once on a pool of ten that had already lost connections, and that is where
@@ -61,6 +71,8 @@ export default async function ChannelsPage() {
     folderList,
     credentials,
     onboardings,
+    agentList,
+    ownershipList,
   ] = await allLimited(3, [
     () => listChannelsForAdmin(),
     () => listGroupNames(),
@@ -69,6 +81,8 @@ export default async function ChannelsPage() {
     () => listFolderOptions(),
     () => credentialStatuses(),
     () => listLatestOnboardings(),
+    () => listActiveAgents(),
+    () => numberOwnership(),
   ]);
 
   // Read on the server, where the variables are. Not ready is still a page:
@@ -97,6 +111,8 @@ export default async function ChannelsPage() {
     .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())[0];
 
   const accountChoices = accountList.map((account) => ({ id: account.id, name: account.name }));
+  const ownerChoices: OwnerChoice[] = agentList.map(({ id, name, email }) => ({ id, name, email }));
+  const ownershipById = new Map(ownershipList.map((row) => [row.channelId, row]));
   const templatesByAccount = new Map(templateCounts.map((row) => [row.accountId, row]));
 
   // Spread whole into a client component's props, and so into the RSC payload:
@@ -267,6 +283,11 @@ export default async function ChannelsPage() {
             // the same window it was connected through — `needsReconnect`,
             // drawn from the same facts as the badge that says which.
             const reconnectable = coexistence !== null && needsReconnect(coexistence, now);
+            // Every plain WhatsApp number, and nothing else: the bot and the
+            // shared inboxes are the whole team's, and the database refuses an
+            // owner on them (`channels_owner_only_whatsapp`).
+            const ownership =
+              channel.type === 'whatsapp' ? ownershipById.get(channel.id) : undefined;
             // The copy buttons wait for the attempt that wrote this object to
             // finish connecting: until then the copy is one of its own steps,
             // shown on its progress card, and the job would skip a run of the
@@ -336,6 +357,7 @@ export default async function ChannelsPage() {
                     mode="reconnect"
                   />
                 ) : null}
+                {ownership ? <NumberOwnerLine ownership={ownership} agents={ownerChoices} /> : null}
               </li>
             );
           })}
@@ -388,6 +410,100 @@ export default async function ChannelsPage() {
           ))}
         </ul>
       </section>
+    </div>
+  );
+}
+
+/**
+ * Who answers for a WhatsApp number, on a line of its own under the row: the
+ * owner or "Team number", a warning when the owner can no longer sign in,
+ * since when and set by whom, the owners before, and the control that hands it
+ * over.
+ *
+ * Drawn from `numberOwnership()` alone, so the badge, the "since" and the
+ * count the handover form states cannot come from two reads that disagree. A
+ * deactivated owner keeps the badge, beside the warning: the number is still
+ * theirs, and reactivating them is one of the two ways out — the policy is that
+ * their existing tickets stay with them while new ones go to the group's rota.
+ */
+function NumberOwnerLine({
+  ownership,
+  agents,
+}: {
+  ownership: NumberOwnership;
+  agents: OwnerChoice[];
+}) {
+  const { owner, current, earlier } = ownership;
+
+  return (
+    <div className="flex w-full flex-wrap items-center gap-x-3 gap-y-1 text-xs text-(--color-text-secondary)">
+      {owner ? (
+        <Badge tone="info">
+          Owner: <span dir="auto">{owner.label}</span>
+          <InfoTip label="Owner">
+            New tickets on this number are assigned to its owner, and every ticket on it counts
+            against them for its SLA, whoever it is reassigned to. Unassigning one hands it back to
+            them.
+          </InfoTip>
+        </Badge>
+      ) : (
+        <Badge tone="neutral">
+          Team number
+          <InfoTip label="Team number">
+            Nobody owns this number. Its default group&rsquo;s rota assigns new tickets, and each
+            ticket counts against whoever holds it.
+          </InfoTip>
+        </Badge>
+      )}
+      {owner && !owner.active ? (
+        <Badge tone="warning">
+          Owner deactivated
+          <InfoTip label="Owner deactivated">
+            The owner can no longer sign in. Until the number is handed to somebody else, or they
+            are reactivated, its new tickets go to the default group&rsquo;s rota and count against
+            whoever holds them; the tickets it already has stay with them.
+          </InfoTip>
+        </Badge>
+      ) : null}
+      {current ? (
+        <span>
+          since {formatDateTime(current.createdAt)}
+          {current.changedByLabel ? (
+            <>
+              , set by <span dir="auto">{current.changedByLabel}</span>
+            </>
+          ) : null}
+        </span>
+      ) : null}
+      {earlier.length > 0 ? (
+        <details>
+          <summary className="cursor-pointer">
+            Earlier {earlier.length === 1 ? 'owner' : 'owners'} ({earlier.length})
+          </summary>
+          <ul className="mt-1 flex flex-col gap-0.5">
+            {earlier.map((change) => (
+              <li key={change.id}>
+                <span dir="auto">{change.toLabel ?? 'Team number'}</span> from{' '}
+                {formatDateTime(change.createdAt)}
+                {change.changedByLabel ? (
+                  <>
+                    , set by <span dir="auto">{change.changedByLabel}</span>
+                  </>
+                ) : null}
+                {change.ticketsMoved > 0
+                  ? ` · ${change.ticketsMoved} ${change.ticketsMoved === 1 ? 'ticket' : 'tickets'} moved`
+                  : null}
+              </li>
+            ))}
+          </ul>
+        </details>
+      ) : null}
+      <OwnerEditor
+        channelId={ownership.channelId}
+        owner={owner}
+        agents={agents}
+        movableTickets={ownership.movableTickets}
+      />
     </div>
   );
 }

@@ -1,7 +1,17 @@
 import { eq } from 'drizzle-orm';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { db } from '@/db/client';
-import { agents, channels, whatsappAccounts, whatsappCredentialEvents } from '@/db/schema';
+import {
+  agents,
+  channelOwnerChanges,
+  channels,
+  contacts,
+  conversations,
+  ticketStatuses,
+  whatsappAccounts,
+  whatsappCredentialEvents,
+} from '@/db/schema';
+import type { Permission } from '@/lib/auth/permissions';
 import { resetEnvCache } from '@/lib/env';
 import { withCleanDatabase } from '@/lib/testing/db';
 import { stubFetch } from '@/lib/testing/fetch';
@@ -18,6 +28,8 @@ import { credentialStatuses, storeBusinessToken } from '@/lib/whatsapp/credentia
  *   exactly what that key gates on Forget;
  * - move a connected number to another business account from the editor — it
  *   would send with a credential it was never connected with.
+ *
+ * And the handover of a number to a person, whose ids both arrive in a form.
  */
 
 const signedIn = vi.hoisted(() => ({
@@ -25,17 +37,30 @@ const signedIn = vi.hoisted(() => ({
   permissions: {} as Record<string, boolean>,
 }));
 
-vi.mock('@/lib/auth/guard', () => ({
-  requirePermission: async () => ({
-    id: signedIn.id,
-    name: 'Mona Admin',
-    role: 'admin',
-    permissions: signedIn.permissions,
-  }),
-}));
-vi.mock('next/cache', () => ({ revalidatePath: () => {} }));
+// The real guard's decision, against the overrides a test sets, with Next's
+// redirect standing as the throw it is: an action refused by its permission
+// answers nothing and writes nothing.
+vi.mock('@/lib/auth/guard', async () => {
+  const { can } =
+    await vi.importActual<typeof import('@/lib/auth/permissions')>('@/lib/auth/permissions');
+  return {
+    requirePermission: async (permission: Permission) => {
+      const agent = {
+        id: signedIn.id,
+        name: 'Mona Admin',
+        role: 'admin' as const,
+        permissions: signedIn.permissions,
+      };
+      if (!can(agent, permission)) throw new Error(`NEXT_REDIRECT forbidden: ${permission}`);
+      return agent;
+    },
+  };
+});
+const revalidated = vi.hoisted(() => [] as string[]);
+vi.mock('next/cache', () => ({ revalidatePath: (path: string) => revalidated.push(path) }));
 
-const { connectBusinessAppNumber, deleteWhatsAppAccount, saveChannel } = await import('./actions');
+const { connectBusinessAppNumber, deleteWhatsAppAccount, saveChannel, setNumberOwner } =
+  await import('./actions');
 
 withCleanDatabase();
 
@@ -58,6 +83,7 @@ beforeEach(async () => {
     .returning({ id: agents.id });
   signedIn.id = agent!.id;
   signedIn.permissions = {};
+  revalidated.length = 0;
 });
 
 async function account(wabaId: string, name: string) {
@@ -303,5 +329,222 @@ describe('connectBusinessAppNumber', () => {
       process.env = { ...saved };
       resetEnvCache();
     }
+  });
+});
+
+describe('setNumberOwner', () => {
+  async function agent(name: string, values: Partial<typeof agents.$inferInsert> = {}) {
+    const [row] = await db
+      .insert(agents)
+      .values({ name, email: `${name.toLowerCase().replace(/\s+/g, '.')}@shipblu.test`, ...values })
+      .returning({ id: agents.id });
+    return row!.id;
+  }
+
+  async function number(
+    name: string,
+    type: 'whatsapp' | 'whatsapp_bot' | 'email' = 'whatsapp',
+    ownerAgentId: string | null = null,
+  ) {
+    const [row] = await db
+      .insert(channels)
+      .values({
+        type,
+        name,
+        ownerAgentId,
+        config:
+          type === 'email'
+            ? { address: 'support@shipblu.test' }
+            : {
+                phoneNumberId: `pn-${name}`,
+                coexistence: {
+                  onboardedAt: '2026-09-19T08:00:00.000Z',
+                  wabaId: WABA,
+                  displayPhoneNumber: '+20 12 78707918',
+                  syncs: {},
+                },
+              },
+      })
+      .returning({ id: channels.id });
+    return row!.id;
+  }
+
+  async function ticket(channelId: string, status: 'Open' | 'Pending' | 'Resolved') {
+    const [state] = await db
+      .select({ id: ticketStatuses.id })
+      .from(ticketStatuses)
+      .where(eq(ticketStatuses.name, status));
+    const [contact] = await db
+      .insert(contacts)
+      .values({ name: 'Amira' })
+      .returning({ id: contacts.id });
+    const [row] = await db
+      .insert(conversations)
+      .values({
+        channel: 'whatsapp',
+        channelId,
+        statusId: state!.id,
+        requesterContactId: contact!.id,
+        subject: 'Where is my parcel?',
+      })
+      .returning({ id: conversations.id });
+    return row!.id;
+  }
+
+  async function holders(id: string) {
+    const [row] = await db
+      .select({
+        accountable: conversations.accountableAgentId,
+        assignee: conversations.assigneeAgentId,
+      })
+      .from(conversations)
+      .where(eq(conversations.id, id));
+    return row!;
+  }
+
+  async function ownerOf(channelId: string) {
+    const [row] = await db
+      .select({ owner: channels.ownerAgentId })
+      .from(channels)
+      .where(eq(channels.id, channelId));
+    return row!.owner;
+  }
+
+  const records = () =>
+    db
+      .select({
+        toAgentId: channelOwnerChanges.toAgentId,
+        changedByAgentId: channelOwnerChanges.changedByAgentId,
+        changedByLabel: channelOwnerChanges.changedByLabel,
+        ticketsMoved: channelOwnerChanges.ticketsMoved,
+      })
+      .from(channelOwnerChanges);
+
+  const handOver = (channelId: string, ownerAgentId: string) =>
+    setNumberOwner(INITIAL, form({ channelId, ownerAgentId }));
+
+  it('is refused to somebody who may not edit channels, before anything is read', async () => {
+    const nayera = await agent('Nayera Mohamed');
+    const id = await number('Nayera Mohamed');
+    signedIn.permissions = { 'admin.channels': false };
+
+    await expect(handOver(id, nayera)).rejects.toThrow(/forbidden: admin\.channels/);
+    expect(await ownerOf(id)).toBeNull();
+    expect(await records()).toEqual([]);
+  });
+
+  // A malformed uuid reaching the lookup is a 22P02, and an action that throws
+  // answers nothing: each is a sentence instead, and nothing is written.
+  it('answers a malformed channel or agent id with a sentence', async () => {
+    const nayera = await agent('Nayera Mohamed');
+    const id = await number('Nayera Mohamed');
+
+    expect(await handOver('not-a-uuid', nayera)).toEqual({
+      error: 'That no longer exists — reload the page and try again',
+    });
+    expect(await handOver(id, 'not-a-uuid')).toEqual({
+      error: 'Unknown agent — reload the page and try again',
+    });
+    expect(await handOver('00000000-0000-4000-8000-000000000001', nayera)).toEqual({
+      error: 'That channel no longer exists.',
+    });
+    expect(await ownerOf(id)).toBeNull();
+    expect(await records()).toEqual([]);
+    expect(revalidated).toEqual([]);
+  });
+
+  it('refuses a number that is not a plain WhatsApp number', async () => {
+    const nayera = await agent('Nayera Mohamed');
+    const bot = await number('Second bot', 'whatsapp_bot');
+    const mailbox = await number('Mailbox', 'email');
+
+    for (const id of [bot, mailbox]) {
+      expect((await handOver(id, nayera)).error).toMatch(
+        /^Only a WhatsApp number can belong to a person\./,
+      );
+      expect(await ownerOf(id)).toBeNull();
+    }
+    expect(await records()).toEqual([]);
+  });
+
+  it('refuses an owner who can no longer sign in, or no longer exists', async () => {
+    const former = await agent('Omar Former', { isActive: false });
+    const id = await number('Nayera Mohamed');
+    const open = await ticket(id, 'Open');
+
+    expect(await handOver(id, former)).toEqual({
+      error: 'Omar Former is deactivated. Reactivate them before handing them a number.',
+    });
+    expect(await handOver(id, '00000000-0000-4000-8000-000000000002')).toEqual({
+      error: 'That agent no longer exists.',
+    });
+    expect(await ownerOf(id)).toBeNull();
+    expect(await holders(open)).toEqual({ accountable: null, assignee: null });
+    expect(await records()).toEqual([]);
+  });
+
+  it('hands the number over with its open tickets, names the admin, and re-renders the page', async () => {
+    const nayera = await agent('Nayera Mohamed');
+    const id = await number('Nayera Mohamed');
+    const open = await ticket(id, 'Open');
+    const pending = await ticket(id, 'Pending');
+    const resolved = await ticket(id, 'Resolved');
+
+    const done = await handOver(id, nayera);
+
+    expect(done).toMatchObject({
+      error: null,
+      ok: true,
+      notice:
+        'Nayera Mohamed owns +20 12 78707918 from now. 2 open or pending tickets moved to them.',
+    });
+    expect(revalidated).toEqual(['/admin/channels']);
+    expect(await ownerOf(id)).toBe(nayera);
+    expect(await holders(open)).toEqual({ accountable: nayera, assignee: nayera });
+    expect(await holders(pending)).toEqual({ accountable: nayera, assignee: nayera });
+    expect(await holders(resolved)).toEqual({ accountable: null, assignee: null });
+    // The admin from the session, never from the form.
+    expect(await records()).toEqual([
+      {
+        toAgentId: nayera,
+        changedByAgentId: signedIn.id,
+        changedByLabel: 'Mona Admin',
+        ticketsMoved: 2,
+      },
+    ]);
+
+    // A second press says so, and writes nothing.
+    expect((await handOver(id, nayera)).notice).toBe(
+      'Nayera Mohamed already owns +20 12 78707918; nothing changed.',
+    );
+    expect(await records()).toHaveLength(1);
+  });
+
+  // "Nobody — team number" submits an empty value, which is a choice, not a
+  // malformed id.
+  it('clears the owner when nobody is chosen', async () => {
+    const nayera = await agent('Nayera Mohamed');
+    const id = await number('Nayera Mohamed', 'whatsapp', nayera);
+    const open = await ticket(id, 'Open');
+    await db
+      .update(conversations)
+      .set({ accountableAgentId: nayera, assigneeAgentId: nayera })
+      .where(eq(conversations.id, open));
+
+    const done = await handOver(id, '');
+
+    expect(done).toMatchObject({
+      error: null,
+      notice:
+        '+20 12 78707918 is a team number from now: its 1 open or pending ticket counts against ' +
+        'whoever holds it.',
+    });
+    expect(revalidated).toEqual(['/admin/channels']);
+    expect(await ownerOf(id)).toBeNull();
+    // The work stays where it was; only the breach stops being hers.
+    expect(await holders(open)).toEqual({ accountable: null, assignee: nayera });
+    expect(await records()).toEqual([
+      expect.objectContaining({ toAgentId: null, changedByAgentId: signedIn.id, ticketsMoved: 1 }),
+    ]);
   });
 });

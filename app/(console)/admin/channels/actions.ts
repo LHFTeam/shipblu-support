@@ -24,6 +24,7 @@ import {
   storedCredentialEditRefusal,
   storedCredentialRemovalRefusal,
 } from '@/lib/whatsapp/credentials';
+import { handOverNumber, handoverNotice } from '@/lib/whatsapp/number-owner';
 import {
   adoptBusinessAppNumber,
   beginCoexistenceOnboarding,
@@ -397,6 +398,45 @@ export async function saveChannel(_state: AdminState, formData: FormData): Promi
 
   revalidatePath('/admin/channels');
   return ok();
+}
+
+// --- Who answers for a number -----------------------------------------------
+
+/**
+ * Hand a WhatsApp number to a team member, or back to the team.
+ *
+ * Its own action and its own form, not a field `saveChannel` reads. Three
+ * forms post to that one — the add form, the row's editor and the widget's
+ * settings — and each would then have to carry the owner through or clear it:
+ * renaming a number would be one forgotten hidden field away from moving its
+ * ninety tickets. Here a submission can do nothing but a handover, behind a
+ * second click, and `handOverNumber` decides the rest under the channel row's
+ * lock: what moves, what is refused, and what is written down.
+ *
+ * Both ids arrive in a form, and the lib re-reads both rows. Parsed here
+ * first, because a malformed uuid reaching its lookup is a 22P02, and an
+ * action that throws answers nothing. An empty owner is the "Nobody — team
+ * number" choice, never a malformed one: `uuidField` keeps the two apart.
+ */
+export async function setNumberOwner(_state: AdminState, formData: FormData): Promise<AdminState> {
+  const agent = await requirePermission('admin.channels');
+
+  const channelId = uuidField(formData, 'channelId');
+  if (!channelId) return { error: GONE };
+  const ownerAgentId = uuidField(formData, 'ownerAgentId');
+  if (ownerAgentId === undefined) {
+    return { error: 'Unknown agent — reload the page and try again' };
+  }
+
+  const handover = await handOverNumber({
+    channelId,
+    toAgentId: ownerAgentId,
+    actor: { id: agent.id, label: agent.name },
+  });
+  if (!handover.ok) return { error: handover.error };
+
+  revalidatePath('/admin/channels');
+  return { ...ok(), notice: handoverNotice(handover) };
 }
 
 // --- Numbers on the WhatsApp Business app -----------------------------------

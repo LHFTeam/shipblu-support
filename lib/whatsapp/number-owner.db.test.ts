@@ -463,18 +463,64 @@ describe('numberOwnership', () => {
         channelId: number,
         owner: { id: ali, label: 'Ali Nasser', active: false },
         movableTickets: 2,
-        history: [
-          expect.objectContaining({
-            fromLabel: 'Nayera Mohamed',
-            toLabel: 'Ali Nasser',
-            changedByLabel: 'Mona Admin',
-            ticketsMoved: 2,
-            ticketsReassigned: 2,
-          }),
-          expect.objectContaining({ fromLabel: null, toLabel: 'Nayera Mohamed' }),
-        ],
+        current: expect.objectContaining({
+          fromLabel: 'Nayera Mohamed',
+          toLabel: 'Ali Nasser',
+          changedByLabel: 'Mona Admin',
+          ticketsMoved: 2,
+          ticketsReassigned: 2,
+          createdAt: expect.any(Date),
+        }),
+        earlier: [expect.objectContaining({ fromLabel: null, toLabel: 'Nayera Mohamed' })],
       },
-      { channelId: team, owner: null, movableTickets: 1, history: [] },
+      { channelId: team, owner: null, movableTickets: 1, current: null, earlier: [] },
     ]);
+  });
+
+  it('dates a team number from the handover that cleared it', async () => {
+    const admin = await agent('Mona Admin', { role: 'admin' });
+    const nayera = await agent('Nayera Mohamed');
+    const number = await phone('Nayera Mohamed');
+    const actor = { id: admin, label: 'Mona Admin' };
+
+    await handOverNumber({ channelId: number, toAgentId: nayera, actor });
+    await handOverNumber({ channelId: number, toAgentId: null, actor });
+
+    const [ownership] = await numberOwnership();
+    expect(ownership).toMatchObject({
+      owner: null,
+      current: { fromLabel: 'Nayera Mohamed', toLabel: null, changedByLabel: 'Mona Admin' },
+      earlier: [{ fromLabel: null, toLabel: 'Nayera Mohamed' }],
+    });
+  });
+
+  // "Since 14 Oct, set by Mona" must not date a state the number is not in.
+  it('dates nothing when the newest handover no longer describes the number', async () => {
+    const admin = await agent('Mona Admin', { role: 'admin' });
+    const nayera = await agent('Nayera Mohamed');
+    const ali = await agent('Ali Nasser');
+    const byHand = await phone('Set by hand');
+    const deleted = await phone('Owner deleted');
+    const actor = { id: admin, label: 'Mona Admin' };
+
+    // An owner written straight into the row leaves the record naming somebody else.
+    await handOverNumber({ channelId: byHand, toAgentId: nayera, actor });
+    await db.update(channels).set({ ownerAgentId: ali }).where(eq(channels.id, byHand));
+
+    // A deleted owner leaves a row naming nobody and a record still naming them.
+    await handOverNumber({ channelId: deleted, toAgentId: nayera, actor });
+    await db.delete(agents).where(eq(agents.id, nayera));
+
+    const ownership = await numberOwnership();
+    expect(ownership.find((row) => row.channelId === byHand)).toMatchObject({
+      owner: { id: ali, label: 'Ali Nasser', active: true },
+      current: null,
+      earlier: [{ toLabel: 'Nayera Mohamed' }],
+    });
+    expect(ownership.find((row) => row.channelId === deleted)).toMatchObject({
+      owner: null,
+      current: null,
+      earlier: [{ toLabel: 'Nayera Mohamed' }],
+    });
   });
 });

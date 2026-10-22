@@ -467,15 +467,64 @@ export async function handOverNumber(input: {
   });
 }
 
+/**
+ * What the admin reads once a handover has answered: who answers for the
+ * number now, and what that did to its tickets. The form said how many would
+ * go; this says what did, and ninety tickets changing hands is the part
+ * somebody will be asked about later.
+ *
+ * Two counts where they differ, because they differ for a reason: a ticket a
+ * supervisor gave to a third person now counts against the new owner and stays
+ * with whoever it was given to, so "moved to them" would be true of its breach
+ * and false of its work. A handover that changed nothing says so, because a
+ * second press of the button lands here and must not read as a second handover.
+ */
+export function handoverNotice(done: Extract<Handover, { ok: true }>): string {
+  const number = done.displayNumber ?? done.channelName;
+  const one = done.ticketsMoved === 1;
+  const moved = `${done.ticketsMoved} open or pending ${one ? 'ticket' : 'tickets'}`;
+  const counts = one ? 'counts' : 'count';
+
+  if (!done.changed) {
+    return done.to
+      ? `${done.to.label} already owns ${number}; nothing changed.`
+      : `${number} is already a team number; nothing changed.`;
+  }
+
+  if (!done.to) {
+    return done.ticketsMoved === 0
+      ? `${number} is a team number from now.`
+      : `${number} is a team number from now: its ${moved} ${counts} against whoever holds ${one ? 'it' : 'each'}.`;
+  }
+
+  const owns = `${done.to.label} owns ${number} from now.`;
+  const reassigned = done.ticketsReassigned === 1 ? 'was' : 'were';
+  if (done.ticketsMoved === 0) {
+    // None needed its accountability moved, yet some changed hands: a
+    // ticket can already count against the new owner only if an agent
+    // reopened it by hand after an earlier handover away from them, and it
+    // follows them when nobody, or the previous owner, held it.
+    return done.ticketsReassigned === 0
+      ? `${owns} No open or pending ticket needed moving.`
+      : `${owns} ${done.ticketsReassigned} open or pending ${done.ticketsReassigned === 1 ? 'ticket' : 'tickets'} ${reassigned} reassigned to them.`;
+  }
+  if (done.ticketsReassigned === done.ticketsMoved) return `${owns} ${moved} moved to them.`;
+  if (done.ticketsReassigned === 0) {
+    return `${owns} ${moved} ${counts} against them, and ${one ? 'stays' : 'stay'} with whoever holds ${one ? 'it' : 'them'}.`;
+  }
+  return `${owns} ${moved} count against them; ${done.ticketsReassigned} ${reassigned} reassigned to them, and the rest stay with whoever holds them.`;
+}
+
 /** How a person is named in the record: their name, or their address when it is blank. */
 function agentLabel(agent: { name: string; email: string }): string {
   return agent.name.trim() || agent.email;
 }
 
-/** One earlier handover, as the admin page lists it. */
+/** One handover, as the admin page lists it. */
 export type OwnerChange = {
   id: string;
   fromLabel: string | null;
+  /** Null for a handover back to the team. */
   toLabel: string | null;
   changedByLabel: string | null;
   ticketsMoved: number;
@@ -489,8 +538,14 @@ export type NumberOwnership = {
   owner: { id: string; label: string; active: boolean } | null;
   /** What a handover would move now: open and pending native tickets. */
   movableTickets: number;
-  /** Newest first, at most `HISTORY_SHOWN`; the first is the current owner's. */
-  history: OwnerChange[];
+  /**
+   * The handover that left the number as it is — "since when, set by whom" —
+   * or null when none did: a number nobody has handed over, or one whose
+   * owner was set or removed some other way since.
+   */
+  current: OwnerChange | null;
+  /** The handovers before it, newest first; with `current`, at most `HISTORY_SHOWN`. */
+  earlier: OwnerChange[];
 };
 
 /** How many handovers the admin page lists per number. */
@@ -504,6 +559,14 @@ const HISTORY_SHOWN = 10;
  * The history is read whole and cut per number in code rather than ranked in
  * SQL. A handover is a person changing jobs or going on leave, a few a year per
  * number, so the table stays small for as long as anybody will read this.
+ *
+ * The newest handover is `current` only when it names the owner the row has
+ * now. `handOverNumber` is the only writer of the column, so it nearly always
+ * does; the exceptions are an owner set by hand in the database, which leaves
+ * no record, and an owner deleted since, whom the foreign key took off the row
+ * and the record still names. In either case "since 14 Oct, set by Mona" would
+ * date a state the number is not in, so the record is listed with the earlier
+ * ones and the row says nothing about since when.
  */
 export async function numberOwnership(): Promise<NumberOwnership[]> {
   const numbers = await db
@@ -533,6 +596,7 @@ export async function numberOwnership(): Promise<NumberOwnership[]> {
       id: channelOwnerChanges.id,
       channelId: channelOwnerChanges.channelId,
       fromLabel: channelOwnerChanges.fromLabel,
+      toAgentId: channelOwnerChanges.toAgentId,
       toLabel: channelOwnerChanges.toLabel,
       changedByLabel: channelOwnerChanges.changedByLabel,
       ticketsMoved: channelOwnerChanges.ticketsMoved,
@@ -543,19 +607,33 @@ export async function numberOwnership(): Promise<NumberOwnership[]> {
     .where(inArray(channelOwnerChanges.channelId, ids))
     .orderBy(desc(channelOwnerChanges.createdAt), desc(channelOwnerChanges.id));
 
-  return numbers.map((row) => ({
-    channelId: row.channelId,
-    owner: row.ownerId
-      ? {
-          id: row.ownerId,
-          label: agentLabel({ name: row.ownerName ?? '', email: row.ownerEmail ?? '' }),
-          active: row.ownerActive ?? false,
-        }
-      : null,
-    movableTickets: counts.find((count) => count.channelId === row.channelId)?.count ?? 0,
-    history: changes
+  return numbers.map((row) => {
+    const history = changes
       .filter((change) => change.channelId === row.channelId)
-      .slice(0, HISTORY_SHOWN)
-      .map(({ channelId: _channelId, ...change }) => change),
-  }));
+      .slice(0, HISTORY_SHOWN);
+    const newest = history[0];
+    // A record naming nobody describes a team number only if it never named
+    // anybody: a `to_label` with no `to_agent_id` is an owner since deleted.
+    const isCurrent =
+      newest !== undefined &&
+      newest.toAgentId === row.ownerId &&
+      (row.ownerId !== null || newest.toLabel === null);
+    const shown = history.map(
+      ({ channelId: _channelId, toAgentId: _toAgentId, ...change }): OwnerChange => change,
+    );
+
+    return {
+      channelId: row.channelId,
+      owner: row.ownerId
+        ? {
+            id: row.ownerId,
+            label: agentLabel({ name: row.ownerName ?? '', email: row.ownerEmail ?? '' }),
+            active: row.ownerActive ?? false,
+          }
+        : null,
+      movableTickets: counts.find((count) => count.channelId === row.channelId)?.count ?? 0,
+      current: isCurrent ? (shown[0] ?? null) : null,
+      earlier: isCurrent ? shown.slice(1) : shown,
+    };
+  });
 }
