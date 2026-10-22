@@ -246,6 +246,9 @@ describe('recordMetaFeedback', () => {
 
   // No survey is ever sent on a comment; this is the second line, for a row
   // that got there anyway. A thanks on one would be posted under the post.
+  // On its comment channel, as the CHECK insists, so it is the strict channel
+  // comparison that refuses it: `instagram_comment` is not the tap's
+  // `instagram`. The external-id half behind it has no row left to refuse.
   it('takes no answer on a comment ticket', async () => {
     const ticket = await surveyedTicket({
       platform: 'instagram',

@@ -57,9 +57,10 @@ export async function recordMetaFeedback(feedback: NormalisedFeedback): Promise<
     .where(eq(csatSurveys.id, feedback.surveyId))
     .limit(1);
   // The ticket's channel against the tap's platform, strictly and on purpose,
-  // and never a comment ticket — by its channel, or by its external id while it
-  // still carries its platform's. No survey is ever sent on one, and a thanks
-  // there is one `send_meta` would post on the public thread.
+  // and never a comment ticket — by its channel, or by its external id, which
+  // the database keeps agreeing and which stays asked for the day that CHECK
+  // is dropped. No survey is ever sent on one, and a thanks there is one
+  // `send_meta` would post on the public thread.
   if (
     !survey ||
     survey.channel !== feedback.platform ||

@@ -204,7 +204,7 @@ describe('the Meta channels', () => {
 
   // One test for every reader, so the composer and the guards cannot disagree
   // about a ticket the way two spellings of the external-id test once could.
-  it('tell a comment ticket by its channel, or by its external id until 1.2 moves it', () => {
+  it('tell a comment ticket by its channel, or by its external id should the CHECK be dropped', () => {
     expect(isCommentTicket('facebook_comment', null)).toBe(true);
     expect(isCommentTicket('instagram_comment', 'instagram:comment:17890')).toBe(true);
     expect(isCommentTicket('facebook', 'facebook:comment:1_2')).toBe(true);

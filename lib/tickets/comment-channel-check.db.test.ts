@@ -7,8 +7,8 @@ import { withCleanDatabase } from '@/lib/testing/db';
 
 /**
  * Stage 1.3's CHECK against real Postgres, as `db/sql/008_comment_channel_check.sql`
- * adds it on every replay: the shapes it refuses, and the shapes every writer
- * produces, which it must accept.
+ * adds it (once, guarded on `pg_constraint`): the shapes it refuses, and the
+ * shapes every writer produces, which it must accept.
  *
  * Asserted by code and constraint name rather than by "it threw", so a fixture
  * that fails for some other reason (a missing status, a foreign key) cannot

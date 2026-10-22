@@ -8,8 +8,11 @@
 -- Its own file rather than a block in 003_constraints.sql, for two reasons. If
 -- a row refuses it, the migrate log names this file ("Applying 008_…") rather
 -- than one block among many; and its rollback is this file's body replaced by
--- a DROP CONSTRAINT IF EXISTS, which touches nothing else (Stage 1.3 of
--- plans/ticket-category-routing.md).
+-- a drop guarded the same way, which touches nothing else (Stage 1.3 of
+-- plans/ticket-category-routing.md). Guarded, not a bare DROP CONSTRAINT IF
+-- EXISTS: ALTER TABLE takes its ACCESS EXCLUSIVE lock before it checks IF
+-- EXISTS, so the bare form would lock conversations on every later deploy to do
+-- nothing — the failure 001's trigger loop describes, from 2026-08-19.
 
 -- --------------------------------------------------------------------------
 -- A comment ticket is on its comment channel, and only a comment ticket is

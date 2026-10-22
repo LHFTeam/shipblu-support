@@ -285,8 +285,13 @@ as instructions. The reasons are given so that any of them can be argued with.
     deploy.
   - **Just before triggering:**
     - run the gate again;
-    - run the `pg_stat_activity` query in `docs/PROJECT-STATE.md` §5.5, which
-      must show nothing open on `conversations`;
+    - list what holds a lock on `conversations`, which must show nothing more
+      than a few seconds old: `select a.pid, l.mode, a.state, now() -
+a.xact_start as age, left(a.query, 80) from pg_locks l join
+pg_stat_activity a using (pid) where l.relation =
+'conversations'::regclass and a.pid <> pg_backend_pid();` (§5.5's query
+      lists only transactions older than five minutes, which the role's
+      `transaction_timeout` reaps, so it reads clear when this would not);
     - stay clear of the nightly rollup at 00:00 UTC.
   - **If the preDeploy fails,** the previous release keeps serving and the
     constraint is absent. Read the deploy log, then the gate query.
@@ -295,17 +300,38 @@ as instructions. The reasons are given so that any of them can be argued with.
 conrelid = 'conversations'::regclass AND conname =
 'conversations_comment_channel_matches_external_id'` returns one row, `true`,
     matching the file.
-  - No job has failed on it since:
-    `SELECT count(*) FROM jobs WHERE last_error ILIKE '%conversations_comment_channel_matches_external_id%'`
-    is 0. A comment the CHECK refused would fail its `process_meta_webhook`
-    job, not the web.
+  - No ingest has failed on it since: `SELECT count(*) FROM jobs WHERE type =
+'process_webhook' AND created_at > '<deploy instant>' AND last_error ILIKE
+'%Failed query: insert into "conversations"%'` is 0. A refused comment fails
+    its `process_webhook` job, not the web, and the row does not name the
+    constraint: `errorMessage` keeps drizzle's `Failed query: …` text, and
+    Postgres's "violates check constraint" is on its `cause`, which nothing
+    stores.
   - A comment that arrives after the deploy files on its comment channel.
-- **Rollback.** Open a PR that replaces the ADD block in `008` with
-  `ALTER TABLE conversations DROP CONSTRAINT IF EXISTS conversations_comment_channel_matches_external_id;`,
-  merge it and deploy web. Its preDeploy drops the constraint, so nobody types
-  DDL against production, and every later replay keeps it dropped. Rolling
-  back 1.3 never needs 1.2 rolled back, because no code path depends on the
-  CHECK.
+- **Rollback.** Open a PR that replaces the ADD block in `008` with a drop
+  guarded the same way, merge it and deploy web:
+
+  ```sql
+  DO $$
+  BEGIN
+    IF EXISTS (
+      SELECT 1 FROM pg_constraint
+      WHERE conname = 'conversations_comment_channel_matches_external_id'
+        AND conrelid = 'conversations'::regclass
+    ) THEN
+      ALTER TABLE conversations
+        DROP CONSTRAINT conversations_comment_channel_matches_external_id;
+    END IF;
+  END $$;
+  ```
+
+  Its preDeploy drops the constraint, so nobody types DDL against production,
+  and every later replay finds nothing to drop and takes no lock. Not a bare
+  `DROP CONSTRAINT IF EXISTS`: `ALTER TABLE` takes ACCESS EXCLUSIVE before it
+  checks `IF EXISTS`, so every later deploy would lock `conversations` to do
+  nothing — the failure `001_extensions_and_triggers.sql`'s trigger loop
+  records from 2026-08-19. Rolling back 1.3 never needs 1.2 rolled back,
+  because no code path depends on the CHECK.
 
 ### Working on this repo without the outgoing session's context
 
@@ -1593,8 +1619,8 @@ deploy it with web and the crons.
       already on its comment channel. They are matched by the ticket's channel
       as it stands, so a copy written late is caught by the next run.
 
-    A second run finds nothing. It is in `scripts/ci/db-jobs.txt` as
-    `dryRun=true`. Its dry-run selection, read-only against production on
+    A second run finds nothing. It was in `scripts/ci/db-jobs.txt` as
+    `dryRun=true` until 1.3 retired it. Its dry-run selection, read-only against production on
     2026-10-21: 43 Facebook and 9 Instagram tickets, none onto a comments row
     (there is none), none deleted; 0 `csat_surveys` and 1 `canned_suggestions`
     copy.
@@ -1688,9 +1714,8 @@ constraint name and table:
 ```
 
 The `coalesce` matters, because a regex on null is null and a CHECK passes on
-null. 1.3 deploys only after `split_comment_channels dryRun=true` reports
-nothing to move and no ticket left that the CHECK would refuse, with all six
-services on 1.2. Adding the CHECK validates every
+null. 1.3 deploys only after the gate under [1.3, as built](#13-as-built)
+returns 0, with all six services on 1.2. Adding the CHECK validates every
 row, and one stray row would fail web's preDeploy. After that the pair can
 never disagree again, and the three ways the code detects a comment today
 become one answer.
@@ -1719,14 +1744,15 @@ cannot be deleted (`scripts/ci/rules/generated-files.mjs:52-63`), and its
 readers are harmless.
 
 1. **If 1.3 has shipped:** a PR replaces the ADD block in
-   `db/sql/008_comment_channel_check.sql` with `ALTER TABLE conversations DROP
-CONSTRAINT IF EXISTS conversations_comment_channel_matches_external_id;`,
-   and web is deployed. Its preDeploy drops the constraint, so nobody types DDL
-   against production, and every later replay keeps it dropped.
-2. **Revert 1.2's writers**, in a PR that reverts #391 and #392 (and restores
-   `split_comment_channels` if step 3 needs it), and deploy web, worker and
-   crons with 1.1's readers still in place, so nothing writes comment values any
-   more. Never deploy an old commit such as `1f89219` instead: `main` also
+   `db/sql/008_comment_channel_check.sql` with the guarded drop under
+   [1.3, as built](#13-as-built), and web is deployed. Its preDeploy drops the
+   constraint, so nobody types DDL against production, and every later replay
+   finds nothing to drop and takes no lock.
+2. **Revert 1.2's writers**, in a PR that reverts #391 and #392, and deploy web,
+   worker and crons with 1.1's readers still in place, so nothing writes comment
+   values any more. Where the revert meets 1.3's retirement of
+   `split_comment_channels`, keep the job deleted: step 3 is an `UPDATE`, not
+   the job. Never deploy an old commit such as `1f89219` instead: `main` also
    carries other work since then, #390 among it. First
    deactivate every `auto_responses` row naming a comment channel: 1.1 still
    matches one, without `answersRequester`, so a passer-by's comment would earn
