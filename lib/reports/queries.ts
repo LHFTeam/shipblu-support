@@ -1,5 +1,5 @@
 import { DateTime } from 'luxon';
-import { and, between, eq, isNotNull, isNull, lt, lte, sql } from 'drizzle-orm';
+import { and, between, desc, eq, isNotNull, isNull, lt, lte, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { share } from '@/lib/charts/scale';
 import { agents, groups, metricsDaily, rollupDays } from '@/db/schema';
@@ -9,10 +9,13 @@ import { RATING_COLUMNS, type ReportWindow } from './rollup';
 /**
  * Read models for the reports page.
  *
- * Every one of these reads `metrics_daily` and nothing else. That is the whole
- * point of the nightly rollup: the page stays fast as the archive grows, and
- * opening it can never put an aggregate over the full message history in front
- * of the database.
+ * Every figure here reads `metrics_daily`, which `byAgent` and `byGroup` join
+ * to `agents` and `groups` only for their names. That is the whole point of the
+ * nightly rollup: the page stays fast as the archive grows, and opening it can
+ * never put an aggregate over the full message history in front of the
+ * database. What is not a figure reads `rollup_days`: how far the rollup has
+ * reached (`lastWholeDay`, `lastWholeRollup`), the question `metrics_daily`
+ * cannot answer, since a day nobody worked has no rows in it.
  */
 
 export type Totals = {
@@ -197,16 +200,30 @@ export async function rolledUpDays(range: Range): Promise<{ first: string | null
  * a day whole. `countedThrough` (`csat-queries.ts`) reads it.
  */
 export async function lastWholeDay(window: ReportWindow): Promise<string | null> {
+  return (await lastWholeRollup(window))?.day ?? null;
+}
+
+/**
+ * `lastWholeDay`, with the instant that day's computation began: what the
+ * admin dashboard's rollup card prints (`systemHealth`). One read for both,
+ * so the card and `/reports/csat` cannot name different days — a second copy
+ * of the predicate would be the same question with two answers.
+ */
+export async function lastWholeRollup(
+  window: Pick<ReportWindow, 'to' | 'zone'>,
+): Promise<{ day: string; computedAt: Date } | null> {
   const [row] = await db
-    .select({ day: sql<string | null>`max(${rollupDays.day})::text` })
+    .select({ day: rollupDays.day, computedAt: rollupDays.computedAt })
     .from(rollupDays)
     .where(
       and(
         lt(rollupDays.day, sql`${window.to}::date`),
         sql`${rollupDays.computedAt} >= (${rollupDays.day} + 1)::timestamp at time zone ${window.zone}`,
       ),
-    );
-  return row?.day ?? null;
+    )
+    .orderBy(desc(rollupDays.day))
+    .limit(1);
+  return row ?? null;
 }
 
 /**

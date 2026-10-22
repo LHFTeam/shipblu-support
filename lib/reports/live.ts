@@ -15,7 +15,15 @@ import {
 import { openBacklog } from '@/lib/tickets/backlog';
 import { readOnlyChannels } from '@/lib/tickets/channel-policy';
 import { notReaction } from '@/lib/tickets/not-reaction';
-import { computeDay, todayIn, totalsOf, type Bucket, type ReportingContext } from './rollup';
+import { lastWholeRollup } from './queries';
+import {
+  computeDay,
+  daysUncounted,
+  todayIn,
+  totalsOf,
+  type Bucket,
+  type ReportingContext,
+} from './rollup';
 
 /**
  * Read models for the live dashboard.
@@ -149,7 +157,10 @@ export async function todaySoFar(
   context: ReportingContext,
   now: Date = new Date(),
 ): Promise<{ day: string; bucket: Bucket }> {
-  const day = todayIn(context.zone);
+  // Named at `now`, the instant the slices are cut at: from the wall clock, a
+  // render that straddled the team's midnight named the new day and cut it
+  // before it began, drawing it as zeros beside the old day's hours.
+  const day = todayIn(context.zone, now);
   const slices = await computeDay(day, context, now);
 
   return { day, bucket: totalsOf(slices) };
@@ -276,8 +287,25 @@ export type SystemHealth = {
   oldestPendingSince: Date | null;
   webhooksUnprocessed: number;
   oldestWebhookSince: Date | null;
-  lastRollupAt: Date | null;
-  lastRollupDay: string | null;
+  /**
+   * The newest day the rollup has computed whole, worked or not
+   * (`lastComputedDay`); in the `metrics_daily` fallback, the newest day
+   * before today with any figures, which a quiet day never is.
+   */
+  rollupDay: string | null;
+  /**
+   * When the rollup began computing `rollupDay`; in the `metrics_daily`
+   * fallback, when that day's figures were written, a few seconds later.
+   */
+  rollupComputedAt: Date | null;
+  /**
+   * The days between `rollupDay` and today the rollup has not computed
+   * (`daysUncounted`): 0 once tonight's run has reached yesterday, and 1
+   * before it — all of the day after a night it missed included — so more
+   * only from the midnight after a missed night. Null when the day came from
+   * `metrics_daily`, which cannot tell a missed night from a quiet day.
+   */
+  rollupDaysBehind: number | null;
 };
 
 /**
@@ -290,7 +318,7 @@ export type SystemHealth = {
  * Bounded by the queue, which the cleanup job keeps short; completed jobs are
  * never counted.
  */
-export async function systemHealth(): Promise<SystemHealth> {
+export async function systemHealth(zone: string, now: Date = new Date()): Promise<SystemHealth> {
   const [queue, hooks, rollup] = await Promise.all([
     db
       .select({
@@ -311,15 +339,7 @@ export async function systemHealth(): Promise<SystemHealth> {
       .from(webhookEvents)
       .where(isNull(webhookEvents.processedAt)),
 
-    // Ordered by the day covered, not by when the row was written: the
-    // question this answers is "how far does the reporting data reach", and a
-    // manual recompute of an old day would otherwise present itself as the
-    // newest thing the rollup knows about.
-    db
-      .select({ day: metricsDaily.day, computedAt: metricsDaily.computedAt })
-      .from(metricsDaily)
-      .orderBy(desc(metricsDaily.day))
-      .limit(1),
+    lastComputedDay(zone, now),
   ]);
 
   return {
@@ -330,9 +350,58 @@ export async function systemHealth(): Promise<SystemHealth> {
     oldestPendingSince: asDate(queue[0]?.oldestPendingSince),
     webhooksUnprocessed: hooks[0]?.unprocessed ?? 0,
     oldestWebhookSince: asDate(hooks[0]?.oldest),
-    lastRollupAt: rollup[0]?.computedAt ?? null,
-    lastRollupDay: rollup[0]?.day ?? null,
+    rollupDay: rollup?.day ?? null,
+    rollupComputedAt: rollup?.computedAt ?? null,
+    rollupDaysBehind: rollup?.behind ?? null,
   };
+}
+
+/**
+ * How far the rollup has reached: the newest day it has computed whole, and
+ * when it began computing it.
+ *
+ * Read from `rollup_days` through `lastWholeRollup`, the read that ends
+ * `/reports/csat`, so the card names the day that page counts to. Not from
+ * `metrics_daily`, which writes no row for a day nobody worked: its newest
+ * row is the last day with work, so after a quiet Friday the nightly run did
+ * compute, the card named Thursday and timed it by Thursday's rows — and a
+ * quiet weekend read as a stalled rollup on the card a supervisor would look
+ * at to see one.
+ *
+ * The newest day covered, not the newest row written, so a hand run over an
+ * old day cannot present itself as the newest thing the rollup knows; and
+ * whole days only, so neither can a hand run over today, which `planDays`
+ * computes as asked.
+ *
+ * While `rollup_days` holds no whole day, the newest day before today in
+ * `metrics_daily` instead: between the deploy whose migration creates the
+ * table and the first nightly run to write it, and after the table is lost,
+ * which its schema allows because every run writes it again. A day short after
+ * a quiet one, as the card always was, until a run reaches the table; but
+ * never today, which only a hand run over a day still going can have written.
+ * Read only then, so the page polling every twenty seconds asks one question,
+ * not two.
+ *
+ * How far behind it is comes only from `rollup_days`, counted as
+ * `/reports/csat` counts it, so the card turns amber on the day that page
+ * warns. From `metrics_daily` it is unknown: a missed night and a quiet day
+ * read the same there, and amber for a quiet weekend is the mistake above.
+ */
+async function lastComputedDay(
+  zone: string,
+  now: Date,
+): Promise<{ day: string; computedAt: Date; behind: number | null } | null> {
+  const today = todayIn(zone, now);
+  const whole = await lastWholeRollup({ to: today, zone });
+  if (whole) return { ...whole, behind: daysUncounted({ to: today }, whole.day) };
+
+  const [newest] = await db
+    .select({ day: metricsDaily.day, computedAt: metricsDaily.computedAt })
+    .from(metricsDaily)
+    .where(lt(metricsDaily.day, today))
+    .orderBy(desc(metricsDaily.day))
+    .limit(1);
+  return newest ? { ...newest, behind: null } : null;
 }
 
 export type HourBucket = { hour: number; inbound: number; outbound: number };

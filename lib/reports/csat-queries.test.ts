@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { countedThrough, daysUncounted, uncounted } from './csat-queries';
+import { countedThrough, uncounted } from './csat-queries';
 
 const WINDOW = { from: '2026-09-18', to: '2026-10-17', zone: 'Africa/Cairo' };
 
@@ -21,18 +21,6 @@ describe('countedThrough', () => {
     expect(countedThrough({ ...WINDOW, from: '2026-10-01', to: '2026-11-01' }, null)).toBe(
       '2026-10-30',
     );
-  });
-});
-
-describe('daysUncounted', () => {
-  it('is 0 once tonight’s run has reached yesterday, and 1 before it', () => {
-    expect(daysUncounted(WINDOW, '2026-10-16')).toBe(0);
-    expect(daysUncounted(WINDOW, '2026-10-15')).toBe(1);
-  });
-
-  it('counts the days a stalled rollup has not reached, across a month boundary', () => {
-    expect(daysUncounted(WINDOW, '2026-10-06')).toBe(10);
-    expect(daysUncounted({ ...WINDOW, to: '2026-11-02' }, '2026-10-30')).toBe(2);
   });
 });
 

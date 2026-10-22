@@ -11,6 +11,22 @@ export function Health({
   health: Awaited<ReturnType<typeof systemHealth>>;
   now: Date;
 }) {
+  // Further behind than tonight's run explains: the threshold `/reports/csat`
+  // warns at, so the tile turns amber on the day that page does. Said in the
+  // hint as well, because the amber is never the only signal.
+  const behind = health.rollupDaysBehind ?? 0;
+  const stalled = behind > 1;
+  // A day with no count beside it is `metrics_daily`'s newest, which holds only
+  // the days somebody worked: a quiet day and a missed night read the same
+  // there, so the tile says what the day is rather than vouching for the run.
+  const fromFigures = health.rollupDay !== null && health.rollupDaysBehind === null;
+  const when = health.rollupComputedAt ? ago(formatRelative(health.rollupComputedAt, now)) : null;
+  const rollupHint = !when
+    ? 'The rollup has not computed a day yet'
+    : fromFigures
+      ? `Last day with figures, written ${when} · any day after it may be quiet or missed`
+      : `Computed ${when}${stalled ? ` · the ${behind} days after ${health.rollupDay} are not rolled up` : ''}`;
+
   return (
     <Section
       title="Behind the scenes"
@@ -46,13 +62,14 @@ export function Health({
         />
         <Stat
           label="Reports cover up to"
-          value={health.lastRollupDay ?? '—'}
-          hint={
-            health.lastRollupAt
-              ? `That day's figures were written ${ago(formatRelative(health.lastRollupAt, now))}`
-              : 'The nightly job has never run'
+          explain={
+            fromFigures
+              ? 'Until the nightly rollup has recorded a day it computed, this is the newest day with any figures. A day nobody worked has none, so a quiet day and a missed night look the same here, and the customer satisfaction report can name a different day.'
+              : "The newest day the nightly rollup has finished computing, whether or not anybody worked it: the day the customer satisfaction report counts to. It moves to yesterday when the nightly run reaches it, so a day older than the one before yesterday means a night's run was missed."
           }
-          tone={health.lastRollupAt ? undefined : 'caution'}
+          value={health.rollupDay ?? '—'}
+          hint={rollupHint}
+          tone={!health.rollupComputedAt || stalled ? 'caution' : undefined}
         />
       </div>
     </Section>

@@ -80,7 +80,7 @@ export default async function DashboardPage({
     todaySoFar(context, now),
     agentLoad(),
     channelLoad(),
-    systemHealth(),
+    systemHealth(context.zone, now),
     todayByHour(context.zone, now),
     daily(history),
     totals(history),
