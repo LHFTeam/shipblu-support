@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DateTime } from 'luxon';
 import {
   adherence,
@@ -142,10 +142,37 @@ describe('focusMeasured', () => {
 });
 
 describe('rangeIn', () => {
+  afterEach(() => vi.useRealTimers());
+
+  /**
+   * How many days `to` is after `from`, counted on the dates, read in UTC as
+   * `windowDays` and `planDays` read them (`docs/PROJECT-STATE.md` §6.101).
+   * Read with no zone, each would be its midnight in the host's zone, and on a
+   * machine set to Cairo the day the clocks spring forward has none: it opens
+   * at 01:00, so a week starting on it measured 5.958 days. CI runs in UTC,
+   * where every date has its midnight, so only a machine in Cairo could see it.
+   */
+  function daysBetween(from: string, to: string): number {
+    const date = (day: string) => DateTime.fromISO(day, { zone: 'utc' });
+    return date(to).diff(date(from), 'days').days;
+  }
+
   it('covers exactly the days asked for, inclusive of today', () => {
     const { from, to } = rangeIn(CAIRO, 7);
-    const span = DateTime.fromISO(to).diff(DateTime.fromISO(from), 'days').days;
-    expect(span).toBe(6);
+    expect(daysBetween(from, to)).toBe(6);
+  });
+
+  it('keeps the first day of a week that opens on the day Cairo springs forward', () => {
+    // The case above, frozen on 6 May 2027, so that it meets the day Cairo
+    // springs forward (Friday 30 April, 00:00 to 01:00) on every run rather
+    // than once a year. A week counted back in hours rather than dates would
+    // open on the 29th.
+    vi.useFakeTimers();
+    vi.setSystemTime(cairo('2027-05-06T12:00'));
+
+    const { from, to } = rangeIn(CAIRO, 7);
+    expect({ from, to }).toEqual({ from: '2027-04-30', to: '2027-05-06' });
+    expect(daysBetween(from, to)).toBe(6);
   });
 
   it('bounds the window in the team zone, not UTC', () => {
