@@ -8,7 +8,7 @@ import { fail, read, scannable, stripComments, requireAtLeast } from '../lib.mjs
  * manage its own panes. The price is that a page which does not open an
  * `overflow-y-auto` wrapper is not merely unpadded: everything below the fold is
  * rendered where nobody can scroll to it, and the page reads as half-finished
- * rather than broken. The subcategory report, then `/reports/categories`,
+ * rather than broken. The subcategory report (then at `/reports/categories`)
  * shipped that way and was caught by a person; the four `/contacts` pages
  * shipped that way and were caught by an audit reading the code, which is the
  * reason this is now a check.

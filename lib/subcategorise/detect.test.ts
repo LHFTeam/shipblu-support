@@ -370,6 +370,29 @@ describe('the environment overrides', () => {
     expect(disabledRuleKeys().size).toBe(0);
     expect(detectSubcategories({ bodyText: 'فين الاوردر' })[0]?.ruleKey).toBe('phrase.where.bare2');
   });
+
+  // Not read, but said: once per process, naming the variable that replaced it,
+  // so a rule switched off under the old name does not come back on in silence.
+  // Fresh modules, because the warnings already given above are remembered.
+  it('says once that a value is still set under an old name', async () => {
+    vi.resetModules();
+    const fresh = await import('./detect');
+    const rules = await import('./rules');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.stubEnv('CATEGORISE_DISABLED_RULES', 'phrase.where.bare2');
+    vi.stubEnv('CATEGORISE_AUTO_MIN', '0.8');
+
+    rules.disabledRuleKeys();
+    rules.disabledRuleKeys();
+    fresh.thresholds();
+    fresh.thresholds();
+
+    expect(warn.mock.calls.map(([line]) => line)).toEqual([
+      '[subcategorise] CATEGORISE_DISABLED_RULES is set, and nothing reads it: it has been SUBCATEGORISE_DISABLED_RULES since Stage 2.A',
+      '[subcategorise] CATEGORISE_AUTO_MIN is set, and nothing reads it: it has been SUBCATEGORISE_AUTO_MIN since Stage 2.A',
+    ]);
+    warn.mockRestore();
+  });
 });
 
 describe('normalisation', () => {

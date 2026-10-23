@@ -1,5 +1,12 @@
 import { hasEnoughContent, normaliseForMatch } from './normalise';
-import { ANCHORED_GRADE, PATTERNS, type PatternRule, disabledRuleKeys, phraseIndex } from './rules';
+import {
+  ANCHORED_GRADE,
+  PATTERNS,
+  type PatternRule,
+  disabledRuleKeys,
+  phraseIndex,
+  warnIfRenamedVariableSet,
+} from './rules';
 import { SPAM_KEY, UNCLASSIFIED_KEY, allSubcategories } from './taxonomy';
 import { logger } from '@/lib/log';
 
@@ -101,6 +108,8 @@ export const RECORD_MIN = 0.35;
  * AGENTS.md documents for the two profile-refresh paths, applied to a number.
  */
 export function thresholds(): { autoApply: number; record: number } {
+  warnIfRenamedVariableSet('CATEGORISE_AUTO_MIN', 'SUBCATEGORISE_AUTO_MIN');
+  warnIfRenamedVariableSet('CATEGORISE_RECORD_MIN', 'SUBCATEGORISE_RECORD_MIN');
   return {
     autoApply: envNumber('SUBCATEGORISE_AUTO_MIN', AUTO_APPLY_MIN),
     record: envNumber('SUBCATEGORISE_RECORD_MIN', RECORD_MIN),

@@ -88,10 +88,12 @@ const nextConfig: NextConfig = {
    * browser that followed it, so admins would keep landing on subcategories
    * after the path means something else. For the same reason each source is
    * exact rather than `/admin/categories/:path*`: redirects run before the
-   * filesystem, so a wildcard would hide Stage 3's whole tree. Stage 3 deletes
-   * the `/admin/categories` entry in the PR that adds its page; the other three
-   * name paths nothing will reuse, and may stay. The query string carries over
-   * on its own (`?days=`, `?run=`).
+   * filesystem, so a wildcard would hide Stage 3's whole tree. An exact source
+   * hides one page the same way, and Stage 3's tree may grow a `review` or a
+   * `shadow` of its own, so the PR that adds its page deletes all three
+   * `/admin/categories` entries; `/reports/categories` goes in whichever PR
+   * first puts a report there. The query string carries over on its own
+   * (`?days=`, `?run=`).
    */
   async redirects() {
     return [

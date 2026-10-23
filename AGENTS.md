@@ -1532,10 +1532,10 @@ too (`::timestamp at time zone <zone>`), rather than casting a date in UTC.
 a young rollup is indistinguishable from a broken one: `rollup_metrics`
 recomputes three days a night and several rollups have no backfill, so every
 window wider than the history returns the same rows and the buttons look dead.
-`/reports/subcategories`, then at `/reports/categories`, was reported as exactly
-that bug. A report with a range control therefore prints the window it selected
-and, when the figures start after the window opens, says where they start and
-why (§6.54).
+The subcategory report (`/reports/categories` at the time,
+`/reports/subcategories` since Stage 2.A) was reported as exactly that bug. A
+report with a range control therefore prints the window it selected and, when
+the figures start after the window opens, says where they start and why (§6.54).
 
 ## Tests
 

@@ -518,8 +518,10 @@ stage section left open was decided as follows.
   field's.
 - **Redirects.** Four exact sources, each a 307. Not `/admin/categories/:path*`:
   redirects run before the filesystem, so a wildcard would hide Stage 3's whole
-  tree, not only its index. Stage 3 deletes the `/admin/categories` entry in the
-  PR that adds its page; the other three name paths nothing will reuse.
+  tree, not only its index. An exact source hides one page the same way, and
+  Stage 3's tree may grow a `review` or a `shadow` of its own, so the PR that
+  adds its page deletes all three `/admin/categories` entries.
+  `/reports/categories` goes in whichever PR first puts a report there.
 - **Permission keys.** Read 2026-10-23 14:22 UTC: no agent holds any override,
   of these keys or any other. `can()` ignores a key it does not know, so an
   override under an old name would lapse silently rather than fail. Stage 3
@@ -527,8 +529,12 @@ stage section left open was decided as follows.
   it reads that no agent's `permissions` holds the key.
 - **Env vars.** `SUBCATEGORISE_DISABLED_RULES`, `SUBCATEGORISE_AUTO_MIN` and
   `SUBCATEGORISE_RECORD_MIN`, with no fallback to the old names: a fallback
-  would be a second place for the same setting. The Render MCP tools do not
-  return variable values, so the deploy-day read is in the dashboard.
+  would be a second place for the same setting. A value still set under an old
+  name is read by nothing, but said once per process
+  (`[subcategorise] CATEGORISE_DISABLED_RULES is set, and nothing reads it`),
+  so a rule switched off under the old name does not come back on in silence.
+  The Render MCP tools do not return variable values, so the deploy-day read is
+  in the dashboard.
 - **Job and log tags.** `backfill_subcategorise_ai` (no row of either name has
   ever existed, read 14:22 UTC) and the log tags `[subcategorise]` and
   `[backfill_subcategorise_ai]`. A log search for the old tags finds nothing
@@ -2242,7 +2248,9 @@ cannot parse.
     (`docs/PROJECT-STATE.md` §6.30). `db/baseline.ts` seeds the same set for
     tests and development.
 - **Admin.** A "Categories" page at `/admin/categories`. This PR removes the
-  2.A redirect from that path.
+  three 2.A redirects under that path, `/admin/categories/review` and
+  `/admin/categories/shadow` included, so a child page of its own named either
+  way is not hidden behind one.
   - **Edit** labels, description, position, active flag and the route group.
     The route-group picker shows each group's strategy, members accepting now
     and hours gate, and warns on a `manual` group.

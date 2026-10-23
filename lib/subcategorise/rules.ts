@@ -1,3 +1,4 @@
+import { logger } from '@/lib/log';
 import { anchored, normaliseForMatch } from './normalise';
 
 /**
@@ -858,6 +859,7 @@ export const PATTERNS: readonly PatternRule[] = [
  * off is safe and reversible, and adding one is a regex in an env var.
  */
 export function disabledRuleKeys(): ReadonlySet<string> {
+  warnIfRenamedVariableSet('CATEGORISE_DISABLED_RULES', 'SUBCATEGORISE_DISABLED_RULES');
   const raw = process.env.SUBCATEGORISE_DISABLED_RULES ?? '';
   return new Set(
     raw
@@ -865,6 +867,25 @@ export function disabledRuleKeys(): ReadonlySet<string> {
       .map((key) => key.trim())
       .filter(Boolean),
   );
+}
+
+const log = logger('subcategorise');
+const renamedVariablesWarned = new Set<string>();
+
+/**
+ * Says once per process that a variable is set under the name it had before
+ * Stage 2.A of `plans/ticket-category-routing.md`.
+ *
+ * Nothing reads the old names: a fallback would be a second home for one
+ * setting. So without this line, a rule switched off under
+ * `CATEGORISE_DISABLED_RULES` would come back on at the deploy with nothing
+ * anywhere saying why, in the one control an incident depends on. Once rather
+ * than per call, because the detector asks on every inbound message.
+ */
+export function warnIfRenamedVariableSet(oldName: string, newName: string): void {
+  if (!process.env[oldName] || renamedVariablesWarned.has(oldName)) return;
+  renamedVariablesWarned.add(oldName);
+  log.warn(`${oldName} is set, and nothing reads it: it has been ${newName} since Stage 2.A`);
 }
 
 let phraseCache: ReadonlyMap<string, PhraseRule> | null = null;
