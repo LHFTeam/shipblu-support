@@ -24,7 +24,11 @@ import { DateTime } from 'luxon';
  *
  * A time the autumn change repeats (`2026-10-29T23:30` happens at +03:00 and
  * again at +02:00) is ambiguous rather than wrong, and resolves to the first,
- * still in summer time. A test that means the second adds an hour to it.
+ * still in summer time. A test that means the second adds an hour to it. That
+ * is chosen here rather than left to luxon, which picks between the two by the
+ * offset the zone has when it is asked: it answered the first while the suite
+ * ran in summer time and the second from the night the clocks went back, so
+ * the two tests relying on the first would have failed in CI all winter.
  *
  * Still on luxon, each for a reason: `forms/summary` builds the offset-carrying
  * `toISO()` string the parser stores, which is the thing under test; the DST case
@@ -52,7 +56,10 @@ export function cairo(iso: string): Date {
   if (dt.toFormat(FIELDS) !== asWritten.toFormat(FIELDS)) {
     throw new Error(`not a Cairo wall-clock time, the clocks skip it: ${iso}`);
   }
-  return dt.toJSDate();
+  // Cairo's clocks go back one hour, so an hour earlier reading the same fields
+  // means luxon took the repeated time's second instance; the first is that one.
+  const hourEarlier = dt.minus({ hours: 1 });
+  return (hourEarlier.toFormat(FIELDS) === dt.toFormat(FIELDS) ? hourEarlier : dt).toJSDate();
 }
 
 /** The inverse, `yyyy-MM-ddTHH:mm` in Cairo, for asserting on a returned instant. */

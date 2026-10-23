@@ -1,7 +1,10 @@
-import { describe, expect, it } from 'vitest';
+import { DateTime } from 'luxon';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cairo, inCairo } from './time';
 
 describe('cairo', () => {
+  afterEach(() => vi.useRealTimers());
+
   // Written in UTC here on purpose, once, to prove the helper does not need it.
   it('converts on both sides of the DST changeover', () => {
     expect(cairo('2026-01-15T14:30').toISOString()).toBe('2026-01-15T12:30:00.000Z');
@@ -17,6 +20,20 @@ describe('cairo', () => {
   });
 
   it('resolves the hour the autumn change repeats to its first, summer-time instance', () => {
+    expect(cairo('2026-10-29T23:30').toISOString()).toBe('2026-10-29T20:30:00.000Z');
+    expect(cairo('2026-10-30T00:00').toISOString()).toBe('2026-10-29T22:00:00.000Z');
+  });
+
+  it('resolves it to the first instance while the suite runs in winter too', () => {
+    // Luxon picks between the two by the offset the zone has when it is asked:
+    // summer's +03:00 gives the first instance and winter's +02:00 the second.
+    // So the case above held only while the suite ran in summer time, and from
+    // the night the clocks went back it would have failed on every run.
+    vi.useFakeTimers();
+    vi.setSystemTime(cairo('2026-11-15T12:00'));
+
+    // Luxon alone now takes the second, or nothing below tests the choice.
+    expect(DateTime.fromISO('2026-10-29T23:30', { zone: 'Africa/Cairo' }).offset).toBe(120);
     expect(cairo('2026-10-29T23:30').toISOString()).toBe('2026-10-29T20:30:00.000Z');
     expect(cairo('2026-10-30T00:00').toISOString()).toBe('2026-10-29T22:00:00.000Z');
   });
