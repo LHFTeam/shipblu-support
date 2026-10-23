@@ -47,10 +47,10 @@ async function ticket(
 }
 
 describe('the day Cairo springs forward', () => {
-  it('is 23 hours long, or nothing below tests the changeover', () => {
-    const start = DateTime.fromISO('2026-04-24', { zone: ZONE });
-    const next = DateTime.fromISO('2026-04-25', { zone: ZONE });
-    expect(next.diff(start, 'hours').hours).toBe(23);
+  // A missing midnight, not a 23-hour day: a spring-forward at 02:00 is 23 hours
+  // too, and there the start plus a day was already the next day's start.
+  it('has no midnight, or nothing below tests the changeover', () => {
+    expect(DateTime.fromISO('2026-04-24', { zone: ZONE }).hour).toBe(1);
   });
 
   it('counts a category on the 25th only, for a ticket created just after its midnight', async () => {
@@ -80,6 +80,8 @@ describe('the day Cairo springs forward', () => {
       .select({ id: ticketRootCauses.id })
       .from(ticketRootCauses)
       .where(eq(ticketRootCauses.key, 'hub.missort'));
+    // Arrived on the 24th, so a cause counted by arrival rather than by
+    // resolution would land there too.
     await ticket('Resolved', {
       createdAt: at('2026-04-24T15:00'),
       resolvedAt: AFTER_MIDNIGHT,

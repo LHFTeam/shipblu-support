@@ -44,14 +44,15 @@ type CategoryRow = typeof categoryMetricsDaily.$inferInsert;
 type CauseRow = typeof rootCauseMetricsDaily.$inferInsert;
 
 /**
- * The end is the next day's `startOf('day')`, as `computeDay` and
- * `computeAgentDay` cut theirs, and not the start plus a day. Cairo springs
- * forward at midnight, so a changeover day such as 24 April 2026 has no 00:00
- * and opens at 01:00. A day added to that is 01:00 on the 25th, an hour after
- * the 25th began, and that hour sat inside both days and counted on each.
+ * Both ends are a `startOf('day')`, exactly as `computeDay` and
+ * `computeAgentDay` cut theirs, so the three rollups put an instant on the same
+ * day. The end is not the start plus a day: Cairo springs forward at midnight,
+ * so a changeover day such as 24 April 2026 has no 00:00 and opens at 01:00. A
+ * day added to that is 01:00 on the 25th, an hour after the 25th began, and
+ * that hour sat inside both days and counted on each.
  */
 function dayBounds(day: string, zone: string): { start: Date; end: Date } {
-  const start = DateTime.fromISO(day, { zone });
+  const start = DateTime.fromISO(day, { zone }).startOf('day');
   return { start: start.toJSDate(), end: start.plus({ days: 1 }).startOf('day').toJSDate() };
 }
 
