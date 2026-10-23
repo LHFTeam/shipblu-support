@@ -47,9 +47,9 @@ export default async function CategoryReviewPage() {
   const visibleChannels = CONVERSATION_CHANNELS.filter((channel) => !hidden.has(channel));
 
   // The team's zone, so "When" is the day the message arrived in Cairo rather
-  // than in UTC — the days the reports beside this page are cut on. Read before
-  // the queries rather than beside them, as `/reports/categories` does: a cold
-  // memo is three queries of its own, and beside these that is six at once.
+  // than in UTC — the days the reports are cut on. Read before the queries
+  // rather than beside them: a cold catalog memo is three queries of its own,
+  // and beside these that is six at once.
   const zone = await reportingZone();
 
   const [queue, unclassified, scores] = await Promise.all([
