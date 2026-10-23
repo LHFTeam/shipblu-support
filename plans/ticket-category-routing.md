@@ -61,7 +61,7 @@ held is folded in. The support lead answered every open question on
 2026-10-20; [Decisions taken](#decisions-taken-with-the-support-lead-2026-10-20)
 records the answers, and the plan below already reflects them.
 
-## Status and handoff (2026-10-23, 12:00 UTC)
+## Status and handoff (2026-10-23, 13:25 UTC)
 
 A session picking this plan up starts here. Everything after this section is
 the design as it was reasoned and as each stage was built. This section says
@@ -77,7 +77,7 @@ re-read before acting on one.
 | 0     | Merged: #386 (`01488c9`)                                                                                                                    | Live since 2026-10-20. Its two operational steps were never done (below)                                                                                                                           |
 | 1.1   | Merged: #387, then `dev` → `main` in #389 (`1f89219`)                                                                                       | Live since 2026-10-21 10:13 UTC                                                                                                                                                                    |
 | 1.2   | Merged: #391 (`31f7379`) and follow-up #392 (`7b7d276`), then `dev` → `main` in #393 (`634a28d`), which also carried another session's #390 | **Done.** All six services live on `634a28d` by 17:38 UTC, worker first. The user ran the backfill and the rollup from a shell, so neither left a `jobs` row. Every check that follows reads clean |
-| 1.3   | Built in #395 (with this section), not merged. Second review answered 2026-10-23. As built below                                            | —                                                                                                                                                                                                  |
+| 1.3   | Merged into `dev`: #395 (`58c5ed9`), 2026-10-23, after its second review. Not yet `dev` → `main`. As built below                            | Not deployed: `main` is still at `634a28d`                                                                                                                                                         |
 | 2–6   | Not started                                                                                                                                 | —                                                                                                                                                                                                  |
 
 **1.2's checks, read at 21:54 UTC.**
@@ -130,11 +130,12 @@ re-read before acting on one.
 Every production write needs the user's go-ahead for that step, and the
 `AGENTS.md` sequence: read the state first, say the change, have the way back.
 
-1. **Review and merge 1.3 into `dev`.** It is built, in #395, as recorded
-   under [1.3, as built](#13-as-built). Its second review (seven threads,
-   2026-10-22) is answered there: the CHECK's lock wait is bounded at 3 s, the
-   gate reads the frozen copies too, the post-deploy check reads what is
-   stored, the 1.2 rollback deactivates one more kind of rule, and the
+1. **1.3 is merged into `dev`**: #395, squashed as `58c5ed9` on 2026-10-23
+   once CI was green, as recorded under [1.3, as built](#13-as-built). Its
+   second review (seven threads, 2026-10-22) is answered there: the CHECK's
+   lock wait is bounded at 3 s, the gate reads the frozen copies too, the
+   post-deploy check reads what is stored, the 1.2 rollback deactivates one
+   more kind of rule, and the
    external-id half stays, held by eight database cases in the shape the 1.2
    rollback leaves. A review of those fixes then made the test helper unable to
    truncate a database it refused, had `withCleanDatabase()` replay `008` before
@@ -143,7 +144,10 @@ Every production write needs the user's go-ahead for that step, and the
 2. **Merge `dev` into `main` only once 1.3's gate holds.** The gate is a
    read-only query. Read it on the day of the merge and quote it in the PR.
    The gate guards the merge rather than the deploy, because whoever next
-   deploys `main` ships 1.3, whatever else they meant to ship.
+   deploys `main` ships 1.3, whatever else they meant to ship. `dev` also
+   carries another session's #394 (`508ea6f`, scroll panes), which has no
+   migration and no `db/sql` change (read 2026-10-23), so the merge ships both
+   and rule 7 asks nothing more of the deploy order.
 3. **Deploy 1.3**: web, then the worker, then the crons. Read the lock
    precautions below first, then run 1.3's verification rows.
 4. **Stage 2** may start whenever it suits. It is a different seam from Stage
@@ -557,7 +561,7 @@ conrelid = 'conversations'::regclass AND conname =
   - An agent's private reply on a comment thread is sent to the newest inbound
     comment's author, who can be a passer-by: the console stores no comment id
     and `send_meta` falls back to `lastInboundCommentId`, which asks no author.
-    Proposed to the user as its own task on 2026-10-23.
+    Taken on by another session on 2026-10-23, outside this plan.
   - `findByExternalId` skips a soft-deleted ticket that the unique index still
     holds, so the next comment under it would fail 23505. Nothing soft-deletes
     a ticket yet; the lookup and the `ticket.purge` note say what the change
@@ -1771,7 +1775,7 @@ deploy it with web and the crons.
     copy.
 
   - **Runbook.** Done on 2026-10-21. Every step's result is in [Status and
-    handoff](#status-and-handoff-2026-10-23-1200-utc).
+    handoff](#status-and-handoff-2026-10-23-1325-utc).
     1. Deploy the worker, then web, then the crons.
     2. Confirm every service runs 1.2, since a worker still on 1.1 files new
        comments on the platform channel.
