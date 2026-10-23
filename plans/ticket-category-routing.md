@@ -497,7 +497,10 @@ stage section left open was decided as follows.
   `categorising`. And what TypeSafe is sent: `SUBCATEGORY_QUESTION` is still
   the string `'category'` and the instructions are byte for byte the old ones,
   pinned by a test, so a shadow run after 2.A is compared with one before it on
-  the same question.
+  the same question. The taxonomy's `note` texts did change, and each is shown
+  to TypeSafe as its option's description, but only in a database seeded after
+  2.A: the seed never rewrites a stored description, so production's options
+  read as they did.
 - **Events.** The rules detector writes `subcategorised` as
   `subcategory-detector`, and the four console actions write
   `subcategory_added|confirmed|rejected|removed` with `subcategoryKey`.
@@ -549,11 +552,21 @@ event as its bare type, while a new web reads an old worker's events in full.
    ```
 
 2. **Deploy** web, then the worker, then the four crons.
-3. **Handbook**, once web is live. Run
-   `npm run job -- seed_console_handbook dryRun=true` and expect exactly the
-   seven articles above. Anything more is a console edit that `overwrite=true`
-   would replace (each replacement cuts a `kb_article_versions` row, so it can
-   be undone), and is read before going on. Then `overwrite=true`.
+3. **Handbook.** Production held no console handbook at 2026-10-23 15:01 UTC:
+   no `handbook-` folder or article, and no `seed_console_handbook` job, ever.
+   If that still holds, 2.A has nothing to do here, because the first seed,
+   whenever somebody runs it, writes 2.A's words. If it has been seeded since,
+   run `npm run job -- seed_console_handbook dryRun=true` once web is live. It
+   should report `folders 0 created, 2 updated` and
+   `7 article(s) differ from this repository`; the job counts them without
+   naming them. A different count is a console edit that `overwrite=true`
+   would replace, and is read first. Then `overwrite=true`, which cuts one
+   `kb_article_versions` row for each article it replaces, so the rows written
+   then name the seven. Rehearsed locally: `origin/dev`'s seed into an empty
+   database, then this branch's dry run, reported exactly that; the overwrite
+   replaced `handbook-automation-and-forms`, `-categorising`, `-owner-role`,
+   `-people`, `-replying`, `-reports` and `-ticket-fields`; and a run after it
+   found all 15 current.
 4. **Verify.** `/admin/categories` lands on `/admin/subcategories`, and the
    ticket sidebar says Subcategories. Once all six services run the release, no
    `categorised` or `category_*` row is newer than the moment the last of web
