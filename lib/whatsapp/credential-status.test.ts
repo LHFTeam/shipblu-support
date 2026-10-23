@@ -1,5 +1,12 @@
+import { DateTime } from 'luxon';
 import { describe, expect, it } from 'vitest';
-import { type CredentialStatus, credentialBadges, credentialOrigin } from './credential-status';
+import { TEAM_TIME_ZONE } from '@/lib/hours/zone';
+import {
+  type CredentialStatus,
+  credentialBadges,
+  credentialOrigin,
+  expiryPhrase,
+} from './credential-status';
 
 /**
  * The badges are the console's whole account of a credential nobody can see,
@@ -118,5 +125,26 @@ describe('credentialOrigin', () => {
     expect(credentialOrigin({ ...healthy, obtainedByName: '' })).toBe(
       'Stored from Embedded Signup on 1 Oct 2026, 03:00',
     );
+  });
+});
+
+describe('expiryPhrase', () => {
+  /**
+   * The card and the sign-in note both print it. An expiry in the first hours
+   * of a Cairo day is the day before in UTC, which is how the note once
+   * disagreed with the card; built from Cairo's wall clock on either side of
+   * daylight saving, since the hours affected move with it.
+   */
+  it.each([
+    { cairo: '2027-01-15T01:30', utcDay: '2027-01-14', said: 'expires 15 Jan 2027, 01:30' },
+    { cairo: '2027-07-15T02:30', utcDay: '2027-07-14', said: 'expires 15 Jul 2027, 02:30' },
+  ])('says the Cairo day and time of $cairo', ({ cairo, utcDay, said }) => {
+    const at = DateTime.fromISO(cairo, { zone: TEAM_TIME_ZONE });
+    expect(at.toUTC().toISODate()).toBe(utcDay);
+    expect(expiryPhrase(at.toJSDate())).toBe(said);
+  });
+
+  it('says "never expires" for no expiry', () => {
+    expect(expiryPhrase(null)).toBe('never expires');
   });
 });
