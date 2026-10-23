@@ -6,7 +6,6 @@ import { useNow } from '@/components/use-now';
 import type { ConversationDetail } from '@/lib/tickets/conversation';
 import type { CannedResponseOption } from '@/lib/tickets/lookups';
 import type { CannedLocale } from '@/lib/tickets/canned';
-import { requesterCommentId } from '@/lib/meta/comments';
 import { describeWindow, metaWindowState } from '@/lib/meta/window';
 import {
   consoleReplyNotice,
@@ -17,6 +16,7 @@ import {
 import { isReaction } from '@/lib/whatsapp/reaction';
 import { formatRemaining, windowState } from '@/lib/whatsapp/window';
 import type { PickerEntry } from '@/lib/side-conversations/queries';
+import { privateReplyOptions } from '@/lib/tickets/private-reply-options';
 import { StartSideConversationForm } from './side-conversations';
 import { ThreadControl } from './thread-control';
 import type { KnowledgeContext, TemplateOption } from './types';
@@ -102,14 +102,10 @@ export function Composer({
     )?.id ?? null;
 
   // What a private reply may answer: the requester's own comments, newest first,
-  // never a passer-by's reply filed on this ticket (`requesterCommentId`). The
-  // timeline is in the order `lib/tickets/reply-comment.ts` reads, so the first
-  // here is the one the action names when the form posts none.
+  // never a passer-by's reply filed on this ticket. The action re-reads the one
+  // the form posts (`lib/tickets/reply-comment.ts`).
   const requesterComments = isCommentThread
-    ? conversation.messages
-        .filter((message) => requesterCommentId(message, conversation.requester.id) !== null)
-        .map((message) => ({ id: message.id, text: message.bodyText, at: message.createdAt }))
-        .reverse()
+    ? privateReplyOptions(conversation.messages, conversation.requester.id)
     : [];
 
   const [requestedTab, setRequestedTab] = useState<Tab>('reply');

@@ -6717,6 +6717,37 @@ dryRun=true`, then without, gives those two theirs back from their
       zone, and keep it per zone, so a test building its instants that way
       would hold whichever season the suite started in.
 
+104.  **An agent's private reply on a comment ticket went to whoever commented
+      last.** _2026-10-23, found by reading the code; it had not happened._
+      Ingest files every reply under the customer's comment on the customer's
+      ticket, a passer-by's included, each with its own author. The console
+      stored a private reply with no comment, and `send_meta` named the newest
+      inbound comment on the ticket, asking no author — so on a thread where a
+      passer-by wrote last, the agent's reply, order details and all, was
+      delivered to the passer-by, and spent the one private reply Meta allows
+      on that comment. Production that day: 54 comment tickets (45 Facebook,
+      9 Instagram) holding 55 inbound comments, every one the requester's own
+      and only one ticket with more than one; 10 private replies ever
+      attempted, 1 sent (#13770, Instagram), none naming a comment. None of
+      them could have reached anybody else.
+
+      `sendReply` now names the comment — the one the agent picked, re-read
+      against the ticket and its requester, or the requester's newest — on
+      `meta.commentId`, and `send_meta`'s fallback for a row naming none is the
+      requester's newest, refusing a private reply with none of theirs
+      (`lib/tickets/reply-comment.ts`). The public reply takes the same rule:
+      nothing private leaks by it, but on Facebook it is posted under the
+      comment named, and a passer-by can delete theirs. The outbound row
+      carrying `commentId` made it look like a comment to the moderation
+      controls, so `moderatableComment` takes the row's direction.
+
+      Left as it was: 11 of those 55 comments were deleted from the console,
+      each the root and its requester's only comment. A reply to one is still
+      sent and refused by Graph, as before; the composer marks it and never
+      chooses it by default, but the server does not refuse it, because doing
+      so needs its own sentence and every case in production has no other
+      comment to fall back to.
+
 ### Tooling notes for this environment
 
 Supabase and Render MCP tools work and are the fastest way to check real state —

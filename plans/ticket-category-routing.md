@@ -1050,10 +1050,13 @@ deletes the file and its test; the test fails and says so until it does.
   in `lib/tickets/outbound.ts` records. It was found during 1.1, and nothing
   here depends on it.
 - **Two more, found in #395's review and left out of its seam.**
-  - An agent's private reply on a comment thread is sent to the newest inbound
-    comment's author, who can be a passer-by: the console stores no comment id
-    and `send_meta` falls back to `lastInboundCommentId`, which asks no author.
-    Taken on by another session on 2026-10-23, outside this plan.
+  - _Closed, outside this plan, on 2026-10-23._ An agent's private reply on a
+    comment thread was sent to the newest inbound comment's author, who can be
+    a passer-by. The console now names one of the requester's own comments as
+    `meta.commentId`, re-read in `sendReply` (`lib/tickets/reply-comment.ts`);
+    a row naming none takes the requester's newest, and a private reply with
+    none of theirs is refused on the row. `lastInboundCommentId` now only
+    answers `inferSendKind`.
   - `findByExternalId` skips a soft-deleted ticket that the unique index still
     holds, so the next comment under it would fail 23505. Nothing soft-deletes
     a ticket yet; the lookup and the `ticket.purge` note say what the change

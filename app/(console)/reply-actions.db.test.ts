@@ -38,6 +38,7 @@ const { agents, contacts, conversations, jobs, messages, ticketStatuses } =
 const { withCleanDatabase } = await import('@/lib/testing/db');
 const { NO_REQUESTER_COMMENT } = await import('@/lib/tickets/reply-comment');
 const { sendMeta } = await import('@/worker/handlers/send-meta');
+const { moderateComment } = await import('./meta-actions');
 const { sendReply } = await import('./reply-actions');
 
 withCleanDatabase();
@@ -220,6 +221,38 @@ describe('a private reply on a comment ticket', () => {
     expect(await replies(ticket)).toEqual([]);
   });
 
+  // Named when the agent wrote, so the requester commenting again before the
+  // job runs does not move the reply onto a comment the agent never read.
+  it('is sent to the comment it named, however the thread moves before the job runs', async () => {
+    const { ticket, amira } = await threadWithPasserBy();
+
+    await reply(ticket, { metaSendKind: 'private_reply' });
+    await comment(ticket, amira, 'post-1_c4', '2026-10-20T09:20:00Z');
+
+    const [stored] = await replies(ticket);
+    await sendMeta(job(stored!.id));
+    expect(addressed(graph.privateReplyToComment)).toEqual(['post-1_c2']);
+  });
+
+  // The reply now carries the comment it answers on `meta.commentId`, beside
+  // `metaKind: 'comment'` — which is how the moderation controls recognise a
+  // comment. A request naming the reply must not act on the customer's comment.
+  it('cannot be moderated as the customer’s comment it names', async () => {
+    const { ticket } = await threadWithPasserBy();
+    await reply(ticket, { metaSendKind: 'private_reply' });
+    const [stored] = await replies(ticket);
+
+    const state = await moderateComment(
+      { error: null },
+      form({ messageId: stored!.id, action: 'delete' }),
+    );
+
+    expect(state.error).toBe('That message is not a Facebook or Instagram comment');
+    expect(
+      await db.select({ id: jobs.id }).from(jobs).where(eq(jobs.type, 'moderate_meta_comment')),
+    ).toEqual([]);
+  });
+
   it('refuses when none of the comments is the requester’s', async () => {
     const { ticket, bob } = await threadWithPasserBy();
     // Every comment Bob's, as on a ticket whose requester's comments are gone.
@@ -251,6 +284,17 @@ describe('a public reply on a comment ticket', () => {
       commentId: 'post-1_c2',
     });
 
+    await sendMeta(job(stored!.id));
+    expect(addressed(graph.replyToComment)).toEqual(['post-1_c2']);
+  });
+
+  it('is posted under the comment it named, however the thread moves before the job runs', async () => {
+    const { ticket, amira } = await threadWithPasserBy();
+
+    await reply(ticket, { metaSendKind: 'comment_reply' });
+    await comment(ticket, amira, 'post-1_c4', '2026-10-20T09:20:00Z');
+
+    const [stored] = await replies(ticket);
     await sendMeta(job(stored!.id));
     expect(addressed(graph.replyToComment)).toEqual(['post-1_c2']);
   });

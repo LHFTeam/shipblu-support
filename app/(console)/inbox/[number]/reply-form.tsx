@@ -8,6 +8,10 @@ import { suggestionKey } from '@/lib/canned-suggest/keyboard';
 import { formatDateTime } from '@/lib/format';
 import type { CannedResponseOption } from '@/lib/tickets/lookups';
 import {
+  defaultPrivateReplyOption,
+  type PrivateReplyOption,
+} from '@/lib/tickets/private-reply-options';
+import {
   availableLocales,
   insertCanned,
   resolveLocale,
@@ -16,7 +20,7 @@ import {
 import { sendReply } from '../../reply-actions';
 import { KnowledgeButton, KnowledgePanel } from './knowledge';
 import { LocaleToggle } from './locale-toggle';
-import type { KnowledgeContext, RequesterCommentOption } from './types';
+import type { KnowledgeContext } from './types';
 import { INITIAL, LOST_SEND } from './form-state';
 import { SubmitButton } from '@/components/submit-button';
 import { useActionForm } from '@/components/use-action-form';
@@ -54,7 +58,7 @@ export function ReplyForm({
    * The requester's comments on a comment ticket, newest first — the only ones
    * a private reply may answer. Empty off a comment ticket.
    */
-  requesterComments: RequesterCommentOption[];
+  requesterComments: PrivateReplyOption[];
   canned: CannedResponseOption[];
   customerLocale: CannedLocale;
   knowledge: KnowledgeContext | null;
@@ -169,15 +173,15 @@ export function ReplyForm({
  * to whoever wrote that comment — so the comment is named here, where the agent
  * can see it, rather than left to whatever is newest when the job runs, which
  * on a busy post is a passer-by's reply filed on this ticket. Only the
- * requester's are offered, newest first and chosen by default, and the action
- * re-reads the one posted before it stores anything.
+ * requester's are offered, newest first, and the action re-reads the one posted
+ * before it stores anything. The default skips a comment deleted from the post
+ * or already answered privately, which Graph would refuse, and the label says
+ * which those are (`defaultPrivateReplyOption`).
  *
- * Uncontrolled, under the form's `key`: a send remounts it on the newest comment
+ * Uncontrolled, under the form's `key`: a send remounts it on the default
  * again, and a refusal leaves the agent's choice where it was (`useActionForm`).
- * The date leads each option because an option is one bidirectional run, and an
- * Arabic comment ahead of it would carry the date to the wrong end of the line.
  */
-function PrivateReplyTarget({ comments }: { comments: RequesterCommentOption[] }) {
+function PrivateReplyTarget({ comments }: { comments: PrivateReplyOption[] }) {
   const id = useId();
 
   return (
@@ -186,12 +190,12 @@ function PrivateReplyTarget({ comments }: { comments: RequesterCommentOption[] }
       <Select
         id={id}
         name="replyToMessageId"
-        defaultValue={comments[0]?.id}
+        defaultValue={defaultPrivateReplyOption(comments)}
         className="w-full font-conversation"
       >
         {comments.map((comment) => (
           <option key={comment.id} value={comment.id}>
-            {formatDateTime(comment.at)} — {excerpt(comment.text)}
+            {optionLabel(comment)}
           </option>
         ))}
       </Select>
@@ -199,10 +203,31 @@ function PrivateReplyTarget({ comments }: { comments: RequesterCommentOption[] }
   );
 }
 
-/** A comment's text on one line, short enough for an option. */
+/**
+ * When, whether it can still take a private reply, and what it said.
+ *
+ * The date leads because an option is one bidirectional run in an LTR select:
+ * an Arabic comment ahead of it would carry the date to the wrong end of the
+ * line. The comment itself is isolated (U+2068 … U+2069), since an option can
+ * hold no `<bdi>`: an Arabic excerpt then keeps its ellipsis at the cut and its
+ * words in order around an order number, and anything the customer's text
+ * opened and the cut left unclosed stops at the isolate's end.
+ */
+function optionLabel(comment: PrivateReplyOption): string {
+  const status = comment.deleted
+    ? 'deleted from the post'
+    : comment.answered
+      ? 'already answered privately'
+      : null;
+  return [formatDateTime(comment.at), status, `\u2068${excerpt(comment.text)}\u2069`]
+    .filter(Boolean)
+    .join(' — ');
+}
+
+/** A comment's text on one line, cut by character rather than by UTF-16 unit. */
 function excerpt(text: string): string {
-  const line = text.replace(/\s+/g, ' ').trim();
-  return line.length > 80 ? `${line.slice(0, 79)}…` : line;
+  const chars = Array.from(text.replace(/\s+/g, ' ').trim());
+  return chars.length > 80 ? `${chars.slice(0, 79).join('')}…` : chars.join('');
 }
 
 /**

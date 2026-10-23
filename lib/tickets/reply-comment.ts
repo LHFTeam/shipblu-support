@@ -65,13 +65,15 @@ async function requesterComment(
         // In the query as well as in `requesterCommentId`, so a requester's
         // later message that is not a comment cannot hide their newest
         // comment behind it — a row the predicate below would then refuse.
+        // A comment deleted from the post is still the customer's, and is
+        // left in: Graph's refusal says what happened to it, where leaving it
+        // out would refuse here for want of a comment the agent can see.
         sql`${messages.meta}->>'metaKind' = 'comment'`,
         messageId ? eq(messages.id, messageId) : undefined,
       ),
     )
     // The comment's own instant, which ingest writes as `created_at`, and the
-    // id after it — the order the ticket page lists them in, so the newest
-    // the composer offers first is the one named here when it posts nothing.
+    // id after it — the order the ticket page lists them in.
     .orderBy(desc(messages.createdAt), desc(messages.id))
     .limit(1);
 

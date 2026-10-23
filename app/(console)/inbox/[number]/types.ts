@@ -27,15 +27,3 @@ export type KnowledgeContext = {
   /** The customer's language, read off the script of what they last wrote. */
   locale: 'ar' | 'en';
 };
-
-/**
- * One of the requester's comments on a comment ticket, as the reply form offers
- * it to a private reply: the message's id, which is all the form posts and the
- * action re-reads (`lib/tickets/reply-comment.ts`), and what the agent needs to
- * tell the comments apart.
- */
-export type RequesterCommentOption = {
-  id: string;
-  text: string;
-  at: Date;
-};

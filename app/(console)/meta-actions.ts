@@ -54,7 +54,12 @@ export async function moderateComment(
   const action: ModerationAction = wanted;
 
   const rows = await db
-    .select({ id: messages.id, conversationId: messages.conversationId, meta: messages.meta })
+    .select({
+      id: messages.id,
+      conversationId: messages.conversationId,
+      direction: messages.direction,
+      meta: messages.meta,
+    })
     .from(messages)
     .where(eq(messages.id, messageId))
     .limit(1);
@@ -70,7 +75,7 @@ export async function moderateComment(
   const readOnly = refuseIfReadOnly(row.conversation.channel);
   if (readOnly) return readOnly;
 
-  const comment = moderatableComment(message.meta);
+  const comment = moderatableComment(message.meta, message.direction);
   if (!comment) return { error: 'That message is not a Facebook or Instagram comment' };
 
   const state = readCommentModeration(message.meta);
