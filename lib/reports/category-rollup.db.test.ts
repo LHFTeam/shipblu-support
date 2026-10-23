@@ -11,6 +11,7 @@ import {
   ticketStatuses,
 } from '@/db/schema';
 import { withCleanDatabase } from '@/lib/testing/db';
+import { cairo } from '@/lib/testing/time';
 import { computeCategoryDay, computeRootCauseDay } from './category-rollup';
 import { reportingContext } from './rollup';
 
@@ -24,11 +25,8 @@ import { reportingContext } from './rollup';
 
 withCleanDatabase();
 
-const ZONE = 'Africa/Cairo';
-const at = (local: string) => DateTime.fromISO(local, { zone: ZONE }).toJSDate();
-
 /** Half an hour into the 25th, Cairo time: inside the hour both days claimed. */
-const AFTER_MIDNIGHT = at('2026-04-25T00:30');
+const AFTER_MIDNIGHT = cairo('2026-04-25T00:30');
 
 async function ticket(
   status: string,
@@ -46,55 +44,90 @@ async function ticket(
   return created!.id;
 }
 
+/** A ticket created at `createdAt` whose primary category is a late delivery. */
+async function lateDelivery(createdAt: Date): Promise<void> {
+  const conversationId = await ticket('Open', { createdAt });
+  const [late] = await db
+    .select({ id: ticketCategories.id })
+    .from(ticketCategories)
+    .where(eq(ticketCategories.key, 'delivery.late'));
+  await db.insert(conversationCategories).values({
+    conversationId,
+    categoryId: late!.id,
+    categoryKey: 'delivery.late',
+    isPrimary: true,
+  });
+}
+
+/** A ticket resolved at `resolvedAt`, mis-sorted at the hub. */
+async function missorted(resolvedAt: Date, createdAt: Date): Promise<void> {
+  const [missort] = await db
+    .select({ id: ticketRootCauses.id })
+    .from(ticketRootCauses)
+    .where(eq(ticketRootCauses.key, 'hub.missort'));
+  await ticket('Resolved', {
+    createdAt,
+    resolvedAt,
+    rootCauseId: missort!.id,
+    rootCauseSetAt: resolvedAt,
+  });
+}
+
+async function context() {
+  const reporting = await reportingContext();
+  expect(reporting.zone).toBe('Africa/Cairo');
+  return reporting;
+}
+
 describe('the day Cairo springs forward', () => {
   // A missing midnight, not a 23-hour day: a spring-forward at 02:00 is 23 hours
   // too, and there the start plus a day was already the next day's start.
   it('has no midnight, or nothing below tests the changeover', () => {
-    expect(DateTime.fromISO('2026-04-24', { zone: ZONE }).hour).toBe(1);
+    expect(DateTime.fromISO('2026-04-24', { zone: 'Africa/Cairo' }).hour).toBe(1);
   });
 
   it('counts a category on the 25th only, for a ticket created just after its midnight', async () => {
-    const conversationId = await ticket('Open', { createdAt: AFTER_MIDNIGHT });
-    const [late] = await db
-      .select({ id: ticketCategories.id })
-      .from(ticketCategories)
-      .where(eq(ticketCategories.key, 'delivery.late'));
-    await db.insert(conversationCategories).values({
-      conversationId,
-      categoryId: late!.id,
-      categoryKey: 'delivery.late',
-      isPrimary: true,
-    });
+    await lateDelivery(AFTER_MIDNIGHT);
+    const reporting = await context();
 
-    const context = await reportingContext();
-    expect(context.zone).toBe(ZONE);
-
-    expect(await computeCategoryDay('2026-04-24', context)).toEqual([]);
-    expect(await computeCategoryDay('2026-04-25', context)).toMatchObject([
+    expect(await computeCategoryDay('2026-04-24', reporting)).toEqual([]);
+    expect(await computeCategoryDay('2026-04-25', reporting)).toMatchObject([
       { day: '2026-04-25', categoryKey: 'delivery.late', ticketsAny: 1, ticketsPrimary: 1 },
     ]);
   });
 
   it('counts a cause on the 25th only, for a ticket resolved just after its midnight', async () => {
-    const [missort] = await db
-      .select({ id: ticketRootCauses.id })
-      .from(ticketRootCauses)
-      .where(eq(ticketRootCauses.key, 'hub.missort'));
     // Arrived on the 24th, so a cause counted by arrival rather than by
     // resolution would land there too.
-    await ticket('Resolved', {
-      createdAt: at('2026-04-24T15:00'),
-      resolvedAt: AFTER_MIDNIGHT,
-      rootCauseId: missort!.id,
-      rootCauseSetAt: AFTER_MIDNIGHT,
-    });
+    await missorted(AFTER_MIDNIGHT, cairo('2026-04-24T15:00'));
+    const reporting = await context();
 
-    const context = await reportingContext();
-    expect(context.zone).toBe(ZONE);
-
-    expect(await computeRootCauseDay('2026-04-24', context)).toEqual([]);
-    expect(await computeRootCauseDay('2026-04-25', context)).toMatchObject([
+    expect(await computeRootCauseDay('2026-04-24', reporting)).toEqual([]);
+    expect(await computeRootCauseDay('2026-04-25', reporting)).toMatchObject([
       { day: '2026-04-25', causeKey: 'hub.missort', owner: 'hub', ticketsResolved: 1 },
+    ]);
+  });
+
+  // The fix moved the 24th's end; these hold both of its ends, so a correction
+  // that overshot, ending the 24th early or opening it late, fails here.
+  it("keeps the 24th's first and last hours on the 24th", async () => {
+    const opening = cairo('2026-04-24T01:00');
+    const lastHour = cairo('2026-04-24T23:30');
+    await lateDelivery(opening);
+    await lateDelivery(lastHour);
+    await missorted(opening, cairo('2026-04-23T15:00'));
+    await missorted(lastHour, cairo('2026-04-23T15:00'));
+    const reporting = await context();
+
+    for (const day of ['2026-04-23', '2026-04-25']) {
+      expect(await computeCategoryDay(day, reporting)).toEqual([]);
+      expect(await computeRootCauseDay(day, reporting)).toEqual([]);
+    }
+    expect(await computeCategoryDay('2026-04-24', reporting)).toMatchObject([
+      { day: '2026-04-24', categoryKey: 'delivery.late', ticketsAny: 2 },
+    ]);
+    expect(await computeRootCauseDay('2026-04-24', reporting)).toMatchObject([
+      { day: '2026-04-24', causeKey: 'hub.missort', ticketsResolved: 2 },
     ]);
   });
 });

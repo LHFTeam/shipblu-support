@@ -1,8 +1,7 @@
-import { DateTime } from 'luxon';
 import { sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import type { categoryMetricsDaily, rootCauseMetricsDaily } from '@/db/schema';
-import type { ReportingContext } from './rollup';
+import { dayWindow, type ReportingContext } from './rollup';
 import { logger } from '@/lib/log';
 
 const log = logger('rollup_metrics');
@@ -26,9 +25,10 @@ const log = logger('rollup_metrics');
  *   `conversations.root_cause_set_at` for why widening `resolved_at` instead
  *   was the wrong repair.
  *
- * The day boundary comes from the reporting timezone, not from UTC, exactly as
- * `computeDay` does it: Cairo observes DST, so a fixed offset would put an hour
- * of every changeover day on the wrong side of midnight.
+ * The day boundary comes from the reporting timezone, not from UTC, through the
+ * `dayWindow` that `computeDay` cuts its own day with: Cairo observes DST, so a
+ * fixed offset would put an hour of every changeover day on the wrong side of
+ * midnight, and a day cut here by hand once counted an hour on two days.
  *
  * **The bot channel is not excluded here, and that is deliberate.** Every other
  * report calls `readOnlyChannels()`, because averaging a first response that
@@ -42,19 +42,6 @@ const log = logger('rollup_metrics');
 
 type CategoryRow = typeof categoryMetricsDaily.$inferInsert;
 type CauseRow = typeof rootCauseMetricsDaily.$inferInsert;
-
-/**
- * Both ends are a `startOf('day')`, exactly as `computeDay` and
- * `computeAgentDay` cut theirs, so the three rollups put an instant on the same
- * day. The end is not the start plus a day: Cairo springs forward at midnight,
- * so a changeover day such as 24 April 2026 has no 00:00 and opens at 01:00. A
- * day added to that is 01:00 on the 25th, an hour after the 25th began, and
- * that hour sat inside both days and counted on each.
- */
-function dayBounds(day: string, zone: string): { start: Date; end: Date } {
-  const start = DateTime.fromISO(day, { zone }).startOf('day');
-  return { start: start.toJSDate(), end: start.plus({ days: 1 }).startOf('day').toJSDate() };
-}
 
 /**
  * Category counts for one day.
@@ -86,7 +73,12 @@ export async function computeCategoryDay(
   day: string,
   { zone }: ReportingContext,
 ): Promise<CategoryRow[]> {
-  const { start, end } = dayBounds(day, zone);
+  const window = dayWindow(day, zone);
+  if (!window) {
+    log.warn(`ignoring an unparseable day "${day}"`);
+    return [];
+  }
+  const { start, end } = window;
 
   const rows = await db.execute<{
     category_key: string;
@@ -111,8 +103,8 @@ export async function computeCategoryDay(
              as assigned_manual
     from conversation_categories cc
     join conversations c on c.id = cc.conversation_id
-    where c.created_at >= ${start.toISOString()}
-      and c.created_at < ${end.toISOString()}
+    where c.created_at >= ${start.toISOString()}::timestamptz
+      and c.created_at < ${end.toISOString()}::timestamptz
       and c.deleted_at is null
       -- A copied WhatsApp history did not arrive on its created_at; an agent
       -- labelling one is not that day's demand.
@@ -162,7 +154,12 @@ export async function computeRootCauseDay(
   day: string,
   { zone }: ReportingContext,
 ): Promise<CauseRow[]> {
-  const { start, end } = dayBounds(day, zone);
+  const window = dayWindow(day, zone);
+  if (!window) {
+    log.warn(`ignoring an unparseable day "${day}"`);
+    return [];
+  }
+  const { start, end } = window;
 
   const rows = await db.execute<{
     cause_key: string;
@@ -176,8 +173,8 @@ export async function computeRootCauseDay(
            count(*)::int as tickets_resolved
     from conversations c
     join ticket_root_causes rc on rc.id = c.root_cause_id
-    where coalesce(c.resolved_at, c.root_cause_set_at) >= ${start.toISOString()}
-      and coalesce(c.resolved_at, c.root_cause_set_at) < ${end.toISOString()}
+    where coalesce(c.resolved_at, c.root_cause_set_at) >= ${start.toISOString()}::timestamptz
+      and coalesce(c.resolved_at, c.root_cause_set_at) < ${end.toISOString()}::timestamptz
       and c.deleted_at is null
     group by rc.key, rc.owner, c.channel
   `);

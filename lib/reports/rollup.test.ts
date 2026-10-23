@@ -1,6 +1,7 @@
+import { DateTime } from 'luxon';
 import { describe, expect, it } from 'vitest';
 import { cairo } from '@/lib/testing/time';
-import { dateIn, emptyBucket, reconciles, slicesFor, type Slice } from './rollup';
+import { dateIn, dayWindow, emptyBucket, reconciles, slicesFor, type Slice } from './rollup';
 
 /**
  * `metrics_daily` stores four slices per day — the totals, and then by group, by
@@ -163,5 +164,56 @@ describe('dateIn', () => {
     // The reporting zone is `business_hours.timezone`, checked only by the
     // hours form; a row edited in the database reaches here unchecked.
     expect(() => dateIn(cairo('2026-10-14T02:59'), 'Africa/Kairo')).toThrow(/Africa\/Kairo/);
+  });
+});
+
+/**
+ * Where every rollup cuts its day. A day that does not end where the next one
+ * begins counts an hour twice or not at all, and nothing in the stored rows
+ * shows which: the category rollup counted the first hour of 25 April 2026 on
+ * the 24th as well, because Cairo springs forward at that midnight
+ * (`docs/PROJECT-STATE.md` §6.101).
+ */
+describe('dayWindow', () => {
+  const CAIRO = 'Africa/Cairo';
+
+  it('opens the day Cairo springs forward at 01:00 and ends it at the next midnight', () => {
+    expect(dayWindow('2026-04-24', CAIRO)).toEqual({
+      start: cairo('2026-04-24T01:00'),
+      end: cairo('2026-04-25T00:00'),
+    });
+  });
+
+  it('holds all 25 hours of the day the clocks go back', () => {
+    const window = dayWindow('2026-10-29', CAIRO)!;
+    expect(window).toEqual({ start: cairo('2026-10-29T00:00'), end: cairo('2026-10-30T00:00') });
+    expect(window.end.getTime() - window.start.getTime()).toBe(25 * 3_600_000);
+  });
+
+  it('ends every Cairo day where the next begins, from DST coming back to 2027', () => {
+    const seams: string[] = [];
+    for (
+      let day = DateTime.fromISO('2023-01-01', { zone: 'utc' });
+      day.year < 2028;
+      day = day.plus({ days: 1 })
+    ) {
+      const end = dayWindow(day.toISODate()!, CAIRO)!.end;
+      const next = dayWindow(day.plus({ days: 1 }).toISODate()!, CAIRO)!.start;
+      if (end.getTime() !== next.getTime()) seams.push(day.toISODate()!);
+    }
+    expect(seams).toEqual([]);
+  });
+
+  it('leaves no hour between two days where luxon reads a bare date an hour late', () => {
+    // Samoa sprang forward on 24 September 2011 and crossed the date line that
+    // December. Luxon resolves a wall-clock time from the zone's offset today,
+    // which is far from 2011's, and lands a bare 25 September at 01:00 rather
+    // than at its midnight; only the start's own `startOf('day')` puts it back.
+    const zone = 'Pacific/Apia';
+    expect(dayWindow('2011-09-25', zone)!.start).toEqual(dayWindow('2011-09-24', zone)!.end);
+  });
+
+  it('answers null for a day that does not parse', () => {
+    expect(dayWindow('not-a-date', CAIRO)).toBeNull();
   });
 });

@@ -1424,7 +1424,12 @@ a customer's inbox would show.
 **Time.** Cairo observes DST again. Build test instants from wall-clock with
 luxon and let the timezone database convert; never hand-convert fixtures. SLA
 clocks are working-time, resolved through `lib/hours/resolve.ts` by every
-consumer so a due date and the report measuring it cannot disagree.
+consumer so a due date and the report measuring it cannot disagree. A rolled-up
+day's instants come from `dayWindow()` in `lib/reports/rollup.ts`, never from
+`start.plus({ days: 1 })`: Cairo springs forward at midnight, so that day opens
+at 01:00 and a day added to it ends an hour into the next. For the same reason
+a count of days is taken on the dates, never on the instants between them
+(`docs/PROJECT-STATE.md` §6.101).
 
 **A date a client component draws is joined from its fields.** It is written
 twice, by Node on the server and by the browser to hydrate, and the punctuation
