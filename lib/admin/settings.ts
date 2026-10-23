@@ -17,7 +17,7 @@ import {
   shipmentPhrases,
   skills,
   slaPolicies,
-  ticketCategories,
+  ticketSubcategories,
   ticketFields,
   ticketForms,
   ticketRootCauses,
@@ -310,11 +310,11 @@ export function listOpenInvites(now: Date) {
 }
 
 /** Every category, retired ones included, in the order the taxonomy lists them. */
-export function listTicketCategories() {
+export function listTicketSubcategories() {
   return db
     .select()
-    .from(ticketCategories)
-    .orderBy(asc(ticketCategories.position), asc(ticketCategories.key));
+    .from(ticketSubcategories)
+    .orderBy(asc(ticketSubcategories.position), asc(ticketSubcategories.key));
 }
 
 /** Every root cause, retired ones included, in the order the resolve dialogue lists them. */

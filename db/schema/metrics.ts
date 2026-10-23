@@ -542,14 +542,14 @@ export const agentMetricsDaily = pgTable(
  * the hardest possible failure to notice. Ask that question live instead, the
  * way the review queue does.
  */
-export const categoryMetricsDaily = pgTable(
+export const subcategoryMetricsDaily = pgTable(
   'category_metrics_daily',
   {
     id: uuid('id').primaryKey().defaultRandom(),
     day: date('day').notNull(),
 
     /** The key as assigned, so a retired category still reports. */
-    categoryKey: text('category_key').notNull(),
+    subcategoryKey: text('category_key').notNull(),
     area: text('area').notNull(),
     channel: channelEnum('channel').notNull(),
 
@@ -572,7 +572,7 @@ export const categoryMetricsDaily = pgTable(
     computedAt: timestamp('computed_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
-    uniqueIndex('category_metrics_daily_dimensions_idx').on(t.day, t.categoryKey, t.channel),
+    uniqueIndex('category_metrics_daily_dimensions_idx').on(t.day, t.subcategoryKey, t.channel),
     index('category_metrics_daily_day_idx').on(t.day),
     index('category_metrics_daily_area_idx').on(t.area, t.day),
   ],
@@ -593,7 +593,7 @@ export const categoryMetricsDaily = pgTable(
  * out of date.
  *
  * Counted from the resolve (`coalesce(resolved_at, root_cause_set_at)`, as
- * `categoryMetricsDaily` explains) rather than `created_at`: the cause is
+ * `subcategoryMetricsDaily` explains) rather than `created_at`: the cause is
  * recorded at resolution, so a ticket that arrives in one month and is
  * understood in the next belongs to the month somebody worked it out.
  */

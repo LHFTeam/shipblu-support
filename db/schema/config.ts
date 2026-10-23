@@ -16,7 +16,7 @@ import { agents, groups } from './agents';
 import {
   automationTriggerEnum,
   cannedVisibilityEnum,
-  categoryAudienceEnum,
+  subcategoryAudienceEnum,
   channelEnum,
   priorityEnum,
   rootCauseOwnerEnum,
@@ -183,7 +183,7 @@ export type TicketFieldOption = {
  *
  * A table rather than a constant because renaming "Cost and payment methods" to
  * "Pricing" is a decision by whoever owns the report and should not be a deploy.
- * What is *not* here is the matching rules: those live in `lib/categorise/`,
+ * What is *not* here is the matching rules: those live in `lib/subcategorise/`,
  * compiled, with tests. A regular expression typed into an admin form is a
  * production incident with no review — `(a+)+$` over every inbound message is a
  * denial of service, and a stray `.*` files the whole archive under one label.
@@ -193,7 +193,7 @@ export type TicketFieldOption = {
  * here nobody may edit: every compiled rule names one, every stored assignment
  * freezes one, and every report groups by one.
  */
-export const ticketCategories = pgTable(
+export const ticketSubcategories = pgTable(
   'ticket_categories',
   {
     id: uuid('id').primaryKey().defaultRandom(),
@@ -227,7 +227,7 @@ export const ticketCategories = pgTable(
     description: text('description'),
 
     /** Which population raises this. Narrows the picker; see the enum. */
-    audience: categoryAudienceEnum('audience').notNull().default('any'),
+    audience: subcategoryAudienceEnum('audience').notNull().default('any'),
 
     /**
      * Nothing auto-assigns this; an agent files it by hand.
@@ -240,7 +240,7 @@ export const ticketCategories = pgTable(
      */
     isDetectable: boolean('is_detectable').notNull().default(true),
 
-    /** Seeded from `lib/categorise/taxonomy.ts`. Deactivated, never deleted. */
+    /** Seeded from `lib/subcategorise/taxonomy.ts`. Deactivated, never deleted. */
     isSystem: boolean('is_system').notNull().default(false),
     isActive: boolean('is_active').notNull().default(true),
 

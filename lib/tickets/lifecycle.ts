@@ -1,7 +1,7 @@
 import { assignConversation } from '@/lib/assignment';
 import { maybeSendAutoResponse } from '@/lib/auto-response';
 import { runAutomations } from '@/lib/automations';
-import { categoriseFromMessage } from '@/lib/categorise/apply';
+import { subcategoriseFromMessage } from '@/lib/subcategorise/apply';
 import { enqueuePriorityClassification } from '@/lib/priority-ai/enqueue';
 import { linkShipmentsFromMessage } from '@/lib/shipments/links';
 import { scheduleSurvey } from '@/lib/csat';
@@ -195,7 +195,7 @@ export async function afterMessageStored(message: StoredMessage): Promise<void> 
   // because both finish by touching the same `conversations` row, and two
   // concurrent updates of one row from one pool is a deadlock.
   try {
-    await categoriseFromMessage(message, 'notify');
+    await subcategoriseFromMessage(message, 'notify');
   } catch (error) {
     log.error(`categorisation failed for message ${message.messageId}`, error);
   }

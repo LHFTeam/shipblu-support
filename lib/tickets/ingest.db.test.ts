@@ -29,7 +29,7 @@ import { ingestInboundEmail } from './ingest';
  * Against the seeded baseline only: no email channel, no SLA policy (the one
  * test about the SLA clock adds its own), no auto-response. So a new ticket has
  * no channel or group, and nothing lands in `jobs` — the lifecycle's enqueues
- * all wait on configuration this database does not have. The categoriser is the one consumer that always writes.
+ * all wait on configuration this database does not have. The subcategoriser is the one consumer that always writes.
  */
 
 withCleanDatabase();
@@ -173,7 +173,7 @@ describe('ingestInboundEmail', () => {
     ]);
 
     expect(await eventsOf(result.conversationId)).toMatchObject([
-      { type: 'categorised', actorLabel: 'category-detector' },
+      { type: 'subcategorised', actorLabel: 'subcategory-detector' },
     ]);
     expect(await db.select().from(jobs)).toEqual([]);
   });

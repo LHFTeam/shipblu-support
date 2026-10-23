@@ -3,7 +3,7 @@ import { eq } from 'drizzle-orm';
 import { db } from '@/db/client';
 import {
   agentMetricsDaily,
-  categoryMetricsDaily,
+  subcategoryMetricsDaily,
   metricsDaily,
   rollupDays,
   rootCauseMetricsDaily,
@@ -11,7 +11,7 @@ import {
 import type { ClaimedJob } from '@/lib/queue';
 import { parseJobPayload, type JobPayload } from '@/lib/queue/payloads';
 import { computeAgentDay, withActivity } from '@/lib/reports/agent-rollup';
-import { computeCategoryDay, computeRootCauseDay } from '@/lib/reports/category-rollup';
+import { computeSubcategoryDay, computeRootCauseDay } from '@/lib/reports/subcategory-rollup';
 import {
   asRows,
   computeDay,
@@ -169,7 +169,7 @@ export async function rollupMetrics(job?: ClaimedJob): Promise<void> {
     const slices = await computeDay(day, context);
     const rows = asRows(day, slices);
     const agentRows = withActivity(await computeAgentDay(day, context));
-    const categoryRows = await computeCategoryDay(day, context);
+    const subcategoryRows = await computeSubcategoryDay(day, context);
     const causeRows = await computeRootCauseDay(day, context);
 
     // Delete-then-insert rather than an upsert on the unique index: Postgres
@@ -225,8 +225,8 @@ export async function rollupMetrics(job?: ClaimedJob): Promise<void> {
       // cause dated by it goes with it or falls back to `root_cause_set_at`.
       // Tickets closed before the close kept it need `restore_resolved_at` run
       // once before any backfill (`docs/PROJECT-STATE.md` §6.98).
-      await tx.delete(categoryMetricsDaily).where(eq(categoryMetricsDaily.day, day));
-      if (categoryRows.length) await tx.insert(categoryMetricsDaily).values(categoryRows);
+      await tx.delete(subcategoryMetricsDaily).where(eq(subcategoryMetricsDaily.day, day));
+      if (subcategoryRows.length) await tx.insert(subcategoryMetricsDaily).values(subcategoryRows);
 
       await tx.delete(rootCauseMetricsDaily).where(eq(rootCauseMetricsDaily.day, day));
       if (causeRows.length) await tx.insert(rootCauseMetricsDaily).values(causeRows);
@@ -247,7 +247,7 @@ export async function rollupMetrics(job?: ClaimedJob): Promise<void> {
 
     log.info(
       `${day}: ${rows.length} rows, ${agentRows.length} agent-day(s), ` +
-        `${categoryRows.length} category row(s), ${causeRows.length} cause row(s)`,
+        `${subcategoryRows.length} category row(s), ${causeRows.length} cause row(s)`,
     );
   }
 

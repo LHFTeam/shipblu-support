@@ -6,7 +6,7 @@ const log = logger('classify_priority');
  * The two switches the priority classifier answers to, read straight from
  * `process.env`.
  *
- * Not through `env()`, for the reason `lib/categorise/detect.ts` gives about its
+ * Not through `env()`, for the reason `lib/subcategorise/detect.ts` gives about its
  * thresholds: the enqueue half runs inside `afterMessageStored`, which every
  * ingest path and the console's reply action reach, and `env()` validates the
  * whole schema — so an enum there would let a typo in a switch nobody on that

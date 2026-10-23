@@ -1,11 +1,11 @@
-import { stateFor, type MessageForState } from '@/lib/categorise-ai/request';
+import { stateFor, type MessageForState } from '@/lib/subcategorise-ai/request';
 import { PRIORITIES, type Priority } from '@/lib/tickets/vocabulary';
 import type { ChoiceQuestion, SystemOneRequest } from '@/lib/typesafe/client';
 
 /**
  * What this system asks Jev about a message's urgency, written down in one place.
  *
- * Pure and tested for the reason `lib/categorise-ai/request.ts` gives: a `choice`
+ * Pure and tested for the reason `lib/subcategorise-ai/request.ts` gives: a `choice`
  * question with a wrong `criteria` map does not fail, it answers over the wrong
  * vocabulary, and that answer looks exactly like a right one. Here the
  * vocabulary is `PRIORITIES` itself, so a level added to the enum is a level the

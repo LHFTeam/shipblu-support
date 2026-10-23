@@ -264,7 +264,7 @@ malformed one and an action that throws returns no state at all.
 `lib/http/action-state.ts` is the answer: `ActionState` and `ok()`, whose
 `nonce` changes on every success so a form keyed on it clears twice in a row.
 The inbox's action files — `reply-`, `ticket-`, `meta-`, `shipment-`,
-`side-conversation-` and `category-actions.ts` — answer with
+`side-conversation-` and `subcategory-actions.ts` — answer with
 `app/(console)/action-state.ts`, the same state plus a `message`, kept outside
 every `'use server'` file so a component can name the type without importing an
 action module. Admin settings actions answer with `SettingsState` / `AdminState`
@@ -822,7 +822,7 @@ automations choose their language as the message is ingested, before its
 question, `requesterLocale`, the ticket page's knowledge panel and canned
 picker, and the language a canned suggestion is filed under use it. The earlier
 messages both TypeSafe questions send as context (`earlierMessages`) still carry
-labels, and so do the categorisers, which read every message rather than the
+labels, and so do the subcategorisers, which read every message rather than the
 last. A reader that forgets answers an Arabic customer in English for sending a
 photo of the damaged parcel, which the out-of-hours acknowledgement and the
 automation engine would have done (§6.97).
@@ -832,7 +832,7 @@ four rules keep the two sides from being read as each other. The copied
 history is a record, not traffic (`lib/tickets/ingest-whatsapp-history.ts`):
 each thread is one resolved `import` conversation, and nothing a live message
 sets off runs for it — no SLA clock, no automation, no out-of-hours reply, no
-categorisation, no shipment linking, no media download and no 24-hour window,
+subcategorisation, no shipment linking, no media download and no 24-hour window,
 because `last_customer_message_at` stays null and a live message never
 continues an imported conversation. A reply the business typed on the phone
 arrives as an `smb_message_echoes` delivery and is the team's reply: outbound,
@@ -1119,16 +1119,17 @@ goes through `formPath` / `encodeSlugParam`. Next hands the path straight to
 needs none of this, which is why the read side was handled long before the write
 side was.
 
-**Ticket categorisation.** `lib/categorise/` is pure and rules-only; the live
-path is `categoriseFromMessage`, called from `afterMessageStored`. Four rules
-hold, and each of them closes something that has already been reasoned through:
+**Ticket subcategorisation.** `lib/subcategorise/` is pure and rules-only; the
+live path is `subcategoriseFromMessage`, called from `afterMessageStored`. Four
+rules hold, and each of them closes something that has already been reasoned
+through:
 
-- **Only inbound `reply` messages are categorised.** Not our own replies, which
-  would file every ticket where an agent pasted a canned answer, and not notes,
-  which would launder an agent's opinion into the `detected` column the tuning
-  pass trusts. Bot channels are excluded through `readOnlyChannels()` — the
-  bot's menu is a self-service funnel, not support demand, and categorising it
-  would report the one as the other.
+- **Only inbound `reply` messages are subcategorised.** Not our own replies,
+  which would file every ticket where an agent pasted a canned answer, and not
+  notes, which would launder an agent's opinion into the `detected` column the
+  tuning pass trusts. Bot channels are excluded through `readOnlyChannels()` —
+  the bot's menu is a self-service funnel, not support demand, and
+  subcategorising it would report the one as the other.
 - **The root cause is never detected, only recorded.** The customer does not
   know why it happened: "where is my order" has at least six causes behind it.
   A detector guessing one manufactures confident, wrong data in the exact place
@@ -1140,39 +1141,40 @@ hold, and each of them closes something that has already been reasoned through:
   inside `ولا`, which is how a "no" rule files a reschedule as a refusal. Text
   is folded before matching, the opposite of `lib/kb/seed.ts`, which compares
   against an unfolded tsvector; this matcher owns both sides.
-- **A category is retired, never deleted**, and `conversation_categories`
-  freezes `category_key` at assignment. The rollups key on the same text, so a
-  report drawn last quarter stays readable after somebody tidies the taxonomy.
-  The registry tables live in `db/schema/config.ts` beside `ticket_statuses`
-  rather than with the join table, because `conversations` references them and
-  everything references `conversations`.
+- **A subcategory is retired, never deleted**, and `conversation_categories`
+  (its name until Stage 2.B) freezes `category_key` at assignment. The rollups
+  key on the same text, so a report drawn last quarter stays readable after
+  somebody tidies the taxonomy. The registry tables live in
+  `db/schema/config.ts` beside `ticket_statuses` rather than with the join
+  table, because `conversations` references them and everything references
+  `conversations`.
 
 Confidence is an evidence grade, not a probability, and anything rendering it
-says so. `CATEGORISE_AUTO_MIN`, `CATEGORISE_RECORD_MIN` and
-`CATEGORISE_DISABLED_RULES` tune the bands and kill one over-firing rule by key
-without a deploy — read through `process.env` for the reason `detect.ts` gives.
-Under-detection is cheap (it shows as `meta.unclassified`, which has its own
-section on the review page — it carries confidence 0, so it can never surface in
-a queue ordered best-evidence-first); over-detection silently moves a number a
-manager staffs a team from. `combine()` picks its ceiling from the strongest
-rule that contributed rather than from how many did, so a pile of single
-keywords is held below the auto band however many of them agree.
-See `plans/ticket-categorisation.md`.
+says so. `SUBCATEGORISE_AUTO_MIN`, `SUBCATEGORISE_RECORD_MIN` and
+`SUBCATEGORISE_DISABLED_RULES` tune the bands and kill one over-firing rule by
+key without a deploy — read through `process.env` for the reason `detect.ts`
+gives. Under-detection is cheap (it shows as `meta.unclassified`, which has its
+own section on the review page — it carries confidence 0, so it can never
+surface in a queue ordered best-evidence-first); over-detection silently moves a
+number a manager staffs a team from. `combine()` picks its ceiling from the
+strongest rule that contributed rather than from how many did, so a pile of
+single keywords is held below the auto band however many of them agree. See
+`plans/ticket-categorisation.md`.
 
 **The one AI provider, and the three things it is allowed to touch.**
 `lib/typesafe/` calls TypeSafe's System One endpoint, and three modules ask it a
-question: `lib/categorise-ai/` asks which category a message belongs to,
+question: `lib/subcategorise-ai/` asks which subcategory a message belongs to,
 `lib/priority-ai/` how urgent it is, and `lib/canned-suggest/` which canned
 response an agent would send next. Jev answers a `choice` over options the
 request offered, so none of them can be handed a word of free text — the
-categoriser gets a key, the classifier a level, the composer an id.
+subcategoriser gets a key, the classifier a level, the composer an id.
 
-The categoriser is a **shadow**: every answer lands in `ai_category_runs` and
-nothing else, so no rollup, no review queue and no primary ladder can see it.
-That separation is not caution to be tidied away later.
-`conversation_categories.confidence` is an evidence grade, hand-assigned and
-combined by noisy-OR, and three screens explain it as one; TypeSafe returns a
-probability. One column holding both would be undetectable from the outside.
+The subcategoriser is a **shadow**: every answer lands in `ai_category_runs`
+(its name until Stage 2.B) and nothing else, so no rollup, no review queue and
+no primary ladder can see it. That separation is not caution to be tidied away
+later. `conversation_categories.confidence` is an evidence grade, hand-assigned
+and combined by noisy-OR, and three screens explain it as one; TypeSafe returns
+a probability. One column holding both would be undetectable from the outside.
 Anything wanting to promote a result argues for it in its own change.
 
 Four rules hold there, and the job is inert until somebody starts it — presence of
@@ -1180,17 +1182,18 @@ Four rules hold there, and the job is inert until somebody starts it — presenc
 key lives in the environment groups rather than the shared one because all three
 uses send real customer text to a third party:
 
-- **The option list comes from `ticket_categories`, never from `TAXONOMY`.** A
-  retired category leaves the rules path at once; if it did not leave the model's
-  choices at the same moment the two would answer over different vocabularies and
-  every disagreement between them would be an artefact.
+- **The option list comes from `ticket_categories` (its name until Stage 2.B),
+  never from `TAXONOMY`.** A retired subcategory leaves the rules path at once;
+  if it did not leave the model's choices at the same moment the two would
+  answer over different vocabularies and every disagreement between them would
+  be an artefact.
 - **`meta.unclassified` is always offered, and the instructions name it.** Given
   55 options and no way out, a model asked about "؟" names something, and a forced
   guess is the over-detection `plans/ticket-categorisation.md` warns about.
-- **The rules baseline is computed in the same call**, from `detectCategories` —
-  not read back from `conversation_categories`, whose rows agents have since
-  confirmed, rejected and added. The first measures the detector; the second
-  measures the team.
+- **The rules baseline is computed in the same call**, from
+  `detectSubcategories` — not read back from `conversation_categories`, whose
+  rows agents have since confirmed, rejected and added. The first measures the
+  detector; the second measures the team.
 - **Nothing retries inside the provider.** Backoff is the queue's, per
   `lib/email/providers/postmark.ts`, which is also why `@typesafe-ai/sdk` is not
   used: it retries internally and brings an error taxonomy where the only thing a
@@ -1203,22 +1206,22 @@ queries in front of real Postgres. See `plans/categorisation-through-typesafe.md
 
 `lib/priority-ai/` asks how urgent each inbound customer message is, and it is
 **not** a shadow: under `PRIORITY_AI=apply` it writes `conversations.priority`,
-which moves SLA deadlines. It earns that where the categoriser could not because
-priority has no second quantity to be confused with — the column is a level, not
-an evidence grade, and one ticket in the archive had a priority set by hand.
-What it may not do is overrule anybody: `lib/priority-ai/decide.ts` is the only
-place that decides whether an answer may be written, and its rules are tests. A
-priority set by a person, a rule, a form default or an agent opening the ticket
-is never touched; only the answer to the customer's opening message may lower a
-ticket, and later ones only raise; and every answer, applied or not, is a row in
-`ai_priority_runs` with its full distribution, because those rows are the only
-labels priority has. A new writer of `conversations.priority` writes the column
-and its `priority_changed` event in one transaction, stamps the event with
-`PRIORITY_STAMP` (`lib/tickets/priority-stamp.ts`) so events sort in the order
-the column was written, and calls `onPriorityChanged` after it commits — as the
-console, the `set_priority` automation and the classifier do. The policies price
-their targets per priority, and the classifier decides whose priority a ticket
-carries from the column and those events read together. See
+which moves SLA deadlines. It earns that where the subcategoriser could not
+because priority has no second quantity to be confused with — the column is a
+level, not an evidence grade, and one ticket in the archive had a priority set
+by hand. What it may not do is overrule anybody: `lib/priority-ai/decide.ts` is
+the only place that decides whether an answer may be written, and its rules are
+tests. A priority set by a person, a rule, a form default or an agent opening
+the ticket is never touched; only the answer to the customer's opening message
+may lower a ticket, and later ones only raise; and every answer, applied or not,
+is a row in `ai_priority_runs` with its full distribution, because those rows
+are the only labels priority has. A new writer of `conversations.priority`
+writes the column and its `priority_changed` event in one transaction, stamps
+the event with `PRIORITY_STAMP` (`lib/tickets/priority-stamp.ts`) so events sort
+in the order the column was written, and calls `onPriorityChanged` after it
+commits — as the console, the `set_priority` automation and the classifier do.
+The policies price their targets per priority, and the classifier decides whose
+priority a ticket carries from the column and those events read together. See
 `plans/priority-through-typesafe.md`.
 
 The suggestion is **live**: its answer is shown to an agent, as grey text in an
@@ -1348,9 +1351,9 @@ turns each letter Arabic spells several ways (ا/أ/إ/آ, ي/ى/ئ, ه/ة, و/�
 bracket expression for `~*`, which the trigram indexes that already exist
 serve. Folding the column through `translate()` instead is a different
 expression, so it would need a new index on every table it touched, `messages`
-included. The letter table is the categoriser's too, so the two agree on which
-letters are one letter — and on no more: the categoriser also strips tatweel
-and tashkeel from the text it reads, which a search can do to the query
+included. The letter table is the subcategoriser's too, so the two agree on
+which letters are one letter — and on no more: the subcategoriser also strips
+tatweel and tashkeel from the text it reads, which a search can do to the query
 (`cleanQuery`) but not to the column.
 
 Every free-text search in the console — the inbox, the contacts page, the merge
@@ -1529,9 +1532,10 @@ too (`::timestamp at time zone <zone>`), rather than casting a date in UTC.
 a young rollup is indistinguishable from a broken one: `rollup_metrics`
 recomputes three days a night and several rollups have no backfill, so every
 window wider than the history returns the same rows and the buttons look dead.
-`/reports/categories` was reported as exactly that bug. A report with a range
-control therefore prints the window it selected and, when the figures start
-after the window opens, says where they start and why (§6.54).
+`/reports/subcategories`, then at `/reports/categories`, was reported as exactly
+that bug. A report with a range control therefore prints the window it selected
+and, when the figures start after the window opens, says where they start and
+why (§6.54).
 
 ## Tests
 

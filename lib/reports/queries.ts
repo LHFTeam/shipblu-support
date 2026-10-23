@@ -3,7 +3,7 @@ import { and, between, eq, isNotNull, isNull, lt, lte, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { share } from '@/lib/charts/scale';
 import { agents, groups, metricsDaily, rollupDays } from '@/db/schema';
-import type { Range } from './category-queries';
+import type { Range } from './subcategory-queries';
 import { RATING_COLUMNS, type ReportWindow } from './rollup';
 
 /**

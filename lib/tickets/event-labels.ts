@@ -18,6 +18,25 @@ const SKIP_REASONS: Record<string, string> = {
   no_skill_match: 'nobody available held every skill it needs',
 };
 
+/**
+ * The subcategory an event is about. Written as `categoryKey` until Stage 2.A
+ * of `plans/ticket-category-routing.md` and as `subcategoryKey` since, and
+ * stored rows are never rewritten, so both are read.
+ */
+function subcategoryKeyOf(data: Record<string, unknown>): unknown {
+  return data.subcategoryKey ?? data.categoryKey;
+}
+
+/**
+ * The name a timeline prints for an event no agent wrote. The rules detector
+ * signed its events `category-detector` until Stage 2.A and
+ * `subcategory-detector` since, and one ticket's history can hold both; read
+ * as two names, they would look like two mechanisms.
+ */
+export function describeActorLabel(label: string | null): string | null {
+  return label === 'category-detector' ? 'subcategory-detector' : label;
+}
+
 export function describeEvent(type: string, data: Record<string, unknown>): string {
   switch (type) {
     // The whole point of the event. Without a case here it fell through to the
@@ -201,12 +220,20 @@ export function describeEvent(type: string, data: Record<string, unknown>): stri
       }
       return 're-counted the due dates';
 
-    // The six categorisation events, and they need cases here for exactly the
-    // reason `unverified_submitter` above does: the default prints the type
+    // The six subcategorisation events, and they need cases here for exactly
+    // the reason `unverified_submitter` above does: the default prints the type
     // with its underscores swapped for spaces and drops the payload, so the
     // timeline read "category added" with no category in it. The actions all
     // store what was decided; this is where it becomes readable.
-    case 'categorised': {
+    //
+    // Each is read under two names, for good. They were written as
+    // `categorised` and `category_*`, with the key in `data.categoryKey`, until
+    // Stage 2.A of `plans/ticket-category-routing.md`; stored history keeps its
+    // words, and during a deploy both writers run side by side. Stage 3's own
+    // category events must take other names, or a ticket's old subcategory
+    // history would read as the new field's.
+    case 'categorised':
+    case 'subcategorised': {
       const applied = Array.isArray(data.applied) ? (data.applied as string[]) : [];
       const suggested = Array.isArray(data.suggested) ? (data.suggested as string[]) : [];
       const parts = [
@@ -219,13 +246,17 @@ export function describeEvent(type: string, data: Record<string, unknown>): stri
       return parts.length > 0 ? parts.join(' and ') : 'read the message and found nothing to file';
     }
     case 'category_added':
-      return `filed this under ${String(data.categoryKey ?? 'a category')}`;
+    case 'subcategory_added':
+      return `filed this under ${String(subcategoryKeyOf(data) ?? 'a subcategory')}`;
     case 'category_confirmed':
-      return `confirmed ${String(data.categoryKey ?? 'a suggested category')}`;
+    case 'subcategory_confirmed':
+      return `confirmed ${String(subcategoryKeyOf(data) ?? 'a suggested subcategory')}`;
     case 'category_rejected':
-      return `rejected ${String(data.categoryKey ?? 'a suggested category')}`;
+    case 'subcategory_rejected':
+      return `rejected ${String(subcategoryKeyOf(data) ?? 'a suggested subcategory')}`;
     case 'category_removed':
-      return `removed ${String(data.categoryKey ?? 'a category')}`;
+    case 'subcategory_removed':
+      return `removed ${String(subcategoryKeyOf(data) ?? 'a subcategory')}`;
     case 'root_cause_set':
       // Null is the clear, not a missing payload: `setRootCause` writes the key
       // it resolved, and writes null when an agent picks "Not established yet".

@@ -258,7 +258,7 @@ export const internalRecipientKindEnum = pgEnum('internal_recipient_kind', ['tea
  * to distort every other number if they are filed as customers.
  *
  * **Only `merchant` and `recipient` are written**, by `requesterKindFrom()` in
- * `lib/categorise/requester.ts`, and only from records — the contact's role
+ * `lib/subcategorise/requester.ts`, and only from records — the contact's role
  * flags and whether they hold a shipping account. Null means "not established",
  * which is a different claim from any of these four and the only honest one
  * when the records do not say: `refreshContactRoles()` is documented as
@@ -287,7 +287,7 @@ export const requesterKindEnum = pgEnum('requester_kind', [
  * the honest answer for the categories both populations really do raise — a
  * damaged parcel is the same complaint whichever end of it you are on.
  */
-export const categoryAudienceEnum = pgEnum('category_audience', ['merchant', 'recipient', 'any']);
+export const subcategoryAudienceEnum = pgEnum('category_audience', ['merchant', 'recipient', 'any']);
 
 /**
  * Where a category assignment stands with a human.
@@ -305,7 +305,7 @@ export const categoryAudienceEnum = pgEnum('category_audience', ['merchant', 're
  * were wrong — the only copy of that evidence anyone will ever have, and what
  * the next round of rule tuning is measured against.
  */
-export const categoryReviewStateEnum = pgEnum('category_review_state', [
+export const subcategoryReviewStateEnum = pgEnum('category_review_state', [
   'auto',
   'suggested',
   'confirmed',

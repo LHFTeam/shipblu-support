@@ -329,7 +329,7 @@ export async function purgeContactRecord(
   // named them now shows an unset party.
   revalidatePath('/contacts');
   revalidatePath('/inbox');
-  revalidatePath('/admin/categories/review');
+  revalidatePath('/admin/subcategories/review');
   revalidatePath('/contacts/shipments');
 
   // Redirected from the action rather than by the panel, for the reason

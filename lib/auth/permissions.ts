@@ -84,11 +84,12 @@ export const PERMISSIONS = [
   'ticket.purge',
   'ticket.merge',
   /**
-   * Adding, confirming or rejecting a category on a ticket.
+   * Adding, confirming or rejecting a subcategory on a ticket, and setting its
+   * root cause, which this key has always gated too.
    *
    * Separate from `ticket.edit_fields`, which it superficially resembles,
    * because the two change different things. A custom field changes what one
-   * ticket says about itself. A category is the label every report is built
+   * ticket says about itself. A subcategory is the label every report is built
    * from *and* the training signal the rules are tuned against — so an agent
    * clearing a suggestion they did not understand moves a number on a
    * supervisor's report and teaches the detector to stop finding that case.
@@ -97,8 +98,13 @@ export const PERMISSIONS = [
    * enough tickets for the corrections to happen at all, and a review queue
    * only an admin can work is a review queue nobody finishes. Its own key so it
    * can be taken off one person without taking their field editing with it.
+   *
+   * Called `ticket.categorise` until Stage 2.A of
+   * `plans/ticket-category-routing.md`; nothing stored the old key (no agent
+   * held an override of it, 2026-10-23), and `can()` ignores a key it does not
+   * know, so an override written under the old name would lapse silently.
    */
-  'ticket.categorise',
+  'ticket.subcategorise',
   'ticket.edit_fields',
   /**
    * Opening a ticket on a customer's behalf, from a form.
@@ -192,16 +198,21 @@ export const PERMISSIONS = [
   'admin.skills',
   'admin.fields',
   /**
-   * The category and root-cause taxonomy, and the review queue.
+   * The subcategory and root-cause taxonomy, and the review queue.
    *
-   * Above `ticket.categorise` and not folded into `admin.fields`, which owns
+   * Above `ticket.subcategorise` and not folded into `admin.fields`, which owns
    * statuses and custom fields, because the blast radius is different in time
    * rather than in size. A field definition changes what can be recorded next.
-   * Retiring or renaming a category rewrites what the archive already means —
+   * Retiring or renaming a subcategory rewrites what the archive already means —
    * retroactively, since the nightly rollup rebuilds from the current taxonomy,
    * so a rename quietly re-labels every report anybody has ever drawn.
+   *
+   * Called `admin.categories` until Stage 2.A, for the same reason as
+   * `ticket.subcategorise`. Stage 3 gives `admin.categories` back to the new
+   * category field's admin page, so an override left under the old name would
+   * come back meaning that page.
    */
-  'admin.categories',
+  'admin.subcategories',
 
   /**
    * Ticket forms, separate from `admin.fields` because the blast radius is.
@@ -235,7 +246,7 @@ const AGENT: Permission[] = [
   'ticket.side_conversation',
   'ticket.assign',
   'ticket.edit_fields',
-  'ticket.categorise',
+  'ticket.subcategorise',
   'ticket.create',
   'contact.view',
   'contact.edit',
@@ -279,7 +290,7 @@ const ADMIN: Permission[] = [
   'admin.sla',
   'admin.skills',
   'admin.fields',
-  'admin.categories',
+  'admin.subcategories',
   'admin.forms',
   'admin.csat',
 ];

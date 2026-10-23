@@ -105,13 +105,15 @@ ungrouped:
         #
         # Read by the code, normally unset, and set nowhere today:
         #
-        #   SHIPMENT_TRACKING_PATTERN   what a tracking number looks like
-        #   SHIPMENT_SBID_PATTERN       what an SBID looks like
-        #   SHIPMENT_IGNORE             references never to link
-        #   SHIPBLU_API_URL             the delivery platform's base URL
-        #   CATEGORISE_DISABLED_RULES   rule keys to stop applying
-        #   CATEGORISE_AUTO_MIN         confidence at which a category auto-applies
-        #   CATEGORISE_RECORD_MIN       confidence below which nothing is written
+        #   SHIPMENT_TRACKING_PATTERN     what a tracking number looks like
+        #   SHIPMENT_SBID_PATTERN         what an SBID looks like
+        #   SHIPMENT_IGNORE               references never to link
+        #   SHIPBLU_API_URL               the delivery platform's base URL
+        #   SUBCATEGORISE_DISABLED_RULES  rule keys to stop applying
+        #   SUBCATEGORISE_AUTO_MIN        confidence at which a subcategory auto-applies
+        #   SUBCATEGORISE_RECORD_MIN      confidence below which nothing is written
+        #     (the three SUBCATEGORISE_* were CATEGORISE_* until Stage 2.A;
+        #     a value left under the old name is read by nothing)
         #
         # Shared, when set, because both halves of one system have to agree on
         # the answer: the web service applies the pattern when an agent searches

@@ -8,7 +8,7 @@
  * one that makes different words equal.
  *
  * One table for the two places text is matched against what somebody typed.
- * `lib/categorise/normalise.ts` folds each variant down to its letter, because
+ * `lib/subcategorise/normalise.ts` folds each variant down to its letter, because
  * it owns both sides of the comparison; a search owns only the query, so it
  * widens each letter out to the whole group instead (below). One list
  * keeps the two agreeing on which letters are one letter, and on no more than

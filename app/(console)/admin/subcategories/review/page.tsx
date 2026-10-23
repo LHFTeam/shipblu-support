@@ -1,0 +1,230 @@
+import Link from 'next/link';
+import { ChannelBadge } from '@/components/channel';
+import { Badge, Cell, Notice, PageHeader, Row, Table } from '@/components/ui';
+import { InfoTip } from '@/components/tooltip';
+import { requirePermission } from '@/lib/auth/guard';
+import { can } from '@/lib/auth/permissions';
+import { reviewQueue, ruleScores, unclassifiedQueue } from '@/lib/subcategorise/queries';
+import { direction } from '@/lib/kb/locale';
+import { detectLocale } from '@/lib/kb/language';
+import { TEAM_TIME_ZONE } from '@/lib/hours/zone';
+import { dateIn } from '@/lib/reports/rollup';
+import { CONVERSATION_CHANNELS, hiddenChannels } from '@/lib/tickets/channel-policy';
+import { ReviewControls } from './controls';
+
+export const dynamic = 'force-dynamic';
+
+/**
+ * The categories the detector is unsure about, and how each rule is doing.
+ *
+ * Three parts that answer different questions. The queue is the work: every
+ * suggestion waiting on one click. The unclassified list under it is the other
+ * direction — messages no rule matched at all, which is where the next rule
+ * comes from. The table at the bottom is why the work is worth doing: a rule
+ * with a high rejection count is one to narrow, and a rule with nothing but
+ * unreviewed rows is one nobody has checked yet.
+ *
+ * The unclassified list is separate rather than mixed into the queue because it
+ * carries confidence 0 by definition, so best-evidence-first ordering buried it
+ * below every real suggestion — the under-detection signal was invisible in the
+ * one place built to surface it.
+ *
+ * Ordered best-evidence-first rather than newest-first. The suggestions most
+ * likely to be right are the cheapest to confirm, and clearing those fastest is
+ * what stops this becoming the screen nobody opens.
+ */
+export default async function SubcategoryReviewPage() {
+  const agent = await requirePermission('admin.subcategories');
+
+  /*
+   * The visibility gate, and the most important line on this page.
+   *
+   * This queue joins `conversations`, so without it the page is a list of
+   * tickets served to anybody holding `admin.subcategories` — including the bot
+   * transcripts that `ticket.view.bot` exists to keep out. Derived from the same
+   * helper the inbox uses rather than a rule of its own.
+   */
+  const hidden = new Set<string>(hiddenChannels(agent));
+  const visibleChannels = CONVERSATION_CHANNELS.filter((channel) => !hidden.has(channel));
+
+  const [queue, unclassified, scores] = await Promise.all([
+    reviewQueue({ visibleChannels }),
+    unclassifiedQueue({ visibleChannels }),
+    ruleScores(),
+  ]);
+
+  const canDecide = can(agent, 'ticket.subcategorise');
+
+  return (
+    <>
+      <PageHeader
+        title="Category review"
+        description="Suggestions the rules were not confident enough to apply on their own. Confirming one says the rule was right; rejecting it stops that rule suggesting the same thing on that ticket again."
+      />
+
+      {queue.length === 0 ? (
+        <Notice tone="neutral">
+          Nothing waiting. Either every suggestion has been answered, or no tickets have arrived on
+          a channel you can see.
+        </Notice>
+      ) : (
+        <Table
+          head={[
+            'Ticket',
+            'Suggested category',
+            <>
+              Evidence{' '}
+              <InfoTip label="Evidence">
+                Which rule matched, and how directly. A whole message that reads as a known phrase
+                scores highest; a single keyword inside a longer sentence scores lowest and is why
+                most of these are here rather than applied outright. It is a grade of evidence, not
+                a probability — nothing here is claiming a percentage chance of being right.
+              </InfoTip>
+            </>,
+            'What the customer wrote',
+            '',
+          ]}
+        >
+          {queue.map((row) => {
+            // Per row, not per page. The excerpt is the customer's own words and
+            // is usually Arabic even where the console is English; an Arabic
+            // sentence in a left-to-right block puts its punctuation on the
+            // wrong end and reads as though it has been corrupted.
+            const excerptLocale = row.excerpt ? detectLocale(row.excerpt) : 'en';
+
+            return (
+              <Row key={`${row.conversationId}:${row.subcategoryId}`}>
+                <Cell>
+                  <Link href={`/inbox/${row.number}`} className="font-medium hover:underline">
+                    #{row.number}
+                  </Link>
+                  <p className="mt-0.5">
+                    <ChannelBadge channel={row.channel} />
+                  </p>
+                </Cell>
+                <Cell>
+                  <span className="font-medium">{row.labelEn}</span>
+                  <p className="text-xs text-(--color-text-tertiary)">{row.key}</p>
+                </Cell>
+                <Cell className="text-xs">
+                  <p className="text-(--color-text-secondary)">{row.confidence.toFixed(2)}</p>
+                  <p className="text-(--color-text-tertiary)">{row.ruleKey ?? 'no rule matched'}</p>
+                </Cell>
+                <Cell className="max-w-xs">
+                  {row.excerpt ? (
+                    <p
+                      dir={direction(excerptLocale)}
+                      lang={excerptLocale}
+                      className="truncate text-xs text-(--color-text-secondary)"
+                    >
+                      {row.excerpt}
+                    </p>
+                  ) : (
+                    <p className="text-xs text-(--color-text-tertiary)">the message is gone</p>
+                  )}
+                </Cell>
+                <Cell>
+                  {canDecide ? (
+                    <ReviewControls
+                      conversationId={row.conversationId}
+                      subcategoryId={row.subcategoryId}
+                      label={row.labelEn}
+                    />
+                  ) : null}
+                </Cell>
+              </Row>
+            );
+          })}
+        </Table>
+      )}
+
+      <section className="mt-8">
+        <h2 className="mb-1 text-sm font-semibold">Nothing matched these</h2>
+        <p className="mb-3 max-w-2xl text-sm text-(--color-text-secondary)">
+          Free text the rules could not read, newest first. There is nothing to confirm here — the
+          point is to read what customers actually wrote and write the rule that was missing. A
+          category climbing this list is the lexicon telling you where its gap is, and it is the
+          cheap half of the asymmetry the detector is tuned around: a miss shows up here, a wrong
+          answer shows up nowhere.
+        </p>
+
+        {unclassified.length === 0 ? (
+          <Notice tone="neutral">Every message so far matched something.</Notice>
+        ) : (
+          <Table head={['Ticket', 'When', 'What the customer wrote']}>
+            {unclassified.map((row) => {
+              const excerptLocale = row.excerpt ? detectLocale(row.excerpt) : 'en';
+              // The day the categoriser first saw it, in the zone the ticket it
+              // links to draws every timestamp in, so the two agree on the date.
+              // Not UTC's, which put anything before 02:00 Cairo (03:00 under
+              // daylight saving) on the day before; nor `reportingZone()`, the
+              // default schedule's — nothing here is a figure cut on report
+              // days, and it would be a query for a zone the ticket page ignores.
+              const seenOn = dateIn(row.firstSeenAt, TEAM_TIME_ZONE);
+              return (
+                <Row key={row.conversationId}>
+                  <Cell>
+                    <Link href={`/inbox/${row.number}`} className="font-medium hover:underline">
+                      #{row.number}
+                    </Link>
+                    <p className="mt-0.5">
+                      <ChannelBadge channel={row.channel} />
+                    </p>
+                  </Cell>
+                  <Cell className="text-xs text-(--color-text-secondary)">{seenOn}</Cell>
+                  <Cell className="max-w-md">
+                    {row.excerpt ? (
+                      <p
+                        dir={direction(excerptLocale)}
+                        lang={excerptLocale}
+                        className="text-xs text-(--color-text-secondary)"
+                      >
+                        {row.excerpt}
+                      </p>
+                    ) : (
+                      <p className="text-xs text-(--color-text-tertiary)">the message is gone</p>
+                    )}
+                  </Cell>
+                </Row>
+              );
+            })}
+          </Table>
+        )}
+      </section>
+
+      <section className="mt-8">
+        <h2 className="mb-1 text-sm font-semibold">How the rules are doing</h2>
+        <p className="mb-3 max-w-2xl text-sm text-(--color-text-secondary)">
+          Every assignment keeps the rule that made it, and a rejected one is kept rather than
+          deleted — so this needs no extra bookkeeping. A rule with rejections outnumbering
+          agreements is matching something it should not; one with nothing but unreviewed rows is
+          one nobody has checked. Turn a bad rule off with <code>SUBCATEGORISE_DISABLED_RULES</code>{' '}
+          rather than waiting for a deploy.
+        </p>
+
+        {scores.length === 0 ? (
+          <Notice tone="neutral">No rule has fired yet.</Notice>
+        ) : (
+          <Table head={['Rule', 'Agreed', 'Rejected', 'Unreviewed']}>
+            {scores.map((score) => (
+              <Row key={score.ruleKey}>
+                <Cell>
+                  <code className="text-xs">{score.ruleKey}</code>
+                </Cell>
+                <Cell>{score.agreed}</Cell>
+                <Cell>
+                  {score.rejected > score.agreed && score.rejected > 0 ? (
+                    <Badge tone="warning">{score.rejected}</Badge>
+                  ) : (
+                    score.rejected
+                  )}
+                </Cell>
+                <Cell className="text-(--color-text-secondary)">{score.unreviewed}</Cell>
+              </Row>
+            ))}
+          </Table>
+        )}
+      </section>
+    </>
+  );
+}

@@ -10,7 +10,7 @@ import {
 /**
  * What the reply composer asks TypeSafe, written down in one place.
  *
- * Pure, and tested, for the reason `lib/categorise-ai/request.ts` gives: a wrong
+ * Pure, and tested, for the reason `lib/subcategorise-ai/request.ts` gives: a wrong
  * request shape is invisible in the response. A `choice` question keyed wrongly
  * still answers — over the wrong options — and the answer looks exactly like a
  * right one.

@@ -123,7 +123,7 @@ BEGIN
   -- `category_key` is frozen at assignment time so a report run next year reads
   -- what was actually assigned rather than what the registry has since been
   -- renamed to. That is only sound if it started out correct; a CHECK cannot
-  -- join, so this is enforced in lib/categorise/apply.ts, and this comment is
+  -- join, so this is enforced in lib/subcategorise/apply.ts, and this comment is
   -- here so the next person looking for the constraint finds out why there
   -- isn't one.
   -- -------------------------------------------------------------------------

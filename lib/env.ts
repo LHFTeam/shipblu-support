@@ -110,13 +110,15 @@ const schema = z.object({
    * that path would fail a search on a variable a search has no use for.
    */
   /**
-   * Controls for the ticket categoriser, all three read straight from
-   * `process.env` by `lib/categorise/` for the same reason the shipment
+   * Controls for the ticket subcategoriser, all three read straight from
+   * `process.env` by `lib/subcategorise/` for the same reason the shipment
    * patterns are: that module is reachable from the ingest path and from a page
    * render, and validating this whole schema there would let one unrelated
-   * missing variable stop tickets being categorised.
+   * missing variable stop tickets being subcategorised. They were
+   * `CATEGORISE_*` until Stage 2.A of `plans/ticket-category-routing.md`, and
+   * nothing reads the old names, so a value set under one is ignored.
    *
-   * `CATEGORISE_DISABLED_RULES` is a comma-separated list of rule keys, and it
+   * `SUBCATEGORISE_DISABLED_RULES` is a comma-separated list of rule keys, and it
    * is the one that matters in an incident: a rule found to be filing half the
    * queue under one label is switched off in the time it takes to restart a
    * service, rather than the time it takes to ship a deploy. There is
@@ -127,11 +129,11 @@ const schema = z.object({
    * The two thresholds are numbers in 0..1 and exist so the auto-apply and
    * review bands can be recalibrated against measured precision without a
    * deploy. A value that will not parse is logged and ignored in favour of the
-   * constant, because a mistyped threshold must not stop categorisation.
+   * constant, because a mistyped threshold must not stop subcategorisation.
    */
-  CATEGORISE_DISABLED_RULES: z.string().optional(),
-  CATEGORISE_AUTO_MIN: z.string().optional(),
-  CATEGORISE_RECORD_MIN: z.string().optional(),
+  SUBCATEGORISE_DISABLED_RULES: z.string().optional(),
+  SUBCATEGORISE_AUTO_MIN: z.string().optional(),
+  SUBCATEGORISE_RECORD_MIN: z.string().optional(),
 
   SHIPMENT_TRACKING_PATTERN: z.string().optional(),
   SHIPMENT_SBID_PATTERN: z.string().optional(),
@@ -344,7 +346,7 @@ const schema = z.object({
 
   /**
    * TypeSafe's System One API, read by three things, each switched on its own
-   * way: the hand-run shadow categorisation in `lib/categorise-ai/`, the
+   * way: the hand-run shadow categorisation in `lib/subcategorise-ai/`, the
    * priority classifier below, and the reply box's canned-response suggestions
    * in `lib/canned-suggest/`.
    *

@@ -33,6 +33,7 @@ import {
 } from './channel-policy';
 import { assignmentVisibility } from './visibility';
 import { metaIndex } from './message-media';
+import { describeActorLabel } from './event-labels';
 import {
   foldReactions,
   type PlacedReaction,
@@ -45,7 +46,7 @@ import {
   type LinkedShipment,
   type LinkedShippingAccount,
 } from '@/lib/shipments/queries';
-import { type AssignedCategory, categoriesForConversation } from '@/lib/categorise/queries';
+import { type AssignedSubcategory, subcategoriesForConversation } from '@/lib/subcategorise/queries';
 import {
   sideConversationsForConversation,
   type SideConversationView,
@@ -200,7 +201,7 @@ export type ConversationDetail = {
    * cause, by a page that has not loaded which one is set, would be told to fill
    * in something already filled in.
    */
-  categories: AssignedCategory[];
+  subcategories: AssignedSubcategory[];
   rootCauseId: string | null;
   /**
    * Which population asked, when the records established it.
@@ -322,7 +323,7 @@ export async function getConversation(
     .limit(1);
   const unverifiedSubmitter = unverified.length > 0;
 
-  const [timeline, files, events, shipments, accounts, sides, categories, controlTakenAt, survey] =
+  const [timeline, files, events, shipments, accounts, sides, subcategories, controlTakenAt, survey] =
     // Nine reads on a pool of eight places: at most the pool at once, so one
     // ticket page can fill it but never queue behind itself (AGENTS.md,
     // Database) — one wave, as before, plus the ninth.
@@ -387,7 +388,7 @@ export async function getConversation(
       () => shipmentsForConversation(row.conversation.id, row.conversation.requesterContactId),
       () => shippingAccountsForConversation(row.conversation.id),
       () => sideConversationsForConversation(row.conversation.id),
-      () => categoriesForConversation(row.conversation.id),
+      () => subcategoriesForConversation(row.conversation.id),
       () => threadControlTakenAt(row.conversation.id),
       () => ticketSurveyState(row.conversation.id, row.conversation.channel),
     ]);
@@ -473,7 +474,7 @@ export async function getConversation(
       : null,
     unverifiedSubmitter,
     metaThread,
-    categories,
+    subcategories,
     rootCauseId: row.conversation.rootCauseId,
     requesterKind: row.conversation.requesterKind,
     shipments,
@@ -541,7 +542,7 @@ export async function getConversation(
     events: events.map((event) => ({
       id: event.id,
       type: event.type,
-      actorName: event.actorName ?? event.actorLabel,
+      actorName: event.actorName ?? describeActorLabel(event.actorLabel),
       data: event.data,
       createdAt: event.createdAt,
     })),

@@ -1,0 +1,245 @@
+import { and, asc, eq, exists, gte, inArray, isNull, lte, ne, notInArray, sql } from 'drizzle-orm';
+import type { SQL } from 'drizzle-orm';
+import { db } from '@/db/client';
+import { aiSubcategoryRuns, conversationSubcategories, conversations, messages } from '@/db/schema';
+import { earlierMessages } from '@/lib/subcategorise-ai/context';
+import { subcategoryOptionsForAi } from '@/lib/subcategorise-ai/options';
+import { formatReport, reportFor } from '@/lib/subcategorise-ai/report';
+import { runOne, type MessageToRun, type RunSettings } from '@/lib/subcategorise-ai/run';
+import { subcategorisationRequest } from '@/lib/subcategorise-ai/request';
+import { UNCLASSIFIED_KEY } from '@/lib/subcategorise/taxonomy';
+import type { ClaimedJob } from '@/lib/queue';
+import { parseJobPayload } from '@/lib/queue/payloads';
+import { scanMessagesInKeysetOrder } from '@/lib/queue/backfill';
+import { CONVERSATION_CHANNELS, readOnlyChannels } from '@/lib/tickets/channel-policy';
+import type { ConversationChannel } from '@/lib/tickets/channel-policy';
+import { notReaction } from '@/lib/tickets/not-reaction';
+import { typesafeConfigured, typesafeModel } from '@/lib/typesafe/client';
+import { logger } from '@/lib/log';
+
+/**
+ * Runs the archive through TypeSafe and records what it said, beside the rules.
+ *
+ * A measurement, not a second detector. Nothing this writes is read by the review
+ * queue, the primary ladder or either rollup — see `db/schema/subcategorise-ai.ts`
+ * for why that separation is the design rather than a staging step.
+ *
+ * Deliberately hand-run and not on a cron. A shadow run is an experiment with a
+ * label on it; something that fires nightly would accumulate rows nobody asked
+ * for against a model alias that moves underneath it.
+ *
+ *     npm run job -- backfill_subcategorise_ai dryRun=true limit=5
+ *     npm run job -- backfill_subcategorise_ai runLabel=smoke limit=5
+ *     npm run job -- backfill_subcategorise_ai runLabel=baseline onlyUnclassified=true
+ *     npm run job -- backfill_subcategorise_ai runLabel=full-2026-09
+ *     npm run job -- backfill_subcategorise_ai runLabel=full-2026-09 reportOnly=true
+ *
+ * **The bot channel is excluded**, through the same `readOnlyChannels()` the live
+ * subcategoriser uses — its menu is a self-service funnel rather than support
+ * demand, and measuring a classifier on it would be measuring the menu. That
+ * leaves a corpus of a few hundred messages, which the report says out loud above
+ * every figure it prints. `channels=whatsapp_bot` overrides it for anyone who
+ * wants the larger validation corpus; that is a decision to take deliberately at
+ * a command line, not a default.
+ */
+
+/** The run's options, as the schema in `lib/queue/payloads.ts` hands them over. */
+type Payload = ReturnType<typeof parseJobPayload<'backfill_subcategorise_ai'>>;
+
+const BATCH = 200;
+
+const TAG = '[backfill_subcategorise_ai]';
+const log = logger('backfill_subcategorise_ai');
+
+export async function backfillSubcategoriseAi(job: ClaimedJob): Promise<void> {
+  const payload = parseJobPayload(job, 'backfill_subcategorise_ai');
+  const runLabel = payload.runLabel ?? 'adhoc';
+  const dryRun = payload.dryRun === true;
+  const withContext = payload.context !== false;
+
+  if (payload.reportOnly === true) {
+    // eslint-disable-next-line no-console -- the report is a multi-line block with no tag
+    console.log(formatReport(await reportFor(runLabel)));
+    return;
+  }
+
+  if (!dryRun && !typesafeConfigured()) {
+    // Unset means skip rather than fail, the same answer the Freshdesk importer
+    // gives: this is a credential nobody has had to hold yet, and a hand-run that
+    // throws teaches less than one that says what is missing.
+    log.info(`TYPESAFE_API_KEY is not set — nothing to run`);
+    return;
+  }
+
+  const options = await subcategoryOptionsForAi();
+  if (options.length === 0 && !dryRun) {
+    // An empty registry is a database nobody has seeded, not a bug here.
+    //
+    // A dry run deliberately carries on past this. Its whole job is to put the
+    // selection and report queries in front of a real Postgres — that is why it
+    // is in CI's handler loop — and CI's database has migrations but no seeded
+    // taxonomy, so bailing out here would skip exactly the SQL it is there to
+    // prove. `tsc` type-checks the drizzle builder, not the statement it emits.
+    log.info(`no active detectable subcategories in ticket_categories — nothing to ask`);
+    // eslint-disable-next-line no-console -- the report is a multi-line block with no tag
+    console.log(formatReport(await reportFor(runLabel)));
+    return;
+  }
+
+  const settings: RunSettings = {
+    runLabel,
+    model: typesafeModel(),
+    withContext,
+    options,
+    offered: new Set(options.map((option) => option.key)),
+  };
+
+  const where = await candidateFilter(payload, runLabel);
+
+  let predicted = 0;
+  let failed = 0;
+
+  const scanned = await scanMessagesInKeysetOrder(
+    { batchSize: BATCH, limit: payload.limit },
+    (after, size) =>
+      db
+        .select({
+          id: messages.id,
+          conversationId: messages.conversationId,
+          bodyText: messages.bodyText,
+          createdAt: messages.createdAt,
+          channel: conversations.channel,
+        })
+        .from(messages)
+        .innerJoin(conversations, eq(conversations.id, messages.conversationId))
+        .where(and(...where, after))
+        .orderBy(asc(messages.id))
+        .limit(size),
+    async (row) => {
+      if (!row.bodyText.trim()) return;
+
+      const message: MessageToRun = {
+        conversationId: row.conversationId,
+        messageId: row.id,
+        channel: row.channel,
+        bodyText: row.bodyText,
+        earlier: withContext ? await earlierMessages(row.conversationId, row.createdAt) : [],
+      };
+
+      if (dryRun) {
+        // Build the body and throw it away. Cheap, and it means a question this
+        // system can no longer construct — a taxonomy past the 255-option limit
+        // — fails here rather than on a live run. Skipped on an empty registry,
+        // which `subcategoryQuestion` refuses by design and which says nothing
+        // about the queries this run is here to exercise.
+        if (settings.options.length > 0) {
+          subcategorisationRequest(message, settings.options, settings.model, settings.withContext);
+        }
+        return;
+      }
+
+      const result = await runOne(message, settings);
+      if (result.outcome === 'predicted') predicted += 1;
+      else failed += 1;
+    },
+  );
+
+  log.info(
+    `run="${runLabel}" scanned=${scanned} predicted=${predicted} failed=${failed} ` +
+      `context=${withContext} dry_run=${dryRun}`,
+  );
+  // eslint-disable-next-line no-console -- the report is a multi-line block with no tag
+  console.log(formatReport(await reportFor(runLabel)));
+
+  if (failed > 0) {
+    // Thrown after everything durable is written, so the queue's retry only fills
+    // the gaps: the rows that succeeded are not selected again, and the ones
+    // carrying an error are the only ones the upsert will replace.
+    throw new Error(`${TAG} ${failed} message(s) failed transiently; re-run to fill the gaps`);
+  }
+}
+
+/** Which messages are in scope, as one list of predicates. */
+async function candidateFilter(payload: Payload, runLabel: string): Promise<SQL[]> {
+  const where: SQL[] = [
+    eq(messages.kind, 'reply'),
+    eq(messages.direction, 'inbound'),
+    sql`btrim(${messages.bodyText}) <> ''`,
+    // A copied WhatsApp history is never subcategorised by the rules path
+    // (`afterMessageStored` does not run for it), so a shadow run over it
+    // would compare the model with a detector that was never asked.
+    ne(messages.sourceSystem, 'import'),
+    // Nor is a reaction, for the same reason — and a thousand calls asking
+    // which subcategory `[reacted 🙏]` is would be paid for.
+    notReaction(),
+  ];
+
+  const channels = requestedChannels(payload.channels);
+  if (channels) where.push(inArray(conversations.channel, channels));
+  else where.push(notInArray(conversations.channel, readOnlyChannels()));
+
+  if (payload.since) where.push(gte(messages.createdAt, new Date(payload.since)));
+  if (payload.until) where.push(lte(messages.createdAt, new Date(payload.until)));
+
+  if (payload.onlyUnclassified === true) {
+    where.push(
+      exists(
+        db
+          .select({ one: sql`1` })
+          .from(conversationSubcategories)
+          .where(
+            and(
+              eq(conversationSubcategories.conversationId, conversations.id),
+              eq(conversationSubcategories.subcategoryKey, UNCLASSIFIED_KEY),
+            ),
+          ),
+      ),
+    );
+  }
+
+  // Already measured under this label, successfully. A row carrying an error is
+  // deliberately not excluded — re-running a label is how a rate-limited run is
+  // completed, and that is the only thing it may change.
+  where.push(
+    sql`not ${exists(
+      db
+        .select({ one: sql`1` })
+        .from(aiSubcategoryRuns)
+        .where(
+          and(
+            eq(aiSubcategoryRuns.runLabel, runLabel),
+            eq(aiSubcategoryRuns.messageId, messages.id),
+            isNull(aiSubcategoryRuns.error),
+          ),
+        ),
+    )}`,
+  );
+
+  return where;
+}
+
+/**
+ * A typo in `channels=` is an error, not an empty run.
+ *
+ * Checked against the channel list rather than passed through, because
+ * `inArray` on a value the enum does not contain returns nothing at all — and a
+ * run that measured zero messages and a run whose filter was misspelt print the
+ * same thing.
+ */
+function requestedChannels(raw: string | undefined): ConversationChannel[] | null {
+  if (typeof raw !== 'string' || !raw.trim()) return null;
+
+  const names = raw
+    .split(',')
+    .map((name) => name.trim())
+    .filter(Boolean);
+
+  const channels: ConversationChannel[] = [];
+  for (const name of names) {
+    const match = CONVERSATION_CHANNELS.find((channel) => channel === name);
+    if (!match) throw new Error(`${TAG} "${name}" is not a conversation channel`);
+    channels.push(match);
+  }
+
+  return channels.length > 0 ? channels : null;
+}

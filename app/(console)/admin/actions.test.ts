@@ -27,7 +27,7 @@ vi.mock('next/cache', () => ({ revalidatePath: () => {} }));
 const actions = {
   ...(await import('./agents/actions')),
   ...(await import('./channels/actions')),
-  ...(await import('./categories/actions')),
+  ...(await import('./subcategories/actions')),
 };
 
 const INITIAL = { error: null };
@@ -52,13 +52,13 @@ describe('admin actions given an id no row can have', () => {
 
   it.each([
     [
-      'saveCategory',
-      () => actions.saveCategory(INITIAL, form({ id: MALFORMED, labelEn: 'A', labelAr: 'ا' })),
+      'saveSubcategory',
+      () => actions.saveSubcategory(INITIAL, form({ id: MALFORMED, labelEn: 'A', labelAr: 'ا' })),
       'Unknown category',
     ],
     [
-      'setCategoryActive',
-      () => actions.setCategoryActive(INITIAL, form({ id: MALFORMED, active: 'true' })),
+      'setSubcategoryActive',
+      () => actions.setSubcategoryActive(INITIAL, form({ id: MALFORMED, active: 'true' })),
       'Unknown category',
     ],
     [
@@ -130,13 +130,13 @@ describe('admin actions given a well-formed id that names nothing', () => {
       'Unknown agent',
     ],
     [
-      'saveCategory',
-      () => actions.saveCategory(INITIAL, form({ id: NOBODY, labelEn: 'A', labelAr: 'ا' })),
+      'saveSubcategory',
+      () => actions.saveSubcategory(INITIAL, form({ id: NOBODY, labelEn: 'A', labelAr: 'ا' })),
       'Unknown category',
     ],
     [
-      'setCategoryActive',
-      () => actions.setCategoryActive(INITIAL, form({ id: NOBODY, active: 'true' })),
+      'setSubcategoryActive',
+      () => actions.setSubcategoryActive(INITIAL, form({ id: NOBODY, active: 'true' })),
       'Unknown category',
     ],
     [

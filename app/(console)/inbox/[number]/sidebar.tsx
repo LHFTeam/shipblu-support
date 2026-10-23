@@ -10,7 +10,7 @@ import { Badge } from '@/components/ui';
 import { accountableNote } from '@/lib/tickets/accountable-note';
 import type { ConversationDetail } from '@/lib/tickets/conversation';
 import type { TicketFieldDef } from '@/lib/tickets/custom-fields';
-import type { CategoryOption, RootCauseOption } from '@/lib/categorise/queries';
+import type { SubcategoryOption, RootCauseOption } from '@/lib/subcategorise/queries';
 import { PRIORITIES } from '@/lib/tickets/vocabulary';
 import { purgeTicket } from '../../ticket-actions';
 import { PurgePanel } from '../../purge-panel';
@@ -18,7 +18,7 @@ import type { PurgePreview } from '@/lib/admin/purge-summary';
 import { SideConversationsField } from './side-conversations';
 import { CustomFields, FieldSelect, SidebarField, TagField } from './ticket-fields';
 import { ShipmentsField, ShippingAccountsField } from './shipments-field';
-import { CategoriesField } from './categories-field';
+import { SubcategoriesField } from './subcategories-field';
 import { SatisfactionField } from './csat-field';
 import { DetailsTabs } from './details-tabs';
 import { describeEvent } from '@/lib/tickets/event-labels';
@@ -45,8 +45,8 @@ export function Sidebar({
   groups,
   fields,
   canClose,
-  canCategorise,
-  categoryOptions,
+  canSubcategorise,
+  subcategoryOptions,
   rootCauses,
   purgePreview,
   purgeRefusal,
@@ -59,8 +59,8 @@ export function Sidebar({
   groups: { id: string; name: string }[];
   fields: TicketFieldDef[];
   canClose: boolean;
-  canCategorise: boolean;
-  categoryOptions: CategoryOption[];
+  canSubcategorise: boolean;
+  subcategoryOptions: SubcategoryOption[];
   rootCauses: RootCauseOption[];
   purgePreview: PurgePreview | null;
   purgeRefusal: string | null;
@@ -221,11 +221,11 @@ export function Sidebar({
               <>
                 {properties}
 
-                <CategoriesField
+                <SubcategoriesField
                   conversation={conversation}
-                  options={categoryOptions}
+                  options={subcategoryOptions}
                   rootCauses={rootCauses}
-                  canCategorise={canCategorise}
+                  canSubcategorise={canSubcategorise}
                 />
 
                 <DetailsSection

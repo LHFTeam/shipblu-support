@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { normaliseForMatch } from '@/lib/categorise/normalise';
+import { normaliseForMatch } from '@/lib/subcategorise/normalise';
 import { ARABIC_LETTER_VARIANTS, arabicVariantPattern } from './arabic';
 
 /** Runs a pattern the way Postgres's `~*` would, near enough for these cases. */

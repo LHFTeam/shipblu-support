@@ -3,13 +3,13 @@ import { and, eq } from 'drizzle-orm';
 import { db } from '@/db/client';
 import {
   contacts,
-  conversationCategories,
+  conversationSubcategories,
   conversations,
-  ticketCategories,
+  ticketSubcategories,
   ticketStatuses,
 } from '@/db/schema';
 import type { SessionAgent } from '@/lib/auth/session';
-import { CAUSE_REQUIRED_AREAS } from '@/lib/categorise/taxonomy';
+import { CAUSE_REQUIRED_AREAS } from '@/lib/subcategorise/taxonomy';
 import type { ActionState } from '@/lib/http/action-state';
 import { isUuid } from '@/lib/http/uuid';
 import { canSeeChannel, consoleReplyReason, readOnlyReason } from '@/lib/tickets/channel-policy';
@@ -90,7 +90,7 @@ export function refresh(number: number) {
   // The category review queue is a view onto these tickets' categories, so any
   // ticket write can stale it. Here rather than in each action, for the reason
   // channel-policy.ts gives about rules spread across call sites.
-  revalidatePath('/admin/categories/review');
+  revalidatePath('/admin/subcategories/review');
 }
 
 /**
@@ -135,7 +135,7 @@ export async function refuseIfIncomplete(
  * three-day auto-close would wedge tickets in a state no person was asked to
  * clear.
  *
- * The list of areas lives in `lib/categorise/taxonomy.ts` because the coverage
+ * The list of areas lives in `lib/subcategorise/taxonomy.ts` because the coverage
  * figure on the report has to measure the same population this gate demands —
  * two definitions of "owes a cause" is how a report comes to say 40% of tickets
  * are missing something that was never asked of most of them.
@@ -144,17 +144,17 @@ export async function refuseIfNoRootCause(conversationId: string): Promise<Actio
   const rows = await db
     .select({
       rootCauseId: conversations.rootCauseId,
-      area: ticketCategories.area,
+      area: ticketSubcategories.area,
     })
     .from(conversations)
     .leftJoin(
-      conversationCategories,
+      conversationSubcategories,
       and(
-        eq(conversationCategories.conversationId, conversations.id),
-        eq(conversationCategories.isPrimary, true),
+        eq(conversationSubcategories.conversationId, conversations.id),
+        eq(conversationSubcategories.isPrimary, true),
       ),
     )
-    .leftJoin(ticketCategories, eq(ticketCategories.id, conversationCategories.categoryId))
+    .leftJoin(ticketSubcategories, eq(ticketSubcategories.id, conversationSubcategories.subcategoryId))
     .where(eq(conversations.id, conversationId))
     .limit(1);
 

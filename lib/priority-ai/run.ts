@@ -1,9 +1,9 @@
 import { and, asc, desc, eq, inArray, ne, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { aiPriorityRuns, conversationEvents, conversations, messages } from '@/db/schema';
-import { isCategorisableMessage } from '@/lib/categorise/apply';
-import { earlierMessages } from '@/lib/categorise-ai/context';
-import { predictionFrom, type AiPrediction } from '@/lib/categorise-ai/map';
+import { isSubcategorisableMessage } from '@/lib/subcategorise/apply';
+import { earlierMessages } from '@/lib/subcategorise-ai/context';
+import { predictionFrom, type AiPrediction } from '@/lib/subcategorise-ai/map';
 import { errorMessage } from '@/lib/errors';
 import { logger } from '@/lib/log';
 import { onPriorityChanged } from '@/lib/sla';
@@ -344,7 +344,7 @@ type LoadedRow = {
  * about when it arrived.
  */
 function skipReason(row: LoadedRow): string | null {
-  if (!isCategorisableMessage(row.kind, row.direction)) return 'not an inbound reply';
+  if (!isSubcategorisableMessage(row.kind, row.direction)) return 'not an inbound reply';
   if (
     row.authorContactId &&
     row.requesterContactId &&

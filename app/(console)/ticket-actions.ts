@@ -332,7 +332,7 @@ export async function purgeTicket(_state: ActionState, formData: FormData): Prom
   // DELETE trigger whose payload names a row nobody can read.
   revalidatePath('/inbox');
   revalidatePath('/contacts');
-  revalidatePath('/admin/categories/review');
+  revalidatePath('/admin/subcategories/review');
 
   // The redirect happens here, not in the panel. A server action that
   // revalidates makes Next re-render the route the form was posted from in the

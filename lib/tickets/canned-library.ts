@@ -9,7 +9,7 @@
  * the console like any response somebody typed there.
  *
  * Organised by what the customer wrote about, following the areas in
- * `lib/categorise/taxonomy.ts`, so the response an agent reaches for sits under
+ * `lib/subcategorise/taxonomy.ts`, so the response an agent reaches for sits under
  * the same heading as the category the ticket was filed under. Two audiences
  * write in and they need different answers to the same question: a recipient
  * waiting for a parcel, who never chose ShipBlu, and a merchant, who pays for

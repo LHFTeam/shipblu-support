@@ -293,7 +293,7 @@ describe('ingestWhatsAppMessage', () => {
       },
     ]);
 
-    expect(await eventTypes(result.conversationId)).toEqual(['categorised']);
+    expect(await eventTypes(result.conversationId)).toEqual(['subcategorised']);
     expect(await db.select().from(jobs)).toEqual([]);
   });
 
@@ -480,8 +480,8 @@ describe('ingestWhatsAppMessage', () => {
       expect(support.conversationId).not.toBe(bot.conversationId);
       expect(await db.select().from(contacts)).toHaveLength(1);
 
-      // Nor categorised, though `afterMessageStored` does run here: the
-      // categoriser leaves read-only channels out itself, because the bot's
+      // Nor subcategorised, though `afterMessageStored` does run here: the
+      // subcategoriser leaves read-only channels out itself, because the bot's
       // menu is a self-service funnel and not support demand.
       expect(await eventTypes(bot.conversationId)).toEqual([]);
     });
@@ -636,9 +636,9 @@ describe('ingestWhatsAppReaction', () => {
       reaction: { message_id: 'wamid.first', emoji: '🙏' },
     });
 
-    // Nothing downstream of a message ran: no categorisation of a 🙏, and
+    // Nothing downstream of a message ran: no subcategorisation of a 🙏, and
     // nothing queued for it.
-    expect(await eventTypes(asked.conversationId)).toEqual(['categorised']);
+    expect(await eventTypes(asked.conversationId)).toEqual(['subcategorised']);
     expect(await db.select().from(jobs)).toEqual(queued);
   });
 

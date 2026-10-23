@@ -472,6 +472,115 @@ conrelid = 'conversations'::regclass AND conname =
   records from 2026-08-19. Rolling back 1.3 never needs 1.2 rolled back,
   because no code path depends on the CHECK.
 
+### 2.A, as built
+
+Built as [Stage 2](#stage-2--the-subcategory-rename) describes it, with no
+migration: `drizzle-kit generate` reports nothing to do, because every schema
+identifier was renamed with its SQL string pinned to the old name. What the
+stage section left open was decided as follows.
+
+- **What moved.** `lib/subcategorise/`, `lib/subcategorise-ai/`,
+  `db/schema/subcategories.ts` and `subcategorise-ai.ts`,
+  `lib/reports/subcategory-queries.ts` and `subcategory-rollup.ts`,
+  `worker/handlers/backfill-subcategorise-ai.ts`,
+  `app/(console)/admin/subcategories/`, `app/(console)/reports/subcategories/`,
+  `app/(console)/subcategory-actions.ts` and the ticket page's
+  `subcategories-field.tsx`. Every exported name follows, with no
+  compatibility alias left behind, and so do the fields that carry the taxonomy
+  across modules: a rule's `subcategory`, an area's `subcategories`, the ticket
+  page's `subcategories` and the form field `subcategoryId`. A raw SQL row keeps
+  `category_key` and is mapped at the boundary.
+- **What kept the old word, on purpose.** The SQL names, until 2.B. The
+  status category, the knowledge base's categories and Meta's template
+  categories, which are other things. The taxonomy and rule keys and
+  `DETECTOR_VERSION`, since no rule changed. The handbook article key
+  `categorising`. And what TypeSafe is sent: `SUBCATEGORY_QUESTION` is still
+  the string `'category'` and the instructions are byte for byte the old ones,
+  pinned by a test, so a shadow run after 2.A is compared with one before it on
+  the same question.
+- **Events.** The rules detector writes `subcategorised` as
+  `subcategory-detector`, and the four console actions write
+  `subcategory_added|confirmed|rejected|removed` with `subcategoryKey`.
+  `describeEvent` reads the old and new names and both keys for good, since
+  stored rows keep their words, and `describeActorLabel` prints the old actor
+  as the new one, so a ticket whose history spans the deploy shows one
+  mechanism, not two. **Stage 3 must not reuse `categorised` or the four
+  `category_*` types**, or a ticket's subcategory history would read as the new
+  field's.
+- **Redirects.** Four exact sources, each a 307. Not `/admin/categories/:path*`:
+  redirects run before the filesystem, so a wildcard would hide Stage 3's whole
+  tree, not only its index. Stage 3 deletes the `/admin/categories` entry in the
+  PR that adds its page; the other three name paths nothing will reuse.
+- **Permission keys.** Read 2026-10-23 14:22 UTC: no agent holds any override,
+  of these keys or any other. `can()` ignores a key it does not know, so an
+  override under an old name would lapse silently rather than fail. Stage 3
+  gives `admin.categories` back to the new Categories page, and before it does
+  it reads that no agent's `permissions` holds the key.
+- **Env vars.** `SUBCATEGORISE_DISABLED_RULES`, `SUBCATEGORISE_AUTO_MIN` and
+  `SUBCATEGORISE_RECORD_MIN`, with no fallback to the old names: a fallback
+  would be a second place for the same setting. The Render MCP tools do not
+  return variable values, so the deploy-day read is in the dashboard.
+- **Job and log tags.** `backfill_subcategorise_ai` (no row of either name has
+  ever existed, read 14:22 UTC) and the log tags `[subcategorise]` and
+  `[backfill_subcategorise_ai]`. A log search for the old tags finds nothing
+  newer than the deploy.
+- **Handbook.** Seven articles change: `replying`, `ticket-fields`,
+  `categorising`, `reports`, `people`, `automation-and-forms` and
+  `owner-role`. So do the `tickets` and `administration` folder descriptions,
+  which the seed syncs on every run. The chips quote the code's labels
+  exactly: `Subcategories`, `Add a subcategory…` and `Subcategory review`.
+
+**Deploying 2.A.** It has no migration, but the release it rides in does: `dev`
+also carries #396 (`e7376bf`: migrations `0044` and `0045`, `db/sql/009`, and
+changes to `001` and `003`) and 1.3's `db/sql/008`. So rules 1 and 7 ask for web
+first, which suits 2.A anyway: an old web prints a new worker's `subcategorised`
+event as its bare type, while a new web reads an old worker's events in full.
+
+1. **Before.** Read, in the Render dashboard, the three env groups and the
+   variables set on web and the worker for any `CATEGORISE_*`; copy a value to
+   its new name before deploying. Re-read the overrides and the job, expecting
+   0 and 0:
+
+   ```sql
+   select
+     (select count(*) from agents
+       where permissions ?| array['ticket.categorise', 'admin.categories']) as overrides,
+     (select count(*) from jobs where type = 'backfill_categorise_ai') as old_jobs;
+   ```
+
+2. **Deploy** web, then the worker, then the four crons.
+3. **Handbook**, once web is live. Run
+   `npm run job -- seed_console_handbook dryRun=true` and expect exactly the
+   seven articles above. Anything more is a console edit that `overwrite=true`
+   would replace (each replacement cuts a `kb_article_versions` row, so it can
+   be undone), and is read before going on. Then `overwrite=true`.
+4. **Verify.** `/admin/categories` lands on `/admin/subcategories`, and the
+   ticket sidebar says Subcategories. Once all six services run the release, no
+   `categorised` or `category_*` row is newer than the moment the last of web
+   and the worker went live, and `subcategorised` appears on every channel that
+   had traffic since:
+
+   ```sql
+   select c.channel, e.type, count(*) as n, max(e.created_at) as newest
+   from conversation_events e
+   join conversations c on c.id = e.conversation_id
+   where e.type in ('categorised', 'subcategorised')
+      or e.type like 'category\_%' or e.type like 'subcategory\_%'
+   group by 1, 2
+   order by 1, 2;
+   ```
+
+   Read 2026-10-23 14:22 UTC, before any of it: 783 `categorised` (facebook
+   380, whatsapp 241, instagram 117, facebook_comment 36, instagram_comment 5,
+   email 2, webchat 2), one `category_confirmed`, and no row under a new name.
+
+**Rolling back 2.A** is deploying the previous commit on all six services. The
+review queue and the reports read `conversation_categories`, which 2.A never
+touched; what an old web cannot read is the events written in between, which
+its timeline prints as bare types. A variable set under a new name is then
+read by nothing, and the handbook keeps its new words until the seed is run
+from the older commit with `overwrite=true`.
+
 ### Working on this repo without the outgoing session's context
 
 - **`dev` is the integration branch, and GitHub keeps deleting it.** The

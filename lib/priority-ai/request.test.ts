@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { MAX_TEXT_LENGTH } from '@/lib/categorise/normalise';
+import { MAX_TEXT_LENGTH } from '@/lib/subcategorise/normalise';
 import { PRIORITIES } from '@/lib/tickets/vocabulary';
 import { PRIORITY_QUESTION, priorityQuestion, priorityRequest } from './request';
 

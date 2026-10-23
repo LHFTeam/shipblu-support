@@ -399,18 +399,18 @@ having actually looked. Accountability is then derived rather than typed:
 `ticket_root_causes.owner` maps each cause to exactly one party, so an agent
 fills one field and the report gets two dimensions that cannot disagree.
 
-12 areas, 55 categories, 27 causes, bilingual, aligned to the parcel states in
-`lib/shipments/status.ts` so a report can ask what the parcel was really doing.
-The detector is rules only — inspectable, free, deterministic, and turn-off-able
-by name in `CATEGORISE_DISABLED_RULES` while somebody fixes one. Two thresholds:
-above 0.90 it applies — a whole message that reads as a known phrase, or two
-anchored patterns agreeing — down to 0.35 it suggests into
-`/admin/categories/review`, below that nothing is written. A pile of single
+12 areas, 55 subcategories, 27 causes, bilingual, aligned to the parcel states
+in `lib/shipments/status.ts` so a report can ask what the parcel was really
+doing. The detector is rules only — inspectable, free, deterministic, and
+turn-off-able by name in `SUBCATEGORISE_DISABLED_RULES` while somebody fixes
+one. Two thresholds: above 0.90 it applies — a whole message that reads as a
+known phrase, or two anchored patterns agreeing — down to 0.35 it suggests into
+`/admin/subcategories/review`, below that nothing is written. A pile of single
 keywords caps below the auto line however many of them agree. Confidence is an evidence grade and not a
 probability, and the console says so where the number appears.
-`/reports/categories` reads the new `category_metrics_daily` and
-`root_cause_metrics_daily`, both folded into the existing `rollup_metrics`
-transaction. See `plans/ticket-categorisation.md`.
+`/reports/subcategories` reads the new `category_metrics_daily` (its name until
+Stage 2.B) and `root_cause_metrics_daily`, both folded into the existing
+`rollup_metrics` transaction. See `plans/ticket-categorisation.md`.
 
 **It was tuned against the real corpus rather than against imagination**, and
 that is the part worth copying. 769 free-text messages, 59.6% → **85.3%
@@ -435,6 +435,17 @@ contain free text the bot never answered**, which is the best available proxy fo
 agent-bound complaints and a leading indicator of inbound volume. That is also
 why there is **no backfill job**: with the bot channel excluded there are 55
 conversations in the entire archive to categorise.
+
+2026-10-23, in the code and not yet deployed: Stage 2.A renames the topic
+taxonomy to subcategory in code, UI, routes (old paths 307-redirect),
+permission keys, the job name and the variables; SQL names follow in 2.B. The
+names an operator types are now `/admin/subcategories`,
+`/reports/subcategories`, `ticket.subcategorise`, `admin.subcategories`,
+`backfill_subcategorise_ai` and `SUBCATEGORISE_*`. Stored events keep
+`categorised` and `category_*` and are read beside the new `subcategorised` and
+`subcategory_*`. The tables keep the names this section gives them until Stage
+2.B of `plans/ticket-category-routing.md`, which frees "category" for the field
+Stage 3 adds.
 
 And now **the chat launcher knows the difference between a customer and us.**
 The help centre answers on the console's own hostname, so every agent reading an
@@ -1476,7 +1487,7 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
   `plans/canned-suggestions-through-typesafe.md`). This makes TypeSafe a
   **request-path dependency for the first time**: `/api/canned-suggestions`
   reads `TYPESAFE_API_KEY` from a web request, where until now only worker jobs
-  did — the hand-run shadow categorisation and the priority classifier. The flag
+  did — the hand-run shadow subcategorisation and the priority classifier. The flag
   is not the key — production already holds that — but the switch on
   `/admin/canned` (`canned_suggestion_settings`, no row = off). Turn it on at
   cutover, once agents are replying, and read
@@ -1488,7 +1499,7 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
   title and text of every canned response the agent can see. Rollback is the
   switch, effective within thirty seconds per instance. The first call measures
   what has only been estimated — about 5–6k input tokens and well under a
-  second, by analogy with the 647 shadow categorisation calls (p50 234 ms) — and
+  second, by analogy with the 647 shadow subcategorisation calls (p50 234 ms) — and
   every row stores both.
 
 ### 5.2 Live-provider verification
@@ -1787,7 +1798,7 @@ expires_at, inspected_at` — never `envelope`, and a null `expires_at` means
   so the timeline can pair it with the message it names — on the person's
   newest conversation, closed or not, and changes nothing on it: no clock,
   `last_message_at` included, no status, no SLA, automation, assignment,
-  out-of-hours reply, categorisation or priority classification. With no
+  out-of-hours reply, subcategorisation or priority classification. With no
   conversation to put it on — or when the newest is a copied phone history,
   whose native ticket before it may be closed and months old — it is not
   stored, and no contact is made. The
