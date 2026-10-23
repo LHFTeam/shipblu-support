@@ -7,7 +7,8 @@ import { can } from '@/lib/auth/permissions';
 import { reviewQueue, ruleScores, unclassifiedQueue } from '@/lib/categorise/queries';
 import { direction } from '@/lib/kb/locale';
 import { detectLocale } from '@/lib/kb/language';
-import { dayIn, reportingZone } from '@/lib/reports/rollup';
+import { TEAM_TIME_ZONE } from '@/lib/hours/zone';
+import { dateIn } from '@/lib/reports/rollup';
 import { CONVERSATION_CHANNELS, hiddenChannels } from '@/lib/tickets/channel-policy';
 import { ReviewControls } from './controls';
 
@@ -45,12 +46,6 @@ export default async function CategoryReviewPage() {
    */
   const hidden = new Set<string>(hiddenChannels(agent));
   const visibleChannels = CONVERSATION_CHANNELS.filter((channel) => !hidden.has(channel));
-
-  // The team's zone, so "When" is the day the message arrived in Cairo rather
-  // than in UTC — the days the reports are cut on. Read before the queries
-  // rather than beside them: a cold catalog memo is three queries of its own,
-  // and beside these that is six at once.
-  const zone = await reportingZone();
 
   const [queue, unclassified, scores] = await Promise.all([
     reviewQueue({ visibleChannels }),
@@ -159,6 +154,13 @@ export default async function CategoryReviewPage() {
           <Table head={['Ticket', 'When', 'What the customer wrote']}>
             {unclassified.map((row) => {
               const excerptLocale = row.excerpt ? detectLocale(row.excerpt) : 'en';
+              // The day the categoriser first saw it, in the zone the ticket it
+              // links to draws every timestamp in, so the two agree on the date.
+              // Not UTC's, which put anything before 02:00 Cairo (03:00 under
+              // daylight saving) on the day before; nor `reportingZone()`, the
+              // default schedule's — nothing here is a figure cut on report
+              // days, and it would be a query for a zone the ticket page ignores.
+              const seenOn = dateIn(row.firstSeenAt, TEAM_TIME_ZONE);
               return (
                 <Row key={row.conversationId}>
                   <Cell>
@@ -169,9 +171,7 @@ export default async function CategoryReviewPage() {
                       <ChannelBadge channel={row.channel} />
                     </p>
                   </Cell>
-                  <Cell className="text-xs text-(--color-text-secondary)">
-                    {dayIn(row.firstSeenAt, zone)}
-                  </Cell>
+                  <Cell className="text-xs text-(--color-text-secondary)">{seenOn}</Cell>
                   <Cell className="max-w-md">
                     {row.excerpt ? (
                       <p

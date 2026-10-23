@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { cairo } from '@/lib/testing/time';
-import { dayIn, emptyBucket, reconciles, slicesFor, type Slice } from './rollup';
+import { dateIn, emptyBucket, reconciles, slicesFor, type Slice } from './rollup';
 
 /**
  * `metrics_daily` stores four slices per day — the totals, and then by group, by
@@ -124,22 +124,22 @@ describe('reconciles', () => {
  * midnight in winter and the hour after it in summer — so the cases that catch
  * a fixed offset sit there.
  */
-describe('dayIn', () => {
+describe('dateIn', () => {
   const ZONE = 'Africa/Cairo';
 
   it('lists the small hours on the day they fall on, which UTC does not', () => {
     // Before 03:00 under daylight saving, and before 02:00 without it, it is
     // still the day before in UTC.
-    expect(dayIn(cairo('2026-10-14T02:59'), ZONE)).toBe('2026-10-14');
-    expect(dayIn(cairo('2026-01-15T01:59'), ZONE)).toBe('2026-01-15');
+    expect(dateIn(cairo('2026-10-14T02:59'), ZONE)).toBe('2026-10-14');
+    expect(dateIn(cairo('2026-01-15T01:59'), ZONE)).toBe('2026-01-15');
   });
 
   it('takes the offset from the zone database, not one fixed for the year', () => {
     // Both are 21:30 UTC. Half past midnight under daylight saving is the day
     // before at +02:00, and half past eleven in winter is the day after at
     // +03:00.
-    expect(dayIn(cairo('2026-10-14T00:30'), ZONE)).toBe('2026-10-14');
-    expect(dayIn(cairo('2026-01-15T23:30'), ZONE)).toBe('2026-01-15');
+    expect(dateIn(cairo('2026-10-14T00:30'), ZONE)).toBe('2026-10-14');
+    expect(dateIn(cairo('2026-01-15T23:30'), ZONE)).toBe('2026-01-15');
   });
 
   it('follows the clocks across the night daylight saving ends', () => {
@@ -150,12 +150,18 @@ describe('dayIn', () => {
     // of these is 21:30 UTC and lands on the wrong day under one fixed offset.
     const secondPass = new Date(cairo('2026-10-29T23:30').getTime() + 60 * 60 * 1000);
 
-    expect(dayIn(cairo('2026-10-29T00:30'), ZONE)).toBe('2026-10-29');
-    expect(dayIn(secondPass, ZONE)).toBe('2026-10-29');
-    expect(dayIn(cairo('2026-10-30T23:30'), ZONE)).toBe('2026-10-30');
+    expect(dateIn(cairo('2026-10-29T00:30'), ZONE)).toBe('2026-10-29');
+    expect(dateIn(secondPass, ZONE)).toBe('2026-10-29');
+    expect(dateIn(cairo('2026-10-30T23:30'), ZONE)).toBe('2026-10-30');
   });
 
   it('answers in the zone it is given, not in Cairo whatever it is asked', () => {
-    expect(dayIn(cairo('2026-10-14T02:59'), 'UTC')).toBe('2026-10-13');
+    expect(dateIn(cairo('2026-10-14T02:59'), 'UTC')).toBe('2026-10-13');
+  });
+
+  it('refuses a zone it cannot read rather than answering nothing', () => {
+    // The reporting zone is `business_hours.timezone`, checked only by the
+    // hours form; a row edited in the database reaches here unchecked.
+    expect(() => dateIn(cairo('2026-10-14T02:59'), 'Africa/Kairo')).toThrow(/Africa\/Kairo/);
   });
 });
