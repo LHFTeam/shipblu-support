@@ -6563,14 +6563,17 @@ dryRun=true`, then without, gives those two theirs back from their
       history starts on 2026-08-30, so nothing stored was wrong; 2027-04-30
       would have been the first.
 
-      The same 23-hour day breaks a count of days as well as a bound.
-      `planDays` in `worker/handlers/rollup-metrics.ts` sizes a range as
+      The same 23-hour day broke a count of days as well as a bound.
+      `planDays` in `worker/handlers/rollup-metrics.ts` sized a range as
       `Math.floor(end.diff(start, 'days').days) + 1`, which for
       `from=2026-04-24 to=2026-04-25` is `floor(0.958) + 1`, one day. A range
-      that starts on a spring-forward day therefore leaves that day out, and
-      `skipped` still reads 0. Until it is fixed, rebuild such a day with
-      `day=`, or start the range a day earlier. Count days on the calendar
-      dates, as `windowDays` does in UTC, never on the instants between them.
+      that started on a spring-forward day therefore left that day out, and
+      `skipped` still read 0, so `rollup_metrics from=<that day>` — the natural
+      way to correct history after a fix like the one above — skipped exactly
+      the day it was correcting. It now counts and walks the calendar dates in
+      UTC, as `windowDays` does, and `rollup-metrics.test.ts` gives every
+      two-day range in Cairo from 2020 to 2030 both of its days. Count days on
+      the calendar dates, never on the instants between them.
 
 ### Tooling notes for this environment
 
