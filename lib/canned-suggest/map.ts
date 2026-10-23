@@ -5,11 +5,11 @@ import { NONE_KEY } from './request';
  * Reading Jev's answer back into canned response ids, and refusing one this
  * system did not ask for.
  *
- * Pure, and worth its test for the categoriser's reason: the request keyed its
+ * Pure, and worth its test for the subcategoriser's reason: the request keyed its
  * options `r1…rN`, and those keys mean a different response in every request.
- * Everything downstream stores ids, so the translation has to happen once,
- * here, before anything is written — a positional key reaching a row would be
- * a pointer to whichever response happened to sit in that slot that day.
+ * Everything downstream stores ids, so the translation has to happen once, here,
+ * before anything is written — a positional key reaching a row would be a pointer
+ * to whichever response happened to sit in that slot that day.
  */
 
 export type Suggestion = {

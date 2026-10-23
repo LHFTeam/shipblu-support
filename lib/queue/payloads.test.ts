@@ -139,7 +139,7 @@ describe('the backfills and the knowledge-base passes', () => {
     ['backfill_shipment_links', {}],
     ['backfill_shipment_links', { limit: 1 }],
     ['backfill_message_locations', { limit: 1 }],
-    ['backfill_categorise_ai', { dryRun: true, limit: 1 }],
+    ['backfill_subcategorise_ai', { dryRun: true, limit: 1 }],
     ['normalise_kb_formatting', { dryRun: true }],
     ['seed_console_handbook', {}],
     ['seed_console_handbook', { overwrite: true }],
@@ -154,7 +154,7 @@ describe('the backfills and the knowledge-base passes', () => {
   it.each([
     'backfill_shipment_links',
     'backfill_message_locations',
-    'backfill_categorise_ai',
+    'backfill_subcategorise_ai',
     'normalise_kb_formatting',
     'seed_console_handbook',
     'seed_canned_responses',
@@ -172,7 +172,7 @@ describe('the backfills and the knowledge-base passes', () => {
     });
     // `since=20260901` at the command line: a number, milliseconds into 1970.
     expect(() => parse('backfill_shipment_links', { since: 20260901 })).toThrow(PermanentJobError);
-    expect(() => parse('backfill_categorise_ai', { until: 'yesterday' })).toThrow(
+    expect(() => parse('backfill_subcategorise_ai', { until: 'yesterday' })).toThrow(
       PermanentJobError,
     );
   });
@@ -198,7 +198,7 @@ describe('the backfills and the knowledge-base passes', () => {
   });
 
   it('keeps a run label of digits as the text it was typed as', () => {
-    expect(parse('backfill_categorise_ai', { runLabel: 2026 })).toEqual({ runLabel: '2026' });
+    expect(parse('backfill_subcategorise_ai', { runLabel: 2026 })).toEqual({ runLabel: '2026' });
   });
 
   it('takes only a locale the help centre has', () => {

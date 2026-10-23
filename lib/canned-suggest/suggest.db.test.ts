@@ -265,8 +265,8 @@ describe('suggestFor', () => {
     expect(await rows()).toEqual([]);
   });
 
-  // Production holds a key for the shadow categoriser, so the key cannot be the
-  // switch — and a switch with no key must not pretend.
+  // Production holds a key for the shadow subcategoriser, so the key cannot be
+  // the switch — and a switch with no key must not pretend.
   it('asks nothing when switched on in an environment with no key', async () => {
     const agent = await signedIn();
     await switchOn(agent);

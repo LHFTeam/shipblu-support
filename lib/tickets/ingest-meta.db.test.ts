@@ -225,7 +225,7 @@ describe('ingestMetaMessage', () => {
         dedupeKey: null,
       },
     ]);
-    expect((await eventsOf(result.conversationId)).map((e) => e.type)).toEqual(['categorised']);
+    expect((await eventsOf(result.conversationId)).map((e) => e.type)).toEqual(['subcategorised']);
   });
 
   it('continues the sender’s live thread, and asks again while no profile has come back', async () => {
@@ -389,7 +389,7 @@ describe('ingestMetaComment', () => {
         actorLabel: 'inbound_facebook',
         data: { postId: 'post-1', rootCommentId: 'post-1_c1' },
       },
-      { type: 'categorised' },
+      { type: 'subcategorised' },
     ]);
     // A comment arrives with its author's name; nothing to look up.
     expect(await queued()).toEqual([]);

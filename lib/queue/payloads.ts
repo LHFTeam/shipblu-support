@@ -178,7 +178,7 @@ export const JOB_PAYLOADS = {
     /** Stop after this many candidate messages. Absent means the whole archive. */
     limit: z.number().int().positive().optional(),
   }),
-  backfill_categorise_ai: z.strictObject({
+  backfill_subcategorise_ai: z.strictObject({
     /**
      * Which experiment these rows belong to. Re-running one fills its gaps only.
      * A label of digits arrives from `npm run job` as a number, and was read as

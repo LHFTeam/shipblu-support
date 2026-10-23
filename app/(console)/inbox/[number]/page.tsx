@@ -8,7 +8,7 @@ import { suggestForAgent } from '@/lib/kb/agent-search';
 import { detectLocale } from '@/lib/kb/language';
 import { seedTerms } from '@/lib/kb/seed';
 import { requestBaseUrl } from '@/lib/kb/site';
-import { categoryOptions, rootCauseOptions } from '@/lib/categorise/queries';
+import { subcategoryOptions, rootCauseOptions } from '@/lib/subcategorise/queries';
 import { listSideConversationRecipients } from '@/lib/side-conversations/queries';
 import { getConversation } from '@/lib/tickets/conversation';
 import { lastCustomerWords, subjectWords } from '@/lib/tickets/customer-text';
@@ -55,14 +55,14 @@ export default async function ConversationPage({
   // Whether the details column's Contact tab may link to the contact's page.
   const canViewContact = can(agent, 'contact.view');
   const canClose = can(agent, 'ticket.close');
-  const canCategorise = can(agent, 'ticket.categorise');
+  const canSubcategorise = can(agent, 'ticket.subcategorise');
 
   // Read whatever the permission, because the sidebar shows what a ticket is
-  // filed under to anybody who can open it — `ticket.categorise` gates changing
-  // it, not seeing it.
+  // filed under to anybody who can open it — `ticket.subcategorise` gates
+  // changing it, not seeing it.
   const mayPurge = can(agent, 'ticket.purge');
-  const [categories, causes, purgePreview, purgeRefusal] = await Promise.all([
-    categoryOptions(),
+  const [subcategories, causes, purgePreview, purgeRefusal] = await Promise.all([
+    subcategoryOptions(),
     rootCauseOptions(),
     // Counted on render rather than on click, because the counts are the whole
     // argument the confirmation panel makes and a panel that has to fetch before
@@ -179,8 +179,8 @@ export default async function ConversationPage({
         canModerateComments={canModerateComments}
         canEditContact={canEditContact}
         canClose={canClose}
-        canCategorise={canCategorise}
-        categoryOptions={categories}
+        canSubcategorise={canSubcategorise}
+        subcategoryOptions={subcategories}
         rootCauses={causes}
         purgePreview={purgePreview}
         purgeRefusal={purgeRefusal}

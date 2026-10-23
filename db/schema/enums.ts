@@ -258,7 +258,7 @@ export const internalRecipientKindEnum = pgEnum('internal_recipient_kind', ['tea
  * to distort every other number if they are filed as customers.
  *
  * **Only `merchant` and `recipient` are written**, by `requesterKindFrom()` in
- * `lib/categorise/requester.ts`, and only from records — the contact's role
+ * `lib/subcategorise/requester.ts`, and only from records — the contact's role
  * flags and whether they hold a shipping account. Null means "not established",
  * which is a different claim from any of these four and the only honest one
  * when the records do not say: `refreshContactRoles()` is documented as
@@ -279,33 +279,37 @@ export const requesterKindEnum = pgEnum('requester_kind', [
 ]);
 
 /**
- * Who a category is meant for.
+ * Who a subcategory is meant for.
  *
  * Only used to narrow the picker an agent sees: offering `billing.payout` on a
  * recipient's "where is my parcel" ticket is how a taxonomy of fifty entries
  * becomes one where people choose the first plausible row and move on. `any` is
- * the honest answer for the categories both populations really do raise — a
+ * the honest answer for the subcategories both populations really do raise — a
  * damaged parcel is the same complaint whichever end of it you are on.
  */
-export const categoryAudienceEnum = pgEnum('category_audience', ['merchant', 'recipient', 'any']);
+export const subcategoryAudienceEnum = pgEnum('category_audience', [
+  'merchant',
+  'recipient',
+  'any',
+]);
 
 /**
- * Where a category assignment stands with a human.
+ * Where a subcategory assignment stands with a human.
  *
- * `auto` was applied without asking because the evidence named the category
- * outright; `suggested` is waiting for one click; `confirmed` and `rejected` are
- * a person's answer.
+ * `auto` was applied without asking because the evidence named the subcategory
+ * outright; `suggested` is waiting for one click; `confirmed` and `rejected`
+ * are a person's answer.
  *
  * **A rejected row is kept, never deleted**, and that is the whole
  * human-in-the-loop mechanism rather than an audit nicety. The natural key is
- * (conversation, category), so a rejected row still occupies it: a later message
- * that would re-assert the same category hits `onConflictDoNothing` and writes
- * nothing. An agent's judgement therefore survives every subsequent message with
- * no extra machinery, and the row keeps the `rule_key` and `confidence` that
- * were wrong — the only copy of that evidence anyone will ever have, and what
- * the next round of rule tuning is measured against.
+ * (conversation, subcategory), so a rejected row still occupies it: a later
+ * message that would re-assert the same subcategory hits `onConflictDoNothing`
+ * and writes nothing. An agent's judgement therefore survives every subsequent
+ * message with no extra machinery, and the row keeps the `rule_key` and
+ * `confidence` that were wrong — the only copy of that evidence anyone will
+ * ever have, and what the next round of rule tuning is measured against.
  */
-export const categoryReviewStateEnum = pgEnum('category_review_state', [
+export const subcategoryReviewStateEnum = pgEnum('category_review_state', [
   'auto',
   'suggested',
   'confirmed',

@@ -57,7 +57,7 @@ export const aiPriorityRuns = pgTable(
 
     /**
      * The level Jev chose. An enum rather than free text because
-     * `lib/categorise-ai/map.ts` refuses an answer outside the levels offered,
+     * `lib/subcategorise-ai/map.ts` refuses an answer outside the levels offered,
      * and the levels offered are exactly `PRIORITIES`.
      */
     predicted: priorityEnum('predicted'),

@@ -61,7 +61,7 @@ held is folded in. The support lead answered every open question on
 2026-10-20; [Decisions taken](#decisions-taken-with-the-support-lead-2026-10-20)
 records the answers, and the plan below already reflects them.
 
-## Status and handoff (2026-10-23, 13:25 UTC)
+## Status and handoff (2026-10-23, 21:10 UTC)
 
 A session picking this plan up starts here. Everything after this section is
 the design as it was reasoned and as each stage was built. This section says
@@ -77,8 +77,26 @@ re-read before acting on one.
 | 0     | Merged: #386 (`01488c9`)                                                                                                                    | Live since 2026-10-20. Its two operational steps were never done (below)                                                                                                                           |
 | 1.1   | Merged: #387, then `dev` → `main` in #389 (`1f89219`)                                                                                       | Live since 2026-10-21 10:13 UTC                                                                                                                                                                    |
 | 1.2   | Merged: #391 (`31f7379`) and follow-up #392 (`7b7d276`), then `dev` → `main` in #393 (`634a28d`), which also carried another session's #390 | **Done.** All six services live on `634a28d` by 17:38 UTC, worker first. The user ran the backfill and the rollup from a shell, so neither left a `jobs` row. Every check that follows reads clean |
-| 1.3   | Merged into `dev`: #395 (`58c5ed9`), 2026-10-23, after its second review. Not yet `dev` → `main`. As built below                            | Not deployed: `main` is still at `634a28d`                                                                                                                                                         |
-| 2–6   | Not started                                                                                                                                 | —                                                                                                                                                                                                  |
+| 1.3   | Merged: #395 (`58c5ed9`), then `dev` → `main` in #397 (`447d8be`), which also carried #394, #396 and #398. As built below                   | **Done.** All six services live on `447d8be` by 18:36 UTC, web first. Its checks read clean (below), though no comment has arrived since                                                           |
+| 2.A   | In review: #400 (`claude/epic-heisenberg-w60nbl`), no migration. As built below                                                             | Not deployed. Ships with the next `dev` → `main` merge, after its "Before" step (Deploying 2.A)                                                                                                    |
+| 2.B–6 | Not started                                                                                                                                 | —                                                                                                                                                                                                  |
+
+**1.3's checks, read at 21:10 UTC.** `<X>` is 18:29:39 UTC, when Render began
+web's deploy, which precedes the preDeploy that added the CHECK.
+
+- **The CHECK.** `conversations_comment_channel_matches_external_id` is one
+  row, validated, and its definition matches `db/sql/008`. `0045` is the newest
+  migration applied, so #396's two came with it. No conversation's channel and
+  external id disagree.
+- **Nothing refused since.** No `process_webhook` attempt since `<X>` has
+  failed on an insert into `conversations`, and no verified Meta delivery
+  received since an hour before `<X>` is unprocessed. All 154 jobs run since
+  `<X>` completed, and none carries an error.
+- **Not yet exercised.** Facebook sent four deliveries after `<X>`, all
+  processed, and they opened one direct-message ticket. No comment has arrived,
+  so the CHECK has not yet met a new one. Re-read the two queries under
+  [1.3, as built](#13-as-built) once one has, and within seven days of it,
+  because `cleanup` deletes a completed job a week after it completes.
 
 **1.2's checks, read at 21:54 UTC.**
 
@@ -130,28 +148,24 @@ re-read before acting on one.
 Every production write needs the user's go-ahead for that step, and the
 `AGENTS.md` sequence: read the state first, say the change, have the way back.
 
-1. **1.3 is merged into `dev`**: #395, squashed as `58c5ed9` on 2026-10-23
-   once CI was green, as recorded under [1.3, as built](#13-as-built). Its
-   second review (seven threads, 2026-10-22) is answered there: the CHECK's
-   lock wait is bounded at 3 s, the gate reads the frozen copies too, the
-   post-deploy check reads what is stored, the 1.2 rollback deactivates one
-   more kind of rule, and the
-   external-id half stays, held by eight database cases in the shape the 1.2
-   rollback leaves. A review of those fixes then made the test helper unable to
-   truncate a database it refused, had `withCleanDatabase()` replay `008` before
-   every test, bounded the rollback's DROP at 3 s too, and named which cases go
-   with step 2's revert.
-2. **Merge `dev` into `main` only once 1.3's gate holds.** The gate is a
-   read-only query. Read it on the day of the merge and quote it in the PR.
-   The gate guards the merge rather than the deploy, because whoever next
-   deploys `main` ships 1.3, whatever else they meant to ship. `dev` also
-   carries another session's #394 (`508ea6f`, scroll panes), which has no
-   migration and no `db/sql` change (read 2026-10-23), so the merge ships both
-   and rule 7 asks nothing more of the deploy order.
-3. **Deploy 1.3**: web, then the worker, then the crons. Read the lock
-   precautions below first, then run 1.3's verification rows.
-4. **Stage 2** may start whenever it suits. It is a different seam from Stage
-   1, but its migrations land one at a time, after 1.3 (deploy rule 2).
+1. **1.3 is deployed.** #395 was squashed into `dev` as `58c5ed9`, and #397
+   (`447d8be`) took it to `main` on 2026-10-23 with #394, #396 and #398, quoting
+   the gate at 0, 0, 0 on production at 18:26:49 UTC. All six services were
+   live on it by 18:36 UTC, web first. Its checks read clean at 21:10 UTC
+   (above), with one re-read left for the first comment. Its reviews are
+   answered under [1.3, as built](#13-as-built).
+2. **Merge #400, then `dev` into `main`.** 2.A has no migration and no `db/sql`
+   change, and nor has anything else on `dev` since #397: #399 (`0d1289d`, a
+   repo rule) and #402 (`48896ce`, the review page's date). Rule 7 still holds,
+   because the merge ships all of `dev`: read `git log origin/main..origin/dev`
+   on the day and every migration in it.
+3. **Deploy 2.A**: web, then the worker, then the crons. Before it, run 2.A's
+   "Before" step under [Deploying 2.A](#2a-as-built): any `CATEGORISE_*` value
+   copied to its new name, the overrides and the old job re-read. After it, run
+   2.A's handbook and verify steps.
+4. **Stage 2.B**, the SQL rename, follows once 2.A is deployed to all six
+   services. It needs the maintenance sequence in its stage section, and its
+   migration lands on its own (deploy rule 2).
 5. **Before Stage 5**, a person does 0.2's reorder and 0.6's staffing, and the
    support lead answers the questions still open (below).
 
@@ -471,6 +485,143 @@ conrelid = 'conversations'::regclass AND conname =
   nothing — the failure `001_extensions_and_triggers.sql`'s trigger loop
   records from 2026-08-19. Rolling back 1.3 never needs 1.2 rolled back,
   because no code path depends on the CHECK.
+
+### 2.A, as built
+
+Built as [Stage 2](#stage-2--the-subcategory-rename) describes it, with no
+migration: `drizzle-kit generate` reports nothing to do, because every schema
+identifier was renamed with its SQL string pinned to the old name. What the
+stage section left open was decided as follows.
+
+- **What moved.** `lib/subcategorise/`, `lib/subcategorise-ai/`,
+  `db/schema/subcategories.ts` and `subcategorise-ai.ts`,
+  `lib/reports/subcategory-queries.ts` and `subcategory-rollup.ts`,
+  `worker/handlers/backfill-subcategorise-ai.ts`,
+  `app/(console)/admin/subcategories/`, `app/(console)/reports/subcategories/`,
+  `app/(console)/subcategory-actions.ts` and the ticket page's
+  `subcategories-field.tsx`. Every exported name follows, with no
+  compatibility alias left behind, and so do the fields that carry the taxonomy
+  across modules: a rule's `subcategory`, an area's `subcategories`, the ticket
+  page's `subcategories` and the form field `subcategoryId`. A raw SQL row keeps
+  `category_key` and is mapped at the boundary.
+- **What kept the old word, on purpose.** The SQL names, until 2.B. The
+  status category, the knowledge base's categories and Meta's template
+  categories, which are other things. The taxonomy and rule keys and
+  `DETECTOR_VERSION`, since no rule changed. The handbook article key
+  `categorising`. And what TypeSafe is sent: `SUBCATEGORY_QUESTION` is still
+  the string `'category'` and the instructions are byte for byte the old ones,
+  pinned by a test, so a shadow run after 2.A is compared with one before it on
+  the same question. The taxonomy's `note` texts did change, and each is shown
+  to TypeSafe as its option's description, but only in a database seeded after
+  2.A: the seed never rewrites a stored description, so production's options
+  read as they did.
+- **Events.** The rules detector writes `subcategorised` as
+  `subcategory-detector`, and the four console actions write
+  `subcategory_added|confirmed|rejected|removed` with `subcategoryKey`.
+  `describeEvent` reads the old and new names and both keys for good, since
+  stored rows keep their words, and `describeActorLabel` prints the old actor
+  as the new one, so a ticket whose history spans the deploy shows one
+  mechanism, not two. **Stage 3 must not reuse `categorised` or the four
+  `category_*` types**, or a ticket's subcategory history would read as the new
+  field's.
+- **Redirects.** Four exact sources, each a 307. Not `/admin/categories/:path*`:
+  redirects run before the filesystem, so a wildcard would hide Stage 3's whole
+  tree, not only its index. An exact source hides one page the same way, and
+  Stage 3's tree may grow a `review` or a `shadow` of its own, so the PR that
+  adds its page deletes all three `/admin/categories` entries.
+  `/reports/categories` goes in whichever PR first puts a report there.
+- **Permission keys.** Read 2026-10-23 14:22 UTC: no agent holds any override,
+  of these keys or any other. `can()` ignores a key it does not know, so an
+  override under an old name would lapse silently rather than fail. Stage 3
+  gives `admin.categories` back to the new Categories page, and before it does
+  it reads that no agent's `permissions` holds the key. A `db/sql` statement
+  moving overrides to the new keys was proposed in review and declined: no
+  code writes the column, so only hand-typed SQL could make one, and a
+  statement replayed on every deploy would, once Stage 3 reclaims
+  `admin.categories`, turn an override of the new page into one of the
+  subcategories page.
+- **Env vars.** `SUBCATEGORISE_DISABLED_RULES`, `SUBCATEGORISE_AUTO_MIN` and
+  `SUBCATEGORISE_RECORD_MIN`, with no fallback to the old names: a fallback
+  would be a second place for the same setting. A value still set under an old
+  name is read by nothing, but said once per process
+  (`[subcategorise] CATEGORISE_DISABLED_RULES is set, and nothing reads it`),
+  so a rule switched off under the old name does not come back on in silence.
+  The Render MCP tools do not return variable values, so the deploy-day read is
+  in the dashboard.
+- **Job and log tags.** `backfill_subcategorise_ai` (no row of either name has
+  ever existed, read 14:22 UTC) and the log tags `[subcategorise]` and
+  `[backfill_subcategorise_ai]`. A log search for the old tags finds nothing
+  newer than the deploy.
+- **Handbook.** Seven articles change: `replying`, `ticket-fields`,
+  `categorising`, `reports`, `people`, `automation-and-forms` and
+  `owner-role`. So do the `tickets` and `administration` folder descriptions,
+  which the seed syncs on every run. The chips quote the code's labels
+  exactly: `Subcategories`, `Add a subcategory…` and `Subcategory review`.
+
+**Deploying 2.A.** It has no migration. Nor does the release it rides in, since
+#397 shipped #396's migrations and 1.3's `db/sql/008` without it, unless
+something carrying one lands on `dev` first (rule 7: read
+`git log origin/main..origin/dev` on the day). Web goes first all the same: an
+old web prints a new worker's `subcategorised` event as its bare type, while a
+new web reads an old worker's events in full.
+
+1. **Before.** Read, in the Render dashboard, the three env groups and the
+   variables set on web and the worker for any `CATEGORISE_*`; copy a value to
+   its new name before deploying. Re-read the overrides and the job, expecting
+   0 and 0:
+
+   ```sql
+   select
+     (select count(*) from agents
+       where permissions ?| array['ticket.categorise', 'admin.categories']) as overrides,
+     (select count(*) from jobs where type = 'backfill_categorise_ai') as old_jobs;
+   ```
+
+2. **Deploy** web, then the worker, then the four crons.
+3. **Handbook.** Production held no console handbook at 2026-10-23 15:01 UTC:
+   no `handbook-` folder or article, and no `seed_console_handbook` job, ever.
+   If that still holds, 2.A has nothing to do here, because the first seed,
+   whenever somebody runs it, writes 2.A's words. If it has been seeded since,
+   run `npm run job -- seed_console_handbook dryRun=true` once web is live. It
+   should report `folders 0 created, 2 updated` and
+   `7 article(s) differ from this repository`; the job counts them without
+   naming them. A different count is a console edit that `overwrite=true`
+   would replace, and is read first. Then `overwrite=true`, which cuts one
+   `kb_article_versions` row for each article it replaces, so the rows written
+   then name the seven. Rehearsed locally: `origin/dev`'s seed into an empty
+   database, then this branch's dry run, reported exactly that; the overwrite
+   replaced `handbook-automation-and-forms`, `-categorising`, `-owner-role`,
+   `-people`, `-replying`, `-reports` and `-ticket-fields`; and a run after it
+   found all 15 current.
+4. **Verify.** `/admin/categories` lands on `/admin/subcategories`, and the
+   ticket sidebar says Subcategories. Once all six services run the release, no
+   `categorised` or `category_*` row is newer than the moment the old web and
+   worker instances stopped (Render's shutdown grace after the last of them went
+   live), and every detector row since is `subcategorised`. It appears only
+   where a rule fired: never on `whatsapp_bot`, which the detector leaves out as
+   read-only, and perhaps not at all on a quiet channel such as email or
+   webchat:
+
+   ```sql
+   select c.channel, e.type, count(*) as n, max(e.created_at) as newest
+   from conversation_events e
+   join conversations c on c.id = e.conversation_id
+   where e.type in ('categorised', 'subcategorised')
+      or e.type like 'category\_%' or e.type like 'subcategory\_%'
+   group by 1, 2
+   order by 1, 2;
+   ```
+
+   Read 2026-10-23 14:22 UTC, before any of it: 783 `categorised` (facebook
+   380, whatsapp 241, instagram 117, facebook_comment 36, instagram_comment 5,
+   email 2, webchat 2), one `category_confirmed`, and no row under a new name.
+
+**Rolling back 2.A** is deploying the previous commit on all six services. The
+review queue and the reports read `conversation_categories`, which 2.A never
+touched; what an old web cannot read is the events written in between, which
+its timeline prints as bare types. A variable set under a new name is then
+read by nothing, and the handbook keeps its new words until the seed is run
+from the older commit with `overwrite=true`.
 
 ### Working on this repo without the outgoing session's context
 
@@ -958,8 +1109,8 @@ The classifier's rules, and what each one closes:
   latency, tokens and a `request_fingerprint`:
   - **Run label.** Live runs carry the label `live`. Each archive backfill
     carries its own label, and the unique index is on (`run_label`,
-    `message_id`), as `backfill_categorise_ai`'s table is
-    (`db/schema/categorise-ai.ts:54-64,123`). So the same message can be
+    `message_id`), as `backfill_subcategorise_ai`'s table is
+    (`db/schema/subcategorise-ai.ts:54-64,123`). So the same message can be
     measured again under a new question. Settling and the ownership test read
     only `live` rows.
   - **Fingerprint:** a hash of the serialised `questions` object exactly as
@@ -990,7 +1141,7 @@ message rather than breaking ingest.
 
 Every existing Jev request keeps its exact input across the comment split.
 `metaPlatformOf` maps a comment channel back to its platform in **both**
-`stateFor` functions, `lib/categorise-ai/request.ts` and
+`stateFor` functions, `lib/subcategorise-ai/request.ts` and
 `lib/canned-suggest/request.ts`. The priority request in particular stays
 byte-identical, and a test asserts it. The new classifier is told
 `is_public_comment` explicitly.
@@ -2028,8 +2179,8 @@ readers are harmless.
   `ticket_categories` and fail every replay.
 
 - **Raw SQL with no database test is tested before merge.** These were never
-  executed in CI: `categoryTotals`, `areaTotals`, `channelTotals`,
-  `causeCoverage`, `ruleScores`, `categoryUsage` and `runLabels`. They get a
+  executed in CI: `subcategoryTotals`, `areaTotals`, `channelTotals`,
+  `causeCoverage`, `ruleScores`, `subcategoryUsage` and `runLabels`. They get a
   `*.db.test.ts`, or one `execute_sql` each against a Supabase branch.
 - **Verification before merge:**
   - CI's `database` job, which migrates an empty Postgres and replays
@@ -2111,7 +2262,9 @@ cannot parse.
     (`docs/PROJECT-STATE.md` §6.30). `db/baseline.ts` seeds the same set for
     tests and development.
 - **Admin.** A "Categories" page at `/admin/categories`. This PR removes the
-  2.A redirect from that path.
+  three 2.A redirects under that path, `/admin/categories/review` and
+  `/admin/categories/shadow` included, so a child page of its own named either
+  way is not hidden behind one.
   - **Edit** labels, description, position, active flag and the route group.
     The route-group picker shows each group's strategy, members accepting now
     and hours gate, and warns on a `manual` group.
@@ -2180,7 +2333,7 @@ enqueued, so no job type is ever unknown.
   - **`record`.** It writes only `ai_category_runs`, under its own run label
     and fingerprint, simulating settling, over human tickets since
     2026-08-18. That lets labelled evaluation start now rather than after weeks
-    of new traffic, following the `backfill_categorise_ai` precedent.
+    of new traffic, following the `backfill_subcategorise_ai` precedent.
   - **`apply`.** It sets the column and its `category_changed` event (actor
     `jev:category`) on open tickets, and nothing else.
     - **It respects ownership.** Under the row lock, it applies the same test

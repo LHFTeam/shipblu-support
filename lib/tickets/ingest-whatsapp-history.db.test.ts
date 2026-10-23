@@ -205,7 +205,7 @@ describe('ingestWhatsAppHistoryChunk', () => {
     });
     expect(rows[2]!.authorContactId).not.toBeNull();
 
-    // No download, no categorising, no linking, no automation: no job at all.
+    // No download, subcategorising, linking or automation: no job at all.
     expect(await db.select({ type: jobs.type }).from(jobs)).toEqual([]);
     const events = await db
       .select({ type: conversationEvents.type })

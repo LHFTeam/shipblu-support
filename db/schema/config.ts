@@ -16,7 +16,7 @@ import { agents, groups } from './agents';
 import {
   automationTriggerEnum,
   cannedVisibilityEnum,
-  categoryAudienceEnum,
+  subcategoryAudienceEnum,
   channelEnum,
   priorityEnum,
   rootCauseOwnerEnum,
@@ -156,9 +156,9 @@ export type TicketFieldOption = {
  * Deliberately two questions, because conflating them is what makes most support
  * taxonomies useless for improving anything:
  *
- * - A **category** is the customer's own account of their problem. "Where is my
- *   order." It is detected from what they wrote, on arrival, and one ticket can
- *   carry several.
+ * - A **subcategory** is the customer's own account of their problem. "Where is
+ *   my order." It is detected from what they wrote, on arrival, and one ticket
+ *   can carry several.
  *
  * - A **root cause** is why that happened, recorded by the agent on resolve,
  *   because *the customer does not know it*. "Where is my order" has at least six
@@ -168,22 +168,22 @@ export type TicketFieldOption = {
  *   between those from the complaint text would manufacture confident, wrong data
  *   in the exact place the team is trying to reason, so nothing tries.
  *
- * The consequence worth stating: a category report says what the queue is full
- * of, and only the cause report says what to go and fix.
+ * The consequence worth stating: a subcategory report says what the queue is
+ * full of, and only the cause report says what to go and fix.
  *
  * Both live here beside `ticket_statuses` and `ticket_fields` rather than in
  * their own file, because `conversations` points at them and everything else
  * points at `conversations` — the schema's import graph is acyclic today and a
  * registry in a leaf module is what would break it. The join table that carries
- * the assignments is in `db/schema/categories.ts`.
+ * the assignments is in `db/schema/subcategories.ts`.
  */
 
 /**
- * The category registry.
+ * The subcategory registry.
  *
  * A table rather than a constant because renaming "Cost and payment methods" to
  * "Pricing" is a decision by whoever owns the report and should not be a deploy.
- * What is *not* here is the matching rules: those live in `lib/categorise/`,
+ * What is *not* here is the matching rules: those live in `lib/subcategorise/`,
  * compiled, with tests. A regular expression typed into an admin form is a
  * production incident with no review — `(a+)+$` over every inbound message is a
  * denial of service, and a stray `.*` files the whole archive under one label.
@@ -193,7 +193,7 @@ export type TicketFieldOption = {
  * here nobody may edit: every compiled rule names one, every stored assignment
  * freezes one, and every report groups by one.
  */
-export const ticketCategories = pgTable(
+export const ticketSubcategories = pgTable(
   'ticket_categories',
   {
     id: uuid('id').primaryKey().defaultRandom(),
@@ -206,8 +206,8 @@ export const ticketCategories = pgTable(
      * held there by a CHECK in `db/sql`.
      *
      * Its own column so a report can group by area without `split_part` in every
-     * query. Fifty-one flat categories is a list nobody reads; eleven areas is a
-     * chart that fits on a screen, and the drill-down is the same table.
+     * query. Fifty-one flat subcategories is a list nobody reads; eleven areas
+     * is a chart that fits on a screen, and the drill-down is the same table.
      */
     area: text('area').notNull(),
 
@@ -219,7 +219,7 @@ export const ticketCategories = pgTable(
      * operations lead is read in, and it is the string an agent matches against
      * the words actually in front of them. A taxonomy maintained only in English
      * makes everybody translate in their head at the moment they are choosing,
-     * which is where mis-categorisation comes from.
+     * which is where a wrong subcategory comes from.
      */
     labelEn: text('label_en').notNull(),
     labelAr: text('label_ar').notNull(),
@@ -227,20 +227,20 @@ export const ticketCategories = pgTable(
     description: text('description'),
 
     /** Which population raises this. Narrows the picker; see the enum. */
-    audience: categoryAudienceEnum('audience').notNull().default('any'),
+    audience: subcategoryAudienceEnum('audience').notNull().default('any'),
 
     /**
      * Nothing auto-assigns this; an agent files it by hand.
      *
-     * The honest home for a category the business needs a bucket for and the
-     * archive has no evidence of. A category no rule can ever award is not dead
-     * weight if it is marked as such — it is dead weight if it sits in the same
-     * list pretending to be detectable, because then a zero count reads as "this
-     * never happens" rather than "nothing is looking for it".
+     * The honest home for a subcategory the business needs a bucket for and the
+     * archive has no evidence of. A subcategory no rule can ever award is not
+     * dead weight if it is marked as such — it is dead weight if it sits in the
+     * same list pretending to be detectable, because then a zero count reads as
+     * "this never happens" rather than "nothing is looking for it".
      */
     isDetectable: boolean('is_detectable').notNull().default(true),
 
-    /** Seeded from `lib/categorise/taxonomy.ts`. Deactivated, never deleted. */
+    /** Seeded from `lib/subcategorise/taxonomy.ts`. Deactivated, never deleted. */
     isSystem: boolean('is_system').notNull().default(false),
     isActive: boolean('is_active').notNull().default(true),
 
@@ -248,7 +248,7 @@ export const ticketCategories = pgTable(
     position: integer('position').notNull().default(0),
 
     /**
-     * Where a merged category's counts now go.
+     * Where a merged subcategory's counts now go.
      *
      * Merging by rewriting the assignments would destroy the record of what was
      * actually chosen at the time; merging by deleting would orphan every report

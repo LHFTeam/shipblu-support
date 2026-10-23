@@ -156,7 +156,7 @@ describe('createTicket', () => {
       .select({ type: conversationEvents.type })
       .from(conversationEvents)
       .where(eq(conversationEvents.conversationId, created.conversationId));
-    expect(events).toEqual([{ type: 'categorised' }]);
+    expect(events).toEqual([{ type: 'subcategorised' }]);
   });
 
   it('takes what a form presets', async () => {

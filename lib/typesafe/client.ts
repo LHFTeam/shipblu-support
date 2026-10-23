@@ -11,15 +11,15 @@ import { isTimeout } from '@/lib/http/deadline';
  * some `state` and a map of typed questions; the answer to a `choice` question
  * is one of the option keys the request itself offered, with a probability for
  * every option. There is no free text anywhere in the exchange, which is why the
- * categoriser built on it can be compared against a regex table at all: both
- * answer over the same fixed vocabulary, and neither can invent a category.
+ * subcategoriser built on it can be compared against a regex table at all: both
+ * answer over the same fixed vocabulary, and neither can invent a subcategory.
  *
  * Shaped after `lib/shipments/platform.ts`, which is the house template for an
  * outbound provider: the round trip owns the timeout and the error taxonomy, the
  * response is validated with zod rather than cast, and **nothing here retries**.
  * Whether to ask again is the caller's. The two jobs ask again later — the
  * priority classifier through the queue's backoff (`lib/queue/index.ts`), the
- * shadow categoriser on its next run over the corpus — where a failure stays
+ * shadow subcategoriser on its next run over the corpus — where a failure stays
  * visible; the reply box's suggestion records the failure on its row and never
  * asks again. A retry loop in here would hide any of those answers inside a
  * slot instead.
@@ -52,9 +52,10 @@ export const DEFAULT_TIMEOUT_MS = 15_000;
 /**
  * The ceiling TypeSafe documents for a `choice` question's option list.
  *
- * Worth naming rather than trusting: the ticket taxonomy is 55 categories today
- * and grows by hand, so the day it passes this the request stops being valid and
- * the failure should be a named assertion here rather than a 422 in a worker log.
+ * Worth naming rather than trusting: the ticket taxonomy is 55 subcategories
+ * today and grows by hand, so the day it passes this the request stops being
+ * valid and the failure should be a named assertion here rather than a 422 in a
+ * worker log.
  */
 export const MAX_CHOICE_OPTIONS = 255;
 
@@ -87,10 +88,10 @@ export type ChoiceQuestion = {
  * The request body, written down from TypeSafe's API reference.
  *
  * `state` is deliberately `unknown` rather than `string`: the endpoint accepts a
- * string, a JSON object or an array of text, and the categoriser sends an object
- * so the channel and the surrounding messages stay distinguishable from the
- * message being classified. Flattening them into one string would make the model
- * guess where the boundary was.
+ * string, a JSON object or an array of text, and the subcategoriser sends an
+ * object so the channel and the surrounding messages stay distinguishable from
+ * the message being classified. Flattening them into one string would make the
+ * model guess where the boundary was.
  */
 export type SystemOneRequest = {
   state: unknown;
@@ -147,7 +148,7 @@ function issuesOf(error: z.ZodError): string {
 /**
  * Whether a call can be made at all.
  *
- * For the shadow categoriser, presence of the credential is the feature flag.
+ * For the shadow subcategoriser, presence of the credential is the feature flag.
  * For the reply box's suggestions it is only half of one — `suggestionsLive()`
  * in `lib/canned-suggest/settings.ts` also needs the admin switch, because
  * production holds this key for the shadow run and a key-as-flag would have
@@ -173,8 +174,8 @@ export type FetchOptions = {
  *
  * The split between transient and permanent is the whole contract with the two
  * jobs: transient means the same call could answer differently later, so they
- * ask again — the classifier by throwing back to the queue, the categoriser by
- * recording the gap for its next run. Permanent means it could not — a wrong
+ * ask again — the classifier by throwing back to the queue, the subcategoriser
+ * by recording the gap for its next run. Permanent means it could not — a wrong
  * key, a malformed question — and a job that keeps asking only delays somebody
  * noticing. The suggestion route reads neither half: it writes every failure to
  * `canned_suggestions.error` and that message gets no suggestion, because an

@@ -3,7 +3,7 @@
 import type { ConversationDetail } from '@/lib/tickets/conversation';
 import type { CannedResponseOption } from '@/lib/tickets/lookups';
 import type { TicketFieldDef } from '@/lib/tickets/custom-fields';
-import type { CategoryOption, RootCauseOption } from '@/lib/categorise/queries';
+import type { SubcategoryOption, RootCauseOption } from '@/lib/subcategorise/queries';
 import type { PurgePreview } from '@/lib/admin/purge-summary';
 import { readOnlyReason } from '@/lib/tickets/channel-policy';
 import type { PickerEntry } from '@/lib/side-conversations/queries';
@@ -73,8 +73,8 @@ export function ConversationView({
   canModerateComments,
   canEditContact,
   canClose,
-  canCategorise,
-  categoryOptions,
+  canSubcategorise,
+  subcategoryOptions,
   rootCauses,
   purgePreview,
   purgeRefusal,
@@ -106,9 +106,9 @@ export function ConversationView({
   /** Whether this agent may end the customer's thread. See `ticket.close`. */
   canClose: boolean;
   /** Whether this agent may correct what a ticket is filed under. */
-  canCategorise: boolean;
+  canSubcategorise: boolean;
   /** The active taxonomy, for the picker. Empty until the seed has run. */
-  categoryOptions: CategoryOption[];
+  subcategoryOptions: SubcategoryOption[];
   rootCauses: RootCauseOption[];
   /** Non-null only for an admin holding `ticket.purge`; see the sidebar. */
   purgePreview: PurgePreview | null;
@@ -171,8 +171,8 @@ export function ConversationView({
         groups={groups}
         fields={fields}
         canClose={canClose}
-        canCategorise={canCategorise}
-        categoryOptions={categoryOptions}
+        canSubcategorise={canSubcategorise}
+        subcategoryOptions={subcategoryOptions}
         rootCauses={rootCauses}
         purgePreview={purgePreview}
         purgeRefusal={purgeRefusal}

@@ -1,0 +1,168 @@
+import Link from 'next/link';
+import { buttonClass, Notice, PageHeader, Table } from '@/components/ui';
+import { InfoTip } from '@/components/tooltip';
+import { listRootCauses, listTicketSubcategories } from '@/lib/admin/settings';
+import { requirePermission } from '@/lib/auth/guard';
+import { subcategoryUsage } from '@/lib/subcategorise/seed';
+import { SubcategoryRow, RootCauseRow } from './forms';
+
+export const dynamic = 'force-dynamic';
+
+/**
+ * The taxonomy: what a ticket can be about, and why it can have happened.
+ *
+ * Editable here rather than in code because renaming "Cost and payment methods"
+ * to "Pricing" is a decision by whoever owns the report and should not need a
+ * deploy. What is **not** editable here is the matching — which words mean which
+ * subcategory lives in `lib/subcategorise/rules.ts`, compiled, with tests. A
+ * regular expression typed into a form is a production incident with no review.
+ *
+ * Nothing on this page deletes. The foreign key from `conversation_categories`
+ * is `restrict`, so a subcategory with tickets behind it cannot be removed at
+ * all — it is deactivated, which takes it out of the picker and leaves every
+ * report ever drawn from it still readable.
+ */
+export default async function SubcategoriesPage() {
+  await requirePermission('admin.subcategories');
+
+  const [subcategories, causes, usage] = await Promise.all([
+    listTicketSubcategories(),
+    listRootCauses(),
+    subcategoryUsage(),
+  ]);
+
+  /*
+   * Which detectable subcategories have never been assigned.
+   *
+   * Only worth saying once something *has* been assigned. On a system where
+   * nothing has run yet every subcategory is unused, and listing all of them is
+   * not a finding — it is the same sentence as "no tickets yet", spelled out
+   * fifty times. `usage.size` is the test for that.
+   */
+  const unused =
+    usage.size === 0
+      ? []
+      : subcategories.filter(
+          (subcategory) =>
+            subcategory.isActive && subcategory.isDetectable && !usage.get(subcategory.key),
+        );
+
+  return (
+    <>
+      <PageHeader
+        title="Subcategories and causes"
+        description="What tickets are about, and why they happen. Labels are yours to change; which words match which subcategory lives in code, with tests."
+        actions={
+          <>
+            <Link
+              href="/admin/subcategories/review"
+              className={buttonClass({ variant: 'secondary', size: 'sm' })}
+            >
+              Review queue
+            </Link>
+            <Link
+              href="/admin/subcategories/shadow"
+              className={buttonClass({ variant: 'secondary', size: 'sm' })}
+            >
+              Shadow runs
+            </Link>
+          </>
+        }
+      />
+
+      {subcategories.length === 0 ? (
+        <Notice tone="neutral">
+          No taxonomy yet. Run <code>npm run db:seed</code> to create it — the subcategories and
+          causes are defined in <code>lib/subcategorise/taxonomy.ts</code> and seeded from there.
+        </Notice>
+      ) : (
+        <>
+          {/*
+            Not a warning, an observation — a subcategory at zero is either one
+            nobody needs or a rule that never matches, and only the second is a
+            problem. Saying which is which is what `is_detectable` is for, so
+            manual-only subcategories are left out of this count entirely.
+          */}
+          {unused.length > 0 ? (
+            <Notice tone="info" icon className="mb-4">
+              <b>{unused.length}</b> detectable subcategories have never been assigned:{' '}
+              {unused.map((subcategory) => subcategory.key).join(', ')}. Either the rules for them
+              never match, or nobody raises them — the review queue&rsquo;s rule table tells the two
+              apart.
+            </Notice>
+          ) : null}
+
+          <h2 className="mb-2 text-sm font-semibold">What tickets are about</h2>
+          <Table
+            head={[
+              'Subcategory',
+              <>
+                Key{' '}
+                <InfoTip label="Key">
+                  How the subcategory is named everywhere it is not shown to a person: every
+                  compiled rule awards one, every stored assignment freezes one, and every report
+                  groups by one. Fixed once the subcategory exists — renaming it would leave the
+                  rules pointing at nothing and strand the value on every ticket already filed under
+                  it.
+                </InfoTip>
+              </>,
+              'Arabic',
+              <>
+                Who{' '}
+                <InfoTip label="Who">
+                  Which population raises this. It <b>orders</b> the picker an agent sees — a
+                  recipient&rsquo;s delivery questions above a merchant&rsquo;s payout ones on a
+                  recipient&rsquo;s ticket — and never hides a row, because the ticket&rsquo;s
+                  requester is established from role flags that can be absent or stale. A list of
+                  fifty is one where people choose the first plausible row; a list an agent cannot
+                  reach past is worse.
+                </InfoTip>
+              </>,
+              'Used',
+              '',
+            ]}
+          >
+            {subcategories.map((subcategory) => (
+              <SubcategoryRow
+                key={subcategory.id}
+                subcategory={{
+                  id: subcategory.id,
+                  key: subcategory.key,
+                  area: subcategory.area,
+                  labelEn: subcategory.labelEn,
+                  labelAr: subcategory.labelAr,
+                  audience: subcategory.audience,
+                  isActive: subcategory.isActive,
+                  isDetectable: subcategory.isDetectable,
+                }}
+                used={usage.get(subcategory.key) ?? 0}
+              />
+            ))}
+          </Table>
+
+          <h2 className="mt-8 mb-2 text-sm font-semibold">Why tickets happen</h2>
+          <p className="mb-3 max-w-2xl text-sm text-(--color-text-secondary)">
+            Recorded by the agent who resolves a ticket, never detected — the customer reports a
+            symptom and does not know the cause. Each one names exactly one accountable party, so an
+            agent answers one question and the report gets both dimensions.
+          </p>
+          <Table head={['Cause', 'Key', 'Arabic', 'Owner', '']}>
+            {causes.map((cause) => (
+              <RootCauseRow
+                key={cause.id}
+                cause={{
+                  id: cause.id,
+                  key: cause.key,
+                  labelEn: cause.labelEn,
+                  labelAr: cause.labelAr,
+                  owner: cause.owner,
+                  isActive: cause.isActive,
+                }}
+              />
+            ))}
+          </Table>
+        </>
+      )}
+    </>
+  );
+}

@@ -1,6 +1,6 @@
 import { and, eq, sql } from 'drizzle-orm';
 import { SEEDED_RULES } from '@/lib/automations/defaults';
-import { syncTaxonomy } from '@/lib/categorise/seed';
+import { syncTaxonomy } from '@/lib/subcategorise/seed';
 import { db } from './client';
 import { automationRules, businessHours, channels, groups, ticketStatuses } from './schema';
 import type { WeeklySchedule } from './schema/config';
@@ -137,21 +137,21 @@ export async function seedBaseline(
     `  automation rules: ${rulesCreated} created, ${SEEDED_RULES.length - rulesCreated} already present`,
   );
 
-  // The category and root-cause registries. A reconcile rather than an
-  // overwrite: labels an admin has edited are left alone, and a category dropped
-  // from the code is reported rather than deleted, because the FK is `restrict`
-  // and there may be tickets behind it.
+  // The subcategory and root-cause registries. A reconcile rather than an
+  // overwrite: labels an admin has edited are left alone, and a subcategory
+  // dropped from the code is reported rather than deleted, because the FK is
+  // `restrict` and there may be tickets behind it.
   const taxonomy = await syncTaxonomy();
   log(
-    `  ticket categories: ${taxonomy.categoriesCreated} created, ${taxonomy.categoriesPresent} already present`,
+    `  ticket subcategories: ${taxonomy.subcategoriesCreated} created, ${taxonomy.subcategoriesPresent} already present`,
   );
   log(
     `  root causes: ${taxonomy.causesCreated} created, ${taxonomy.causesPresent} already present`,
   );
-  if (taxonomy.orphanedCategoryKeys.length || taxonomy.orphanedCauseKeys.length) {
+  if (taxonomy.orphanedSubcategoryKeys.length || taxonomy.orphanedCauseKeys.length) {
     log(
       `  in the database but no longer in the code (left alone, decide by hand): ${[
-        ...taxonomy.orphanedCategoryKeys,
+        ...taxonomy.orphanedSubcategoryKeys,
         ...taxonomy.orphanedCauseKeys,
       ].join(', ')}`,
     );

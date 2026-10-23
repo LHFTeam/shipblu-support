@@ -23,7 +23,7 @@ export type LinkAction = (
  *
  * - `rereadOnRefusal` re-reads the page after a refusal, for a control that
  *   shows no error and whose refusal means the screen is out of date: the
- *   ticket is no longer this agent's to see, the category is gone, the
+ *   ticket is no longer this agent's to see, the subcategory is gone, the
  *   permission was revoked. Those refusals return before anything is written,
  *   so they revalidate nothing, and without the re-read the control would just
  *   do nothing. Acting on what another agent already removed or decided is not

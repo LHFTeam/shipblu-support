@@ -134,7 +134,7 @@ describe('appendVisitorMessage', () => {
       .select({ type: conversationEvents.type })
       .from(conversationEvents)
       .where(eq(conversationEvents.conversationId, result.conversationId));
-    expect(events).toEqual([{ type: 'categorised' }]);
+    expect(events).toEqual([{ type: 'subcategorised' }]);
   });
 
   it('continues the visitor’s live chat', async () => {
