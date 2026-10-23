@@ -281,16 +281,36 @@ as instructions. The reasons are given so that any of them can be argued with.
     match.
   - The plan's 1.2 as-built note and this section are updated.
 - **The gate.** Merge `dev` → `main` only when this read-only query, run on the
-  day, returns 0 on production (`nqbcfnvqqyqawmffgiql`):
+  day, returns 0, 0, 0 on production (`nqbcfnvqqyqawmffgiql`):
 
   ```sql
-  SELECT count(*) FROM conversations WHERE NOT (CASE channel
-    WHEN 'facebook_comment' THEN coalesce(external_id, '') ~ '^facebook:comment:.'
-    WHEN 'instagram_comment' THEN coalesce(external_id, '') ~ '^instagram:comment:.'
-    ELSE coalesce(external_id, '') !~ '^(facebook|instagram):comment:' END);
+  SELECT
+    (SELECT count(*) FROM conversations WHERE NOT (CASE channel
+       WHEN 'facebook_comment' THEN coalesce(external_id, '') ~ '^facebook:comment:.'
+       WHEN 'instagram_comment' THEN coalesce(external_id, '') ~ '^instagram:comment:.'
+       ELSE coalesce(external_id, '') !~ '^(facebook|instagram):comment:' END)) AS tickets,
+    (SELECT count(*) FROM csat_surveys s JOIN conversations c ON c.id = s.conversation_id
+      WHERE (c.channel IN ('facebook_comment', 'instagram_comment')
+             OR s.channel IN ('facebook_comment', 'instagram_comment'))
+        AND coalesce(s.channel, c.channel) <> c.channel) AS surveys,
+    (SELECT count(*) FROM canned_suggestions s JOIN conversations c ON c.id = s.conversation_id
+      WHERE (c.channel IN ('facebook_comment', 'instagram_comment')
+             OR s.channel IN ('facebook_comment', 'instagram_comment'))
+        AND s.channel <> c.channel) AS suggestions;
   ```
 
-  It returned 0 at 21:54 UTC on 2026-10-21. Staging's database
+  `tickets` is what the CHECK would refuse. The other two are the frozen copies
+  `split_comment_channels` used to move with their ticket, read on the comment
+  axis: a comment ticket's copy anywhere but its own comment channel, or a
+  direct message's copy on a comment channel. A null survey channel follows its
+  ticket, as the rollup reads it (`coalesce`, `lib/reports/rollup.ts`). This is
+  the last read that can find a stranded copy: both copies are written from the
+  ticket's channel as it stands, nothing updates either copy's channel, and once
+  the CHECK holds nothing moves a ticket's channel either, the retired job
+  having been the only thing that did. So there is no job left to keep for them.
+
+  It returned 0, 0, 0 at 11:30 UTC on 2026-10-23 (the first count alone, 0, at
+  21:54 UTC on 2026-10-21). Staging's database
   (`funavpkflkhthegahuay`) has only its first migration applied and holds no
   tickets, so its first deploy, whenever staging is resumed, adds the CHECK to
   an empty table.
@@ -326,13 +346,55 @@ pg_stat_activity a using (pid) where l.relation =
 conrelid = 'conversations'::regclass AND conname =
 'conversations_comment_channel_matches_external_id'` returns one row, `true`,
     matching the file.
-  - No ingest has failed on it since: `SELECT count(*) FROM jobs WHERE type =
-'process_webhook' AND created_at > '<deploy instant>' AND last_error ILIKE
-'%Failed query: insert into "conversations"%'` is 0. A refused comment fails
-    its `process_webhook` job, not the web, and the row does not name the
-    constraint: `errorMessage` keeps drizzle's `Failed query: …` text, and
-    Postgres's "violates check constraint" is on its `cause`, which nothing
-    stores.
+  - No ingest has failed on it since. A refused comment fails its
+    `process_webhook` job, not the web, and nothing stored names the
+    constraint: `processMetaWebhook` keeps drizzle's `Failed query: insert into
+"conversations" …` text, and Postgres's "violates check constraint" is on
+    its `cause`, which nothing stores. So read two things, from the instant
+    noted just before triggering (`<X>`, the database's own clock, which
+    precedes the build and so the preDeploy that adds the CHECK):
+
+    ```sql
+    -- Every attempt since X that failed on an insert into conversations, however
+    -- old its job. Expect no rows.
+    SELECT j.id, j.status, j.attempts, j.created_at, j.run_at, j.completed_at,
+           substring(j.last_error from 'comment ([^: ]+):') AS comment_id,
+           (SELECT c.channel FROM messages m JOIN conversations c ON c.id = m.conversation_id
+             WHERE m.channel_message_id = substring(j.last_error from 'comment ([^: ]+):'))
+             AS filed_on
+    FROM jobs j
+    WHERE j.type = 'process_webhook'
+      AND j.run_at >= timestamptz '<X>'
+      AND j.last_error LIKE '%Failed query: insert into "conversations"%'
+    ORDER BY j.run_at;
+
+    -- No verified Meta delivery left unprocessed, retrying or dead. A delivery
+    -- retries for at most 10 + 40 + 90 + 160 s. Expect 0.
+    SELECT count(*) FROM webhook_events
+    WHERE channel IN ('facebook', 'instagram') AND signature_verified
+      AND processed_at IS NULL AND received_at < now() - interval '10 minutes';
+    ```
+
+    Each detail is there for a reason found on review:
+    - **`run_at`, not `created_at`.** Claiming, failing and completing a job
+      never touch `created_at`, so a job created before the deploy whose later
+      attempt was refused would read clear. `jobs` has no `updated_at`.
+    - **A success does not hide a refusal.** `completeJob` leaves `last_error`
+      alone, so a refusal followed by a successful retry is still listed. It is
+      `webhook_events.error` that a Meta success clears, so that column adds
+      nothing here.
+    - **A hit is not proof of the CHECK.** The same text comes from a race on
+      `conversations_external_idx`, which its retry wins. Production held two
+      such jobs from 2026-10-15, both completed, both comments filed on
+      `instagram_comment`. A CHECK refusal does not win on retry, so a completed
+      hit whose `filed_on` is the comment channel is that race; a `filed_on`
+      that is null means the comment is not in the database.
+    - **Read it within seven days.** `cleanup` deletes completed jobs a week
+      after they complete, which is where the two from 2026-10-15 went. A later
+      failure with different text also overwrites `last_error`; the per-attempt
+      record is the worker's Render log, `[worker] process_webhook` lines
+      carrying `Failed query: insert into "conversations"`.
+
   - A comment that arrives after the deploy files on its comment channel.
 - **Rollback.** Open a PR that replaces the ADD block in `008` with a drop
   guarded the same way, merge it and deploy web:
@@ -1788,8 +1850,13 @@ readers are harmless.
    the active rules with a `send_reply` action as a `SELECT` first
    (`actions::text like '%send_reply%' and is_active`), and deactivate each
    one a comment ticket could satisfy — a comment channel named, no channel
-   condition, or a channel condition that excludes rather than names — unless
-   the support lead approves it by name.
+   condition, a channel condition that excludes rather than names, or one that
+   names `facebook` or `instagram`, which every comment ticket carries again
+   once this step re-deploys 1.1's ingest and step 3 moves the old ones back —
+   unless the support lead approves it by name. The last case was missed until
+   #395's review: the engine's `channel` fact is the stored column, and the
+   refusal in `sendCannedReply` that would otherwise stop it is #391's, so this
+   step removes it.
 3. **Reverse the backfill** with an `UPDATE`, run as a `SELECT` first, that
    sets each comment channel back to its platform in `conversations`,
    `csat_surveys` and `canned_suggestions`, and points `channel_id` back at the
@@ -2296,7 +2363,7 @@ Web first (it migrates `metrics_daily`), then the worker and crons, with
 | 1     | No comment reply queued as email                          | `jobs` where `type='send_email'` joined to comment-channel messages = 0                                                                               |
 | 1     | The SLA did not change under comments                     | Comment tickets created after 1.2 with a null `sla_policy_id` = 0, and every one on the default policy (Q11)                                          |
 | 1.3   | The CHECK is live and validated                           | `pg_constraint` for `conversations_comment_channel_matches_external_id`: one row, `convalidated = true`, matching `db/sql/008`                        |
-| 1.3   | Nothing refused since                                     | `jobs` whose `last_error` names the constraint = 0                                                                                                    |
+| 1.3   | Nothing refused since                                     | No `process_webhook` attempt since failed on a `conversations` insert; no Meta delivery unprocessed (1.3, as built)                                   |
 | 2     | Detector still writing                                    | `subcategorised` events in the last hour > 0 during traffic                                                                                           |
 | 2     | Old names gone                                            | No `pg_class` relation named `ticket_categories%`, `conversation_categories%`, `category_metrics_daily%` or `ai_category_runs%` before Stage 3        |
 | 3     | Registry seeded                                           | 3 active rows; every `route_group_id` resolves to a non-manual group                                                                                  |
