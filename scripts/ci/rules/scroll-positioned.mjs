@@ -32,6 +32,12 @@ import { fail, lineOfNode, parseSource, read, requireAtLeast, scannableSource } 
  * positioned pane the span is placed in that pane's own content, where it adds
  * no scroll range — unless a clipping box between the two hides where it sits,
  * which is why a component that renders inside one positions itself as well.
+ * Nor is positioning `.app-scroll` in globals.css, though most panes carry it
+ * (§6.81): it is declared only under `@media (pointer: fine)`, so a phone
+ * would never get it, and unlayered, so it would beat the `fixed` on the
+ * admin mobile nav, which carries it too. Moved into a layer, it would still
+ * leave this rule to find every scroll and read its branches and `static`s,
+ * and would save only the word `relative`.
  *
  * What it reads is the class list as written, in any `.ts` or `.tsx` module:
  * the literals and template text of one `className`, or of one expression of
@@ -45,15 +51,29 @@ import { fail, lineOfNode, parseSource, read, requireAtLeast, scannableSource } 
  * different variant is refused even where it would cover the scroll (an `lg:`
  * scroll, an `md:` position); spell the same one. A `static` anywhere in the
  * list is refused, under any variant or condition, because it can take the
- * position back. Importance is read either way round (`!relative`,
- * `relative!`), and an arbitrary property as the utility it spells
- * (`[overflow-y:auto]`, `[position:relative]`).
+ * position back — on a `?:` arm that never scrolls and in a call's argument
+ * too, since this cannot tell those from `cn(…, open && 'md:static')`, so a
+ * branch like that goes in a list of its own. Importance is read either way
+ * round (`!relative`, `relative!`), and an arbitrary property as the utility
+ * it spells (`[overflow-y:auto]`, `[position:relative]`). A position written
+ * against an interpolation or another operand, with no space between, is not
+ * one: `${base}relative` renders as a single class that positions nothing, so
+ * spell the space in the text itself — an empty `?:` arm beside it is not a
+ * space. Nor can it tell a sentence from a class list: a message naming
+ * `overflow-y-auto` as a bare word is read as one, so name a utility in
+ * backticks there, as prose here already does.
  *
  * What it does not see: a position supplied through a variable or a helper
  * (spell `relative` beside `overflow-y-auto` instead); a variant that moves a
  * utility onto other elements (`*:`, `[&>li]:`), read as if it were the box's
  * own; a box made to scroll by an inline `style` or a stylesheet rule, of which
- * the console has none — globals.css scrolls only horizontally; and horizontal
+ * the console has none — globals.css scrolls only horizontally; an arbitrary
+ * `overflow` with two values or a variable (`[overflow:hidden_auto]`), where
+ * `overflow-y-auto` says the same; an axis utility narrowing a shorthand, so
+ * `overflow-auto overflow-y-hidden` is read as a vertical scroller (spell a
+ * horizontal one `overflow-x-auto`); an `sr-only` under a clipping box between
+ * it and its pane, usually in another file, which is why a component mounted
+ * inside one positions itself, as `AttachmentList` does; and horizontal
  * scrollers, out of scope because a box escaping one lands inside the vertical
  * pane around it, which this rule has already positioned.
  */
@@ -99,8 +119,8 @@ const CONSEQUENCE =
   'an `sr-only` or other absolutely positioned box inside it is placed against the document instead, lengthens the page, and scrolling past the end takes the whole console off the screen';
 
 const MESSAGES = {
-  unpositioned: `a scroll container that is not positioned wherever it scrolls — ${CONSEQUENCE}; add \`relative\` beside it, unprefixed and outside any condition (§6.81)`,
-  static: `a scroll container that a \`static\` unpositions again — ${CONSEQUENCE}; drop the \`static\` (§6.81)`,
+  unpositioned: `a scroll container that is not positioned wherever it scrolls — ${CONSEQUENCE}; add \`relative\` beside it, unprefixed, outside any condition and with a space between it and any interpolation or operand it touches (§6.81)`,
+  static: `a scroll container that a \`static\` unpositions again — ${CONSEQUENCE}; drop the \`static\`, or move the branch that carries it into a list of its own (§6.81)`,
 };
 
 /**
@@ -134,7 +154,7 @@ function carriedWherever(text, list, accepts) {
  * call, which may return anything.
  */
 function alwaysCarries(node, accepts) {
-  if (isClassText(node)) return tokens(node.text).some(accepts);
+  if (isClassText(node)) return wholeTokens(node).some(accepts);
   if (ts.isTemplateExpression(node)) {
     return (
       alwaysCarries(node.head, accepts) ||
@@ -212,6 +232,79 @@ const unpositions = (token) => parseToken(token).utility === 'static';
 
 const tokens = (text) => text.split(/\s+/).filter(Boolean);
 
+/**
+ * The tokens of `text` that are whole classes every time it renders. One at
+ * an edge counts only when whitespace parts it from whatever the list puts
+ * beside it: `${base}relative` renders as `p-2relative`, which positions
+ * nothing. Only a position is read this way. A scroll touching an
+ * interpolation is still a scroll, because `overflow-y-auto${extra}` scrolls
+ * whenever `extra` is empty, and a `static` is still refused wherever it sits.
+ */
+function wholeTokens(text) {
+  const words = tokens(text.text);
+  if (!parted(text, 'start')) words.shift();
+  if (!parted(text, 'end')) words.pop();
+  return words;
+}
+
+/**
+ * Whether whitespace, or the edge of its class list, is at `edge` of `node`
+ * every time it renders. Outward from `node`, a template, a `+` or a `+=` puts
+ * its neighbouring piece there, read past empty text; a `?:` arm, a `&&`, `||`
+ * or `??` operand or a wrapper shares the edge of the expression around it;
+ * anything else, a call above all, is where the list ends.
+ */
+function parted(node, edge) {
+  if (spaced(node, edge)) return true;
+  for (let at = node; ;) {
+    const parent = at.parent;
+    const whole = parent && ts.isTemplateSpan(parent) ? parent.parent : parent;
+    const parts = whole && piecesOf(whole);
+    if (parts) {
+      const step = edge === 'start' ? -1 : 1;
+      for (let i = parts.indexOf(at) + step; i >= 0 && i < parts.length; i += step) {
+        if (isClassText(parts[i]) && parts[i].text === '') continue;
+        return spaced(parts[i], edge === 'start' ? 'end' : 'start');
+      }
+      at = whole;
+    } else if (parent && isClassExpression(parent)) {
+      at = parent;
+    } else {
+      return true;
+    }
+  }
+}
+
+/** Whether every render of `node` has whitespace at `edge`, as far as the text shows. */
+function spaced(node, edge) {
+  if (isClassText(node)) return (edge === 'start' ? /^\s/ : /\s$/).test(node.text);
+  const parts = piecesOf(node);
+  if (parts) {
+    const outer = (edge === 'start' ? parts : [...parts].reverse()).find(
+      (part) => !(isClassText(part) && part.text === ''),
+    );
+    return Boolean(outer) && spaced(outer, edge);
+  }
+  if (isWrapper(node)) return Boolean(node.expression) && spaced(node.expression, edge);
+  if (ts.isConditionalExpression(node)) {
+    return spaced(node.whenTrue, edge) && spaced(node.whenFalse, edge);
+  }
+  return false;
+}
+
+/**
+ * The pieces a template, a `+` or a `+=` renders one after another, in order.
+ * A `+=` appends to whatever its left side already holds, so it glues exactly
+ * as a `+` does, rather than sharing an edge the way a `&&` operand does.
+ */
+function piecesOf(node) {
+  if (ts.isTemplateExpression(node)) {
+    return [node.head, ...node.templateSpans.flatMap((span) => [span.expression, span.literal])];
+  }
+  if (isConcatenation(node) || isAppend(node)) return [node.left, node.right];
+  return null;
+}
+
 function isClassText(node) {
   return (
     ts.isStringLiteral(node) ||
@@ -235,6 +328,10 @@ function isWrapper(node) {
 
 function isConcatenation(node) {
   return ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.PlusToken;
+}
+
+function isAppend(node) {
+  return ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.PlusEqualsToken;
 }
 
 /**

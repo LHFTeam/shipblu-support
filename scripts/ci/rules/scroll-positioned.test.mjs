@@ -158,6 +158,60 @@ describe('scroll-positioned', () => {
     ).toEqual(at(0, 1, 2, 3, 4, 5, 6));
   });
 
+  it('does not count a position glued to whatever the list puts beside it', async () => {
+    expect(
+      await verdicts([
+        '`${base}relative overflow-y-auto`',
+        '`overflow-y-auto relative${x}`',
+        '`${a ? "relative" : "sticky"}x overflow-y-auto`',
+        '`x${a ? "relative" : "sticky"} overflow-y-auto`',
+        '"p-2" + "relative overflow-y-auto"',
+        '"overflow-y-auto relative" + x',
+        '`${x}${a ? "relative" : "sticky"} overflow-y-auto`',
+        '`relative${a ? " p-2" : ""} overflow-y-auto`',
+        '(cls += "relative overflow-y-auto")',
+        '"p-2" + ("relative overflow-y-auto")',
+        '"p-2" + (a && "relative overflow-y-auto")',
+      ]),
+    ).toEqual(at(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10));
+  });
+
+  it('tells the author a glued position needs a space, not another relative', async () => {
+    const found = await runRule('scroll-positioned', {
+      ...PANES,
+      'components/list.tsx': page('<ul className={`${base}relative overflow-y-auto`} />'),
+    });
+
+    expect(found).toEqual([
+      expect.objectContaining({
+        where: 'components/list.tsx:2',
+        message: expect.stringMatching(/a space between it and any interpolation/),
+      }),
+    ]);
+  });
+
+  it('counts a position whitespace parts from whatever is beside it', async () => {
+    expect(
+      await verdicts([
+        '`${base} relative overflow-y-auto`',
+        '`relative overflow-y-auto ${x}`',
+        '`relative ${x}overflow-y-auto`',
+        '`x ${a ? "relative" : "sticky"} overflow-y-auto`',
+        '"p-2 " + "relative overflow-y-auto"',
+        '(a ? "relative" : "sticky") + " overflow-y-auto"',
+        '`${a ? "relative" : "sticky"}${b ? " p-2" : " p-4"} overflow-y-auto`',
+        'cn(`${base}`, "relative overflow-y-auto")',
+        '(cls += " relative overflow-y-auto")',
+      ]),
+    ).toEqual([]);
+  });
+
+  it('still counts a scroll glued to an interpolation, which scrolls whenever it is empty', async () => {
+    expect(
+      await verdicts(['`max-h-40 overflow-y-auto${extra}`', '`${extra}overflow-y-auto`']),
+    ).toEqual(at(0, 1));
+  });
+
   it('reports a class list once, at the text that is not positioned', async () => {
     const found = await runRule('scroll-positioned', {
       ...PANES,
