@@ -161,6 +161,7 @@ as instructions. The reasons are given so that any of them can be argued with.
       WHERE conname = 'conversations_comment_channel_matches_external_id'
         AND conrelid = 'conversations'::regclass
     ) THEN
+      PERFORM set_config('lock_timeout', '3s', true);
       ALTER TABLE conversations
         ADD CONSTRAINT conversations_comment_channel_matches_external_id
         CHECK (CASE channel
@@ -176,8 +177,27 @@ as instructions. The reasons are given so that any of them can be argued with.
   first written. It also pins the platform, so `instagram:comment:…` cannot sit
   on `facebook_comment`, and it requires a root, as `rootCommentId` does. No
   writer produces either shape, and production holds none. The expression is
-  never null, because `channel` is NOT NULL and every arm coalesces. Do not use
-  `NOT VALID`: the point is that every row is checked, once.
+  never null, because `channel` is NOT NULL and every arm coalesces.
+
+  It is added VALID, with the wait for its lock bounded at 3 s, and not
+  `NOT VALID` with a `VALIDATE` in a later file. Review asked for the second
+  form (#395), so it was measured on a 70,000-row copy of the table:
+  - **Holding the lock costs about 80 ms.** The same predicate scans
+    production's heap in 82 ms, all from cache (2026-10-22). `NOT VALID` cuts
+    that to 2 ms.
+  - **Waiting for it costs up to the timeout, and `NOT VALID` does not help.**
+    Both forms ask for ACCESS EXCLUSIVE, so both queue behind any open
+    transaction that has touched the table, and every later read and write of
+    `conversations` queues behind them. With a reader holding the table, a plain
+    `SELECT` waited the same 5 s behind either form. What bounds that is the
+    `set_config` line: transaction-local, and `db/migrate.ts` sends each file as
+    one implicit transaction, so it applies to this `ALTER` alone and reverts
+    before the next file. Measured: 55P03 after 3 s, the session still at 10 s
+    afterwards.
+  - **The split has a half-applied state.** If `VALIDATE` found a bad row, the
+    deploy would fail with the constraint already committed `NOT VALID`, and
+    that refuses every `UPDATE` of the row, so a ticket would stop taking
+    replies. VALID lands whole or leaves nothing.
 
 - **The tests it breaks.** The test database replays `db/sql`, so a test that
   inserts a row the CHECK refuses fails at the insert. This was measured on
@@ -279,22 +299,28 @@ as instructions. The reasons are given so that any of them can be argued with.
   - **Order: web first, then the worker, then the crons.** Only web's
     preDeploy (`npm run db:migrate`) replays `db/sql`. The worker and crons
     change only in that the retired job is gone, and nothing enqueues it.
-  - **The lock.** `ADD CONSTRAINT … CHECK` holds an ACCESS EXCLUSIVE lock on
-    `conversations` while it validates every row (about 69,000). `db/migrate.ts`
-    sets `lock_timeout` to 10 s, so one long transaction on the table fails the
-    deploy.
+  - **The lock.** `ADD CONSTRAINT … CHECK` takes ACCESS EXCLUSIVE on
+    `conversations` and holds it while it validates every row (about 70,000;
+    about 80 ms). While it waits for the lock, every read and write of the
+    table waits behind it, so `008` bounds that wait at 3 s, below
+    `db/migrate.ts`'s session-wide 10 s. One transaction holding the table for
+    longer fails the deploy with 55P03.
   - **Just before triggering:**
-    - run the gate again;
+    - run the gate again, and note `SELECT now()` from the same session as the
+      instant the verification below reads from;
     - list what holds a lock on `conversations`, which must show nothing more
       than a few seconds old: `select a.pid, l.mode, a.state, now() -
 a.xact_start as age, left(a.query, 80) from pg_locks l join
 pg_stat_activity a using (pid) where l.relation =
 'conversations'::regclass and a.pid <> pg_backend_pid();` (§5.5's query
       lists only transactions older than five minutes, which the role's
-      `transaction_timeout` reaps, so it reads clear when this would not);
+      `transaction_timeout` reaps, so it reads clear when this would not). It
+      is a reading, not a reservation: Render runs the whole build between it
+      and the `ALTER`, which is why the file bounds the wait itself;
     - stay clear of the nightly rollup at 00:00 UTC.
   - **If the preDeploy fails,** the previous release keeps serving and the
-    constraint is absent. Read the deploy log, then the gate query.
+    constraint is absent. Read the deploy log, then the gate query. A 55P03 is
+    the 3 s bound: list the locks again and redeploy once the table is clear.
 - **1.3's verification**, read-only, after the deploy:
   - `SELECT convalidated, pg_get_constraintdef(oid) FROM pg_constraint WHERE
 conrelid = 'conversations'::regclass AND conname =

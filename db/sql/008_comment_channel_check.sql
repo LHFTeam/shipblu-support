@@ -37,11 +37,29 @@
 -- root or no root.
 --
 -- Never null, so never passed by default: `channel` is NOT NULL and every arm
--- coalesces the external id. Added VALID, not NOT VALID: the point is that
--- every row is checked, once. That takes an ACCESS EXCLUSIVE lock on
--- conversations for as long as the scan does, and db/migrate.ts gives up after
--- its 10 s lock_timeout, so the deploy that adds it is triggered with nothing
--- else open on the table.
+-- coalesces the external id.
+--
+-- The lock. Adding it takes ACCESS EXCLUSIVE on conversations, which costs
+-- twice. Holding it costs the scan: the same predicate reads production's heap
+-- in about 80 ms (2026-10-22). Waiting for it costs more: until every open
+-- transaction that has touched the table finishes, the request sits in the
+-- queue and every later read and write of conversations waits behind it, up to
+-- db/migrate.ts's session-wide 10 s. So the wait is bounded here, at 3 s, for
+-- this one statement: set_config(..., true) is transaction-local, and
+-- db/migrate.ts sends this file as one implicit transaction, so it reverts
+-- before the next file and replays never reach it. A deploy that cannot get the
+-- lock in 3 s fails fast with 55P03, which db/migrate.ts explains, and the
+-- previous release keeps serving.
+--
+-- Added VALID, not NOT VALID with a VALIDATE in a later file, though that would
+-- move the scan under SHARE UPDATE EXCLUSIVE. ADD ... NOT VALID asks for the
+-- same ACCESS EXCLUSIVE, so it queues the table for just as long (measured, on
+-- a 70,000-row copy: a reader holding the table kept a plain SELECT waiting the
+-- same 5 s behind both forms); it only shortens the 80 ms hold. And it splits
+-- one outcome into two: a VALIDATE that found a bad row would fail the deploy
+-- with the constraint already committed NOT VALID, which refuses every UPDATE
+-- of that row, so a ticket would stop taking replies. VALID either lands whole
+-- or leaves nothing behind.
 -- --------------------------------------------------------------------------
 
 DO $$
@@ -51,6 +69,7 @@ BEGIN
     WHERE conname = 'conversations_comment_channel_matches_external_id'
       AND conrelid = 'conversations'::regclass
   ) THEN
+    PERFORM set_config('lock_timeout', '3s', true);
     ALTER TABLE conversations
       ADD CONSTRAINT conversations_comment_channel_matches_external_id
       CHECK (CASE channel
