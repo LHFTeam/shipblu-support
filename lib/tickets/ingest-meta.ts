@@ -543,6 +543,22 @@ type FoundConversation = {
   reopenCount: number;
 };
 
+/**
+ * The ticket a comment thread is filed on, by its `<platform>:comment:<root>`.
+ *
+ * It skips a soft-deleted ticket as every read does, but this is the one lookup
+ * a unique index answers as well: `conversations_external_idx` covers
+ * `(source_system, external_id)` with deleted rows included. Nothing sets
+ * `conversations.deleted_at` yet — a purge deletes the row, which frees its
+ * place in the index — but once `ticket.delete` does, the next comment under a
+ * deleted thread finds nothing here, inserts the same pair, fails 23505, and
+ * takes its Meta batch with it on every retry until the job is dead. So the
+ * change that gives `ticket.delete` an action decides here what that comment
+ * does: reopen the hidden ticket, land on it, or open a new one under a narrower
+ * index. `ticket.merge` has the same question: this does not skip a merged
+ * ticket, so a comment lands on the one merged away unless it follows
+ * `merged_into_id`.
+ */
 async function findByExternalId(externalId: string): Promise<FoundConversation | null> {
   const rows = await db
     .select({

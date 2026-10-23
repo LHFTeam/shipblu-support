@@ -75,7 +75,10 @@ export const PERMISSIONS = [
    * verbs that happen to share a word. `conversations.deleted_at` exists and
    * every query already filters on it, so `ticket.delete` has a well-defined
    * meaning waiting for it: hide this from the inbox, and put it back if that
-   * was wrong. This one has no way back — which is why it is admin-only while
+   * was wrong. One lookup needs more than the filter: a comment thread is found
+   * by an external id a unique index holds across deleted rows, so
+   * `findByExternalId` in `lib/tickets/ingest-meta.ts` says what that action
+   * has to decide first. This one has no way back — which is why it is admin-only while
    * `ticket.delete` sits at supervisor.
    */
   'ticket.purge',
