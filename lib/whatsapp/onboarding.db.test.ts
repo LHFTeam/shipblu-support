@@ -1,4 +1,5 @@
 import { and, eq, sql } from 'drizzle-orm';
+import { DateTime } from 'luxon';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { db } from '@/db/client';
 import {
@@ -10,6 +11,7 @@ import {
   whatsappOnboardings,
 } from '@/db/schema';
 import { resetEnvCache } from '@/lib/env';
+import { TEAM_TIME_ZONE } from '@/lib/hours/zone';
 import { withCleanDatabase } from '@/lib/testing/db';
 import { stubFetch } from '@/lib/testing/fetch';
 import { canRequestSync, parseCoexistence } from './coexistence';
@@ -256,6 +258,60 @@ describe('the first phase: exchanging the code', () => {
       );
     }
   });
+
+  /**
+   * The note prints the same instant as the credential card on /admin/channels,
+   * so it reads it in Cairo as the card does. Each case is an expiry in the
+   * first hours of a Cairo day, whose UTC date is the day before — which the
+   * note printed while it took the date off `toISOString()` — once on either
+   * side of daylight saving, since the hours affected move with it.
+   */
+  it.each([
+    {
+      season: 'winter',
+      cairo: '2027-01-15T01:30',
+      utcDay: '2027-01-14',
+      shown: '15 Jan 2027, 01:30',
+    },
+    {
+      season: 'summer',
+      cairo: '2027-07-15T02:30',
+      utcDay: '2027-07-14',
+      shown: '15 Jul 2027, 02:30',
+    },
+  ])(
+    'says when the token expires on the Cairo day, as the card does ($season)',
+    async ({ cairo, utcDay, shown }) => {
+      const expires = DateTime.fromISO(cairo, { zone: TEAM_TIME_ZONE });
+      expect(expires.toUTC().toISODate()).toBe(utcDay);
+      graph(
+        exchangeRoutes({
+          debug: {
+            method: 'GET',
+            path: /\/debug_token\?/,
+            answer: () => ({
+              data: {
+                app_id: APP_ID,
+                is_valid: true,
+                expires_at: expires.toUnixInteger(),
+                scopes: ['whatsapp_business_management', 'whatsapp_business_messaging'],
+                granular_scopes: [{ scope: 'whatsapp_business_management', target_ids: [WABA] }],
+              },
+            }),
+          },
+        }),
+      );
+
+      const outcome = await beginCoexistenceOnboarding(claim(), await admin());
+
+      expect(outcome).toMatchObject({
+        ok: true,
+        notice: expect.stringContaining(`(expires ${shown})`),
+      });
+      const [account] = await db.select().from(whatsappAccounts);
+      expect((await credentialStatuses()).get(account!.id)?.expiresAt).toEqual(expires.toJSDate());
+    },
+  );
 
   it('refuses an expired code without writing anything, and without repeating the code or the secret', async () => {
     graph(

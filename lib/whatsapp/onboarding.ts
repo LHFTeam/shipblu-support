@@ -3,6 +3,7 @@ import { db } from '@/db/client';
 import { groups, jobs, whatsappOnboardings } from '@/db/schema';
 import { env, metaAppSecret } from '@/lib/env';
 import { errorMessage } from '@/lib/errors';
+import { formatDateTime } from '@/lib/format';
 import { isTimeout } from '@/lib/http/deadline';
 import { logger } from '@/lib/log';
 import { inspectToken, type TokenInspection } from '@/lib/meta/debug-token';
@@ -353,11 +354,14 @@ export async function beginCoexistenceOnboarding(
     expiresAt: inspection ? (inspection.expiresAt?.toISOString() ?? 'never') : 'unknown',
   });
 
+  // The expiry in Cairo, as the credential card on /admin/channels prints the
+  // same instant: the UTC date read a token expiring before 02:00 Cairo time
+  // (03:00 in summer) as expiring the day before.
   const notes = [
     `Signed in to Meta and stored the business token${
       inspection
         ? inspection.expiresAt
-          ? ` (expires ${inspection.expiresAt.toISOString().slice(0, 10)})`
+          ? ` (expires ${formatDateTime(inspection.expiresAt)})`
           : ' (never expires)'
         : ''
     }. Connecting the number now.`,
