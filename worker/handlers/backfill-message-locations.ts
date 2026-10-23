@@ -49,8 +49,8 @@ export async function backfillMessageLocations(job: ClaimedJob): Promise<void> {
   const dryRun = payload.dryRun === true;
 
   const bounds: SQL[] = [];
-  if (payload.since) bounds.push(gte(messages.createdAt, new Date(payload.since)));
-  if (payload.until) bounds.push(lte(messages.createdAt, new Date(payload.until)));
+  if (payload.since) bounds.push(gte(messages.createdAt, payload.since));
+  if (payload.until) bounds.push(lte(messages.createdAt, payload.until));
 
   // Only rows that could possibly carry one. The `like` is a cheap prefilter
   // that keeps this from parsing nine thousand JSON blobs to find eight hundred

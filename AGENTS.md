@@ -494,6 +494,15 @@ code writes. Every operator-run schema is strict now; the last four to move were
 still takes any object, so the entry is a convention the compiler does not
 force.
 
+A time in a payload is read by its schema, never by the handler. jsonb holds it
+as text, and `new Date()` reads text with no offset in the host's zone and a bare
+date as UTC midnight, so `since=2026-10-01T00:00` meant one instant on Render
+and another on a laptop in Cairo (`docs/PROJECT-STATE.md` §6.102). `instant` in
+`payloads.ts` reads one on a Cairo clock, a date alone as the start of that day
+there, and an explicit `Z` or offset as given, and hands the handler a `Date`.
+Its `z.input` stays a string, so `enqueue` takes the text and the reading
+happens only where the job runs.
+
 **`PermanentJobError` is for a failure no retry can fix**, and it sends the job
 to `dead` on its first attempt instead of spending the rest. That means input
 that is wrong: a payload failing its schema (which `parseJobPayload` throws), or

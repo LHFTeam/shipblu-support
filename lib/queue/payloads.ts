@@ -1,18 +1,97 @@
+import { DateTime, IANAZone } from 'luxon';
 import { z } from 'zod';
 import { SURVEY_TRIGGERS } from '@/lib/csat/decision';
+import { TEAM_TIME_ZONE } from '@/lib/hours/zone';
 import { LOCALES } from '@/lib/kb/locale';
 import { RERUNNABLE_STEPS } from '@/db/schema';
 import { PermanentJobError, type ClaimedJob, type JobType } from '@/lib/queue';
 
 /**
- * A bound on a scan, handed straight to `new Date()`. Checked as something
- * `Date` can read, because what `npm run job` makes of `since=20260901` is a
- * number, which `new Date` reads as milliseconds into 1970, and a typo is an
- * Invalid Date that fails only when the query is bound.
+ * A bound on a scan, typed as text and handed to the handler as the instant it
+ * names, read on the team's clock.
+ *
+ * The handlers used to call `new Date()` on the text, which reads
+ * `2026-10-01T00:00` in the host's zone and `2026-10-01` as UTC midnight. So one
+ * command meant 00:00Z on Render, which sets no `TZ`, and 21:00Z the evening
+ * before on a laptop in Cairo, and neither was the start of 1 October where the
+ * team works and every report cuts its days (`docs/PROJECT-STATE.md` §6.102).
+ * Read once here, a handler is given a `Date` and has nothing left to misread:
+ *
+ * - a time ending in `Z` or an offset is the instant it names;
+ * - a time without one is that time on a Cairo clock;
+ * - a date alone is the start of that day in Cairo. A bound is an instant, so
+ *   `until=2026-10-08` stops as the 8th begins and covers the 7th.
+ *
+ * Only those shapes, with a space allowed for the `T` as Postgres prints a
+ * timestamp. `Date.parse` read anything else it could, `Oct 1 2026` in the
+ * host's zone and `2026-02-30` as 2 March. A number never reaches here as text:
+ * `npm run job` makes `since=20260901` a number, which `new Date` read as
+ * milliseconds into 1970.
  */
-const instant = z.string().refine((value) => !Number.isNaN(Date.parse(value)), {
-  message: 'expected a date or a time Date can read',
+const instant = z.string().transform((text, ctx) => {
+  const read = readBound(text);
+  if ('refused' in read) {
+    ctx.addIssue(read.refused);
+    return z.NEVER;
+  }
+  return read.at;
 });
+
+const BOUND =
+  /^(\d{4}-\d{2}-\d{2})(?:[T ](\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?)(Z|[+-]\d{2}(?::?\d{2})?)?)?$/i;
+const MINUTE = 60_000;
+const DAY = 24 * 60 * MINUTE;
+
+function readBound(text: string): { at: Date } | { refused: string } {
+  const unreadable = {
+    refused:
+      `expected 2026-10-01 or 2026-10-01T09:30 on a ${TEAM_TIME_ZONE} clock, ` +
+      `or a time ending in Z or an offset such as +03:00`,
+  };
+  const parts = BOUND.exec(text);
+  const date = parts?.[1];
+  if (!parts || !date) return unreadable;
+  const time = parts[2];
+  const offset = parts[3];
+
+  if (offset) {
+    const named = DateTime.fromISO(`${date}T${time}${offset}`, { setZone: true });
+    return named.isValid ? { at: named.toJSDate() } : unreadable;
+  }
+
+  // The fields as written, on a clock that never changes, so nothing is
+  // resolved yet.
+  const written = DateTime.fromISO(time ? `${date}T${time}` : date, { zone: 'utc' });
+  if (!written.isValid) return unreadable;
+  const fields = written.toMillis();
+
+  // Every instant a Cairo clock showed those fields: one, or two in the hour
+  // the autumn change repeats, or none in the hour spring skips. Worked out
+  // from the zone's offsets a day either side rather than asked of
+  // `DateTime.fromISO(text, { zone })`, because luxon picks between the two by
+  // the offset the zone has on the day it is asked, so the same bound would
+  // move by an hour between a run in summer and one in winter.
+  const zone = IANAZone.create(TEAM_TIME_ZONE);
+  const offsetAt = (ms: number) => zone.offset(ms) * MINUTE;
+  const before = offsetAt(fields - DAY);
+  const after = offsetAt(fields + DAY);
+  const [first] = [fields - before, fields - after]
+    .filter((at) => offsetAt(at) === fields - at)
+    .sort((a, b) => a - b);
+
+  // The first of a repeated time, as `cairo()` reads one in the tests.
+  if (first !== undefined) return { at: new Date(first) };
+
+  // Midnight skipped: Cairo springs forward from 00:00 to 01:00, so its day
+  // began at the jump, which is midnight read at the offset before it.
+  if (!time) return { at: new Date(fields - before) };
+
+  return {
+    refused:
+      `${TEAM_TIME_ZONE}'s clocks skipped ${text} when they went forward; ` +
+      `give the offset it was meant at, or the date alone for the start of that day`,
+  };
+}
 
 /**
  * What a job's payload must hold, written once for the code that enqueues it
@@ -161,7 +240,7 @@ export const JOB_PAYLOADS = {
   // on a payload code writes; on one an operator types, `dryrun=true` would be
   // dropped and the run would write.
   backfill_shipment_links: z.strictObject({
-    /** ISO timestamps bounding which messages are scanned. */
+    /** Which messages are scanned, by when they were stored: see `instant`. */
     since: instant.optional(),
     until: instant.optional(),
     /** Scan only, write nothing. Useful for checking a new pattern's yield. */
@@ -170,7 +249,7 @@ export const JOB_PAYLOADS = {
     limit: z.number().int().positive().optional(),
   }),
   backfill_message_locations: z.strictObject({
-    /** ISO timestamps bounding which messages are scanned. */
+    /** Which messages are scanned, by when they were stored: see `instant`. */
     since: instant.optional(),
     until: instant.optional(),
     /** Scan and report, write nothing. */
@@ -186,7 +265,7 @@ export const JOB_PAYLOADS = {
      */
     runLabel: z.union([z.string(), z.number().transform(String)]).optional(),
     limit: z.number().int().positive().optional(),
-    /** ISO timestamps bounding which messages are considered. */
+    /** Which messages are considered, by when they were stored: see `instant`. */
     since: instant.optional(),
     until: instant.optional(),
     /** Comma-separated channels, replacing the default "everything but the bot". */

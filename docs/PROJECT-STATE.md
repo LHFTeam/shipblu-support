@@ -6645,6 +6645,33 @@ dryRun=true`, then without, gives those two theirs back from their
       `windowDays` does in UTC, and so should anything else counting days:
       never on the instants between them.
 
+102.  **A scan bound typed at `npm run job` named a different instant on each
+      host.** _2026-10-23._ `since` and `until` on `backfill_shipment_links`,
+      `backfill_message_locations` and `backfill_subcategorise_ai` were checked
+      only as something `Date.parse` could read, and each handler then called
+      `new Date(payload.since)`. ECMAScript reads a date-time with no offset in
+      the host's zone and a date alone as UTC midnight, so
+      `since=2026-10-01T00:00` was 00:00Z on Render, which sets no `TZ`, and
+      21:00Z the evening before on a laptop in Cairo. Neither was Cairo's
+      midnight, where the team names its times and every report cuts its day.
+      A run under `TZ=UTC` and another under `TZ=Africa/Cairo` confirmed it.
+      `instant` in `lib/queue/payloads.ts` now reads the text once: a time with
+      no offset on a Cairo clock, a date alone as the start of that day in
+      Cairo, and a `Z` or an offset as given. The handlers receive a `Date`. A
+      time the spring change skips is refused. A time the autumn change repeats
+      takes its first instance. The resolver works that out from the zone's
+      offsets rather than asking `DateTime.fromISO(text, { zone })`, because
+      luxon chooses between the two instances by the offset in force on the day
+      the code runs (#409), so a bound in that hour would have moved by an hour
+      between summer and winter. `Date.parse` also read `Oct 1 2026` and
+      `2026/10/01` in the host's zone, and rolled `2026-02-30` over to 2 March.
+      Those are now refused, along with anything that is not an ISO date or
+      date-time. Whether a past run passed a bound with a time cannot be read
+      back. On 2026-10-23 production's `jobs` table held no row of any of the
+      three types, `cleanup` deletes completed rows after seven days, and
+      `npm run job` writes none. Nothing in the repository passes one: the
+      admin buttons and CI's database job send no bound, and no doc shows one.
+
 ### Tooling notes for this environment
 
 Supabase and Render MCP tools work and are the fastest way to check real state —

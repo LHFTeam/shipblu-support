@@ -48,8 +48,8 @@ export async function backfillShipmentLinks(job: ClaimedJob): Promise<void> {
   const dryRun = payload.dryRun === true;
 
   const bounds: SQL[] = [];
-  if (payload.since) bounds.push(gte(messages.createdAt, new Date(payload.since)));
-  if (payload.until) bounds.push(lte(messages.createdAt, new Date(payload.until)));
+  if (payload.since) bounds.push(gte(messages.createdAt, payload.since));
+  if (payload.until) bounds.push(lte(messages.createdAt, payload.until));
 
   // Per channel, not just totalled.
   //
