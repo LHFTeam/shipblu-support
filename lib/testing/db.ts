@@ -154,7 +154,7 @@ END $$`;
  *
  * A reseed hands out new ids, so a registry cached by the previous test is a set
  * of foreign keys into nothing. The subcategoriser is the one that shows it:
- * its insert fails the `ticket_categories` foreign key, the lifecycle catches
+ * its insert fails the `ticket_subcategories` foreign key, the lifecycle catches
  * and logs the error as it is meant to, and the test sees a ticket that was
  * never subcategorised — a quirk of the fixture, reading as one of the code.
  *

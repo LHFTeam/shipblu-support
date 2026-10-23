@@ -16,7 +16,7 @@ import { priorityEnum } from './enums';
 /**
  * Every answer Jev gave about a message's priority, and what was done with it.
  *
- * Unlike `ai_category_runs` this is not a shadow table that nothing acts on —
+ * Unlike `ai_subcategory_runs` this is not a shadow table that nothing acts on —
  * the classifier writes `conversations.priority` — but it is the only place the
  * evidence for those writes lives. No ticket in the archive carried a priority
  * anybody chose when this shipped, so these rows are the first labels there
@@ -41,7 +41,7 @@ export const aiPriorityRuns = pgTable(
     /**
      * One answer per message, ever — the unique index below is what makes a
      * re-delivered job a no-op rather than a second opinion. `set null` on
-     * delete, as `ai_category_runs` does: the run is evidence about the
+     * delete, as `ai_subcategory_runs` does: the run is evidence about the
      * classifier, and a deleted message must not take it along.
      */
     messageId: uuid('message_id').references(() => messages.id, { onDelete: 'set null' }),

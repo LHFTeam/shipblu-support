@@ -5,7 +5,7 @@ import { predictionFrom } from './map';
 /**
  * Reading the answer, and refusing one nobody asked for.
  *
- * `ai_category_runs.predicted_key` has no foreign key behind it — recording a
+ * `ai_subcategory_runs.predicted_key` has no foreign key behind it — recording a
  * wrong prediction is the entire point of a shadow run — so this is the only
  * thing standing between a model's answer and a subcategory key that never
  * existed.

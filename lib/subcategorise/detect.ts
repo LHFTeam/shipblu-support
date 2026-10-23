@@ -25,7 +25,7 @@ const log = logger('subcategorise');
 export type HitLayer = 'phrase' | 'keyword' | 'fallback';
 
 export type SubcategoryHit = {
-  /** A `ticket_categories.key`. */
+  /** A `ticket_subcategories.key`. */
   key: string;
   /** The evidence grade, 0..1. See `rules.ts` — not a probability. */
   confidence: number;

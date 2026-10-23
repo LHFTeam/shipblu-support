@@ -356,7 +356,7 @@ const BANDS = [
  * The evidence for a threshold, should one ever be wanted: if precision in the
  * lowest band is poor and its suggestions are mostly waved away, hiding them is
  * an argument this table makes and v1 does not act on. A probability, not an
- * evidence grade — nothing here is comparable to `conversation_categories.confidence`.
+ * evidence grade — nothing here is comparable to `conversation_subcategories.confidence`.
  */
 export async function byProbability(window: ReportWindow): Promise<BandRow[]> {
   const rows = await db.execute<{

@@ -194,7 +194,7 @@ export type TicketFieldOption = {
  * freezes one, and every report groups by one.
  */
 export const ticketSubcategories = pgTable(
-  'ticket_categories',
+  'ticket_subcategories',
   {
     id: uuid('id').primaryKey().defaultRandom(),
 
@@ -262,9 +262,9 @@ export const ticketSubcategories = pgTable(
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
-    uniqueIndex('ticket_categories_key_idx').on(t.key),
-    index('ticket_categories_area_idx').on(t.area, t.position),
-    index('ticket_categories_active_idx').on(t.isActive, t.position),
+    uniqueIndex('ticket_subcategories_key_idx').on(t.key),
+    index('ticket_subcategories_area_idx').on(t.area, t.position),
+    index('ticket_subcategories_active_idx').on(t.isActive, t.position),
   ],
 );
 
@@ -288,7 +288,7 @@ export const ticketRootCauses = pgTable(
   {
     id: uuid('id').primaryKey().defaultRandom(),
 
-    /** `owner.slug`, immutable, for the reasons `ticket_categories.key` is. */
+    /** `owner.slug`, immutable, for the reasons `ticket_subcategories.key` is. */
     key: text('key').notNull(),
 
     labelEn: text('label_en').notNull(),

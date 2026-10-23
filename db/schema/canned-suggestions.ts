@@ -20,7 +20,7 @@ import { channelEnum, suggestionEditEnum } from './enums';
  * Every canned response TypeSafe's Jev suggested in the reply composer, and what
  * the agent did with it.
  *
- * Not a shadow, unlike `ai_category_runs`: the answer here is shown to an agent
+ * Not a shadow, unlike `ai_subcategory_runs`: the answer here is shown to an agent
  * as ghost text in the reply box. It is still never *applied* — the agent puts it
  * in the box with Tab and sends it with Send, and nothing reaches a customer
  * without both — so what this table holds is a record of a suggestion and of a
@@ -56,7 +56,7 @@ export const cannedSuggestions = pgTable(
      * The newest reply on the ticket when the question was asked — the last
      * message of the history Jev was sent, so it is the cache key: the same
      * anchor means the same input. Set null on delete, the
-     * `ai_category_runs.message_id` convention.
+     * `ai_subcategory_runs.message_id` convention.
      */
     anchorMessageId: uuid('anchor_message_id').references(() => messages.id, {
       onDelete: 'set null',

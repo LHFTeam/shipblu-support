@@ -225,7 +225,7 @@ export async function rollupMetrics(job?: ClaimedJob): Promise<void> {
       // nightly jobs would be two answers to "which day is this". Rebuilt by
       // delete and insert like the others, and safe to destroy for the same
       // reason — `conversations.created_at` is immutable and
-      // `conversation_categories.first_seen_at` is append-only, so every column
+      // `conversation_subcategories.first_seen_at` is append-only, so every column
       // can be recomputed from scratch. The column that would break that is
       // "suggestions still open", which is why it is not there. `resolved_at`
       // is not immutable: a close keeps it (`resolveStamp`), but every resolve

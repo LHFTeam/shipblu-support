@@ -76,7 +76,7 @@ export class TypeSafeApiError extends Error {
  *
  * `criteria` maps an option key to the description the model judges against. The
  * keys are ours and come back verbatim in the answer, which is what lets a
- * caller hand over `ticket_categories.key` and get one back.
+ * caller hand over `ticket_subcategories.key` and get one back.
  */
 export type ChoiceQuestion = {
   type: 'choice';

@@ -14,7 +14,7 @@ import { UNCLASSIFIED_KEY } from './taxonomy';
  * Reading subcategories back out.
  *
  * Labels always come from the registry through the join, never from the
- * `category_key` frozen on the assignment: that column is provenance — what was
+ * `subcategory_key` frozen on the assignment: that column is provenance — what was
  * assigned at the time — and rendering it would show an agent a name an admin
  * has since corrected.
  */
@@ -302,7 +302,7 @@ export async function ruleScores(): Promise<RuleScore[]> {
            count(*) filter (where review_state = 'confirmed')::int as agreed,
            count(*) filter (where review_state = 'rejected')::int  as rejected,
            count(*) filter (where review_state in ('auto', 'suggested'))::int as unreviewed
-    from conversation_categories
+    from conversation_subcategories
     where rule_key is not null
     group by rule_key
     order by count(*) filter (where review_state = 'rejected') desc, rule_key

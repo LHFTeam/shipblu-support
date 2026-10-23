@@ -417,9 +417,9 @@ known phrase, or two anchored patterns agreeing — down to 0.35 it suggests int
 `/admin/subcategories/review`, below that nothing is written. A pile of single
 keywords caps below the auto line however many of them agree. Confidence is an evidence grade and not a
 probability, and the console says so where the number appears.
-`/reports/subcategories` reads the new `category_metrics_daily` (its name until
-Stage 2.B) and `root_cause_metrics_daily`, both folded into the existing
-`rollup_metrics` transaction. See `plans/ticket-categorisation.md`.
+`/reports/subcategories` reads the new `subcategory_metrics_daily` and
+`root_cause_metrics_daily`, both folded into the existing `rollup_metrics`
+transaction. See `plans/ticket-categorisation.md`.
 
 **It was tuned against the real corpus rather than against imagination**, and
 that is the part worth copying. 769 free-text messages, 59.6% → **85.3%
@@ -453,9 +453,19 @@ names an operator types are now `/admin/subcategories`,
 `/reports/subcategories`, `ticket.subcategorise`, `admin.subcategories`,
 `backfill_subcategorise_ai` and `SUBCATEGORISE_*`. Stored events keep
 `categorised` and `category_*` and are read beside the new `subcategorised` and
-`subcategory_*`. The tables keep the names this section gives them until Stage
-2.B of `plans/ticket-category-routing.md`, which frees "category" for the field
-Stage 3 adds.
+`subcategory_*`. The tables keep their `category` names until Stage 2.B of
+`plans/ticket-category-routing.md` (below), which frees "category" for the
+field Stage 3 adds.
+
+2026-10-23, in the code and not yet deployed: Stage 2.B renames the database to
+match. Migration `0046_subcategory_names` renames the four tables to
+`ticket_subcategories`, `conversation_subcategories`,
+`subcategory_metrics_daily` and `ai_subcategory_runs`, the three
+`category_id`/`category_key` columns to `subcategory_*`, and the enum types to
+`subcategory_audience` and `subcategory_review_state`; `db/sql/002` is now
+`002_subcategories.sql` and renames the six CHECKs and three `_pkey` names in
+place. Its deploy is a maintenance sequence, and its rollback is the runbook in
+`db/runbooks/`, both in the plan.
 
 And now **the chat launcher knows the difference between a customer and us.**
 The help centre answers on the console's own hostname, so every agent reading an

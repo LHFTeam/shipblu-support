@@ -6,7 +6,7 @@ import { TypeSafeApiError, type ChoiceAnswer } from '@/lib/typesafe/client';
  * Pure, and the half of this module most worth a test: everything downstream
  * stores what comes out of here as a subcategory key, and a key that never
  * existed would be written to a text column that nothing validates.
- * `conversation_categories` has a foreign key standing behind its `category_key`;
+ * `conversation_subcategories` has a foreign key standing behind its `subcategory_key`;
  * the shadow table does not, because it records what a model said rather than
  * what the system believes, and a prediction constrained by a foreign key could
  * not record a wrong one at all. That check has to live here instead.

@@ -28,7 +28,7 @@ import type { AdminState } from '../settings-shared';
  * - **`owner`** on a cause, for the same reason: the prefix of the key names it,
  *   and a CHECK holds them together.
  *
- * There is no delete. The foreign key from `conversation_categories` is
+ * There is no delete. The foreign key from `conversation_subcategories` is
  * `restrict`, so a subcategory with tickets behind it cannot be removed at
  * all — deactivating takes it out of the picker and leaves every report ever
  * drawn from it still readable.

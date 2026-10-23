@@ -530,7 +530,7 @@ export const agentMetricsDaily = pgTable(
  *
  * **Everything here is recomputable**, which is what makes a delete-and-insert
  * rebuild safe: `conversations.created_at` is immutable and
- * `conversation_categories.first_seen_at` is append-only. A cause is dated by
+ * `conversation_subcategories.first_seen_at` is append-only. A cause is dated by
  * `coalesce(resolved_at, root_cause_set_at)`: a resolve keeps its stamp through
  * the close that follows it, so the cause stays on the day it was resolved, and
  * a ticket closed straight from Open, or reopened and not yet resolved again,
@@ -543,13 +543,13 @@ export const agentMetricsDaily = pgTable(
  * way the review queue does.
  */
 export const subcategoryMetricsDaily = pgTable(
-  'category_metrics_daily',
+  'subcategory_metrics_daily',
   {
     id: uuid('id').primaryKey().defaultRandom(),
     day: date('day').notNull(),
 
     /** The key as assigned, so a retired subcategory still reports. */
-    subcategoryKey: text('category_key').notNull(),
+    subcategoryKey: text('subcategory_key').notNull(),
     area: text('area').notNull(),
     channel: channelEnum('channel').notNull(),
 
@@ -572,9 +572,9 @@ export const subcategoryMetricsDaily = pgTable(
     computedAt: timestamp('computed_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
-    uniqueIndex('category_metrics_daily_dimensions_idx').on(t.day, t.subcategoryKey, t.channel),
-    index('category_metrics_daily_day_idx').on(t.day),
-    index('category_metrics_daily_area_idx').on(t.area, t.day),
+    uniqueIndex('subcategory_metrics_daily_dimensions_idx').on(t.day, t.subcategoryKey, t.channel),
+    index('subcategory_metrics_daily_day_idx').on(t.day),
+    index('subcategory_metrics_daily_area_idx').on(t.area, t.day),
   ],
 );
 
