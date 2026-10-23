@@ -154,11 +154,11 @@ export default async function SubcategoryReviewPage() {
           <Table head={['Ticket', 'When', 'What the customer wrote']}>
             {unclassified.map((row) => {
               const excerptLocale = row.excerpt ? detectLocale(row.excerpt) : 'en';
-              // The day the categoriser first saw it, in the zone the ticket it
-              // links to draws every timestamp in, so the two agree on the date.
-              // Not UTC's, which put anything before 02:00 Cairo (03:00 under
-              // daylight saving) on the day before; nor `reportingZone()`, the
-              // default schedule's — nothing here is a figure cut on report
+              // The day the subcategoriser first saw it, in the zone the ticket
+              // it links to draws every timestamp in, so the two agree on the
+              // date. Not UTC's, which put anything before 02:00 Cairo (03:00
+              // under daylight saving) on the day before; nor `reportingZone()`,
+              // the default schedule's — nothing here is a figure cut on report
               // days, and it would be a query for a zone the ticket page ignores.
               const seenOn = dateIn(row.firstSeenAt, TEAM_TIME_ZONE);
               return (
