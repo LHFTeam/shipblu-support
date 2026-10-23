@@ -61,14 +61,16 @@ held is folded in. The support lead answered every open question on
 2026-10-20; [Decisions taken](#decisions-taken-with-the-support-lead-2026-10-20)
 records the answers, and the plan below already reflects them.
 
-## Status and handoff (2026-10-23, 21:40 UTC)
+## Status and handoff
 
-A session picking this plan up starts here. Everything after this section is
-the design as it was reasoned and as each stage was built. This section says
-where the work stands, what comes next and how, and what has already bitten.
-Whoever moves any of it updates this section in the same PR. Every figure here
-was read from production, Render or GitHub at the time in the heading, or at
-the time it gives: re-read before acting on one.
+As of 2026-10-23, 22:00 UTC. A session picking this plan up starts here.
+Everything after this section is the design as it was reasoned and as each stage
+was built. This section says where the work stands, what comes next and how, and
+what has already bitten. Whoever moves any of it updates this section in the
+same PR. Every figure here was read from production, Render or GitHub at that
+time, or at the time it gives: re-read before acting on one. The time is on this
+line rather than in the heading so that links to the section survive each
+update.
 
 ### Where it stands
 
@@ -78,7 +80,7 @@ the time it gives: re-read before acting on one.
 | 1.1   | Merged: #387, then `dev` → `main` in #389 (`1f89219`)                                                                                       | Live since 2026-10-21 10:13 UTC                                                                                                                                                                    |
 | 1.2   | Merged: #391 (`31f7379`) and follow-up #392 (`7b7d276`), then `dev` → `main` in #393 (`634a28d`), which also carried another session's #390 | **Done.** All six services live on `634a28d` by 17:38 UTC on 2026-10-21, worker first. The user ran the backfill and the rollup from a shell, leaving no `jobs` row. Every check below reads clean |
 | 1.3   | Merged: #395 (`58c5ed9`), then `dev` → `main` in #397 (`447d8be`), which also carried #394, #396 and #398. As built below                   | **Done.** All six services live on `447d8be` by 18:36 UTC, web first. Its checks read clean (below), though no comment has arrived since                                                           |
-| 2.A   | In review: #400 (`claude/epic-heisenberg-w60nbl`), no migration. As built below                                                             | Not deployed. Ships with the next `dev` → `main` merge, after its "Before" step (Deploying 2.A)                                                                                                    |
+| 2.A   | Merged into `dev`: #400 (`a558c5b`), no migration. As built below                                                                           | Not deployed. Ships with the next `dev` → `main` merge, after its "Before" step (Deploying 2.A)                                                                                                    |
 | 2.B–6 | Not started                                                                                                                                 | —                                                                                                                                                                                                  |
 
 **1.3's deploy, read on Render and production on 2026-10-23.**
@@ -106,12 +108,13 @@ the time it gives: re-read before acting on one.
   about 180 ms of that. So no new code ran before the schema it reads.
 
   Old code did run against the new schema, which is additive. The old worker
-  kept taking jobs until 18:38:02 (its instance's last log line), two minutes
-  after Render reported the new one live. That is about five and a half
-  minutes against the new schema, the last two of them beside the new worker.
-  The only old cron run against it was `shipblu-sla-sweep`'s at
-  18:35:07–18:35:49, which succeeded. `/api/health` reported `447d8be` at
-  18:36:30, and `autoDeploy` read `no` / `off` on all six afterwards.
+  finished its last job at 18:38:02 (its instance's last log line is that
+  `process_webhook … ok`), two minutes after Render reported the new one live.
+  That is about five and a half minutes against the new schema, the last two of
+  them beside the new worker. The only old cron run against it was
+  `shipblu-sla-sweep`'s at 18:35:07–18:35:49, which succeeded. `/api/health`
+  reported `447d8be` at 18:36:30, and `autoDeploy` read `no` / `off` on all six
+  afterwards.
 
 - **What has run on it** (read at 21:35:51). The gate still reads 0, 0, 0,
   and no job run since 18:29:39 carries an error. The first ticket after the
@@ -202,11 +205,13 @@ Every production write needs the user's go-ahead for that step, and the
    live on it by 18:36 UTC, web first. Its checks read clean at 21:10 UTC
    (above), with one re-read left for the first comment. Its reviews are
    answered under [1.3, as built](#13-as-built).
-2. **Merge #400, then `dev` into `main`.** 2.A has no migration and no `db/sql`
-   change, and nor has anything else on `dev` since #397: #399 (`0d1289d`, a
-   repo rule) and #402 (`48896ce`, the review page's date). Rule 7 still holds,
-   because the merge ships all of `dev`: read `git log origin/main..origin/dev`
-   on the day and every migration in it.
+2. **Merge `dev` into `main`.** #400 merged into `dev` as `a558c5b` at 21:33
+   UTC. 2.A has no migration and changes `db/sql` only in `002`'s comments.
+   Nor has anything else on `dev` since #397 a migration or a `db/sql` change:
+   #399 (`0d1289d`, a repo rule), #402 (`48896ce`, the review page's date),
+   #401 (`a3fb23d`, the stored token's expiry) and #408 (these docs). Rule 7
+   still holds, because the merge ships all of `dev`: read
+   `git log origin/main..origin/dev` on the day and every migration in it.
 3. **Deploy 2.A**: web, then the worker, then the crons. Before it, run 2.A's
    "Before" step under [Deploying 2.A](#2a-as-built): any `CATEGORISE_*` value
    copied to its new name, the overrides and the old job re-read. After it, run
@@ -421,8 +426,7 @@ as instructions. The reasons are given so that any of them can be argued with.
     nothing on the worker or the crons that depends on new schema: its
     retired job is gone, and nothing enqueues it. The release that shipped
     it, #397, also carried #396. #396's worker and cron code reads
-    `conversations.accountable_agent_id` from migration 0044 by name, in five
-    places:
+    `conversations.accountable_agent_id` from migration 0044 by name, in:
     - the worker's ingest and assignment;
     - `sla_sweep` and `assign_sweep`;
     - `snapshot_backlog`;
@@ -1999,7 +2003,7 @@ deploy it with web and the crons.
     copy.
 
   - **Runbook.** Done on 2026-10-21. Every step's result is in [Status and
-    handoff](#status-and-handoff-2026-10-23-2140-utc).
+    handoff](#status-and-handoff).
     1. Deploy the worker, then web, then the crons.
     2. Confirm every service runs 1.2, since a worker still on 1.1 files new
        comments on the platform channel.

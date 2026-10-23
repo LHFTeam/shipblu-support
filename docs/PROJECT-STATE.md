@@ -10,10 +10,12 @@ were last re-measured as a whole against production on 2026-09-20, and a
 paragraph re-read since gives its own date; where a number here disagrees with
 an older paragraph elsewhere in the file, the older one has not been re-checked.
 
-**Production runs `447d8be`, deployed 2026-10-23 18:29–18:36 UTC.** That is the
-six unsuspended services: web first for the migrations, then the worker, then
-the four crons. It is the `dev` → `main` release #397, which carries three
-changes:
+**Production runs `447d8be`, deployed on 2026-10-23, all six unsuspended
+services by 18:36:47 UTC:** web first for the migrations, then the worker, then
+the four crons. Each service's deploy, and when the old worker stopped, is in
+`plans/ticket-category-routing.md` (1.3's deploy); this file repeats only the
+times §5.1 argues from. It is the `dev` → `main` release #397, which carries
+three changes:
 
 - Stage 1.3's comment CHECK (`plans/ticket-category-routing.md`);
 - WhatsApp number owners (§1, §5.1);
@@ -22,9 +24,9 @@ changes:
 `main` running ahead of production is the trap rather than the footnote.
 `autoDeploy` is `no` on every production service (§2), so a merge changes
 nothing that is running. The gap is invisible because CI is green and the old
-code keeps serving: until 2026-09-20 production served `b1d911a` for eleven
-days while `main` moved on. Check `/api/health`, which reports the commit,
-before concluding any change below is live.
+code keeps serving: until 23:41 UTC on 2026-09-20 production served `b1d911a`
+for eleven days while `main` moved on. Check `/api/health`, which reports the
+commit, before concluding any change below is live.
 
 ---
 
@@ -565,20 +567,19 @@ has run live**: the whole flow is proven by the unit and database tiers (§7) an
 waits on Meta-side preconditions nobody has checked yet (§5.2).
 
 And now **a WhatsApp number can belong to a person**, built on 2026-10-22 and
-deployed on 2026-10-23 (`447d8be`, all six services by 18:36:47 UTC). A team
-member handed a business number answers its customers from the phone and
-answers for its tickets' SLA, so WhatsApp now threads on the customer _and_ the
-number they wrote to (§6.99, which also closes the race that
-opened two tickets for one chat, §6.100), and a ticket carries the person
-accountable for it beside the person working it. Reassigning moves the work and
-leaves the breach with the owner; reports, the live board and the hourly sample
-all file breaches that way; an owner sees every ticket on their number; and the
-ticket page names our number and who is accountable. The threading changed
-with the deploy. The rest waits for an admin to hand a number over, and none
-has been yet: no row had an owner at 21:35 UTC. §5.1 has the steps for
-Nayera's, and the two configuration fixes that decide whether her figures mean
-anything; §5.5 has what
-they still leave out. See `plans/whatsapp-number-ownership.md`.
+deployed on 2026-10-23 (`447d8be`, header). A team member handed a business
+number answers its customers from the phone and answers for its tickets' SLA, so
+WhatsApp now threads on the customer _and_ the number they wrote to (§6.99,
+which also closes the race that opened two tickets for one chat, §6.100), and a
+ticket carries the person accountable for it beside the person working it.
+Reassigning moves the work and leaves the breach with the owner; reports, the
+live board and the hourly sample all file breaches that way; an owner sees every
+ticket on their number; and the ticket page names our number and who is
+accountable. The threading changed with the deploy. The rest waits for an admin
+to hand a number over, and none has been yet: no row had an owner at 21:35 UTC.
+§5.1 has the steps for Nayera's, and the two configuration fixes that decide
+whether her figures mean anything; §5.5 has what they still leave out. See
+`plans/whatsapp-number-ownership.md`.
 
 So: **the system still cannot take a real human support ticket**, and the
 remaining work is mostly not code — it is configuration, live-provider
@@ -999,12 +1000,14 @@ is **402,172 rows and 1006 MB** as of 2026-09-20, against the 206,053 that PR
 measured eleven days earlier. Retention is the change that stops a table
 doubling every fortnight.
 
-~~**And `main` is not deployed.**~~ **Deployed 2026-09-20.** All seven services
-were then on `6d9b7f3` (production runs `447d8be` now, header); `/api/health`
-reports the commit and the new `pool` block from #153. The standing hazard is
-unchanged, though, and it is why this paragraph stays: `autoDeploy` is off
-everywhere, so the next merge is again not running until somebody triggers it —
-including the job whose handler a queued row will look for.
+~~**And `main` is not deployed.**~~ **Deployed 2026-09-20.** The production
+services were then on `6d9b7f3`. This said all seven, but staging, the seventh,
+has had no deploy since 2026-08-18. Production runs `447d8be` now (header);
+`/api/health` reports the commit and the new `pool` block from #153. The
+standing hazard is unchanged, though, and it is why this paragraph stays:
+`autoDeploy` is off everywhere, so the next merge is again not running until
+somebody triggers it — including the job whose handler a queued row will look
+for.
 
 ### 5.1 Configuration and cutover — the real remaining work
 
@@ -1194,14 +1197,16 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
   response. In order:
 
   1. ~~**Before the deploy, look for a held lock.**~~ **Deployed 2026-10-23**,
-     web first. By its log, web's preDeploy began applying 0044 and 0045 at
-     18:32:19 UTC and had replayed `db/sql` by 18:32:23. The worker's deploy
-     began after that, at 18:33:34, and the four crons followed. No lock
-     listing was recorded just before the deploy (#397 records one at 16:23
-     UTC), but the migrations took about 2 s and `008` about 180 ms, so no
-     lock wait came near its bound. At 18:33:27 `drizzle.__drizzle_migrations`
-     ended at 0045 (`1792755327631`), and both `channels_owner_only_whatsapp`
-     and the 1.3 CHECK were validated.
+     web first, then the worker and the four crons (each service's deploy is in
+     the plan; see the header). Web's preDeploy logged
+     `Applying drizzle migrations...` at 18:32:19.9 UTC and `Applying 001_…` at
+     18:32:22.1. `db/migrate.ts` prints the second only once drizzle's
+     migrations have committed, so 0044 and 0045 took about 2 s. `008` ran from
+     18:32:23.26 to 18:32:23.44. No lock listing was recorded just before the
+     deploy (#397 records one at 16:23 UTC), but at those durations no lock wait
+     came near its bound. At 18:33:27 `drizzle.__drizzle_migrations` ended at
+     0045 (`1792755327631`), and both `channels_owner_only_whatsapp` and the 1.3
+     CHECK were validated.
   2. ~~**Check that `db/sql/009` placed the four tickets with no row.**~~
      **Placed.** At 18:41 UTC #1, #2, #10820 and #10853 were all on "WhatsApp
      Support", the plain row, and none was on the bot's. This returned nothing
@@ -1219,7 +1224,7 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
      #55282/#55283, #55829/#55830, #55896/#55897 and #69183/#69184. The last
      pair opened on 2026-10-22 at 09:42 UTC, later than the 2026-10-21 reading
      §6.100 records. The fixed worker went live at 18:35:46 UTC on 2026-10-23,
-     and the old one kept taking jobs until 18:38:02. No ticket has been
+     and the old one finished its last job at 18:38:02. No ticket has been
      opened on the number since the deploy (21:35).
 
      In each pair the lone half — #54574, #55283, #55830, #55896 and #69184 —
@@ -6575,8 +6580,8 @@ dryRun=true`, then without, gives those two theirs back from their
       open, one resolved and holding only the phone's three replies),
       #55282/#55283, #55829/#55830 and #55896/#55897. A fifth pair,
       #69183/#69184, opened the same way on 2026-10-22, 120 ms apart, before the
-      fix below reached production: the fixed worker went live on `447d8be` at
-      18:35:46 UTC on 2026-10-23, and the old one took its last job at 18:38:02.
+      fix below reached production on 2026-10-23 (§5.1 step 3 gives the
+      cutover).
       `ingestWhatsAppMessage` and `ingestWhatsAppEcho` each called
       `findLiveConversation` before opening their transaction and inserted when
       it found nothing, so a customer's message and the phone's reply to it,

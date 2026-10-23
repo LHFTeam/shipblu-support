@@ -36,7 +36,8 @@ Read on 2026-10-21, read-only.
   written to two numbers while a ticket was open (`docs/PROJECT-STATE.md`
   §6.99). Every number connected makes that likelier.
 - Four contacts held two live tickets each on Nayera's number, created 36–121 ms
-  apart: a race between finding the live conversation and inserting one (§6.100).
+  apart (as re-measured on 2026-10-23): a race between finding the live
+  conversation and inserting one (§6.100).
 - Four `whatsapp` tickets had a null `channel_id`, all filed before "WhatsApp
   Support" had a row.
 - Reports filed SLA met and breached under `conversations.assignee_agent_id` at
