@@ -5,19 +5,28 @@ it is designed; **this file is about the state of the work** — what is live,
 what is merely built, what is left, and the mistakes that have already cost us
 time. Read both. Do not re-derive settled decisions.
 
-Last updated: 2026-09-21, against `main` at `d5d791f`. The figures in §1 and §5
-were re-measured against production on 2026-09-20; where a number here disagrees
-with an older paragraph elsewhere in the file, the older one has not been
-re-checked.
+Last updated: 2026-10-23, against `main` at `447d8be`. The figures in §1 and §5
+were last re-measured as a whole against production on 2026-09-20, and a
+paragraph re-read since gives its own date; where a number here disagrees with
+an older paragraph elsewhere in the file, the older one has not been re-checked.
 
-**Production runs `d5d791f`, deployed 2026-09-21 13:17–13:22 UTC** — the six
-unsuspended services, web first for the migration. It served `510024c` for the
-thirteen hours before that and `b1d911a` for eleven days before _that_, while
-`main` ran ahead of it, which is the trap rather than the footnote: `autoDeploy`
-is `no` on every production service (§2), so a merge changes nothing that is
-running, and the gap is invisible because CI is green and the old code keeps
-serving. Check `/api/health`, which reports the commit, before concluding any
-change below is live.
+**Production runs `447d8be`, deployed on 2026-10-23, all six unsuspended
+services by 18:36:47 UTC:** web first for the migrations, then the worker, then
+the four crons. Each service's deploy, and when the old worker stopped, is in
+`plans/ticket-category-routing.md` (1.3's deploy); this file repeats only the
+times §5.1 argues from. It is the `dev` → `main` release #397, which carries
+three changes:
+
+- Stage 1.3's comment CHECK (`plans/ticket-category-routing.md`);
+- WhatsApp number owners (§1, §5.1);
+- the positioned scroll panes.
+
+`main` running ahead of production is the trap rather than the footnote.
+`autoDeploy` is `no` on every production service (§2), so a merge changes
+nothing that is running. The gap is invisible because CI is green and the old
+code keeps serving: until 23:41 UTC on 2026-09-20 production served `b1d911a`
+for eleven days while `main` moved on. Check `/api/health`, which reports the
+commit, before concluding any change below is live.
 
 ---
 
@@ -568,18 +577,19 @@ has run live**: the whole flow is proven by the unit and database tiers (§7) an
 waits on Meta-side preconditions nobody has checked yet (§5.2).
 
 And now **a WhatsApp number can belong to a person**, built on 2026-10-22 and
-not deployed. A team member handed a business number answers its customers
-from the phone and answers for its tickets' SLA, so WhatsApp now threads on the
-customer _and_ the number they wrote to (§6.99, which also closes the race that
-opened two tickets for one chat, §6.100), and a ticket carries the person
-accountable for it beside the person working it. Reassigning moves the work and
-leaves the breach with the owner; reports, the live board and the hourly sample
-all file breaches that way; an owner sees every ticket on their number; and the
-ticket page names our number and who is accountable. The threading changes on
-deploy; the rest waits for an admin to hand a number over — §5.1 has the steps
-for Nayera's, and the two
-configuration fixes that decide whether her figures mean anything; §5.5 has what
-they still leave out. See `plans/whatsapp-number-ownership.md`.
+deployed on 2026-10-23 (`447d8be`, header). A team member handed a business
+number answers its customers from the phone and answers for its tickets' SLA, so
+WhatsApp now threads on the customer _and_ the number they wrote to (§6.99,
+which also closes the race that opened two tickets for one chat, §6.100), and a
+ticket carries the person accountable for it beside the person working it.
+Reassigning moves the work and leaves the breach with the owner; reports, the
+live board and the hourly sample all file breaches that way; an owner sees every
+ticket on their number; and the ticket page names our number and who is
+accountable. The threading changed with the deploy. The rest waits for an admin
+to hand a number over, and none has been yet: no row had an owner at 21:35 UTC.
+§5.1 has the steps for Nayera's, and the two configuration fixes that decide
+whether her figures mean anything; §5.5 has what they still leave out. See
+`plans/whatsapp-number-ownership.md`.
 
 So: **the system still cannot take a real human support ticket**, and the
 remaining work is mostly not code — it is configuration, live-provider
@@ -636,7 +646,9 @@ because the rest worked. So the service name understates what it does — grep
 `render.yaml` for `startCommand` rather than trusting a cron's name.
 
 **No production service on Render deploys itself.** `autoDeploy` is `no` and
-`autoDeployTrigger` is `off` on all six of them, so merging to `main`
+`autoDeployTrigger` is `off` on all six of them (read back on each after #397
+deployed, 2026-10-23; that day it had been `checksPass` on all six from about
+13:53 to 18:25 UTC), so merging to `main`
 changes nothing that is running — a deploy is triggered by hand, from the
 dashboard or the API, and until it is, `main` and production are different
 software. This is easy to miss precisely because it looks like nothing went
@@ -998,12 +1010,14 @@ is **402,172 rows and 1006 MB** as of 2026-09-20, against the 206,053 that PR
 measured eleven days earlier. Retention is the change that stops a table
 doubling every fortnight.
 
-~~**And `main` is not deployed.**~~ **Deployed 2026-09-20.** All seven services
-are on `6d9b7f3`; `/api/health` reports the commit and the new `pool` block from
-#153. The standing hazard is unchanged, though, and it is why this paragraph
-stays: `autoDeploy` is off everywhere, so the next merge is again not running
-until somebody triggers it — including the job whose handler a queued row will
-look for.
+~~**And `main` is not deployed.**~~ **Deployed 2026-09-20.** The production
+services were then on `6d9b7f3`. This said all seven, but staging, the seventh,
+has had no deploy since 2026-08-18. Production runs `447d8be` now (header);
+`/api/health` reports the commit and the new `pool` block from #153. The
+standing hazard is unchanged, though, and it is why this paragraph stays:
+`autoDeploy` is off everywhere, so the next merge is again not running until
+somebody triggers it — including the job whose handler a queued row will look
+for.
 
 ### 5.1 Configuration and cutover — the real remaining work
 
@@ -1174,49 +1188,77 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
 
 - **"Nayera Mohamed", the coexistence number, has no owner yet.** Number
   ownership was built on 2026-10-22 (`plans/whatsapp-number-ownership.md`,
-  §6.99, §6.100) and is not deployed. On 2026-10-21 the number held 89 open native tickets, all
-  unassigned — 84 in `Merchant Care`, whose roster is empty, and 5 that a web
-  chat rule moved to `Customer Care` (step 6) — beside 8 resolved and 47 copied
-  histories. Nayera herself is an `agent` in no group and not accepting tickets,
-  so the rota could never reach her: those timelines held 1,220
-  `assignment_skipped` events, and 24 of the 89 had breached their first
+  §6.99, §6.100) and deployed on 2026-10-23 (`447d8be`, §1). No row had an
+  owner at 21:35 UTC.
+
+  At 18:33 UTC that day the number (channels row
+  `e65286af-c512-4903-9f4a-7a96cb986f04`) held 94 open native tickets, none
+  pending and all unassigned (still 94 at 21:35):
+  - 89 in `Merchant Care`, whose roster is empty;
+  - 5 that a web chat rule moved to `Customer Care` (step 6).
+
+  Beside them it held 8 resolved tickets and 47 copied histories. On 2026-10-21
+  the same reading gave 89 open: 84 in `Merchant Care` and 5 in
+  `Customer Care`.
+
+  Nayera herself is an `agent` in no group and not accepting tickets, so the
+  rota could never reach her. Those timelines held 1,497 `assignment_skipped`
+  events (1,220 on 2026-10-21), and 25 of the 94 had breached their first
   response. In order:
 
-  1. **Before the deploy, look for a held lock.** Migration 0044 adds a column
-     and a foreign key to both `conversations` and `channels`, and 0045 an
-     index on the new `conversations` column; drizzle
-     applies a deploy's migrations in one transaction, so `conversations` is
-     `ACCESS EXCLUSIVE` until the key has scanned every row (all null, so the
-     scan is short). Run the `pg_stat_activity` query in §5.5 first; a blocked
-     migration fails after `lock_timeout = 10s` rather than stalling (§6.15).
-     Web first, for the migration, then the worker.
-  2. **Check that `db/sql/009` placed the four tickets with no row.** #1, #2,
-     #10820 and #10853 were filed before "WhatsApp Support" had a row, and every
-     inbound message on them names its number. A ticket is now threaded on its
-     number's row, so left without one, #10820 and #10853 would not be
-     continued by their customers' next message: it would open a second ticket.
-     This should return nothing:
+  1. ~~**Before the deploy, look for a held lock.**~~ **Deployed 2026-10-23**,
+     web first, then the worker and the four crons (each service's deploy is in
+     the plan; see the header). Web's preDeploy logged
+     `Applying drizzle migrations...` at 18:32:19.9 UTC and `Applying 001_…` at
+     18:32:22.1. `db/migrate.ts` prints the second only once drizzle's
+     migrations have committed, so 0044 and 0045 took about 2 s. `008` ran from
+     18:32:23.26 to 18:32:23.44. No lock listing was recorded just before the
+     deploy (#397 records one at 16:23 UTC), but at those durations no lock wait
+     came near its bound. At 18:33:27 `drizzle.__drizzle_migrations` ended at
+     0045 (`1792755327631`), and both `channels_owner_only_whatsapp` and the 1.3
+     CHECK were validated.
+  2. ~~**Check that `db/sql/009` placed the four tickets with no row.**~~
+     **Placed.** At 18:41 UTC #1, #2, #10820 and #10853 were all on "WhatsApp
+     Support", the plain row, and none was on the bot's. This returned nothing
+     at 18:33:27:
 
      ```sql
      select number, channel_id from conversations
      where channel = 'whatsapp' and channel_id is null;
      ```
 
-     A row left is a ticket whose number no `whatsapp` row names, which no
-     backfill can place.
+     `009` replays on every deploy. A row this lists later is a ticket whose
+     number no `whatsapp` row names, which no backfill can place.
 
-  3. **Close the four duplicate halves** (§6.100): #54574/#54575,
-     #55282/#55283, #55829/#55830 and #55896/#55897. An agent reads each pair
-     and closes the one that repeats the other. There is no ticket merge to do
-     it with. Do this before step 4, or the handover moves both halves and the
-     one nobody answers counts against Nayera.
+  3. **Read, then close, the five duplicate halves** (§6.100): #54574/#54575,
+     #55282/#55283, #55829/#55830, #55896/#55897 and #69183/#69184. The last
+     pair opened on 2026-10-22 at 09:42 UTC, later than the 2026-10-21 reading
+     §6.100 records. The fixed worker went live at 18:35:46 UTC on 2026-10-23,
+     and the old one finished its last job at 18:38:02. No ticket has been
+     opened on the number since the deploy (21:35).
+
+     In each pair the lone half — #54574, #55283, #55830, #55896 and #69184 —
+     holds a single message, the customer's opening one. It has no reply and
+     has breached its first response. The other half's first message is
+     stamped a second or two later, though in three pairs that ticket was
+     inserted first, and it carries the rest of the conversation. #54575, the
+     first pair's, is already resolved.
+
+     So a close by message count would close the half holding the opening
+     message without anybody reading it. Read both halves of each pair before
+     closing either. There is no ticket merge to do it with. Do this before
+     step 4, or the handover moves both halves and the one nobody answers
+     counts against Nayera.
+
   4. **Hand the number to Nayera** under `/admin/channels`: _Set owner_ on the
      number's row, pick her — every agent is listed with their address, since
      two active agents share a name — and _Hand over_, which asks "Hand over
      with N tickets?" before it acts. The answer says what moved, e.g. "Nayera
-     Mohamed owns +20 12 78707918 from now. 85 open or pending tickets moved to
-     them." Read it back from `channel_owner_changes`, and from a count of
-     `conversations` whose `accountable_agent_id` is hers.
+     Mohamed owns +20 12 78707918 from now. 89 open or pending tickets moved to
+     them." That is 94 less one open half of every pair; it is 90 if #54574
+     stays open, since its other half is already resolved. Read it back from
+     `channel_owner_changes`, and from a count of `conversations` whose
+     `accountable_agent_id` is hers.
 
      What to expect: her inbox gains Unassigned and All open; the number's
      tickets stop collecting `assignment_skipped`, since an owned ticket skips
@@ -6544,17 +6586,21 @@ dryRun=true`, then without, gives those two theirs back from their
 
 100.  **Looking for the live conversation outside the transaction opened two
       tickets for one chat.** _2026-10-21._ Four customers each held two live
-      tickets on Nayera's number, created 35–120 ms apart: #54574/#54575 (one
-      open, one resolved and holding only the phone's reply), #55282/#55283,
-      #55829/#55830 and #55896/#55897. `ingestWhatsAppMessage` and
-      `ingestWhatsAppEcho` each called `findLiveConversation` before opening
-      their transaction and inserted when it found nothing, so a customer's
-      message and the phone's reply to it, handled in two worker slots at once,
-      each found nothing and each opened a ticket. The reply lands on one; the
-      other keeps a first-response clock nothing will stop, and breaches — and
-      under number ownership it breaches against the owner, for a reply that
-      was sent. The race is inferred from the timing; the data shows only the
-      pairs.
+      tickets on Nayera's number, created 36–121 ms apart: #54574/#54575 (one
+      open, one resolved and holding only the phone's three replies),
+      #55282/#55283, #55829/#55830 and #55896/#55897. A fifth pair,
+      #69183/#69184, opened the same way on 2026-10-22, 120 ms apart, before the
+      fix below reached production on 2026-10-23 (§5.1 step 3 gives the
+      cutover).
+      `ingestWhatsAppMessage` and `ingestWhatsAppEcho` each called
+      `findLiveConversation` before opening their transaction and inserted when
+      it found nothing, so a customer's message and the phone's reply to it,
+      handled in two worker slots at once, each found nothing and each opened a
+      ticket. In #55829/#55830 the two were both the customer's messages, a
+      second apart. The reply lands on one; the other keeps a first-response
+      clock nothing will stop, and breaches — and under number ownership it
+      breaches against the owner, for a reply that was sent. The race is
+      inferred from the timing; the data shows only the pairs.
 
       Both paths now call `lockThread(tx, contactId, key)` and then look inside
       the same transaction. It is
@@ -6566,8 +6612,38 @@ dryRun=true`, then without, gives those two theirs back from their
       other. A reaction takes none, since it creates nothing. The test runs an
       inbound message and an echo for four customers at once and expects four
       tickets; with the lock removed it got seven or eight on every run. The
-      four pairs are left for an agent to close (§5.1): there is no ticket
-      merge, and which half to keep is a judgement.
+      five pairs are left for an agent to read and close (§5.1). There is no
+      ticket merge, and which half to keep is a judgement: in each pair, the
+      half with one message holds the customer's opening message.
+
+101.  **Cairo springs forward at midnight, so that day has no 00:00.**
+      _2026-10-23._ On the last Friday of April the clocks go from 00:00 to
+      01:00, so `DateTime.fromISO('2026-04-24', { zone: 'Africa/Cairo' })` is
+      01:00+03:00 and the day is 23 hours long. A day ended at its start plus
+      a day ends at 01:00 on the 25th, an hour into the next day.
+      `dayBounds` in the subcategory rollup (`lib/reports/subcategory-rollup.ts`,
+      `category-rollup.ts` until Stage 2.A) ended its day that way, so the
+      first hour of the 25th counted on both days in
+      `category_metrics_daily` and `root_cause_metrics_daily`: a database probe
+      with one ticket at 2026-04-24T21:30Z found it on both. Each of the three
+      rollups wrote its day bounds out by hand, and this was the copy that
+      drifted, so all three now cut their day through `dayWindow` in
+      `lib/reports/rollup.ts`, each of whose ends is a `startOf('day')`. The
+      fall-back day (24:00 back to 23:00 on the last Thursday of
+      October) is right either way, because its midnight exists. Production
+      held none of the affected days when this was fixed, since the subcategory
+      history starts on 2026-08-30, so nothing stored was wrong; 2027-04-30
+      would have been the first.
+
+      The same 23-hour day broke a count of days as well as a bound.
+      `planDays` in `worker/handlers/rollup-metrics.ts` sized a range as
+      `Math.floor(end.diff(start, 'days').days) + 1`, which for
+      `from=2026-04-24 to=2026-04-25` is `floor(0.958) + 1`, one day. A range
+      that started on a spring-forward day therefore left that day out, and
+      `skipped` did not count it, so the rebuild that would repair such a day
+      skipped it without a word. It now counts the span on the calendar dates, as
+      `windowDays` does in UTC, and so should anything else counting days:
+      never on the instants between them.
 
 ### Tooling notes for this environment
 

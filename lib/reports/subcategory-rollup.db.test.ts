@@ -11,6 +11,7 @@ import {
   ticketSubcategories,
 } from '@/db/schema';
 import { withCleanDatabase } from '@/lib/testing/db';
+import { cairo } from '@/lib/testing/time';
 import { reportingContext } from './rollup';
 import { computeRootCauseDay, computeSubcategoryDay } from './subcategory-rollup';
 
@@ -346,6 +347,81 @@ describe('computeRootCauseDay', () => {
         channel: 'email',
         resolved: 1,
       },
+    ]);
+  });
+});
+
+/**
+ * Across the night Cairo springs forward. Its clocks jump from 00:00 to 01:00 at
+ * the start of Friday 24 April 2026, so the 24th opens at 01:00 and is 23 hours
+ * long. A day ended at "its start plus a day" ends at 01:00 on the 25th, an hour
+ * after the 25th began, and that hour was counted on both days
+ * (`docs/PROJECT-STATE.md` §6.101). The instants here are built with `cairo()`,
+ * which refuses a wall-clock time the change skips, so none of them can quietly
+ * name a different hour from the one it says.
+ */
+describe('the day Cairo springs forward', () => {
+  /** Half an hour into the 25th, Cairo time: inside the hour both days claimed. */
+  const AFTER_MIDNIGHT = cairo('2026-04-25T00:30');
+
+  // A missing midnight, not a 23-hour day: a spring-forward at 02:00 is 23 hours
+  // too, and there the start plus a day was already the next day's start.
+  it('has no midnight, or nothing below tests the changeover', () => {
+    expect(DateTime.fromISO('2026-04-24', { zone: ZONE }).hour).toBe(1);
+  });
+
+  it('counts a subcategory on the 25th only, for a ticket created just after its midnight', async () => {
+    expect((await reportingContext()).zone).toBe(ZONE);
+    await ticket({ createdAt: AFTER_MIDNIGHT }, [primary('delivery.late')]);
+
+    expect(await subcategoryDay('2026-04-24')).toEqual([]);
+    expect(await subcategoryDay('2026-04-25')).toEqual([
+      counts('2026-04-25', 'delivery.late', 'email', { primary: 1, any: 1, auto: 1 }),
+    ]);
+  });
+
+  it('counts a cause on the 25th only, for a ticket resolved just after its midnight', async () => {
+    expect((await reportingContext()).zone).toBe(ZONE);
+    // Arrived on the 24th, so a cause counted by arrival rather than by
+    // resolution would land there too.
+    await ticket({
+      status: 'Resolved',
+      createdAt: cairo('2026-04-24T15:00'),
+      resolvedAt: AFTER_MIDNIGHT,
+      rootCauseSetAt: AFTER_MIDNIGHT,
+      cause: 'hub.missort',
+    });
+
+    expect(await causeDay('2026-04-24')).toEqual([]);
+    expect(await causeDay('2026-04-25')).toEqual([
+      { day: '2026-04-25', cause: 'hub.missort', owner: 'hub', channel: 'email', resolved: 1 },
+    ]);
+  });
+
+  // The fix moved the 24th's end; these hold both of its ends, so a correction
+  // that overshot, ending the 24th early or opening it late, fails here.
+  it("keeps the 24th's first and last hours on the 24th", async () => {
+    expect((await reportingContext()).zone).toBe(ZONE);
+    for (const instant of [cairo('2026-04-24T01:00'), cairo('2026-04-24T23:30')]) {
+      await ticket({ createdAt: instant }, [primary('delivery.late')]);
+      await ticket({
+        status: 'Resolved',
+        createdAt: cairo('2026-04-23T15:00'),
+        resolvedAt: instant,
+        rootCauseSetAt: instant,
+        cause: 'hub.missort',
+      });
+    }
+
+    for (const day of ['2026-04-23', '2026-04-25']) {
+      expect(await subcategoryDay(day)).toEqual([]);
+      expect(await causeDay(day)).toEqual([]);
+    }
+    expect(await subcategoryDay('2026-04-24')).toEqual([
+      counts('2026-04-24', 'delivery.late', 'email', { primary: 2, any: 2, auto: 2 }),
+    ]);
+    expect(await causeDay('2026-04-24')).toEqual([
+      { day: '2026-04-24', cause: 'hub.missort', owner: 'hub', channel: 'email', resolved: 2 },
     ]);
   });
 });

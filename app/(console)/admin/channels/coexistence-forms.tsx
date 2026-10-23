@@ -29,6 +29,7 @@ import {
   credentialBadges,
   credentialOrigin,
   type CredentialStatus,
+  expiryPhrase,
 } from '@/lib/whatsapp/credential-status';
 import {
   type ConnectPhase,
@@ -1537,9 +1538,7 @@ function AdoptForm({
 // --- The credential ---------------------------------------------------------
 
 function expiryLabel(status: CredentialStatus): string {
-  if (status.inspectedAt === null) return 'expiry unknown';
-  if (status.expiresAt === null) return 'never expires';
-  return `expires ${formatDateTime(status.expiresAt)}`;
+  return status.inspectedAt === null ? 'expiry unknown' : expiryPhrase(status.expiresAt);
 }
 
 /**
