@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { commentIdOf, commentReplyTarget, commentRequest, rootCommentId } from './comments';
+import {
+  commentIdOf,
+  commentReplyTarget,
+  commentRequest,
+  requesterCommentId,
+  rootCommentId,
+} from './comments';
 
 /**
  * Every assertion here is against Meta's reference rather than against
@@ -119,6 +125,45 @@ describe('commentIdOf', () => {
     expect(commentIdOf({ platform: 'facebook' }, 'm_abc')).toBeNull();
     expect(commentIdOf(null, 'm_abc')).toBeNull();
     expect(commentIdOf({ metaKind: 'comment' }, '')).toBeNull();
+  });
+});
+
+describe('requesterCommentId', () => {
+  const AMIRA = 'contact-amira';
+  const comment = (authorContactId: string | null, direction = 'inbound') => ({
+    direction,
+    authorContactId,
+    meta: { metaKind: 'comment', commentId: 'post-1_c2' },
+  });
+
+  it('is the comment when the ticket’s requester wrote it', () => {
+    expect(requesterCommentId(comment(AMIRA), AMIRA)).toBe('post-1_c2');
+    // A row from before ingest stored the id, read as `commentIdOf` reads it.
+    expect(
+      requesterCommentId(
+        {
+          direction: 'inbound',
+          authorContactId: AMIRA,
+          meta: { metaKind: 'comment' },
+          channelMessageId: 'post-1_c1',
+        },
+        AMIRA,
+      ),
+    ).toBe('post-1_c1');
+  });
+
+  // Anybody may reply under the customer's comment, and ingest files it on
+  // their ticket: a private reply named after it would go to the passer-by.
+  it('is null for a passer-by’s comment, our own reply, and anything not a comment', () => {
+    expect(requesterCommentId(comment('contact-bob'), AMIRA)).toBeNull();
+    expect(requesterCommentId(comment(null), AMIRA)).toBeNull();
+    expect(requesterCommentId(comment(AMIRA, 'outbound'), AMIRA)).toBeNull();
+    expect(
+      requesterCommentId(
+        { direction: 'inbound', authorContactId: AMIRA, meta: { metaKind: 'direct_message' } },
+        AMIRA,
+      ),
+    ).toBeNull();
   });
 });
 

@@ -37,6 +37,7 @@ import { alreadySent } from './already-sent';
 import { subjectGone } from './subject-gone';
 import { isMetaChannel, metaPlatformOf } from '@/lib/tickets/channel-policy';
 import { metaReplyTarget } from '@/lib/tickets/meta-thread';
+import { newestRequesterComment, NO_REQUESTER_COMMENT } from '@/lib/tickets/reply-comment';
 import { errorMessage } from '@/lib/errors';
 import { logger } from '@/lib/log';
 
@@ -207,10 +208,19 @@ async function deliver(
     // Instagram reply hangs off the top-level comment and nowhere else, so once
     // a customer has answered inside a thread, replying to what they just wrote
     // means posting to a `replies` edge that does not exist.
+    //
+    // The comment the console or the acknowledgement named, and otherwise the
+    // requester's newest — never simply the newest, which can be a passer-by's
+    // reply under the customer's comment. Public either way, so nothing leaks
+    // by it; but on Facebook the reply is posted under the comment named, the
+    // ticket's answer belongs under the customer's words, and a passer-by can
+    // delete their own comment and fail a reply the customer was owed.
     const commentId = commentReplyTarget({
       platform,
       externalId: row.conversation.externalId,
-      lastCommentId: meta.commentId ?? (await lastInboundCommentId(row.conversation.id)),
+      lastCommentId:
+        meta.commentId ??
+        (await newestRequesterComment(row.conversation.id, row.conversation.requesterContactId)),
     });
     if (!commentId) throw new Error('no comment to reply to on this ticket');
     return replyToComment({ platform, commentId, message: text });
@@ -219,8 +229,19 @@ async function deliver(
   if (sendKind === 'private_reply') {
     // The comment the agent is answering, not the thread's root: the seven days
     // a private reply is allowed within are counted from the comment it names.
-    const commentId = meta.commentId ?? (await lastInboundCommentId(row.conversation.id));
-    if (!commentId) throw new Error('no comment to reply privately to');
+    //
+    // Named by the console, which checked it is the requester's
+    // (`lib/tickets/reply-comment.ts`). A reply stored before the console named
+    // one takes the requester's newest, and never the newest comment of all: a
+    // private reply goes to whoever wrote the comment it names, so a passer-by's
+    // would hand them what the agent wrote for the customer, and spend the one
+    // private reply Meta allows on a comment the customer never wrote. With
+    // nothing of the requester's to answer it refuses, permanently, rather than
+    // send to anybody else.
+    const commentId =
+      meta.commentId ??
+      (await newestRequesterComment(row.conversation.id, row.conversation.requesterContactId));
+    if (!commentId) throw new MetaSendRefusal(NO_REQUESTER_COMMENT);
 
     // Meta allows exactly one private reply per comment, ever. A second attempt
     // is rejected, so this is the one send in the product that must not be
@@ -437,7 +458,9 @@ function explainedKind(sendKind: SendKind): MetaSendContext['sendKind'] {
  * started recording it.
  *
  * A ticket whose inbound history is comments is answered with a comment; one
- * whose history is messages is answered with a message.
+ * whose history is messages is answered with a message. Anybody's comment
+ * counts here, since this asks what kind of thread it is and not whom to answer;
+ * the comment a reply goes under is the requester's (`newestRequesterComment`).
  */
 async function inferSendKind(
   conversationId: string,
@@ -446,6 +469,7 @@ async function inferSendKind(
   return commentId ? 'comment_reply' : 'dm';
 }
 
+/** Anybody's, so never a reply's target: only `inferSendKind` asks, and only whether one exists. */
 async function lastInboundCommentId(conversationId: string): Promise<string | null> {
   const rows = await db
     .select({ meta: messages.meta, channelMessageId: messages.channelMessageId })

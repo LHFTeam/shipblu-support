@@ -7,13 +7,22 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
  * refusal of the card is kept for the admin page and the survey goes on as
  * rating buttons inside the 24 hours, a refusal about the customer is neither,
  * and a card that goes out takes the last refusal down.
+ *
+ * And which comment a reply on a comment ticket goes to when its row names
+ * none, as every reply stored before the console named one does.
  */
 
-const graph = vi.hoisted(() => ({ sendMessageRequest: vi.fn() }));
+const graph = vi.hoisted(() => ({
+  sendMessageRequest: vi.fn(),
+  privateReplyToComment: vi.fn(),
+  replyToComment: vi.fn(),
+}));
 
 vi.mock('@/lib/meta/client', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/meta/client')>()),
   sendMessageRequest: graph.sendMessageRequest,
+  privateReplyToComment: graph.privateReplyToComment,
+  replyToComment: graph.replyToComment,
 }));
 // Which host and token: the environment's, and nothing this test is about.
 vi.mock('@/lib/meta/connection', async (importOriginal) => ({
@@ -43,6 +52,7 @@ const { saveCsatSettings, UNSET_CSAT_SETTINGS } = await import('@/lib/csat/setti
 const { DEFAULT_WORDING } = await import('@/lib/csat/wording');
 const { MetaApiError } = await import('@/lib/meta/client');
 const { withCleanDatabase } = await import('@/lib/testing/db');
+const { NO_REQUESTER_COMMENT } = await import('@/lib/tickets/reply-comment');
 const { sendMeta } = await import('./send-meta');
 
 withCleanDatabase();
@@ -52,6 +62,8 @@ const SETTINGS = { privacyUrl: 'https://shipblu.com/privacy', metaExpiresInDays:
 
 beforeEach(() => {
   graph.sendMessageRequest.mockReset();
+  graph.privateReplyToComment.mockReset().mockResolvedValue('mid.private');
+  graph.replyToComment.mockReset().mockResolvedValue('reply-1');
 });
 
 async function settingsOn() {
@@ -350,5 +362,123 @@ describe('send_meta, for a survey card', () => {
       refusal: null,
       fellBack: 0,
     });
+  });
+});
+
+describe('send_meta, for a reply on a comment ticket that names no comment', () => {
+  async function contact(name: string) {
+    const [row] = await db.insert(contacts).values({ name }).returning({ id: contacts.id });
+    return row!.id;
+  }
+
+  async function comment(conversationId: string, author: string, commentId: string, at: string) {
+    await db.insert(messages).values({
+      conversationId,
+      direction: 'inbound',
+      kind: 'reply',
+      authorContactId: author,
+      bodyText: `Comment ${commentId}`,
+      channelMessageId: commentId,
+      deliveryStatus: 'delivered',
+      meta: { metaKind: 'comment', platform: 'facebook', commentId, isPublic: true },
+      createdAt: new Date(at),
+    });
+  }
+
+  /**
+   * Amira's comment and her follow-up, then Bob's reply under them — filed on
+   * her ticket and the newest comment on it — and an agent's reply stored the
+   * way the console stored one before it named the comment.
+   */
+  async function legacyReply(sendKind: 'private_reply' | 'comment_reply') {
+    const [open] = await db
+      .select({ id: ticketStatuses.id })
+      .from(ticketStatuses)
+      .where(eq(ticketStatuses.name, 'Open'));
+    const [agent] = await db
+      .insert(agents)
+      .values({ name: 'Omar', email: 'omar@shipblu.test' })
+      .returning({ id: agents.id });
+    const amira = await contact('Amira');
+    const bob = await contact('Bob');
+    const [ticket] = await db
+      .insert(conversations)
+      .values({
+        channel: 'facebook_comment',
+        externalId: 'facebook:comment:post-1_c1',
+        statusId: open!.id,
+        requesterContactId: amira,
+      })
+      .returning({ id: conversations.id });
+    await comment(ticket!.id, amira, 'post-1_c1', '2026-10-20T09:00:00Z');
+    await comment(ticket!.id, amira, 'post-1_c2', '2026-10-20T09:05:00Z');
+    await comment(ticket!.id, bob, 'post-1_c3', '2026-10-20T09:10:00Z');
+
+    const [reply] = await db
+      .insert(messages)
+      .values({
+        conversationId: ticket!.id,
+        direction: 'outbound',
+        kind: 'reply',
+        authorAgentId: agent!.id,
+        bodyText: 'Your order 4411 leaves the hub today.',
+        deliveryStatus: 'pending',
+        meta: {
+          metaKind: 'comment',
+          platform: 'facebook',
+          sendKind,
+          isPublic: sendKind === 'comment_reply',
+        },
+      })
+      .returning({ id: messages.id });
+    return { conversationId: ticket!.id, messageId: reply!.id, bob };
+  }
+
+  async function delivery(messageId: string) {
+    const [row] = await db
+      .select({ status: messages.deliveryStatus, error: messages.deliveryError })
+      .from(messages)
+      .where(eq(messages.id, messageId));
+    return row!;
+  }
+
+  function addressed(mock: typeof graph.privateReplyToComment) {
+    return mock.mock.calls.map(([input]) => (input as { commentId: string }).commentId);
+  }
+
+  it('sends a private reply to the requester’s newest comment, not the passer-by’s', async () => {
+    const reply = await legacyReply('private_reply');
+
+    await sendMeta(job(reply.messageId));
+
+    expect(addressed(graph.privateReplyToComment)).toEqual(['post-1_c2']);
+    expect(await delivery(reply.messageId)).toMatchObject({ status: 'sent' });
+  });
+
+  it('refuses a private reply when no comment is the requester’s, and sends nothing', async () => {
+    const reply = await legacyReply('private_reply');
+    await db
+      .update(messages)
+      .set({ authorContactId: reply.bob })
+      .where(
+        and(eq(messages.conversationId, reply.conversationId), eq(messages.direction, 'inbound')),
+      );
+
+    // Refused for good: no retry finds the customer a comment.
+    await sendMeta(job(reply.messageId));
+
+    expect(graph.privateReplyToComment).not.toHaveBeenCalled();
+    expect(await delivery(reply.messageId)).toEqual({
+      status: 'failed',
+      error: NO_REQUESTER_COMMENT,
+    });
+  });
+
+  it('posts a public reply under the requester’s newest comment on Facebook', async () => {
+    const reply = await legacyReply('comment_reply');
+
+    await sendMeta(job(reply.messageId));
+
+    expect(addressed(graph.replyToComment)).toEqual(['post-1_c2']);
   });
 });

@@ -2,9 +2,10 @@
 
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { GlobeIcon, SendIcon, XIcon } from '@/components/icons';
-import { Button, ErrorText, Select, Textarea } from '@/components/ui';
+import { Button, ErrorText, Label, Select, Textarea } from '@/components/ui';
 import { InfoTip } from '@/components/tooltip';
 import { suggestionKey } from '@/lib/canned-suggest/keyboard';
+import { formatDateTime } from '@/lib/format';
 import type { CannedResponseOption } from '@/lib/tickets/lookups';
 import {
   availableLocales,
@@ -15,7 +16,7 @@ import {
 import { sendReply } from '../../reply-actions';
 import { KnowledgeButton, KnowledgePanel } from './knowledge';
 import { LocaleToggle } from './locale-toggle';
-import type { KnowledgeContext } from './types';
+import type { KnowledgeContext, RequesterCommentOption } from './types';
 import { INITIAL, LOST_SEND } from './form-state';
 import { SubmitButton } from '@/components/submit-button';
 import { useActionForm } from '@/components/use-action-form';
@@ -39,6 +40,7 @@ function bodiesOf(response: CannedResponseOption) {
 export function ReplyForm({
   conversationId,
   isCommentThread = false,
+  requesterComments,
   canned,
   customerLocale,
   knowledge,
@@ -48,6 +50,11 @@ export function ReplyForm({
 }: {
   conversationId: string;
   isCommentThread?: boolean;
+  /**
+   * The requester's comments on a comment ticket, newest first — the only ones
+   * a private reply may answer. Empty off a comment ticket.
+   */
+  requesterComments: RequesterCommentOption[];
   canned: CannedResponseOption[];
   customerLocale: CannedLocale;
   knowledge: KnowledgeContext | null;
@@ -103,21 +110,34 @@ export function ReplyForm({
       />
 
       {isCommentThread ? (
-        <label className="flex items-start gap-2 rounded-md border border-(--color-border-subtle) p-2 text-xs">
-          <input
-            type="checkbox"
-            checked={privately}
-            onChange={(event) => setPrivately(event.target.checked)}
-            className="mt-0.5 size-4 shrink-0 accent-(--color-control-accent)"
-          />
-          <span>
-            <span className="font-medium">Reply privately instead</span>
-            <span className="block text-(--color-text-secondary)">
-              Moves the conversation into the direct message inbox. Meta allows this once per
-              comment, so it cannot be undone or repeated.
+        <div className="flex flex-col gap-2 rounded-md border border-(--color-border-subtle) p-2 text-xs">
+          <label className="flex items-start gap-2">
+            <input
+              type="checkbox"
+              checked={privately}
+              // Can be unticked whatever happens to the list, so a box ticked
+              // before the list emptied is never stuck sending privately; the
+              // action refuses that send with the reason.
+              disabled={!privately && requesterComments.length === 0}
+              onChange={(event) => setPrivately(event.target.checked)}
+              className="mt-0.5 size-4 shrink-0 accent-(--color-control-accent)"
+            />
+            <span>
+              <span className="font-medium">Reply privately instead</span>
+              <span className="block text-(--color-text-secondary)">
+                {requesterComments.length > 0
+                  ? 'Moves the conversation into the direct message inbox. Meta allows this ' +
+                    'once per comment, so it cannot be undone or repeated.'
+                  : 'Not on this ticket: a private reply goes to whoever wrote the comment it ' +
+                    'answers, and none of the comments here is the customer’s own.'}
+              </span>
             </span>
-          </span>
-        </label>
+          </label>
+
+          {privately && requesterComments.length > 0 ? (
+            <PrivateReplyTarget comments={requesterComments} />
+          ) : null}
+        </div>
       ) : null}
 
       <ErrorText>{state.error}</ErrorText>
@@ -140,6 +160,49 @@ export function ReplyForm({
       </div>
     </form>
   );
+}
+
+/**
+ * Which of the requester's comments a private reply answers.
+ *
+ * A private reply is a message addressed to a comment id, and Meta delivers it
+ * to whoever wrote that comment — so the comment is named here, where the agent
+ * can see it, rather than left to whatever is newest when the job runs, which
+ * on a busy post is a passer-by's reply filed on this ticket. Only the
+ * requester's are offered, newest first and chosen by default, and the action
+ * re-reads the one posted before it stores anything.
+ *
+ * Uncontrolled, under the form's `key`: a send remounts it on the newest comment
+ * again, and a refusal leaves the agent's choice where it was (`useActionForm`).
+ * The date leads each option because an option is one bidirectional run, and an
+ * Arabic comment ahead of it would carry the date to the wrong end of the line.
+ */
+function PrivateReplyTarget({ comments }: { comments: RequesterCommentOption[] }) {
+  const id = useId();
+
+  return (
+    <div>
+      <Label htmlFor={id}>Answers the customer’s comment</Label>
+      <Select
+        id={id}
+        name="replyToMessageId"
+        defaultValue={comments[0]?.id}
+        className="w-full font-conversation"
+      >
+        {comments.map((comment) => (
+          <option key={comment.id} value={comment.id}>
+            {formatDateTime(comment.at)} — {excerpt(comment.text)}
+          </option>
+        ))}
+      </Select>
+    </div>
+  );
+}
+
+/** A comment's text on one line, short enough for an option. */
+function excerpt(text: string): string {
+  const line = text.replace(/\s+/g, ' ').trim();
+  return line.length > 80 ? `${line.slice(0, 79)}…` : line;
 }
 
 /**
@@ -363,7 +426,7 @@ function ReplyBody({
           ghost ??
           (isCommentThread
             ? privately
-              ? 'Send this privately to the commenter — one chance per comment.'
+              ? 'Send this privately to the customer — one chance per comment.'
               : 'Reply under the comment, where everyone can see it…'
             : 'Write a reply to the customer…')
         }

@@ -148,7 +148,7 @@ export function commentRequest(input: CommentRequestInput): GraphRequest {
 export function commentReplyTarget(input: {
   platform: MetaPlatform;
   externalId: string | null;
-  /** The comment the agent is answering — the newest inbound one. */
+  /** The comment the reply answers — the requester's own (`requesterCommentId`). */
   lastCommentId: string | null;
 }): string | null {
   const root = rootCommentId(input.externalId);
@@ -173,6 +173,37 @@ export function commentIdOf(meta: unknown, channelMessageId: string | null): str
   if (metaKind !== 'comment') return null;
   if (typeof commentId === 'string' && commentId) return commentId;
   return channelMessageId || null;
+}
+
+/**
+ * The comment a stored message is, when it is one the ticket's requester wrote
+ * — the only comments a reply on a comment ticket may answer.
+ *
+ * Anybody may reply under the customer's comment, and ingest files that reply
+ * on the customer's ticket, so "the newest comment on the ticket" is a
+ * passer-by's as often as the customer's. A private reply goes to whoever wrote
+ * the comment it names, carrying whatever the agent wrote for the customer, and
+ * Meta allows one per comment ever, so naming a passer-by's both tells a
+ * stranger the customer's business and spends nothing the customer can use.
+ * The out-of-hours acknowledgement asks the same question of the comment that
+ * set it off (`answersRequester` in `lib/auto-response/resolve.ts`).
+ *
+ * Pure, and over the fields the ticket page already holds, so the composer
+ * offers exactly the comments `lib/tickets/reply-comment.ts` will accept.
+ */
+export function requesterCommentId(
+  message: {
+    direction: string;
+    authorContactId: string | null;
+    meta: unknown;
+    channelMessageId?: string | null;
+  },
+  requesterContactId: string,
+): string | null {
+  if (message.direction !== 'inbound' || message.authorContactId !== requesterContactId) {
+    return null;
+  }
+  return commentIdOf(message.meta, message.channelMessageId ?? null);
 }
 
 /**
