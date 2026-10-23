@@ -218,12 +218,11 @@ Every production write needs the user's go-ahead for that step, and the
    "Before" step under [Deploying 2.A](#2a-as-built): any `CATEGORISE_*` value
    copied to its new name, the overrides and the old job re-read. After it, run
    2.A's handbook and verify steps.
-4. **Stage 2.B**, the SQL rename, is built as #403, stacked on #400 and marked
-   ready for review on 2026-10-23. It merges into `dev` only once 2.A is
-   deployed to all six services, and then deploys alone in a maintenance window
-   by the steps under [Deploying 2.B](#2b-as-built). It rolls back by the
-   runbook named there, which stops being a way back once any later migration
-   has run.
+4. **Stage 2.B**, the SQL rename, is built as #403 and in review. It merges
+   into `dev` only once 2.A is deployed to all six services, and then deploys
+   alone in a maintenance window by the steps under
+   [Deploying 2.B](#2b-as-built). It rolls back by the runbook named there,
+   which stops being a way back once any later migration has run.
 5. **Before Stage 5**, a person does 0.2's reorder and 0.6's staffing, and the
    support lead answers the questions still open (below).
 
@@ -760,6 +759,20 @@ on 2026-10-23 after 18:00 UTC.
   table is enough to make it wait. Validation reads only the 823 and 647 rows
   that reference them. Locally, the whole migrate (`0046` and every `db/sql`
   file) took 0.9 s on Postgres 17.11.
+- **A rename-only 0046 was proposed in review and declined by the user on
+  2026-10-23.** Renaming the foreign keys, indexes and primary key instead of
+  dropping and re-adding them would lock only the four small tables, never
+  `conversations`, `messages` or `agents`: measured on near-empty tables,
+  8 ms against 24 ms for the generated statements, ending in the same
+  catalog. But it gains little inside a window where the old release fails
+  against the renamed tables either way: what it moves is where a wait of up
+  to `lock_timeout` falls, and failing to get a lock is the clean failure. It
+  does not remove the failure under "How it fails" either, which comes from
+  `db/sql` running after either form commits. And it cannot pass CI as
+  generated: `--custom` in place of 0046 keeps 0045's snapshot, so the drift
+  step stops on its TTY prompt, and drizzle-kit has no rename for an index, a
+  foreign key or a primary key. The only way through is replacing generated
+  SQL by hand, which the drift step cannot see and decision 2 rules out.
 - **How it fails.** `db/migrate.ts` sets `lock_timeout` to 10 s. A lock 0046
   cannot get fails the preDeploy cleanly: Drizzle's transaction rolls back,
   nothing is applied, and the old release keeps serving. But `db/sql` runs only
@@ -1108,8 +1121,10 @@ and should be read as a guide:
 ## Decisions
 
 Each decision says what it closes. Where a decision is the support lead's to
-make, it is listed again under [Questions](#questions-for-the-support-lead) with
-the default this plan assumes.
+make, it was listed again as a question for the support lead with the default
+this plan assumed, and
+[Decisions taken with the support lead](#decisions-taken-with-the-support-lead-2026-10-20)
+records the answer.
 
 ### 1. Comment channels are new `channel` enum values, scoped to the work surface
 
@@ -1330,7 +1345,9 @@ The category and the subcategories are independent judgements in this plan:
   detector sets them.
 
 Whether a subcategory should also carry a "usually this category" link for the
-picker is a [question](#questions-for-the-support-lead), not a dependency.
+picker was a question, not a dependency. The support lead answered it
+([decision 4](#decisions-taken-with-the-support-lead-2026-10-20)): category and
+subcategories are independent.
 
 **Before the first response, the SLA policy follows the ticket's category and
 group.** `applySlaOnCreate` selects the policy before any category exists. So

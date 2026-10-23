@@ -22,8 +22,9 @@ import { computeRootCauseDay, computeSubcategoryDay } from './subcategory-rollup
  * no longer exists under the name it spells passes every static check; these
  * fixtures are the first thing to execute it.
  *
- * Each ticket says which day it belongs on and why. The day under test is
- * 13 October, in Cairo, which is UTC+3 until the end of the month.
+ * Each ticket says which day it belongs on and why. The days under test are
+ * 13 October, in Cairo, which is UTC+3 until the end of the month, and, in the
+ * last block, the night Cairo springs forward in April.
  */
 
 withCleanDatabase();
