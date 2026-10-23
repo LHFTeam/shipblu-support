@@ -1,5 +1,7 @@
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
 import { sql } from 'drizzle-orm';
-import { afterAll, beforeEach } from 'vitest';
+import { afterAll, beforeAll, beforeEach } from 'vitest';
 import { seedBaseline } from '@/db/baseline';
 import { closeDb, db } from '@/db/client';
 import { forgetSuggestionSettings } from '@/lib/canned-suggest/settings';
@@ -33,6 +35,80 @@ export function withCleanDatabase(): void {
 
   afterAll(() => closeDb());
 }
+
+/**
+ * Inside one `describe`: the database as rolling back Stage 1.2 of
+ * `plans/ticket-category-routing.md` leaves it, so its tests can hold a comment
+ * ticket on its platform's channel. That is the shape `isCommentTicket`'s
+ * external-id half and Meta's live-conversation condition exist for, and the
+ * CHECK in `db/sql/008_comment_channel_check.sql` refuses it at the insert
+ * everywhere else, so without this nothing at the database tier could build one
+ * and every reader's half of the test could be deleted with the suite green.
+ *
+ * It uses the plan's own SQL: the CHECK is dropped by the guarded block the
+ * rollback ships, and `moveCommentsBack()` is the channel half of the
+ * rollback's step 3, which puts every comment ticket and both its frozen copies
+ * back on their platform (the other half points `channel_id` at a platform row,
+ * and no test here has a comments row for it to name). A test builds its
+ * ticket the way 1.2 files one, moves it back, and then asks the reader — so a
+ * rollback that stopped working would fail here too.
+ *
+ * After the block it empties the tables and replays `008`, emptying first
+ * because the CHECK is added VALID and the block's last test leaves a row it
+ * refuses. A run killed in between leaves the database without the CHECK;
+ * `comment-channel-check.db.test.ts` then fails until `npm run db:migrate`
+ * restores it, so that cannot pass unseen. The files run one at a time
+ * (`vitest.db.config.mts`), so no other file sees the CHECK missing.
+ *
+ * Call it inside a `describe`, in a file that called `withCleanDatabase()`.
+ */
+export function withoutCommentChannelCheck(): { moveCommentsBack: () => Promise<number> } {
+  beforeAll(async () => {
+    refuseUnlessDisposable(process.env.DATABASE_URL, process.env.TEST_DATABASE_URL);
+    await db.execute(sql.raw(DROP_COMMENT_CHANNEL_CHECK));
+  });
+
+  afterAll(async () => {
+    await truncateEverything();
+    const check = await readFile(
+      path.join(process.cwd(), 'db/sql/008_comment_channel_check.sql'),
+      'utf8',
+    );
+    await db.execute(sql.raw(check));
+  });
+
+  return {
+    // How many tickets it moved, so a test can say the rollback happened rather
+    // than pass on a ticket that was never on a comment channel.
+    moveCommentsBack: async () => {
+      let tickets = 0;
+      for (const table of ['conversations', 'csat_surveys', 'canned_suggestions']) {
+        const moved = await db.execute(
+          sql.raw(
+            `UPDATE ${table} SET channel = replace(channel::text, '_comment', '')::channel ` +
+              `WHERE channel IN ('facebook_comment', 'instagram_comment') RETURNING 1`,
+          ),
+        );
+        if (table === 'conversations') tickets = moved.length;
+      }
+      return tickets;
+    },
+  };
+}
+
+/** The rollback of Stage 1.3, as the plan gives it: guarded, so it takes no lock once done. */
+const DROP_COMMENT_CHANNEL_CHECK = `
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'conversations_comment_channel_matches_external_id'
+      AND conrelid = 'conversations'::regclass
+  ) THEN
+    ALTER TABLE conversations
+      DROP CONSTRAINT conversations_comment_channel_matches_external_id;
+  END IF;
+END $$`;
 
 /**
  * The caches this process holds of rows that were just truncated.

@@ -19,7 +19,7 @@ import type {
   NormalisedDirectMessage,
   NormalisedInteraction,
 } from '@/lib/meta/types';
-import { withCleanDatabase } from '@/lib/testing/db';
+import { withCleanDatabase, withoutCommentChannelCheck } from '@/lib/testing/db';
 import { applyMetaInteraction, ingestMetaComment, ingestMetaMessage } from './ingest-meta';
 
 /**
@@ -706,5 +706,53 @@ describe('an older Meta item stored after a newer one', () => {
     expect(await applyMetaInteraction(postback)).toBe(true);
     // From the postback's own instant, the clock would read 11:00.
     expect(await clocks(ticket)).toEqual(onNewer);
+  });
+});
+
+// The plan's rollback of Stage 1.2 moves every comment thread back onto
+// `facebook`/`instagram`, where a direct message's lookup matches it on the
+// channel and only its external id keeps a private message off a public thread
+// (`liveConversationFilter`).
+describe('Meta ingest, once rolling back 1.2 has moved comments back', () => {
+  const { moveCommentsBack } = withoutCommentChannelCheck();
+
+  it('keeps the commenter’s taps and direct messages off the comment thread', async () => {
+    const onPost = await ingestMetaComment(comment({ from: PSID }));
+    expect(await moveCommentsBack()).toBe(1);
+
+    // A tap with no chat to land on writes nothing, rather than opening the
+    // window on the public thread.
+    const tap: NormalisedInteraction = {
+      platform: 'facebook',
+      connection: 'facebook_page',
+      kind: 'postback',
+      from: PSID,
+      at: LATER,
+      opensWindow: true,
+      summary: 'Track my order',
+      payload: 'TRACK',
+      standby: false,
+    };
+    expect(await applyMetaInteraction(tap)).toBe(false);
+
+    const direct = await ingestMetaMessage(dm({ sentAt: LATER }));
+    expect(direct).toMatchObject({ createdConversation: true });
+    expect(direct.conversationId).not.toBe(onPost.conversationId);
+    expect(await messagesOf(onPost.conversationId)).toHaveLength(1);
+  });
+
+  it('puts a reply on the moved thread, and leaves it on its platform', async () => {
+    const root = await ingestMetaComment(comment());
+    expect(await moveCommentsBack()).toBe(1);
+
+    const reply = await ingestMetaComment(
+      comment({ commentId: 'post-1_c2', parentCommentId: 'post-1_c1', createdAt: LATER }),
+    );
+
+    expect(reply).toMatchObject({
+      conversationId: root.conversationId,
+      createdConversation: false,
+    });
+    expect(await conversation(root.conversationId)).toMatchObject({ channel: 'facebook' });
   });
 });

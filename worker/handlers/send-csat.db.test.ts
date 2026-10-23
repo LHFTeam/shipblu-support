@@ -15,7 +15,7 @@ import {
 import { scheduleSurvey, sendSurvey, ticketSurveyState } from '@/lib/csat';
 import { saveCsatSettings, UNSET_CSAT_SETTINGS } from '@/lib/csat/settings';
 import type { ClaimedJob } from '@/lib/queue';
-import { withCleanDatabase } from '@/lib/testing/db';
+import { withCleanDatabase, withoutCommentChannelCheck } from '@/lib/testing/db';
 import { sendCsat } from './send-csat';
 
 /**
@@ -692,5 +692,28 @@ describe('the sidebar', () => {
     expect(after.latestId).not.toBe(pressed.latestId);
     // And the new survey says it went, under the rating it sits beneath.
     expect(after.newer).toEqual({ sentAt: expect.any(Date) });
+  });
+});
+
+// The plan's rollback of Stage 1.2 moves the ticket back to `facebook`, where
+// Messenger's card and its quick replies are open to it on the channel alone:
+// only the external id says the thread is public.
+describe('send_csat, once rolling back 1.2 has moved comments back', () => {
+  const { moveCommentsBack } = withoutCommentChannelCheck();
+
+  it('still surveys nobody on a comment thread', async () => {
+    await switchOn();
+    const comment = await resolvedTicket({
+      channel: 'facebook_comment',
+      externalId: 'facebook:comment:123_456',
+    });
+    expect(await moveCommentsBack()).toBe(1);
+
+    await sendCsat(job(comment));
+
+    expect(await surveysOf(comment)).toMatchObject([
+      { skipReason: 'comment_thread', channel: 'facebook' },
+    ]);
+    expect(await db.select({ id: jobs.id }).from(jobs)).toHaveLength(0);
   });
 });

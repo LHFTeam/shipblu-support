@@ -136,10 +136,10 @@ describe('pickRule', () => {
   });
 
   // A comment ticket on its platform's channel, as every one was before Stage
-  // 1.2 and as one could be again if 1.3's CHECK were dropped. Matched raw, a
-  // "Facebook messages" rule would be posted under the comment and a "Facebook
-  // comments" rule would never fire; matched as the comment it is, both answer
-  // as they do for a comment on its own channel.
+  // 1.2 and every one is again once the plan's rollback of 1.2 has run. Matched
+  // raw, a "Facebook messages" rule would be posted under the comment and a
+  // "Facebook comments" rule would never fire; matched as the comment it is,
+  // both answer as they do for a comment on its own channel.
   it('matches a comment filed on its platform as the comment it is', () => {
     const rules = [
       rule({ id: 'company' }),

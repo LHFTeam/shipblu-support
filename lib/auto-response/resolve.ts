@@ -69,8 +69,8 @@ export type AutoResponseRule = {
  * channel to match on itself (`ruleChannel`), so every caller must supply the
  * external id and none can skip the mapping by forgetting it — which would undo
  * the comment exclusion for any comment ticket filed on its platform's channel,
- * as every one was before Stage 1.2 and one could be again if the CHECK of 1.3
- * were dropped, and nothing would fail.
+ * as every one was before Stage 1.2 and every one is again once the plan's
+ * rollback of 1.2 has run, and nothing would fail.
  */
 export function pickRule(
   rules: AutoResponseRule[],
@@ -103,10 +103,9 @@ export function pickRule(
  * `plans/ticket-category-routing.md` moved it, and matching that column raw
  * would post the wording of a rule the form names "Facebook messages" publicly
  * under a comment. Since Stage 1.3 a CHECK keeps the column and the external id
- * one answer, so this returns its input; it stays for the day the CHECK is
- * dropped, its rollback, when a comment could again be written on its
- * platform's channel and this is what would keep it out of a direct-message
- * rule.
+ * one answer, so this returns its input — until the plan's rollback of Stage
+ * 1.2 puts comment tickets back on their platform's channel while this code is
+ * deployed, and this is what keeps them out of a direct-message rule.
  */
 function ruleChannel(channel: ConversationChannel, externalId: string | null): ConversationChannel {
   if (isMetaChannel(channel) && isCommentTicket(channel, externalId)) {

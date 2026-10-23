@@ -245,6 +245,20 @@ as instructions. The reasons are given so that any of them can be argued with.
   halves. The new test has fourteen cases: seven refused, six accepted, and an
   update that splits the pair.
 
+  Review of #395 put the legacy cases back, in the shape that can still exist:
+  the one the rollback of 1.2 leaves (below). Deleting them had left every
+  reader's external-id half deletable with the suite green. Each file that held
+  one now has a `describe` that calls `withoutCommentChannelCheck()`
+  (`lib/testing/db.ts`). That drops the CHECK with the rollback's own guarded
+  block, builds the ticket the way 1.2 files it, and moves it back with step 3's
+  `UPDATE`. Afterwards it empties the tables and replays `008`. There are eight
+  cases, across `send-reply`, `meta-feedback`, `send-csat`, `ingest-meta` (two),
+  `inbox`, `locale` and `auto-response/index`. Seven guard a reader, and each
+  was mutation-checked: swapping the reader's `isCommentTicket` for
+  `isCommentChannel` (eight readers: the inbox and out-of-hours cases cover two each), or dropping
+  Meta's external-id condition, fails it, and restoring passes it. The eighth
+  pins that ingest lands a reply on a moved-back thread and leaves its channel.
+
 - **`split_comment_channels` is retired in the same PR.** After the CHECK it can
   match nothing, and its test cannot build a fixture. Remove all of it:
   - `worker/handlers/split-comment-channels.ts` and its `.db.test.ts`;
@@ -256,12 +270,22 @@ as instructions. The reasons are given so that any of them can be argued with.
   CI checks that those agree. The job stays in git history and in 1.2's
   as-built note.
 
-- **No runtime code path changes.** `isCommentTicket(channel, externalId)` keeps
-  its external-id half, and `pickRule` keeps `ruleChannel`. With the CHECK in
-  place both give the channel test's answer, so keeping them costs nothing. And
-  if 1.3 is rolled back, they are still what keeps a legacy row from being
-  answered in public. What changes are the comments that promise otherwise, or
-  that name the retired job:
+- **One runtime change, and it changes no answer.** `isCommentTicket` keeps its
+  external-id half, and `pickRule` keeps `ruleChannel`.
+  Review of #395 read both as dead once the CHECK holds. They are not, because
+  the rollback of 1.2 undoes the move while this code stays deployed. Its step
+  2 reverts #391 and #392, which re-deploys 1.1's ingest, so new comments are
+  filed on `facebook`/`instagram` again; its step 3 moves the old ones back.
+  The half came in 1.1 (#387), so that revert does not restore it if 1.3 has
+  removed it. An audit of every reader in that state found that, with the half
+  removed, the out-of-hours picker and the survey's thanks would post publicly,
+  and the survey and the console reply would message privately, possibly a
+  passer-by. With the half kept, every one of them stays right. The one runtime
+  change: Meta's direct messages now use the shared `liveConversationFilter`.
+  Their own copy had drifted, missing the merged-away and import conditions,
+  neither of which exists on a Meta ticket. The filter keeps their one extra
+  condition, no external id, for the same rollback. What else changes are the
+  comments that promise otherwise, or that name the retired job:
   - `lib/tickets/channel-policy.ts` (the comments near `isCommentTicket` and the
     "Stage 1.3" notes);
   - `lib/auto-response/resolve.ts` (`ruleChannel`: "Once a CHECK … returns its

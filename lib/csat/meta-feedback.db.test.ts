@@ -15,7 +15,7 @@ import { fallBackToQuickReplies, sendSurvey } from '@/lib/csat';
 import { DEFAULT_WORDING } from '@/lib/csat/wording';
 import type { NormalisedFeedback } from '@/lib/meta/types';
 import { commentChannelOf } from '@/lib/tickets/channel-policy';
-import { withCleanDatabase } from '@/lib/testing/db';
+import { withCleanDatabase, withoutCommentChannelCheck } from '@/lib/testing/db';
 import { recordMetaFeedback } from './meta-feedback';
 
 // The account a reply is addressed from. Unset here, every thread reads as
@@ -248,7 +248,8 @@ describe('recordMetaFeedback', () => {
   // that got there anyway. A thanks on one would be posted under the post.
   // On its comment channel, as the CHECK insists, so it is the strict channel
   // comparison that refuses it: `instagram_comment` is not the tap's
-  // `instagram`. The external-id half behind it has no row left to refuse.
+  // `instagram`. The external-id half behind it is the case at the end of this
+  // file, where rolling back 1.2 has moved the ticket back.
   it('takes no answer on a comment ticket', async () => {
     const ticket = await surveyedTicket({
       platform: 'instagram',
@@ -377,3 +378,23 @@ async function untilSomebodyWaits(): Promise<void> {
   }
   throw new Error('nothing came to wait on the lock this test holds');
 }
+
+// The plan's rollback of Stage 1.2 moves the ticket back to `instagram`, where
+// the strict channel comparison lets the tap through and only the external id
+// says the thread is public. A thanks there would be posted under the post.
+describe('recordMetaFeedback, once rolling back 1.2 has moved comments back', () => {
+  const { moveCommentsBack } = withoutCommentChannelCheck();
+
+  it('still takes no answer on the comment ticket', async () => {
+    const ticket = await surveyedTicket({
+      platform: 'instagram',
+      delivery: 'meta_quick_reply',
+      comment: 'instagram:comment:17890',
+    });
+    expect(await moveCommentsBack()).toBe(1);
+
+    expect(await recordMetaFeedback(answer(ticket.surveyId))).toBe('unknown_survey');
+    expect(await surveyRow(ticket.surveyId)).toMatchObject({ status: 'sent', rating: null });
+    expect(await thanks(ticket.conversationId, ticket.messageId)).toEqual([]);
+  });
+});

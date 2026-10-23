@@ -106,9 +106,15 @@ export type FilterableChannel = (typeof FILTERABLE_CHANNELS)[number];
  * (`conversations_comment_channel_matches_external_id`, in
  * `db/sql/008_comment_channel_check.sql`) makes the channel and the external id
  * one answer. Wherever being a comment matters the external id
- * (`rootCommentId`) is still asked beside the channel: it costs nothing while
- * the CHECK holds, and if the CHECK is ever dropped — its rollback — it is what
- * keeps a row written in the meantime from being answered as a private message.
+ * (`rootCommentId`) is still asked beside the channel, because the plan's
+ * rollback of Stage 1.2 undoes the move while this code stays deployed: it
+ * re-deploys 1.1's ingest, which files new comments on `facebook`/`instagram`
+ * again, then moves the old ones back. Every reader that would publish or
+ * message wrongly on such a ticket — the out-of-hours picker and its sender,
+ * the survey and its thanks, the 24-hour guard, the console reply — then has
+ * only the external id to tell. Tests build that shape on purpose: the
+ * database tier through `withoutCommentChannelCheck` (`lib/testing/db.ts`), the
+ * 24-hour guard and `pickRule` from plain rows.
  */
 const META_CHANNELS = [
   'facebook',
@@ -148,8 +154,9 @@ export function metaPlatformOf(channel: MetaChannel): MetaPlatform {
  * in two spellings — the anchored `rootCommentId` in some, a bare
  * `includes(':comment:')` in others — which could already disagree about an id.
  * Since Stage 1.3 of `plans/ticket-category-routing.md` the database keeps the
- * two halves agreeing, and both are still asked on purpose (the note above
- * `META_CHANNELS`): dropping the CHECK then needs no code change first.
+ * two halves agreeing, and both are still asked on purpose: rolling back Stage
+ * 1.2 puts comment tickets back on their platform's channel, where the external
+ * id is the only half that answers (the note above `META_CHANNELS`).
  */
 export function isCommentTicket(channel: string, externalId: string | null): boolean {
   return isCommentChannel(channel) || rootCommentId(externalId) !== null;
