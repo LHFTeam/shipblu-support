@@ -125,6 +125,21 @@ export function credentialOrigin(
 }
 
 /**
+ * When an inspected token lapses: "expires 15 Jan 2027, 01:30", or "never
+ * expires" for Meta's `expires_at: 0`.
+ *
+ * The account card and the note a sign-in answers with both say it, through
+ * this one function, so the two cannot print one instant as two days: the
+ * note took the UTC date off `toISOString()` while the card read Cairo's, and
+ * a token expiring before 02:00 Cairo time (03:00 in summer) expired a day
+ * earlier in the note. Only for a token Meta answered about — a null here is
+ * "never", and "nobody asked" is the caller's to say (`inspectedAt`).
+ */
+export function expiryPhrase(expiresAt: Date | null): string {
+  return expiresAt === null ? 'never expires' : `expires ${formatDateTime(expiresAt)}`;
+}
+
+/**
  * The badges a credential earns, most urgent first.
  *
  * A refusal outranks a clock. `expiresAt` is what Meta said when it was asked,

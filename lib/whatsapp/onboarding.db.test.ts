@@ -16,6 +16,7 @@ import { withCleanDatabase } from '@/lib/testing/db';
 import { stubFetch } from '@/lib/testing/fetch';
 import { canRequestSync, parseCoexistence } from './coexistence';
 import { recordContactSync, recordHistoryProgress, recordSyncRequest } from './coexistence-state';
+import { expiryPhrase } from './credential-status';
 import { credentialStatuses, forgetStoredCredential } from './credentials';
 import { adoptBusinessAppNumber, beginCoexistenceOnboarding, retryOnboarding } from './onboarding';
 import { completeOnboarding } from './onboarding-complete';
@@ -83,25 +84,33 @@ function graph(routes: Route[]) {
   });
 }
 
+/**
+ * `debug_token` answering for a token this app issued, with every scope a send
+ * needs, for the WABA — and never expiring. `data` changes one field of that,
+ * so a case about the expiry cannot drift from what the exchange accepts.
+ */
+const debugRoute = (data: Record<string, unknown> = {}): Route => ({
+  method: 'GET',
+  path: /\/debug_token\?/,
+  answer: () => ({
+    data: {
+      app_id: APP_ID,
+      is_valid: true,
+      expires_at: 0,
+      scopes: ['whatsapp_business_management', 'whatsapp_business_messaging'],
+      granular_scopes: [{ scope: 'whatsapp_business_management', target_ids: [WABA] }],
+      ...data,
+    },
+  }),
+});
+
 const exchangeRoutes = (overrides: Partial<Record<string, Route>> = {}): Route[] => [
   overrides.exchange ?? {
     method: 'GET' as const,
     path: /\/oauth\/access_token\?/,
     answer: () => ({ access_token: TOKEN, token_type: 'bearer' }),
   },
-  overrides.debug ?? {
-    method: 'GET' as const,
-    path: /\/debug_token\?/,
-    answer: () => ({
-      data: {
-        app_id: APP_ID,
-        is_valid: true,
-        expires_at: 0,
-        scopes: ['whatsapp_business_management', 'whatsapp_business_messaging'],
-        granular_scopes: [{ scope: 'whatsapp_business_management', target_ids: [WABA] }],
-      },
-    }),
-  },
+  overrides.debug ?? debugRoute(),
   overrides.waba ?? {
     method: 'GET' as const,
     path: new RegExp(`/${WABA}\\?fields=id,name$`),
@@ -261,10 +270,11 @@ describe('the first phase: exchanging the code', () => {
 
   /**
    * The note prints the same instant as the credential card on /admin/channels,
-   * so it reads it in Cairo as the card does. Each case is an expiry in the
-   * first hours of a Cairo day, whose UTC date is the day before — which the
-   * note printed while it took the date off `toISOString()` — once on either
-   * side of daylight saving, since the hours affected move with it.
+   * in the same words: both go through `expiryPhrase`, and the stored row is
+   * what the card reads. Each case is an expiry in the first hours of a Cairo
+   * day, whose UTC date is the day before — which the note printed while it
+   * took the date off `toISOString()` — once on either side of daylight
+   * saving, since the hours affected move with it.
    */
   it.each([
     {
@@ -284,23 +294,7 @@ describe('the first phase: exchanging the code', () => {
     async ({ cairo, utcDay, shown }) => {
       const expires = DateTime.fromISO(cairo, { zone: TEAM_TIME_ZONE });
       expect(expires.toUTC().toISODate()).toBe(utcDay);
-      graph(
-        exchangeRoutes({
-          debug: {
-            method: 'GET',
-            path: /\/debug_token\?/,
-            answer: () => ({
-              data: {
-                app_id: APP_ID,
-                is_valid: true,
-                expires_at: expires.toUnixInteger(),
-                scopes: ['whatsapp_business_management', 'whatsapp_business_messaging'],
-                granular_scopes: [{ scope: 'whatsapp_business_management', target_ids: [WABA] }],
-              },
-            }),
-          },
-        }),
-      );
+      graph(exchangeRoutes({ debug: debugRoute({ expires_at: expires.toUnixInteger() }) }));
 
       const outcome = await beginCoexistenceOnboarding(claim(), await admin());
 
@@ -308,8 +302,15 @@ describe('the first phase: exchanging the code', () => {
         ok: true,
         notice: expect.stringContaining(`(expires ${shown})`),
       });
+      if (!outcome.ok) throw new Error(outcome.error);
+
+      // What the card prints for the credential just stored: inspected, so
+      // `expiryLabel` hands its expiry to `expiryPhrase`, as the note did.
       const [account] = await db.select().from(whatsappAccounts);
-      expect((await credentialStatuses()).get(account!.id)?.expiresAt).toEqual(expires.toJSDate());
+      const status = (await credentialStatuses()).get(account!.id)!;
+      expect(status.inspectedAt).not.toBeNull();
+      expect(status.expiresAt).toEqual(expires.toJSDate());
+      expect(outcome.notice).toContain(`(${expiryPhrase(status.expiresAt)})`);
     },
   );
 
