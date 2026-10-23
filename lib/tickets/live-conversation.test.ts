@@ -26,4 +26,22 @@ describe('liveConversationFilter', () => {
     );
     expect(params).toEqual(['contact-1', 'webchat', 'import']);
   });
+
+  // On a platform channel an external id is a public comment thread: none under
+  // the CHECK, every one again if Stage 1.2 is rolled back.
+  it('keeps a Meta direct message off a comment thread, and asks it of no other channel', () => {
+    const statement = (channel: 'facebook' | 'instagram' | 'whatsapp') =>
+      db
+        .select({ id: conversations.id })
+        .from(conversations)
+        .where(liveConversationFilter('contact-1', channel))
+        .toSQL().sql;
+
+    for (const platform of ['facebook', 'instagram'] as const) {
+      expect(statement(platform)).toContain(
+        'and "conversations"."source_system" <> $3 and "conversations"."external_id" is null)',
+      );
+    }
+    expect(statement('whatsapp')).not.toContain('external_id');
+  });
 });

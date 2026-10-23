@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, isNull } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { channels, conversationEvents, conversations, messages, ticketStatuses } from '@/db/schema';
 import type {
@@ -20,6 +20,7 @@ import { findContactByIdentity, needsChannelProfile, resolveContact } from './co
 import { UNNAMED_SUBJECT } from './customer-text';
 import { latest } from './latest';
 import { afterInboundMessage, afterMessageStored } from './lifecycle';
+import { findLiveConversation } from './live-conversation';
 import { reopenResolved } from './reopen';
 import { requireDefaultOpenStatusId } from './statuses';
 
@@ -541,38 +542,6 @@ type FoundConversation = {
   statusCategory: 'open' | 'pending' | 'resolved' | 'closed';
   reopenCount: number;
 };
-
-/** The customer's live thread on this platform, if they have one. */
-async function findLiveConversation(
-  contactId: string,
-  platform: MetaPlatform,
-): Promise<FoundConversation | null> {
-  const rows = await db
-    .select({
-      id: conversations.id,
-      number: conversations.number,
-      statusCategory: ticketStatuses.category,
-      reopenCount: conversations.reopenCount,
-    })
-    .from(conversations)
-    .innerJoin(ticketStatuses, eq(ticketStatuses.id, conversations.statusId))
-    .where(
-      and(
-        eq(conversations.requesterContactId, contactId),
-        eq(conversations.channel, platform),
-        isNull(conversations.deletedAt),
-        isNull(conversations.externalId),
-      ),
-    )
-    .orderBy(desc(conversations.lastMessageAt))
-    .limit(1);
-
-  const row = rows[0];
-  // A closed conversation is history: a new message starts a new ticket rather
-  // than reopening something the team considered finished weeks ago.
-  if (!row || row.statusCategory === 'closed') return null;
-  return row;
-}
 
 async function findByExternalId(externalId: string): Promise<FoundConversation | null> {
   const rows = await db
