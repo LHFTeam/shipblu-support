@@ -168,12 +168,23 @@ describe('scroll-positioned', () => {
         '"p-2" + "relative overflow-y-auto"',
         '"overflow-y-auto relative" + x',
         '`${x}${a ? "relative" : "sticky"} overflow-y-auto`',
-        '`relative${a ? " p-2" : ""} overflow-y-auto`',
         '(cls += "relative overflow-y-auto")',
         '"p-2" + ("relative overflow-y-auto")',
         '"p-2" + (a && "relative overflow-y-auto")',
+        '`p-2${cn("relative overflow-y-auto")}`',
+        '"p-2" + cn("relative overflow-y-auto")',
+        '`p-2${tw`relative overflow-y-auto`}`',
+        // One arm glues, so the other being empty does not save it.
+        '`relative${a ? "p-2" : ""} overflow-y-auto`',
+        '`${a ? "" : "x"}relative overflow-y-auto`',
+        // An empty piece is looked past, to glue as much as to a space.
+        '"p-2" + `${a ? " " : ""}relative overflow-y-auto`',
+        '`${x}${a ? " " : ""}relative overflow-y-auto`',
+        // Only an argument nothing certain stands beside meets the call's neighbours.
+        '"p-2" + cn("", "relative overflow-y-auto")',
+        '"p-2" + cn(a && "x", "relative overflow-y-auto")',
       ]),
-    ).toEqual(at(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10));
+    ).toEqual(at(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18));
   });
 
   it('tells the author a glued position needs a space, not another relative', async () => {
@@ -202,6 +213,27 @@ describe('scroll-positioned', () => {
         '`${a ? "relative" : "sticky"}${b ? " p-2" : " p-4"} overflow-y-auto`',
         'cn(`${base}`, "relative overflow-y-auto")',
         '(cls += " relative overflow-y-auto")',
+        '`p-2 ${cn("relative overflow-y-auto")}`',
+        'cn("p-2", "relative overflow-y-auto")',
+        '`p-2 ${tw`relative overflow-y-auto`}`',
+        '"p-2" + cn("flex", "relative overflow-y-auto")',
+        'cn("overflow-y-auto relative", "p-2") + extra',
+        // `a += b` is `a + b`, so its right side carries a position as `+` does.
+        '(cls += " relative") + " overflow-y-auto"',
+        '`${(cls += " relative")} overflow-y-auto`',
+      ]),
+    ).toEqual([]);
+  });
+
+  it('looks past a piece that renders nothing to whatever is beyond it', async () => {
+    expect(
+      await verdicts([
+        '`relative${a ? " p-2" : ""} overflow-y-auto`',
+        '`relative${a ? ` ${b}` : ""} overflow-y-auto`',
+        '`overflow-y-auto relative${a ? "" : ""}`',
+        '`max-h-40 overflow-y-auto relative${className ? ` ${className}` : ""}`',
+        '`${a ? "p-2 " : ""}relative overflow-y-auto`',
+        '"overflow-y-auto relative" + (extra ? " " + extra : "")',
       ]),
     ).toEqual([]);
   });
