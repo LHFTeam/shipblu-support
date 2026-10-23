@@ -622,7 +622,7 @@ is on its comment channel, and a test fixture builds it there too — a
 **Detecting a comment is still the channel test _or_ the external id** —
 `isCommentTicket(channel, externalId)` in `lib/tickets/channel-policy.ts`, the
 one copy every reader calls — on purpose: the plan's rollback of Stage 1.2
-undoes the move while today's code stays deployed. It re-deploys 1.1's ingest,
+undoes the move while 1.1's readers stay deployed. It re-deploys 1.1's ingest,
 which files new comments on `facebook`/`instagram`, then moves the old ones
 back, and from then on the external id is the only half that answers. Without
 it the out-of-hours picker and the survey's thanks would post in public, and the

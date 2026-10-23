@@ -241,8 +241,10 @@ as instructions. The reasons are given so that any of them can be argued with.
 
   It also inserts each accepted shape and expects it to succeed.
 
-  Locally, migrate `shipblu_test` again before `npm run test:db`. A database
-  migrated before the branch has no CHECK, and the suite passes on it.
+  Locally, a database migrated before the branch has no CHECK. Since #395's
+  second review `withCleanDatabase()` replays `008` before every test, so the
+  suite adds it itself; migrating `shipblu_test` again is still the way to
+  bring the rest of `db/sql` up to date.
 
   As built: the seven fixtures were rewritten, and the one case that existed
   only for a pre-1.2 row (ingest-meta's "a reply on a thread filed before
@@ -278,7 +280,7 @@ as instructions. The reasons are given so that any of them can be argued with.
 - **One runtime change, and it changes no answer.** `isCommentTicket` keeps its
   external-id half, and `pickRule` keeps `ruleChannel`.
   Review of #395 read both as dead once the CHECK holds. They are not, because
-  the rollback of 1.2 undoes the move while this code stays deployed. Its step
+  the rollback of 1.2 undoes the move while 1.1's readers stay deployed. Its step
   2 reverts #391 and #392, which re-deploys 1.1's ingest, so new comments are
   filed on `facebook`/`instagram` again; its step 3 moves the old ones back.
   The half came in 1.1 (#387), so that revert does not restore it if 1.3 has
@@ -385,7 +387,9 @@ conrelid = 'conversations'::regclass AND conname =
 
     ```sql
     -- Every attempt since X that failed on an insert into conversations, however
-    -- old its job. Expect no rows.
+    -- old its job, except one that ended it dead: that keeps the run_at it was
+    -- scheduled with, so a dead job scheduled before X is the next query's to
+    -- find. Expect no rows.
     SELECT j.id, j.status, j.attempts, j.created_at, j.run_at, j.completed_at,
            substring(j.last_error from 'comment ([^: ]+):') AS comment_id,
            (SELECT c.channel FROM messages m JOIN conversations c ON c.id = m.conversation_id
@@ -397,11 +401,17 @@ conrelid = 'conversations'::regclass AND conname =
       AND j.last_error LIKE '%Failed query: insert into "conversations"%'
     ORDER BY j.run_at;
 
-    -- No verified Meta delivery left unprocessed, retrying or dead. A delivery
-    -- retries for at most 10 + 40 + 90 + 160 s. Expect 0.
-    SELECT count(*) FROM webhook_events
+    -- Every verified Meta delivery left unprocessed, retrying or dead, received
+    -- since an hour before X. Run it at X as well: what it lists then predates
+    -- the deploy. A delivery retries for at most 10 + 40 + 90 + 160 s, so the
+    -- hour is for a backlogged worker, and a dead delivery from earlier, which
+    -- cleanup keeps for 30 days, cannot read as a refusal. Expect nothing new.
+    SELECT id, received_at, left(error, 120) AS error FROM webhook_events
     WHERE channel IN ('facebook', 'instagram') AND signature_verified
-      AND processed_at IS NULL AND received_at < now() - interval '10 minutes';
+      AND processed_at IS NULL
+      AND received_at >= timestamptz '<X>' - interval '1 hour'
+      AND received_at < now() - interval '10 minutes'
+    ORDER BY received_at;
     ```
 
     Each detail is there for a reason found on review:
@@ -436,6 +446,7 @@ conrelid = 'conversations'::regclass AND conname =
       WHERE conname = 'conversations_comment_channel_matches_external_id'
         AND conrelid = 'conversations'::regclass
     ) THEN
+      PERFORM set_config('lock_timeout', '3s', true);
       ALTER TABLE conversations
         DROP CONSTRAINT conversations_comment_channel_matches_external_id;
     END IF;
@@ -443,7 +454,11 @@ conrelid = 'conversations'::regclass AND conname =
   ```
 
   Its preDeploy drops the constraint, so nobody types DDL against production,
-  and every later replay finds nothing to drop and takes no lock. Not a bare
+  and every later replay finds nothing to drop and takes no lock. The drop
+  asks for ACCESS EXCLUSIVE as the ADD did, so its wait is bounded the same way,
+  at 3 s: a rollback is the deploy most likely to run while something holds the
+  table. `withoutCommentChannelCheck()` in `lib/testing/db.ts` runs this block
+  before its tests, so the rollback's SQL is exercised on every CI run. Not a bare
   `DROP CONSTRAINT IF EXISTS`: `ALTER TABLE` takes ACCESS EXCLUSIVE before it
   checks `IF EXISTS`, so every later deploy would lock `conversations` to do
   nothing — the failure `001_extensions_and_triggers.sql`'s trigger loop
@@ -1753,7 +1768,7 @@ deploy it with web and the crons.
     copy.
 
   - **Runbook.** Done on 2026-10-21. Every step's result is in [Status and
-    handoff](#status-and-handoff-2026-10-21-2200-utc).
+    handoff](#status-and-handoff-2026-10-23-1200-utc).
     1. Deploy the worker, then web, then the crons.
     2. Confirm every service runs 1.2, since a worker still on 1.1 files new
        comments on the platform channel.
@@ -1842,7 +1857,7 @@ constraint name and table:
 
 The `coalesce` matters, because a regex on null is null and a CHECK passes on
 null. 1.3 deploys only after the gate under [1.3, as built](#13-as-built)
-returns 0, with all six services on 1.2. Adding the CHECK validates every
+returns 0, 0, 0, with all six services on 1.2. Adding the CHECK validates every
 row, and one stray row would fail web's preDeploy. After that the pair can
 never disagree again, and the three ways the code detects a comment today
 become one answer.
@@ -1879,7 +1894,10 @@ readers are harmless.
    worker and crons with 1.1's readers still in place, so nothing writes comment
    values any more. Where the revert meets 1.3's retirement of
    `split_comment_channels`, keep the job deleted: step 3 is an `UPDATE`, not
-   the job. Never deploy an old commit such as `1f89219` instead: `main` also
+   the job. Where it meets the rollback-state cases #395 added, the ones that
+   hold code #391/#392 wrote go with that code: send-reply's and locale's, and
+   `lib/auto-response/index.db.test.ts`, which #391 created. The rest hold 1.1's
+   readers, which stay. Never deploy an old commit such as `1f89219` instead: `main` also
    carries other work since then, #390 among it. First
    deactivate every `auto_responses` row naming a comment channel: 1.1 still
    matches one, without `answersRequester`, so a passer-by's comment would earn

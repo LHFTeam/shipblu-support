@@ -107,12 +107,12 @@ export type FilterableChannel = (typeof FILTERABLE_CHANNELS)[number];
  * `db/sql/008_comment_channel_check.sql`) makes the channel and the external id
  * one answer. Wherever being a comment matters the external id
  * (`rootCommentId`) is still asked beside the channel, because the plan's
- * rollback of Stage 1.2 undoes the move while this code stays deployed: it
+ * rollback of Stage 1.2 undoes the move while 1.1's readers stay deployed: it
  * re-deploys 1.1's ingest, which files new comments on `facebook`/`instagram`
- * again, then moves the old ones back. Every reader that would publish or
- * message wrongly on such a ticket — the out-of-hours picker and its sender,
- * the survey and its thanks, the 24-hour guard, the console reply — then has
- * only the external id to tell. Tests build that shape on purpose: the
+ * again, then moves the old ones back. Every reader of 1.1's that would publish
+ * or message wrongly on such a ticket — the out-of-hours picker, the survey and
+ * its thanks, the 24-hour guard, the console reply — then has only the
+ * external id to tell. Tests build that shape on purpose: the
  * database tier through `withoutCommentChannelCheck` (`lib/testing/db.ts`), the
  * 24-hour guard and `pickRule` from plain rows.
  */
