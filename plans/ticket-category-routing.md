@@ -61,14 +61,16 @@ held is folded in. The support lead answered every open question on
 2026-10-20; [Decisions taken](#decisions-taken-with-the-support-lead-2026-10-20)
 records the answers, and the plan below already reflects them.
 
-## Status and handoff (2026-10-23, 21:10 UTC)
+## Status and handoff
 
-A session picking this plan up starts here. Everything after this section is
-the design as it was reasoned and as each stage was built. This section says
-where the work stands, what comes next and how, and what has already bitten.
-Whoever moves any of it updates this section in the same PR. Every figure here
-was read from production, Render or GitHub at the time in the heading:
-re-read before acting on one.
+As of 2026-10-23, 22:00 UTC. A session picking this plan up starts here.
+Everything after this section is the design as it was reasoned and as each stage
+was built. This section says where the work stands, what comes next and how, and
+what has already bitten. Whoever moves any of it updates this section in the
+same PR. Every figure here was read from production, Render or GitHub at that
+time, or at the time it gives: re-read before acting on one. The time is on this
+line rather than in the heading so that links to the section survive each
+update.
 
 ### Where it stands
 
@@ -76,10 +78,59 @@ re-read before acting on one.
 | ----- | ------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 0     | Merged: #386 (`01488c9`)                                                                                                                    | Live since 2026-10-20. Its two operational steps were never done (below)                                                                                                                           |
 | 1.1   | Merged: #387, then `dev` → `main` in #389 (`1f89219`)                                                                                       | Live since 2026-10-21 10:13 UTC                                                                                                                                                                    |
-| 1.2   | Merged: #391 (`31f7379`) and follow-up #392 (`7b7d276`), then `dev` → `main` in #393 (`634a28d`), which also carried another session's #390 | **Done.** All six services live on `634a28d` by 17:38 UTC, worker first. The user ran the backfill and the rollup from a shell, so neither left a `jobs` row. Every check that follows reads clean |
+| 1.2   | Merged: #391 (`31f7379`) and follow-up #392 (`7b7d276`), then `dev` → `main` in #393 (`634a28d`), which also carried another session's #390 | **Done.** All six services live on `634a28d` by 17:38 UTC on 2026-10-21, worker first. The user ran the backfill and the rollup from a shell, leaving no `jobs` row. Every check below reads clean |
 | 1.3   | Merged: #395 (`58c5ed9`), then `dev` → `main` in #397 (`447d8be`), which also carried #394, #396 and #398. As built below                   | **Done.** All six services live on `447d8be` by 18:36 UTC, web first. Its checks read clean (below), though no comment has arrived since                                                           |
-| 2.A   | In review: #400 (`claude/epic-heisenberg-w60nbl`), no migration. As built below                                                             | Not deployed. Ships with the next `dev` → `main` merge, after its "Before" step (Deploying 2.A)                                                                                                    |
+| 2.A   | Merged into `dev`: #400 (`a558c5b`), no migration. As built below                                                                           | Not deployed. Ships with the next `dev` → `main` merge, after its "Before" step (Deploying 2.A)                                                                                                    |
 | 2.B–6 | Not started                                                                                                                                 | —                                                                                                                                                                                                  |
+
+**1.3's deploy, read on Render and production on 2026-10-23.**
+
+- **The release.** #397 merged `dev` (`e7376bf`) into `main` at 18:28:11 UTC
+  as `447d8be`. It carried #396 beside 1.3, and #396's migration 0044 adds
+  columns that its worker and cron code reads (0045 adds an index). So rule 7
+  asked for web first on #396's account, beside 1.3's own reason for it: only
+  web's preDeploy replays `db/sql`. An earlier version of this section said
+  the merge shipped only #394 beside 1.3 and that rule 7 asked nothing more of
+  the deploy order. That was written before #396 landed on `dev`.
+- **The order held.** Each service was deployed by hand on `447d8be`:
+
+  | Service                          | Deploy                     | Started  | Live     |
+  | -------------------------------- | -------------------------- | -------- | -------- |
+  | web `shipblu-support`            | `dep-dbdqf4t9fdbs738ak5cg` | 18:29:39 | 18:33:07 |
+  | worker `shipblu-support-worker`  | `dep-dbdqgvgm7kps73bc1tdg` | 18:33:34 | 18:35:46 |
+  | `shipblu-sla-sweep`              | `dep-dbdqi38n74is73eild2g` | 18:35:57 | 18:36:34 |
+  | `shipblu-time-automations`       | `dep-dbdqi49srm7s73cl8g30` | 18:36:01 | 18:36:40 |
+  | `shipblu-nightly`                | `dep-dbdqi5psrm7s73cl8lh0` | 18:36:07 | 18:36:38 |
+  | `shipblu-whatsapp-template-sync` | `dep-dbdqi6oae00c73am2j8g` | 18:36:11 | 18:36:47 |
+
+  Web's preDeploy logged `Applying drizzle migrations...` at 18:32:19 and
+  `Done: 9 post-migration file(s) applied.` at 18:32:23, with `008` taking
+  about 180 ms of that. So no new code ran before the schema it reads.
+
+  Old code did run against the new schema, which is additive. The old worker
+  finished its last job at 18:38:02 (its instance's last log line is that
+  `process_webhook … ok`), two minutes after Render reported the new one live.
+  That is about five and a half minutes against the new schema, the last two of
+  them beside the new worker. The only old cron run against it was
+  `shipblu-sla-sweep`'s at 18:35:07–18:35:49, which succeeded. `/api/health`
+  reported `447d8be` at 18:36:30, and `autoDeploy` read `no` / `off` on all six
+  afterwards.
+
+- **What has run on it** (read at 21:35:51). The gate still reads 0, 0, 0,
+  and no job run since 18:29:39 carries an error. The first ticket after the
+  deploy, #70381 at 18:37:49, was filed by the old worker, which was still
+  taking jobs (above). The new worker's first was #70382, on the bot channel at
+  19:28:31, so its `conversations` insert, which names the new column, works.
+  No support or coexistence WhatsApp ticket has been created yet.
+
+  Three crons have run on `447d8be`, each successfully by Render's run
+  events:
+  - `shipblu-sla-sweep`, first at 18:40:00–18:40:55;
+  - `shipblu-time-automations`, first at 18:45:16–18:46:17;
+  - `shipblu-whatsapp-template-sync` at 19:01:01–19:02:44, its backlog
+    snapshot at 19:02:28.
+
+  `shipblu-nightly` first runs on `447d8be` at 00:00 UTC on 2026-10-24.
 
 **1.3's checks, read at 21:10 UTC.** `<X>` is 18:29:39 UTC, when Render began
 web's deploy, which precedes the preDeploy that added the CHECK.
@@ -98,7 +149,7 @@ web's deploy, which precedes the preDeploy that added the CHECK.
   [1.3, as built](#13-as-built) once one has, and within seven days of it,
   because `cleanup` deletes a completed job a week after it completes.
 
-**1.2's checks, read at 21:54 UTC.**
+**1.2's checks, read at 21:54 UTC on 2026-10-21.**
 
 - **The backfill.** All 52 comment tickets are on `facebook_comment` or
   `instagram_comment`, and none is left on a platform channel. No row
@@ -154,11 +205,13 @@ Every production write needs the user's go-ahead for that step, and the
    live on it by 18:36 UTC, web first. Its checks read clean at 21:10 UTC
    (above), with one re-read left for the first comment. Its reviews are
    answered under [1.3, as built](#13-as-built).
-2. **Merge #400, then `dev` into `main`.** 2.A has no migration and no `db/sql`
-   change, and nor has anything else on `dev` since #397: #399 (`0d1289d`, a
-   repo rule) and #402 (`48896ce`, the review page's date). Rule 7 still holds,
-   because the merge ships all of `dev`: read `git log origin/main..origin/dev`
-   on the day and every migration in it.
+2. **Merge `dev` into `main`.** #400 merged into `dev` as `a558c5b` at 21:33
+   UTC. 2.A has no migration and changes `db/sql` only in `002`'s comments.
+   Nor has anything else on `dev` since #397 a migration or a `db/sql` change:
+   #399 (`0d1289d`, a repo rule), #402 (`48896ce`, the review page's date),
+   #401 (`a3fb23d`, the stored token's expiry) and #408 (these docs). Rule 7
+   still holds, because the merge ships all of `dev`: read
+   `git log origin/main..origin/dev` on the day and every migration in it.
 3. **Deploy 2.A**: web, then the worker, then the crons. Before it, run 2.A's
    "Before" step under [Deploying 2.A](#2a-as-built): any `CATEGORISE_*` value
    copied to its new name, the overrides and the old job re-read. After it, run
@@ -369,8 +422,24 @@ as instructions. The reasons are given so that any of them can be argued with.
 
 - **Deploy order and precautions.**
   - **Order: web first, then the worker, then the crons.** Only web's
-    preDeploy (`npm run db:migrate`) replays `db/sql`. The worker and crons
-    change only in that the retired job is gone, and nothing enqueues it.
+    preDeploy (`npm run db:migrate`) replays `db/sql`. 1.3 on its own changes
+    nothing on the worker or the crons that depends on new schema: its
+    retired job is gone, and nothing enqueues it. The release that shipped
+    it, #397, also carried #396. #396's worker and cron code reads
+    `conversations.accountable_agent_id` from migration 0044 by name, in:
+    - the worker's ingest and assignment;
+    - `sla_sweep` and `assign_sweep`;
+    - `snapshot_backlog`;
+    - `rollup_metrics`;
+    - the time automations, through `assignConversation` and
+      `reopenWithOwner`.
+
+    Ingest and `reopenWithOwner` also read `channels.owner_agent_id`. Drizzle
+    names every column, so new code running ahead of 0044 fails every insert
+    and whole-row select of `conversations` or `channels` (rule 1), the
+    senders' included. That made web first rule 7's requirement for the
+    release too, and it is the order that ran.
+
   - **The lock.** `ADD CONSTRAINT … CHECK` takes ACCESS EXCLUSIVE on
     `conversations` and holds it while it validates every row (about 70,000;
     about 80 ms). While it waits for the lock, every read and write of the
@@ -625,20 +694,28 @@ from the older commit with `overwrite=true`.
 
 ### Working on this repo without the outgoing session's context
 
-- **`dev` is the integration branch, and GitHub keeps deleting it.** The
-  repository's "Automatically delete head branches" setting removes `dev`
-  whenever a `dev` → `main` PR merges: at #389, and again at #393. Both times
-  it was recreated from `main` with the user's agreement. Before branching,
-  run `git ls-remote origin dev`. If it prints nothing, ask the user, since
-  creating `dev` is a push to `dev`, which `AGENTS.md` forbids an agent to do
-  unasked. Then branch from `origin/dev`, open the PR into `dev`, and leave the
-  `dev` → `main` merge to the user. The lasting fix is turning that setting off
-  or protecting `dev`, and that is the user's call.
+- **`dev` is the integration branch, and GitHub used to delete it.** The
+  repository's "Automatically delete head branches" setting removed `dev`
+  whenever a `dev` → `main` PR merged: at #389, and again at #393. Both times
+  it was recreated from `main` with the user's agreement. It survived #397:
+  `dev` still pointed at `e7376bf` at 18:30 UTC, two minutes after that merge,
+  and #399 merged into it at 18:34. The repository's `delete_branch_on_merge`
+  read `false` at 21:33 UTC, which explains it. When it changed is not
+  recorded. Before branching, still run `git ls-remote origin dev`. If it
+  prints nothing, ask the user, since creating `dev` is a push to `dev`, which
+  `AGENTS.md` forbids an agent to do unasked. Then branch from `origin/dev`,
+  open the PR into `dev`, and leave the `dev` → `main` merge to the user.
+  Protecting `dev` would make it hold for good, and that is the user's
+  call.
 - **A `dev` → `main` merge ships every session's work.** `634a28d` carried #390
-  beside 1.2. Before choosing a stage's deploy order, read
-  `git log origin/main..origin/dev` and every migration in it (deploy rule 7).
+  beside 1.2, and `447d8be` carried #396 beside 1.3. Before choosing a stage's
+  deploy order, read `git log origin/main..origin/dev` and every migration in
+  it (deploy rule 7).
 - **Deploys are by hand.** `autoDeploy` is off on every production service.
-  Render's workspace is `tea-da1f2lgjo6nc738hobmg`:
+  On 2026-10-23 it was `checksPass` on all six from about 13:53 to 18:25 UTC,
+  by Render's `auto_deploy_enabled` and `auto_deploy_disabled` events, and off
+  again before #397 merged. Render's workspace is
+  `tea-da1f2lgjo6nc738hobmg`:
 
   | Service                           | Id                         | Runs                                           |
   | --------------------------------- | -------------------------- | ---------------------------------------------- |
@@ -1926,7 +2003,7 @@ deploy it with web and the crons.
     copy.
 
   - **Runbook.** Done on 2026-10-21. Every step's result is in [Status and
-    handoff](#status-and-handoff-2026-10-23-1325-utc).
+    handoff](#status-and-handoff).
     1. Deploy the worker, then web, then the crons.
     2. Confirm every service runs 1.2, since a worker still on 1.1 files new
        comments on the platform channel.
