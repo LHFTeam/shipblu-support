@@ -1168,7 +1168,7 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
      scan is short). Run the `pg_stat_activity` query in §5.5 first; a blocked
      migration fails after `lock_timeout = 10s` rather than stalling (§6.15).
      Web first, for the migration, then the worker.
-  2. **Check that `db/sql/008` placed the four tickets with no row.** #1, #2,
+  2. **Check that `db/sql/009` placed the four tickets with no row.** #1, #2,
      #10820 and #10853 were filed before "WhatsApp Support" had a row, and every
      inbound message on them names its number. A ticket is now threaded on its
      number's row, so left without one, #10820 and #10853 would not be
@@ -2156,7 +2156,7 @@ message bodies — the same reasoning as the deliberately tiny `pg_notify` paylo
     one splits it.** The foreign key sets their `channel_id` null, so they
     thread only with events no row names until an active row naming the number
     exists again — then the customer's next message adopts the ticket
-    (`findOrAdoptLive`), or the next deploy's replay of `db/sql/008` places it.
+    (`findOrAdoptLive`), or the next deploy's replay of `db/sql/009` places it.
     A deactivated row keeps its tickets, but the resolver threads on active
     rows only, so the number's next message opens a ticket under no row beside
     the live one.
@@ -6501,7 +6501,7 @@ dryRun=true`, then without, gives those two theirs back from their
       with no row take its customer's messages to every number. But tickets
       ingested before "WhatsApp Support" had a row carry a null — #1, #2,
       #10820 and #10853 — so the open two would have opened a second ticket on
-      their customers' next message. `db/sql/008_whatsapp_channel_backfill.sql`
+      their customers' next message. `db/sql/009_whatsapp_channel_backfill.sql`
       gives each the `whatsapp` row of its newest inbound, non-reaction message
       that names one, so #1 gets the support line and never the bot. Driven
       from the tickets still null, so its replay on every deploy reads only

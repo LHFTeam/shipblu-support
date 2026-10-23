@@ -6,7 +6,7 @@ import { channels, contacts, conversations, messages, ticketStatuses } from '@/d
 import { withCleanDatabase } from '@/lib/testing/db';
 
 /**
- * `008_whatsapp_channel_backfill.sql`, run as `db/migrate.ts` runs it: the
+ * `009_whatsapp_channel_backfill.sql`, run as `db/migrate.ts` runs it: the
  * file's own text, executed, and executed again.
  *
  * The CI replay proves the statement plans and survives a second run on an
@@ -18,7 +18,7 @@ import { withCleanDatabase } from '@/lib/testing/db';
 withCleanDatabase();
 
 const backfill = readFileSync(
-  new URL('./008_whatsapp_channel_backfill.sql', import.meta.url),
+  new URL('./009_whatsapp_channel_backfill.sql', import.meta.url),
   'utf8',
 );
 
@@ -94,7 +94,7 @@ async function channelOf(id: string): Promise<string | null> {
   return row!.channelId;
 }
 
-describe('008_whatsapp_channel_backfill.sql', () => {
+describe('009_whatsapp_channel_backfill.sql', () => {
   it('files a ticket with no row under the number its newest inbound message reached', async () => {
     const support = await number('WhatsApp Support', SUPPORT);
     const phone = await number('Nayera', PHONE);

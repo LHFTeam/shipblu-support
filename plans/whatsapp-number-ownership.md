@@ -97,7 +97,7 @@ Each was put as a question with the alternatives below, and answered.
 | --------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
 | The thread key, the finders, the lock                                       | `lib/tickets/live-conversation.ts` — `ThreadKey`, `lockThread`             |
 | Threading and stamping at ingest                                            | `lib/tickets/ingest-whatsapp.ts` — `threadKey()`, `resolveWhatsAppChannel` |
-| Tickets filed before their number had a row                                 | `db/sql/008_whatsapp_channel_backfill.sql`                                 |
+| Tickets filed before their number had a row                                 | `db/sql/009_whatsapp_channel_backfill.sql`                                 |
 | The columns and the record                                                  | `db/schema/config.ts`, `db/schema/conversations.ts`, migration 0044        |
 | Only a WhatsApp row (plain or coexistence, never the bot) may have an owner | `channels_owner_only_whatsapp`, `db/sql/003_constraints.sql`               |
 | Every write of ownership and accountability                                 | `lib/whatsapp/number-owner.ts`                                             |
@@ -124,7 +124,7 @@ have changed nothing but the diff.
 A null `channel_id` matches only another null. A wildcard would let a ticket
 with no row take its customer's messages to every number, which is the bug the
 key exists to close. The four tickets that had one were placed by
-`db/sql/008`: each gets the `whatsapp` row of its newest inbound, non-reaction
+`db/sql/009`: each gets the `whatsapp` row of its newest inbound, non-reaction
 message that names one. It is driven from the tickets still null, so its replay
 on every deploy reads only those, and a second run changes nothing.
 
@@ -144,7 +144,7 @@ while visibility, a handover and a reopen by hand — all keyed on `channel_id` 
 treated the ticket as the support owner's. Under no row it is nobody's on every
 path. Once its number's row is added, the customer's next message continues
 it and files it under the row (`findOrAdoptLive`) rather than opening a second
-ticket beside it, and `db/sql/008` places any left on the next deploy — under
+ticket beside it, and `db/sql/009` places any left on the next deploy — under
 active rows only, since the resolver threads on nothing else. Each message so
 filed logs `[whatsapp_ingest] no channel row for this number, filed under no row phone_number_id=…`, with its key last as every
 `logger` line has it; an echo on such a number, which ingest ignores, logs
@@ -373,7 +373,7 @@ These are in `docs/PROJECT-STATE.md` §5.5 with their detail:
   the owner's slice.
 - A breach from before a handover is measured against the new owner, on the day
   the ticket is answered.
-- Deleting a channel row strands its tickets' thread until `008` can place them
+- Deleting a channel row strands its tickets' thread until `009` can place them
   again.
 
 ## Deploying it
@@ -390,7 +390,7 @@ These are in `docs/PROJECT-STATE.md` §5.5 with their detail:
   OR's arms only when each has an index; without it the inbox, its counts and
   the stream's authorisation scan the whole table on every render. It is built
   in the same transaction, over a column that is all null, so it is quick.
-- `db/sql/003` adds the CHECK, and `db/sql/008` places the null tickets. Both
+- `db/sql/003` adds the CHECK, and `db/sql/009` places the null tickets. Both
   replay on every deploy and change nothing the second time. `db/sql/001`'s
   queue trigger now also fires on `accountable_agent_id`, so a handover that
   moves only accountability refreshes the new owner's inbox live.
@@ -412,7 +412,7 @@ Locally, against Postgres with the migrations and `db/sql` applied:
     their own number; and four customers' inbound messages and echoes at once
     give four tickets. With the lock removed, the same test gave seven or eight,
     every run.
-  - `008`: the right row each time, never the bot's, and idempotent.
+  - `009`: the right row each time, never the bot's, and idempotent.
   - The CHECK, and the foreign keys going null when an agent is deleted.
   - `handOverNumber`: what moves and what does not; both events with no actor;
     the counts; the refusals; the no-op. A computed agent day gives the admin no

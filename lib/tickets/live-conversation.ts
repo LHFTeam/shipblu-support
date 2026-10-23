@@ -1,6 +1,8 @@
 import { and, desc, eq, isNull, ne, sql, type SQL } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { conversations, ticketStatuses } from '@/db/schema';
+import type { MetaPlatform } from '@/lib/meta/types';
+import { isMetaChannel } from './channel-policy';
 import type { StatusCategory } from './vocabulary';
 
 /**
@@ -19,13 +21,16 @@ import type { StatusCategory } from './vocabulary';
  * number": a wildcard would let a ticket with no row absorb that person's
  * messages to every number, which is the bug the key exists to close.
  *
- * The widget and the bot keep the person alone. The widget has one channel, and
- * its older tickets carry no `channel_id`; the bot has one number, whose
- * transcripts all carry its row already.
+ * The widget, the bot and Meta's direct messages keep the person alone. The
+ * widget has one channel, and its older tickets carry no `channel_id`; the bot
+ * has one number, whose transcripts all carry its row already; and a Meta
+ * direct message is kept off a comment thread by `liveConversationFilter`
+ * instead.
  */
 export type ThreadKey =
   | { channel: 'webchat' }
   | { channel: 'whatsapp_bot' }
+  | { channel: MetaPlatform }
   | { channel: 'whatsapp'; channelId: string | null };
 
 export type LiveConversation = {
@@ -64,12 +69,20 @@ function threadConditions(contactId: string, key: ThreadKey): SQL[] {
  * Which of a contact's conversations on a thread can be their live one.
  *
  * Its own export so a test can read the statement back through `toSQL()`: the
- * WhatsApp path and the widget each wrote these conditions out, and the point
- * of sharing them is that they cannot drift apart again. Meta's direct
- * messages are not here, on purpose — they must also skip comment threads, which
- * may still live on the same channel (until `split_comment_channels` has moved
- * them to `facebook_comment` / `instagram_comment`) and are told apart by
- * `external_id`.
+ * WhatsApp path, the widget and Meta's direct messages each wrote these
+ * conditions out, and the point of sharing them is that they cannot drift apart
+ * again. Meta's copy already had: it skipped neither a merged-away ticket nor an
+ * import.
+ *
+ * Meta's direct messages ask one thing more, that the ticket has no external
+ * id: on `facebook` / `instagram` that is a public comment thread, which a
+ * private message must never continue. The comment channels and their CHECK
+ * (`db/sql/008_comment_channel_check.sql`) keep comments off those channels
+ * today, but the documented rollback of Stage 1.2 of
+ * `plans/ticket-category-routing.md` puts them back there, and this condition
+ * is what keeps the inbox's messages and its public threads apart while it
+ * does. The other channels carry no comment threads, so their statement is
+ * unchanged.
  *
  * Never an imported conversation: a WhatsApp Business app chat copied in after
  * a coexistence onboarding is filed resolved, and its newest message can be
@@ -79,7 +92,11 @@ function threadConditions(contactId: string, key: ThreadKey): SQL[] {
  * message opens its own; the import stays on the contact's record beside it.
  */
 export function liveConversationFilter(contactId: string, key: ThreadKey): SQL {
-  return and(...threadConditions(contactId, key), ne(conversations.sourceSystem, 'import'))!;
+  return and(
+    ...threadConditions(contactId, key),
+    ne(conversations.sourceSystem, 'import'),
+    isMetaChannel(key.channel) ? isNull(conversations.externalId) : undefined,
+  )!;
 }
 
 /**
@@ -127,10 +144,14 @@ export async function findLiveConversation(
  * left out, a coexistence customer reacting to a message from their copied
  * phone history would have the reaction filed on whatever native ticket came
  * before it — closed, and possibly months old.
+ *
+ * Not on Meta's channels: it asks nothing but the person and the channel, and
+ * on `facebook` or `instagram` that can be a public comment thread
+ * (`liveConversationFilter`).
  */
 export async function findNewestConversation(
   contactId: string,
-  key: ThreadKey,
+  key: Exclude<ThreadKey, { channel: MetaPlatform }>,
   executor: typeof db = db,
 ): Promise<{ id: string; number: number; imported: boolean } | null> {
   const [row] = await executor

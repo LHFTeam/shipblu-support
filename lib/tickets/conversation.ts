@@ -435,8 +435,9 @@ export async function getConversation(
     its own: the composer's verdict has to describe the same last message the
     agent is looking at, and a second read could catch a newer one.
 
-    A comment ticket is left out — by its channel, or by its external id while
-    it still carries its platform's. It is answered through the comment
+    A comment ticket is left out — by its channel, or by its external id
+    (`isCommentTicket`, which keeps both halves on purpose). It is answered
+    through the comment
     endpoints, which are addressed by comment id and are not page-scoped, so
     neither of the two refusals applies to it.
   */

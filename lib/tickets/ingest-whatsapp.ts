@@ -826,7 +826,7 @@ async function numberOwner(tx: Tx, channel: ResolvedChannel): Promise<string | n
  * row: a second ticket beside it, and on the first a clock nothing will stop.
  * So a miss on a row looks once more, for the newest live ticket under no row
  * whose customer last wrote to this same number, and files it under the row.
- * `db/sql/008` does the same, on the next deploy, for one nobody writes to.
+ * `db/sql/009` does the same, on the next deploy, for one nobody writes to.
  *
  * Only a ticket under no row is adopted, since one on another row is that
  * number's and taking it would move somebody's ticket off their phone; and only
@@ -863,7 +863,9 @@ async function findOrAdoptLive(
  * One helper for all three paths, so the message, the echo and the reaction
  * cannot be filed by different keys.
  */
-function threadKey(channel: ResolvedChannel): ThreadKey {
+function threadKey(
+  channel: ResolvedChannel,
+): Extract<ThreadKey, { channel: 'whatsapp' | 'whatsapp_bot' }> {
   return channel.kind === 'whatsapp'
     ? { channel: 'whatsapp', channelId: channel.id }
     : { channel: 'whatsapp_bot' };
@@ -923,7 +925,7 @@ export async function resolveWhatsAppChannel(
   // owner on a handover or a reopen for a number they never held, while ingest
   // stamped nobody. Under no row it is nobody's on every path and threads only
   // with other events no row names; once its number has a row, the customer's
-  // next message files it there (`findOrAdoptLive`), as `db/sql/008` does on
+  // next message files it there (`findOrAdoptLive`), as `db/sql/009` does on
   // the next deploy for one nobody writes to.
   //
   // A row still lends its default group, so the message is routed somewhere a

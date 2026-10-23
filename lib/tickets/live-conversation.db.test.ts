@@ -43,8 +43,8 @@ async function number(name: string): Promise<string> {
 }
 
 /** WhatsApp tickets filed under no row — what every fixture here is unless it names one. */
-const NO_ROW: ThreadKey = { channel: 'whatsapp', channelId: null };
-const on = (channelId: string): ThreadKey => ({ channel: 'whatsapp', channelId });
+const NO_ROW = { channel: 'whatsapp', channelId: null } satisfies ThreadKey;
+const on = (channelId: string) => ({ channel: 'whatsapp', channelId }) satisfies ThreadKey;
 
 async function ticket(
   requesterContactId: string,

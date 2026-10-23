@@ -10,7 +10,7 @@ import {
   messages,
   ticketStatuses,
 } from '@/db/schema';
-import { withCleanDatabase } from '@/lib/testing/db';
+import { withCleanDatabase, withoutCommentChannelCheck } from '@/lib/testing/db';
 import { runAutomations } from './index';
 
 /**
@@ -102,25 +102,19 @@ async function automatedReplyOn(conversationId: string) {
 describe("an automation's canned reply", () => {
   // Posted under a comment where anybody reading the post sees it, addressed
   // to the requester, and under whichever comment came in last — which on a
-  // busy thread is a passer-by's. A comment still filed on its platform's
-  // channel is the same thread, so it is refused by its external id too.
+  // busy thread is a passer-by's.
   it('is never sent on a public comment thread', async () => {
     const id = await cannedResponse({ ar: 'وصلتنا رسالتك.', en: 'We have your message.' });
     await acknowledgeWith(id);
 
-    const moved = await ticketFrom('Where is my parcel?', {
+    const comment = await ticketFrom('Where is my parcel?', {
       channel: 'facebook_comment',
       externalId: 'facebook:comment:post-1_c1',
     });
-    const legacy = await ticketFrom('Where is my parcel?', {
-      channel: 'facebook',
-      externalId: 'facebook:comment:post-2_c1',
-    });
     const message = await ticketFrom('Where is my parcel?', { channel: 'facebook' });
-    for (const ticket of [moved, legacy, message]) await runAutomations('on_create', ticket);
+    for (const ticket of [comment, message]) await runAutomations('on_create', ticket);
 
-    expect(await automatedReplyOn(moved)).toEqual([]);
-    expect(await automatedReplyOn(legacy)).toEqual([]);
+    expect(await automatedReplyOn(comment)).toEqual([]);
     // A direct message on the same platform is answered as it always was.
     expect(await automatedReplyOn(message)).toEqual(['We have your message.']);
   });
@@ -161,5 +155,28 @@ describe("an automation's canned reply", () => {
       );
     expect(events).toEqual([{ actorLabel: 'automation:Acknowledge' }]);
     expect(await countsOf(id)).toEqual({ total: 0, ar: 0, en: 0 });
+  });
+});
+
+// The plan's rollback of Stage 1.2 moves every comment ticket back onto its
+// platform's channel, where only its external id says the thread is public, and
+// a rule matching it there would post under the comment.
+describe("an automation's canned reply, once rolling back 1.2 has moved comments back", () => {
+  const { moveCommentsBack } = withoutCommentChannelCheck();
+
+  it('is still never sent on the comment thread', async () => {
+    const id = await cannedResponse({ ar: 'وصلتنا رسالتك.', en: 'We have your message.' });
+    await acknowledgeWith(id);
+
+    const comment = await ticketFrom('Where is my parcel?', {
+      channel: 'facebook_comment',
+      externalId: 'facebook:comment:post-1_c1',
+    });
+    expect(await moveCommentsBack()).toBe(1);
+    const message = await ticketFrom('Where is my parcel?', { channel: 'facebook' });
+    for (const ticket of [comment, message]) await runAutomations('on_create', ticket);
+
+    expect(await automatedReplyOn(comment)).toEqual([]);
+    expect(await automatedReplyOn(message)).toEqual(['We have your message.']);
   });
 });
