@@ -1503,9 +1503,10 @@ describe('a customer writing to two of our numbers', () => {
         channelId: a,
         lastCustomerMessageAt: SENT,
       });
-      // Said, so a number connected at Meta and never added as a channel shows.
+      // Said, so a number connected at Meta and never added as a channel shows,
+      // with its key last, as every line of the logger puts it.
       expect(warn).toHaveBeenCalledWith(
-        `[whatsapp_ingest] no channel row for phone_number_id=${SUPPORT_NUMBER}; filed under no row`,
+        `[whatsapp_ingest] no channel row for this number, filed under no row phone_number_id=${SUPPORT_NUMBER}`,
       );
 
       // Events on numbers no row names still thread with each other.
@@ -1517,6 +1518,77 @@ describe('a customer writing to two of our numbers', () => {
         }),
       );
       expect(more.conversationId).toBe(unknown.conversationId);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  // With no plain row to lend one, a coexistence row's default group still
+  // routes the message — a team looks at it — while the ticket stays under no
+  // row, so it is not that phone's, its owner's or their clocks'.
+  it("routes a number no row names to a phone's group when there is no plain row", async () => {
+    const [team] = await db
+      .insert(groups)
+      .values({ name: 'Phone team' })
+      .returning({ id: groups.id });
+    const a = await phone('Nayera', NUMBER_A);
+    await db.update(channels).set({ defaultGroupId: team!.id }).where(eq(channels.id, a));
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    try {
+      const unknown = await ingestWhatsAppMessage(inbound({ phoneNumberId: SUPPORT_NUMBER }));
+
+      const [row] = await db
+        .select({ channelId: conversations.channelId, groupId: conversations.groupId })
+        .from(conversations)
+        .where(eq(conversations.id, unknown.conversationId));
+      expect(row).toEqual({ channelId: null, groupId: team!.id });
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  // The row an admin adds for a number that had none is what the warning asks
+  // for. Keyed on the new row, the customer's next message would miss the
+  // ticket open under no row and open a second, leaving a clock on the first
+  // that nothing stops; it continues the first and files it under the row.
+  it('continues a ticket filed under no row once its number has a row', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const before = await ingestWhatsAppMessage(inbound({ phoneNumberId: NUMBER_B }));
+      expect(await conversation(before.conversationId)).toMatchObject({ channelId: null });
+
+      const b = await phone('Ali', NUMBER_B);
+      const after = await ingestWhatsAppMessage(
+        inbound({ wamid: 'wamid.after', phoneNumberId: NUMBER_B, sentAt: LATER }),
+      );
+
+      expect(after).toMatchObject({
+        conversationId: before.conversationId,
+        createdConversation: false,
+      });
+      expect(await conversation(before.conversationId)).toMatchObject({ channelId: b });
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  // Under no row sit the tickets of every number no row names, so only one
+  // whose customer last wrote to this number is this number's to take.
+  it('leaves a ticket under no row alone when its customer last wrote to another number', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const elsewhere = await ingestWhatsAppMessage(inbound({ phoneNumberId: NUMBER_A }));
+
+      const b = await phone('Ali', NUMBER_B);
+      const toB = await ingestWhatsAppMessage(
+        inbound({ wamid: 'wamid.to-b', phoneNumberId: NUMBER_B, sentAt: LATER }),
+      );
+
+      expect(toB).toMatchObject({ createdConversation: true });
+      expect(toB.conversationId).not.toBe(elsewhere.conversationId);
+      expect(await conversation(toB.conversationId)).toMatchObject({ channelId: b });
+      expect(await conversation(elsewhere.conversationId)).toMatchObject({ channelId: null });
     } finally {
       warn.mockRestore();
     }

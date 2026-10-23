@@ -1138,7 +1138,7 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
     not appear there. Since §6.99 a fallback is never filed under any row: the
     row is in the thread key and in every reader of whose number a ticket is
     on, and each one logs
-    `[whatsapp_ingest] no channel row for phone_number_id=…`.
+    `[whatsapp_ingest] no channel row for this number, filed under no row phone_number_id=…`.
   - **Only one agent has ever been online.** Presence gates eligibility, so round
     robin hands everything to whoever is connected. George has never signed in
     (`last_seen_at` null) and Ahmed last beat on 26 Aug, which means the rota is
@@ -1161,7 +1161,8 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
   response. In order:
 
   1. **Before the deploy, look for a held lock.** Migration 0044 adds a column
-     and a foreign key to both `conversations` and `channels`, and drizzle
+     and a foreign key to both `conversations` and `channels`, and 0045 an
+     index on the new `conversations` column; drizzle
      applies a deploy's migrations in one transaction, so `conversations` is
      `ACCESS EXCLUSIVE` until the key has scanned every row (all null, so the
      scan is short). Run the `pg_stat_activity` query in §5.5 first; a blocked
@@ -2151,15 +2152,14 @@ message bodies — the same reasoning as the deliberately tiny `pg_notify` paylo
     breached while it was nobody's and is answered after the handover files
     its breach under the owner, on the day of the answer. Triaging a number's
     breached tickets before handing it over is the way round it.
-  - **A handover that moves only accountability does not refresh an inbox
-    live.** `notify_conversation_change` (`db/sql/001`) wakes the lists for a
-    fixed set of columns, and `accountable_agent_id` is not among them, so a
-    ticket somebody else holds appears in the new owner's lists at their next
-    navigation.
-  - **Deleting a channel row strands its tickets' thread.** The foreign key
-    sets their `channel_id` null, so they thread only with events no row
-    names, until a row naming the number exists again and the next deploy's
-    replay of `db/sql/008` places them.
+  - **Deleting a channel row strands its tickets' thread, and deactivating
+    one splits it.** The foreign key sets their `channel_id` null, so they
+    thread only with events no row names until an active row naming the number
+    exists again — then the customer's next message adopts the ticket
+    (`findOrAdoptLive`), or the next deploy's replay of `db/sql/008` places it.
+    A deactivated row keeps its tickets, but the resolver threads on active
+    rows only, so the number's next message opens a ticket under no row beside
+    the live one.
 
 - **The dead-letter queue has 57 rows in it and, until 2026-09-21, nobody had
   read them.** `/api/health` reported `dead: 56` unchanged for eleven days; the
@@ -6514,7 +6514,7 @@ dryRun=true`, then without, gives those two theirs back from their
       reopen by hand read it as the support owner's ticket while ingest
       stamped nobody. It now files under no row, keeps the plain support row's
       default group for routing, and logs
-      `[whatsapp_ingest] no channel row for phone_number_id=…`.
+      `[whatsapp_ingest] no channel row for this number, filed under no row phone_number_id=…`.
 
     Everything that was already per number is now right per ticket with no
     change of its own: `sendingNumberFor` (§6.8), the 24-hour window,

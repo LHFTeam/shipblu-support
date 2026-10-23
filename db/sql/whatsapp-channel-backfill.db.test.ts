@@ -141,6 +141,20 @@ describe('008_whatsapp_channel_backfill.sql', () => {
     expect(await channelOf(id)).toBe(live);
   });
 
+  // The resolver threads only on active rows, so a ticket placed under an
+  // inactive one is out of its customer's reach: their next message, still
+  // filed under no row, would open another beside it, and every deploy would
+  // strand one more.
+  it('never places a ticket under an inactive row', async () => {
+    await number('Retired', SUPPORT, { isActive: false });
+    const id = await ticket();
+    await message(id, SUPPORT, '09:00');
+
+    await run();
+
+    expect(await channelOf(id)).toBeNull();
+  });
+
   // The support row exists, so each ticket below that names its number would be
   // placed there if the statement reached it.
   it('leaves alone what it cannot place, and what is already placed', async () => {

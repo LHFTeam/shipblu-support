@@ -316,6 +316,13 @@
       "when": 1792664793398,
       "tag": "0044_unusual_black_bird",
       "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1792755327631,
+      "tag": "0045_whole_vampiro",
+      "breakpoints": true
     }
   ]
 }

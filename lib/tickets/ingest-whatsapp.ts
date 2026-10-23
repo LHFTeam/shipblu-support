@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { channels, conversations, messages } from '@/db/schema';
 import { logger } from '@/lib/log';
@@ -14,12 +14,7 @@ import {
 import { parseCoexistence } from '@/lib/whatsapp/coexistence';
 import { lastInboundPhoneNumberId } from '@/lib/whatsapp/conversation';
 import { ACCESS_TOKEN_CODE, explainDeliveryError, type TokenOrigin } from '@/lib/whatsapp/errors';
-import {
-  alignAccountable,
-  lockedOwnerId,
-  ownerStamp,
-  recordOwnerAssigned,
-} from '@/lib/whatsapp/number-owner';
+import { lockedOwnerId, ownerStamp, recordOwnerAssigned } from '@/lib/whatsapp/number-owner';
 import type {
   NormalisedEcho,
   NormalisedInboundMessage,
@@ -35,6 +30,7 @@ import {
   findLiveConversation,
   findNewestConversation,
   lockThread,
+  type LiveConversation,
   type ThreadKey,
 } from './live-conversation';
 import { reopenResolved } from './reopen';
@@ -84,6 +80,7 @@ export async function ingestWhatsAppMessage(
   });
 
   const channel = await resolveWhatsAppChannel(message.phoneNumberId);
+  noteUnnamedNumber(channel, message.phoneNumberId);
   const thread = threadKey(channel);
 
   const result = await db.transaction(async (tx) => {
@@ -95,37 +92,24 @@ export async function ingestWhatsAppMessage(
     // delivery for this customer and number waits for this one to commit and
     // continues its ticket instead of opening another (`lockThread`).
     await lockThread(tx, contactId, thread);
-    const existing = await findLiveConversation(contactId, thread, tx);
+    const existing = await findOrAdoptLive(tx, contactId, thread, message.phoneNumberId);
 
     if (existing) {
       conversationId = existing.id;
       conversationNumber = existing.number;
 
       // A reopen is the one moment a ticket that already exists takes its
-      // number's owner again: if the number changed hands while the ticket sat
-      // resolved, the person now holding the phone is the one who can answer
-      // it. A message continuing an open ticket never does — the handover
-      // already moved those, and anything since is a deliberate reassignment.
+      // number's owner again (`reopenWithOwner`, inside `reopenResolved`): if
+      // the number changed hands while the ticket sat resolved, the person now
+      // holding the phone is the one who can answer it. A message continuing an
+      // open ticket never does — the handover already moved those, and anything
+      // since is a deliberate reassignment.
       if (existing.statusCategory === 'resolved') {
-        // Read before the reopen writes the ticket, so this transaction takes
-        // the channel's lock before any ticket's, in the order a handover does.
-        const ownerId = await numberOwner(tx, channel);
-        const reopened = await reopenResolved(
+        await reopenResolved(
           tx,
           { id: conversationId, reopenCount: existing.reopenCount },
           { actorLabel: 'inbound_whatsapp', reason: 'customer_replied' },
         );
-        // Only for the number's own traffic: a number no row names is filed
-        // under no row (`resolveWhatsAppChannel`) and is nobody's, so there is
-        // nothing to align it with.
-        if (reopened && channel.ownable) {
-          await alignAccountable(tx, {
-            conversationId,
-            ownerId,
-            channelId: channel.id,
-            reason: 'reopened_after_handover',
-          });
-        }
       }
     } else {
       const statusId = await requireDefaultOpenStatusId(tx);
@@ -360,7 +344,7 @@ export async function ingestWhatsAppEcho(echo: NormalisedEcho): Promise<WhatsApp
     // each open a ticket — and the half the reply did not land on keeps a
     // first-response clock nothing will stop.
     await lockThread(tx, contactId, thread);
-    const existing = await findLiveConversation(contactId, thread, tx);
+    const existing = await findOrAdoptLive(tx, contactId, thread, echo.phoneNumberId);
 
     if (existing) {
       conversationId = existing.id;
@@ -603,6 +587,7 @@ export async function ingestWhatsAppReaction(
   // Mirrored on the numbers the business's messages are, and on no other.
   const sender = reaction.side === 'business' ? echoSender(channel) : null;
   if (reaction.side === 'business' && !sender) return skipped('not_mirrored');
+  noteUnnamedNumber(channel, phoneNumberId);
 
   const seen = await storedMessage(wamid);
   if (seen) return { ...seen, duplicate: true, skipped: null };
@@ -813,6 +798,11 @@ export type ResolvedChannel = {
    * owner is is read inside the ingest's transaction (`numberOwner`).
    */
   ownable: boolean;
+  /**
+   * Whether a row names this number. False is the fallback: filed under no row,
+   * and worth a warning on the paths that keep the event (`noteUnnamedNumber`).
+   */
+  named: boolean;
 };
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -823,6 +813,48 @@ type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
  */
 async function numberOwner(tx: Tx, channel: ResolvedChannel): Promise<string | null> {
   return channel.ownable && channel.id ? lockedOwnerId(tx, channel.id) : null;
+}
+
+/**
+ * The customer's live conversation on this number — or, when there is none,
+ * their live conversation filed under no row before the number had one, moved
+ * onto the row and continued.
+ *
+ * A number no row names files under no row (`resolveWhatsAppChannel`). Once an
+ * admin adds its row, which is what the warning asks for, the customer's next
+ * message is keyed on the row and would miss the ticket already open under no
+ * row: a second ticket beside it, and on the first a clock nothing will stop.
+ * So a miss on a row looks once more, for the newest live ticket under no row
+ * whose customer last wrote to this same number, and files it under the row.
+ * `db/sql/008` does the same, on the next deploy, for one nobody writes to.
+ *
+ * Only a ticket under no row is adopted, since one on another row is that
+ * number's and taking it would move somebody's ticket off their phone; and only
+ * one whose customer last wrote to this number, since under no row sit the
+ * tickets of every number no row names. It keeps the accountability it had —
+ * none, as nothing under no row is anybody's — until its next reopen or a
+ * handover. The no-row thread's lock is taken after the row's, always in that
+ * order, so two adoptions cannot wait on each other.
+ */
+async function findOrAdoptLive(
+  tx: Tx,
+  contactId: string,
+  thread: ThreadKey,
+  phoneNumberId: string | null,
+): Promise<LiveConversation | null> {
+  const live = await findLiveConversation(contactId, thread, tx);
+  if (live || thread.channel !== 'whatsapp' || !thread.channelId || !phoneNumberId) return live;
+
+  const unfiled: ThreadKey = { channel: 'whatsapp', channelId: null };
+  await lockThread(tx, contactId, unfiled);
+  const orphan = await findLiveConversation(contactId, unfiled, tx);
+  if (!orphan || (await lastInboundPhoneNumberId(orphan.id)) !== phoneNumberId) return null;
+
+  await tx
+    .update(conversations)
+    .set({ channelId: thread.channelId })
+    .where(and(eq(conversations.id, orphan.id), isNull(conversations.channelId)));
+  return orphan;
 }
 
 /**
@@ -874,6 +906,7 @@ export async function resolveWhatsAppChannel(
       kind: byNumber.type === 'whatsapp_bot' ? 'whatsapp_bot' : 'whatsapp',
       coexistence: byNumber.type === 'whatsapp' && parseCoexistence(byNumber.config) !== null,
       ownable: byNumber.type === 'whatsapp',
+      named: true,
     };
   }
 
@@ -888,25 +921,41 @@ export async function resolveWhatsAppChannel(
   // some of those paths and not on others — a coexistence row's would file it
   // onto somebody's phone and their clocks, and the support row's charged its
   // owner on a handover or a reopen for a number they never held, while ingest
-  // stamped nobody. Under no row it is nobody's on every path, threads only
-  // with other events no row names, and `db/sql/008` files it under its
-  // number's row once one exists.
+  // stamped nobody. Under no row it is nobody's on every path and threads only
+  // with other events no row names; once its number has a row, the customer's
+  // next message files it there (`findOrAdoptLive`), as `db/sql/008` does on
+  // the next deploy for one nobody writes to.
   //
-  // The plain support row still lends its default group, so the message is
-  // routed where a support message would be — never a coexistence row's,
-  // which is one person's team.
-  const support = rows.find((c) => c.type === 'whatsapp' && parseCoexistence(c.config) === null);
-  // Said once per event, because the usual cause is a number connected at Meta
-  // and never added under /admin/channels — invisible otherwise, since its
-  // traffic still reaches the inbox.
-  log.warn(`no channel row for phone_number_id=${phoneNumberId ?? 'none'}; filed under no row`);
+  // A row still lends its default group, so the message is routed somewhere a
+  // team looks: the plain support row's, where a support message would go, and
+  // with none the first WhatsApp row's. Only the group — routing is not
+  // ownership, and the ticket stays under no row, nobody's on every path; and
+  // a ticket with no group is one the rota never sees.
+  const routing =
+    rows.find((c) => c.type === 'whatsapp' && parseCoexistence(c.config) === null) ??
+    rows.find((c) => c.type === 'whatsapp');
   return {
     id: null,
-    defaultGroupId: support?.defaultGroupId ?? null,
+    defaultGroupId: routing?.defaultGroupId ?? null,
     kind: 'whatsapp',
     coexistence: false,
     ownable: false,
+    named: false,
   };
+}
+
+/**
+ * Said once per event that is kept, because the usual cause of a number no row
+ * names is one connected at Meta and never added under /admin/channels —
+ * invisible otherwise, since its traffic still reaches the inbox. Not from the
+ * echo path, which ignores an echo on such a number anyway. The key is last,
+ * as every line of `logger` puts it, so a search can read the value.
+ */
+function noteUnnamedNumber(channel: ResolvedChannel, phoneNumberId: string | null): void {
+  if (channel.named) return;
+  log.warn(
+    `no channel row for this number, filed under no row phone_number_id=${phoneNumberId ?? 'none'}`,
+  );
 }
 
 /** First line, trimmed to something that fits a ticket list. */

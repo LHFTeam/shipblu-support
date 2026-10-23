@@ -282,6 +282,16 @@ export const conversations = pgTable(
     // The inbox's default query: open tickets for a group, newest activity first.
     index('conversations_inbox_idx').on(t.statusId, t.groupId, t.lastMessageAt),
     index('conversations_assignee_idx').on(t.assigneeAgentId, t.lastMessageAt),
+    // Every restricted agent's visibility ORs `accountable_agent_id = me` beside
+    // the assignee and the numbers they own (`answerableBy`). Postgres combines
+    // the arms of an OR only when each has an index; without this one the inbox,
+    // its counts and the stream's authorisation scan the whole table, bot
+    // transcripts included, on every render. Partial, because only tickets on an
+    // owned number carry one, and `= me` never matches a null anyway. It also
+    // serves the foreign key's `set null` when an agent row is deleted.
+    index('conversations_accountable_idx')
+      .on(t.accountableAgentId)
+      .where(sql`${t.accountableAgentId} is not null`),
     index('conversations_requester_idx').on(t.requesterContactId),
     index('conversations_form_idx').on(t.formId, t.createdAt),
     index('conversations_channel_idx').on(t.channel, t.lastMessageAt),

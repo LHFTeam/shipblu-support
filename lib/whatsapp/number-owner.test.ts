@@ -57,8 +57,16 @@ describe('handoverNotice', () => {
   // and stays where it was put: "moved to them" would be half true of it.
   it('separates the breach that moved from the work that did not', () => {
     expect(handoverNotice({ ...done, ticketsMoved: 3, ticketsReassigned: 2 })).toBe(
-      'Nayera Mohamed owns +20 12 78707918 from now. 3 open or pending tickets count against ' +
-        'them; 2 were reassigned to them, and the rest stay with whoever holds them.',
+      'Nayera Mohamed owns +20 12 78707918 from now. 3 open or pending tickets now count ' +
+        'against them; 2 tickets were reassigned to them.',
+    );
+    // Counted apart, so reassigned can exceed moved: one ticket already
+    // accountable to the new owner, held by the previous one, is reassigned
+    // without being moved. Neither count is read as a part of the other, and
+    // one ticket is one ticket.
+    expect(handoverNotice({ ...done, ticketsMoved: 1, ticketsReassigned: 2 })).toBe(
+      'Nayera Mohamed owns +20 12 78707918 from now. 1 open or pending ticket now counts ' +
+        'against them; 2 tickets were reassigned to them.',
     );
     expect(handoverNotice({ ...done, ticketsMoved: 1, ticketsReassigned: 0 })).toBe(
       'Nayera Mohamed owns +20 12 78707918 from now. 1 open or pending ticket counts against ' +

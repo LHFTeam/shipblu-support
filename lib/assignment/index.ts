@@ -137,6 +137,21 @@ export async function assignConversation(
     !['open', 'pending'].includes(ticket.statusCategory)
   );
 
+  /*
+   * The group a caller is routing the ticket to, decided once for every branch
+   * below: a caller that named a group is routing the ticket there, and that
+   * half happens whether or not anybody turns out to be free to take it — or
+   * whether the ticket's number's owner takes it instead.
+   *
+   * Doing it before the pick rather than alongside it is the difference between
+   * a rule that reads "urgent shipping tickets go to the shipping team" and one
+   * that reads "…unless everybody there is busy, in which case leave it where it
+   * was". Out of hours, at capacity, no skill match — the ticket still belongs to
+   * that team's queue, and that is where somebody will look for it.
+   */
+  const routeTo =
+    options.groupId && options.groupId !== conversation.groupId ? options.groupId : null;
+
   if (conversation.assigneeAgentId) {
     // An owned ticket is assigned in the insert that creates it (`ownerStamp`),
     // so a rule routing it meets it already held — by the owner, whom this
@@ -145,13 +160,8 @@ export async function assignConversation(
     // reaches the group whose SLA policy, hours and members the rule meant.
     // Anybody else holding a ticket was given it on purpose, and a rule has
     // never moved their ticket.
-    if (
-      assignable &&
-      options.groupId &&
-      options.groupId !== conversation.groupId &&
-      conversation.assigneeAgentId === conversation.accountableAgentId
-    ) {
-      await moveToGroup(conversationId, options.groupId, options.actorLabel);
+    if (routeTo && assignable && conversation.assigneeAgentId === conversation.accountableAgentId) {
+      await moveToGroup(conversationId, routeTo, options.actorLabel);
     }
     return { assignedTo: null, reason: 'already_assigned' };
   }
@@ -161,9 +171,7 @@ export async function assignConversation(
   // The number's owner, ahead of everything the rota would ask — see the
   // module header for why none of it applies.
   if (conversation.accountableAgentId && ticket.accountableActive) {
-    if (options.groupId && options.groupId !== conversation.groupId) {
-      await moveToGroup(conversationId, options.groupId, options.actorLabel);
-    }
+    if (routeTo) await moveToGroup(conversationId, routeTo, options.actorLabel);
     return handBackToOwner(
       conversationId,
       conversation.accountableAgentId,
@@ -199,19 +207,8 @@ export async function assignConversation(
    */
   const { lastAssignedAgentId: _preLockCursor, ...group } = groupRow;
 
-  /*
-   * A caller that named a group is routing the ticket there, and that half
-   * happens whether or not anybody turns out to be free to take it.
-   *
-   * Doing it before the pick rather than alongside it is the difference between
-   * a rule that reads "urgent shipping tickets go to the shipping team" and one
-   * that reads "…unless everybody there is busy, in which case leave it where it
-   * was". Out of hours, at capacity, no skill match — the ticket still belongs to
-   * that team's queue, and that is where somebody will look for it.
-   */
-  if (options.groupId && options.groupId !== conversation.groupId) {
-    await moveToGroup(conversationId, groupId, options.actorLabel);
-  }
+  // Before the pick, so the routing half stands whatever the pick finds.
+  if (routeTo) await moveToGroup(conversationId, routeTo, options.actorLabel);
 
   const strategy = options.strategy ?? group.assignmentStrategy;
   if (strategy === 'manual') return { assignedTo: null, reason: 'strategy_manual' };

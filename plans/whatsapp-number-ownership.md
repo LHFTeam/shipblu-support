@@ -83,7 +83,9 @@ Each was put as a question with the alternatives below, and answered.
    is no historical rebuild. Reason: the requirement starts accountability
    "once they do" own the number. With the policies misconfigured today,
    charging past days would record that misconfiguration as her performance.
-   Known and accepted: the nightly rollup re-files only its own three-day window.
+   The nightly rollup rebuilds three days, and it reads accountability as of
+   each figure's own instant (`accountableOrAssigneeAt`), so a handover does
+   not re-file the days before it onto the new owner.
 
 ## Shape
 
@@ -128,14 +130,21 @@ for the live conversation inside their transaction (§6.100). The reaction takes
 no lock, because it never creates a conversation.
 
 `resolveWhatsAppChannel`'s fallback, for a number no row names, now files the
-event under no row, borrowing only the plain support row's default group. With
+event under no row, borrowing only a row's default group — the plain support
+row's, else the first WhatsApp row's, so a deployment with no plain row still
+routes it. With
 the row in the key, a coexistence row's id would land an unknown number's
 traffic on somebody's phone, its tickets and their clocks. The support row's id
 was the first version, and review found it inconsistent: ingest stamped nobody,
 while visibility, a handover and a reopen by hand — all keyed on `channel_id` —
 treated the ticket as the support owner's. Under no row it is nobody's on every
-path, and `db/sql/008` files it under its number's row once one exists. Each
-fallback logs `[whatsapp_ingest] no channel row for phone_number_id=…`.
+path. Once its number's row is added, the customer's next message continues
+it and files it under the row (`findOrAdoptLive`) rather than opening a second
+ticket beside it, and `db/sql/008` places any left on the next deploy — under
+active rows only, since the resolver threads on nothing else. Each message so
+filed logs `[whatsapp_ingest] no channel row for this number, filed under no row phone_number_id=…`, with its key last as every
+`logger` line has it; an echo on such a number, which ingest ignores, logs
+nothing.
 
 Everything that was already per number is now right per ticket with no change
 of its own: `sendingNumberFor`, the 24-hour window, `send_whatsapp`,
@@ -173,14 +182,15 @@ accountability is set or moved at three moments:
   moves accountability on all of them, and the assignee where the previous owner
   or nobody held the ticket. It writes `accountable_changed` and `assigned`
   events and one `channel_owner_changes` row with both counts.
-- **`alignAccountable`**, when a resolved ticket is reopened and the number has
-  changed hands since: by its customer writing again (ingest), or by an agent or
-  a rule moving it out of resolved, or by a reply through the help-centre portal
-  (`ownerOnReopen`, in `changeStatus`, the `set_status` action and
-  `appendReply`). The second was added in review: a ticket an agent
-  reopened by hand was then continued by the customer's message as an open
-  ticket, which never realigns, so it stayed with the previous owner for good.
-  It is a no-op on nearly every reopen.
+- **`alignAccountable`**, when a ticket comes back out of resolved or closed
+  and the number has changed hands since. It runs inside `reopenWithOwner`,
+  which every status writer goes through: `changeStatus`, the `set_status`
+  action and `reopenResolved`, which every customer's reopen uses — WhatsApp,
+  the portal and any later path. Review moved it there from four call sites,
+  each of which had been found missing in turn: a ticket an agent reopened by
+  hand was then continued by the customer's message as an open ticket, which
+  never realigns, so it stayed with the previous owner for good. It realigns
+  only when the write happened, and is a no-op on nearly every reopen.
 
 Nothing else writes accountability: not assignment, reclaim, a supervisor's
 reassignment, an automation or a merge. That is what lets a reassignment move
@@ -223,8 +233,12 @@ tickets, and an owned ticket held by somebody else, are reclaimed as before.
 assignee_agent_id)`, and every reader that says whose breach a ticket is reads
 it:
 
-- the four agent reads in `computeDay`: created, first response, resolved and
-  reopened;
+- the four agent reads in `computeDay` — created, first response, resolved and
+  reopened — as `accountableOrAssigneeAt(instant)`: the `from` of the first
+  `accountable_changed` event after the figure's instant, and the column when
+  nothing moved it since. Read from the column alone, a handover on Tuesday
+  re-filed Monday's late answer onto the new owner when Tuesday night rebuilt
+  Monday;
 - the live board's Breached, in `agentLoad`;
 - `agent_backlog_snapshots.breached_count`;
 - `sla_breached.data.accountableAgentId`, read by the same `UPDATE` that sets
@@ -353,8 +367,6 @@ These are in `docs/PROJECT-STATE.md` §5.5 with their detail:
   the owner's slice.
 - A breach from before a handover is measured against the new owner, on the day
   the ticket is answered.
-- A change of accountability alone does not wake the inbox lists live:
-  `notify_conversation_change` has a fixed column list.
 - Deleting a channel row strands its tickets' thread until `008` can place them
   again.
 
@@ -366,8 +378,16 @@ These are in `docs/PROJECT-STATE.md` §5.5 with their detail:
   until its key has validated every row. They are all null, so it is short.
   Check for a held lock first (§5.5's `pg_stat_activity` query). Deploy web
   first, for the migration, then the worker.
+- Migration 0045 adds `conversations_accountable_idx`, partial on a non-null
+  `accountable_agent_id`. Every restricted agent's visibility ORs
+  `accountable_agent_id = me` beside indexed arms, and Postgres combines an
+  OR's arms only when each has an index; without it the inbox, its counts and
+  the stream's authorisation scan the whole table on every render. It is built
+  in the same transaction, over a column that is all null, so it is quick.
 - `db/sql/003` adds the CHECK, and `db/sql/008` places the null tickets. Both
-  replay on every deploy and change nothing the second time.
+  replay on every deploy and change nothing the second time. `db/sql/001`'s
+  queue trigger now also fires on `accountable_agent_id`, so a handover that
+  moves only accountability refreshes the new owner's inbox live.
 - Rolling back the code leaves the columns and the table unread, and every
   report falls back to the assignee. Undoing a handover is a handover to
   "Nobody — team number": accountability clears, and the assignees keep what

@@ -390,4 +390,55 @@ describe('computeDay, for a ticket on a WhatsApp number with an owner', () => {
     );
     expect(reconciles(slices)).toBe(true);
   });
+
+  // The nightly run rebuilds three days from current state. A handover on the
+  // 14th moves the column on a ticket still open, and rebuilding the 13th from
+  // the column alone filed Monday's late answer — made under Nayera — against
+  // Ali, who did not hold the phone yet. Each figure is filed as of its own
+  // instant, from the event the handover left.
+  it("keeps a day's figures with whoever answered for them then, after a handover", async () => {
+    const [nayera, ali] = await db
+      .insert(agents)
+      .values([
+        { name: 'Nayera', email: 'nayera@shipblu.test', role: 'agent' },
+        { name: 'Ali', email: 'ali@shipblu.test', role: 'agent' },
+      ])
+      .returning({ id: agents.id });
+    const [contact] = await db.insert(contacts).values({ name: 'Amira' }).returning();
+    const [open] = await db
+      .select({ id: ticketStatuses.id })
+      .from(ticketStatuses)
+      .where(eq(ticketStatuses.name, 'Open'));
+
+    // Answered late on the 13th under Nayera, still open, handed to Ali on the
+    // 14th — so the column now names him.
+    const [late] = await db
+      .insert(conversations)
+      .values({
+        channel: 'whatsapp',
+        statusId: open!.id,
+        requesterContactId: contact!.id,
+        accountableAgentId: ali!.id,
+        assigneeAgentId: ali!.id,
+        createdAt: at('2026-10-13T09:00'),
+        firstRespondedAt: at('2026-10-13T11:00'),
+        firstResponseDueAt: at('2026-10-13T10:00'),
+      })
+      .returning({ id: conversations.id });
+    await db.insert(conversationEvents).values({
+      conversationId: late!.id,
+      type: 'accountable_changed',
+      createdAt: at('2026-10-14T08:00'),
+      data: { from: nayera!.id, to: ali!.id, channelId: null, reason: 'number_handover' },
+    });
+
+    const thirteenth = await computeDay('2026-10-13', await reportingContext());
+    const agent = (id: string) => thirteenth.find((slice) => slice.agentId === id);
+
+    expect(ticketCounts(agent(nayera!.id))).toEqual(
+      expected({ ticketsCreated: 1, firstResponseCount: 1, slaFirstResponseBreached: 1 }),
+    );
+    expect(agent(ali!.id)).toBeUndefined();
+    expect(reconciles(thirteenth)).toBe(true);
+  });
 });

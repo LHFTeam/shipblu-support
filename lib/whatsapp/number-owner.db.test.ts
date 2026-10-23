@@ -1,4 +1,4 @@
-import { asc, eq } from 'drizzle-orm';
+import { asc, eq, inArray } from 'drizzle-orm';
 import { DateTime } from 'luxon';
 import { describe, expect, it } from 'vitest';
 import { db } from '@/db/client';
@@ -17,7 +17,7 @@ import { computeAgentDay } from '@/lib/reports/agent-rollup';
 import { changeStatus } from '@/lib/tickets/status';
 import { reportingContext } from '@/lib/reports/rollup';
 import { withCleanDatabase } from '@/lib/testing/db';
-import { alignAccountable, handOverNumber, numberOwnership } from './number-owner';
+import { alignAccountable, handOverNumber, numberOwnership, reopenWithOwner } from './number-owner';
 
 /**
  * Handing a WhatsApp number over, against Postgres: which of its tickets move,
@@ -508,28 +508,55 @@ describe('a resolved ticket reopened by an agent or a rule', () => {
     expect(await holders(resolved)).toEqual({ accountable: ali, assignee: ali });
   });
 
-  it('moves nothing on any other move: resolving, closing, or out of Closed', async () => {
-    const { admin, nayera, number } = await handedOver();
-    const open = await ticket(number, 'Open', {
-      accountableAgentId: nayera,
-      assigneeAgentId: nayera,
-    });
+  // Closed counts too: a handover leaves it, but one brought back is live work
+  // on a phone the previous owner no longer holds, and nothing else could ever
+  // move it — Unassign would hand it back to them and a second handover is a
+  // no-op.
+  it('brings a closed ticket over when an agent reopens it', async () => {
+    const { admin, nayera, ali, number } = await handedOver();
     const closed = await ticket(number, 'Closed', {
       accountableAgentId: nayera,
       assigneeAgentId: nayera,
     });
-    // The handover moved the open one already; put it back to test the move.
+
+    await changeStatus(admin, closed, await status('Open'));
+
+    expect(await holders(closed)).toEqual({ accountable: ali, assignee: ali });
+  });
+
+  it('moves nothing on any other move: to pending, to resolved, to closed', async () => {
+    const { admin, nayera, number } = await handedOver();
+    const open = await ticket(number, 'Open');
+    const resolving = await ticket(number, 'Open');
+    const closing = await ticket(number, 'Open');
+    // The handover moved the live ones already; put them back to test the moves.
     await db
       .update(conversations)
       .set({ accountableAgentId: nayera, assigneeAgentId: nayera })
-      .where(eq(conversations.id, open));
+      .where(inArray(conversations.id, [open, resolving, closing]));
 
     await changeStatus(admin, open, await status('Pending'));
-    await changeStatus(admin, closed, await status('Open'));
+    await changeStatus(admin, resolving, await status('Resolved'));
+    await changeStatus(admin, closing, await status('Closed'));
 
-    for (const id of [open, closed]) {
+    for (const id of [open, resolving, closing]) {
       expect(await holders(id)).toEqual({ accountable: nayera, assignee: nayera });
     }
+  });
+
+  // `reopenResolved` answers false and writes nothing when no open status
+  // exists; a realignment after it would move a ticket that stayed resolved
+  // and say "when the customer wrote again" of a reopen that never happened.
+  it('realigns nothing when the write did not happen', async () => {
+    const { nayera, resolved } = await handedOver();
+
+    const written = await db.transaction((tx) =>
+      reopenWithOwner(tx, resolved, 'open', 'reopened_after_handover', async () => false),
+    );
+
+    expect(written).toBe(false);
+    expect(await holders(resolved)).toEqual({ accountable: nayera, assignee: nayera });
+    expect((await eventsOf(resolved)).map((e) => e.type)).not.toContain('accountable_changed');
   });
 });
 

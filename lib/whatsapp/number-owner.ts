@@ -73,7 +73,7 @@ export function effectiveOwnerId(owner: NumberOwner | null): string | null {
  *
  * Null for a row that is not a plain number: the bot is nobody's.
  */
-export async function lockedOwnerId(tx: Tx, channelId: string): Promise<string | null> {
+export async function lockedOwnerId(tx: typeof db, channelId: string): Promise<string | null> {
   // The channel alone, and the owner in a second read. A row that waited for a
   // handover's lock is re-read at its new version, but a table joined to it and
   // not locked keeps the row the first look found — the previous owner's —
@@ -138,34 +138,58 @@ export async function recordOwnerAssigned(
   });
 }
 
-/** Why a ticket's accountability was brought in line with its number. */
 /**
- * Why a ticket was realigned: its customer reopened it (WhatsApp ingest or the
- * portal), or an agent or a rule moved it out of resolved. Two reasons rather
- * than one so the timeline can say which happened.
+ * Why a ticket was realigned: its customer reopened it (`reopenResolved`, for
+ * WhatsApp and the portal alike), or an agent or a rule moved it back out of
+ * resolved or closed. Two reasons rather than one so the timeline can say which.
  */
 export type AlignReason = 'reopened_after_handover' | 'reopened_by_status';
 
 /**
- * The owner a ticket takes when it is moved out of resolved anywhere but
- * WhatsApp ingest — an agent's status picker, a rule's `set_status`, a reply
- * through the help-centre portal — or null when this move realigns nothing.
+ * Write a ticket's status, keeping it with its number's owner when the write
+ * brings it back.
  *
- * The customer writing on WhatsApp is not the only way a resolved ticket comes
- * back, and after any of the others the customer's next message continues an
- * open ticket, which never realigns. Left to
- * ingest alone, a ticket resolved across a handover and reopened by hand stays
- * with the previous owner for good: Unassign hands it back to them, the sweep
- * never reclaims it from them, and handing the number to the person who owns it
- * now changes nothing. Only out of resolved, as the customer's reopen: closed
- * and imported tickets stay where a handover leaves them.
+ * Every status writer goes through this — `changeStatus`, the `set_status`
+ * action and `reopenResolved`, which every customer's reopen uses — so a ticket
+ * leaving resolved or closed takes the number's current owner however it
+ * leaves. The realignment once lived at each caller, and each new caller was a
+ * place to forget it: a ticket resolved across a handover and reopened by hand
+ * stayed with the previous owner for good, because the customer's next message
+ * then continued an open ticket, which never realigns, Unassign handed it back
+ * to them, the sweep never reclaimed it from them, and handing the number to
+ * the person who owns it now changed nothing.
  *
- * Call it before writing the status, inside the same transaction, so the
- * channel's lock is taken before the ticket's — the order a handover takes
- * them — and pass the answer to `alignAccountable` afterwards.
+ * `write` performs the status change and answers whether it happened; nothing
+ * is realigned when it did not (`reopenResolved` with no open status). The
+ * owner is read before it, inside the caller's transaction, so the channel's
+ * lock comes before the ticket's — the order a handover takes them.
  */
-export async function ownerOnReopen(
-  tx: Tx,
+export async function reopenWithOwner(
+  tx: typeof db,
+  conversationId: string,
+  to: StatusCategory,
+  reason: AlignReason,
+  write: () => Promise<boolean>,
+): Promise<boolean> {
+  const owner = await ownerOnReopen(tx, conversationId, to);
+  const written = await write();
+  if (written && owner) await alignAccountable(tx, { conversationId, ...owner, reason });
+  return written;
+}
+
+/**
+ * The owner a ticket takes when it is moved back into the queue, or null when
+ * this move realigns nothing: not a WhatsApp ticket on a row, an import, or a
+ * move that is not out of resolved or closed into open or pending.
+ *
+ * Closed counts as well as resolved. A handover leaves both where they are,
+ * because most never come back and rewriting a finished ticket's
+ * accountability would move a breach that already happened; one that does come
+ * back is live work on a phone its old owner no longer holds, however it was
+ * finished.
+ */
+async function ownerOnReopen(
+  tx: typeof db,
   conversationId: string,
   to: StatusCategory,
 ): Promise<{ ownerId: string | null; channelId: string } | null> {
@@ -186,7 +210,7 @@ export async function ownerOnReopen(
     !ticket?.channelId ||
     ticket.channel !== 'whatsapp' ||
     ticket.sourceSystem === 'import' ||
-    ticket.category !== 'resolved'
+    (ticket.category !== 'resolved' && ticket.category !== 'closed')
   ) {
     return null;
   }
@@ -211,7 +235,7 @@ export async function ownerOnReopen(
  * then a team ticket like any other, which keeps the assignee it had.
  */
 export async function alignAccountable(
-  tx: Tx,
+  tx: typeof db,
   input: {
     conversationId: string;
     ownerId: string | null;
@@ -565,7 +589,11 @@ export function handoverNotice(done: Extract<Handover, { ok: true }>): string {
   if (done.ticketsReassigned === 0) {
     return `${owns} ${moved} ${counts} against them, and ${one ? 'stays' : 'stay'} with whoever holds ${one ? 'it' : 'them'}.`;
   }
-  return `${owns} ${moved} count against them; ${done.ticketsReassigned} ${reassigned} reassigned to them, and the rest stay with whoever holds them.`;
+  // The two counts are taken separately — a ticket already accountable to the
+  // new owner can be reassigned without being moved — so neither is a part of
+  // the other, and the sentence states each on its own.
+  const reassignedTickets = `${done.ticketsReassigned} ${done.ticketsReassigned === 1 ? 'ticket' : 'tickets'}`;
+  return `${owns} ${moved} now ${counts} against them; ${reassignedTickets} ${reassigned} reassigned to them.`;
 }
 
 /** How a person is named in the record: their name, or their address when it is blank. */

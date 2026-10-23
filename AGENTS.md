@@ -884,16 +884,19 @@ the statement they always did. The message and echo paths take `lockThread`,
 then look for the live conversation inside their transaction: looked for before
 it, a customer's message and the phone's reply processed at once each opened a
 ticket, and the half the reply missed kept a clock nothing could stop (§6.100).
-A number no row names is filed under **no row**, and only borrows the plain
-support row's default group for routing. Every reader of whose number a ticket
-is on — owner, visibility, a handover, a reopen, the ticket page — keys on
-`channel_id`, so a row's id handed out there makes the ticket that number's on
-some paths and not others: a coexistence row's files a stranger onto somebody's
-phone, and the support row's charged its owner for a number they never held.
-Each such event logs `[whatsapp_ingest] no channel row for phone_number_id=…`, which
-usually means a number connected at Meta and never added under
-`/admin/channels`. `db/sql/008_whatsapp_channel_backfill.sql` gives a ticket
-filed before its number had a row the row it belongs to.
+A number no row names is filed under **no row**, and only borrows a row's
+default group for routing — the plain support row's, else the first WhatsApp
+row's. Every reader of whose number a ticket is on — owner, visibility, a
+handover, a reopen, the ticket page — keys on `channel_id`, so a row's id
+handed out there makes the ticket that number's on some paths and not others: a
+coexistence row's files a stranger onto somebody's phone, and the support row's
+charged its owner for a number they never held. Each such message logs
+`[whatsapp_ingest] no channel row for this number, filed under no row phone_number_id=…`, which usually means a number connected at Meta and never
+added under `/admin/channels`. Once the row is added, the customer's next
+message continues the ticket open under no row and files it under the row
+(`findOrAdoptLive`) instead of opening a second beside it, and
+`db/sql/008_whatsapp_channel_backfill.sql` places any left on the next deploy —
+under active rows only, the only ones the resolver threads on.
 
 **A WhatsApp number can belong to a person, and then two columns say different
 things.** `channels.owner_agent_id` is who owns the number now.
@@ -904,11 +907,13 @@ re-file the days before a handover onto somebody who did not hold the phone
 then. Both are written only in `lib/whatsapp/number-owner.ts`, and a ticket's
 accountability is written at three moments: ingest creating it on an owned number
 (`ownerStamp`, in the insert, assignee included), `handOverNumber` (the number's
-open and pending native tickets), and its reopening after the number changed
-hands (`alignAccountable`) — by its customer writing again, or by an agent or a
-rule moving it out of resolved, or by a reply through the help-centre portal
-(`ownerOnReopen`, in `changeStatus`, `set_status` and `appendReply`), since the customer's next message then continues an open ticket,
-which never realigns. Six rules hold:
+open and pending native tickets), and its coming back out of resolved or
+closed after the number changed hands (`alignAccountable`). That last is
+`reopenWithOwner`, which every status writer goes through — `changeStatus`, the
+`set_status` action and `reopenResolved`, which every customer's reopen uses —
+so a new writer cannot forget it: reopened by hand and then continued by the
+customer as an open ticket, which never realigns, a ticket stayed with the
+previous owner for good. Six rules hold:
 
 - **Reassignment moves the work, never the breach.** Assignment, reclaim, a
   supervisor's reassignment, an automation and a merge never write
@@ -929,8 +934,10 @@ which never realigns. Six rules hold:
   restores the number. `/admin/channels` warns.
 - **Whose breach it is reads `accountableOrAssignee()`**
   (`lib/tickets/accountable.ts`) everywhere that says so — the rollup's agent
-  slices (every figure but CSAT, which stays with the agent each survey was
-  about), the live board's Breached, `agent_backlog_snapshots.breached_count`
+  slices as `accountableOrAssigneeAt` (as of each figure's own instant, from the
+  `accountable_changed` events, so rebuilding a day after a handover leaves its
+  figures where they were; every figure but CSAT, which stays with the agent
+  each survey was about), the live board's Breached, `agent_backlog_snapshots.breached_count`
   and `sla_breached.data.accountableAgentId` — so the dashboard and tomorrow's
   report name one person. What somebody is carrying — open, awaiting a reply,
   the capacity check — stays on the assignee.

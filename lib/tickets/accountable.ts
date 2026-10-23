@@ -28,10 +28,42 @@ import { openBacklog } from './backlog';
  * about whose queue the work is in, and the owner of a number does not carry a
  * ticket somebody else is working.
  */
-export function accountableOrAssignee(
-  t: { accountableAgentId: AnyPgColumn; assigneeAgentId: AnyPgColumn } = conversations,
-): SQL<string | null> {
-  return sql<string | null>`coalesce(${t.accountableAgentId}, ${t.assigneeAgentId})`;
+export function accountableOrAssignee(): SQL<string | null> {
+  return sql<
+    string | null
+  >`coalesce(${conversations.accountableAgentId}, ${conversations.assigneeAgentId})`;
+}
+
+/**
+ * The same answer as it stood at `at`: for the rollup, which rebuilds the last
+ * three days from current state every night.
+ *
+ * Read from the column alone, a handover on Tuesday would re-file Monday's
+ * figures — a breach answered late under the previous owner included — onto
+ * the new owner when Tuesday night rebuilds Monday, which is exactly what
+ * freezing the column was meant to prevent. Every write that moves it after a
+ * ticket exists leaves an `accountable_changed` event naming whom it moved
+ * from (`handOverNumber`, `alignAccountable`), so the value at `at` is the
+ * `from` of the first such event after it, and the column itself when nothing
+ * has moved it since. Only accountability is read back; the assignee half is
+ * the current one, as every agent slice has always been.
+ *
+ * `ace` is an alias because the reopened read selects from
+ * `conversation_events` itself and passes its `created_at` as `at`: aliased,
+ * the inner table hides its own name, so that reference reaches the outer row.
+ */
+export function accountableOrAssigneeAt(at: SQL | AnyPgColumn): SQL<string | null> {
+  const movedSince = sql`from conversation_events ace
+    where ace.conversation_id = ${conversations.id}
+      and ace.type = 'accountable_changed'
+      and ace.created_at > ${at}`;
+  return sql<string | null>`coalesce(
+    case when exists (select 1 ${movedSince})
+      then (select (ace.data->>'from')::uuid ${movedSince} order by ace.created_at, ace.id limit 1)
+      else ${conversations.accountableAgentId}
+    end,
+    ${conversations.assigneeAgentId}
+  )`;
 }
 
 /**

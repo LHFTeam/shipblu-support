@@ -20,7 +20,7 @@ import { businessMinutesBetween, type HoursConfig } from '@/lib/hours';
 import { loadHoursCatalog } from '@/lib/hours/catalog';
 import { defaultHours, ticketHours, type HoursCatalog } from '@/lib/hours/resolve';
 import { loadPolicies, type LoadedPolicy } from '@/lib/sla';
-import { accountableOrAssignee } from '@/lib/tickets/accountable';
+import { accountableOrAssigneeAt } from '@/lib/tickets/accountable';
 import { readOnlyChannels } from '@/lib/tickets/channel-policy';
 import { TEAM_TIME_ZONE } from '@/lib/hours/zone';
 import { logger } from '@/lib/log';
@@ -41,15 +41,16 @@ const log = logger('rollup');
  * combination instead would multiply the row count for cuts nobody asks for;
  * these four are the questions a support team actually has.
  *
- * The agent a ticket's figures belong to is the one its SLA counts against
- * (`accountableOrAssignee()`): the owner of the WhatsApp number it arrived on,
- * and otherwise whoever holds it. Every ticket figure in that slice — created,
- * first response, resolved, reopened, met and breached — goes to the same
- * person, so the "First response" and "Within SLA" columns beside each other
- * still describe the same tickets. It reads the frozen column rather than the
- * number's current owner, so the three days this rebuilds every night stay
- * where they were filed when a number changes hands. Surveys are the
- * exception: a score is the survey's own snapshot of who handled the ticket.
+ * The agent a ticket's figures belong to is the one its SLA counted against
+ * when each happened (`accountableOrAssigneeAt`): the owner of the WhatsApp
+ * number it arrived on at that moment, and otherwise whoever holds it. Every
+ * ticket figure in that slice — created, first response, resolved, reopened,
+ * met and breached — is filed that way, so the "First response" and "Within
+ * SLA" columns beside each other still describe the same tickets. Read as of
+ * the figure's own instant rather than from the column, so a handover does not
+ * re-file the days before it when the nightly run rebuilds them. Surveys are
+ * the exception: a score is the survey's own snapshot of who handled the
+ * ticket.
  */
 
 /**
@@ -296,7 +297,7 @@ export async function computeDay(
     .select({
       channel: conversations.channel,
       groupId: conversations.groupId,
-      agentId: accountableOrAssignee(),
+      agentId: accountableOrAssigneeAt(conversations.createdAt),
     })
     .from(conversations)
     .where(
@@ -320,7 +321,7 @@ export async function computeDay(
     .select({
       channel: conversations.channel,
       groupId: conversations.groupId,
-      agentId: accountableOrAssignee(),
+      agentId: accountableOrAssigneeAt(conversations.firstRespondedAt),
       createdAt: conversations.createdAt,
       firstRespondedAt: conversations.firstRespondedAt,
       firstResponseDueAt: conversations.firstResponseDueAt,
@@ -360,7 +361,7 @@ export async function computeDay(
     .select({
       channel: conversations.channel,
       groupId: conversations.groupId,
-      agentId: accountableOrAssignee(),
+      agentId: accountableOrAssigneeAt(conversations.resolvedAt),
       createdAt: conversations.createdAt,
       resolvedAt: conversations.resolvedAt,
       resolutionDueAt: conversations.resolutionDueAt,
@@ -403,7 +404,7 @@ export async function computeDay(
     .select({
       channel: conversations.channel,
       groupId: conversations.groupId,
-      agentId: accountableOrAssignee(),
+      agentId: accountableOrAssigneeAt(conversationEvents.createdAt),
     })
     .from(conversationEvents)
     .innerJoin(conversations, eq(conversations.id, conversationEvents.conversationId))
