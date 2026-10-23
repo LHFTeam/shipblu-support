@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { db } from '@/db/client';
 import {
   agents,
+  channels,
   contacts,
   conversationShipments,
   conversations,
@@ -15,11 +16,12 @@ import type { SessionAgent } from '@/lib/auth/session';
 import { canSubscribeToConversation } from '@/lib/realtime/authorization';
 import { conversationsForTrackingNumber } from '@/lib/shipments/queries';
 import { withCleanDatabase } from '@/lib/testing/db';
+import { handOverNumber } from '@/lib/whatsapp/number-owner';
 import { loadConversation } from './console-guards';
 import { getConversation } from './conversation';
 import { inboxCounts, listInbox } from './inbox';
 import { parseFilters } from './inbox-filters';
-import { inboxGroupsFor, scopeForAgent, seesTicket } from './visibility';
+import { inboxGroupsFor, ownsANumber, scopeForAgent, seesTicket } from './visibility';
 
 /**
  * `ticket.view.group`, end to end. The rule used to be spelled out in seven
@@ -210,5 +212,149 @@ describe('an agent who sees every ticket', () => {
       { id: expect.any(String), name: 'Support', member: false },
     ]);
     expect(await inboxCounts(admin)).toMatchObject({ groups: 2, all: 4 });
+  });
+});
+
+/**
+ * The owner of a WhatsApp number, as production has her: an agent-role user in
+ * no group. A breach on her number's tickets counts against her whoever holds
+ * them, so she must be able to open every one of them — by every path the
+ * group member above is admitted by — and nothing on a number she does not own.
+ */
+describe('the owner of a WhatsApp number', () => {
+  let owner: SessionAgent;
+  let bob: SessionAgent;
+  let hers: string;
+  let ids: Record<
+    'waiting' | 'withBob' | 'history' | 'answeredFor' | 'otherWaiting' | 'otherWithBob',
+    string
+  >;
+  let numberOf: Record<keyof typeof ids, number>;
+
+  async function number(name: string, ownerAgentId: string | null): Promise<string> {
+    const [row] = await db
+      .insert(channels)
+      .values({ type: 'whatsapp', name, config: { phoneNumberId: name }, ownerAgentId })
+      .returning({ id: channels.id });
+    return row!.id;
+  }
+
+  async function onNumber(
+    channelId: string,
+    values: Partial<typeof conversations.$inferInsert> & { status?: string } = {},
+  ) {
+    const { status = 'Open', ...rest } = values;
+    const [statusRow] = await db
+      .select({ id: ticketStatuses.id })
+      .from(ticketStatuses)
+      .where(eq(ticketStatuses.name, status));
+    const [contact] = await db.insert(contacts).values({ name: 'Merchant' }).returning();
+    const [row] = await db
+      .insert(conversations)
+      .values({
+        channel: 'whatsapp',
+        channelId,
+        statusId: statusRow!.id,
+        requesterContactId: contact!.id,
+        ...rest,
+      })
+      .returning({ id: conversations.id, number: conversations.number });
+    return row!;
+  }
+
+  beforeEach(async () => {
+    owner = await signedIn('agent', 'nayera@shipblu.test');
+    bob = await signedIn('agent', 'bob@shipblu.test');
+    hers = await number('Nayera Mohamed', owner.id);
+    const team = await number('WhatsApp Support', null);
+
+    const rows = {
+      // Arrived on her number and nobody has taken it.
+      waiting: await onNumber(hers, { accountableAgentId: owner.id }),
+      // A supervisor gave the work to Bob; the breach is still hers.
+      withBob: await onNumber(hers, { accountableAgentId: owner.id, assigneeAgentId: bob.id }),
+      // Its copied history, which nobody is accountable for: hers by the number alone.
+      history: await onNumber(hers, { sourceSystem: 'import', status: 'Resolved' }),
+      // Resolved on another number while she owned it, which has since moved
+      // on: accountable to her until its customer writes again.
+      answeredFor: await onNumber(team, {
+        accountableAgentId: owner.id,
+        assigneeAgentId: bob.id,
+        status: 'Resolved',
+      }),
+      otherWaiting: await onNumber(team),
+      otherWithBob: await onNumber(team, { assigneeAgentId: bob.id }),
+    };
+    ids = Object.fromEntries(Object.entries(rows).map(([key, row]) => [key, row.id])) as typeof ids;
+    numberOf = Object.fromEntries(
+      Object.entries(rows).map(([key, row]) => [key, row.number]),
+    ) as typeof numberOf;
+  });
+
+  it('lists every ticket on her number and every ticket she answers for, and nothing else', async () => {
+    expect(await listed(owner)).toEqual([ids.waiting, ids.withBob].sort());
+    expect(await listed(owner, { status: 'all' })).toEqual(
+      [ids.waiting, ids.withBob, ids.history, ids.answeredFor].sort(),
+    );
+    // Unassigned is what has arrived on her number and nobody has taken.
+    expect(await listed(owner, { view: 'unassigned' })).toEqual([ids.waiting]);
+    expect(await listed(owner, { view: 'mine' })).toEqual([]);
+    expect(await inboxCounts(owner)).toEqual({ mine: 0, unassigned: 1, groups: 0, all: 2 });
+    expect(await ownsANumber(owner)).toBe(true);
+  });
+
+  it('opens, acts on and subscribes to one a colleague holds, and one she only answers for', async () => {
+    for (const key of ['withBob', 'history', 'answeredFor'] as const) {
+      expect(await getConversation(owner, numberOf[key])).not.toBeNull();
+      expect(await loadConversation(owner, ids[key])).not.toBeNull();
+      expect(await canSubscribeToConversation(owner, ids[key])).toBe(true);
+      expect(await seesTicket(owner, ids[key])).toBe(true);
+    }
+  });
+
+  it('is refused another number’s tickets by every path', async () => {
+    for (const key of ['otherWaiting', 'otherWithBob'] as const) {
+      expect(await getConversation(owner, numberOf[key])).toBeNull();
+      expect(await loadConversation(owner, ids[key])).toBeNull();
+      expect(await canSubscribeToConversation(owner, ids[key])).toBe(false);
+      expect(await seesTicket(owner, ids[key])).toBe(false);
+    }
+  });
+
+  it('sees her number’s tickets on a shipment page', async () => {
+    const [shipment] = await db
+      .insert(shipments)
+      .values({ trackingNumber: TRACKING })
+      .returning({ id: shipments.id });
+    await db.insert(conversationShipments).values(
+      [ids.waiting, ids.otherWaiting].map((conversationId) => ({
+        conversationId,
+        shipmentId: shipment!.id,
+      })),
+    );
+
+    const found = await conversationsForTrackingNumber(TRACKING, scopeForAgent(owner));
+    expect(found.map((row) => row.id)).toEqual([ids.waiting]);
+  });
+
+  it('widens nothing for the colleague working one of her tickets', async () => {
+    expect(await listed(bob)).toEqual([ids.withBob, ids.otherWithBob].sort());
+    expect(await ownsANumber(bob)).toBe(false);
+  });
+
+  // Read in the query on every request: the number's tickets go with the
+  // number at the next page, and what she still answers for stays with her.
+  it('loses the number’s open tickets when it is handed over, and keeps what she answers for', async () => {
+    const handover = await handOverNumber({
+      channelId: hers,
+      toAgentId: bob.id,
+      actor: { id: admin.id, label: 'Admin' },
+    });
+    expect(handover).toMatchObject({ ok: true, changed: true });
+
+    expect(await listed(owner, { status: 'all' })).toEqual([ids.answeredFor]);
+    expect(await seesTicket(owner, ids.withBob)).toBe(false);
+    expect(await ownsANumber(owner)).toBe(false);
+    expect(await listed(bob)).toEqual([ids.waiting, ids.withBob, ids.otherWithBob].sort());
   });
 });

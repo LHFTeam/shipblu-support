@@ -71,7 +71,7 @@ export default async function ReportsPage({
   const startsLate = rolledUp.first !== null && rolledUp.first > range.from;
 
   return (
-    <div className="app-scroll h-full overflow-y-auto p-4 sm:p-6">
+    <div className="app-scroll relative h-full overflow-y-auto p-4 sm:p-6">
       <PageHeader
         title="Reports"
         description={`${range.from} to ${range.to}, in ${zone}. Rolled up nightly — today is not included yet.`}
@@ -198,7 +198,11 @@ export default async function ReportsPage({
             <Stat label="Reopened" value={summary.ticketsReopened.toLocaleString()} />
           </section>
 
-          <Breakdown title="By agent" rows={agentRows} />
+          <Breakdown
+            title="By agent"
+            hint="A ticket on a WhatsApp number with an owner counts against that owner, whoever worked it; any other ticket against whoever held it. CSAT is the exception: it stays with the agent each survey was about."
+            rows={agentRows}
+          />
           <Breakdown title="By group" rows={groupRows} />
           <Breakdown
             title="By channel"
@@ -246,10 +250,13 @@ function percentage(value: number | null): string {
 
 function Breakdown({
   title,
+  hint,
   rows,
   marks,
 }: {
   title: string;
+  /** Says whose a row's tickets are, where that is not obvious from the title. */
+  hint?: string;
   rows: ReportRow[];
   /** Optional per-row element shown instead of the plain label. */
   marks?: Record<string, React.ReactNode>;
@@ -258,7 +265,12 @@ function Breakdown({
 
   return (
     <section className="mb-8">
-      <h2 className="mb-2 text-sm font-semibold text-(--color-text-secondary)">{title}</h2>
+      <h2
+        className={`${hint ? 'mb-1' : 'mb-2'} text-sm font-semibold text-(--color-text-secondary)`}
+      >
+        {title}
+      </h2>
+      {hint ? <p className="mb-2 text-xs text-(--color-text-tertiary)">{hint}</p> : null}
       <Table head={['', 'Created', 'Resolved', 'First response', 'Within SLA', 'CSAT']}>
         {/* Keyed by position, as the page always was: a label is a display name,
             and two agents can share one. */}

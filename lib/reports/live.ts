@@ -12,6 +12,7 @@ import {
   ticketStatuses,
   webhookEvents,
 } from '@/db/schema';
+import { breachedByAccountable } from '@/lib/tickets/accountable';
 import { openBacklog } from '@/lib/tickets/backlog';
 import { readOnlyChannels } from '@/lib/tickets/channel-policy';
 import { notReaction } from '@/lib/tickets/not-reaction';
@@ -182,8 +183,13 @@ export type AgentLoad = {
   lastInputAt: Date | null;
   /** Their effective cap, already resolved through the group default. Null is uncapped. */
   maxOpen: number | null;
+  /** Tickets they hold — the count the capacity check measures. */
   open: number;
   awaitingReply: number;
+  /**
+   * Breached tickets that count against them (`accountableOrAssignee()`),
+   * held by them or not — a different population from `open`.
+   */
   breached: number;
   oldestWaitingSince: Date | null;
 };
@@ -201,15 +207,12 @@ export async function agentLoad(): Promise<AgentLoad[]> {
       assigneeAgentId: conversations.assigneeAgentId,
       lastCustomerMessageAt: conversations.lastCustomerMessageAt,
       lastAgentMessageAt: conversations.lastAgentMessageAt,
-      breached:
-        sql<boolean>`(${conversations.firstResponseBreached} or ${conversations.resolutionBreached})`.as(
-          'breached',
-        ),
     })
     .from(conversations)
     .innerJoin(ticketStatuses, eq(ticketStatuses.id, conversations.statusId))
     .where(liveTickets())
     .as('live');
+  const breachedBy = breachedByAccountable();
 
   const awaiting = sql`${live.lastCustomerMessageAt} is not null
     and (${live.lastAgentMessageAt} is null
@@ -234,13 +237,20 @@ export async function agentLoad(): Promise<AgentLoad[]> {
       ))`,
       open: sql<number>`count(${live.assigneeAgentId})::int`,
       awaitingReply: sql<number>`count(*) filter (where ${awaiting})::int`,
-      breached: sql<number>`count(*) filter (where ${live.breached})::int`,
+      // Against whom each breach counts, not who holds it: the owner of the
+      // number an owned ticket arrived on, whoever is working it — the same
+      // person tomorrow's report files it under. So it can exceed Open, and
+      // for an owner whose tickets a colleague is covering it is the only
+      // column that is not zero.
+      breached: sql<number>`coalesce(${breachedBy.count}, 0)`,
       oldestWaitingSince: sql<unknown>`min(${live.lastCustomerMessageAt}) filter (where ${awaiting})`,
     })
     .from(agents)
     .leftJoin(live, eq(live.assigneeAgentId, agents.id))
+    // One row per agent at most, so it multiplies nothing the counts above see.
+    .leftJoin(breachedBy, eq(breachedBy.agentId, agents.id))
     .where(eq(agents.isActive, true))
-    .groupBy(agents.id)
+    .groupBy(agents.id, breachedBy.count)
     .orderBy(desc(sql`count(${live.assigneeAgentId})`), asc(agents.name));
 
   return rows.map(({ isAcceptingTickets, ...row }) => ({

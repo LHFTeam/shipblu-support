@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, isNull } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { channels, conversationEvents, conversations, messages, ticketStatuses } from '@/db/schema';
 import type {
@@ -20,6 +20,7 @@ import { findContactByIdentity, needsChannelProfile, resolveContact } from './co
 import { UNNAMED_SUBJECT } from './customer-text';
 import { latest } from './latest';
 import { afterInboundMessage, afterMessageStored } from './lifecycle';
+import { findLiveConversation } from './live-conversation';
 import { reopenResolved } from './reopen';
 import { requireDefaultOpenStatusId } from './statuses';
 
@@ -28,9 +29,9 @@ import { requireDefaultOpenStatusId } from './statuses';
  *
  * Two threading rules, because the two kinds of event are not the same thing:
  *
- * - A **direct message** threads on the customer, exactly like WhatsApp. One
- *   live conversation per person per platform, so the console reads as a chat
- *   rather than as a ticket per message.
+ * - A **direct message** threads on the customer, as WhatsApp does on each of
+ *   our numbers. One live conversation per person per platform, so the console
+ *   reads as a chat rather than as a ticket per message.
  *
  * - A **comment** threads on the comment it belongs to. One ticket per
  *   top-level comment and its replies, keyed on the root comment id, so a
@@ -70,7 +71,7 @@ export async function ingestMetaMessage(
   }
 
   const channel = await channelFor(message.platform);
-  const existing = await findLiveConversation(contactId, message.platform);
+  const existing = await findLiveConversation(contactId, { channel: message.platform });
 
   const result = await db.transaction(async (tx) => {
     let conversationId: string;
@@ -193,8 +194,8 @@ export async function ingestMetaComment(comment: NormalisedComment): Promise<Met
   // A comment is a channel of its own (`db/schema/enums.ts`), so a team can
   // route and report public comments apart from direct messages; the person
   // stays on the platform, above, because the commenter is the same user who
-  // writes to the inbox. A comment on a thread filed before Stage 1.2 lands on
-  // that ticket and keeps its channel until `split_comment_channels` moves it.
+  // writes to the inbox. The database refuses a comment ticket on any other
+  // channel (`db/sql/008_comment_channel_check.sql`).
   const commentChannel = commentChannelOf(comment.platform);
 
   // The root of the thread is what the ticket is about. A reply to a comment
@@ -384,7 +385,7 @@ export async function applyMetaInteraction(interaction: NormalisedInteraction): 
   const contactId = await findContactByIdentity(interaction.platform, interaction.from);
   if (!contactId) return false;
 
-  const existing = await findLiveConversation(contactId, interaction.platform);
+  const existing = await findLiveConversation(contactId, { channel: interaction.platform });
   if (!existing) return false;
 
   const type = `meta_${interaction.kind}`;
@@ -542,38 +543,22 @@ type FoundConversation = {
   reopenCount: number;
 };
 
-/** The customer's live thread on this platform, if they have one. */
-async function findLiveConversation(
-  contactId: string,
-  platform: MetaPlatform,
-): Promise<FoundConversation | null> {
-  const rows = await db
-    .select({
-      id: conversations.id,
-      number: conversations.number,
-      statusCategory: ticketStatuses.category,
-      reopenCount: conversations.reopenCount,
-    })
-    .from(conversations)
-    .innerJoin(ticketStatuses, eq(ticketStatuses.id, conversations.statusId))
-    .where(
-      and(
-        eq(conversations.requesterContactId, contactId),
-        eq(conversations.channel, platform),
-        isNull(conversations.deletedAt),
-        isNull(conversations.externalId),
-      ),
-    )
-    .orderBy(desc(conversations.lastMessageAt))
-    .limit(1);
-
-  const row = rows[0];
-  // A closed conversation is history: a new message starts a new ticket rather
-  // than reopening something the team considered finished weeks ago.
-  if (!row || row.statusCategory === 'closed') return null;
-  return row;
-}
-
+/**
+ * The ticket a comment thread is filed on, by its `<platform>:comment:<root>`.
+ *
+ * It skips a soft-deleted ticket as every read does, but this is the one lookup
+ * a unique index answers as well: `conversations_external_idx` covers
+ * `(source_system, external_id)` with deleted rows included. Nothing sets
+ * `conversations.deleted_at` yet — a purge deletes the row, which frees its
+ * place in the index — but once `ticket.delete` does, the next comment under a
+ * deleted thread finds nothing here, inserts the same pair, fails 23505, and
+ * takes its Meta batch with it on every retry until the job is dead. So the
+ * change that gives `ticket.delete` an action decides here what that comment
+ * does: reopen the hidden ticket, land on it, or open a new one under a narrower
+ * index. `ticket.merge` has the same question: this does not skip a merged
+ * ticket, so a comment lands on the one merged away unless it follows
+ * `merged_into_id`.
+ */
 async function findByExternalId(externalId: string): Promise<FoundConversation | null> {
   const rows = await db
     .select({

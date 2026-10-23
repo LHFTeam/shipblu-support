@@ -16,9 +16,9 @@ import type { FieldOption } from './condition-builder';
  *
  * A comment channel is its own value, so a condition on `facebook` does not
  * reach a Facebook comment, and a rule that should names `facebook_comment` as
- * well. The engine's `channel` fact is the stored column, so a comment ticket
- * filed before Stage 1.2 of `plans/ticket-category-routing.md` still answers as
- * its platform until `split_comment_channels` has moved it.
+ * well. The engine's `channel` fact is the stored column, which since Stage 1.3
+ * of `plans/ticket-category-routing.md` the database keeps on the comment
+ * channel for every comment ticket.
  */
 const CONDITION_CHANNELS: readonly ConversationChannel[] = [
   'email',

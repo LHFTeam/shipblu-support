@@ -115,7 +115,7 @@ export function WidgetArticle({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+      <div className="relative min-h-0 flex-1 overflow-y-auto px-4 py-3">
         <h2 className="mb-2 text-base font-semibold text-(--color-text-primary)">
           {loaded?.title ?? article.title}
         </h2>

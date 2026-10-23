@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Badge, Button, ErrorText, Field, Input, Select } from '@/components/ui';
+import { Badge, Button, ErrorText, Field, Input, Select, SuccessText } from '@/components/ui';
 import { parseCoexistence } from '@/lib/whatsapp/coexistence';
 import {
   isCommentChannel,
@@ -10,7 +10,8 @@ import {
   type ConversationChannel,
 } from '@/lib/tickets/channel-policy';
 import type { AdminState } from '../settings-shared';
-import { saveChannel } from './actions';
+import { saveChannel, setNumberOwner } from './actions';
+import { ConfirmSubmit } from '@/components/confirm-submit';
 import { SubmitButton } from '@/components/submit-button';
 import { useActionForm } from '@/components/use-action-form';
 import { CHANNEL_TYPES, channelTypeLabel, isChannelType, type ChannelType } from './channel-types';
@@ -196,6 +197,189 @@ export function ChannelEditor({
       </div>
     </form>
   );
+}
+
+/** An agent a number can be handed to. The address tells apart two people of one name. */
+export type OwnerChoice = { id: string; name: string; email: string };
+
+/**
+ * The control that hands a WhatsApp number to a team member, or back to the
+ * team.
+ *
+ * A form of its own, posting to `setNumberOwner`, rather than a field in the
+ * editor beside it: that editor saves a name and a group, and a handover moves
+ * every open ticket on the number, so the two should not share a button.
+ *
+ * Mounted only while open, as `AdoptBusinessAppNumber` is, so Cancel and a
+ * success throw the form's state away with it and reopening starts from the
+ * number as it now is rather than from the last refusal. The success's
+ * sentence — who owns the number now, and what that did to its tickets —
+ * outlives the form, beside the button that reopens it: it is the one place
+ * the admin learns that ninety tickets changed hands.
+ */
+export function OwnerEditor({
+  channelId,
+  owner,
+  agents,
+  movableTickets,
+}: {
+  channelId: string;
+  /** As the row records it; `active` false is an owner who can no longer sign in. */
+  owner: { id: string; label: string; active: boolean } | null;
+  /** Active agents, by name. */
+  agents: OwnerChoice[];
+  /** Open and pending native tickets on the number: what a handover moves now. */
+  movableTickets: number;
+}) {
+  const [open, setOpen] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  if (!open) {
+    return (
+      <>
+        <button
+          type="button"
+          onClick={() => {
+            setNotice(null);
+            setOpen(true);
+          }}
+          className="text-xs text-(--color-text-link) hover:text-(--color-text-link-hover) hover:underline"
+        >
+          {owner ? 'Change owner' : 'Set owner'}
+        </button>
+        {notice ? (
+          <div className="w-full">
+            <SuccessText>{notice}</SuccessText>
+          </div>
+        ) : null}
+      </>
+    );
+  }
+
+  return (
+    <OwnerForm
+      channelId={channelId}
+      owner={owner}
+      agents={agents}
+      movableTickets={movableTickets}
+      onCancel={() => setOpen(false)}
+      onDone={(sentence) => {
+        setNotice(sentence);
+        setOpen(false);
+      }}
+    />
+  );
+}
+
+/**
+ * The handover itself. The select is uncontrolled and the button is
+ * `ConfirmSubmit` — its second click is the moment the admin has read how many
+ * tickets go with the number — so the form submits through `useActionForm`,
+ * whose refusal leaves the choice standing where React's reset would put the
+ * select back on the stored owner (§6.80). Nothing in it takes text, which
+ * `ConfirmSubmit` needs: Enter in a text box would submit past the
+ * confirmation.
+ *
+ * It opens on the number's current owner, so the select starts on what the
+ * number has rather than on "Nobody", and a second click nobody meant leaves
+ * it as it was. An owner the list of active agents leaves out — deactivated,
+ * which is the case the row warns about — is offered under their own name for
+ * that reason. Choosing them again is refused by the lib with the way out;
+ * clearing the number is a deliberate choice of "Nobody" on screen.
+ */
+function OwnerForm({
+  channelId,
+  owner,
+  agents,
+  movableTickets,
+  onCancel,
+  onDone,
+}: {
+  channelId: string;
+  owner: { id: string; label: string; active: boolean } | null;
+  agents: OwnerChoice[];
+  movableTickets: number;
+  onCancel: () => void;
+  onDone: (notice: string | null) => void;
+}) {
+  // `: void` by hand: the handler reads the state this same call returns, and
+  // TypeScript cannot infer a return type through that loop.
+  const { state, form } = useActionForm(setNumberOwner, INITIAL, {
+    onSuccess: (): void => onDone(state.notice ?? null),
+  });
+
+  const listed = owner === null || agents.some((agent) => agent.id === owner.id);
+
+  return (
+    <form {...form} className="mt-2 flex w-full flex-col gap-3">
+      <input type="hidden" name="channelId" value={channelId} />
+
+      <Field
+        label="Owner"
+        className="sm:w-96"
+        explain={
+          <>
+            The team member who answers this number from the phone. New tickets on it are assigned
+            to them, and every ticket on it counts against them for its SLA, whoever it is later
+            reassigned to. Nobody makes it a team number: its default group&rsquo;s rota assigns new
+            tickets, and each ticket counts against whoever holds it.
+          </>
+        }
+        hint={movesHint(movableTickets)}
+      >
+        {/* Named outright: `Field` puts its InfoTip button inside the label,
+            and a label with no `for` names its first labelable descendant —
+            the button — so the select would reach a screen reader unnamed. */}
+        <Select name="ownerAgentId" defaultValue={owner?.id ?? ''} aria-label="Owner">
+          <option value="">Nobody — team number</option>
+          {owner && !listed ? (
+            <option value={owner.id}>
+              {owner.active ? owner.label : `${owner.label} (deactivated)`}
+            </option>
+          ) : null}
+          {agents.map((agent) => (
+            <option key={agent.id} value={agent.id}>
+              {`${agent.name} — ${agent.email}`}
+            </option>
+          ))}
+        </Select>
+      </Field>
+
+      <ErrorText>{state.error}</ErrorText>
+
+      <div className="flex items-center gap-3">
+        <ConfirmSubmit
+          label="Hand over"
+          confirmLabel={
+            movableTickets === 0
+              ? 'Really hand over?'
+              : `Hand over with ${movableTickets} ${movableTickets === 1 ? 'ticket' : 'tickets'}?`
+          }
+          busy="Handing over…"
+        />
+        <Button variant="ghost" size="sm" onClick={onCancel}>
+          Cancel
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+/**
+ * What a handover does to the number's tickets, under the picker: said before
+ * the second click, because afterwards it has happened. The count is
+ * `movesWithNumber`'s, so it is the set the handover then moves. Worded for
+ * both choices, because the select is uncontrolled and the hint cannot follow
+ * it: choosing Nobody moves the tickets' accountability and none of their work.
+ */
+function movesHint(count: number): string {
+  const resolved =
+    'A resolved ticket follows only if it is reopened. Choosing Nobody leaves every ticket with whoever holds it, and each counts against them.';
+  if (count === 0) return `It has no open or pending tickets now. ${resolved}`;
+  if (count === 1) {
+    return `Its 1 open or pending ticket goes with it: from now it counts against the new owner, and is reassigned to them if the current owner or nobody holds it. ${resolved}`;
+  }
+  return `Its ${count} open or pending tickets go with it: from now they count against the new owner, and those the current owner or nobody holds are reassigned to them. ${resolved}`;
 }
 
 function NameField({ className, defaultValue }: { className?: string; defaultValue?: string }) {

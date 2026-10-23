@@ -87,7 +87,7 @@ export default async function AgentProductivityPage({
   const team = totalsOf(summaries);
 
   return (
-    <div className="app-scroll h-full overflow-y-auto p-4 sm:p-6">
+    <div className="app-scroll relative h-full overflow-y-auto p-4 sm:p-6">
       <PageHeader
         title="Agent productivity"
         description={`${from} to ${to}, in ${zone}. Rolled up nightly — today is not included yet.`}
@@ -221,7 +221,7 @@ export default async function AgentProductivityPage({
 
           <Section
             title="Speed and efficacy"
-            hint="Resolved counts resolutions this agent performed, which is what the reopen rate beside it is a share of — not tickets resolved while assigned to them, which is what /reports shows. Handling time is measured while the ticket is open, focused and in use, so it excludes work done in other systems."
+            hint="Resolved counts resolutions this agent performed, which is what the reopen rate beside it is a share of — not the tickets /reports files under them, which are those they held or, on a WhatsApp number they own, answered for. Handling time is measured while the ticket is open, focused and in use, so it excludes work done in other systems."
           >
             <Table
               head={[

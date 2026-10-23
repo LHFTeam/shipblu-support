@@ -39,8 +39,41 @@ export function describeEvent(type: string, data: Record<string, unknown>): stri
       return typeof data.probability === 'number'
         ? `set priority to ${String(data.to ?? '')} (${Math.round(data.probability * 100)}% likely)`
         : `set priority to ${String(data.to ?? '')}`;
+    /*
+     * The two ways a ticket becomes a WhatsApp number's owner's say so, because
+     * otherwise "why is this hers?" has no answer on the page: nobody clicked
+     * anything, and the actor printed ahead of the sentence is a mechanism.
+     */
     case 'assigned':
+      if (data.reason === 'number_owner') {
+        return 'gave the ticket to the owner of the WhatsApp number it arrived on';
+      }
+      if (data.reason === 'number_handover') {
+        return 'gave the ticket to the new owner of its WhatsApp number';
+      }
       return 'reassigned the ticket';
+    /*
+     * Who answers for the ticket's SLA, which is not who holds it: a number's
+     * owner stays accountable through every reassignment, so this changes only
+     * when the number itself changes hands. Said in full, because the sidebar
+     * shows the result and not the reason.
+     */
+    case 'accountable_changed':
+      // Worded by what is true at the time, not by why it came about: a
+      // handover while the ticket sat resolved is the usual cause, but an
+      // owner deactivated and reactivated in between arrives here too.
+      if (data.reason === 'reopened_after_handover' || data.reason === 'reopened_by_status') {
+        const when =
+          data.reason === 'reopened_by_status'
+            ? 'when it was reopened'
+            : 'when the customer wrote again';
+        return data.to
+          ? `made the owner of its WhatsApp number accountable for the ticket ${when}: it did not name the number's current owner`
+          : `cleared who is accountable for the ticket ${when}: its WhatsApp number has no active owner now, so breaches count against whoever holds it`;
+      }
+      return data.to
+        ? 'made the new owner of its WhatsApp number accountable for the ticket: breaches on it count against them'
+        : 'cleared who is accountable for the ticket: its WhatsApp number has no owner now, so breaches count against whoever holds it';
     case 'unassigned':
       return 'unassigned the ticket';
     case 'group_changed':

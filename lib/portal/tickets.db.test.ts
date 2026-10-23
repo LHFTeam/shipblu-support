@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { db } from '@/db/client';
 import {
   agents,
+  channels,
   contacts,
   conversationEvents,
   conversations,
@@ -81,6 +82,15 @@ async function setStatus(conversationId: string, name: string, extra = {}) {
 }
 
 /** Resolves a ticket the way an agent does: status, time and who. */
+async function agentRow(name: string): Promise<string> {
+  const [row] = await db
+    .insert(agents)
+    .values({ name, email: `${name.toLowerCase().replace(/\s+/g, '.')}@shipblu.test` })
+    .returning({ id: agents.id });
+  if (!row) throw new Error('no agent');
+  return row.id;
+}
+
 async function resolveAsAgent(conversationId: string): Promise<string> {
   const [agent] = await db
     .insert(agents)
@@ -262,6 +272,45 @@ describe('appendReply', () => {
     expect(reopened).toEqual([
       { actorLabel: 'portal', data: { reason: 'customer_replied', resolvedBy: resolver } },
     ]);
+  });
+
+  // The portal reopens a WhatsApp ticket too, for a customer it knows by email.
+  // Left out of the realignment, a ticket resolved across a handover and
+  // reopened here stayed with the previous owner for good.
+  it("brings a resolved WhatsApp ticket over to its number's owner when the customer replies", async () => {
+    const contactId = await customer();
+    const nayera = await agentRow('Nayera Mohamed');
+    const ali = await agentRow('Ali Nasser');
+    const [phone] = await db
+      .insert(channels)
+      .values({ type: 'whatsapp', name: 'Nayera Mohamed', ownerAgentId: ali, config: {} })
+      .returning({ id: channels.id });
+    const [resolved] = await db
+      .select({ id: ticketStatuses.id })
+      .from(ticketStatuses)
+      .where(eq(ticketStatuses.name, 'Resolved'));
+    const [ticket] = await db
+      .insert(conversations)
+      .values({
+        channel: 'whatsapp',
+        channelId: phone!.id,
+        statusId: resolved!.id,
+        requesterContactId: contactId,
+        accountableAgentId: nayera,
+        assigneeAgentId: nayera,
+      })
+      .returning({ id: conversations.id, number: conversations.number });
+
+    expect(await appendReply(contactId, ticket!.number, 'Still not here.')).toEqual({ ok: true });
+
+    const [after] = await db
+      .select({
+        accountable: conversations.accountableAgentId,
+        assignee: conversations.assigneeAgentId,
+      })
+      .from(conversations)
+      .where(eq(conversations.id, ticket!.id));
+    expect(after).toEqual({ accountable: ali, assignee: ali });
   });
 
   it('answers on a ticket that arrived on another channel, as inbound', async () => {

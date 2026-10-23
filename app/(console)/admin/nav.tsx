@@ -83,7 +83,7 @@ export function AdminNav() {
     <>
       <nav
         aria-label="Admin sections"
-        className="app-scroll hidden w-(--views-width) shrink-0 flex-col gap-4.5 overflow-y-auto border-e border-(--color-border-subtle) bg-(--color-background-surface) px-2.5 py-4 lg:flex"
+        className="app-scroll relative hidden w-(--views-width) shrink-0 flex-col gap-4.5 overflow-y-auto border-e border-(--color-border-subtle) bg-(--color-background-surface) px-2.5 py-4 lg:flex"
       >
         <Link
           href="/admin"

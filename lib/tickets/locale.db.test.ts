@@ -2,7 +2,7 @@ import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { db } from '@/db/client';
 import { contacts, conversations, messages, ticketStatuses } from '@/db/schema';
-import { withCleanDatabase } from '@/lib/testing/db';
+import { withCleanDatabase, withoutCommentChannelCheck } from '@/lib/testing/db';
 import { requesterLocale } from './locale';
 
 /**
@@ -22,9 +22,26 @@ async function ticket(
     .where(eq(ticketStatuses.name, 'Open'));
   const [row] = await db
     .insert(conversations)
-    .values({ channel, statusId: open!.id, requesterContactId: contact!.id })
+    .values({
+      channel,
+      // A comment ticket carries the thread's root, as ingest files it and as
+      // the comment-channel CHECK requires.
+      externalId: channel === 'facebook_comment' ? 'facebook:comment:post-1_c1' : null,
+      statusId: open!.id,
+      requesterContactId: contact!.id,
+    })
     .returning({ id: conversations.id });
   return row!.id;
+}
+
+/** The ticket's requester, and a second contact who writes on it too. */
+async function twoAuthors(id: string) {
+  const [requester] = await db
+    .select({ id: conversations.requesterContactId })
+    .from(conversations)
+    .where(eq(conversations.id, id));
+  const [other] = await db.insert(contacts).values({ name: 'Bob' }).returning();
+  return { requester: requester!.id, other: other!.id };
 }
 
 describe('requesterLocale', () => {
@@ -192,16 +209,6 @@ describe('requesterLocale', () => {
     expect(await requesterLocale(id)).toBe('ar');
   });
 
-  /** The ticket's requester, and a second contact who writes on it too. */
-  async function twoAuthors(id: string) {
-    const [requester] = await db
-      .select({ id: conversations.requesterContactId })
-      .from(conversations)
-      .where(eq(conversations.id, id));
-    const [other] = await db.insert(contacts).values({ name: 'Bob' }).returning();
-    return { requester: requester!.id, other: other!.id };
-  }
-
   // On a comment thread a passer-by's reply is filed on the requester's
   // ticket. The acknowledgement is addressed to the requester, so the
   // passer-by's English does not choose its language when the requester's own
@@ -281,6 +288,36 @@ describe('requesterLocale', () => {
       direction: 'inbound',
       bodyText: 'الشحنة وصلت مكسورة',
     });
+
+    expect(await requesterLocale(id)).toBe('ar');
+  });
+});
+
+// The plan's rollback of Stage 1.2 moves the ticket back to `facebook`, where
+// only its external id says the newest words may be a passer-by's.
+describe('requesterLocale, once rolling back 1.2 has moved comments back', () => {
+  const { moveCommentsBack } = withoutCommentChannelCheck();
+
+  it('still reads the requester’s words on the comment thread', async () => {
+    const id = await ticket('facebook_comment');
+    const { requester, other } = await twoAuthors(id);
+    await db.insert(messages).values([
+      {
+        conversationId: id,
+        direction: 'inbound',
+        authorContactId: requester,
+        bodyText: 'فين شحنتي؟',
+        createdAt: new Date('2026-10-01T10:00:00Z'),
+      },
+      {
+        conversationId: id,
+        direction: 'inbound',
+        authorContactId: other,
+        bodyText: 'Same here, my parcel never came either',
+        createdAt: new Date('2026-10-01T10:10:00Z'),
+      },
+    ]);
+    expect(await moveCommentsBack()).toBe(1);
 
     expect(await requesterLocale(id)).toBe('ar');
   });

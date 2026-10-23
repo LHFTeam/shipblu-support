@@ -205,12 +205,19 @@ function that reads it.
 **A page under `(console)` outside `admin/` brings its own scroll container.**
 The shell is `h-dvh overflow-hidden` so the inbox can own the full height and
 manage its own panes, which means a page that does not open an
-`app-scroll h-full overflow-y-auto p-6` wrapper is not merely unpadded — every
-row below the fold is rendered where nobody can scroll to it, and the page reads
-as half-finished rather than as broken (§6.53). `admin/layout.tsx` supplies one
-for everything beneath it; nothing else does. CI checks it (`console-scroll`):
-every other console page either says `overflow-y-auto` or renders
-`<InboxShell>`, which owns its panes.
+`app-scroll relative h-full overflow-y-auto p-6` wrapper is not merely unpadded —
+every row below the fold is rendered where nobody can scroll to it, and the page
+reads as half-finished rather than as broken (§6.53). `admin/layout.tsx`
+supplies one for everything beneath it; nothing else does. CI checks it
+(`console-scroll`): every other console page either says `overflow-y-auto` or
+renders `<InboxShell>`, which owns its panes. **A scroll container is also
+`relative`.** `sr-only` is `position: absolute`, so inside an unpositioned pane
+it is placed against the document, past every `overflow-hidden`, and stretches
+the page under the shell. Scrolling past the end of the pane then moves the
+whole console (§6.81, twice). CI refuses a class list that scrolls vertically
+unless a position applies wherever it scrolls — unprefixed or under the scroll's
+own variant, on every branch of the expression, with no `static` to take it
+back (`scroll-positioned`).
 
 ## Do not edit
 
@@ -322,7 +329,12 @@ so nothing may open a pool or read env at module scope. Schema changes go in
 and must not use `CREATE INDEX CONCURRENTLY`; the whole file runs in one
 implicit transaction. New tables get RLS enabled by a loop in `db/sql/` — do not
 add it by hand. All three are checked, the first two by replaying the files and
-the last by asking the database which tables ended up covered.
+the last by asking the database which tables ended up covered. A lock that must
+outlive one statement belongs to a transaction: an advisory lock is
+`pg_advisory_xact_lock` taken inside `db.transaction` (`lockThread` in
+`lib/tickets/live-conversation.ts`), never `pg_advisory_lock`, because the
+pooler hands the backend to another client when each transaction ends, and a
+session lock would stay behind on it, held for somebody else.
 
 **postgres.js must never pipeline through the transaction pooler.** Once every
 connection is busy, postgres.js writes the next query onto a connection still
@@ -576,8 +588,9 @@ Two things it must be given rather than guess. **A Meta comment ticket has no
 messaging window**: it is answered on the comment edge, which `send_meta` reaches
 before it consults the clock, so the guard takes the ticket's channel and
 `external_id` and never blocks one — a `facebook_comment` or `instagram_comment`
-ticket by its channel, and one still filed on its platform's channel by its
-`external_id`. And **the clock is the real one** — the ingest lifecycle hands
+ticket by its channel, and one back on its platform's channel, as rolling back
+Stage 1.2 leaves every one (below), by its `external_id`. And **the clock is the
+real one** — the ingest lifecycle hands
 a message's own `sentAt` down as its timestamp, and that is exactly
 `lastCustomerMessageAt`, so passing it as `now` compares a value with itself and
 reports every window open. That is precisely the replayed backlog the guard is
@@ -604,12 +617,26 @@ never thank a commenter on the public thread. A TypeSafe request sends the
 platform rather than the channel, so the vocabulary the model was asked in does
 not move under it.
 
-Until the CHECK constraint in `plans/ticket-category-routing.md` §1.3 lands, a
-comment ticket can still sit on its platform's channel — every one ingested
-before 1.2 does, and `split_comment_channels` moves them — so **detecting a
-comment is the channel test _or_ the external id**
-— `isCommentTicket(channel, externalId)` in `lib/tickets/channel-policy.ts`, the
-one copy every reader calls — never either alone.
+**The database holds the pair.** Since Stage 1.3 of
+`plans/ticket-category-routing.md`, `conversations_comment_channel_matches_external_id`
+(`db/sql/008_comment_channel_check.sql`) refuses a ticket whose channel and
+external id disagree: a comment id off a comment channel, a comment channel
+without one, or one holding the other platform's comment. So a comment ticket
+is on its comment channel, and a test fixture builds it there too — a
+`*.db.test.ts` that inserts a comment id on `facebook` now fails at the insert.
+**Detecting a comment is still the channel test _or_ the external id** —
+`isCommentTicket(channel, externalId)` in `lib/tickets/channel-policy.ts`, the
+one copy every reader calls — on purpose: the plan's rollback of Stage 1.2
+undoes the move while 1.1's readers stay deployed. It re-deploys 1.1's ingest,
+which files new comments on `facebook`/`instagram`, then moves the old ones
+back, and from then on the external id is the only half that answers. Without
+it the out-of-hours picker and the survey's thanks would post in public, and the
+survey and the console reply would message privately. Meta's direct messages ask
+the same of `liveConversationFilter`, so a chat never continues a public thread.
+So a test of that shape does not build its ticket on `facebook`: it builds one
+the way 1.2 files it and moves it back with `withoutCommentChannelCheck()` from
+`lib/testing/db.ts`, which drops the CHECK for one `describe` with the plan's
+own SQL and restores it after.
 The difference is public wherever the software replies on its own, because a
 reply on a comment ticket is posted under the customer's comment where anybody
 reading the post sees it. The out-of-hours picker handles it: a rule with no
@@ -621,10 +648,11 @@ on the customer's ticket; and it names that comment as the reply's target, so
 a reply written before the job runs does not become it. It judges the message
 the lifecycle hands it by id, never the newest inbound row, which after a
 batch retry is a passer-by's reply stored before the requester's older comment. `pickRule` takes the stored channel and
-external id and reads a comment still filed on its platform as the comment
-channel it is moving to, so a rule naming the platform answers that platform's
-direct messages and nothing posted in public; every caller must supply the
-external id, so none can skip the mapping by forgetting it. Its reply leaves
+external id and reads a comment filed on its platform's channel as its comment
+channel — which the CHECK makes impossible today, and which keeps a rule naming
+the platform to that platform's direct messages once rolling back 1.2 has put
+comments back there; every caller must supply the external id, so none can skip
+the mapping by forgetting it. Its reply leaves
 `{{customer_name}}` blank, because the contact's name can have come from a
 private channel and the reply is published under the post. **The automation
 engine never answers a comment**: `sendCannedReply` refuses a `send_reply` on
@@ -743,8 +771,9 @@ depends on it.
 **A WhatsApp reaction is stored as a message and is not one.** It arrives as
 `type: 'reaction'`, from the customer or echoed from our own number, and
 `parseWebhook` files it apart from both. `ingestWhatsAppReaction` puts the row on
-the person's newest conversation, closed or not — nowhere, when that is a copied
-history — and changes nothing else — no
+the person's newest conversation with that number, closed or not — nowhere, when
+that is a copied history, and never on a ticket with another of our numbers —
+and changes nothing else — no
 clock, `last_message_at` included, no reopen, no ticket of its own, nothing
 downstream of a message — for the reasons `applyMetaInteraction` gives for a
 Facebook or Instagram reaction, though unlike that path it keeps a row. The
@@ -813,9 +842,9 @@ same echo is our own send coming back and stays ignored. It answers only what
 came before it: `onAgentReply` stops the next-response clock only when the
 reply is at least as new as `last_customer_message_at`, and
 `first_responded_at` takes the earliest reply, so the SLA does not depend on
-the order deliveries are processed in. With no live conversation, the business
-writing first files a _resolved_ conversation (`resolved_at` null, no survey)
-that the customer's reply reopens. The copy of contacts
+the order deliveries are processed in. With no live conversation on that number,
+the business writing first files a _resolved_ conversation (`resolved_at` null,
+no survey) that the customer's reply reopens. The copy of contacts
 and history is once per onboarding, inside 24 hours of the exchange, with the
 Business app open on the phone (`canRequestSync`; Meta's 2593107 and 2593108
 both mean "reconnect"). And `saveChannel` carries `coexistence` and the stored
@@ -854,6 +883,97 @@ reply names it from one chat, a customer's reaction to that reply from another
 delivery comes back — a redelivery's dedupe, a status update — because Meta
 repeats its own wamid there, and the unique index on `channel_message_id` is
 what serves it.
+
+**A WhatsApp conversation is the customer and the number they wrote to.**
+`ThreadKey` (`lib/tickets/live-conversation.ts`) keys a `whatsapp` conversation
+on the contact and the `channels` row of our number, so a merchant writing to
+one team member's number and then to another's has two tickets, each answered
+from its own phone and measured against its own person. Keyed on the person
+alone, the second number's message continued the first number's ticket, an echo
+typed on one phone stopped the clocks of a ticket with the other, and a reaction
+was filed across them (§6.99). A null `channel_id`, a number no row names,
+matches only another null and never "any number": a wildcard would let a ticket
+with no row take that customer's messages to every number. The message, the
+echo and the reaction build the key through one `threadKey()` in
+`ingest-whatsapp.ts`; the bot and the widget stay keyed on the person and emit
+the statement they always did. The message and echo paths take `lockThread`,
+then look for the live conversation inside their transaction: looked for before
+it, a customer's message and the phone's reply processed at once each opened a
+ticket, and the half the reply missed kept a clock nothing could stop (§6.100).
+A number no row names is filed under **no row**, and only borrows a row's
+default group for routing — the plain support row's, else the first WhatsApp
+row's. Every reader of whose number a ticket is on — owner, visibility, a
+handover, a reopen, the ticket page — keys on `channel_id`, so a row's id
+handed out there makes the ticket that number's on some paths and not others: a
+coexistence row's files a stranger onto somebody's phone, and the support row's
+charged its owner for a number they never held. Each such message logs
+`[whatsapp_ingest] no channel row for this number, filed under no row phone_number_id=…`, which usually means a number connected at Meta and never
+added under `/admin/channels`. Once the row is added, the customer's next
+message continues the ticket open under no row and files it under the row
+(`findOrAdoptLive`) instead of opening a second beside it, and
+`db/sql/009_whatsapp_channel_backfill.sql` places any left on the next deploy —
+under active rows only, the only ones the resolver threads on.
+
+**A WhatsApp number can belong to a person, and then two columns say different
+things.** `channels.owner_agent_id` is who owns the number now.
+`conversations.accountable_agent_id` is whom a ticket's SLA counts against,
+frozen onto the ticket: ownership changes, and `rollup_metrics` rebuilds the
+last three days from current state, so reading the owner at report time would
+re-file the days before a handover onto somebody who did not hold the phone
+then. Both are written only in `lib/whatsapp/number-owner.ts`, and a ticket's
+accountability is written at three moments: ingest creating it on an owned number
+(`ownerStamp`, in the insert, assignee included), `handOverNumber` (the number's
+open and pending native tickets), and its coming back out of resolved or
+closed after the number changed hands (`alignAccountable`). That last is
+`reopenWithOwner`, which every status writer goes through — `changeStatus`, the
+`set_status` action and `reopenResolved`, which every customer's reopen uses —
+so a new writer cannot forget it: reopened by hand and then continued by the
+customer as an open ticket, which never realigns, a ticket stayed with the
+previous owner for good. Six rules hold:
+
+- **Reassignment moves the work, never the breach.** Assignment, reclaim, a
+  supervisor's reassignment, an automation and a merge never write
+  accountability. A handover or a reopen moves the assignee too, but only off
+  the number's previous owner or nobody: a ticket somebody was deliberately
+  given stays with them.
+- **The owner is outside the rota.** `assignConversation` hands an unassigned
+  owned ticket straight back to its active owner — group, hours, presence,
+  capacity and skills unasked, the cursor unmoved, though a group a caller
+  named is still applied first — so "Unassign" on one returns it in the same
+  request. The sweep never reclaims an active owner's own ticket. They answer
+  from the phone with the console closed, and every one of those gates
+  measures the console.
+- **A deactivated owner stays on the number and counts as nobody**
+  (`effectiveOwnerId`): new tickets and reopens treat it as a team number — the
+  group's rota assigns, and a breach counts against whoever holds the ticket —
+  the tickets the owner had stay theirs until a handover, and reactivating them
+  restores the number. `/admin/channels` warns.
+- **Whose breach it is reads `accountableOrAssignee()`**
+  (`lib/tickets/accountable.ts`) everywhere that says so — the rollup's agent
+  slices as `accountableOrAssigneeAt` (as of each figure's own instant, from the
+  `accountable_changed` events, so rebuilding a day after a handover leaves its
+  figures where they were; every figure but CSAT, which stays with the agent
+  each survey was about), the live board's Breached, `agent_backlog_snapshots.breached_count`
+  and `sla_breached.data.accountableAgentId` — so the dashboard and tomorrow's
+  report name one person. What somebody is carrying — open, awaiting a reply,
+  the capacity check — stays on the assignee.
+- **An owner sees what counts against them.** `heldByOrInGroupsOf` ORs in
+  "accountable to me, or on a number I own" on both of its branches, so every
+  reader of visibility inherits it; and the inbox asks `ownsANumber`, so an
+  owner in no group is offered Unassigned and All open rather than Mine alone.
+- **A handover's events carry no `actorAgentId`.** The agent rollup counts every
+  event an agent acted in as a ticket they touched, and an admin handing over
+  ninety tickets has worked none of them. The admin is named in `data.by` and in
+  `channel_owner_changes`, the append-only record of who owned a number when,
+  which outlives the channel, the agents and any purged ticket.
+
+Only a `whatsapp` row may have an owner — a plain number or a coexistence one,
+never the bot (`channels_owner_only_whatsapp` in `db/sql/003`): the bot and the
+shared inboxes are the whole team's. A number
+changes hands through its own action, `setNumberOwner`, behind a two-click
+confirm that states how many tickets go with it, and never through
+`saveChannel`, which three forms post to. See
+`plans/whatsapp-number-ownership.md`.
 
 **Explaining a control.** A label short enough to fit a dense table is rarely
 long enough to explain itself. `InfoTip` from `components/tooltip.tsx` is the

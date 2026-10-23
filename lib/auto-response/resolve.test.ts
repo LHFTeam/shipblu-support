@@ -135,11 +135,12 @@ describe('pickRule', () => {
     );
   });
 
-  // Every comment ticket carries its platform's channel until Stage 1.2 moves
-  // it. Matched raw, a "Facebook messages" rule would be posted under the
-  // comment and a "Facebook comments" rule would never fire; matched as the
-  // comment it is, both answer as they will after the move.
-  it('matches a comment still filed on its platform as the comment it is', () => {
+  // A comment ticket on its platform's channel, as every one was before Stage
+  // 1.2 and every one is again once the plan's rollback of 1.2 has run. Matched
+  // raw, a "Facebook messages" rule would be posted under the comment and a
+  // "Facebook comments" rule would never fire; matched as the comment it is,
+  // both answer as they do for a comment on its own channel.
+  it('matches a comment filed on its platform as the comment it is', () => {
     const rules = [
       rule({ id: 'company' }),
       rule({ id: 'messages', channel: 'facebook' }),
@@ -155,7 +156,7 @@ describe('pickRule', () => {
     const onlyPlatform = [rule({ id: 'company' }), rule({ id: 'messages', channel: 'facebook' })];
     expect(pickRule(onlyPlatform, legacy)).toBeNull();
 
-    // And once the backfill has moved it, keeping its external id.
+    // And on its own channel, the only shape the CHECK lets a comment have.
     const moved = { ...legacy, channel: 'facebook_comment' } as const;
     expect(pickRule(rules, moved)?.id).toBe('comments');
     expect(pickRule(onlyPlatform, moved)).toBeNull();

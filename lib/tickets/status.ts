@@ -3,6 +3,7 @@ import { db } from '@/db/client';
 import { conversationEvents, conversations, type ticketStatuses } from '@/db/schema';
 import { onStatusChanged } from '@/lib/sla';
 import { afterTicketResolved } from '@/lib/tickets/lifecycle';
+import { reopenWithOwner } from '@/lib/whatsapp/number-owner';
 import { resolveStamp } from './resolve-stamp';
 
 /** The status a ticket is moving to, as read from `ticket_statuses`. */
@@ -30,24 +31,30 @@ export async function changeStatus(
   via?: 'reply_and_resolve',
 ): Promise<void> {
   await db.transaction(async (tx) => {
-    await tx
-      .update(conversations)
-      .set({
-        statusId: status.id,
-        ...resolveStamp(status.category),
-        // Stamped on the way in and left alone otherwise. Moving a ticket
-        // back to Open must not erase who resolved it — that record is what
-        // the reopening about to follow gets attributed to.
-        ...(status.category === 'resolved' ? { resolvedByAgentId: agentId } : {}),
-        closedAt: status.category === 'closed' ? new Date() : null,
-      })
-      .where(eq(conversations.id, conversationId));
+    // Through `reopenWithOwner`, as every status writer is, so moving a
+    // WhatsApp ticket back out of resolved or closed takes its number's current
+    // owner.
+    await reopenWithOwner(tx, conversationId, status.category, 'reopened_by_status', async () => {
+      await tx
+        .update(conversations)
+        .set({
+          statusId: status.id,
+          ...resolveStamp(status.category),
+          // Stamped on the way in and left alone otherwise. Moving a ticket
+          // back to Open must not erase who resolved it — that record is what
+          // the reopening about to follow gets attributed to.
+          ...(status.category === 'resolved' ? { resolvedByAgentId: agentId } : {}),
+          closedAt: status.category === 'closed' ? new Date() : null,
+        })
+        .where(eq(conversations.id, conversationId));
 
-    await tx.insert(conversationEvents).values({
-      conversationId,
-      type: 'status_changed',
-      actorAgentId: agentId,
-      data: { to: status.name, category: status.category, ...(via ? { via } : {}) },
+      await tx.insert(conversationEvents).values({
+        conversationId,
+        type: 'status_changed',
+        actorAgentId: agentId,
+        data: { to: status.name, category: status.category, ...(via ? { via } : {}) },
+      });
+      return true;
     });
   });
 

@@ -31,6 +31,7 @@ import { checkSlugConfinement } from './rules/slugify.mjs';
 import { checkNoDomTitleAttribute } from './rules/dom-title.mjs';
 import { checkLikePatternsUseTheBuilder } from './rules/like-patterns.mjs';
 import { checkConsolePagesScroll } from './rules/console-scroll.mjs';
+import { checkScrollContainersArePositioned } from './rules/scroll-positioned.mjs';
 import { checkLightOnly } from './rules/light-only.mjs';
 import { checkFramingHeaders } from './rules/framing.mjs';
 import { checkNextAgentRulesOff } from './rules/next-agent-rules.mjs';
@@ -78,6 +79,7 @@ export const RULES = [
   ['dom-title', checkNoDomTitleAttribute],
   ['like-patterns', checkLikePatternsUseTheBuilder],
   ['console-scroll', checkConsolePagesScroll],
+  ['scroll-positioned', checkScrollContainersArePositioned],
   ['form-reset', checkFormsDoNotReset],
   ['action-revalidates', checkActionsRevalidate],
   ['button-type', checkButtonTypeIsFixed],

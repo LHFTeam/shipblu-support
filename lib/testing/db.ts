@@ -1,5 +1,6 @@
+import { readFile } from 'node:fs/promises';
 import { sql } from 'drizzle-orm';
-import { afterAll, beforeEach } from 'vitest';
+import { afterAll, beforeAll, beforeEach } from 'vitest';
 import { seedBaseline } from '@/db/baseline';
 import { closeDb, db } from '@/db/client';
 import { forgetSuggestionSettings } from '@/lib/canned-suggest/settings';
@@ -25,14 +26,128 @@ import { forgetPresencePolicy } from '@/lib/presence/policy';
  */
 export function withCleanDatabase(): void {
   beforeEach(async () => {
-    refuseUnlessDisposable(process.env.DATABASE_URL, process.env.TEST_DATABASE_URL);
     await truncateEverything();
     await seedBaseline(() => {});
     forgetDatabaseCaches();
+    // Outside `withoutCommentChannelCheck()`'s block every test starts with the
+    // CHECK in place, whatever a run killed inside one left behind. A guarded
+    // no-op once the constraint exists: one catalog lookup.
+    if (!commentCheckDropped) await db.execute(sql.raw(await commentChannelCheck()));
   });
 
   afterAll(() => closeDb());
 }
+
+/**
+ * Inside one `describe`: the database as rolling back Stage 1.2 of
+ * `plans/ticket-category-routing.md` leaves it, so its tests can hold a comment
+ * ticket on its platform's channel. That is the shape `isCommentTicket`'s
+ * external-id half and Meta's live-conversation condition exist for, and the
+ * CHECK in `db/sql/008_comment_channel_check.sql` refuses it at the insert
+ * everywhere else, so without this nothing at the database tier could build one
+ * and every reader's half of the test could be deleted with the suite green.
+ *
+ * It uses the plan's own SQL: the CHECK is dropped by the guarded block the
+ * rollback ships, and `moveCommentsBack()` is the channel half of the
+ * rollback's step 3, which puts every comment ticket and both its frozen copies
+ * back on their platform (the other half points `channel_id` at a platform row,
+ * and no test here has a comments row for it to name). A test builds its
+ * ticket the way 1.2 files one, moves it back, and then asks the reader — so a
+ * rollback that stopped working would fail here too. Most readers held this way
+ * are 1.1's, which the rollback leaves deployed. Three came with 1.2 itself —
+ * the automation engine's refusal, the out-of-hours sender's requester check
+ * and `requesterLocale`'s comment narrowing — so the rollback's step 2 reverts
+ * them, and their cases with them; until then they hold the state in which the
+ * CHECK is gone and the comments moved back with 1.2 still deployed. The Meta
+ * ingest cases build their thread through 1.2's ingest itself, so under step 2
+ * the thread is already on its platform and has nothing to move; the plan's
+ * step 2 says what changes in them.
+ *
+ * After the block it empties the tables and replays `008`, emptying first
+ * because the CHECK is added VALID and the block's last test leaves a row it
+ * refuses. Nothing else in the file sees the CHECK missing: the files run one
+ * at a time (`vitest.db.config.mts`), and `withCleanDatabase()` replays `008`
+ * before every test outside the block, so a run killed inside one leaves no
+ * later fixture unchecked.
+ *
+ * The restore runs only after a drop that happened. Vitest runs a block's
+ * `afterAll` even when its `beforeAll` threw, so after the refusal below it
+ * would otherwise truncate the very database that was refused.
+ *
+ * Call it inside a `describe`, in a file that called `withCleanDatabase()`.
+ */
+export function withoutCommentChannelCheck(): { moveCommentsBack: () => Promise<number> } {
+  beforeAll(async () => {
+    refuseUnlessDisposable(process.env.DATABASE_URL, process.env.TEST_DATABASE_URL);
+    await db.execute(sql.raw(DROP_COMMENT_CHANNEL_CHECK));
+    commentCheckDropped = true;
+  });
+
+  afterAll(async () => {
+    if (!commentCheckDropped) return;
+    await truncateEverything();
+    await db.execute(sql.raw(await commentChannelCheck()));
+    commentCheckDropped = false;
+  });
+
+  return {
+    // How many tickets it moved, so a test can say the rollback happened rather
+    // than pass on a ticket that was never on a comment channel.
+    moveCommentsBack: async () => {
+      let tickets = 0;
+      for (const table of ['conversations', 'csat_surveys', 'canned_suggestions']) {
+        const moved = await db.execute(
+          sql.raw(
+            `UPDATE ${table} SET channel = replace(channel::text, '_comment', '')::channel ` +
+              `WHERE channel IN ('facebook_comment', 'instagram_comment') RETURNING 1`,
+          ),
+        );
+        if (table === 'conversations') tickets = moved.length;
+      }
+      return tickets;
+    },
+  };
+}
+
+/** Whether a `withoutCommentChannelCheck()` block has the CHECK dropped right now. */
+let commentCheckDropped = false;
+
+let commentChannelCheckSql: Promise<string> | null = null;
+
+/**
+ * `db/sql/008_comment_channel_check.sql`, read once: guarded, so replaying it is
+ * idempotent. Found from this module rather than the working directory, since
+ * every test reads it and vitest runs from wherever the shell is; and a failed
+ * read is not kept, so one bad read does not fail every later test with it.
+ */
+function commentChannelCheck(): Promise<string> {
+  commentChannelCheckSql ??= readFile(
+    new URL('../../db/sql/008_comment_channel_check.sql', import.meta.url),
+    'utf8',
+  ).catch((error: unknown) => {
+    commentChannelCheckSql = null;
+    throw error;
+  });
+  return commentChannelCheckSql;
+}
+
+/**
+ * The rollback of Stage 1.3, as the plan gives it: guarded, so it takes no lock
+ * once done, and bounded at 3 s as the ADD is.
+ */
+const DROP_COMMENT_CHANNEL_CHECK = `
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'conversations_comment_channel_matches_external_id'
+      AND conrelid = 'conversations'::regclass
+  ) THEN
+    PERFORM set_config('lock_timeout', '3s', true);
+    ALTER TABLE conversations
+      DROP CONSTRAINT conversations_comment_channel_matches_external_id;
+  END IF;
+END $$`;
 
 /**
  * The caches this process holds of rows that were just truncated.
@@ -62,8 +177,13 @@ function forgetDatabaseCaches(): void {
  * database. No `cascade`: every table in the schema is already named, so the
  * only thing it could reach is a table outside it, and emptying one of those
  * should fail loudly rather than happen.
+ *
+ * It refuses a database that is not disposable itself, rather than trusting
+ * each caller to have asked first: a vitest `afterAll` runs even when the
+ * `beforeAll` that refused threw.
  */
 async function truncateEverything(): Promise<void> {
+  refuseUnlessDisposable(process.env.DATABASE_URL, process.env.TEST_DATABASE_URL);
   const tables = await db.execute<{ name: string }>(
     sql`select format('%I.%I', schemaname, tablename) as name from pg_tables where schemaname = 'public'`,
   );

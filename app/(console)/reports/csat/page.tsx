@@ -161,7 +161,7 @@ export default async function CsatReportPage({
   const surveyedDays = series.filter(hasSurveys);
 
   return (
-    <div className="app-scroll h-full overflow-y-auto p-4 sm:p-6">
+    <div className="app-scroll relative h-full overflow-y-auto p-4 sm:p-6">
       <PageHeader
         title="Customer satisfaction"
         description={`${range.from} to ${range.to}, in ${zone}. Rolled up nightly: the figures run to ${noFigures ? 'no day in this window' : through}; the comments, read live, to now.`}
@@ -315,7 +315,7 @@ export default async function CsatReportPage({
               {namesAgents ? (
                 <Breakdown
                   title="By agent"
-                  hint="The agent the ticket was assigned to when its survey went out. A resolution counts against whoever held the ticket when its day was rolled up, so a ticket reassigned in between counts its survey and its resolve against different people."
+                  hint="The agent the ticket was assigned to when its survey went out. A resolution counts against the owner of the ticket's WhatsApp number when it has one, and otherwise against whoever held it when its day was rolled up — so an owned ticket somebody else worked, or any ticket reassigned in between, counts its survey and its resolve against different people, and their Resolutions surveyed reads low for one and blank for the other."
                   rows={agentRows.filter(hasSurveysOrResolutions)}
                 />
               ) : null}

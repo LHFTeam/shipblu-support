@@ -1,4 +1,5 @@
-import { and, eq, isNull, sql } from 'drizzle-orm';
+import { and, eq, exists, isNull, sql } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/pg-core';
 import { db } from '@/db/client';
 import {
   agentSkills,
@@ -17,6 +18,7 @@ import { groupHours } from '@/lib/hours/resolve';
 import { conversationFacts } from '@/lib/rules/facts';
 import { isReadOnlyChannel } from '@/lib/tickets/channel-policy';
 import { openBacklog } from '@/lib/tickets/backlog';
+import { recordOwnerAssigned } from '@/lib/whatsapp/number-owner';
 import { filterCandidates, type CandidateRow } from './eligibility';
 import { pickLoadBalanced, pickRoundRobin } from './strategies';
 import { activeSkills, matchingSkills } from './skills';
@@ -39,6 +41,19 @@ import { activeSkills, matchingSkills } from './skills';
  * **A refusal is recorded.** "Why is this ticket still unassigned?" is the
  * question a queue that assigns itself has to be able to answer, so a skipped
  * assignment writes its reason onto the timeline rather than returning silently.
+ *
+ * One kind of ticket skips the rota altogether: one on a WhatsApp number that
+ * belongs to a person, whose `accountable_agent_id` names them
+ * (`lib/whatsapp/number-owner.ts`). An unassigned one goes straight back to that
+ * person while they are active — which is what makes "Unassign" on it hand it
+ * back to the owner, and the sweep return a ticket reclaimed from somebody else.
+ * The group, its strategy and hours, and the owner's presence, capacity and
+ * skills are not consulted, and the group's round-robin cursor does not move:
+ * every one of those gates measures who is at the console, and the owner
+ * answers from the phone with it closed. A caller that named a group still
+ * moves the ticket there first, because a rule routing it is describing where
+ * the work belongs whoever then holds it. A deactivated owner is nobody here,
+ * and the ticket takes the rota like any other.
  */
 
 export type AssignmentStrategy = (typeof groups.$inferSelect)['assignmentStrategy'];
@@ -90,17 +105,20 @@ export async function assignConversation(
 ): Promise<AssignmentOutcome> {
   const now = options.now ?? new Date();
 
+  const accountable = alias(agents, 'accountable');
   const rows = await db
     .select({
       conversation: conversations,
       statusCategory: ticketStatuses.category,
       requesterEmail: contacts.primaryEmail,
       formSlug: ticketForms.slug,
+      accountableActive: accountable.isActive,
     })
     .from(conversations)
     .innerJoin(ticketStatuses, eq(ticketStatuses.id, conversations.statusId))
     .leftJoin(contacts, eq(contacts.id, conversations.requesterContactId))
     .leftJoin(ticketForms, eq(ticketForms.id, conversations.formId))
+    .leftJoin(accountable, eq(accountable.id, conversations.accountableAgentId))
     .where(eq(conversations.id, conversationId))
     .limit(1);
 
@@ -108,18 +126,58 @@ export async function assignConversation(
   if (!ticket) return { assignedTo: null, reason: 'not_assignable' };
 
   const conversation = ticket.conversation;
-  if (conversation.assigneeAgentId) return { assignedTo: null, reason: 'already_assigned' };
 
   // A bot transcript is not work to hand out, and neither is a deleted, merged,
   // spam or finished ticket. Same population the dashboard calls the backlog.
-  if (
+  const assignable = !(
     conversation.deletedAt ||
     conversation.mergedIntoId ||
     conversation.isSpam ||
     isReadOnlyChannel(conversation.channel) ||
     !['open', 'pending'].includes(ticket.statusCategory)
-  ) {
-    return { assignedTo: null, reason: 'not_assignable' };
+  );
+
+  /*
+   * The group a caller is routing the ticket to, decided once for every branch
+   * below: a caller that named a group is routing the ticket there, and that
+   * half happens whether or not anybody turns out to be free to take it — or
+   * whether the ticket's number's owner takes it instead.
+   *
+   * Doing it before the pick rather than alongside it is the difference between
+   * a rule that reads "urgent shipping tickets go to the shipping team" and one
+   * that reads "…unless everybody there is busy, in which case leave it where it
+   * was". Out of hours, at capacity, no skill match — the ticket still belongs to
+   * that team's queue, and that is where somebody will look for it.
+   */
+  const routeTo =
+    options.groupId && options.groupId !== conversation.groupId ? options.groupId : null;
+
+  if (conversation.assigneeAgentId) {
+    // An owned ticket is assigned in the insert that creates it (`ownerStamp`),
+    // so a rule routing it meets it already held — by the owner, whom this
+    // call would have chosen anyway. The group the rule names still applies,
+    // as it does in the owner branch below: without it, an owned ticket never
+    // reaches the group whose SLA policy, hours and members the rule meant.
+    // Anybody else holding a ticket was given it on purpose, and a rule has
+    // never moved their ticket.
+    if (routeTo && assignable && conversation.assigneeAgentId === conversation.accountableAgentId) {
+      await moveToGroup(conversationId, routeTo, options.actorLabel);
+    }
+    return { assignedTo: null, reason: 'already_assigned' };
+  }
+
+  if (!assignable) return { assignedTo: null, reason: 'not_assignable' };
+
+  // The number's owner, ahead of everything the rota would ask — see the
+  // module header for why none of it applies.
+  if (conversation.accountableAgentId && ticket.accountableActive) {
+    if (routeTo) await moveToGroup(conversationId, routeTo, options.actorLabel);
+    return handBackToOwner(
+      conversationId,
+      conversation.accountableAgentId,
+      conversation.channelId,
+      { actorLabel: options.actorLabel, now },
+    );
   }
 
   const groupId = options.groupId ?? conversation.groupId;
@@ -149,25 +207,8 @@ export async function assignConversation(
    */
   const { lastAssignedAgentId: _preLockCursor, ...group } = groupRow;
 
-  /*
-   * A caller that named a group is routing the ticket there, and that half
-   * happens whether or not anybody turns out to be free to take it.
-   *
-   * Doing it before the pick rather than alongside it is the difference between
-   * a rule that reads "urgent shipping tickets go to the shipping team" and one
-   * that reads "…unless everybody there is busy, in which case leave it where it
-   * was". Out of hours, at capacity, no skill match — the ticket still belongs to
-   * that team's queue, and that is where somebody will look for it.
-   */
-  if (options.groupId && options.groupId !== conversation.groupId) {
-    await db.update(conversations).set({ groupId }).where(eq(conversations.id, conversationId));
-    await db.insert(conversationEvents).values({
-      conversationId,
-      type: 'group_changed',
-      actorLabel: options.actorLabel ?? 'auto_assign',
-      data: { to: groupId },
-    });
-  }
+  // Before the pick, so the routing half stands whatever the pick finds.
+  if (routeTo) await moveToGroup(conversationId, routeTo, options.actorLabel);
 
   const strategy = options.strategy ?? group.assignmentStrategy;
   if (strategy === 'manual') return { assignedTo: null, reason: 'strategy_manual' };
@@ -284,6 +325,71 @@ export async function assignConversation(
   }
 
   return outcome;
+}
+
+/**
+ * Route the ticket into a group a caller named, and say so on the timeline.
+ *
+ * Shared by the rota and the owner's path, so a rule moving a ticket writes
+ * the same event whoever then holds it. Conditional on the group existing,
+ * because the owner's path reaches here without having looked the group up: a
+ * rule naming a group deleted since would otherwise throw on the foreign key
+ * and take the assignment down with it, where the rota answers `no_group`.
+ */
+async function moveToGroup(
+  conversationId: string,
+  groupId: string,
+  actorLabel: string | undefined,
+): Promise<void> {
+  const moved = await db
+    .update(conversations)
+    .set({ groupId })
+    .where(
+      and(
+        eq(conversations.id, conversationId),
+        exists(db.select({ id: groups.id }).from(groups).where(eq(groups.id, groupId))),
+      ),
+    )
+    .returning({ id: conversations.id });
+  if (moved.length === 0) return;
+
+  await db.insert(conversationEvents).values({
+    conversationId,
+    type: 'group_changed',
+    actorLabel: actorLabel ?? 'auto_assign',
+    data: { to: groupId },
+  });
+}
+
+/**
+ * Give an unassigned owned ticket back to its number's owner.
+ *
+ * Guarded on `assignee_agent_id IS NULL` in the write itself, like every other
+ * entry point here: an agent may have picked the ticket up since it was read,
+ * and they keep it. No group lock, because no cursor or roster is read.
+ */
+async function handBackToOwner(
+  conversationId: string,
+  ownerId: string,
+  channelId: string | null,
+  { actorLabel, now }: { actorLabel: string | undefined; now: Date },
+): Promise<AssignmentOutcome> {
+  return db.transaction(async (tx) => {
+    const updated = await tx
+      .update(conversations)
+      .set({ assigneeAgentId: ownerId, assignedAt: now })
+      .where(and(eq(conversations.id, conversationId), isNull(conversations.assigneeAgentId)))
+      .returning({ id: conversations.id });
+    if (updated.length === 0) return { assignedTo: null, reason: 'already_assigned' as SkipReason };
+
+    await recordOwnerAssigned(tx, {
+      conversationId,
+      ownerId,
+      channelId,
+      actorLabel: actorLabel ?? 'auto_assign',
+    });
+    return { assignedTo: ownerId, reason: null };
+  });
 }
 
 /**

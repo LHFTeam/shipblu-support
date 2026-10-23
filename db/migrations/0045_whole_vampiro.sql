@@ -1,0 +1,1 @@
+CREATE INDEX "conversations_accountable_idx" ON "conversations" USING btree ("accountable_agent_id") WHERE "conversations"."accountable_agent_id" is not null;

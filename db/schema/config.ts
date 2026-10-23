@@ -1038,6 +1038,30 @@ export const channels = pgTable(
       onDelete: 'set null',
     }),
 
+    /**
+     * The team member this WhatsApp number was handed to: who answers its
+     * customers, and who answers for its tickets' SLA. Null is a team number,
+     * which every number is until somebody hands it over — the admin who
+     * connected a number through Embedded Signup is not its owner by default.
+     *
+     * A column rather than a key in `config`, for the reason
+     * `whatsappAccountId` gives — it is a foreign key, and a deleted agent must
+     * not leave a number owned by an id that is gone — and because `saveChannel`
+     * rebuilds a plain number's `config` as `{phoneNumberId}` on every edit, so
+     * an owner kept there would be dropped by renaming the channel.
+     *
+     * Only `whatsapp` rows may carry one (`channels_owner_only_whatsapp` in
+     * db/sql/003). Written by `handOverNumber` in
+     * `lib/whatsapp/number-owner.ts` and nothing else, which records every
+     * change in `channel_owner_changes`. A deactivated owner stays recorded
+     * here, so reactivating them restores the number, but counts as nobody
+     * while deactivated (`effectiveOwnerId`).
+     *
+     * This is the configuration, not what reports read: a ticket freezes the
+     * answer in its own `accountable_agent_id`, because this column changes.
+     */
+    ownerAgentId: uuid('owner_agent_id').references(() => agents.id, { onDelete: 'set null' }),
+
     /** Default group and status applied to tickets arriving on this channel. */
     defaultGroupId: uuid('default_group_id').references(() => groups.id, { onDelete: 'set null' }),
 
@@ -1055,6 +1079,58 @@ export const channels = pgTable(
     uniqueIndex('channels_name_idx').on(t.name),
     index('channels_whatsapp_account_idx').on(t.whatsappAccountId),
   ],
+);
+
+/**
+ * Every time a WhatsApp number changed hands, and who handed it over.
+ *
+ * Append-only, one row per handover — to nobody included — written by
+ * `handOverNumber` in the transaction that changes `channels.owner_agent_id`.
+ * It is the only complete answer to "who owned this number on the day it
+ * breached?". The tickets' own `accountable_changed` events answer it one
+ * ticket at a time, but a handover on a number with no open tickets writes
+ * none, and a purged ticket takes its timeline with it.
+ *
+ * Shaped like `whatsapp_credential_events`, for the same reason: the question
+ * is asked after the fact, so the record must outlive what it names.
+ * `channel_id` is a bare uuid rather than a foreign key, with `channel_name`
+ * and `display_number` keeping the identity it may no longer resolve to. The
+ * three agents are foreign keys that go null when an agent row is deleted, each
+ * with a label beside it so a departed agent is still named.
+ */
+export const channelOwnerChanges = pgTable(
+  'channel_owner_changes',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    channelId: uuid('channel_id').notNull(),
+    channelName: text('channel_name').notNull(),
+    /** The number as Meta displays it, where the row records one (a coexistence number). */
+    displayNumber: text('display_number'),
+
+    /** Null on either side is a team number: a first owner, or a handover to nobody. */
+    fromAgentId: uuid('from_agent_id').references(() => agents.id, { onDelete: 'set null' }),
+    fromLabel: text('from_label'),
+    toAgentId: uuid('to_agent_id').references(() => agents.id, { onDelete: 'set null' }),
+    toLabel: text('to_label'),
+    changedByAgentId: uuid('changed_by_agent_id').references(() => agents.id, {
+      onDelete: 'set null',
+    }),
+    changedByLabel: text('changed_by_label'),
+
+    /**
+     * The number's open and pending tickets whose accountability moved, and how
+     * many of those also changed hands as work — only the ones the previous
+     * owner held, or nobody did. Kept here because the events that say the
+     * same thing per ticket do not survive a purge, and an admin asking "what
+     * did that handover do?" should not have to count a timeline.
+     */
+    ticketsMoved: integer('tickets_moved').notNull().default(0),
+    ticketsReassigned: integer('tickets_reassigned').notNull().default(0),
+
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  // The admin page asks for each number's history, newest first.
+  (t) => [index('channel_owner_changes_channel_idx').on(t.channelId, t.createdAt)],
 );
 
 /**

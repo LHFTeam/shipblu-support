@@ -83,7 +83,7 @@ export default async function CannedSuggestionsReportPage({
   const startsLate = firstDay !== null && firstDay > range.from;
 
   return (
-    <div className="app-scroll h-full overflow-y-auto p-4 sm:p-6">
+    <div className="app-scroll relative h-full overflow-y-auto p-4 sm:p-6">
       <PageHeader
         title="Suggested responses"
         description={`${range.from} to ${range.to}, in ${zone}. How often agents take the canned response Jev suggests in the reply box, and which suggestions turn out to be right.`}

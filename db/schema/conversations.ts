@@ -196,6 +196,33 @@ export const conversations = pgTable(
     resolvedByAgentId: uuid('resolved_by_agent_id').references(() => agents.id, {
       onDelete: 'set null',
     }),
+    /**
+     * Who answers for this ticket's SLA, as opposed to who is working it.
+     *
+     * The owner of the WhatsApp number the ticket arrived on
+     * (`channels.owner_agent_id`), frozen onto the ticket at exactly three
+     * moments, all in `lib/whatsapp/number-owner.ts`: when ingest creates it on
+     * an owned number, when the number is handed over (its open and pending
+     * tickets move), and when its customer reopens it after a handover. Never
+     * by assignment, reclaim, console reassignment, an automation or a merge —
+     * which is the reason it is a second column rather than the assignee.
+     * Reassigning a ticket moves the work; a breach on it still belongs to the
+     * person responsible for the number.
+     *
+     * Reporting cannot read the channel's *current* owner instead, for the
+     * reason `resolvedByAgentId` gives: ownership changes, and the nightly
+     * rollup rebuilds the last three days from current state, so a handover
+     * would re-file the days before it onto somebody who did not own the
+     * number then.
+     *
+     * Null means nobody owned it — a team number, a deactivated owner, any
+     * channel but WhatsApp, a ticket from before owners existed — and reports
+     * then count the breach against the assignee, through
+     * `accountableOrAssignee()`, exactly as they did before this column.
+     */
+    accountableAgentId: uuid('accountable_agent_id').references(() => agents.id, {
+      onDelete: 'set null',
+    }),
     closedAt: timestamp('closed_at', { withTimezone: true }),
 
     /**
@@ -255,6 +282,16 @@ export const conversations = pgTable(
     // The inbox's default query: open tickets for a group, newest activity first.
     index('conversations_inbox_idx').on(t.statusId, t.groupId, t.lastMessageAt),
     index('conversations_assignee_idx').on(t.assigneeAgentId, t.lastMessageAt),
+    // Every restricted agent's visibility ORs `accountable_agent_id = me` beside
+    // the assignee and the numbers they own (`answerableBy`). Postgres combines
+    // the arms of an OR only when each has an index; without this one the inbox,
+    // its counts and the stream's authorisation scan the whole table, bot
+    // transcripts included, on every render. Partial, because only tickets on an
+    // owned number carry one, and `= me` never matches a null anyway. It also
+    // serves the foreign key's `set null` when an agent row is deleted.
+    index('conversations_accountable_idx')
+      .on(t.accountableAgentId)
+      .where(sql`${t.accountableAgentId} is not null`),
     index('conversations_requester_idx').on(t.requesterContactId),
     index('conversations_form_idx').on(t.formId, t.createdAt),
     index('conversations_channel_idx').on(t.channel, t.lastMessageAt),

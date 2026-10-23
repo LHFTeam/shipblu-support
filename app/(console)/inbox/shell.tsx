@@ -5,7 +5,7 @@ import { LiveUpdates } from '@/components/live-updates';
 import { ViewsPanel, type ViewsPanelSection } from '@/components/views-panel';
 import { inboxCounts, listInbox } from '@/lib/tickets/inbox';
 import { parseFilters } from '@/lib/tickets/inbox-filters';
-import { assignmentScope, inboxGroupsFor } from '@/lib/tickets/visibility';
+import { assignmentScope, inboxGroupsFor, ownsANumber } from '@/lib/tickets/visibility';
 import { activeViewId, inboxViews, seesGroupQueues, viewHref } from '@/lib/tickets/inbox-views';
 import { InboxList, KnowledgeBaseLink } from './list';
 
@@ -42,28 +42,31 @@ export async function InboxShell({
 }) {
   const agent = await requireAgent();
   const filters = parseFilters(searchParams);
-  // The counts are the ones the console layout already asked for on this
-  // request; `inboxCounts` memoises them, so the views cost no second query.
-  // The groups are one small read, for the group views' names.
-  const [{ rows, nextCursor }, counts, groups] = await Promise.all([
-    listInbox(agent, filters),
-    inboxCounts(agent),
-    inboxGroupsFor(agent),
-  ]);
-
-  const viewingTicket = activeNumber !== undefined;
   // From the scope `listInbox` and `inboxCounts` are drawn from, so a view is
   // offered for exactly what the lists can hold.
   const scope = assignmentScope(agent);
   const canViewAll = !scope;
   const canViewGroups = scope?.includeGroups ?? false;
+  // The counts are the ones the console layout already asked for on this
+  // request; `inboxCounts` memoises them, so the views cost no second query.
+  // The groups are one small read, for the group views' names. Whether they
+  // own a number is another, asked only where it can widen what they see.
+  const [{ rows, nextCursor }, counts, groups, ownsNumbers] = await Promise.all([
+    listInbox(agent, filters),
+    inboxCounts(agent),
+    inboxGroupsFor(agent),
+    canViewAll ? false : ownsANumber(agent),
+  ]);
+
+  const viewingTicket = activeNumber !== undefined;
   const canSeeBot = can(agent, 'ticket.view.bot');
   const canSeeRatings = can(agent, 'report.view');
 
   // A view keeps the open ticket open, as the Status and Channel selects do.
   const base = viewingTicket ? `/inbox/${activeNumber}` : '/inbox';
-  const views = inboxViews({ canSeeBot, canViewAll, canViewGroups, groups, canSeeRatings });
-  const activeView = activeViewId(views, filters, { canViewAll, canViewGroups, groups });
+  const reach = { canViewAll, canViewGroups, groups, ownsNumbers };
+  const views = inboxViews({ canSeeBot, canSeeRatings, ...reach });
+  const activeView = activeViewId(views, filters, reach);
   const sections: ViewsPanelSection[] = views.map((section) => ({
     title: section.title,
     items: section.items.map((view) => ({
@@ -81,7 +84,7 @@ export async function InboxShell({
     <div className="flex h-full md:gap-(--console-gap) md:bg-(--color-background-console) md:px-(--console-gap) md:pb-(--console-gap)">
       <LiveUpdates channel={filters.channel} conversationId={activeConversationId} />
 
-      <div className="app-scroll hidden w-(--views-width) shrink-0 overflow-y-auto rounded-(--console-panel-radius) bg-(--color-background-surface) min-[1366px]:block">
+      <div className="app-scroll relative hidden w-(--views-width) shrink-0 overflow-y-auto rounded-(--console-panel-radius) bg-(--color-background-surface) min-[1366px]:block">
         <ViewsPanel
           title="Inbox"
           sections={sections}

@@ -2,7 +2,15 @@ import { eq } from 'drizzle-orm';
 import { DateTime } from 'luxon';
 import { describe, expect, it } from 'vitest';
 import { db } from '@/db/client';
-import { agents, contacts, conversations, csatSurveys, groups, ticketStatuses } from '@/db/schema';
+import {
+  agents,
+  contacts,
+  conversationEvents,
+  conversations,
+  csatSurveys,
+  groups,
+  ticketStatuses,
+} from '@/db/schema';
 import { withCleanDatabase } from '@/lib/testing/db';
 import { computeDay, reconciles, reportingContext, totalsOf, type Slice } from './rollup';
 
@@ -271,5 +279,166 @@ describe('computeDay, for surveys', () => {
     expect(surveyCounts({ ...slices[0]!, bucket: totalsOf(slices) })).toEqual(
       counts({ csatSentCount: 1 }),
     );
+  });
+});
+
+describe('computeDay, for a ticket on a WhatsApp number with an owner', () => {
+  const TICKET_COLUMNS = [
+    'ticketsCreated',
+    'ticketsResolved',
+    'ticketsReopened',
+    'firstResponseCount',
+    'slaFirstResponseMet',
+    'slaFirstResponseBreached',
+    'resolutionCount',
+    'slaResolutionMet',
+    'slaResolutionBreached',
+  ] as const;
+
+  const ticketCounts = (slice: Slice | undefined) =>
+    slice && Object.fromEntries(TICKET_COLUMNS.map((column) => [column, slice.bucket[column]]));
+
+  const expected = (given: Partial<Record<(typeof TICKET_COLUMNS)[number], number>>) =>
+    Object.fromEntries(TICKET_COLUMNS.map((column) => [column, given[column] ?? 0]));
+
+  // The requirement in one fixture: the number's owner answers for its
+  // tickets' SLA whoever a supervisor gives the work to, and a ticket on a
+  // team number is filed exactly as before owners existed.
+  it('files every ticket figure under the owner whoever holds it, and an unowned one under its holder', async () => {
+    const [nayera, bob] = await db
+      .insert(agents)
+      .values([
+        { name: 'Nayera', email: 'nayera@shipblu.test', role: 'agent' },
+        { name: 'Bob', email: 'bob@shipblu.test', role: 'agent' },
+      ])
+      .returning({ id: agents.id });
+    const [contact] = await db.insert(contacts).values({ name: 'Amira' }).returning();
+    const [resolved] = await db
+      .select({ id: ticketStatuses.id })
+      .from(ticketStatuses)
+      .where(eq(ticketStatuses.name, 'Resolved'));
+    const base = {
+      channel: 'whatsapp' as const,
+      statusId: resolved!.id,
+      requesterContactId: contact!.id,
+    };
+
+    // Nayera's, reassigned to Bob: answered inside its target, resolved past
+    // its, reopened once — all on the 13th.
+    const [reassigned] = await db
+      .insert(conversations)
+      .values({
+        ...base,
+        accountableAgentId: nayera!.id,
+        assigneeAgentId: bob!.id,
+        createdAt: at('2026-10-13T09:00'),
+        firstRespondedAt: at('2026-10-13T09:10'),
+        firstResponseDueAt: at('2026-10-13T10:00'),
+        resolvedAt: at('2026-10-13T15:00'),
+        resolutionDueAt: at('2026-10-13T12:00'),
+      })
+      .returning({ id: conversations.id });
+    await db.insert(conversationEvents).values({
+      conversationId: reassigned!.id,
+      type: 'reopened',
+      createdAt: at('2026-10-13T13:00'),
+    });
+    // Nayera's and held by nobody: still hers.
+    await db.insert(conversations).values({
+      ...base,
+      accountableAgentId: nayera!.id,
+      createdAt: at('2026-10-13T11:00'),
+    });
+    // A team number's, held by Bob: answered past its target, and his.
+    await db.insert(conversations).values({
+      ...base,
+      assigneeAgentId: bob!.id,
+      createdAt: at('2026-10-13T09:30'),
+      firstRespondedAt: at('2026-10-13T11:00'),
+      firstResponseDueAt: at('2026-10-13T10:00'),
+    });
+
+    const slices = await computeDay('2026-10-13', await reportingContext());
+    const agent = (id: string) => slices.find((slice) => slice.agentId === id);
+
+    expect(ticketCounts(agent(nayera!.id))).toEqual(
+      expected({
+        ticketsCreated: 2,
+        ticketsResolved: 1,
+        ticketsReopened: 1,
+        firstResponseCount: 1,
+        slaFirstResponseMet: 1,
+        resolutionCount: 1,
+        slaResolutionBreached: 1,
+      }),
+    );
+    expect(ticketCounts(agent(bob!.id))).toEqual(
+      expected({ ticketsCreated: 1, firstResponseCount: 1, slaFirstResponseBreached: 1 }),
+    );
+    // Moved between agents, never duplicated or lost: the totals are the sum.
+    expect(ticketCounts({ ...slices[0]!, bucket: totalsOf(slices) })).toEqual(
+      expected({
+        ticketsCreated: 3,
+        ticketsResolved: 1,
+        ticketsReopened: 1,
+        firstResponseCount: 2,
+        slaFirstResponseMet: 1,
+        slaFirstResponseBreached: 1,
+        resolutionCount: 1,
+        slaResolutionBreached: 1,
+      }),
+    );
+    expect(reconciles(slices)).toBe(true);
+  });
+
+  // The nightly run rebuilds three days from current state. A handover on the
+  // 14th moves the column on a ticket still open, and rebuilding the 13th from
+  // the column alone filed Monday's late answer — made under Nayera — against
+  // Ali, who did not hold the phone yet. Each figure is filed as of its own
+  // instant, from the event the handover left.
+  it("keeps a day's figures with whoever answered for them then, after a handover", async () => {
+    const [nayera, ali] = await db
+      .insert(agents)
+      .values([
+        { name: 'Nayera', email: 'nayera@shipblu.test', role: 'agent' },
+        { name: 'Ali', email: 'ali@shipblu.test', role: 'agent' },
+      ])
+      .returning({ id: agents.id });
+    const [contact] = await db.insert(contacts).values({ name: 'Amira' }).returning();
+    const [open] = await db
+      .select({ id: ticketStatuses.id })
+      .from(ticketStatuses)
+      .where(eq(ticketStatuses.name, 'Open'));
+
+    // Answered late on the 13th under Nayera, still open, handed to Ali on the
+    // 14th — so the column now names him.
+    const [late] = await db
+      .insert(conversations)
+      .values({
+        channel: 'whatsapp',
+        statusId: open!.id,
+        requesterContactId: contact!.id,
+        accountableAgentId: ali!.id,
+        assigneeAgentId: ali!.id,
+        createdAt: at('2026-10-13T09:00'),
+        firstRespondedAt: at('2026-10-13T11:00'),
+        firstResponseDueAt: at('2026-10-13T10:00'),
+      })
+      .returning({ id: conversations.id });
+    await db.insert(conversationEvents).values({
+      conversationId: late!.id,
+      type: 'accountable_changed',
+      createdAt: at('2026-10-14T08:00'),
+      data: { from: nayera!.id, to: ali!.id, channelId: null, reason: 'number_handover' },
+    });
+
+    const thirteenth = await computeDay('2026-10-13', await reportingContext());
+    const agent = (id: string) => thirteenth.find((slice) => slice.agentId === id);
+
+    expect(ticketCounts(agent(nayera!.id))).toEqual(
+      expected({ ticketsCreated: 1, firstResponseCount: 1, slaFirstResponseBreached: 1 }),
+    );
+    expect(agent(ali!.id)).toBeUndefined();
+    expect(reconciles(thirteenth)).toBe(true);
   });
 });

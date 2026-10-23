@@ -14,7 +14,8 @@ import {
 import { fallBackToQuickReplies, sendSurvey } from '@/lib/csat';
 import { DEFAULT_WORDING } from '@/lib/csat/wording';
 import type { NormalisedFeedback } from '@/lib/meta/types';
-import { withCleanDatabase } from '@/lib/testing/db';
+import { commentChannelOf } from '@/lib/tickets/channel-policy';
+import { withCleanDatabase, withoutCommentChannelCheck } from '@/lib/testing/db';
 import { recordMetaFeedback } from './meta-feedback';
 
 // The account a reply is addressed from. Unset here, every thread reads as
@@ -46,13 +47,14 @@ async function statusId(name: string): Promise<string> {
 
 /**
  * A resolved ticket whose customer is `psid` on `platform`, surveyed as
- * `delivery`: a DM unless `externalId` names a comment.
+ * `delivery`: a DM unless given a `comment` to be filed under.
  */
 async function surveyedTicket(input: {
   platform: 'facebook' | 'instagram';
   delivery: 'meta_template' | 'meta_quick_reply';
   lastWroteAt?: Date;
-  externalId?: string;
+  /** Filed as a comment under this external id, on the platform's comment channel. */
+  comment?: string;
 }) {
   const [contact] = await db
     .insert(contacts)
@@ -63,11 +65,12 @@ async function surveyedTicket(input: {
     .values({ contactId: contact!.id, channel: input.platform, identifier: 'psid-amira' });
 
   const lastWroteAt = input.lastWroteAt ?? new Date(Date.now() - HOUR);
+  const channel = input.comment ? commentChannelOf(input.platform) : input.platform;
   const [ticket] = await db
     .insert(conversations)
     .values({
-      channel: input.platform,
-      externalId: input.externalId ?? null,
+      channel,
+      externalId: input.comment ?? null,
       statusId: await statusId('Resolved'),
       requesterContactId: contact!.id,
       lastCustomerMessageAt: lastWroteAt,
@@ -78,7 +81,7 @@ async function surveyedTicket(input: {
     conversationId: ticket!.id,
     locale: 'en',
     delivery: input.delivery,
-    snapshot: { agentId: null, groupId: null, channel: input.platform },
+    snapshot: { agentId: null, groupId: null, channel },
     resurveyAfterDays: 14,
     ruleId: null,
     requesterEmail: null,
@@ -243,24 +246,20 @@ describe('recordMetaFeedback', () => {
 
   // No survey is ever sent on a comment; this is the second line, for a row
   // that got there anyway. A thanks on one would be posted under the post.
-  it('takes no answer on a comment ticket, before 1.2 moves it or after', async () => {
-    const legacy = await surveyedTicket({
+  // On its comment channel, as the CHECK insists, so it is the strict channel
+  // comparison that refuses it: `instagram_comment` is not the tap's
+  // `instagram`. The external-id half behind it is the case at the end of this
+  // file, where rolling back 1.2 has moved the ticket back.
+  it('takes no answer on a comment ticket', async () => {
+    const ticket = await surveyedTicket({
       platform: 'instagram',
       delivery: 'meta_quick_reply',
-      externalId: 'instagram:comment:17890',
+      comment: 'instagram:comment:17890',
     });
-    expect(await recordMetaFeedback(answer(legacy.surveyId))).toBe('unknown_survey');
+    expect(await recordMetaFeedback(answer(ticket.surveyId))).toBe('unknown_survey');
 
-    // The same ticket once 1.2 has moved it to its comment channel, keeping its
-    // external id as the backfill does (and as 1.3's CHECK requires).
-    await db
-      .update(conversations)
-      .set({ channel: 'instagram_comment' })
-      .where(eq(conversations.id, legacy.conversationId));
-    expect(await recordMetaFeedback(answer(legacy.surveyId))).toBe('unknown_survey');
-
-    expect(await surveyRow(legacy.surveyId)).toMatchObject({ status: 'sent', rating: null });
-    expect(await thanks(legacy.conversationId, legacy.messageId)).toEqual([]);
+    expect(await surveyRow(ticket.surveyId)).toMatchObject({ status: 'sent', rating: null });
+    expect(await thanks(ticket.conversationId, ticket.messageId)).toEqual([]);
   });
 
   it('records a tap made after the window closed, without a reply that could not send', async () => {
@@ -379,3 +378,23 @@ async function untilSomebodyWaits(): Promise<void> {
   }
   throw new Error('nothing came to wait on the lock this test holds');
 }
+
+// The plan's rollback of Stage 1.2 moves the ticket back to `instagram`, where
+// the strict channel comparison lets the tap through and only the external id
+// says the thread is public. A thanks there would be posted under the post.
+describe('recordMetaFeedback, once rolling back 1.2 has moved comments back', () => {
+  const { moveCommentsBack } = withoutCommentChannelCheck();
+
+  it('still takes no answer on the comment ticket', async () => {
+    const ticket = await surveyedTicket({
+      platform: 'instagram',
+      delivery: 'meta_quick_reply',
+      comment: 'instagram:comment:17890',
+    });
+    expect(await moveCommentsBack()).toBe(1);
+
+    expect(await recordMetaFeedback(answer(ticket.surveyId))).toBe('unknown_survey');
+    expect(await surveyRow(ticket.surveyId)).toMatchObject({ status: 'sent', rating: null });
+    expect(await thanks(ticket.conversationId, ticket.messageId)).toEqual([]);
+  });
+});

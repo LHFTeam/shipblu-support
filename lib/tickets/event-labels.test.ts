@@ -181,6 +181,61 @@ describe('describeEvent', () => {
     );
   });
 
+  // Every one of these is an `assigned` or an `accountable_changed` written by
+  // nobody, so without the reason the timeline said "reassigned the ticket" and
+  // the reason a ticket is somebody's could not be read anywhere.
+  it('says when a ticket went to its WhatsApp number’s owner, and why', () => {
+    expect(describeEvent('assigned', { to: 'a', reason: 'number_owner' })).toBe(
+      'gave the ticket to the owner of the WhatsApp number it arrived on',
+    );
+    expect(describeEvent('assigned', { to: 'a', reason: 'number_handover' })).toBe(
+      'gave the ticket to the new owner of its WhatsApp number',
+    );
+    // Any other assignment, from before the reason existed or by a person.
+    expect(describeEvent('assigned', { to: 'a' })).toBe('reassigned the ticket');
+    expect(describeEvent('assigned', { to: 'a', strategy: 'round_robin' })).toBe(
+      'reassigned the ticket',
+    );
+  });
+
+  it('says who answers for the SLA after a handover, a reopen, or the number going to nobody', () => {
+    expect(
+      describeEvent('accountable_changed', { from: null, to: 'a', reason: 'number_handover' }),
+    ).toBe(
+      'made the new owner of its WhatsApp number accountable for the ticket: breaches on it count against them',
+    );
+    expect(
+      describeEvent('accountable_changed', { from: 'a', to: null, reason: 'number_handover' }),
+    ).toBe(
+      'cleared who is accountable for the ticket: its WhatsApp number has no owner now, so breaches count against whoever holds it',
+    );
+    expect(
+      describeEvent('accountable_changed', {
+        from: 'a',
+        to: 'b',
+        reason: 'reopened_after_handover',
+      }),
+    ).toBe(
+      "made the owner of its WhatsApp number accountable for the ticket when the customer wrote again: it did not name the number's current owner",
+    );
+    expect(
+      describeEvent('accountable_changed', {
+        from: 'a',
+        to: null,
+        reason: 'reopened_after_handover',
+      }),
+    ).toBe(
+      'cleared who is accountable for the ticket when the customer wrote again: its WhatsApp number has no active owner now, so breaches count against whoever holds it',
+    );
+    // An agent or a rule reopening it says so, rather than crediting a message
+    // the customer never sent.
+    expect(
+      describeEvent('accountable_changed', { from: 'a', to: 'b', reason: 'reopened_by_status' }),
+    ).toBe(
+      "made the owner of its WhatsApp number accountable for the ticket when it was reopened: it did not name the number's current owner",
+    );
+  });
+
   it('prints an unknown type with its underscores as spaces', () => {
     expect(describeEvent('something_new_happened', { anything: 1 })).toBe('something new happened');
   });

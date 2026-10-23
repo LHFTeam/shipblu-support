@@ -80,9 +80,13 @@ export async function registerVisitor(token: string, displayName?: string | null
  * the matter is finished, and a returning visitor with a new question should
  * not have it buried under last month's thread. Resolved is different: that is
  * awaiting-confirmation, so a reply reopens it, exactly as on WhatsApp.
+ *
+ * Threaded on the visitor alone. WhatsApp also keys on which of our numbers a
+ * message reached, but the widget is one channel, and its older tickets carry
+ * no `channel_id` for a key to match.
  */
 export async function findLiveConversation(contactId: string): Promise<string | null> {
-  return (await findLiveOnChannel(contactId, 'webchat'))?.id ?? null;
+  return (await findLiveOnChannel(contactId, { channel: 'webchat' }))?.id ?? null;
 }
 
 /**

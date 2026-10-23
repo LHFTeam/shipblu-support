@@ -116,7 +116,7 @@ export default async function CategoryReportPage({
   const leadArea = areas.find((area) => area.ticketsPrimary > 0) ?? null;
 
   return (
-    <div className="app-scroll h-full overflow-y-auto p-4 sm:p-6">
+    <div className="app-scroll relative h-full overflow-y-auto p-4 sm:p-6">
       <PageHeader
         title="What tickets are about"
         description={`${range.from} to ${range.to}, in ${zone}. Demand by category, and — the half that matters — why those tickets existed and who owns fixing it.`}

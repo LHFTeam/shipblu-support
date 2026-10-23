@@ -2,7 +2,7 @@ import { and, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { db } from '@/db/client';
 import { autoResponses, contacts, conversations, messages, ticketStatuses } from '@/db/schema';
-import { withCleanDatabase } from '@/lib/testing/db';
+import { withCleanDatabase, withoutCommentChannelCheck } from '@/lib/testing/db';
 import { cairo } from '@/lib/testing/time';
 import { maybeSendAutoResponse } from './index';
 
@@ -145,5 +145,42 @@ describe('maybeSendAutoResponse on a comment ticket', () => {
     expect(sent).toHaveLength(1);
     // Under her comment, not under Bob's newer one.
     expect(sent[0]!.meta).toMatchObject({ isPublic: true, commentId: 'post-1_c2' });
+  });
+});
+
+// The plan's rollback of Stage 1.2 moves the ticket back to `facebook`, where
+// a rule for every channel, or for Facebook's messages, would match it on the
+// channel alone and post its wording under the comment.
+describe('maybeSendAutoResponse, once rolling back 1.2 has moved comments back', () => {
+  const { moveCommentsBack } = withoutCommentChannelCheck();
+
+  it('still answers a comment only by a comments rule, and publicly', async () => {
+    await db.insert(autoResponses).values([
+      { channel: null, bodyEn: 'Thanks for your message, {{customer_name}}.' },
+      { channel: 'facebook', bodyEn: 'Thanks for your Facebook message, {{customer_name}}.' },
+    ]);
+    const amira = await contact('Amira');
+    const ticket = await commentTicket(amira);
+    expect(await moveCommentsBack()).toBe(1);
+
+    await maybeSendAutoResponse(
+      await comment(ticket, amira, 'post-1_c1', cairo('2026-10-21T22:50')),
+      NIGHT,
+    );
+    expect(await acknowledgements(ticket)).toEqual([]);
+
+    await db.insert(autoResponses).values({
+      channel: 'facebook_comment',
+      bodyEn: 'Hi {{customer_name}}, thanks for your comment — we will reply when we open.',
+    });
+    await maybeSendAutoResponse(
+      await comment(ticket, amira, 'post-1_c2', cairo('2026-10-21T22:55')),
+      NIGHT,
+    );
+
+    const sent = await acknowledgements(ticket);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.meta).toMatchObject({ isPublic: true, commentId: 'post-1_c2' });
+    expect(sent[0]!.bodyText).toBe('Hi, thanks for your comment — we will reply when we open.');
   });
 });

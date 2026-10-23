@@ -246,7 +246,7 @@ export function WidgetThread({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="min-h-0 flex-1 overflow-y-auto p-4">
+      <div className="relative min-h-0 flex-1 overflow-y-auto p-4">
         {messages.length === 0 && !askForDetails ? (
           <p className="py-8 text-center text-sm text-(--color-text-secondary)">{copy.starter}</p>
         ) : null}

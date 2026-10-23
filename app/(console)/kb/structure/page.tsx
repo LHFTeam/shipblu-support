@@ -15,7 +15,7 @@ export default async function StructurePage() {
   const [categories, folders] = await Promise.all([listCategoriesForAdmin(), listFolderOptions()]);
 
   return (
-    <div className="app-scroll mx-auto flex h-full max-w-3xl flex-col gap-8 overflow-y-auto p-4 sm:p-6">
+    <div className="app-scroll relative mx-auto flex h-full max-w-3xl flex-col gap-8 overflow-y-auto p-4 sm:p-6">
       <nav className="text-sm text-(--color-text-secondary)">
         <Link
           href="/kb"

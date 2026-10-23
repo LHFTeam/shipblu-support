@@ -1,8 +1,10 @@
-import { and, asc, desc, eq, isNull, notInArray } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull, notInArray } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/pg-core';
 import { db } from '@/db/client';
 import {
   agents,
   attachments,
+  channels,
   conversationEvents,
   conversations,
   contacts,
@@ -19,6 +21,7 @@ import type { SessionAgent } from '@/lib/auth/session';
 import { configuredAccountId } from '@/lib/meta/client';
 import { metaConnection } from '@/lib/meta/connection';
 import { metaThreadStateFromMessage, type MetaThreadState } from '@/lib/meta/thread';
+import { parseCoexistence } from '@/lib/whatsapp/coexistence';
 import type { CustomFieldValues } from './custom-fields';
 import { threadControlTakenAt } from './meta-thread';
 import {
@@ -101,6 +104,43 @@ export type ConversationDetail = {
   customFields: CustomFieldValues;
   assigneeAgentId: string | null;
   assigneeName: string | null;
+  /**
+   * Whose SLA breaches this ticket counts against: the owner of the WhatsApp
+   * number it arrived on, frozen onto the ticket when it was opened, handed
+   * over or reopened after a handover. Null is "whoever holds it", which is
+   * every ticket not on an owned number — the same fallback the reports take
+   * (`accountableOrAssignee` in lib/tickets/accountable.ts).
+   *
+   * `active` because a deactivated owner keeps the tickets they had until an
+   * admin hands the number over, and the sidebar has to say so rather than
+   * show a name nobody can sign in as.
+   */
+  accountable: { id: string; name: string; active: boolean } | null;
+  /**
+   * Which of our WhatsApp numbers the ticket is on, for a `whatsapp` or
+   * `whatsapp_bot` ticket that carries a `channel_id`; null otherwise,
+   * including the few old tickets filed before a ticket knew its number.
+   *
+   * A customer who writes to two of our numbers has two tickets, one per
+   * number, and nothing else on the page tells them apart — the requester,
+   * the channel badge and the subject are the same on both.
+   *
+   * Built from named fields rather than the row: `channels.config` holds the
+   * number's Meta ids and its onboarding state, and this object is serialised
+   * into the page's RSC payload. `displayNumber` is the number Meta reported
+   * for a coexistence number and null for a plain one, whose config holds only
+   * the `phoneNumberId` — a Meta id, which is not a phone number and would be
+   * misread as one.
+   *
+   * `owner` is the number's owner *now*, which can differ from `accountable`:
+   * a resolved ticket from before a handover, a ticket opened while the owner
+   * was deactivated, the copied history. The sidebar says which it is.
+   */
+  businessNumber: {
+    name: string;
+    displayNumber: string | null;
+    owner: { id: string; name: string; active: boolean } | null;
+  } | null;
   groupId: string | null;
   groupName: string | null;
   requester: {
@@ -206,6 +246,12 @@ export async function getConversation(
   const hidden = hiddenChannels(agent);
   if (hidden.length) where.push(notInArray(conversations.channel, hidden));
 
+  // Two more readings of `agents` beside the assignee's: the ticket's
+  // accountable agent and the number's current owner, who are the same person
+  // on most owned tickets and not on the ones the sidebar has to explain.
+  const accountableAgent = alias(agents, 'accountable_agent');
+  const numberOwner = alias(agents, 'number_owner');
+
   const rows = await db
     .select({
       conversation: conversations,
@@ -217,6 +263,14 @@ export async function getConversation(
       requesterPhone: contacts.primaryPhone,
       requesterAvatarPath: contacts.avatarPath,
       assigneeName: agents.name,
+      accountableId: accountableAgent.id,
+      accountableName: accountableAgent.name,
+      accountableActive: accountableAgent.isActive,
+      numberName: channels.name,
+      numberConfig: channels.config,
+      ownerId: numberOwner.id,
+      ownerName: numberOwner.name,
+      ownerActive: numberOwner.isActive,
       groupName: groups.name,
       formNameAr: ticketForms.nameAr,
       formNameEn: ticketForms.nameEn,
@@ -227,6 +281,18 @@ export async function getConversation(
     .innerJoin(ticketStatuses, eq(ticketStatuses.id, conversations.statusId))
     .innerJoin(contacts, eq(contacts.id, conversations.requesterContactId))
     .leftJoin(agents, eq(agents.id, conversations.assigneeAgentId))
+    .leftJoin(accountableAgent, eq(accountableAgent.id, conversations.accountableAgentId))
+    // Only a WhatsApp row is one of our numbers. Another kind of ticket can
+    // carry a `channel_id` too, naming a mailbox or a widget, and the header
+    // would otherwise call that a number.
+    .leftJoin(
+      channels,
+      and(
+        eq(channels.id, conversations.channelId),
+        inArray(channels.type, ['whatsapp', 'whatsapp_bot']),
+      ),
+    )
+    .leftJoin(numberOwner, eq(numberOwner.id, channels.ownerAgentId))
     .leftJoin(groups, eq(groups.id, conversations.groupId))
     .leftJoin(ticketForms, eq(ticketForms.id, conversations.formId))
     .where(and(...where))
@@ -369,8 +435,9 @@ export async function getConversation(
     its own: the composer's verdict has to describe the same last message the
     agent is looking at, and a second read could catch a newer one.
 
-    A comment ticket is left out — by its channel, or by its external id while
-    it still carries its platform's. It is answered through the comment
+    A comment ticket is left out — by its channel, or by its external id
+    (`isCommentTicket`, which keeps both halves on purpose). It is answered
+    through the comment
     endpoints, which are addressed by comment id and are not page-scoped, so
     neither of the two refusals applies to it.
   */
@@ -421,6 +488,19 @@ export async function getConversation(
     customFields: row.conversation.customFields,
     assigneeAgentId: row.conversation.assigneeAgentId,
     assigneeName: row.assigneeName,
+    accountable: row.accountableId
+      ? { id: row.accountableId, name: row.accountableName!, active: row.accountableActive! }
+      : null,
+    businessNumber:
+      row.numberName !== null
+        ? {
+            name: row.numberName,
+            displayNumber: parseCoexistence(row.numberConfig)?.displayPhoneNumber ?? null,
+            owner: row.ownerId
+              ? { id: row.ownerId, name: row.ownerName!, active: row.ownerActive! }
+              : null,
+          }
+        : null,
     groupId: row.conversation.groupId,
     groupName: row.groupName,
     requester: {

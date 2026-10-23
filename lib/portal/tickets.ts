@@ -347,6 +347,9 @@ export async function appendReply(
     if (!ticket || ticket.statusCategory === 'closed') return null;
 
     if (ticket.statusCategory === 'resolved') {
+      // A WhatsApp ticket can be answered here too, by a customer the portal
+      // knows by email, and reopened it takes its number's current owner —
+      // inside `reopenResolved`, as every customer's reopen does.
       await reopenResolved(
         tx,
         { id: ticket.id, reopenCount: ticket.reopenCount },

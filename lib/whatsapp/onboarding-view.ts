@@ -709,7 +709,7 @@ export type ProgressRows = {
  *
  * Left out on purpose:
  *
- * - What only an admin's action writes — a channel's name and group, an
+ * - What only an admin's action writes — a channel's name, group and owner, an
  *   account's name, variable and default flag — because the action revalidates
  *   the page by itself. A channel's account and active flag change otherwise
  *   only beside a write that is in here: the job's channel step writes them in

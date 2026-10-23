@@ -141,6 +141,37 @@ describe('slaSweep: breaches', () => {
     expect(breached.map((row) => (row.data as { kind: string }).kind)).toEqual(['resolution']);
   });
 
+  // Who the breach counted against at the moment it happened: the ticket's
+  // columns move afterwards — a reassignment, a handover — and the event is
+  // the one record that does not.
+  it('records whom each breach counted against: the number’s owner, else the holder, else nobody', async () => {
+    const [nayera, bob] = await db
+      .insert(agents)
+      .values([
+        { name: 'Nayera', email: 'nayera@shipblu.test', role: 'agent' },
+        { name: 'Bob', email: 'bob@shipblu.test', role: 'agent' },
+      ])
+      .returning({ id: agents.id });
+    const owned = await ticket({
+      channel: 'whatsapp',
+      accountableAgentId: nayera!.id,
+      assigneeAgentId: bob!.id,
+      firstResponseDueAt: minutesAgo(10),
+    });
+    const held = await ticket({ assigneeAgentId: bob!.id, resolutionDueAt: minutesAgo(10) });
+    const nobodys = await ticket({ firstResponseDueAt: minutesAgo(10) });
+
+    await slaSweep();
+
+    const against = async (id: string) =>
+      (await events(id, 'sla_breached')).map(
+        (row) => (row.data as { accountableAgentId: string | null }).accountableAgentId,
+      );
+    expect(await against(owned)).toEqual([nayera!.id]);
+    expect(await against(held)).toEqual([bob!.id]);
+    expect(await against(nobodys)).toEqual([null]);
+  });
+
   it('leaves alone a ticket that was answered, is not due yet, or has its clock stopped', async () => {
     const answered = await ticket({
       firstResponseDueAt: minutesAgo(10),
