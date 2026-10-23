@@ -57,7 +57,10 @@ BEGIN
   ALTER TABLE category_metrics_daily RENAME COLUMN subcategory_key TO category_key;
 
   -- Renaming a constraint that owns an index renames the index too, which is
-  -- what the composite primary key and the three `_pkey` names rely on.
+  -- what the composite primary key and the three `_pkey` names rely on. Two of
+  -- the names Drizzle gave in 0046 are longer than the 63 bytes Postgres keeps,
+  -- so they are written here as the catalog stores them, ending `_f` and `_`;
+  -- production already holds eight foreign keys cut short the same way.
   ALTER TABLE conversation_categories
     RENAME CONSTRAINT conversation_subcategories_conversation_id_subcategory_id_pk
     TO conversation_categories_conversation_id_category_id_pk;
@@ -65,10 +68,10 @@ BEGIN
     RENAME CONSTRAINT conversation_subcategories_conversation_id_conversations_id_fk
     TO conversation_categories_conversation_id_conversations_id_fk;
   ALTER TABLE conversation_categories
-    RENAME CONSTRAINT conversation_subcategories_subcategory_id_ticket_subcategories_id_fk
+    RENAME CONSTRAINT conversation_subcategories_subcategory_id_ticket_subcategories_
     TO conversation_categories_category_id_ticket_categories_id_fk;
   ALTER TABLE conversation_categories
-    RENAME CONSTRAINT conversation_subcategories_detected_in_message_id_messages_id_fk
+    RENAME CONSTRAINT conversation_subcategories_detected_in_message_id_messages_id_f
     TO conversation_categories_detected_in_message_id_messages_id_fk;
   ALTER TABLE conversation_categories
     RENAME CONSTRAINT conversation_subcategories_assigned_by_agent_id_agents_id_fk

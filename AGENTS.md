@@ -185,6 +185,7 @@ components/      shared UI primitives (ui.tsx) and small client components
 db/schema/       Drizzle table definitions
 db/migrations/   generated — never hand-edit
 db/sql/          idempotent SQL Drizzle cannot express, replayed after migrating
+db/runbooks/     SQL a person runs by hand (a rollback); never replayed, each tested
 worker/handlers/ one file per job type, registered in worker/handlers/index.ts
 proxy.ts         Next 16 middleware: host routing + the signed-out redirect
 ```
@@ -325,13 +326,17 @@ saying why the capability is separate.
 (prepared statements disabled), `sessionSql()` for `LISTEN`. Initialise
 everything lazily — `next build` imports route modules without runtime secrets,
 so nothing may open a pool or read env at module scope. Schema changes go in
-`db/schema/` then `npm run db:generate`. Files in `db/sql/` must be idempotent
-and must not use `CREATE INDEX CONCURRENTLY`; the whole file runs in one
-implicit transaction. New tables get RLS enabled by a loop in `db/sql/` — do not
-add it by hand. All three are checked, the first two by replaying the files and
-the last by asking the database which tables ended up covered. A lock that must
-outlive one statement belongs to a transaction: an advisory lock is
-`pg_advisory_xact_lock` taken inside `db.transaction` (`lockThread` in
+`db/schema/` then `npm run db:generate`. A rename asks, for every table, column
+and enum, whether it was renamed or replaced, and only at a terminal; a session
+without one answers through a pseudo-terminal (Python's `pty`), each answer
+named in advance, as Stage 2.B's `0046` was, and never by editing the SQL it
+writes. Files in `db/sql/` must be idempotent and must not use
+`CREATE INDEX CONCURRENTLY`; the whole file runs in one implicit transaction.
+New tables get RLS enabled by a loop in `db/sql/` — do not add it by hand. All
+three are checked, the first two by replaying the files and the last by asking
+the database which tables ended up covered. A lock that must outlive one
+statement belongs to a transaction: an advisory lock is `pg_advisory_xact_lock`
+taken inside `db.transaction` (`lockThread` in
 `lib/tickets/live-conversation.ts`), never `pg_advisory_lock`, because the
 pooler hands the backend to another client when each transaction ends, and a
 session lock would stay behind on it, held for somebody else.
@@ -1141,10 +1146,10 @@ through:
   inside `ولا`, which is how a "no" rule files a reschedule as a refusal. Text
   is folded before matching, the opposite of `lib/kb/seed.ts`, which compares
   against an unfolded tsvector; this matcher owns both sides.
-- **A subcategory is retired, never deleted**, and `conversation_categories`
-  (its name until Stage 2.B) freezes `category_key` at assignment. The rollups
-  key on the same text, so a report drawn last quarter stays readable after
-  somebody tidies the taxonomy. The registry tables live in
+- **A subcategory is retired, never deleted**, and
+  `conversation_subcategories` freezes `subcategory_key` at assignment. The
+  rollups key on the same text, so a report drawn last quarter stays readable
+  after somebody tidies the taxonomy. The registry tables live in
   `db/schema/config.ts` beside `ticket_statuses` rather than with the join
   table, because `conversations` references them and everything references
   `conversations`.
@@ -1169,10 +1174,10 @@ response an agent would send next. Jev answers a `choice` over options the
 request offered, so none of them can be handed a word of free text — the
 subcategoriser gets a key, the classifier a level, the composer an id.
 
-The subcategoriser is a **shadow**: every answer lands in `ai_category_runs`
-(its name until Stage 2.B) and nothing else, so no rollup, no review queue and
-no primary ladder can see it. That separation is not caution to be tidied away
-later. `conversation_categories.confidence` is an evidence grade, hand-assigned
+The subcategoriser is a **shadow**: every answer lands in `ai_subcategory_runs`
+and nothing else, so no rollup, no review queue and no primary ladder can see
+it. That separation is not caution to be tidied away later.
+`conversation_subcategories.confidence` is an evidence grade, hand-assigned
 and combined by noisy-OR, and three screens explain it as one; TypeSafe returns
 a probability. One column holding both would be undetectable from the outside.
 Anything wanting to promote a result argues for it in its own change.
@@ -1182,16 +1187,16 @@ Four rules hold there, and the job is inert until somebody starts it — presenc
 key lives in the environment groups rather than the shared one because all three
 uses send real customer text to a third party:
 
-- **The option list comes from `ticket_categories` (its name until Stage 2.B),
-  never from `TAXONOMY`.** A retired subcategory leaves the rules path at once;
-  if it did not leave the model's choices at the same moment the two would
-  answer over different vocabularies and every disagreement between them would
-  be an artefact.
+- **The option list comes from `ticket_subcategories`, never from
+  `TAXONOMY`.** A retired subcategory leaves the rules path at once; if it did
+  not leave the model's choices at the same moment the two would answer over
+  different vocabularies and every disagreement between them would be an
+  artefact.
 - **`meta.unclassified` is always offered, and the instructions name it.** Given
   55 options and no way out, a model asked about "؟" names something, and a forced
   guess is the over-detection `plans/ticket-categorisation.md` warns about.
 - **The rules baseline is computed in the same call**, from
-  `detectSubcategories` — not read back from `conversation_categories`, whose
+  `detectSubcategories` — not read back from `conversation_subcategories`, whose
   rows agents have since confirmed, rejected and added. The first measures the
   detector; the second measures the team.
 - **Nothing retries inside the provider.** Backoff is the queue's, per

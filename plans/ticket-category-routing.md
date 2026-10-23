@@ -623,6 +623,142 @@ its timeline prints as bare types. A variable set under a new name is then
 read by nothing, and the handbook keeps its new words until the seed is run
 from the older commit with `overwrite=true`.
 
+### 2.B, as built
+
+Built as [Stage 2](#stage-2--the-subcategory-rename) describes 2.B, stacked on
+2.A (#400) at the user's request. What the stage section left open, or got
+wrong, was decided as follows. Every catalog figure was read from production
+on 2026-10-23 after 18:00 UTC.
+
+- **What moved.** The four tables, the two enum types (Postgres renames their
+  array types with them), and **three** columns, not two: `category_metrics_daily`
+  also has a `category_key`, and leaving it would put a `category_key` column
+  in `subcategory_metrics_daily` once Stage 3 gives "category" its new meaning.
+  `conversation_categories_category_idx` became
+  `conversation_subcategories_subcategory_idx`. No foreign key from any other
+  table points into the four, and no function, view, trigger body, policy or
+  publication names them, so a rename reaches everything that depends on them.
+  Their rows: 55, 823, 396 and 647.
+- **Migration `0046_subcategory_names`** is drizzle-kit's, committed as it
+  wrote it. It was generated under a pseudo-terminal, since this environment
+  has none, with every one of the ten prompts answered from a list naming each
+  rename in advance; any other prompt would have killed the run before it wrote
+  anything. A second `generate` reports nothing to migrate. It renames the
+  types, tables and columns, drops and re-adds the seven foreign keys and the
+  composite primary key under new names, and drops and recreates the thirteen
+  indexes.
+- **Two foreign-key names are longer than the 63 bytes Postgres keeps**, so
+  they are stored cut short:
+  `conversation_subcategories_subcategory_id_ticket_subcategories_` and
+  `conversation_subcategories_detected_in_message_id_messages_id_f`. Production
+  already holds eight like that. A command naming the long form is truncated
+  the same way, so a later migration that drops one still finds it.
+- **`db/sql/002_subcategories.sql`** renames the six CHECKs and the three
+  `_pkey` names in a loop, each guarded on the constraint's name **and** its
+  table through `to_regclass`, and then adds any CHECK still missing under its
+  new name. A fresh database takes the same path as production: every
+  migration runs before `db/sql`, so `0021` has created the tables under the
+  old names and `0046` has renamed them by then.
+- **Locks.** Re-adding the foreign keys takes SHARE ROW EXCLUSIVE on
+  `conversations`, `messages` and `agents` until the migration commits, which
+  blocks writes to them meanwhile. Validation reads only the 823 and 647 rows
+  that reference them. `db/migrate.ts` sets `lock_timeout` to 10 s, so a lock
+  it cannot get fails the preDeploy cleanly: nothing is applied and the old
+  release keeps serving. Locally, the whole migrate (`0046` and every
+  `db/sql` file) took 0.9 s on Postgres 17.11.
+- **The raw SQL follows**, in `lib/reports/subcategory-queries.ts`,
+  `lib/reports/subcategory-rollup.ts`, `lib/subcategorise/queries.ts`,
+  `lib/subcategorise/seed.ts` and `lib/subcategorise-ai/report.ts`. Each
+  function in them now has a database test that executes it on fixture rows,
+  so a missed name fails CI.
+- **The rollback is `db/runbooks/2b-subcategory-rollback.sql`**: one `DO`
+  block, so a name that is not there leaves nothing half renamed. Its test runs
+  it and then `0046` and `002` again inside a transaction it rolls back. It
+  asserts that the way back produces production's catalog exactly, and that
+  the way forward restores every new name. That way, the runbook a person runs
+  by hand is exercised on every CI run.
+
+**Rehearsed locally, not on a Supabase branch.** The user chose this on
+2026-10-23, for two reasons. A Supabase branch replays only the migrations
+Supabase itself recorded, which is 2 of production's 46, so it would start
+nearly empty. And it is billed while it exists. The rehearsal ran on a local
+Postgres 17.11:
+
+1. 2.A's code migrated an empty database. Its 39 names for the four tables
+   (constraints, indexes, the trigger and the types) are identical to
+   production's.
+2. Rows were written in every table through 2.A's schema.
+3. This branch's migrate took 0.9 s. Every name was new and none old, every
+   row survived, and every constraint was validated. `rollup_metrics` and
+   `backfill_subcategorise_ai dryRun=true` ran.
+4. The runbook, through `psql -v ON_ERROR_STOP=1 -f`, left a catalog identical
+   to production's, with 0046's migration row gone and the rows intact.
+5. 2.A's migrate replayed the old `002_categories.sql` and changed nothing.
+   2.A's rollup and backfill ran.
+6. This branch's migrate again took 0.87 s, ending identical to step 3. One
+   more replay changed nothing.
+
+2.A's code run against the renamed database fails at once:
+`relation "conversation_categories" does not exist`. That is the window the
+maintenance sequence below closes.
+
+**Deploying 2.B.** The stage section's sequence holds, with these specifics:
+
+1. **Order of merges.** #400 merges into `dev` first. 2.B's PR merges only
+   after the release carrying 1.3, #396 and 2.A is deployed to all six
+   services, so that 2.B's maintenance window ships alone.
+2. **Before the deploy.** Read `pg_stat_activity` for transactions open on
+   `conversations`, `messages`, `agents` or the four tables
+   (`docs/PROJECT-STATE.md` §5.5). Any one of them makes the migration fail at
+   its lock timeout. Note the time web's preDeploy starts.
+3. **During it**, the stage section's steps 2–6 apply: suspend the worker and
+   crons, deploy web, load the pages, then deploy the worker and crons and
+   resume them.
+4. **Step 7's list.** These are the inbound messages ingested on web between
+   the migration and cutover:
+
+   ```sql
+   select c.number, c.channel, m.id as message_id, m.created_at
+   from messages m
+   join conversations c on c.id = m.conversation_id
+   where m.direction = 'inbound' and m.kind = 'reply'
+     and (c.channel in ('webchat', 'portal') or c.form_id is not null)
+     and m.created_at between '<preDeploy start>' and '<web live>'
+   order by m.created_at;
+   ```
+
+   An old web instance's subcategoriser failed on each of them and the failure
+   was caught. There is no job that re-runs it, so for each row an agent opens
+   the ticket and adds a subcategory by hand if the sidebar shows none.
+
+5. **Verify.** No relation or type still has an old name:
+
+   ```sql
+   select relname from pg_class
+   where relname ~ '^(ticket_categories|conversation_categories|category_metrics_daily|ai_category_runs)'
+   union all
+   select typname from pg_type
+   where typname ~ '^_?category_(audience|review_state)$';
+   ```
+
+   It should return no rows. `subcategorised` events also continue on new
+   messages.
+
+**Rolling back 2.B** is the stage section's runbook with the file named:
+
+1. Keep the worker and crons suspended.
+2. On the session connection, run:
+
+   ```sh
+   psql "$DATABASE_URL_SESSION" -v ON_ERROR_STOP=1 \
+     -f db/runbooks/2b-subcategory-rollback.sql
+   ```
+
+3. Deploy the previous web commit by hand.
+
+It stops being a way back once Stage 3 has created the new
+`ticket_categories`, because the names collide. That stage deletes the file.
+
 ### Working on this repo without the outgoing session's context
 
 - **`dev` is the integration branch, and GitHub keeps deleting it.** The
