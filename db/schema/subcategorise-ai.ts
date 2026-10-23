@@ -16,7 +16,7 @@ import { conversations, messages } from './conversations';
  * What TypeSafe's model said about a message, beside what the rules said.
  *
  * A shadow table, and the shadow is the design rather than a first step that was
- * not finished. `conversation_categories` is read by the review queue, the
+ * not finished. `conversation_subcategories` is read by the review queue, the
  * primary ladder and both nightly rollups, and its `confidence` column is
  * documented and rendered as an *evidence grade* — a hand-assigned 0.9 / 0.7 /
  * 0.55 combined by noisy-OR, deliberately not a probability. TypeSafe returns an
@@ -36,7 +36,7 @@ import { conversations, messages } from './conversations';
  * predictions is the point.
  */
 export const aiSubcategoryRuns = pgTable(
-  'ai_category_runs',
+  'ai_subcategory_runs',
   {
     id: uuid('id').primaryKey().defaultRandom(),
 
@@ -45,7 +45,7 @@ export const aiSubcategoryRuns = pgTable(
       .references(() => conversations.id, { onDelete: 'cascade' }),
 
     /**
-     * Nullable and `set null`, the way `conversation_categories.detected_in_message_id`
+     * Nullable and `set null`, the way `conversation_subcategories.detected_in_message_id`
      * is: a deleted message must not take the measurement with it, because the
      * run is evidence about the detector rather than about the ticket.
      */
@@ -74,7 +74,7 @@ export const aiSubcategoryRuns = pgTable(
     /** Whether earlier messages on the ticket were in `state`. Never inferred at read time. */
     withContext: boolean('with_context').notNull().default(false),
 
-    /** Frozen as text, the `conversation_categories.category_key` convention. */
+    /** Frozen as text, the `conversation_subcategories.subcategory_key` convention. */
     predictedKey: text('predicted_key'),
 
     /** The winner's own share of the distribution. */
@@ -96,7 +96,7 @@ export const aiSubcategoryRuns = pgTable(
      * What the rules detector returned for the same text, at the same moment.
      *
      * Computed by calling the pure detector rather than read back from
-     * `conversation_categories`, and that is the difference between measuring the
+     * `conversation_subcategories`, and that is the difference between measuring the
      * detector and measuring the agents: those rows may since have been confirmed,
      * rejected or added by hand.
      */
@@ -120,8 +120,8 @@ export const aiSubcategoryRuns = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
-    uniqueIndex('ai_category_runs_label_message_idx').on(t.runLabel, t.messageId),
-    index('ai_category_runs_label_idx').on(t.runLabel, t.createdAt),
-    index('ai_category_runs_conversation_idx').on(t.conversationId),
+    uniqueIndex('ai_subcategory_runs_label_message_idx').on(t.runLabel, t.messageId),
+    index('ai_subcategory_runs_label_idx').on(t.runLabel, t.createdAt),
+    index('ai_subcategory_runs_conversation_idx').on(t.conversationId),
   ],
 );

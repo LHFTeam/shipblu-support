@@ -80,7 +80,7 @@ export async function backfillSubcategoriseAi(job: ClaimedJob): Promise<void> {
     // is in CI's handler loop — and CI's database has migrations but no seeded
     // taxonomy, so bailing out here would skip exactly the SQL it is there to
     // prove. `tsc` type-checks the drizzle builder, not the statement it emits.
-    log.info(`no active detectable subcategories in ticket_categories — nothing to ask`);
+    log.info(`no active detectable subcategories in ticket_subcategories — nothing to ask`);
     // eslint-disable-next-line no-console -- the report is a multi-line block with no tag
     console.log(formatReport(await reportFor(runLabel)));
     return;

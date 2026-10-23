@@ -11,7 +11,7 @@ import { errorMessage } from '@/lib/errors';
  * One message, asked of TypeSafe and recorded beside what the rules said.
  *
  * The rules baseline is computed here, in the same call, from the same string —
- * not read back from `conversation_categories`. Those rows may since have been
+ * not read back from `conversation_subcategories`. Those rows may since have been
  * confirmed, rejected or added by an agent, so comparing against them would
  * measure how the team has been curating the queue rather than how the detector
  * performs. `detectSubcategories` is pure and touches no database, so asking it

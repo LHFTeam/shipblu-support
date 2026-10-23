@@ -287,7 +287,7 @@ export const requesterKindEnum = pgEnum('requester_kind', [
  * the honest answer for the subcategories both populations really do raise — a
  * damaged parcel is the same complaint whichever end of it you are on.
  */
-export const subcategoryAudienceEnum = pgEnum('category_audience', [
+export const subcategoryAudienceEnum = pgEnum('subcategory_audience', [
   'merchant',
   'recipient',
   'any',
@@ -309,7 +309,7 @@ export const subcategoryAudienceEnum = pgEnum('category_audience', [
  * `confidence` that were wrong — the only copy of that evidence anyone will
  * ever have, and what the next round of rule tuning is measured against.
  */
-export const subcategoryReviewStateEnum = pgEnum('category_review_state', [
+export const subcategoryReviewStateEnum = pgEnum('subcategory_review_state', [
   'auto',
   'suggested',
   'confirmed',

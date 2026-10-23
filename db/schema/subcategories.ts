@@ -30,12 +30,12 @@ import { subcategoryReviewStateEnum, linkSourceEnum } from './enums';
  * filing it as one throws away the half somebody would have acted on.
  */
 export const conversationSubcategories = pgTable(
-  'conversation_categories',
+  'conversation_subcategories',
   {
     conversationId: uuid('conversation_id')
       .notNull()
       .references(() => conversations.id, { onDelete: 'cascade' }),
-    subcategoryId: uuid('category_id')
+    subcategoryId: uuid('subcategory_id')
       .notNull()
       .references(() => ticketSubcategories.id, { onDelete: 'restrict' }),
 
@@ -47,7 +47,7 @@ export const conversationSubcategories = pgTable(
      * not what the registry has since been edited to say. The label an agent sees
      * always comes from the join; this column is provenance.
      */
-    subcategoryKey: text('category_key').notNull(),
+    subcategoryKey: text('subcategory_key').notNull(),
 
     /**
      * Who asserted it.
@@ -134,16 +134,16 @@ export const conversationSubcategories = pgTable(
     // application discipline: ingest jobs for the same conversation run in
     // parallel on the worker, and "whichever committed last wins" is how a ticket
     // ends up with two primaries and a report that counts it twice.
-    uniqueIndex('conversation_categories_primary_idx')
+    uniqueIndex('conversation_subcategories_primary_idx')
       .on(t.conversationId)
       .where(sql`${t.isPrimary}`),
 
     // The driver report: every conversation in a subcategory, by date.
-    index('conversation_categories_key_idx').on(t.subcategoryKey, t.firstSeenAt),
-    index('conversation_categories_category_idx').on(t.subcategoryId),
+    index('conversation_subcategories_key_idx').on(t.subcategoryKey, t.firstSeenAt),
+    index('conversation_subcategories_subcategory_idx').on(t.subcategoryId),
 
     // The review queue: everything waiting on a click, best evidence first.
-    index('conversation_categories_review_idx')
+    index('conversation_subcategories_review_idx')
       .on(t.confidence, t.firstSeenAt)
       .where(sql`${t.reviewState} = 'suggested'`),
   ],

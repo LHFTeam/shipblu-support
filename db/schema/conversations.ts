@@ -77,7 +77,7 @@ export const conversations = pgTable(
      * customer reports a symptom; the cause is what somebody established by
      * looking, and inferring it from the complaint text would fill the one column
      * the team plans from with confident guesses. Which is also why it is a
-     * column here rather than a row in `conversation_categories`: a ticket has
+     * column here rather than a row in `conversation_subcategories`: a ticket has
      * many things it is about and exactly one reason it happened.
      *
      * `restrict`, like `status_id`: a cause with history behind it is retired,

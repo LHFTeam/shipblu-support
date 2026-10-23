@@ -44,7 +44,7 @@ export type SubcategoryTotal = {
 
 export async function subcategoryTotals(range: Range): Promise<SubcategoryTotal[]> {
   const rows = await db.execute<{
-    category_key: string;
+    subcategory_key: string;
     label: string | null;
     area: string;
     tickets_primary: number;
@@ -53,7 +53,7 @@ export async function subcategoryTotals(range: Range): Promise<SubcategoryTotal[
     assigned_suggested: number;
     assigned_manual: number;
   }>(sql`
-    select m.category_key,
+    select m.subcategory_key,
            tc.label_en as label,
            m.area,
            sum(m.tickets_primary)::int    as tickets_primary,
@@ -61,16 +61,16 @@ export async function subcategoryTotals(range: Range): Promise<SubcategoryTotal[
            sum(m.assigned_auto)::int      as assigned_auto,
            sum(m.assigned_suggested)::int as assigned_suggested,
            sum(m.assigned_manual)::int    as assigned_manual
-    from category_metrics_daily m
-    left join ticket_categories tc on tc.key = m.category_key
+    from subcategory_metrics_daily m
+    left join ticket_subcategories tc on tc.key = m.subcategory_key
     where m.day between ${range.from}::date and ${range.to}::date
-    group by m.category_key, tc.label_en, m.area
-    order by sum(m.tickets_any) desc, m.category_key
+    group by m.subcategory_key, tc.label_en, m.area
+    order by sum(m.tickets_any) desc, m.subcategory_key
   `);
 
   return rows.map((row) => ({
-    subcategoryKey: row.category_key,
-    label: row.label ?? row.category_key,
+    subcategoryKey: row.subcategory_key,
+    label: row.label ?? row.subcategory_key,
     area: row.area,
     ticketsPrimary: row.tickets_primary,
     ticketsAny: row.tickets_any,
@@ -92,7 +92,7 @@ export async function areaTotals(range: Range): Promise<AreaTotal[]> {
     select area,
            sum(tickets_any)::int     as tickets_any,
            sum(tickets_primary)::int as tickets_primary
-    from category_metrics_daily
+    from subcategory_metrics_daily
     where day between ${range.from}::date and ${range.to}::date
     group by area
     order by sum(tickets_any) desc, area
@@ -138,9 +138,9 @@ export async function channelTotals(range: Range): Promise<ChannelTotal[]> {
   }>(sql`
     select channel::text as channel,
            sum(tickets_primary)::int as tickets_primary,
-           coalesce(sum(tickets_any) filter (where category_key = 'meta.unclassified'), 0)::int
+           coalesce(sum(tickets_any) filter (where subcategory_key = 'meta.unclassified'), 0)::int
              as unread
-    from category_metrics_daily
+    from subcategory_metrics_daily
     where day between ${range.from}::date and ${range.to}::date
     group by channel
     order by sum(tickets_primary) desc, channel
@@ -239,7 +239,7 @@ export async function rolledUpRange(range: Range): Promise<{
 }> {
   const rows = await db.execute<{ first: string | null; last: string | null; days: number }>(sql`
     with covered as (
-      select day from category_metrics_daily where day <= ${range.to}::date
+      select day from subcategory_metrics_daily where day <= ${range.to}::date
       union
       select day from root_cause_metrics_daily where day <= ${range.to}::date
     )
@@ -303,11 +303,11 @@ export async function causeCoverage(
     select count(*) filter (where c.root_cause_id is not null)::int as with_cause,
            count(*)::int as total
     from conversations c
-    join conversation_categories cc
+    join conversation_subcategories cc
       on cc.conversation_id = c.id and cc.is_primary
     where ${within(sql`coalesce(c.resolved_at, c.root_cause_set_at)`, { ...range, zone })}
       and c.deleted_at is null
-      and split_part(cc.category_key, '.', 1) in (${areas})
+      and split_part(cc.subcategory_key, '.', 1) in (${areas})
   `);
   const row = rows[0];
   return { withCause: row?.with_cause ?? 0, total: row?.total ?? 0 };

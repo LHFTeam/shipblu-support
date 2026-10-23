@@ -15,9 +15,9 @@ export const dynamic = 'force-dynamic';
  *
  * Read-only, and that is the whole design rather than a stage it has not reached
  * yet. Nothing on this page writes, and nothing it reads is read by anything
- * else: `ai_category_runs` is a shadow table that no rollup, no review queue and
+ * else: `ai_subcategory_runs` is a shadow table that no rollup, no review queue and
  * no primary ladder touches. A control here that promoted a prediction into
- * `conversation_categories` would be the change this experiment exists to
+ * `conversation_subcategories` would be the change this experiment exists to
  * inform, made before the experiment had answered anything.
  *
  * It leads with what the run holds rather than with a result, for the reason

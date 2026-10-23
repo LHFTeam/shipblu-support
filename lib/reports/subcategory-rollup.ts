@@ -82,7 +82,7 @@ export async function computeSubcategoryDay(
   const { start, end } = dayBounds(day, zone);
 
   const rows = await db.execute<{
-    category_key: string;
+    subcategory_key: string;
     area: string;
     channel: string;
     tickets_primary: number;
@@ -91,8 +91,8 @@ export async function computeSubcategoryDay(
     assigned_suggested: number;
     assigned_manual: number;
   }>(sql`
-    select cc.category_key,
-           split_part(cc.category_key, '.', 1) as area,
+    select cc.subcategory_key,
+           split_part(cc.subcategory_key, '.', 1) as area,
            c.channel::text as channel,
            count(*) filter (where cc.is_primary)::int as tickets_primary,
            count(*)::int                              as tickets_any,
@@ -102,7 +102,7 @@ export async function computeSubcategoryDay(
              as assigned_suggested,
            count(*) filter (where cc.source = 'manual')::int
              as assigned_manual
-    from conversation_categories cc
+    from conversation_subcategories cc
     join conversations c on c.id = cc.conversation_id
     where c.created_at >= ${start.toISOString()}
       and c.created_at < ${end.toISOString()}
@@ -111,7 +111,7 @@ export async function computeSubcategoryDay(
       -- labelling one is not that day's demand.
       and c.source_system <> 'import'
       and cc.review_state <> 'rejected'
-    group by cc.category_key, c.channel
+    group by cc.subcategory_key, c.channel
   `);
 
   return rows.map((row) => {
@@ -123,14 +123,14 @@ export async function computeSubcategoryDay(
     const banded = row.assigned_auto + row.assigned_suggested + row.assigned_manual;
     if (banded !== row.tickets_any) {
       log.error(
-        `${day} ${row.category_key}/${row.channel}: ` +
+        `${day} ${row.subcategory_key}/${row.channel}: ` +
           `${banded} banded assignments but ${row.tickets_any} rows`,
       );
     }
 
     return {
       day,
-      subcategoryKey: row.category_key,
+      subcategoryKey: row.subcategory_key,
       area: row.area,
       channel: row.channel as SubcategoryRow['channel'],
       ticketsPrimary: row.tickets_primary,

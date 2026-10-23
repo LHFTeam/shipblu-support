@@ -30,7 +30,7 @@ export const SUGGESTION_QUESTION = 'canned_response';
  *
  * Added here, in code, on every request — not left to a registry row that
  * happens to exist. The subcategoriser's `meta.unclassified` is offered only
- * because its `ticket_categories` row is active, and nothing stops an admin
+ * because its `ticket_subcategories` row is active, and nothing stops an admin
  * retiring it; a suggester without this key would put a confident-looking guess
  * in front of an agent for "ok thanks", which is the over-suggestion that
  * teaches people to ignore the feature.
