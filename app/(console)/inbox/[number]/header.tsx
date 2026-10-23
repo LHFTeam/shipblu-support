@@ -108,6 +108,9 @@ export function Header({
             {(relative) => <span>Opened {ago(relative)}</span>}
           </RelativeTime>
           {isComment ? <Badge tone="public">Public comment</Badge> : null}
+          {conversation.businessNumber ? (
+            <BusinessNumberBadge number={conversation.businessNumber} />
+          ) : null}
           {/*
               Only where there is something to ask. A Messenger or Instagram
               customer arrives as a bare scoped id and stays unnamed until Meta
@@ -154,5 +157,43 @@ export function Header({
         </div>
       </div>
     </header>
+  );
+}
+
+/**
+ * Which of our WhatsApp numbers the customer wrote to.
+ *
+ * Here and not only in the sidebar, because the sidebar is desktop-only and
+ * this is the one thing that tells a customer's two tickets apart — one per
+ * number they wrote to — on the phone the owner of a number answers from.
+ *
+ * The name gives way and the number does not: at phone width the whole
+ * sentence is wider than the row, and a cut-off "+20 12 787…" is no longer a
+ * number anybody can check against their phone. The wrapper caps the badge at
+ * the row's width so the name has something to truncate against, and gives
+ * the badge itself `min-width: 0` (`*:`), because a flex item will not shrink
+ * below its content without it and `Badge` takes no class of its own. The name is
+ * isolated with `dir="auto"`, since a channel is often named after the person
+ * it belongs to and that can be Arabic; the number is `dir="ltr"`, so its
+ * digit groups stay in order whatever is around them.
+ */
+function BusinessNumberBadge({
+  number,
+}: {
+  number: NonNullable<ConversationDetail['businessNumber']>;
+}) {
+  return (
+    <span className="inline-flex max-w-full min-w-0 *:min-w-0">
+      <Badge>
+        <span className="min-w-0 truncate">
+          Our number: <span dir="auto">{number.name}</span>
+        </span>
+        {number.displayNumber ? (
+          <span dir="ltr" className="shrink-0 tabular-nums">
+            ({number.displayNumber})
+          </span>
+        ) : null}
+      </Badge>
+    </span>
   );
 }

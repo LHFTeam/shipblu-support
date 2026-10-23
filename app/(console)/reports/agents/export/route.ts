@@ -117,7 +117,11 @@ const HEADER = [
   'sessions',
   'assigned',
   'resolutions_made',
-  'resolved_while_assigned',
+  // Renamed from `resolved_while_assigned` when a ticket on a WhatsApp number
+  // with an owner began counting against that owner whoever held it: the old
+  // name described a population this column no longer is, and a consumer
+  // reading it by header would have taken it in the old sense.
+  'resolved_accountable',
   'conversations_touched',
   'public_replies',
   'private_notes',

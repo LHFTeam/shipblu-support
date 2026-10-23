@@ -1,6 +1,7 @@
 import { eq } from 'drizzle-orm';
 import type { db } from '@/db/client';
 import { conversationEvents, conversations } from '@/db/schema';
+import { reopenWithOwner } from '@/lib/whatsapp/number-owner';
 import { resolveStamp } from './resolve-stamp';
 import { defaultOpenStatusId } from './statuses';
 
@@ -35,25 +36,30 @@ export async function reopenResolved(
   const statusId = await defaultOpenStatusId(tx);
   if (!statusId) return false;
 
-  // `resolvedByAgentId` is deliberately not cleared here, so it survives
-  // to be read back below.
-  const reopened = await tx
-    .update(conversations)
-    .set({ statusId, ...resolveStamp('open'), reopenCount: ticket.reopenCount + 1 })
-    .where(eq(conversations.id, ticket.id))
-    .returning({ resolvedBy: conversations.resolvedByAgentId });
+  // Through `reopenWithOwner`, as every status writer is: a WhatsApp ticket
+  // coming back takes its number's current owner, here for every customer's
+  // reopen at once — WhatsApp, the portal and any path added later.
+  return reopenWithOwner(tx, ticket.id, 'open', 'reopened_after_handover', async () => {
+    // `resolvedByAgentId` is deliberately not cleared here, so it survives
+    // to be read back below.
+    const reopened = await tx
+      .update(conversations)
+      .set({ statusId, ...resolveStamp('open'), reopenCount: ticket.reopenCount + 1 })
+      .where(eq(conversations.id, ticket.id))
+      .returning({ resolvedBy: conversations.resolvedByAgentId });
 
-  await tx.insert(conversationEvents).values({
-    conversationId: ticket.id,
-    type: 'reopened',
-    actorLabel: by.actorLabel,
-    // The resolver is snapshotted onto the event rather than looked up
-    // later. `conversations.resolved_by_agent_id` is overwritten by the
-    // next resolution, and the nightly rollup rebuilds the last three
-    // days — so reading it at report time would let a ticket resolved
-    // again by somebody else silently move this reopening onto them.
-    data: { reason: by.reason, resolvedBy: reopened[0]?.resolvedBy ?? null },
+    await tx.insert(conversationEvents).values({
+      conversationId: ticket.id,
+      type: 'reopened',
+      actorLabel: by.actorLabel,
+      // The resolver is snapshotted onto the event rather than looked up
+      // later. `conversations.resolved_by_agent_id` is overwritten by the
+      // next resolution, and the nightly rollup rebuilds the last three
+      // days — so reading it at report time would let a ticket resolved
+      // again by somebody else silently move this reopening onto them.
+      data: { reason: by.reason, resolvedBy: reopened[0]?.resolvedBy ?? null },
+    });
+
+    return true;
   });
-
-  return true;
 }

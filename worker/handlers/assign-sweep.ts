@@ -52,6 +52,11 @@ function routingGroups() {
  * at, not the archive. Each ticket is attempted individually rather than in one
  * transaction: they contend for the same group lock, and one ticket that cannot
  * be placed must not roll back the twenty before it.
+ *
+ * An owned WhatsApp ticket in no group, or in a manual one, is not in this list,
+ * and does not need to be: it goes back to its owner on the spot — ingest
+ * stamps it, and "Unassign" runs `assignConversation` in the same request — so
+ * the sweep is only ever its second chance.
  */
 async function assignWaiting(): Promise<number> {
   const waiting = await db
@@ -84,7 +89,7 @@ async function assignWaiting(): Promise<number> {
 /**
  * Take an unanswered ticket back off somebody who is no longer here.
  *
- * Opt-in per group, off everywhere by default, and hedged in three ways that
+ * Opt-in per group, off everywhere by default, and hedged in four ways that
  * matter more than the feature does:
  *
  * - **Only a ticket still awaiting its first agent reply.** Once an agent has
@@ -96,6 +101,13 @@ async function assignWaiting(): Promise<number> {
  *   anybody to do.
  * - **Only after the configured wait.** An agent whose train went into a tunnel
  *   is offline for ninety seconds.
+ * - **Never from a WhatsApp number's owner, on their own number's ticket, while
+ *   they are active.** They answer from the phone with the console closed, so
+ *   the presence this pass measures says nothing about them — every ticket of
+ *   theirs would read as abandoned the moment the wait ran out. And taking it
+ *   back would only hand it to them again: `assignConversation` returns an
+ *   owned ticket to its owner. A deactivated owner's tickets, and an owned
+ *   ticket somebody else is holding, are reclaimed like any other.
  */
 async function reclaimAbandoned(now: Date): Promise<number> {
   const abandoned = await db
@@ -124,6 +136,14 @@ async function reclaimAbandoned(now: Date): Promise<number> {
         or(
           isNull(conversations.lastAgentMessageAt),
           lt(conversations.lastAgentMessageAt, conversations.lastCustomerMessageAt),
+        ),
+        // Not the number's owner holding their own ticket. `agents` is the
+        // assignee, so where the two are the same person this is the owner's
+        // flag.
+        or(
+          isNull(conversations.accountableAgentId),
+          ne(conversations.accountableAgentId, conversations.assigneeAgentId),
+          eq(agents.isActive, false),
         ),
         openBacklog(),
       ),

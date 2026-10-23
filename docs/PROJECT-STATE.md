@@ -545,6 +545,20 @@ ever held — one, sealed, opened only by the worker (§2, §8) — and **none o
 has run live**: the whole flow is proven by the unit and database tiers (§7) and
 waits on Meta-side preconditions nobody has checked yet (§5.2).
 
+And now **a WhatsApp number can belong to a person**, built on 2026-10-22 and
+not deployed. A team member handed a business number answers its customers
+from the phone and answers for its tickets' SLA, so WhatsApp now threads on the
+customer _and_ the number they wrote to (§6.99, which also closes the race that
+opened two tickets for one chat, §6.100), and a ticket carries the person
+accountable for it beside the person working it. Reassigning moves the work and
+leaves the breach with the owner; reports, the live board and the hourly sample
+all file breaches that way; an owner sees every ticket on their number; and the
+ticket page names our number and who is accountable. The threading changes on
+deploy; the rest waits for an admin to hand a number over — §5.1 has the steps
+for Nayera's, and the two
+configuration fixes that decide whether her figures mean anything; §5.5 has what
+they still leave out. See `plans/whatsapp-number-ownership.md`.
+
 So: **the system still cannot take a real human support ticket**, and the
 remaining work is mostly not code — it is configuration, live-provider
 verification, and cutover. But the team has started arriving: **11 agents** as of
@@ -1118,9 +1132,13 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
     `phoneNumberId` `838961722630554`, the support line; it must **never** carry
     the bot's `128318316834446`, which would route 13,693 bot transcripts into
     the team's queue. `resolveWhatsAppChannel` matches the number exactly and
-    otherwise falls back to the first `whatsapp` row, so a blank number is safe
-    and a wrong one is only ever a fallback — the bot's number is the single
-    value that must not appear there.
+    otherwise files the event under no row, in the plain (not coexistence)
+    `whatsapp` row's default group, so a blank number is safe and a wrong one
+    is only ever a fallback — the bot's number is the single value that must
+    not appear there. Since §6.99 a fallback is never filed under any row: the
+    row is in the thread key and in every reader of whose number a ticket is
+    on, and each one logs
+    `[whatsapp_ingest] no channel row for this number, filed under no row phone_number_id=…`.
   - **Only one agent has ever been online.** Presence gates eligibility, so round
     robin hands everything to whoever is connected. George has never signed in
     (`last_seen_at` null) and Ahmed last beat on 26 Aug, which means the rota is
@@ -1131,6 +1149,79 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
   needed yet. If skills are ever switched on, set one: without it a mistake in a
   skill's conditions is a ticket no human ever sees. `/admin` reports both,
   including any skill no active agent holds.
+
+- **"Nayera Mohamed", the coexistence number, has no owner yet.** Number
+  ownership was built on 2026-10-22 (`plans/whatsapp-number-ownership.md`,
+  §6.99, §6.100) and is not deployed. On 2026-10-21 the number held 89 open native tickets, all
+  unassigned — 84 in `Merchant Care`, whose roster is empty, and 5 that a web
+  chat rule moved to `Customer Care` (step 6) — beside 8 resolved and 47 copied
+  histories. Nayera herself is an `agent` in no group and not accepting tickets,
+  so the rota could never reach her: those timelines held 1,220
+  `assignment_skipped` events, and 24 of the 89 had breached their first
+  response. In order:
+
+  1. **Before the deploy, look for a held lock.** Migration 0044 adds a column
+     and a foreign key to both `conversations` and `channels`, and 0045 an
+     index on the new `conversations` column; drizzle
+     applies a deploy's migrations in one transaction, so `conversations` is
+     `ACCESS EXCLUSIVE` until the key has scanned every row (all null, so the
+     scan is short). Run the `pg_stat_activity` query in §5.5 first; a blocked
+     migration fails after `lock_timeout = 10s` rather than stalling (§6.15).
+     Web first, for the migration, then the worker.
+  2. **Check that `db/sql/009` placed the four tickets with no row.** #1, #2,
+     #10820 and #10853 were filed before "WhatsApp Support" had a row, and every
+     inbound message on them names its number. A ticket is now threaded on its
+     number's row, so left without one, #10820 and #10853 would not be
+     continued by their customers' next message: it would open a second ticket.
+     This should return nothing:
+
+     ```sql
+     select number, channel_id from conversations
+     where channel = 'whatsapp' and channel_id is null;
+     ```
+
+     A row left is a ticket whose number no `whatsapp` row names, which no
+     backfill can place.
+
+  3. **Close the four duplicate halves** (§6.100): #54574/#54575,
+     #55282/#55283, #55829/#55830 and #55896/#55897. An agent reads each pair
+     and closes the one that repeats the other. There is no ticket merge to do
+     it with. Do this before step 4, or the handover moves both halves and the
+     one nobody answers counts against Nayera.
+  4. **Hand the number to Nayera** under `/admin/channels`: _Set owner_ on the
+     number's row, pick her — every agent is listed with their address, since
+     two active agents share a name — and _Hand over_, which asks "Hand over
+     with N tickets?" before it acts. The answer says what moved, e.g. "Nayera
+     Mohamed owns +20 12 78707918 from now. 85 open or pending tickets moved to
+     them." Read it back from `channel_owner_changes`, and from a count of
+     `conversations` whose `accountable_agent_id` is hers.
+
+     What to expect: her inbox gains Unassigned and All open; the number's
+     tickets stop collecting `assignment_skipped`, since an owned ticket skips
+     the rota; and her Breached on `/admin/dashboard` opens at the open tickets
+     that had already breached, because a figure is filed under whoever is
+     accountable on the day it is measured. If the team wants her figures to
+     start from the handover, triage those first. To undo it, hand the number
+     to "Nobody — team number": accountability clears, and the tickets stay with
+     her until somebody reassigns them.
+
+  5. **The SLA policies cannot match on group, and that is the team's call to
+     fix.** All four compare `group.id` with a group's _name_ — "Customer
+     Care", "Merchant Care" — which no ticket's group id ever equals. The three
+     with `all` conditions therefore match nothing, and the default, "Live
+     Support (Customer Care)", matches every WhatsApp ticket through its `any`
+     arm on the channel, so the number's tickets are measured against a 1–2
+     minute first response. Re-picking the group in each policy at
+     `/admin/sla` stores its id. Until somebody does, an owner's figures
+     measure that target rather than the one the team means.
+  6. **The two "Route … Web Chat" automation rules re-group WhatsApp tickets
+     too**, and that is also the team's call. "Route Public Web Chat to
+     Customer Care" (`requester.email is_empty`) and "Route Account Web Chat to
+     Merchant Care" (`is_set`), both `on_create` and added 2026-10-20, have no
+     channel condition; the first moved 5 of the number's tickets on its first
+     day. A channel condition for web chat on each, at `/admin/automations`,
+     confines them. Ownership no longer depends on the group, but a policy
+     matched on group (step 5) and the by-group report do.
 
 - ~~**Locations are empty.**~~ Entered in production on 2026-10-05 by SQL from a
   list ali@shipblu.com supplied, normalised exactly as `saveLocation` would. No
@@ -2038,6 +2129,37 @@ message bodies — the same reasoning as the deliberately tiny `pg_notify` paylo
   and an ordinary number's echoes are ignored (`ingest-whatsapp.ts`) — so
   every one breaches, and fires whatever breach rules exist. Linking the
   number to the Business app, or retiring it, closes both.
+- **What an owner's SLA figures leave out, or get wrong.** Since number
+  ownership (§5.1, `plans/whatsapp-number-ownership.md`) every figure a ticket
+  on an owned number has is filed under its owner. None of these were fixed
+  with it:
+  - **Next-response breaches are recorded nowhere.** `next_response_due_at` is
+    kept and `onAgentReply` stops it, but the SLA sweep looks only for
+    first-response and resolution breaches (`findBreaches` in
+    `worker/handlers/sla-sweep.ts`), so a customer left waiting in the middle
+    of a conversation counts against nobody.
+  - **A conversation the business starts from the phone gets no SLA policy** —
+    LHFTeam/shipblu-support#352 (§5.2). 31 of the number's 97 live tickets on
+    2026-10-21.
+  - **And it reads as a 0-second first response, now in the owner's slice.** The
+    echo that opens it is its first reply, stamped at or before the ticket's
+    `created_at`, so `computeDay` counts a first response of nothing, and under
+    `accountableOrAssignee()` that pads the owner's average with conversations
+    they started. Leaving out a `first_responded_at` at or before `created_at`
+    in that read would fix it.
+  - **A breach from before a handover is measured against the new owner.**
+    Accountability is frozen per ticket, not per breach: an open ticket that
+    breached while it was nobody's and is answered after the handover files
+    its breach under the owner, on the day of the answer. Triaging a number's
+    breached tickets before handing it over is the way round it.
+  - **Deleting a channel row strands its tickets' thread, and deactivating
+    one splits it.** The foreign key sets their `channel_id` null, so they
+    thread only with events no row names until an active row naming the number
+    exists again — then the customer's next message adopts the ticket
+    (`findOrAdoptLive`), or the next deploy's replay of `db/sql/009` places it.
+    A deactivated row keeps its tickets, but the resolver threads on active
+    rows only, so the number's next message opens a ticket under no row beside
+    the live one.
 
 - **The dead-letter queue has 57 rows in it and, until 2026-09-21, nobody had
   read them.** `/api/health` reported `dead: 56` unchanged for eleven days; the
@@ -2519,7 +2641,8 @@ Each cost real time. Most are also comments in the code.
    Replying from a different number is a re-engagement message to someone who
    never engaged — and the send API _accepts_ it, with the rejection arriving on
    a status webhook a second later, so no pre-send check can catch it. The
-   sending number is resolved from the conversation for this reason.
+   sending number is resolved from the conversation for this reason, and since
+   §6.99 a WhatsApp conversation is exactly one such pair.
 9. **ASCII slugify erases Arabic entirely**, collapsing every Arabic article
    onto one URL.
 10. **Freshdesk visibility must default closed.** `visibility === 3 ?
@@ -5846,7 +5969,7 @@ claude/shipblu-support-app-03p2we could not be found` — staging's pin to a
       is a connection that closed by itself, and frees the place as it is.
 
     **The Channels page.**
-    - The page's seven reads run three at a time (`allLimited` in
+    - The page's nine reads run three at a time (`allLimited` in
       `lib/concurrency.ts`).
     - While an onboarding moves, the page asks `/api/admin/onboarding-progress`
       for `progressVersion` and re-renders only when the answer differs. That
@@ -6351,6 +6474,78 @@ dryRun=true`, then without, gives those two theirs back from their
     backfill. Until this change a correction was filed on the day it was made,
     and counted on two days instead; a first cause was counted once, on that
     day. No cause had been recorded on production when this was read.
+
+99. **A WhatsApp customer was one conversation whichever of our numbers they
+    wrote to.** _2026-10-21, found while designing number ownership
+    (`plans/whatsapp-number-ownership.md`)._ Ingest found the live
+    conversation by the contact and the channel _kind_ — `whatsapp` — which was
+    right while the support line was the only human number. A coexistence
+    number is one team member's phone, though, so with two of them taking
+    traffic a merchant's message to the second continued their ticket with the
+    first, where only the first phone's owner looked; a reply typed on one
+    phone landed on, and stopped the clocks of, the customer's newest ticket
+    with any number; and a reaction on one number was filed on a ticket with
+    another. It had not happened yet: on 2026-10-21 every message on a ticket
+    with a row named that row's number (Nayera's 129 tickets and the support
+    line's 7), and the one ticket holding two numbers, closed #1, predates
+    every row and holds the support line's and the bot's. No customer had yet
+    written to two numbers while a ticket was open, and every number connected
+    makes it likelier — "ShipBlu Admin" was connected with no traffic yet, and
+    a number adopted from Business Suite was waiting (§5.2).
+
+    `ThreadKey` (`lib/tickets/live-conversation.ts`) keys a `whatsapp`
+    conversation on the contact and `channel_id`; the widget and the bot keep
+    the person alone, and their SQL is pinned unchanged. Two things the key
+    forced, neither obvious:
+    - **A null `channel_id` matches only null.** A wildcard would let a ticket
+      with no row take its customer's messages to every number. But tickets
+      ingested before "WhatsApp Support" had a row carry a null — #1, #2,
+      #10820 and #10853 — so the open two would have opened a second ticket on
+      their customers' next message. `db/sql/009_whatsapp_channel_backfill.sql`
+      gives each the `whatsapp` row of its newest inbound, non-reaction message
+      that names one, so #1 gets the support line and never the bot. Driven
+      from the tickets still null, so its replay on every deploy reads only
+      those.
+    - **The fallback for a number no row names must not hand out any row.**
+      It used to take the first `whatsapp` row when no plain one existed; with
+      the row in the key, that files an unknown number's traffic onto
+      somebody's phone's tickets, and onto their clocks. The support row's id
+      was no better once numbers have owners: visibility, a handover and a
+      reopen by hand read it as the support owner's ticket while ingest
+      stamped nobody. It now files under no row, keeps the plain support row's
+      default group for routing, and logs
+      `[whatsapp_ingest] no channel row for this number, filed under no row phone_number_id=…`.
+
+    Everything that was already per number is now right per ticket with no
+    change of its own: `sendingNumberFor` (§6.8), the 24-hour window,
+    `send_whatsapp`, `automatedReplyBlocked` and an echo's `onAgentReply`.
+
+100.  **Looking for the live conversation outside the transaction opened two
+      tickets for one chat.** _2026-10-21._ Four customers each held two live
+      tickets on Nayera's number, created 35–120 ms apart: #54574/#54575 (one
+      open, one resolved and holding only the phone's reply), #55282/#55283,
+      #55829/#55830 and #55896/#55897. `ingestWhatsAppMessage` and
+      `ingestWhatsAppEcho` each called `findLiveConversation` before opening
+      their transaction and inserted when it found nothing, so a customer's
+      message and the phone's reply to it, handled in two worker slots at once,
+      each found nothing and each opened a ticket. The reply lands on one; the
+      other keeps a first-response clock nothing will stop, and breaches — and
+      under number ownership it breaches against the owner, for a reply that
+      was sent. The race is inferred from the timing; the data shows only the
+      pairs.
+
+      Both paths now call `lockThread(tx, contactId, key)` and then look inside
+      the same transaction. It is
+      `pg_advisory_xact_lock(hashtextextended('<contact>:<channel>:<channel_id|none>', 0))`:
+      advisory, because the row to lock is the one that does not exist yet;
+      `_xact_`, because the transaction pooler hands the backend on when the
+      transaction ends (AGENTS.md, Database); and keyed on exactly the thread,
+      so two customers, or one customer on two numbers, never wait for each
+      other. A reaction takes none, since it creates nothing. The test runs an
+      inbound message and an echo for four customers at once and expects four
+      tickets; with the lock removed it got seven or eight on every run. The
+      four pairs are left for an agent to close (§5.1): there is no ticket
+      merge, and which half to keep is a judgement.
 
 ### Tooling notes for this environment
 

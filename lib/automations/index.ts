@@ -22,6 +22,7 @@ import { conversationFacts } from '@/lib/rules/facts';
 import { onGroupChanged, onPriorityChanged, onStatusChanged } from '@/lib/sla';
 import { PRIORITY_STAMP } from '@/lib/tickets/priority-stamp';
 import { resolveStamp } from '@/lib/tickets/resolve-stamp';
+import { reopenWithOwner } from '@/lib/whatsapp/number-owner';
 import { parseActions, type Action } from './actions';
 import { logger } from '@/lib/log';
 
@@ -243,20 +244,29 @@ async function applyAction(
       const status = rows[0];
       if (!status) return;
 
-      await db
-        .update(conversations)
-        .set({
-          statusId: status.id,
-          ...resolveStamp(action.category),
-          // Explicitly nobody, not "leave whoever was there". A rule resolving
-          // a ticket that an agent had resolved earlier owns this resolution,
-          // so if the customer comes back it must not land on that agent's
-          // reopen rate — they are not the reason it was resolved this time.
-          // A rule's close leaves it: the resolve it follows is still theirs.
-          ...(action.category === 'resolved' ? { resolvedByAgentId: null } : {}),
-          closedAt: action.category === 'closed' ? new Date() : null,
-        })
-        .where(eq(conversations.id, conversationId));
+      // Through `reopenWithOwner`, as every status writer is, so a rule moving
+      // a WhatsApp ticket back out of resolved or closed takes its number's
+      // current owner; in a transaction because the channel's lock has to be
+      // held across the status write for a handover to see one or the other.
+      await db.transaction((tx) =>
+        reopenWithOwner(tx, conversationId, action.category, 'reopened_by_status', async () => {
+          await tx
+            .update(conversations)
+            .set({
+              statusId: status.id,
+              ...resolveStamp(action.category),
+              // Explicitly nobody, not "leave whoever was there". A rule resolving
+              // a ticket that an agent had resolved earlier owns this resolution,
+              // so if the customer comes back it must not land on that agent's
+              // reopen rate — they are not the reason it was resolved this time.
+              // A rule's close leaves it: the resolve it follows is still theirs.
+              ...(action.category === 'resolved' ? { resolvedByAgentId: null } : {}),
+              closedAt: action.category === 'closed' ? new Date() : null,
+            })
+            .where(eq(conversations.id, conversationId));
+          return true;
+        }),
+      );
 
       await record('status_changed', { to: status.name, category: action.category });
       // The SLA clock has to hear about this the same way it hears about an

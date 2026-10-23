@@ -5,6 +5,7 @@ import { db } from '@/db/client';
 import {
   agents,
   businessHours,
+  channels,
   contacts,
   conversations,
   csatSurveys,
@@ -429,6 +430,175 @@ describe('getConversation', () => {
       authorContactId: null,
       authorAgentColor: null,
       authorAgentAvatarUrl: null,
+    });
+  });
+
+  describe('our number and who is accountable', () => {
+    async function numberTicket(values: {
+      channel: 'whatsapp' | 'whatsapp_bot' | 'webchat';
+      channelId: string | null;
+      accountableAgentId?: string | null;
+      assigneeAgentId?: string | null;
+    }) {
+      const [contact] = await db.insert(contacts).values({ name: 'Amira' }).returning();
+      const [row] = await db
+        .insert(conversations)
+        .values({
+          statusId: await openStatusId(),
+          requesterContactId: contact!.id,
+          ...values,
+        })
+        .returning({ number: conversations.number });
+      return row!.number;
+    }
+
+    async function channel(values: {
+      type: 'whatsapp' | 'whatsapp_bot' | 'webchat';
+      name: string;
+      config: Record<string, unknown>;
+      ownerAgentId?: string | null;
+    }) {
+      const [row] = await db.insert(channels).values(values).returning({ id: channels.id });
+      return row!.id;
+    }
+
+    // The coexistence block as onboarding writes it: the WABA id, the Meta
+    // phone number id and the number Meta reported for it.
+    const coexistence = (displayPhoneNumber: string) => ({
+      phoneNumberId: '1070000000000001',
+      coexistence: {
+        onboardedAt: '2026-09-01T10:00:00.000Z',
+        wabaId: '2090000000000001',
+        displayPhoneNumber,
+        verifiedName: 'ShipBlu',
+      },
+    });
+
+    it("names an owned coexistence number, its owner and the ticket's accountable agent", async () => {
+      const agent = await admin();
+      const [nayera, bob] = await db
+        .insert(agents)
+        .values([
+          { name: 'نيرة محمد', email: 'nayera@shipblu.test', role: 'agent' },
+          { name: 'Bob', email: 'bob@shipblu.test', role: 'agent' },
+        ])
+        .returning({ id: agents.id });
+      const line = await channel({
+        type: 'whatsapp',
+        name: 'Nayera Mohamed',
+        config: coexistence('+20 12 78707918'),
+        ownerAgentId: nayera!.id,
+      });
+      // Covered by Bob: the work moved, the accountability did not.
+      const number = await numberTicket({
+        channel: 'whatsapp',
+        channelId: line,
+        accountableAgentId: nayera!.id,
+        assigneeAgentId: bob!.id,
+      });
+
+      const detail = await getConversation(agent, number);
+
+      expect(detail!.businessNumber).toEqual({
+        name: 'Nayera Mohamed',
+        displayNumber: '+20 12 78707918',
+        owner: { id: nayera!.id, name: 'نيرة محمد', active: true },
+      });
+      expect(detail!.accountable).toEqual({ id: nayera!.id, name: 'نيرة محمد', active: true });
+      expect(detail!.assigneeName).toBe('Bob');
+
+      // The object is serialised into the page: nothing of the stored config
+      // but the display number may ride along with it.
+      const shipped = JSON.stringify(detail);
+      expect(shipped).not.toContain('1070000000000001');
+      expect(shipped).not.toContain('2090000000000001');
+      expect(shipped).not.toContain('onboardedAt');
+    });
+
+    it('says when the owner and the accountable agent are deactivated', async () => {
+      const agent = await admin();
+      const [omar] = await db
+        .insert(agents)
+        .values({ name: 'Omar Former', email: 'omar.former@shipblu.test', isActive: false })
+        .returning({ id: agents.id });
+      const line = await channel({
+        type: 'whatsapp',
+        name: 'Omar line',
+        config: coexistence('+20 10 40204380'),
+        ownerAgentId: omar!.id,
+      });
+      const number = await numberTicket({
+        channel: 'whatsapp',
+        channelId: line,
+        accountableAgentId: omar!.id,
+        assigneeAgentId: omar!.id,
+      });
+
+      const detail = await getConversation(agent, number);
+
+      expect(detail!.accountable).toEqual({ id: omar!.id, name: 'Omar Former', active: false });
+      expect(detail!.businessNumber!.owner).toEqual({
+        id: omar!.id,
+        name: 'Omar Former',
+        active: false,
+      });
+    });
+
+    it('names a plain number without a display number, and the bot by its row', async () => {
+      const agent = await admin();
+      const plain = await channel({
+        type: 'whatsapp',
+        name: 'Support line',
+        config: { phoneNumberId: '1070000000000002' },
+      });
+      const bot = await channel({
+        type: 'whatsapp_bot',
+        name: 'Second bot',
+        config: { phoneNumberId: '1070000000000003' },
+      });
+
+      const onPlain = await getConversation(
+        agent,
+        await numberTicket({ channel: 'whatsapp', channelId: plain }),
+      );
+      const onBot = await getConversation(
+        agent,
+        await numberTicket({ channel: 'whatsapp_bot', channelId: bot }),
+      );
+
+      // The phone number id is Meta's id, not a number; a plain row has no
+      // other, so the badge names the channel and nothing more.
+      expect(onPlain!.businessNumber).toEqual({
+        name: 'Support line',
+        displayNumber: null,
+        owner: null,
+      });
+      expect(onPlain!.accountable).toBeNull();
+      expect(JSON.stringify(onPlain)).not.toContain('1070000000000002');
+      expect(onBot!.businessNumber).toEqual({
+        name: 'Second bot',
+        displayNumber: null,
+        owner: null,
+      });
+    });
+
+    it('names no number on a webchat ticket, or on a WhatsApp ticket filed before tickets knew theirs', async () => {
+      const agent = await admin();
+      const chat = await channel({ type: 'webchat', name: 'Website chat', config: {} });
+
+      const webchat = await getConversation(
+        agent,
+        await numberTicket({ channel: 'webchat', channelId: chat }),
+      );
+      const unplaced = await getConversation(
+        agent,
+        await numberTicket({ channel: 'whatsapp', channelId: null }),
+      );
+
+      expect(webchat!.businessNumber).toBeNull();
+      expect(webchat!.accountable).toBeNull();
+      expect(unplaced!.businessNumber).toBeNull();
+      expect(unplaced!.accountable).toBeNull();
     });
   });
 });

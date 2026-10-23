@@ -315,7 +315,7 @@ export default async function CsatReportPage({
               {namesAgents ? (
                 <Breakdown
                   title="By agent"
-                  hint="The agent the ticket was assigned to when its survey went out. A resolution counts against whoever held the ticket when its day was rolled up, so a ticket reassigned in between counts its survey and its resolve against different people."
+                  hint="The agent the ticket was assigned to when its survey went out. A resolution counts against the owner of the ticket's WhatsApp number when it has one, and otherwise against whoever held it when its day was rolled up — so an owned ticket somebody else worked, or any ticket reassigned in between, counts its survey and its resolve against different people, and their Resolutions surveyed reads low for one and blank for the other."
                   rows={agentRows.filter(hasSurveysOrResolutions)}
                 />
               ) : null}

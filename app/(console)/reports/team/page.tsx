@@ -64,7 +64,13 @@ export default async function TeamAvailabilityPage() {
             'Last activity',
             'Open',
             'Awaiting reply',
-            'Breached',
+            <>
+              Breached{' '}
+              <InfoTip label="Breached">
+                A ticket on a WhatsApp number with an owner counts against that owner whoever holds
+                it, so this can be more than Open.
+              </InfoTip>
+            </>,
             '',
           ]}
         >

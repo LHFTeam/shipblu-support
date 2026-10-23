@@ -99,6 +99,24 @@ describe('inboxViews', () => {
     expect(ids).toEqual(['mine']);
   });
 
+  // The owner of a WhatsApp number sees its tickets whoever holds them, so in
+  // no group — as production's owner is — Unassigned is what has arrived on
+  // her number and All includes what a colleague is working there.
+  it('gives the owner of a number in no group Unassigned and All, and no My groups', () => {
+    const ids = inboxViews({
+      canSeeBot: false,
+      canViewAll: false,
+      canViewGroups: true,
+      groups: [],
+      ownsNumbers: true,
+      canSeeRatings: false,
+    })
+      .flatMap((section) => section.items)
+      .map((item) => item.id);
+    expect(ids.slice(0, 3)).toEqual(['mine', 'unassigned', 'all']);
+    expect(ids).not.toContain('groups');
+  });
+
   it('offers My groups only to a member of one, and a view per group only where there are several', () => {
     const items = (groups: typeof GROUPS) =>
       inboxViews({ ...everything, groups }).flatMap((section) => section.items);
@@ -217,6 +235,19 @@ describe('activeViewId', () => {
     expect(activeViewId(theirs, parseFilters({}), own)).toBe('mine');
     expect(activeViewId(theirs, parseFilters({ view: 'mine', channel: 'email' }), own)).toBe(
       'ch-email',
+    );
+  });
+
+  it('keeps All and Mine apart for the owner of a number, in no group', () => {
+    const owner = { canViewAll: false, canViewGroups: true, groups: [], ownsNumbers: true };
+    const theirs = inboxViews({ canSeeBot: false, canSeeRatings: false, ...owner });
+    expect(activeViewId(theirs, parseFilters({}), owner)).toBe('all');
+    expect(activeViewId(theirs, parseFilters({ view: 'mine' }), owner)).toBe('mine');
+    expect(activeViewId(theirs, parseFilters({ view: 'unassigned' }), owner)).toBe('unassigned');
+    // A channel view is All on that channel, and Mine on it is the selects' own.
+    expect(activeViewId(theirs, parseFilters({ channel: 'whatsapp' }), owner)).toBe('ch-whatsapp');
+    expect(activeViewId(theirs, parseFilters({ view: 'mine', channel: 'whatsapp' }), owner)).toBe(
+      null,
     );
   });
 

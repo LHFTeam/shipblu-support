@@ -179,3 +179,29 @@ BEGIN
       );
   END IF;
 END $$;
+
+-- --------------------------------------------------------------------------
+-- Only a WhatsApp number can belong to a person
+--
+-- `channels.owner_agent_id` names the team member a business number was handed
+-- to, and every ticket arriving on it is stamped as theirs to answer for. That
+-- is a fact about a number one person answers from. The bot's number is a
+-- self-service funnel nobody replies on, and a mailbox or a Page is read by the
+-- whole team; nothing reads an owner off any of them, so one there would be a
+-- setting the console shows and nothing honours — until the day a reader is
+-- added, when a team inbox's breaches would start landing on one person.
+--
+-- `handOverNumber` refuses any other type before it writes. This is the half
+-- that also holds for an UPDATE nobody wrote a code path for.
+-- --------------------------------------------------------------------------
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'channels_owner_only_whatsapp'
+  ) THEN
+    ALTER TABLE channels
+      ADD CONSTRAINT channels_owner_only_whatsapp CHECK (
+        owner_agent_id IS NULL OR type = 'whatsapp'
+      );
+  END IF;
+END $$;

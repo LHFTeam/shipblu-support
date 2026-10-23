@@ -39,6 +39,14 @@ describe('realtime SQL producer contract', () => {
     );
   });
 
+  // Who answers for a ticket decides who may see it (`answerableBy`), so a
+  // handover that moves only that column must reach the queues as a
+  // reassignment does — or the new owner's list lacks the tickets that now
+  // count against them until they reload.
+  it('treats a change of who is accountable as a queue change', () => {
+    expect(code).toContain('OLD.accountable_agent_id IS DISTINCT FROM NEW.accountable_agent_id');
+  });
+
   it('emits no global topic, so one write cannot wake every browser', () => {
     // The regression §6.23 was about: a single `conversation_changed` reaching
     // every console and widget turned one message insert into a full inbox

@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { db } from '@/db/client';
 import {
   agents,
+  channels,
   contacts,
   conversationEvents,
   conversations,
@@ -195,5 +196,85 @@ describe('assignSweep: reclaiming an unanswered ticket', () => {
     await assignSweep();
 
     expect(await outcome(id)).toEqual({ assigneeAgentId: agentId, reclaimed: [] });
+  });
+});
+
+/**
+ * A WhatsApp number's owner answers from the phone with the console closed, so
+ * the presence the reclaim pass measures says nothing about them. Their own
+ * tickets stay with them while they are active; everything else about an owned
+ * ticket is reclaimed as before.
+ */
+describe('assignSweep: reclaiming on a number that belongs to somebody', () => {
+  async function owner(state: AgentState): Promise<string> {
+    const [row] = await db
+      .insert(agents)
+      .values({ name: 'Nayera', email: 'nayera@shipblu.test', ...state })
+      .returning({ id: agents.id });
+    return row!.id;
+  }
+
+  async function ownedNumber(ownerAgentId: string): Promise<string> {
+    const [row] = await db
+      .insert(channels)
+      .values({ type: 'whatsapp', name: 'Nayera Mohamed', ownerAgentId, config: {} })
+      .returning({ id: channels.id });
+    return row!.id;
+  }
+
+  it('never takes an owned ticket from its owner while they are active', async () => {
+    const nayera = await owner({ presence: 'offline', lastSeenAt: minutesAgo(30) });
+    const channelId = await ownedNumber(nayera);
+    const id = await assignedTicket(nayera, {
+      channel: 'whatsapp',
+      channelId,
+      accountableAgentId: nayera,
+    });
+
+    await assignSweep();
+
+    expect(await outcome(id)).toEqual({ assigneeAgentId: nayera, reclaimed: [] });
+  });
+
+  // Reclaimed, and then the rota: the group has nobody in it, so it waits.
+  it('takes it back from an owner who has been deactivated', async () => {
+    const nayera = await owner({
+      presence: 'offline',
+      lastSeenAt: minutesAgo(30),
+      isActive: false,
+    });
+    const channelId = await ownedNumber(nayera);
+    const id = await assignedTicket(nayera, {
+      channel: 'whatsapp',
+      channelId,
+      accountableAgentId: nayera,
+    });
+
+    await assignSweep();
+
+    expect(await outcome(id)).toEqual({
+      assigneeAgentId: null,
+      reclaimed: [{ from: nayera, afterMins: WAIT_MINS }],
+    });
+  });
+
+  // Somebody else holding the owner's ticket is measured like anybody — and
+  // once it is back in the queue, the same run hands it to the owner.
+  it('takes an owned ticket back from somebody else, and gives it to the owner', async () => {
+    const nayera = await owner({ presence: 'offline', lastSeenAt: minutesAgo(30) });
+    const omar = await agent({ presence: 'offline', lastSeenAt: minutesAgo(30) });
+    const channelId = await ownedNumber(nayera);
+    const id = await assignedTicket(omar, {
+      channel: 'whatsapp',
+      channelId,
+      accountableAgentId: nayera,
+    });
+
+    await assignSweep();
+
+    expect(await outcome(id)).toEqual({
+      assigneeAgentId: nayera,
+      reclaimed: [{ from: omar, afterMins: WAIT_MINS }],
+    });
   });
 });

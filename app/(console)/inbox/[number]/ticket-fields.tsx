@@ -16,11 +16,14 @@ import { useFieldAction } from './use-field-action';
  */
 export function SidebarField({
   label,
+  info,
   hint,
   as = 'block',
   children,
 }: {
   label: string;
+  /** An `InfoTip` beside the label, for a field whose meaning a word cannot carry. */
+  info?: React.ReactNode;
   hint?: React.ReactNode;
   /**
    * `group` for a set of controls one label cannot belong to — the checkboxes
@@ -34,6 +37,7 @@ export function SidebarField({
     <div {...(as === 'group' ? { role: 'group', 'aria-label': label } : {})}>
       <p className="mb-1 flex items-center gap-1 text-xs font-medium text-(--color-text-secondary)">
         {label}
+        {info}
       </p>
       {children}
       {hint ? <p className="mt-1 text-xs text-(--color-text-secondary)">{hint}</p> : null}

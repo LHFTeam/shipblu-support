@@ -53,7 +53,9 @@ export function AgentLoad({
               Breached{' '}
               <InfoTip label="Breached">
                 Past a first-response or resolution target already, counted in the working hours the
-                ticket&rsquo;s SLA policy uses rather than in wall-clock time.
+                ticket&rsquo;s SLA policy uses rather than in wall-clock time. A ticket on a
+                WhatsApp number with an owner counts against that owner whoever holds it, so this
+                can be more than Open.
               </InfoTip>
             </>,
             <>

@@ -110,6 +110,17 @@ Design decisions worth knowing before changing things:
   invariant is what makes a reopened ticket stick to the agent who handled it and what
   stops the five-minute sweep from shuffling work under people mid-reply. It is also why
   the sweep can safely re-examine the whole backlog: for nearly every ticket it is a read.
+- **A WhatsApp number can belong to a person, and a ticket remembers whose it was.** A
+  team member handed a business number answers its customers from the phone and answers
+  for its tickets' SLA. So a WhatsApp message threads on the customer _and_ the number
+  they wrote to — two numbers, two tickets — and a ticket carries
+  `accountable_agent_id` beside its assignee: reassigning moves the work, and the breach
+  stays with the number's owner. It is frozen onto the ticket rather than read off the
+  number when a report runs, because ownership changes and the nightly rollup rebuilds
+  three days from current state. Handing a number over, and reopening a ticket after
+  one, are the exceptions to the bullet above: each does replace an assignee, but only
+  where the previous owner or nobody held the ticket.
+  See `plans/whatsapp-number-ownership.md`.
 - **Presence has exactly one writer.** `agents.presence` is set by the lightweight SSE
   stream at `/api/presence` and nothing else — a stream is open or it is not. Inbox
   invalidations are separate, so viewing Contacts or Admin still counts as present and
@@ -132,7 +143,8 @@ Design decisions worth knowing before changing things:
   who is holding what, what is about to breach — because a page that refreshes itself
   every twenty seconds must never run an aggregate over the archive.
 - **Social messages and comments thread differently.** A Facebook or Instagram DM
-  threads on the customer, like WhatsApp — one live ticket per person per platform. A
+  threads on the customer — one live ticket per person per platform — as a WhatsApp
+  message does on each of our numbers (above). A
   comment threads on the root of its reply chain, so a customer commenting on two posts
   gets two tickets, each needing its own public answer. Meta echoes our own outbound
   messages back to us, and dropping those is what stops an agent replying to themselves.
@@ -378,6 +390,12 @@ either the SQL that loads those rows or the strategy that picks between them.
   reply, and only in an `open` status. Once an agent has answered, the thread is theirs:
   pulling it out from under a half-written follow-up is worse for the customer than a slow
   response. A `pending` ticket is waiting on the customer, not on us.
+- **The owner of a WhatsApp number is outside all of this.** An unassigned ticket on a
+  number that belongs to somebody goes straight back to them while they are active — no
+  group, strategy, hours, presence, cap or skill is asked, and no cursor moves — and
+  reclaiming never takes their own number's ticket from them. Every one of those gates
+  measures the console, and the owner answers from the phone with it closed. A rule
+  naming a group still moves the ticket there.
 - **Escalation finally reads `groups.escalate_to_agent_id`**, which has been in the schema
   since the first migration with a comment describing exactly this and no code behind it.
   It means what it means in the SLA sweep — the named agent becomes a watcher and the

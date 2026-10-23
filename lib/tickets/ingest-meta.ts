@@ -29,9 +29,9 @@ import { requireDefaultOpenStatusId } from './statuses';
  *
  * Two threading rules, because the two kinds of event are not the same thing:
  *
- * - A **direct message** threads on the customer, exactly like WhatsApp. One
- *   live conversation per person per platform, so the console reads as a chat
- *   rather than as a ticket per message.
+ * - A **direct message** threads on the customer, as WhatsApp does on each of
+ *   our numbers. One live conversation per person per platform, so the console
+ *   reads as a chat rather than as a ticket per message.
  *
  * - A **comment** threads on the comment it belongs to. One ticket per
  *   top-level comment and its replies, keyed on the root comment id, so a
@@ -71,7 +71,7 @@ export async function ingestMetaMessage(
   }
 
   const channel = await channelFor(message.platform);
-  const existing = await findLiveConversation(contactId, message.platform);
+  const existing = await findLiveConversation(contactId, { channel: message.platform });
 
   const result = await db.transaction(async (tx) => {
     let conversationId: string;
@@ -385,7 +385,7 @@ export async function applyMetaInteraction(interaction: NormalisedInteraction): 
   const contactId = await findContactByIdentity(interaction.platform, interaction.from);
   if (!contactId) return false;
 
-  const existing = await findLiveConversation(contactId, interaction.platform);
+  const existing = await findLiveConversation(contactId, { channel: interaction.platform });
   if (!existing) return false;
 
   const type = `meta_${interaction.kind}`;

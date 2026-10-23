@@ -1,6 +1,6 @@
 import { and, asc, eq, exists, isNull, notInArray, sql, type SQL } from 'drizzle-orm';
 import { db } from '@/db/client';
-import { conversations, groupMembers, groups } from '@/db/schema';
+import { channels, conversations, groupMembers, groups } from '@/db/schema';
 import type { SessionAgent } from '@/lib/auth/session';
 import { can } from '@/lib/auth/permissions';
 import { heldByOrInGroupsOf } from './assignment-scope';
@@ -31,8 +31,9 @@ export function conversationVisibility(agent: SessionAgent): SQL[] {
 
 /**
  * Which tickets an agent may see by who holds them, decided from their
- * permissions: undefined for every ticket, otherwise their own, and — with
- * `ticket.view.group` — every ticket sitting in a group they belong to,
+ * permissions: undefined for every ticket, otherwise their own — held by them,
+ * accountable to them or on a WhatsApp number they own — and, with
+ * `ticket.view.group`, every ticket sitting in a group they belong to,
  * whoever holds it or whether anybody does.
  *
  * The group half is what makes a group a queue. Without it a ticket routed into
@@ -112,6 +113,26 @@ export async function inboxGroupsFor(
     .from(groups)
     .where(viewAll ? undefined : member)
     .orderBy(asc(groups.name));
+}
+
+/**
+ * Whether the agent owns a WhatsApp number, which the inbox asks to decide
+ * whether their All is wider than Mine: `heldByOrInGroupsOf` shows an owner
+ * every ticket on their number, so one in no group still has an Unassigned and
+ * an All worth offering (`inboxViews`).
+ *
+ * Ownership rather than "is anything on it open right now", so the views an
+ * owner is offered do not appear and vanish as their number's queue fills and
+ * empties. Asked of the same column the predicate reads, and like it read
+ * fresh each request, so a handover changes the views at the next page.
+ */
+export async function ownsANumber(agent: SessionAgent): Promise<boolean> {
+  const rows = await db
+    .select({ one: sql<number>`1` })
+    .from(channels)
+    .where(eq(channels.ownerAgentId, agent.id))
+    .limit(1);
+  return rows.length > 0;
 }
 
 /**

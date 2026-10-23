@@ -5,6 +5,9 @@ import { Avatar } from '@/components/avatar';
 import { ChannelBadge } from '@/components/channel';
 import { DetailsSection, Property, PropertyList } from '@/components/details-section';
 import { RelativeTime } from '@/components/relative-time';
+import { InfoTip } from '@/components/tooltip';
+import { Badge } from '@/components/ui';
+import { accountableNote } from '@/lib/tickets/accountable-note';
 import type { ConversationDetail } from '@/lib/tickets/conversation';
 import type { TicketFieldDef } from '@/lib/tickets/custom-fields';
 import type { CategoryOption, RootCauseOption } from '@/lib/categorise/queries';
@@ -91,6 +94,41 @@ export function Sidebar({
               .filter((s) => canClose || s.category !== 'closed' || s.id === conversation.statusId)
               .map((s) => ({ value: s.id, label: s.name }))}
           />
+        </SidebarField>
+
+        {/*
+          Read-only, and above Assignee because it is the question the
+          assignee picker cannot answer: on an owned WhatsApp number the two
+          are different people as soon as somebody covers a ticket, and an
+          agent reassigning one should know before they press it that the
+          breach stays where it is.
+        */}
+        <SidebarField
+          label="Accountable"
+          info={
+            <InfoTip label="who is accountable">
+              Whose SLA breaches this ticket counts against. On a WhatsApp number with an owner,
+              that is the owner, whoever holds the ticket; on anything else, whoever holds it.
+              Reassigning moves the work and not this, and unassigning hands the ticket straight
+              back to whoever is accountable for it, while they are active.
+            </InfoTip>
+          }
+          hint={accountableNote(conversation.accountable, conversation.businessNumber)}
+        >
+          {conversation.accountable ? (
+            <p className="flex min-w-0 items-center gap-1.5 text-sm text-(--color-text-primary)">
+              <span dir="auto" className="min-w-0 truncate">
+                {conversation.accountable.name}
+              </span>
+              {conversation.accountable.active ? null : (
+                <span className="inline-flex shrink-0">
+                  <Badge tone="warning">Deactivated</Badge>
+                </span>
+              )}
+            </p>
+          ) : (
+            <p className="text-sm text-(--color-text-secondary)">Whoever holds it</p>
+          )}
         </SidebarField>
 
         <SidebarField label="Assignee">

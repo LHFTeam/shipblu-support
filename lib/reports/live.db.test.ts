@@ -2,14 +2,15 @@ import { eq } from 'drizzle-orm';
 import { DateTime } from 'luxon';
 import { describe, expect, it } from 'vitest';
 import { db } from '@/db/client';
-import { contacts, conversations, messages, ticketStatuses } from '@/db/schema';
+import { agents, contacts, conversations, messages, ticketStatuses } from '@/db/schema';
 import { withCleanDatabase } from '@/lib/testing/db';
-import { todayByHour } from './live';
+import { agentLoad, todayByHour } from './live';
 
 /**
  * The live report's hourly volume, the one figure on it counted from messages
  * rather than tickets — so the one that has to say for itself which rows are
- * traffic.
+ * traffic. And the board of who is carrying what, the one table on it keyed on
+ * two different people per ticket.
  */
 
 withCleanDatabase();
@@ -17,17 +18,21 @@ withCleanDatabase();
 const ZONE = 'Africa/Cairo';
 const NOW = DateTime.fromISO('2026-10-13T12:30', { zone: ZONE });
 
-async function ticket(channel: 'whatsapp' | 'email'): Promise<string> {
+async function ticket(
+  channel: 'whatsapp' | 'email',
+  values: Partial<typeof conversations.$inferInsert> & { status?: string } = {},
+): Promise<string> {
+  const { status = 'Open', ...rest } = values;
   const [contact] = await db.insert(contacts).values({ name: 'Amira' }).returning();
-  const [open] = await db
+  const [row] = await db
     .select({ id: ticketStatuses.id })
     .from(ticketStatuses)
-    .where(eq(ticketStatuses.name, 'Open'));
-  const [row] = await db
+    .where(eq(ticketStatuses.name, status));
+  const [inserted] = await db
     .insert(conversations)
-    .values({ channel, statusId: open!.id, requesterContactId: contact!.id })
+    .values({ channel, statusId: row!.id, requesterContactId: contact!.id, ...rest })
     .returning({ id: conversations.id });
-  return row!.id;
+  return inserted!.id;
 }
 
 describe('todayByHour', () => {
@@ -75,6 +80,60 @@ describe('todayByHour', () => {
       hour: 11,
       inbound: 2,
       outbound: 1,
+    });
+  });
+});
+
+describe('agentLoad', () => {
+  // The board's Breached column must name the person tomorrow's report files
+  // the breach under, while Open and Waiting on us stay the capacity check's
+  // count of what each person holds.
+  it('counts a breach against the number’s owner and the work against whoever holds it', async () => {
+    const [nayera, bob] = await db
+      .insert(agents)
+      .values([
+        { name: 'Nayera', email: 'nayera@shipblu.test', role: 'agent' },
+        { name: 'Bob', email: 'bob@shipblu.test', role: 'agent' },
+      ])
+      .returning({ id: agents.id });
+    const waiting = { lastCustomerMessageAt: NOW.minus({ hours: 2 }).toJSDate() };
+
+    // Nayera's number, Bob working it, past its first-response target and
+    // waiting on a reply.
+    await ticket('whatsapp', {
+      accountableAgentId: nayera!.id,
+      assigneeAgentId: bob!.id,
+      firstResponseBreached: true,
+      ...waiting,
+    });
+    // Nayera's number, nobody holding it, past its resolution target.
+    await ticket('whatsapp', { accountableAgentId: nayera!.id, resolutionBreached: true });
+    // Bob's own, on a team number: his breach, as before owners existed.
+    await ticket('email', { assigneeAgentId: bob!.id, firstResponseBreached: true });
+    // Bob's and on time.
+    await ticket('email', { assigneeAgentId: bob!.id });
+    // Nayera's, breached and resolved since: out of the live backlog altogether.
+    await ticket('whatsapp', {
+      accountableAgentId: nayera!.id,
+      assigneeAgentId: nayera!.id,
+      firstResponseBreached: true,
+      status: 'Resolved',
+    });
+
+    const load = await agentLoad();
+    const row = (id: string) => load.find((agent) => agent.id === id);
+
+    expect(row(nayera!.id)).toMatchObject({
+      open: 0,
+      awaitingReply: 0,
+      breached: 2,
+      oldestWaitingSince: null,
+    });
+    expect(row(bob!.id)).toMatchObject({
+      open: 3,
+      awaitingReply: 1,
+      breached: 1,
+      oldestWaitingSince: waiting.lastCustomerMessageAt,
     });
   });
 });
