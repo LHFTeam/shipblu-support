@@ -17,7 +17,7 @@ export const dynamic = 'force-dynamic';
  * subcategory lives in `lib/subcategorise/rules.ts`, compiled, with tests. A
  * regular expression typed into a form is a production incident with no review.
  *
- * Nothing on this page deletes. The foreign key from `conversation_categories`
+ * Nothing on this page deletes. The foreign key from `conversation_subcategories`
  * is `restrict`, so a subcategory with tickets behind it cannot be removed at
  * all — it is deactivated, which takes it out of the picker and leaves every
  * report ever drawn from it still readable.

@@ -101,15 +101,15 @@ export async function runLabels(
     last_at: string | null;
   }>(sql`
     SELECT
-      ai_category_runs.run_label AS run_label,
+      ai_subcategory_runs.run_label AS run_label,
       count(*) AS rows,
-      count(*) FILTER (WHERE ai_category_runs.error IS NOT NULL) AS failed,
-      max(ai_category_runs.created_at) AS last_at
-    FROM ai_category_runs
-    JOIN conversations ON conversations.id = ai_category_runs.conversation_id
+      count(*) FILTER (WHERE ai_subcategory_runs.error IS NOT NULL) AS failed,
+      max(ai_subcategory_runs.created_at) AS last_at
+    FROM ai_subcategory_runs
+    JOIN conversations ON conversations.id = ai_subcategory_runs.conversation_id
     WHERE true${gate}
     GROUP BY 1
-    ORDER BY max(ai_category_runs.created_at) DESC
+    ORDER BY max(ai_subcategory_runs.created_at) DESC
     LIMIT 50
   `);
 
@@ -145,22 +145,22 @@ export async function reportFor(
       conversations.channel::text AS channel,
       CASE WHEN messages.body_text ~ '[؀-ۿ]' THEN 'arabic' ELSE 'other' END AS script,
       count(*) AS rows,
-      count(*) FILTER (WHERE ai_category_runs.error IS NULL) AS predicted,
-      count(*) FILTER (WHERE ai_category_runs.error IS NOT NULL) AS failed,
-      count(*) FILTER (WHERE ${UNCLASSIFIED_KEY} = any(ai_category_runs.rules_keys))
+      count(*) FILTER (WHERE ai_subcategory_runs.error IS NULL) AS predicted,
+      count(*) FILTER (WHERE ai_subcategory_runs.error IS NOT NULL) AS failed,
+      count(*) FILTER (WHERE ${UNCLASSIFIED_KEY} = any(ai_subcategory_runs.rules_keys))
         AS rules_unclassified,
       count(*) FILTER (
-        WHERE ${UNCLASSIFIED_KEY} = any(ai_category_runs.rules_keys)
-          AND ai_category_runs.predicted_key IS NOT NULL
-          AND ai_category_runs.predicted_key <> ${UNCLASSIFIED_KEY}
+        WHERE ${UNCLASSIFIED_KEY} = any(ai_subcategory_runs.rules_keys)
+          AND ai_subcategory_runs.predicted_key IS NOT NULL
+          AND ai_subcategory_runs.predicted_key <> ${UNCLASSIFIED_KEY}
       ) AS named_where_rules_gave_up,
-      count(*) FILTER (WHERE ai_category_runs.predicted_key = any(ai_category_runs.rules_keys))
+      count(*) FILTER (WHERE ai_subcategory_runs.predicted_key = any(ai_subcategory_runs.rules_keys))
         AS agreed,
-      avg(ai_category_runs.confidence) AS avg_confidence
-    FROM ai_category_runs
-    JOIN conversations ON conversations.id = ai_category_runs.conversation_id
-    LEFT JOIN messages ON messages.id = ai_category_runs.message_id
-    WHERE ai_category_runs.run_label = ${runLabel}${gate}
+      avg(ai_subcategory_runs.confidence) AS avg_confidence
+    FROM ai_subcategory_runs
+    JOIN conversations ON conversations.id = ai_subcategory_runs.conversation_id
+    LEFT JOIN messages ON messages.id = ai_subcategory_runs.message_id
+    WHERE ai_subcategory_runs.run_label = ${runLabel}${gate}
     GROUP BY 1, 2
     ORDER BY count(*) DESC
   `);
@@ -173,39 +173,39 @@ export async function reportFor(
   }>(sql`
     SELECT
       CASE
-        WHEN ai_category_runs.confidence IS NULL THEN 'unreported'
-        WHEN ai_category_runs.confidence >= 0.9 THEN '0.90 and up'
-        WHEN ai_category_runs.confidence >= 0.7 THEN '0.70 to 0.89'
-        WHEN ai_category_runs.confidence >= 0.5 THEN '0.50 to 0.69'
+        WHEN ai_subcategory_runs.confidence IS NULL THEN 'unreported'
+        WHEN ai_subcategory_runs.confidence >= 0.9 THEN '0.90 and up'
+        WHEN ai_subcategory_runs.confidence >= 0.7 THEN '0.70 to 0.89'
+        WHEN ai_subcategory_runs.confidence >= 0.5 THEN '0.50 to 0.69'
         ELSE 'below 0.50'
       END AS band,
       count(*) AS rows,
-      count(*) FILTER (WHERE ai_category_runs.predicted_key = ${UNCLASSIFIED_KEY})
+      count(*) FILTER (WHERE ai_subcategory_runs.predicted_key = ${UNCLASSIFIED_KEY})
         AS said_unclassified,
-      count(*) FILTER (WHERE ai_category_runs.predicted_key = any(ai_category_runs.rules_keys))
+      count(*) FILTER (WHERE ai_subcategory_runs.predicted_key = any(ai_subcategory_runs.rules_keys))
         AS agreed_with_rules
-    FROM ai_category_runs
-    JOIN conversations ON conversations.id = ai_category_runs.conversation_id
-    WHERE ai_category_runs.run_label = ${runLabel} AND ai_category_runs.error IS NULL${gate}
+    FROM ai_subcategory_runs
+    JOIN conversations ON conversations.id = ai_subcategory_runs.conversation_id
+    WHERE ai_subcategory_runs.run_label = ${runLabel} AND ai_subcategory_runs.error IS NULL${gate}
     GROUP BY 1
     -- Ordered by the band's own floor, not by its label: sorting the text puts
     -- "below 0.50" above "0.90 and up", which reads as the opposite of the point.
-    ORDER BY min(ai_category_runs.confidence) DESC NULLS LAST
+    ORDER BY min(ai_subcategory_runs.confidence) DESC NULLS LAST
   `);
 
   const disagreements = await db.execute<{ ai_key: string; rules_key: string; rows: string }>(sql`
     SELECT
-      coalesce(ai_category_runs.predicted_key, '(none)') AS ai_key,
+      coalesce(ai_subcategory_runs.predicted_key, '(none)') AS ai_key,
       CASE
-        WHEN ${UNCLASSIFIED_KEY} = any(ai_category_runs.rules_keys) THEN ${UNCLASSIFIED_KEY}
-        ELSE coalesce(ai_category_runs.rules_keys[1], '(none)')
+        WHEN ${UNCLASSIFIED_KEY} = any(ai_subcategory_runs.rules_keys) THEN ${UNCLASSIFIED_KEY}
+        ELSE coalesce(ai_subcategory_runs.rules_keys[1], '(none)')
       END AS rules_key,
       count(*) AS rows
-    FROM ai_category_runs
-    JOIN conversations ON conversations.id = ai_category_runs.conversation_id
-    WHERE ai_category_runs.run_label = ${runLabel}
-      AND ai_category_runs.error IS NULL
-      AND NOT (ai_category_runs.predicted_key = any(ai_category_runs.rules_keys))${gate}
+    FROM ai_subcategory_runs
+    JOIN conversations ON conversations.id = ai_subcategory_runs.conversation_id
+    WHERE ai_subcategory_runs.run_label = ${runLabel}
+      AND ai_subcategory_runs.error IS NULL
+      AND NOT (ai_subcategory_runs.predicted_key = any(ai_subcategory_runs.rules_keys))${gate}
     GROUP BY 1, 2
     ORDER BY count(*) DESC
     LIMIT 15
@@ -224,17 +224,17 @@ export async function reportFor(
   }>(sql`
     SELECT
       count(*) AS rows,
-      count(*) FILTER (WHERE ai_category_runs.error IS NULL) AS predicted,
-      count(*) FILTER (WHERE ai_category_runs.error IS NOT NULL) AS failed,
-      coalesce(sum(ai_category_runs.input_tokens), 0) AS input_tokens,
-      avg(ai_category_runs.latency_ms) AS avg_latency_ms,
-      min(ai_category_runs.created_at) AS first_at,
-      max(ai_category_runs.created_at) AS last_at,
-      count(*) FILTER (WHERE ai_category_runs.with_context) AS with_context,
-      array_remove(array_agg(DISTINCT ai_category_runs.model), NULL) AS models
-    FROM ai_category_runs
-    JOIN conversations ON conversations.id = ai_category_runs.conversation_id
-    WHERE ai_category_runs.run_label = ${runLabel}${gate}
+      count(*) FILTER (WHERE ai_subcategory_runs.error IS NULL) AS predicted,
+      count(*) FILTER (WHERE ai_subcategory_runs.error IS NOT NULL) AS failed,
+      coalesce(sum(ai_subcategory_runs.input_tokens), 0) AS input_tokens,
+      avg(ai_subcategory_runs.latency_ms) AS avg_latency_ms,
+      min(ai_subcategory_runs.created_at) AS first_at,
+      max(ai_subcategory_runs.created_at) AS last_at,
+      count(*) FILTER (WHERE ai_subcategory_runs.with_context) AS with_context,
+      array_remove(array_agg(DISTINCT ai_subcategory_runs.model), NULL) AS models
+    FROM ai_subcategory_runs
+    JOIN conversations ON conversations.id = ai_subcategory_runs.conversation_id
+    WHERE ai_subcategory_runs.run_label = ${runLabel}${gate}
   `);
 
   const total = totals[0];

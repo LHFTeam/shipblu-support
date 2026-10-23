@@ -113,7 +113,12 @@ export function planDays(
 
   if (!start.isValid || !end.isValid || start > end) return { days: [], skipped: 0 };
 
-  const span = Math.floor(end.diff(start, 'days').days) + 1;
+  // Counted on the calendar dates, not the instants between them. A range that
+  // starts on a Cairo spring-forward day starts at 01:00, so luxon's day diff
+  // from it to the next midnight is 23 hours rather than a day, and flooring it
+  // dropped that day with nothing in `skipped` to say so
+  // (`docs/PROJECT-STATE.md` §6.101).
+  const span = datesFrom(start, end) + 1;
   const kept = Math.min(span, MAX_DAYS);
 
   // Newest first, so a truncated rebuild fixes the days most likely to be read.
@@ -121,6 +126,12 @@ export function planDays(
     days: Array.from({ length: kept }, (_, offset) => end.minus({ days: offset }).toISODate()!),
     skipped: span - kept,
   };
+}
+
+/** How many dates `end`'s is after `start`'s, read as dates in UTC as `windowDays` reads them. */
+function datesFrom(start: DateTime, end: DateTime): number {
+  const date = (at: DateTime) => DateTime.fromISO(at.toISODate()!, { zone: 'utc' });
+  return date(end).diff(date(start), 'days').days;
 }
 
 /**
@@ -214,7 +225,7 @@ export async function rollupMetrics(job?: ClaimedJob): Promise<void> {
       // nightly jobs would be two answers to "which day is this". Rebuilt by
       // delete and insert like the others, and safe to destroy for the same
       // reason — `conversations.created_at` is immutable and
-      // `conversation_categories.first_seen_at` is append-only, so every column
+      // `conversation_subcategories.first_seen_at` is append-only, so every column
       // can be recomputed from scratch. The column that would break that is
       // "suggestions still open", which is why it is not there. `resolved_at`
       // is not immutable: a close keeps it (`resolveStamp`), but every resolve

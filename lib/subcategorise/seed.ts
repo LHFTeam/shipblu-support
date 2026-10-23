@@ -122,12 +122,12 @@ export async function syncTaxonomy(): Promise<SeedOutcome> {
  * of those is fine; the distinction is `is_detectable`.
  */
 export async function subcategoryUsage(): Promise<Map<string, number>> {
-  const rows = await db.execute<{ category_key: string; used: number }>(
-    sql`select category_key, count(*)::int as used
-        from conversation_categories
+  const rows = await db.execute<{ subcategory_key: string; used: number }>(
+    sql`select subcategory_key, count(*)::int as used
+        from conversation_subcategories
         where review_state <> 'rejected'
-        group by category_key`,
+        group by subcategory_key`,
   );
 
-  return new Map(rows.map((row) => [row.category_key, row.used]));
+  return new Map(rows.map((row) => [row.subcategory_key, row.used]));
 }

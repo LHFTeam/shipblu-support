@@ -61,14 +61,16 @@ held is folded in. The support lead answered every open question on
 2026-10-20; [Decisions taken](#decisions-taken-with-the-support-lead-2026-10-20)
 records the answers, and the plan below already reflects them.
 
-## Status and handoff (2026-10-23, 21:10 UTC)
+## Status and handoff
 
-A session picking this plan up starts here. Everything after this section is
-the design as it was reasoned and as each stage was built. This section says
-where the work stands, what comes next and how, and what has already bitten.
-Whoever moves any of it updates this section in the same PR. Every figure here
-was read from production, Render or GitHub at the time in the heading:
-re-read before acting on one.
+As of 2026-10-23, 22:00 UTC. A session picking this plan up starts here.
+Everything after this section is the design as it was reasoned and as each stage
+was built. This section says where the work stands, what comes next and how, and
+what has already bitten. Whoever moves any of it updates this section in the
+same PR. Every figure here was read from production, Render or GitHub at that
+time, or at the time it gives: re-read before acting on one. The time is on this
+line rather than in the heading so that links to the section survive each
+update.
 
 ### Where it stands
 
@@ -76,10 +78,60 @@ re-read before acting on one.
 | ----- | ------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 0     | Merged: #386 (`01488c9`)                                                                                                                    | Live since 2026-10-20. Its two operational steps were never done (below)                                                                                                                           |
 | 1.1   | Merged: #387, then `dev` → `main` in #389 (`1f89219`)                                                                                       | Live since 2026-10-21 10:13 UTC                                                                                                                                                                    |
-| 1.2   | Merged: #391 (`31f7379`) and follow-up #392 (`7b7d276`), then `dev` → `main` in #393 (`634a28d`), which also carried another session's #390 | **Done.** All six services live on `634a28d` by 17:38 UTC, worker first. The user ran the backfill and the rollup from a shell, so neither left a `jobs` row. Every check that follows reads clean |
+| 1.2   | Merged: #391 (`31f7379`) and follow-up #392 (`7b7d276`), then `dev` → `main` in #393 (`634a28d`), which also carried another session's #390 | **Done.** All six services live on `634a28d` by 17:38 UTC on 2026-10-21, worker first. The user ran the backfill and the rollup from a shell, leaving no `jobs` row. Every check below reads clean |
 | 1.3   | Merged: #395 (`58c5ed9`), then `dev` → `main` in #397 (`447d8be`), which also carried #394, #396 and #398. As built below                   | **Done.** All six services live on `447d8be` by 18:36 UTC, web first. Its checks read clean (below), though no comment has arrived since                                                           |
-| 2.A   | In review: #400 (`claude/epic-heisenberg-w60nbl`), no migration. As built below                                                             | Not deployed. Ships with the next `dev` → `main` merge, after its "Before" step (Deploying 2.A)                                                                                                    |
-| 2.B–6 | Not started                                                                                                                                 | —                                                                                                                                                                                                  |
+| 2.A   | Merged into `dev`: #400 (`a558c5b`), no migration. As built below                                                                           | Not deployed. Ships with the next `dev` → `main` merge, after its "Before" step (Deploying 2.A)                                                                                                    |
+| 2.B   | In review: #403 (`claude/stage-2b-subcategory-sql`): migration `0046`, `db/sql/002`, a runbook. As built below                              | Not deployed. Merges only after 2.A's release is on all six services (1.3 and #396 already are), then deploys alone in a maintenance window (Deploying 2.B)                                        |
+| 3–6   | Not started                                                                                                                                 | —                                                                                                                                                                                                  |
+
+**1.3's deploy, read on Render and production on 2026-10-23.**
+
+- **The release.** #397 merged `dev` (`e7376bf`) into `main` at 18:28:11 UTC
+  as `447d8be`. It carried #396 beside 1.3, and #396's migration 0044 adds
+  columns that its worker and cron code reads (0045 adds an index). So rule 7
+  asked for web first on #396's account, beside 1.3's own reason for it: only
+  web's preDeploy replays `db/sql`. An earlier version of this section said
+  the merge shipped only #394 beside 1.3 and that rule 7 asked nothing more of
+  the deploy order. That was written before #396 landed on `dev`.
+- **The order held.** Each service was deployed by hand on `447d8be`:
+
+  | Service                          | Deploy                     | Started  | Live     |
+  | -------------------------------- | -------------------------- | -------- | -------- |
+  | web `shipblu-support`            | `dep-dbdqf4t9fdbs738ak5cg` | 18:29:39 | 18:33:07 |
+  | worker `shipblu-support-worker`  | `dep-dbdqgvgm7kps73bc1tdg` | 18:33:34 | 18:35:46 |
+  | `shipblu-sla-sweep`              | `dep-dbdqi38n74is73eild2g` | 18:35:57 | 18:36:34 |
+  | `shipblu-time-automations`       | `dep-dbdqi49srm7s73cl8g30` | 18:36:01 | 18:36:40 |
+  | `shipblu-nightly`                | `dep-dbdqi5psrm7s73cl8lh0` | 18:36:07 | 18:36:38 |
+  | `shipblu-whatsapp-template-sync` | `dep-dbdqi6oae00c73am2j8g` | 18:36:11 | 18:36:47 |
+
+  Web's preDeploy logged `Applying drizzle migrations...` at 18:32:19 and
+  `Done: 9 post-migration file(s) applied.` at 18:32:23, with `008` taking
+  about 180 ms of that. So no new code ran before the schema it reads.
+
+  Old code did run against the new schema, which is additive. The old worker
+  finished its last job at 18:38:02 (its instance's last log line is that
+  `process_webhook … ok`), two minutes after Render reported the new one live.
+  That is about five and a half minutes against the new schema, the last two of
+  them beside the new worker. The only old cron run against it was
+  `shipblu-sla-sweep`'s at 18:35:07–18:35:49, which succeeded. `/api/health`
+  reported `447d8be` at 18:36:30, and `autoDeploy` read `no` / `off` on all six
+  afterwards.
+
+- **What has run on it** (read at 21:35:51). The gate still reads 0, 0, 0,
+  and no job run since 18:29:39 carries an error. The first ticket after the
+  deploy, #70381 at 18:37:49, was filed by the old worker, which was still
+  taking jobs (above). The new worker's first was #70382, on the bot channel at
+  19:28:31, so its `conversations` insert, which names the new column, works.
+  No support or coexistence WhatsApp ticket has been created yet.
+
+  Three crons have run on `447d8be`, each successfully by Render's run
+  events:
+  - `shipblu-sla-sweep`, first at 18:40:00–18:40:55;
+  - `shipblu-time-automations`, first at 18:45:16–18:46:17;
+  - `shipblu-whatsapp-template-sync` at 19:01:01–19:02:44, its backlog
+    snapshot at 19:02:28.
+
+  `shipblu-nightly` first runs on `447d8be` at 00:00 UTC on 2026-10-24.
 
 **1.3's checks, read at 21:10 UTC.** `<X>` is 18:29:39 UTC, when Render began
 web's deploy, which precedes the preDeploy that added the CHECK.
@@ -98,7 +150,7 @@ web's deploy, which precedes the preDeploy that added the CHECK.
   [1.3, as built](#13-as-built) once one has, and within seven days of it,
   because `cleanup` deletes a completed job a week after it completes.
 
-**1.2's checks, read at 21:54 UTC.**
+**1.2's checks, read at 21:54 UTC on 2026-10-21.**
 
 - **The backfill.** All 52 comment tickets are on `facebook_comment` or
   `instagram_comment`, and none is left on a platform channel. No row
@@ -154,18 +206,23 @@ Every production write needs the user's go-ahead for that step, and the
    live on it by 18:36 UTC, web first. Its checks read clean at 21:10 UTC
    (above), with one re-read left for the first comment. Its reviews are
    answered under [1.3, as built](#13-as-built).
-2. **Merge #400, then `dev` into `main`.** 2.A has no migration and no `db/sql`
-   change, and nor has anything else on `dev` since #397: #399 (`0d1289d`, a
-   repo rule) and #402 (`48896ce`, the review page's date). Rule 7 still holds,
-   because the merge ships all of `dev`: read `git log origin/main..origin/dev`
-   on the day and every migration in it.
+2. **Merge `dev` into `main`.** #400 merged into `dev` as `a558c5b` at 21:33
+   UTC. 2.A has no migration and changes `db/sql` only in `002`'s comments.
+   Nor has anything else on `dev` since #397 a migration or a `db/sql` change:
+   #399 (`0d1289d`, a repo rule), #402 (`48896ce`, the review page's date),
+   #401 (`a3fb23d`, the stored token's expiry), #408 (these docs) and #404
+   (`558d285`, the rollups' day boundaries). Rule 7 still holds, because the
+   merge ships all of `dev`: read `git log origin/main..origin/dev` on the day
+   and every migration in it.
 3. **Deploy 2.A**: web, then the worker, then the crons. Before it, run 2.A's
    "Before" step under [Deploying 2.A](#2a-as-built): any `CATEGORISE_*` value
    copied to its new name, the overrides and the old job re-read. After it, run
    2.A's handbook and verify steps.
-4. **Stage 2.B**, the SQL rename, follows once 2.A is deployed to all six
-   services. It needs the maintenance sequence in its stage section, and its
-   migration lands on its own (deploy rule 2).
+4. **Stage 2.B**, the SQL rename, is built as #403 and in review. It merges
+   into `dev` only once 2.A is deployed to all six services, and then deploys
+   alone in a maintenance window by the steps under
+   [Deploying 2.B](#2b-as-built). It rolls back by the runbook named there,
+   which stops being a way back once any later migration has run.
 5. **Before Stage 5**, a person does 0.2's reorder and 0.6's staffing, and the
    support lead answers the questions still open (below).
 
@@ -369,8 +426,24 @@ as instructions. The reasons are given so that any of them can be argued with.
 
 - **Deploy order and precautions.**
   - **Order: web first, then the worker, then the crons.** Only web's
-    preDeploy (`npm run db:migrate`) replays `db/sql`. The worker and crons
-    change only in that the retired job is gone, and nothing enqueues it.
+    preDeploy (`npm run db:migrate`) replays `db/sql`. 1.3 on its own changes
+    nothing on the worker or the crons that depends on new schema: its
+    retired job is gone, and nothing enqueues it. The release that shipped
+    it, #397, also carried #396. #396's worker and cron code reads
+    `conversations.accountable_agent_id` from migration 0044 by name, in:
+    - the worker's ingest and assignment;
+    - `sla_sweep` and `assign_sweep`;
+    - `snapshot_backlog`;
+    - `rollup_metrics`;
+    - the time automations, through `assignConversation` and
+      `reopenWithOwner`.
+
+    Ingest and `reopenWithOwner` also read `channels.owner_agent_id`. Drizzle
+    names every column, so new code running ahead of 0044 fails every insert
+    and whole-row select of `conversations` or `channels` (rule 1), the
+    senders' included. That made web first rule 7's requirement for the
+    release too, and it is the order that ran.
+
   - **The lock.** `ADD CONSTRAINT … CHECK` takes ACCESS EXCLUSIVE on
     `conversations` and holds it while it validates every row (about 70,000;
     about 80 ms). While it waits for the lock, every read and write of the
@@ -623,22 +696,290 @@ its timeline prints as bare types. A variable set under a new name is then
 read by nothing, and the handbook keeps its new words until the seed is run
 from the older commit with `overwrite=true`.
 
+### 2.B, as built
+
+Built as [Stage 2](#stage-2--the-subcategory-rename) describes 2.B, stacked on
+2.A (#400) at the user's request. What the stage section left open, or got
+wrong, was decided as follows. Every catalog figure was read from production
+on 2026-10-23 after 18:00 UTC.
+
+- **What moved.** The four tables, the two enum types (Postgres renames their
+  array types with them), and **three** columns, not two: `category_metrics_daily`
+  also has a `category_key`, and leaving it would put a `category_key` column
+  in `subcategory_metrics_daily` once Stage 3 gives "category" its new meaning.
+  `conversation_categories_category_idx` became
+  `conversation_subcategories_subcategory_idx`. No foreign key from any other
+  table points into the four, and no function, view, trigger body, policy or
+  publication names them, so a rename reaches everything that depends on them.
+  Their rows: 55, 823, 396 and 647.
+- **Migration `0046_subcategory_names`** is drizzle-kit's, committed as it
+  wrote it. It was generated under a pseudo-terminal, since this environment
+  has none, with every one of the nine prompts (two types, four tables, three
+  columns) answered from a list naming each rename in advance; any other prompt
+  would have killed the run before it wrote anything. A second `generate`
+  reports nothing to migrate. It renames the types, tables and columns, drops
+  and re-adds the seven foreign keys and the composite primary key under new
+  names, and drops and recreates the thirteen indexes.
+- **Two foreign-key names are longer than the 63 bytes Postgres keeps**, so
+  they are stored cut short:
+  `conversation_subcategories_subcategory_id_ticket_subcategories_` and
+  `conversation_subcategories_detected_in_message_id_messages_id_f`. Production
+  already holds eight like that. A command naming the long form is truncated
+  the same way, so a later migration that drops one still finds it.
+- **`db/sql/002_subcategories.sql`** renames the six CHECKs and the three
+  `_pkey` names in a loop, each guarded on the constraint's name **and** its
+  table through `to_regclass`, and then adds any CHECK still missing under its
+  new name. For 2.B alone, a fresh database takes the same path as production:
+  every migration runs before `db/sql`, so `0021` has created the tables under
+  the old names and `0046` has renamed them by then.
+- **That order leaves a trap for Stages 3 and 4.** On a fresh database (CI,
+  `shipblu_test`, a staging that takes 2.B and Stage 3 in one deploy),
+  `ticket_categories_pkey`, `category_metrics_daily_pkey` and
+  `ai_category_runs_pkey` are still taken while every later migration runs,
+  because only `db/sql` renames them. A later table reusing one of those names
+  with an unnamed primary key is then created as `<table>_pkey1` there, but as
+  `<table>_pkey` in production. Moving the three renames into a migration of
+  their own would close it. Decision 2's objection to `--custom`, that it
+  keeps the previous snapshot, does not reach this one: placed after 0046 it
+  copies 0046's snapshot, which already describes the schema, and CI's drift
+  step passes (tried in a scratch copy on 2026-10-23; the three renames took
+  about 1 ms on the three small tables). What it costs is a hand-written
+  migration, against the generated-only convention, and inside 2.B a runbook
+  that would have to remove two rows. So it is recorded here rather than done.
+  The cheapest place is the head of Stage 3's PR, guarded, where the runbook is
+  deleted anyway; Stage 3's and Stage 4's own sections say what they do about
+  it.
+- **Locks.** Dropping the old foreign keys removes their triggers on
+  `conversations`, `messages` and `agents`, and Postgres takes ACCESS EXCLUSIVE
+  on each referenced table to do that. Re-adding them asks only SHARE ROW
+  EXCLUSIVE, but the stronger lock is held until 0046 commits. So reads of the
+  three tables block as well as writes, and every console request reads
+  `agents`. While the migration waits for one of these locks, every new query
+  on that table queues behind it, and a transaction that has only read the
+  table is enough to make it wait. Validation reads only the 823 and 647 rows
+  that reference them. Locally, the whole migrate (`0046` and every `db/sql`
+  file) took 0.9 s on Postgres 17.11.
+- **A rename-only 0046 was proposed in review and declined by the user on
+  2026-10-23.** Renaming the foreign keys, indexes and primary key instead of
+  dropping and re-adding them would lock only the four small tables, never
+  `conversations`, `messages` or `agents`: measured on near-empty tables,
+  8 ms against 24 ms for the generated statements, ending in the same
+  catalog. But it gains little inside a window where the old release fails
+  against the renamed tables either way: what it moves is where a wait of up
+  to `lock_timeout` falls, and failing to get a lock is the clean failure. It
+  does not remove the failure under "How it fails" either, which comes from
+  `db/sql` running after either form commits. And it cannot pass CI as
+  generated: `--custom` in place of 0046 keeps 0045's snapshot, so the drift
+  step stops on its TTY prompt, and drizzle-kit has no rename for an index, a
+  foreign key or a primary key. The only way through is replacing generated
+  SQL by hand, which the drift step cannot see and decision 2 rules out.
+- **How it fails.** `db/migrate.ts` sets `lock_timeout` to 10 s. A lock 0046
+  cannot get fails the preDeploy cleanly: Drizzle's transaction rolls back,
+  nothing is applied, and the old release keeps serving. But `db/sql` runs only
+  after 0046 has committed, and 001's `CREATE INDEX IF NOT EXISTS` takes SHARE
+  on eight tables (`conversations`, `messages`, `contacts`, `companies`,
+  `kb_articles`, `shipments`, `shipping_accounts`, `side_conversation_messages`)
+  before it checks that the index exists. A write transaction open on one of
+  those for more than 10 s fails the preDeploy **after** the rename. The log
+  then shows `Applying 001_…` or `Applying 002_…` after the migrations ran, and
+  the old release is serving against renamed tables. There are two ways out.
+  Clear the lock and deploy the same commit again: Drizzle skips 0046, and 002
+  is written for exactly "tables renamed, constraints still old". Or roll back
+  by the runbook, which renames back only the CHECKs and `_pkey` names that 002
+  renamed, so it starts from this state as well as from a finished deploy; a
+  test builds the state and runs it. From this state the runbook is the whole
+  rollback: Render never promoted the failed deploy, so web is still on the
+  previous commit, and the worker and crons were never deployed ("Rolling back
+  2.B" says which steps that leaves). Keep the worker and crons suspended until
+  one of them succeeds.
+- **The raw SQL follows**, in `lib/reports/subcategory-queries.ts`,
+  `lib/reports/subcategory-rollup.ts`, `lib/subcategorise/queries.ts`,
+  `lib/subcategorise/seed.ts` and `lib/subcategorise-ai/report.ts`. Each
+  function in them that names a renamed table now has a database test that
+  executes it on fixture rows, so a missed name fails CI. `rootCauseOptions`,
+  which reads only `ticket_root_causes`, has none. The tier passes under both
+  `C.UTF-8` and `en_US.UTF-8`, the collation CI and production sort with.
+- **The rollback is `db/runbooks/2b-subcategory-rollback.sql`**: one `DO`
+  block, so a name that is not there leaves nothing half renamed. Its test runs
+  it and then `0046` and `002` again inside a transaction it rolls back. It
+  asserts that the way back produces production's catalog exactly, and that
+  the way forward restores every new name. That way, the runbook a person runs
+  by hand is exercised on every CI run. Drizzle applies a migration only when
+  it is newer than the newest row, so deleting 0046's row brings it back only
+  while nothing later has run. The runbook therefore refuses once a later
+  migration has been applied, and a second test holds it to that. A third runs
+  it from the half-applied state under "How it fails". The test also reads the
+  journal: the runbook's literal `when` for 0046 must match it, and once any
+  migration follows 0046 a case fails with a sentence saying what to do (delete
+  the runbook and its test in that PR, and write the way back from then), while
+  the cases that run the runbook are skipped rather than failing on its
+  exception.
+
+**Rehearsed locally, not on a Supabase branch.** The user chose this on
+2026-10-23, for two reasons. A Supabase branch replays only the migrations
+Supabase itself recorded, which is 2 of production's 46, so it would start
+nearly empty. And it is billed while it exists. The rehearsal ran on a local
+Postgres 17.11:
+
+1. 2.A's code migrated an empty database. Its 39 names for the four tables
+   (the constraints, the indexes, the three renamed columns and the two types,
+   as listed in `PRODUCTION_BEFORE` in the runbook's test) are identical to
+   production's, and so is its one trigger.
+2. Rows were written in every table through 2.A's schema.
+3. This branch's migrate took 0.9 s. Every name was new and none old, every
+   row survived, and every constraint was validated. `rollup_metrics` and
+   `backfill_subcategorise_ai dryRun=true` ran.
+4. The runbook, through `psql -v ON_ERROR_STOP=1 -f`, left a catalog identical
+   to production's, with 0046's migration row gone and the rows intact.
+5. 2.A's migrate replayed the old `002_categories.sql` and changed nothing.
+   2.A's rollup and backfill ran.
+6. This branch's migrate again took 0.87 s, ending identical to step 3. One
+   more replay changed nothing.
+
+2.A's code run against the renamed database fails at once:
+`relation "conversation_categories" does not exist`. That is the window the
+maintenance sequence below closes.
+
+**Deploying 2.B.** The stage section's sequence holds, with these specifics:
+
+1. **Order of merges.** #400 merged into `dev` first, as `a558c5b`. 2.B's PR
+   merges only after the release carrying 2.A is deployed to all six services
+   (#397 had already shipped 1.3 and #396), so that 2.B's maintenance window
+   ships alone.
+2. **Before the deploy.** List what holds a lock on the tables the deploy
+   locks: the seven 0046 does and the six more 001 does. Do not use the query
+   in `docs/PROJECT-STATE.md` §5.5: it lists only transactions older than five
+   minutes, which `transaction_timeout` reaps, so it reads clear when this
+   would not.
+
+   ```sql
+   select a.pid, l.relation::regclass as relation, l.mode, a.state,
+          now() - a.xact_start as age, left(a.query, 80) as query
+   from pg_locks l
+   join pg_stat_activity a using (pid)
+   where l.relation in (
+       'conversations'::regclass, 'messages'::regclass, 'agents'::regclass,
+       'ticket_categories'::regclass, 'conversation_categories'::regclass,
+       'category_metrics_daily'::regclass, 'ai_category_runs'::regclass,
+       'contacts'::regclass, 'companies'::regclass, 'kb_articles'::regclass,
+       'shipments'::regclass, 'shipping_accounts'::regclass,
+       'side_conversation_messages'::regclass)
+     and a.pid <> pg_backend_pid()
+   order by age desc;
+   ```
+
+   Nothing on it should be more than a few seconds old. It is a reading, not a
+   reservation. Note the time web's preDeploy starts.
+
+3. **During it**, the stage section's steps 2–6 apply: suspend the worker and
+   crons, deploy web, load the pages, then deploy the worker and crons and
+   resume them. If the preDeploy fails, read "How it fails" above before doing
+   anything else.
+4. **Step 7's list.** These are the inbound messages ingested on web between
+   the migration and cutover. Web is every path that leaves
+   `channel_message_id` null: the widget, the portal (including a portal reply
+   on a ticket of any channel) and forms. The worker's email, WhatsApp and
+   Meta ingest always sets it, and the worker is suspended for the window.
+
+   ```sql
+   select c.number, c.channel, m.id as message_id, m.created_at
+   from messages m
+   join conversations c on c.id = m.conversation_id
+   where m.direction = 'inbound' and m.kind = 'reply'
+     and (c.channel in ('webchat', 'portal') or c.form_id is not null
+          or m.channel_message_id is null)
+     and m.created_at between '<preDeploy start>' and '<web live>'
+   order by m.created_at;
+   ```
+
+   An old web instance's subcategoriser failed on each of them and the failure
+   was caught. There is no job that re-runs it, so for each row an agent opens
+   the ticket and adds a subcategory by hand if the sidebar shows none.
+
+5. **Verify.** No relation or type still has an old name:
+
+   ```sql
+   select relname from pg_class
+   where relname ~ '^(ticket_categories|conversation_categories|category_metrics_daily|ai_category_runs)'
+   union all
+   select typname from pg_type
+   where typname ~ '^_?category_(audience|review_state)$';
+   ```
+
+   It should return no rows. `subcategorised` events also continue on new
+   messages.
+
+**Rolling back 2.B** is the stage section's runbook, with the file named and
+the services it leaves out put back:
+
+1. Suspend the worker and the four crons. If the deploy's step 3 already
+   resumed them on 2.B, suspend them again.
+2. On the session connection, run:
+
+   ```sh
+   psql "$DATABASE_URL_SESSION" -v ON_ERROR_STOP=1 \
+     -f db/runbooks/2b-subcategory-rollback.sql
+   ```
+
+   It refuses once any migration newer than 0046 has been applied. Note when it
+   committed.
+
+3. Deploy the previous web commit by hand, and note when it goes live. Its
+   preDeploy replays the old `002_categories.sql`, which finds its own names and
+   does nothing. The order cannot be swapped: run before the runbook, the old
+   file reaches `ALTER TABLE ticket_categories` and fails with 42P01. So between
+   the two times, web serves 2.B's code against the old names for the previous
+   commit's whole build, preDeploy and start, minutes rather than seconds.
+   Meanwhile every ticket page fails, because `subcategoriesForConversation`
+   is in its `allLimited` batch, and every inbound web message loses its
+   subcategorisation.
+4. If the worker and crons ran 2.B, deploy the previous commit to the worker,
+   `shipblu-sla-sweep`, `shipblu-time-automations`,
+   `shipblu-whatsapp-template-sync` and `shipblu-nightly`. They have no
+   preDeploy and build their own copy. Then resume them all.
+5. List the messages step 3's window cost with the query in step 4 of
+   "Deploying 2.B", bounded by `'<runbook committed>'` and
+   `'<previous web live>'`, and subcategorise each one by hand as that step
+   says.
+6. Do not deploy `main` to any service until the roll-forward is intended.
+   With 0046's row gone, web's preDeploy applies it again, and the worker and
+   crons would run 2.B's code against the old names.
+
+**From a preDeploy that failed between 0046 and `db/sql`** ("How it fails"),
+only steps 1, 2, 5 and 6 apply. Web never left the previous commit, because
+Render does not promote a failed deploy, and the worker and crons were never
+deployed, so steps 3 and 4 have nothing to do: the previous release works again
+once the runbook commits. Step 5's window then runs from
+`'<preDeploy started>'`, before 0046 committed, to `'<runbook committed>'`.
+
+It stops being a way back once any migration after 0046 has been applied,
+Stage 3's new `ticket_categories` among them. The PR that adds that migration
+deletes the file and its test; the test fails and says so until it does.
+
 ### Working on this repo without the outgoing session's context
 
-- **`dev` is the integration branch, and GitHub keeps deleting it.** The
-  repository's "Automatically delete head branches" setting removes `dev`
-  whenever a `dev` → `main` PR merges: at #389, and again at #393. Both times
-  it was recreated from `main` with the user's agreement. Before branching,
-  run `git ls-remote origin dev`. If it prints nothing, ask the user, since
-  creating `dev` is a push to `dev`, which `AGENTS.md` forbids an agent to do
-  unasked. Then branch from `origin/dev`, open the PR into `dev`, and leave the
-  `dev` → `main` merge to the user. The lasting fix is turning that setting off
-  or protecting `dev`, and that is the user's call.
+- **`dev` is the integration branch, and GitHub used to delete it.** The
+  repository's "Automatically delete head branches" setting removed `dev`
+  whenever a `dev` → `main` PR merged: at #389, and again at #393. Both times
+  it was recreated from `main` with the user's agreement. It survived #397:
+  `dev` still pointed at `e7376bf` at 18:30 UTC, two minutes after that merge,
+  and #399 merged into it at 18:34. The repository's `delete_branch_on_merge`
+  read `false` at 21:33 UTC, which explains it. When it changed is not
+  recorded. Before branching, still run `git ls-remote origin dev`. If it
+  prints nothing, ask the user, since creating `dev` is a push to `dev`, which
+  `AGENTS.md` forbids an agent to do unasked. Then branch from `origin/dev`,
+  open the PR into `dev`, and leave the `dev` → `main` merge to the user.
+  Protecting `dev` would make it hold for good, and that is the user's
+  call.
 - **A `dev` → `main` merge ships every session's work.** `634a28d` carried #390
-  beside 1.2. Before choosing a stage's deploy order, read
-  `git log origin/main..origin/dev` and every migration in it (deploy rule 7).
+  beside 1.2, and `447d8be` carried #396 beside 1.3. Before choosing a stage's
+  deploy order, read `git log origin/main..origin/dev` and every migration in
+  it (deploy rule 7).
 - **Deploys are by hand.** `autoDeploy` is off on every production service.
-  Render's workspace is `tea-da1f2lgjo6nc738hobmg`:
+  On 2026-10-23 it was `checksPass` on all six from about 13:53 to 18:25 UTC,
+  by Render's `auto_deploy_enabled` and `auto_deploy_disabled` events, and off
+  again before #397 merged. Render's workspace is
+  `tea-da1f2lgjo6nc738hobmg`:
 
   | Service                           | Id                         | Runs                                           |
   | --------------------------------- | -------------------------- | ---------------------------------------------- |
@@ -780,8 +1121,10 @@ and should be read as a guide:
 ## Decisions
 
 Each decision says what it closes. Where a decision is the support lead's to
-make, it is listed again under [Questions](#questions-for-the-support-lead) with
-the default this plan assumes.
+make, it was listed again as a question for the support lead with the default
+this plan assumed, and
+[Decisions taken with the support lead](#decisions-taken-with-the-support-lead-2026-10-20)
+records the answer.
 
 ### 1. Comment channels are new `channel` enum values, scoped to the work surface
 
@@ -931,8 +1274,11 @@ it:
   0**. CI's drift step (`.github/workflows/ci.yml:135-144`) would therefore
   pass a schema rename with no migration. Stage 0.1 makes that step fail on
   the message.
-- **The `--custom` flag is not used.** It saves the _old_ snapshot, so every
-  later generate would prompt again.
+- **The `--custom` flag is not used for the rename.** It saves the _old_
+  snapshot, so every later generate would prompt again. A `--custom` migration
+  that changes nothing the snapshot records, such as the implicit `_pkey`
+  names, does not have that problem; [2.B, as built](#2b-as-built) says where
+  that matters.
 
 ### 3. The new category is a registry row and a foreign key, like root causes
 
@@ -999,7 +1345,9 @@ The category and the subcategories are independent judgements in this plan:
   detector sets them.
 
 Whether a subcategory should also carry a "usually this category" link for the
-picker is a [question](#questions-for-the-support-lead), not a dependency.
+picker was a question, not a dependency. The support lead answered it
+([decision 4](#decisions-taken-with-the-support-lead-2026-10-20)): category and
+subcategories are independent.
 
 **Before the first response, the SLA policy follows the ticket's category and
 group.** `applySlaOnCreate` selects the policy before any category exists. So
@@ -1926,7 +2274,7 @@ deploy it with web and the crons.
     copy.
 
   - **Runbook.** Done on 2026-10-21. Every step's result is in [Status and
-    handoff](#status-and-handoff-2026-10-23-1325-utc).
+    handoff](#status-and-handoff).
     1. Deploy the worker, then web, then the crons.
     2. Confirm every service runs 1.2, since a worker still on 1.1 files new
        comments on the platform channel.
@@ -2152,8 +2500,9 @@ readers are harmless.
 
 **2.B — The database (maintenance sequence).**
 
-- **Schema.** The four table names, two column names, two enum type names, and
-  every explicit index string on those tables are renamed in `db/schema`:
+- **Schema.** The four table names, two column names (three, as built), two
+  enum type names, and every explicit index string on those tables are renamed
+  in `db/schema`:
   - `ticket_categories` → `ticket_subcategories`
   - `conversation_categories` → `conversation_subcategories`, with its columns
     `category_id` → `subcategory_id` and `category_key` → `subcategory_key`
@@ -2173,7 +2522,8 @@ readers are harmless.
   - on production it renames the six CHECK constraints when the old name
     exists on that table and the new one does not;
   - on a fresh database it creates them under the new names;
-  - it renames the three implicit `_pkey` indexes, guarded on `indrelid`.
+  - it renames the three implicit `_pkey` constraints, and their indexes with
+    them, guarded on `conrelid` as built.
 
   A guard on the name alone would one day find Stage 3's constraint on the new
   `ticket_categories` and fail every replay.
@@ -2221,8 +2571,10 @@ readers are harmless.
      `002_categories.sql`, which now finds its old names again.
   5. Do not deploy `main` until the roll-forward is intended.
 
-  This exact sequence, including the later roll-forward, is rehearsed on the
-  Supabase branch before 2.B merges.
+  This exact sequence, including the later roll-forward, is rehearsed before
+  2.B merges. As built, it was rehearsed locally against production's names,
+  as the user chose on 2026-10-23, and [2.B, as built](#2b-as-built) has the
+  runbook and the steps that superseded this list.
 
 **Gate:** Stage 3 does not start until 2.B is deployed to all six services and
 verified. After that, nothing running can read `ticket_categories` expecting the
@@ -2243,6 +2595,16 @@ cannot parse.
     `OLD.category_id IS DISTINCT FROM NEW.category_id` added to the
     `queue_relevant` list in `001_extensions_and_triggers.sql:370-385`. Without
     the second, open inboxes do not redraw when only the category changes.
+  - **The primary key's name.** On a fresh database `ticket_categories_pkey` is
+    still taken when this migration runs, because only `db/sql/002` renames the
+    old one ([2.B, as built](#2b-as-built)), so an unnamed key is created as
+    `ticket_categories_pkey1` there and as `ticket_categories_pkey` in
+    production. Nothing may name it until a migration of its own renames the
+    old three ahead of this one; deciding that is this stage's. The cheapest
+    is a guarded `--custom` migration at the head of this stage's PR, renaming
+    each old `_pkey` only where it still exists: about 1 ms, and it passes the
+    drift step because it changes nothing the snapshot records. The fallback is
+    an explicit primary-key name here and in Stage 4.
 - **Seeding.** `lib/categories/registry.ts` holds the starter set: four rows
   with English and Arabic labels and descriptions written for Jev. Being in
   code means the wording goes through review.
@@ -2346,7 +2708,9 @@ enqueued, so no job type is ever unknown.
       each `on_update` **and `time_based`** rule keyed on `category.id` would
       match. The time-based sweep re-evaluates every live ticket every 15
       minutes, so such a rule would act on the whole backlog within one run.
-- **Runs table.** `ai_category_runs`, whose name is free after the gate.
+- **Runs table.** `ai_category_runs`, whose name is free after the gate. Its
+  primary key meets the same fresh-database trap as Stage 3's
+  (`ai_category_runs_pkey1`); see [2.B, as built](#2b-as-built).
   - The unique index is on (`run_label`, `message_id`), with the
     upsert-over-`failed` discipline applying within a label.
   - Settling and ownership read only the `live` label.
