@@ -61,7 +61,7 @@ held is folded in. The support lead answered every open question on
 2026-10-20; [Decisions taken](#decisions-taken-with-the-support-lead-2026-10-20)
 records the answers, and the plan below already reflects them.
 
-## Status and handoff (2026-10-23, 13:25 UTC)
+## Status and handoff (2026-10-23, 15:01 UTC)
 
 A session picking this plan up starts here. Everything after this section is
 the design as it was reasoned and as each stage was built. This section says
@@ -78,7 +78,8 @@ re-read before acting on one.
 | 1.1   | Merged: #387, then `dev` → `main` in #389 (`1f89219`)                                                                                       | Live since 2026-10-21 10:13 UTC                                                                                                                                                                    |
 | 1.2   | Merged: #391 (`31f7379`) and follow-up #392 (`7b7d276`), then `dev` → `main` in #393 (`634a28d`), which also carried another session's #390 | **Done.** All six services live on `634a28d` by 17:38 UTC, worker first. The user ran the backfill and the rollup from a shell, so neither left a `jobs` row. Every check that follows reads clean |
 | 1.3   | Merged into `dev`: #395 (`58c5ed9`), 2026-10-23, after its second review. Not yet `dev` → `main`. As built below                            | Not deployed: `main` is still at `634a28d`                                                                                                                                                         |
-| 2–6   | Not started                                                                                                                                 | —                                                                                                                                                                                                  |
+| 2.A   | In review: #400 (`claude/epic-heisenberg-w60nbl`), no migration. As built below                                                             | Not deployed. Ships with the next `dev` → `main` merge, after its "Before" step (Deploying 2.A)                                                                                                    |
+| 2.B–6 | Not started                                                                                                                                 | —                                                                                                                                                                                                  |
 
 **1.2's checks, read at 21:54 UTC.**
 
@@ -145,13 +146,18 @@ Every production write needs the user's go-ahead for that step, and the
    read-only query. Read it on the day of the merge and quote it in the PR.
    The gate guards the merge rather than the deploy, because whoever next
    deploys `main` ships 1.3, whatever else they meant to ship. `dev` also
-   carries another session's #394 (`508ea6f`, scroll panes), which has no
-   migration and no `db/sql` change (read 2026-10-23), so the merge ships both
-   and rule 7 asks nothing more of the deploy order.
-3. **Deploy 1.3**: web, then the worker, then the crons. Read the lock
-   precautions below first, then run 1.3's verification rows.
-4. **Stage 2** may start whenever it suits. It is a different seam from Stage
-   1, but its migrations land one at a time, after 1.3 (deploy rule 2).
+   carries #394 (`508ea6f`, scroll panes; no migration), another session's #396
+   (`e7376bf`: migrations `0044` and `0045`, `db/sql/009`, and changes to `001`
+   and `003`) and, once #400 merges, 2.A. The merge ships all of them, and
+   rules 1 and 7 ask for web first.
+3. **Deploy 1.3 and 2.A**: web, then the worker, then the crons. Before it, run
+   2.A's "Before" step under [Deploying 2.A](#2a-as-built): any `CATEGORISE_*`
+   value copied to its new name, the overrides and the old job re-read. Read
+   1.3's lock precautions below too. After it, run 1.3's verification rows and
+   2.A's handbook and verify steps.
+4. **Stage 2.B**, the SQL rename, follows once 2.A is deployed to all six
+   services. It needs the maintenance sequence in its stage section, and its
+   migration lands on its own (deploy rule 2).
 5. **Before Stage 5**, a person does 0.2's reorder and 0.6's staffing, and the
    support lead answers the questions still open (below).
 
