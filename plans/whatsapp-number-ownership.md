@@ -35,7 +35,7 @@ Read on 2026-10-21, read-only.
   had not yet mixed two numbers on a live ticket, because no customer had
   written to two numbers while a ticket was open (`docs/PROJECT-STATE.md`
   §6.99). Every number connected makes that likelier.
-- Four contacts held two live tickets each on Nayera's number, created 35–120 ms
+- Four contacts held two live tickets each on Nayera's number, created 36–121 ms
   apart: a race between finding the live conversation and inserting one (§6.100).
 - Four `whatsapp` tickets had a null `channel_id`, all filed before "WhatsApp
   Support" had a row.
