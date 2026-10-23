@@ -526,7 +526,12 @@ stage section left open was decided as follows.
   of these keys or any other. `can()` ignores a key it does not know, so an
   override under an old name would lapse silently rather than fail. Stage 3
   gives `admin.categories` back to the new Categories page, and before it does
-  it reads that no agent's `permissions` holds the key.
+  it reads that no agent's `permissions` holds the key. A `db/sql` statement
+  moving overrides to the new keys was proposed in review and declined: no
+  code writes the column, so only hand-typed SQL could make one, and a
+  statement replayed on every deploy would, once Stage 3 reclaims
+  `admin.categories`, turn an override of the new page into one of the
+  subcategories page.
 - **Env vars.** `SUBCATEGORISE_DISABLED_RULES`, `SUBCATEGORISE_AUTO_MIN` and
   `SUBCATEGORISE_RECORD_MIN`, with no fallback to the old names: a fallback
   would be a second place for the same setting. A value still set under an old
