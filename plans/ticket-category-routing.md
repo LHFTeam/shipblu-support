@@ -78,7 +78,7 @@ re-read before acting on one.
 | 1.1   | Merged: #387, then `dev` → `main` in #389 (`1f89219`)                                                                                       | Live since 2026-10-21 10:13 UTC                                                                                                                                                                    |
 | 1.2   | Merged: #391 (`31f7379`) and follow-up #392 (`7b7d276`), then `dev` → `main` in #393 (`634a28d`), which also carried another session's #390 | **Done.** All six services live on `634a28d` by 17:38 UTC, worker first. The user ran the backfill and the rollup from a shell, so neither left a `jobs` row. Every check that follows reads clean |
 | 1.3   | Merged: #395 (`58c5ed9`), then `dev` → `main` in #397 (`447d8be`), which also carried #394, #396 and #398. As built below                   | **Done.** All six services live on `447d8be` by 18:36 UTC, web first. Its checks read clean (below), though no comment has arrived since                                                           |
-| 2.A   | In review: #400 (`claude/epic-heisenberg-w60nbl`), no migration. As built below                                                             | Not deployed. Ships with the next `dev` → `main` merge, after its "Before" step (Deploying 2.A)                                                                                                    |
+| 2.A   | Merged into `dev`: #400 (`a558c5b`), 2026-10-23, no migration. Not yet `dev` → `main`. As built below                                       | Not deployed. Ships with the next `dev` → `main` merge, after its "Before" step (Deploying 2.A)                                                                                                    |
 | 2.B   | In review: #403 (`claude/stage-2b-subcategory-sql`), stacked on #400: migration `0046`, `db/sql/002`, a runbook. As built below             | Not deployed. Merges only after 2.A's release is on all six services (1.3 and #396 already are), then deploys alone in a maintenance window (Deploying 2.B)                                        |
 | 3–6   | Not started                                                                                                                                 | —                                                                                                                                                                                                  |
 
@@ -155,11 +155,12 @@ Every production write needs the user's go-ahead for that step, and the
    live on it by 18:36 UTC, web first. Its checks read clean at 21:10 UTC
    (above), with one re-read left for the first comment. Its reviews are
    answered under [1.3, as built](#13-as-built).
-2. **Merge #400, then `dev` into `main`.** 2.A has no migration and no `db/sql`
-   change, and nor has anything else on `dev` since #397: #399 (`0d1289d`, a
-   repo rule) and #402 (`48896ce`, the review page's date). Rule 7 still holds,
-   because the merge ships all of `dev`: read `git log origin/main..origin/dev`
-   on the day and every migration in it.
+2. **Merge `dev` into `main`.** #400 is squashed into `dev` as `a558c5b`. 2.A
+   has no migration and no `db/sql` change, and nor has anything else on `dev`
+   since #397: #399 (`0d1289d`, a repo rule) and #402 (`48896ce`, the review
+   page's date). Rule 7 still holds, because the merge ships all of `dev`:
+   read `git log origin/main..origin/dev` on the day and every migration in
+   it.
 3. **Deploy 2.A**: web, then the worker, then the crons. Before it, run 2.A's
    "Before" step under [Deploying 2.A](#2a-as-built): any `CATEGORISE_*` value
    copied to its new name, the overrides and the old job re-read. After it, run
@@ -744,10 +745,10 @@ maintenance sequence below closes.
 
 **Deploying 2.B.** The stage section's sequence holds, with these specifics:
 
-1. **Order of merges.** #400 merges into `dev` first. 2.B's PR merges only
-   after the release carrying 2.A is deployed to all six services (#397 had
-   already shipped 1.3 and #396), so that 2.B's maintenance window ships
-   alone.
+1. **Order of merges.** #400 merged into `dev` first, as `a558c5b`. 2.B's PR
+   merges only after the release carrying 2.A is deployed to all six services
+   (#397 had already shipped 1.3 and #396), so that 2.B's maintenance window
+   ships alone.
 2. **Before the deploy.** List what holds a lock on the tables the deploy
    locks: the seven 0046 does and the six more 001 does. Do not use the query
    in `docs/PROJECT-STATE.md` §5.5: it lists only transactions older than five
