@@ -107,6 +107,21 @@ export function todayIn(zone: string): string {
 }
 
 /**
+ * The team's date an instant falls on, as the `YYYY-MM-DD` a report prints.
+ *
+ * For a page that lists rows by day beside the reports rather than inside a
+ * window. `at.toISOString().slice(0, 10)` is the obvious spelling and it is the
+ * UTC date: anything that happened in Cairo before 02:00 — 03:00 under daylight
+ * saving — prints as the day before, which is the evening shift's last messages
+ * and the night's first, on the date nobody received them. The zone is an
+ * argument for the reason `rangeIn` takes one: the caller resolves it once, so
+ * every date on the page is in the same team's days as the figures beside it.
+ */
+export function dayIn(at: Date, zone: string): string {
+  return DateTime.fromJSDate(at, { zone }).toISODate()!;
+}
+
+/**
  * The window a report's range covers, as the `YYYY-MM-DD` the rollup writes.
  *
  * Lives here, beside `todayIn`, because it is the read side of the same rule:

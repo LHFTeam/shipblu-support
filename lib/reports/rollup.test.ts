@@ -1,5 +1,6 @@
+import { DateTime } from 'luxon';
 import { describe, expect, it } from 'vitest';
-import { emptyBucket, reconciles, slicesFor, type Slice } from './rollup';
+import { dayIn, emptyBucket, reconciles, slicesFor, type Slice } from './rollup';
 
 /**
  * `metrics_daily` stores four slices per day — the totals, and then by group, by
@@ -108,5 +109,47 @@ describe('reconciles', () => {
       const [totals, ...rest] = day;
       expect(reconciles([surveys(null, { ...totals!.bucket, ...counts }), ...rest])).toBe(false);
     }
+  });
+});
+
+/**
+ * The day a row is listed under is the team's day. The bug this guards printed
+ * `toISOString().slice(0, 10)`, the UTC date, so a message that reached Cairo
+ * before 02:00 (03:00 under daylight saving) was listed on the day before.
+ * Instants are built from Cairo's wall clock and converted by the zone database,
+ * never by hand, so the offset each case relies on is the one Cairo really had.
+ */
+describe('dayIn', () => {
+  const ZONE = 'Africa/Cairo';
+  const cairo = (wallClock: string) => DateTime.fromISO(wallClock, { zone: ZONE }).toJSDate();
+
+  it('lists the small hours of a summer night on their own day, which UTC does not', () => {
+    const at = cairo('2026-10-14T02:59');
+    expect(at.toISOString().slice(0, 10)).toBe('2026-10-13');
+    expect(dayIn(at, ZONE)).toBe('2026-10-14');
+  });
+
+  it('lists the small hours of a winter night on their own day, at the other offset', () => {
+    const at = cairo('2026-01-15T01:30');
+    expect(at.toISOString().slice(0, 10)).toBe('2026-01-14');
+    expect(dayIn(at, ZONE)).toBe('2026-01-15');
+  });
+
+  it('keeps the last minute of a day on that day', () => {
+    expect(dayIn(cairo('2026-10-13T23:59'), ZONE)).toBe('2026-10-13');
+  });
+
+  it('follows the clocks across the night daylight saving ends', () => {
+    // Cairo's clocks go back an hour at midnight between 29 and 30 October
+    // 2026. 02:30 the night before is three hours ahead of UTC and 01:30 the
+    // night after is two, so both are 23:30 the day before in UTC — one offset
+    // hard-coded would get one of them wrong.
+    expect(dayIn(cairo('2026-10-29T02:30'), ZONE)).toBe('2026-10-29');
+    expect(dayIn(cairo('2026-10-30T01:30'), ZONE)).toBe('2026-10-30');
+  });
+
+  it('answers in the zone it is given, not the one the process runs in', () => {
+    const at = cairo('2026-10-14T02:59');
+    expect(dayIn(at, 'UTC')).toBe('2026-10-13');
   });
 });
