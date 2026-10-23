@@ -83,4 +83,35 @@ describe('planDays', () => {
   it('treats a range ending before any data as empty rather than as the default', () => {
     expect(planDays({ from: '2019-01-01', to: '2019-02-01' }, bounds, zone).days).toHaveLength(32);
   });
+
+  // 24 April 2026 opens at 01:00, when Cairo springs forward, so it is an hour
+  // short of a whole day to the next midnight. A span measured in elapsed time
+  // left a range's first day out whenever it was that one, with nothing skipped.
+  describe('a range that starts on the day Cairo springs forward', () => {
+    const april = { today: '2026-10-23', earliest: '2026-04-24' };
+    const threeDays = ['2026-04-26', '2026-04-25', '2026-04-24'];
+
+    it('keeps that day when the range names it', () => {
+      expect(planDays({ from: '2026-04-24', to: '2026-04-25' }, april, zone)).toEqual({
+        days: ['2026-04-25', '2026-04-24'],
+        skipped: 0,
+      });
+    });
+
+    it('keeps it when `days` counts back to it', () => {
+      expect(planDays({ days: 3, to: '2026-04-26' }, april, zone).days).toEqual(threeDays);
+    });
+
+    it('keeps it when the oldest ticket is on it', () => {
+      expect(planDays({ to: '2026-04-26' }, april, zone).days).toEqual(threeDays);
+    });
+
+    it('counts the day the clocks go back as one day too', () => {
+      const autumn = { today: '2026-11-05', earliest: null };
+      expect(planDays({ from: '2026-10-29', to: '2026-10-30' }, autumn, zone).days).toEqual([
+        '2026-10-30',
+        '2026-10-29',
+      ]);
+    });
+  });
 });

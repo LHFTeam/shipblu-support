@@ -1,4 +1,3 @@
-import { DateTime } from 'luxon';
 import { and, eq, gte, inArray, isNull, lt, lte, ne, notInArray, or, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import {
@@ -26,7 +25,7 @@ import {
   totalSeconds,
   type Span,
 } from './intervals';
-import type { ReportingContext } from './rollup';
+import { dayWindow, type ReportingContext } from './rollup';
 import { logger } from '@/lib/log';
 
 const log = logger('agent-rollup');
@@ -166,14 +165,13 @@ export async function computeAgentDay(
   { zone, hoursFor }: ReportingContext,
   until?: Date,
 ): Promise<AgentDay[]> {
-  const start = DateTime.fromISO(day, { zone });
-  if (!start.isValid) {
+  const window = dayWindow(day, zone);
+  if (!window) {
     log.warn(`ignoring an unparseable day "${day}"`);
     return [];
   }
 
-  const from = start.startOf('day').toJSDate();
-  const endOfDay = start.plus({ days: 1 }).startOf('day').toJSDate();
+  const { start: from, end: endOfDay } = window;
   const to = until && until < endOfDay ? until : endOfDay;
 
   const roster = await db.select({ id: agents.id }).from(agents).where(eq(agents.isActive, true));
