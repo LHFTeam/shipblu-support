@@ -130,6 +130,28 @@ export function dateIn(at: Date, zone: string): string {
 }
 
 /**
+ * Where a rolled-up day begins and ends, end exclusive, or null for a day that
+ * does not parse. Every rollup cuts its day here, so `metrics_daily`, the agent
+ * rows and the subcategory rows, written for one day in one transaction, put an
+ * instant on the same day.
+ *
+ * Both ends are a `startOf('day')`. The end is not the start plus a day: Cairo
+ * springs forward at midnight, so a changeover day such as 24 April 2026 has no
+ * 00:00 and opens at 01:00, and a day added to that is 01:00 on the 25th. The
+ * subcategory rollup cut its own day that way, and the first hour of the 25th
+ * counted on both days (`docs/PROJECT-STATE.md` §6.101). The start is a
+ * `startOf('day')` too, because luxon can resolve a bare date an hour late in
+ * a zone whose clocks jump across the date line, and that hour would then be
+ * on no day.
+ */
+export function dayWindow(day: string, zone: string): { start: Date; end: Date } | null {
+  const date = DateTime.fromISO(day, { zone });
+  if (!date.isValid) return null;
+  const start = date.startOf('day');
+  return { start: start.toJSDate(), end: start.plus({ days: 1 }).startOf('day').toJSDate() };
+}
+
+/**
  * The window a report's range covers, as the `YYYY-MM-DD` the rollup writes.
  *
  * Lives here, beside `todayIn`, because it is the read side of the same rule:
@@ -296,14 +318,13 @@ export async function computeDay(
   { zone, hoursFor }: ReportingContext,
   until?: Date,
 ): Promise<Slice[]> {
-  const start = DateTime.fromISO(day, { zone });
-  if (!start.isValid) {
+  const window = dayWindow(day, zone);
+  if (!window) {
     log.warn(`ignoring an unparseable day "${day}"`);
     return [];
   }
 
-  const from = start.startOf('day').toJSDate();
-  const endOfDay = start.plus({ days: 1 }).startOf('day').toJSDate();
+  const { start: from, end: endOfDay } = window;
   const to = until && until < endOfDay ? until : endOfDay;
 
   const buckets = new Map<string, Bucket>();

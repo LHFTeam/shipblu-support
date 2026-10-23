@@ -6606,6 +6606,35 @@ dryRun=true`, then without, gives those two theirs back from their
       ticket merge, and which half to keep is a judgement: in each pair, the
       half with one message holds the customer's opening message.
 
+101.  **Cairo springs forward at midnight, so that day has no 00:00.**
+      _2026-10-23._ On the last Friday of April the clocks go from 00:00 to
+      01:00, so `DateTime.fromISO('2026-04-24', { zone: 'Africa/Cairo' })` is
+      01:00+03:00 and the day is 23 hours long. A day ended at its start plus
+      a day ends at 01:00 on the 25th, an hour into the next day.
+      `dayBounds` in the subcategory rollup (`lib/reports/subcategory-rollup.ts`,
+      `category-rollup.ts` until Stage 2.A) ended its day that way, so the
+      first hour of the 25th counted on both days in
+      `category_metrics_daily` and `root_cause_metrics_daily`: a database probe
+      with one ticket at 2026-04-24T21:30Z found it on both. Each of the three
+      rollups wrote its day bounds out by hand, and this was the copy that
+      drifted, so all three now cut their day through `dayWindow` in
+      `lib/reports/rollup.ts`, each of whose ends is a `startOf('day')`. The
+      fall-back day (24:00 back to 23:00 on the last Thursday of
+      October) is right either way, because its midnight exists. Production
+      held none of the affected days when this was fixed, since the subcategory
+      history starts on 2026-08-30, so nothing stored was wrong; 2027-04-30
+      would have been the first.
+
+      The same 23-hour day broke a count of days as well as a bound.
+      `planDays` in `worker/handlers/rollup-metrics.ts` sized a range as
+      `Math.floor(end.diff(start, 'days').days) + 1`, which for
+      `from=2026-04-24 to=2026-04-25` is `floor(0.958) + 1`, one day. A range
+      that started on a spring-forward day therefore left that day out, and
+      `skipped` did not count it, so the rebuild that would repair such a day
+      skipped it without a word. It now counts the span on the calendar dates, as
+      `windowDays` does in UTC, and so should anything else counting days:
+      never on the instants between them.
+
 ### Tooling notes for this environment
 
 Supabase and Render MCP tools work and are the fastest way to check real state —
