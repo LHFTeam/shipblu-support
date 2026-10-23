@@ -61,7 +61,7 @@ held is folded in. The support lead answered every open question on
 2026-10-20; [Decisions taken](#decisions-taken-with-the-support-lead-2026-10-20)
 records the answers, and the plan below already reflects them.
 
-## Status and handoff (2026-10-23, 15:01 UTC)
+## Status and handoff (2026-10-23, 21:10 UTC)
 
 A session picking this plan up starts here. Everything after this section is
 the design as it was reasoned and as each stage was built. This section says
@@ -77,9 +77,26 @@ re-read before acting on one.
 | 0     | Merged: #386 (`01488c9`)                                                                                                                    | Live since 2026-10-20. Its two operational steps were never done (below)                                                                                                                           |
 | 1.1   | Merged: #387, then `dev` → `main` in #389 (`1f89219`)                                                                                       | Live since 2026-10-21 10:13 UTC                                                                                                                                                                    |
 | 1.2   | Merged: #391 (`31f7379`) and follow-up #392 (`7b7d276`), then `dev` → `main` in #393 (`634a28d`), which also carried another session's #390 | **Done.** All six services live on `634a28d` by 17:38 UTC, worker first. The user ran the backfill and the rollup from a shell, so neither left a `jobs` row. Every check that follows reads clean |
-| 1.3   | Merged into `dev`: #395 (`58c5ed9`), 2026-10-23, after its second review. Not yet `dev` → `main`. As built below                            | Not deployed: `main` is still at `634a28d`                                                                                                                                                         |
+| 1.3   | Merged: #395 (`58c5ed9`), then `dev` → `main` in #397 (`447d8be`), which also carried #394, #396 and #398. As built below                   | **Done.** All six services live on `447d8be` by 18:36 UTC, web first. Its checks read clean (below), though no comment has arrived since                                                           |
 | 2.A   | In review: #400 (`claude/epic-heisenberg-w60nbl`), no migration. As built below                                                             | Not deployed. Ships with the next `dev` → `main` merge, after its "Before" step (Deploying 2.A)                                                                                                    |
 | 2.B–6 | Not started                                                                                                                                 | —                                                                                                                                                                                                  |
+
+**1.3's checks, read at 21:10 UTC.** `<X>` is 18:29:39 UTC, when Render began
+web's deploy, which precedes the preDeploy that added the CHECK.
+
+- **The CHECK.** `conversations_comment_channel_matches_external_id` is one
+  row, validated, and its definition matches `db/sql/008`. `0045` is the newest
+  migration applied, so #396's two came with it. No conversation's channel and
+  external id disagree.
+- **Nothing refused since.** No `process_webhook` attempt since `<X>` has
+  failed on an insert into `conversations`, and no verified Meta delivery
+  received since an hour before `<X>` is unprocessed. All 154 jobs run since
+  `<X>` completed, and none carries an error.
+- **Not yet exercised.** Facebook sent four deliveries after `<X>`, all
+  processed, and they opened one direct-message ticket. No comment has arrived,
+  so the CHECK has not yet met a new one. Re-read the two queries under
+  [1.3, as built](#13-as-built) once one has, and within seven days of it,
+  because `cleanup` deletes a completed job a week after it completes.
 
 **1.2's checks, read at 21:54 UTC.**
 
@@ -131,29 +148,20 @@ re-read before acting on one.
 Every production write needs the user's go-ahead for that step, and the
 `AGENTS.md` sequence: read the state first, say the change, have the way back.
 
-1. **1.3 is merged into `dev`**: #395, squashed as `58c5ed9` on 2026-10-23
-   once CI was green, as recorded under [1.3, as built](#13-as-built). Its
-   second review (seven threads, 2026-10-22) is answered there: the CHECK's
-   lock wait is bounded at 3 s, the gate reads the frozen copies too, the
-   post-deploy check reads what is stored, the 1.2 rollback deactivates one
-   more kind of rule, and the
-   external-id half stays, held by eight database cases in the shape the 1.2
-   rollback leaves. A review of those fixes then made the test helper unable to
-   truncate a database it refused, had `withCleanDatabase()` replay `008` before
-   every test, bounded the rollback's DROP at 3 s too, and named which cases go
-   with step 2's revert.
-2. **Merge `dev` into `main` only once 1.3's gate holds.** The gate is a
-   read-only query. Read it on the day of the merge and quote it in the PR.
-   The gate guards the merge rather than the deploy, because whoever next
-   deploys `main` ships 1.3, whatever else they meant to ship. `dev` also
-   carries #394 (`508ea6f`, scroll panes; no migration), another session's #396
-   (`e7376bf`: migrations `0044` and `0045`, `db/sql/009`, and changes to `001`
-   and `003`) and, once #400 merges, 2.A. The merge ships all of them, and
-   rules 1 and 7 ask for web first.
-3. **Deploy 1.3 and 2.A**: web, then the worker, then the crons. Before it, run
-   2.A's "Before" step under [Deploying 2.A](#2a-as-built): any `CATEGORISE_*`
-   value copied to its new name, the overrides and the old job re-read. Read
-   1.3's lock precautions below too. After it, run 1.3's verification rows and
+1. **1.3 is deployed.** #395 was squashed into `dev` as `58c5ed9`, and #397
+   (`447d8be`) took it to `main` on 2026-10-23 with #394, #396 and #398, quoting
+   the gate at 0, 0, 0 on production at 18:26:49 UTC. All six services were
+   live on it by 18:36 UTC, web first. Its checks read clean at 21:10 UTC
+   (above), with one re-read left for the first comment. Its reviews are
+   answered under [1.3, as built](#13-as-built).
+2. **Merge #400, then `dev` into `main`.** 2.A has no migration and no `db/sql`
+   change, and nor has anything else on `dev` since #397: #399 (`0d1289d`, a
+   repo rule) and #402 (`48896ce`, the review page's date). Rule 7 still holds,
+   because the merge ships all of `dev`: read `git log origin/main..origin/dev`
+   on the day and every migration in it.
+3. **Deploy 2.A**: web, then the worker, then the crons. Before it, run 2.A's
+   "Before" step under [Deploying 2.A](#2a-as-built): any `CATEGORISE_*` value
+   copied to its new name, the overrides and the old job re-read. After it, run
    2.A's handbook and verify steps.
 4. **Stage 2.B**, the SQL rename, follows once 2.A is deployed to all six
    services. It needs the maintenance sequence in its stage section, and its
@@ -550,11 +558,12 @@ stage section left open was decided as follows.
   which the seed syncs on every run. The chips quote the code's labels
   exactly: `Subcategories`, `Add a subcategory…` and `Subcategory review`.
 
-**Deploying 2.A.** It has no migration, but the release it rides in does: `dev`
-also carries #396 (`e7376bf`: migrations `0044` and `0045`, `db/sql/009`, and
-changes to `001` and `003`) and 1.3's `db/sql/008`. So rules 1 and 7 ask for web
-first, which suits 2.A anyway: an old web prints a new worker's `subcategorised`
-event as its bare type, while a new web reads an old worker's events in full.
+**Deploying 2.A.** It has no migration. Nor does the release it rides in, since
+#397 shipped #396's migrations and 1.3's `db/sql/008` without it, unless
+something carrying one lands on `dev` first (rule 7: read
+`git log origin/main..origin/dev` on the day). Web goes first all the same: an
+old web prints a new worker's `subcategorised` event as its bare type, while a
+new web reads an old worker's events in full.
 
 1. **Before.** Read, in the Render dashboard, the three env groups and the
    variables set on web and the worker for any `CATEGORISE_*`; copy a value to
