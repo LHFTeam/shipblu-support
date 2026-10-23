@@ -84,9 +84,10 @@ describe('planDays', () => {
     expect(planDays({ from: '2019-01-01', to: '2019-02-01' }, bounds, zone).days).toHaveLength(32);
   });
 
-  // 24 April 2026 opens at 01:00, when Cairo springs forward, so it is an hour
-  // short of a whole day to the next midnight. A span measured in elapsed time
-  // left a range's first day out whenever it was that one, with nothing skipped.
+  // 24 April 2026 opens at 01:00, when Cairo springs forward, so luxon's day
+  // diff from it to the next midnight is 23 hours, not a day. Flooring that diff
+  // left a range's first day out whenever it was that one, and `skipped` did not
+  // count it.
   describe('a range that starts on the day Cairo springs forward', () => {
     const april = { today: '2026-10-23', earliest: '2026-04-24' };
     const threeDays = ['2026-04-26', '2026-04-25', '2026-04-24'];

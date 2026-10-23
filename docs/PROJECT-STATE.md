@@ -6570,8 +6570,8 @@ dryRun=true`, then without, gives those two theirs back from their
       `Math.floor(end.diff(start, 'days').days) + 1`, which for
       `from=2026-04-24 to=2026-04-25` is `floor(0.958) + 1`, one day. A range
       that started on a spring-forward day therefore left that day out, and
-      `skipped` still read 0, so the rebuild that would repair such a day
-      skipped it. It now counts the span on the calendar dates, as
+      `skipped` did not count it, so the rebuild that would repair such a day
+      skipped it without a word. It now counts the span on the calendar dates, as
       `windowDays` does in UTC, and so should anything else counting days:
       never on the instants between them.
 

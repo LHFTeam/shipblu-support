@@ -114,9 +114,10 @@ export function planDays(
   if (!start.isValid || !end.isValid || start > end) return { days: [], skipped: 0 };
 
   // Counted on the calendar dates, not the instants between them. A range that
-  // starts on a Cairo spring-forward day starts at 01:00, an hour short of a
-  // whole day to the next midnight, and an elapsed-time span floored that day
-  // away with nothing in `skipped` to say so (`docs/PROJECT-STATE.md` §6.101).
+  // starts on a Cairo spring-forward day starts at 01:00, so luxon's day diff
+  // from it to the next midnight is 23 hours rather than a day, and flooring it
+  // dropped that day with nothing in `skipped` to say so
+  // (`docs/PROJECT-STATE.md` §6.101).
   const span = datesFrom(start, end) + 1;
   const kept = Math.min(span, MAX_DAYS);
 

@@ -171,7 +171,8 @@ describe('dateIn', () => {
  * Where every rollup cuts its day. A day that does not end where the next one
  * begins counts an hour twice or not at all, and nothing in the stored rows
  * shows which: the category rollup counted the first hour of 25 April 2026 on
- * the 24th as well, because Cairo springs forward at that midnight
+ * the 24th as well, because Cairo springs forward at the midnight that opens
+ * the 24th and a day added to its 01:00 start ran an hour into the 25th
  * (`docs/PROJECT-STATE.md` §6.101).
  */
 describe('dayWindow', () => {
@@ -206,9 +207,10 @@ describe('dayWindow', () => {
 
   it('leaves no hour between two days where luxon reads a bare date an hour late', () => {
     // Samoa sprang forward on 24 September 2011 and crossed the date line that
-    // December. Luxon resolves a wall-clock time from the zone's offset today,
-    // which is far from 2011's, and lands a bare 25 September at 01:00 rather
-    // than at its midnight; only the start's own `startOf('day')` puts it back.
+    // December. Luxon resolves a wall-clock time from an offset it guesses for
+    // the zone once and caches, and any guess since then (+13 or +14) is far
+    // from 2011's, so a bare 25 September lands at 01:00 rather than at its
+    // midnight; only the start's own `startOf('day')` puts it back.
     const zone = 'Pacific/Apia';
     expect(dayWindow('2011-09-25', zone)!.start).toEqual(dayWindow('2011-09-24', zone)!.end);
   });
