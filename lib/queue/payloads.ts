@@ -37,8 +37,10 @@ const instant = z.string().transform((text, ctx) => {
   return read.at;
 });
 
+// An offset is held to hours 00-23 and minutes 00-59, as `Date.parse` held it:
+// luxon checks neither, and reads `+03:60` as +04:00.
 const BOUND =
-  /^(\d{4}-\d{2}-\d{2})(?:[T ](\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?)(Z|[+-]\d{2}(?::?\d{2})?)?)?$/i;
+  /^(\d{4}-\d{2}-\d{2})(?:[T ](\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?)(Z|[+-](?:[01]\d|2[0-3])(?::?[0-5]\d)?)?)?$/i;
 const MINUTE = 60_000;
 const DAY = 24 * 60 * MINUTE;
 
@@ -79,7 +81,8 @@ function readBound(text: string): { at: Date } | { refused: string } {
     .filter((at) => offsetAt(at) === fields - at)
     .sort((a, b) => a - b);
 
-  // The first of a repeated time, as `cairo()` reads one in the tests.
+  // The first of a repeated time, still on summer time, whichever season the
+  // job runs in: the instance `cairo()` documents for the tests.
   if (first !== undefined) return { at: new Date(first) };
 
   // Midnight skipped: Cairo springs forward from 00:00 to 01:00, so its day

@@ -246,7 +246,8 @@ describe('a scan bound', () => {
       expect(at('2026-01-15')).toEqual(cairo('2026-01-15T00:00'));
       // 24 April 2026 has no 00:00: the clocks went from 00:00 to 01:00.
       expect(at('2026-04-24')).toEqual(cairo('2026-04-24T01:00'));
-      // 30 October's midnight exists: it is the hour after it that repeats.
+      // 30 October's midnight happens once: the hour that repeats is the one
+      // before it, 23:00 on the 29th.
       expect(at('2026-10-30')).toEqual(cairo('2026-10-30T00:00'));
     });
 
@@ -264,8 +265,10 @@ describe('a scan bound', () => {
       expect(at('2026-04-24T00:30+02:00')).toEqual(new Date('2026-04-23T22:30:00Z'));
     });
 
-    // The two instants are written out in UTC, once: `cairo()` leaves this
-    // choice to luxon, which is the thing being frozen out here.
+    // Written out in UTC, once, rather than through `cairo()`: the expectation
+    // must not come from luxon's own choice between the two instances, which is
+    // what this case freezes out, and `cairo()` left that choice to luxon until
+    // #409.
     it('takes the first instance of the hour the autumn change repeats, whenever it runs', () => {
       vi.useFakeTimers({ toFake: ['Date'] });
 
@@ -291,15 +294,22 @@ describe('a scan bound', () => {
     // `since=20260901` at the command line: a number, milliseconds into 1970.
     20260901,
     'yesterday',
-    // Each read by `Date.parse` in the host's zone, or not as written.
+    // Each read by `Date.parse`, in the host's zone or not as written.
     'Oct 1 2026',
     '2026/10/01',
     '2026-02-30',
     '2026-10',
+    // Refused by `Date.parse` too, and kept so the shape stays as narrow.
     '09:30',
     '2026-10-01T09:30+03:00 ',
     '2026-10-01+03:00',
     '2026-10-01T25:00',
+    // Refused by `Date.parse` and read by luxon, which checks no offset's range
+    // and takes +03:60 as +04:00.
+    '2026-10-01T00:00+24:00',
+    '2026-10-01T00:00+03:60',
+    '2026-10-01T00:00+0360',
+    '2026-10-01T00:00+99:99',
   ])('refuses %o rather than guessing what it meant', (text) => {
     expect(() => read(text)).toThrow(PermanentJobError);
   });
