@@ -21,8 +21,8 @@ import type { ActionState } from '@/lib/http/action-state';
 export type SettingsState = ActionState;
 
 /**
- * What the agents, channels, import and categories actions answer: the error,
- * and for an invite, which of its two deliveries happened. Built on
+ * What the agents, channels, import and subcategories actions answer: the
+ * error, and for an invite, which of its two deliveries happened. Built on
  * `ActionState` so a success can carry the nonce a form clears itself on.
  */
 export type AdminState = ActionState & {

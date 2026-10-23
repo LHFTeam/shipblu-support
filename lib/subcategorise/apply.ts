@@ -332,8 +332,8 @@ async function insertAssignment(
  * allows exactly one primary per conversation, so writing the new one first
  * would conflict with the old — and the gap between the two statements is a
  * window where a second caller sees no primary and writes its own. That is not
- * hypothetical here. The index's own comment in `db/schema/subcategories.ts` says
- * ingest jobs for one conversation run in parallel on the worker, and two
+ * hypothetical here. The index's own comment in `db/schema/subcategories.ts`
+ * says ingest jobs for one conversation run in parallel on the worker, and two
  * agents pressing Confirm on the same ticket reach this the same way. The
  * losing side raises 23505, which `afterMessageStored` swallows — so the
  * symptom is a message that silently never got its timeline event or its

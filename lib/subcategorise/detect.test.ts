@@ -1,14 +1,16 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   AUTO_APPLY_MIN,
   INFERENCE_CEILING,
   KEYWORD_CEILING,
+  RECORD_MIN,
   bandFor,
   combine,
   detectSubcategories,
+  thresholds,
 } from './detect';
 import { MAX_TEXT_LENGTH, anchored, normaliseForMatch } from './normalise';
-import { PHRASES } from './rules';
+import { PHRASES, disabledRuleKeys } from './rules';
 import { UNCLASSIFIED_KEY } from './taxonomy';
 
 /**
@@ -329,6 +331,44 @@ describe('bands', () => {
     expect(hit.key).toBe(UNCLASSIFIED_KEY);
     expect(hit.confidence).toBe(0);
     expect(bandFor(hit)).toBe('suggested');
+  });
+});
+
+describe('the environment overrides', () => {
+  // `SUBCATEGORISE_*` since Stage 2.A of `plans/ticket-category-routing.md`,
+  // and `CATEGORISE_*` before it. A value still set under the old name is not
+  // read at all, so the default applies without a word — which is why the old
+  // names are asserted here beside the new ones.
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('reads the thresholds from SUBCATEGORISE_AUTO_MIN and SUBCATEGORISE_RECORD_MIN', () => {
+    vi.stubEnv('SUBCATEGORISE_AUTO_MIN', '0.8');
+    vi.stubEnv('SUBCATEGORISE_RECORD_MIN', '0.5');
+    expect(thresholds()).toEqual({ autoApply: 0.8, record: 0.5 });
+  });
+
+  it('does not read thresholds left under the old CATEGORISE_* names', () => {
+    vi.stubEnv('SUBCATEGORISE_AUTO_MIN', undefined);
+    vi.stubEnv('SUBCATEGORISE_RECORD_MIN', undefined);
+    vi.stubEnv('CATEGORISE_AUTO_MIN', '0.8');
+    vi.stubEnv('CATEGORISE_RECORD_MIN', '0.5');
+    expect(thresholds()).toEqual({ autoApply: AUTO_APPLY_MIN, record: RECORD_MIN });
+  });
+
+  it('switches a rule off through SUBCATEGORISE_DISABLED_RULES', () => {
+    vi.stubEnv('SUBCATEGORISE_DISABLED_RULES', 'phrase.where.bare2');
+    expect(disabledRuleKeys()).toEqual(new Set(['phrase.where.bare2']));
+    const hits = detectSubcategories({ bodyText: 'فين الاوردر' });
+    expect(hits.map((hit) => hit.ruleKey)).not.toContain('phrase.where.bare2');
+  });
+
+  it('does not read a rule list left under the old CATEGORISE_DISABLED_RULES', () => {
+    vi.stubEnv('SUBCATEGORISE_DISABLED_RULES', undefined);
+    vi.stubEnv('CATEGORISE_DISABLED_RULES', 'phrase.where.bare2');
+    expect(disabledRuleKeys().size).toBe(0);
+    expect(detectSubcategories({ bodyText: 'فين الاوردر' })[0]?.ruleKey).toBe('phrase.where.bare2');
   });
 });
 

@@ -730,7 +730,10 @@ export const ROOT_CAUSES: readonly RootCauseDef[] = [
 ] as const;
 
 /** Every subcategory, flattened, in seed order. */
-export function allSubcategories(): readonly (SubcategoryDef & { area: string; position: number })[] {
+export function allSubcategories(): readonly (SubcategoryDef & {
+  area: string;
+  position: number;
+})[] {
   const rows: (SubcategoryDef & { area: string; position: number })[] = [];
   let position = 0;
   for (const area of TAXONOMY) {

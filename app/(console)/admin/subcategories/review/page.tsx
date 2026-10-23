@@ -15,7 +15,7 @@ import { ReviewControls } from './controls';
 export const dynamic = 'force-dynamic';
 
 /**
- * The categories the detector is unsure about, and how each rule is doing.
+ * The subcategories the detector is unsure about, and how each rule is doing.
  *
  * Three parts that answer different questions. The queue is the work: every
  * suggestion waiting on one click. The unclassified list under it is the other
@@ -58,7 +58,7 @@ export default async function SubcategoryReviewPage() {
   return (
     <>
       <PageHeader
-        title="Category review"
+        title="Subcategory review"
         description="Suggestions the rules were not confident enough to apply on their own. Confirming one says the rule was right; rejecting it stops that rule suggesting the same thing on that ticket again."
       />
 
@@ -71,7 +71,7 @@ export default async function SubcategoryReviewPage() {
         <Table
           head={[
             'Ticket',
-            'Suggested category',
+            'Suggested subcategory',
             <>
               Evidence{' '}
               <InfoTip label="Evidence">
@@ -143,7 +143,7 @@ export default async function SubcategoryReviewPage() {
         <p className="mb-3 max-w-2xl text-sm text-(--color-text-secondary)">
           Free text the rules could not read, newest first. There is nothing to confirm here — the
           point is to read what customers actually wrote and write the rule that was missing. A
-          category climbing this list is the lexicon telling you where its gap is, and it is the
+          subcategory climbing this list is the lexicon telling you where its gap is, and it is the
           cheap half of the asymmetry the detector is tuned around: a miss shows up here, a wrong
           answer shows up nowhere.
         </p>

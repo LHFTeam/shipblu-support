@@ -14,43 +14,44 @@ export const dynamic = 'force-dynamic';
  * Editable here rather than in code because renaming "Cost and payment methods"
  * to "Pricing" is a decision by whoever owns the report and should not need a
  * deploy. What is **not** editable here is the matching — which words mean which
- * category lives in `lib/subcategorise/rules.ts`, compiled, with tests. A regular
- * expression typed into a form is a production incident with no review.
+ * subcategory lives in `lib/subcategorise/rules.ts`, compiled, with tests. A
+ * regular expression typed into a form is a production incident with no review.
  *
  * Nothing on this page deletes. The foreign key from `conversation_categories`
- * is `restrict`, so a category with tickets behind it cannot be removed at all —
- * it is deactivated, which takes it out of the picker and leaves every report
- * ever drawn from it still readable.
+ * is `restrict`, so a subcategory with tickets behind it cannot be removed at
+ * all — it is deactivated, which takes it out of the picker and leaves every
+ * report ever drawn from it still readable.
  */
 export default async function SubcategoriesPage() {
   await requirePermission('admin.subcategories');
 
-  const [categories, causes, usage] = await Promise.all([
+  const [subcategories, causes, usage] = await Promise.all([
     listTicketSubcategories(),
     listRootCauses(),
     subcategoryUsage(),
   ]);
 
   /*
-   * Which detectable categories have never been assigned.
+   * Which detectable subcategories have never been assigned.
    *
    * Only worth saying once something *has* been assigned. On a system where
-   * nothing has run yet every category is unused, and listing all of them is
+   * nothing has run yet every subcategory is unused, and listing all of them is
    * not a finding — it is the same sentence as "no tickets yet", spelled out
    * fifty times. `usage.size` is the test for that.
    */
   const unused =
     usage.size === 0
       ? []
-      : categories.filter(
-          (category) => category.isActive && category.isDetectable && !usage.get(category.key),
+      : subcategories.filter(
+          (subcategory) =>
+            subcategory.isActive && subcategory.isDetectable && !usage.get(subcategory.key),
         );
 
   return (
     <>
       <PageHeader
-        title="Categories and causes"
-        description="What tickets are about, and why they happen. Labels are yours to change; which words match which category lives in code, with tests."
+        title="Subcategories and causes"
+        description="What tickets are about, and why they happen. Labels are yours to change; which words match which subcategory lives in code, with tests."
         actions={
           <>
             <Link
@@ -69,24 +70,24 @@ export default async function SubcategoriesPage() {
         }
       />
 
-      {categories.length === 0 ? (
+      {subcategories.length === 0 ? (
         <Notice tone="neutral">
-          No taxonomy yet. Run <code>npm run db:seed</code> to create it — the categories and causes
-          are defined in <code>lib/subcategorise/taxonomy.ts</code> and seeded from there.
+          No taxonomy yet. Run <code>npm run db:seed</code> to create it — the subcategories and
+          causes are defined in <code>lib/subcategorise/taxonomy.ts</code> and seeded from there.
         </Notice>
       ) : (
         <>
           {/*
-            Not a warning, an observation — a category at zero is either one
+            Not a warning, an observation — a subcategory at zero is either one
             nobody needs or a rule that never matches, and only the second is a
             problem. Saying which is which is what `is_detectable` is for, so
-            manual-only categories are left out of this count entirely.
+            manual-only subcategories are left out of this count entirely.
           */}
           {unused.length > 0 ? (
             <Notice tone="info" icon className="mb-4">
-              <b>{unused.length}</b> detectable categories have never been assigned:{' '}
-              {unused.map((category) => category.key).join(', ')}. Either the rules for them never
-              match, or nobody raises them — the review queue&rsquo;s rule table tells the two
+              <b>{unused.length}</b> detectable subcategories have never been assigned:{' '}
+              {unused.map((subcategory) => subcategory.key).join(', ')}. Either the rules for them
+              never match, or nobody raises them — the review queue&rsquo;s rule table tells the two
               apart.
             </Notice>
           ) : null}
@@ -94,14 +95,15 @@ export default async function SubcategoriesPage() {
           <h2 className="mb-2 text-sm font-semibold">What tickets are about</h2>
           <Table
             head={[
-              'Category',
+              'Subcategory',
               <>
                 Key{' '}
                 <InfoTip label="Key">
-                  How the category is named everywhere it is not shown to a person: every compiled
-                  rule awards one, every stored assignment freezes one, and every report groups by
-                  one. Fixed once the category exists — renaming it would leave the rules pointing
-                  at nothing and strand the value on every ticket already filed under it.
+                  How the subcategory is named everywhere it is not shown to a person: every
+                  compiled rule awards one, every stored assignment freezes one, and every report
+                  groups by one. Fixed once the subcategory exists — renaming it would leave the
+                  rules pointing at nothing and strand the value on every ticket already filed under
+                  it.
                 </InfoTip>
               </>,
               'Arabic',
@@ -120,20 +122,20 @@ export default async function SubcategoriesPage() {
               '',
             ]}
           >
-            {categories.map((category) => (
+            {subcategories.map((subcategory) => (
               <SubcategoryRow
-                key={category.id}
-                category={{
-                  id: category.id,
-                  key: category.key,
-                  area: category.area,
-                  labelEn: category.labelEn,
-                  labelAr: category.labelAr,
-                  audience: category.audience,
-                  isActive: category.isActive,
-                  isDetectable: category.isDetectable,
+                key={subcategory.id}
+                subcategory={{
+                  id: subcategory.id,
+                  key: subcategory.key,
+                  area: subcategory.area,
+                  labelEn: subcategory.labelEn,
+                  labelAr: subcategory.labelAr,
+                  audience: subcategory.audience,
+                  isActive: subcategory.isActive,
+                  isDetectable: subcategory.isDetectable,
                 }}
-                used={usage.get(category.key) ?? 0}
+                used={usage.get(subcategory.key) ?? 0}
               />
             ))}
           </Table>

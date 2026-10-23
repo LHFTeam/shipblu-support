@@ -36,10 +36,11 @@ const RANGES = [7, 30, 90] as const;
 /**
  * What customers contacted us about, and why it happened.
  *
- * Two halves, and the second is the point. Volume by category says what the
- * queue was full of; volume by cause and owner says what to go and change. A
- * support team can read the first every week and never learn anything from it;
- * the second is the one that ends an argument about whose problem something is.
+ * Two halves, and the second is the point. Volume by subcategory says what
+ * the queue was full of; volume by cause and owner says what to go and change.
+ * A support team can read the first every week and never learn anything from
+ * it; the second is the one that ends an argument about whose problem
+ * something is.
  *
  * Reads only the nightly rollup, exactly as `/reports` does, so today's numbers
  * appear tomorrow rather than making every open tab run an aggregate over the
@@ -50,12 +51,12 @@ const RANGES = [7, 30, 90] as const;
  *
  * It was reported as broken, and from the outside it was indistinguishable from
  * broken: `rollup_metrics` recomputes three days a night and there is no
- * category backfill, so any window wider than the history holds the same rows —
- * 7, 30 and 90 answered identically and the buttons looked dead. Two things fix
- * that, and neither is the numbers. The header prints the window it selected, so
- * a press always changes something visible; and `rolledUpRange` says how much of
- * that window has figures at all, so "these three are the same" reads as a fact
- * about the archive rather than a fault in the page.
+ * subcategory backfill, so any window wider than the history holds the same
+ * rows — 7, 30 and 90 answered identically and the buttons looked dead. Two
+ * things fix that, and neither is the numbers. The header prints the window it
+ * selected, so a press always changes something visible; and `rolledUpRange`
+ * says how much of that window has figures at all, so "these three are the
+ * same" reads as a fact about the archive rather than a fault in the page.
  *
  * The window itself comes from `rangeIn()` in the reporting zone rather than
  * from the database's `current_date`, which is UTC — the rollup buckets days in
@@ -80,7 +81,7 @@ export default async function SubcategoryReportPage({
   const { zone } = await reportingContext();
   const range = rangeIn(zone, days);
 
-  const [categories, areas, channels, causes, owners, coverage, rolledUp] = await Promise.all([
+  const [subcategories, areas, channels, causes, owners, coverage, rolledUp] = await Promise.all([
     subcategoryTotals(range),
     areaTotals(range),
     channelTotals(range),
@@ -104,12 +105,12 @@ export default async function SubcategoryReportPage({
    * Keyed on where the figures *start* rather than on how many days inside the
    * window carry rows. Two things make a day legitimately empty — today, which
    * the rollup clamps off because it is not complete, and any day the team took
-   * no categorised tickets — so a day count short of `days` is the normal state
-   * and a warning drawn from it would be permanent furniture. A first day later
-   * than the window's start is the real signal: it means a wider range cannot
-   * reach further back, so the three buttons must agree with each other. `first`
-   * is where the history starts even when that is before the window — a quiet
-   * opening day has no row — which `rolledUpRange` explains.
+   * no subcategorised tickets — so a day count short of `days` is the normal
+   * state and a warning drawn from it would be permanent furniture. A first day
+   * later than the window's start is the real signal: it means a wider range
+   * cannot reach further back, so the three buttons must agree with each other.
+   * `first` is where the history starts even when that is before the window — a
+   * quiet opening day has no row — which `rolledUpRange` explains.
    */
   const startsLate = rolledUp.first !== null && rolledUp.first > range.from;
 
@@ -119,7 +120,7 @@ export default async function SubcategoryReportPage({
     <div className="app-scroll relative h-full overflow-y-auto p-4 sm:p-6">
       <PageHeader
         title="What tickets are about"
-        description={`${range.from} to ${range.to}, in ${zone}. Demand by category, and — the half that matters — why those tickets existed and who owns fixing it.`}
+        description={`${range.from} to ${range.to}, in ${zone}. Demand by subcategory, and — the half that matters — why those tickets existed and who owns fixing it.`}
         actions={
           <div className="flex flex-wrap items-center gap-3">
             <RangeNav
@@ -137,10 +138,10 @@ export default async function SubcategoryReportPage({
         }
       />
 
-      {categories.length === 0 && causes.length === 0 ? (
+      {subcategories.length === 0 && causes.length === 0 ? (
         <EmptyState
           title="Nothing rolled up yet"
-          hint={`No category or cause has been counted between ${range.from} and ${range.to}. These figures come from the nightly rollup, so a category assigned today appears tomorrow — run \`npm run job -- rollup_metrics\` to build them now.`}
+          hint={`No subcategory or cause has been counted between ${range.from} and ${range.to}. These figures come from the nightly rollup, so a subcategory assigned today appears tomorrow — run \`npm run job -- rollup_metrics\` to build them now.`}
         />
       ) : (
         <>
@@ -149,43 +150,43 @@ export default async function SubcategoryReportPage({
             one block so neither can be scrolled past on its own.
 
             The first is the multi-label warning: a ticket routinely carries two
-            or three categories, so the column does not sum to the ticket count,
-            and without saying so the first person to add it up files a bug. The
-            second only appears when the history starts inside the window, which
-            is the state that makes the range control look broken.
+            or three subcategories, so the column does not sum to the ticket
+            count, and without saying so the first person to add it up files a
+            bug. The second only appears when the history starts inside the
+            window, which is the state that makes the range control look broken.
           */}
           <div className="mb-6 max-w-2xl space-y-2">
             <Notice tone="neutral">
               A ticket can be about more than one thing, so{' '}
               <b className="text-(--color-text-primary)">Mentioned</b> counts every ticket carrying
-              a category and does not add up to the number of tickets.{' '}
+              a subcategory and does not add up to the number of tickets.{' '}
               <b className="text-(--color-text-primary)">Leading</b> counts each ticket once, under
-              whichever category leads it — that is the column to compare against a ticket count.
+              whichever subcategory leads it — that is the column to compare against a ticket count.
             </Notice>
 
             {startsLate ? (
               <Notice tone="info" icon>
-                This window opens on {range.from}, but the categorised history{' '}
+                This window opens on {range.from}, but the subcategorised history{' '}
                 <b>begins on {rolledUp.first}</b> — {rolledUp.days}{' '}
-                {rolledUp.days === 1 ? 'day' : 'days'} of it in this window. Categorisation records
-                forward only and there is no backfill, so a wider range cannot reach further back
-                than that: until more history accumulates, 7, 30 and 90 days will keep answering the
-                same.
+                {rolledUp.days === 1 ? 'day' : 'days'} of it in this window. Subcategorisation
+                records forward only and there is no backfill, so a wider range cannot reach further
+                back than that: until more history accumulates, 7, 30 and 90 days will keep
+                answering the same.
               </Notice>
             ) : null}
           </div>
 
           <section className="mb-8 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <Stat
-              label="Tickets categorised"
+              label="Tickets with a subcategory"
               value={areaTickets.toLocaleString()}
-              hint="Counted once each, under the category leading them"
+              hint="Counted once each, under the subcategory leading them"
               explain={
                 <>
-                  A ticket is counted on the day it <em>arrived</em>, because a category describes
-                  demand. The causes further down are counted on the day somebody worked them out
-                  instead, so the two halves of this page deliberately do not describe the same set
-                  of tickets.
+                  A ticket is counted on the day it <em>arrived</em>, because a subcategory
+                  describes demand. The causes further down are counted on the day somebody worked
+                  them out instead, so the two halves of this page deliberately do not describe the
+                  same set of tickets.
                 </>
               }
             />
@@ -208,7 +209,7 @@ export default async function SubcategoryReportPage({
                   Under-detection, which is the cheap failure: it shows up here rather than moving a
                   number somebody staffs a team from. It is counted per message, so a ticket whose
                   first message matched a rule and whose second did not appears both here and under
-                  its category — which is why this is a count and never a percentage.
+                  its subcategory — which is why this is a count and never a percentage.
                 </>
               }
             />
@@ -235,7 +236,7 @@ export default async function SubcategoryReportPage({
           <section className="mb-8">
             <h2 className="mb-2 text-sm font-semibold text-(--color-text-secondary)">By area</h2>
             {areas.length === 0 ? (
-              <Quiet>No category was assigned in this window.</Quiet>
+              <Quiet>No subcategory was assigned in this window.</Quiet>
             ) : (
               <Table head={['Area', 'Tickets', 'Mentioned', 'Share of tickets']}>
                 {areas.map((area) => (
@@ -266,7 +267,7 @@ export default async function SubcategoryReportPage({
             */}
             {unread > 0 ? (
               <p className="mt-2 max-w-2xl text-xs text-(--color-text-secondary)">
-                Unclassified shows a share of 0% by design — it is never the category leading a
+                Unclassified shows a share of 0% by design — it is never the subcategory leading a
                 ticket, so it is a measurement gap rather than a slice of demand.
                 {can(agent, 'admin.subcategories') ? (
                   <>
@@ -276,7 +277,7 @@ export default async function SubcategoryReportPage({
                       href="/admin/subcategories/review"
                       className="text-(--color-text-link) underline"
                     >
-                      category review
+                      subcategory review
                     </Link>
                     , which is where the next rule comes from.
                   </>
@@ -287,14 +288,14 @@ export default async function SubcategoryReportPage({
 
           <section className="mb-8">
             <h2 className="mb-2 text-sm font-semibold text-(--color-text-secondary)">
-              By category
+              By subcategory
             </h2>
-            {categories.length === 0 ? (
-              <Quiet>No category was assigned in this window.</Quiet>
+            {subcategories.length === 0 ? (
+              <Quiet>No subcategory was assigned in this window.</Quiet>
             ) : (
               <Table
                 head={[
-                  'Category',
+                  'Subcategory',
                   'Leading',
                   'Mentioned',
                   <>
@@ -302,32 +303,32 @@ export default async function SubcategoryReportPage({
                     <InfoTip label="How it was filed">
                       <b>Auto</b> means the rules were confident enough to apply it without asking.
                       <b> Suggested</b> means a rule proposed it and a person was asked — including
-                      the ones already confirmed, because how a category was <em>filed</em> does not
-                      change when somebody agrees with it, and counting confirmations here would
+                      the ones already confirmed, because how a subcategory was <em>filed</em> does
+                      not change when somebody agrees with it, and counting confirmations here would
                       make last week&rsquo;s figures move every time the queue is worked through.{' '}
-                      <b>By hand</b> is an agent filing something the rules missed — and a category
-                      arriving by hand far more often than by rule is the clearest sign the lexicon
-                      has a gap.
+                      <b>By hand</b> is an agent filing something the rules missed — and a
+                      subcategory arriving by hand far more often than by rule is the clearest sign
+                      the lexicon has a gap.
                     </InfoTip>
                   </>,
                 ]}
               >
-                {categories.map((category) => (
-                  <Row key={category.subcategoryKey}>
+                {subcategories.map((subcategory) => (
+                  <Row key={subcategory.subcategoryKey}>
                     <Cell>
-                      <span className="font-medium">{category.label}</span>
+                      <span className="font-medium">{subcategory.label}</span>
                       <p className="text-xs text-(--color-text-secondary)">
-                        {category.subcategoryKey}
+                        {subcategory.subcategoryKey}
                       </p>
                     </Cell>
-                    <Cell>{category.ticketsPrimary.toLocaleString()}</Cell>
+                    <Cell>{subcategory.ticketsPrimary.toLocaleString()}</Cell>
                     <Cell className="text-(--color-text-secondary)">
-                      {category.ticketsAny.toLocaleString()}
+                      {subcategory.ticketsAny.toLocaleString()}
                     </Cell>
                     <Cell className="text-xs whitespace-nowrap text-(--color-text-secondary)">
-                      {category.assignedAuto} auto · {category.assignedSuggested} suggested ·{' '}
-                      {category.assignedManual > 0 ? (
-                        <b>{category.assignedManual} by hand</b>
+                      {subcategory.assignedAuto} auto · {subcategory.assignedSuggested} suggested ·{' '}
+                      {subcategory.assignedManual > 0 ? (
+                        <b>{subcategory.assignedManual} by hand</b>
                       ) : (
                         '0 by hand'
                       )}
@@ -349,7 +350,7 @@ export default async function SubcategoryReportPage({
               Where it arrived
             </h2>
             {channels.length === 0 ? (
-              <Quiet>No category was assigned in this window.</Quiet>
+              <Quiet>No subcategory was assigned in this window.</Quiet>
             ) : (
               <Table
                 head={[

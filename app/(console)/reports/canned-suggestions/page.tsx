@@ -316,9 +316,9 @@ export default async function CannedSuggestionsReportPage({
             By how sure Jev was
             <InfoTip label="By how sure Jev was">
               The share of Jev&rsquo;s probability it gave the response it suggested. A probability
-              from the model, not the evidence grade a ticket&rsquo;s categories carry &mdash; the
-              two are different quantities. Every suggestion is shown whatever its probability; this
-              table is the evidence for hiding the unsure ones, if that is ever wanted.
+              from the model, not the evidence grade a ticket&rsquo;s subcategories carry &mdash;
+              the two are different quantities. Every suggestion is shown whatever its probability;
+              this table is the evidence for hiding the unsure ones, if that is ever wanted.
             </InfoTip>
           </h2>
           <div className="mb-8">

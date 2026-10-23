@@ -2,11 +2,16 @@
 
 import { useState } from 'react';
 import { Badge, Button, Cell, ErrorText, Input, Row } from '@/components/ui';
-import { saveSubcategory, saveRootCause, setSubcategoryActive, setRootCauseActive } from './actions';
+import {
+  saveSubcategory,
+  saveRootCause,
+  setSubcategoryActive,
+  setRootCauseActive,
+} from './actions';
 import { sentenceCase } from '@/lib/format';
 
 /**
- * One editable row each, for a category and for a cause.
+ * One editable row each, for a subcategory and for a cause.
  *
  * Edit-in-place rather than a modal: there are eighty-odd rows between the two
  * tables and the only thing anybody changes is a label, so a dialogue per edit
@@ -56,10 +61,10 @@ function useLabelEditor(
 }
 
 export function SubcategoryRow({
-  category,
+  subcategory,
   used,
 }: {
-  category: {
+  subcategory: {
     id: string;
     key: string;
     area: string;
@@ -72,9 +77,9 @@ export function SubcategoryRow({
   used: number;
 }) {
   const editor = useLabelEditor(
-    { labelEn: category.labelEn, labelAr: category.labelAr },
+    { labelEn: subcategory.labelEn, labelAr: subcategory.labelAr },
     saveSubcategory,
-    category.id,
+    subcategory.id,
   );
   const [togglingBusy, setTogglingBusy] = useState(false);
   const [toggleError, setToggleError] = useState<string | null>(null);
@@ -86,8 +91,8 @@ export function SubcategoryRow({
     setToggleError(null);
     try {
       const formData = new FormData();
-      formData.set('id', category.id);
-      formData.set('active', category.isActive ? 'false' : 'true');
+      formData.set('id', subcategory.id);
+      formData.set('active', subcategory.isActive ? 'false' : 'true');
       const result = await setSubcategoryActive({ error: null }, formData);
       if (result.error) setToggleError(result.error);
     } catch {
@@ -104,7 +109,7 @@ export function SubcategoryRow({
           <Input
             className="w-full"
             value={editor.draft.labelEn}
-            aria-label={`English label for ${category.key}`}
+            aria-label={`English label for ${subcategory.key}`}
             onChange={(event) => editor.setDraft({ ...editor.draft, labelEn: event.target.value })}
           />
         ) : (
@@ -112,16 +117,16 @@ export function SubcategoryRow({
             {/* A retired row's name is greyed, but not its badges: the word
                 "Retired" is what says why, and a dimmed badge would not say it. */}
             <span
-              className={`font-medium ${category.isActive ? '' : 'text-(--color-text-tertiary)'}`}
+              className={`font-medium ${subcategory.isActive ? '' : 'text-(--color-text-tertiary)'}`}
             >
-              {category.labelEn}
+              {subcategory.labelEn}
             </span>
-            {!category.isDetectable ? (
+            {!subcategory.isDetectable ? (
               <span className="ms-2">
                 <Badge>By hand only</Badge>
               </span>
             ) : null}
-            {!category.isActive ? (
+            {!subcategory.isActive ? (
               <span className="ms-2">
                 <Badge tone="neutral">Retired</Badge>
               </span>
@@ -141,7 +146,7 @@ export function SubcategoryRow({
       </Cell>
 
       <Cell>
-        <code className="text-xs text-(--color-text-secondary)">{category.key}</code>
+        <code className="text-xs text-(--color-text-secondary)">{subcategory.key}</code>
       </Cell>
 
       <Cell>
@@ -151,17 +156,17 @@ export function SubcategoryRow({
             dir="rtl"
             lang="ar"
             value={editor.draft.labelAr}
-            aria-label={`Arabic label for ${category.key}`}
+            aria-label={`Arabic label for ${subcategory.key}`}
             onChange={(event) => editor.setDraft({ ...editor.draft, labelAr: event.target.value })}
           />
         ) : (
           <span dir="rtl" lang="ar" className="text-sm">
-            {category.labelAr}
+            {subcategory.labelAr}
           </span>
         )}
       </Cell>
 
-      <Cell className="text-xs text-(--color-text-secondary)">{category.audience}</Cell>
+      <Cell className="text-xs text-(--color-text-secondary)">{subcategory.audience}</Cell>
 
       {/*
         Zero is not an error and is not styled as one — see the page. It only
@@ -196,7 +201,7 @@ export function SubcategoryRow({
                 disabled={togglingBusy}
                 onClick={() => void toggle()}
               >
-                {category.isActive ? 'Retire' : 'Restore'}
+                {subcategory.isActive ? 'Retire' : 'Restore'}
               </Button>
             </>
           )}

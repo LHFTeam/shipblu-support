@@ -11,9 +11,10 @@ import { confirmSubcategory, rejectSubcategory } from '../../../subcategory-acti
  * that wrote its own version of "confirm" would be a second place for the rule
  * about keeping `confidence` and `rule_key` to be forgotten.
  *
- * The row disappears on success because `confirmSubcategory` and `rejectSubcategory`
- * both revalidate this path — nothing here has to know that, which is why the
- * revalidation lives in the shared `refresh()` rather than in each action.
+ * The row disappears on success because `confirmSubcategory` and
+ * `rejectSubcategory` both revalidate this path — nothing here has to know
+ * that, which is why the revalidation lives in the shared `refresh()` rather
+ * than in each action.
  */
 export function ReviewControls({
   conversationId,

@@ -4,17 +4,17 @@ import { CAUSE_REQUIRED_AREAS } from '@/lib/subcategorise/taxonomy';
 import { within } from './rollup';
 
 /**
- * Reading the category and cause rollups.
+ * Reading the subcategory and cause rollups.
  *
  * Reads only the rollup tables, exactly as `queries.ts` does, so opening the
  * page never runs an aggregate over every assignment ever made. Labels are
- * joined from the registry so a renamed category reads by its current name,
+ * joined from the registry so a renamed subcategory reads by its current name,
  * while the rollup keeps the key it was counted under.
  *
- * A category whose key has since been retired still appears — the join is a
- * LEFT JOIN and falls back to the stored key. A report drawn last quarter has to
- * stay readable after somebody tidies the taxonomy, which is the whole reason
- * these tables are keyed on text rather than on a foreign key.
+ * A subcategory whose key has since been retired still appears — the join is a
+ * LEFT JOIN and falls back to the stored key. A report drawn last quarter has
+ * to stay readable after somebody tidies the taxonomy, which is the whole
+ * reason these tables are keyed on text rather than on a foreign key.
  *
  * ## The window is passed in, never derived here
  *
@@ -216,14 +216,14 @@ export async function ownerTotals(range: Range): Promise<OwnerTotal[]> {
  * rows.
  *
  * Without this the range control is indistinguishable from a broken one. The
- * rollup recomputes three days a night and there is no category backfill, so
- * every window wider than the history holds the same rows — 7, 30 and 90 all
- * answer identically and the buttons look dead. The page can only say why if it
- * knows where its own data starts and stops, so it asks.
+ * rollup recomputes three days a night and there is no subcategory backfill,
+ * so every window wider than the history holds the same rows — 7, 30 and 90
+ * all answer identically and the buttons look dead. The page can only say why
+ * if it knows where its own data starts and stops, so it asks.
  *
  * Both tables, because they are counted from different timestamps and can
- * legitimately begin on different days: a category comes off `created_at` and a
- * cause off `resolved_at`.
+ * legitimately begin on different days: a subcategory comes off `created_at`
+ * and a cause off `resolved_at`.
  *
  * `first` has no lower bound, because a day nobody worked has no row. Taken
  * from inside the window it was later than `from` whenever the window opened on
@@ -263,8 +263,8 @@ export async function rolledUpRange(range: Range): Promise<{
  * omits whatever nobody filled in.
  *
  * The denominator is the population the resolve gate actually demands a cause
- * from — a ticket whose leading category is in `CAUSE_REQUIRED_AREAS` — and not
- * every ended ticket. Counting price-list questions and integration
+ * from — a ticket whose leading subcategory is in `CAUSE_REQUIRED_AREAS` — and
+ * not every ended ticket. Counting price-list questions and integration
  * walkthroughs in the denominator would report a permanent two-thirds gap made
  * almost entirely of tickets that never owed a cause and never will, and a
  * figure that cannot reach 100% is one people stop reading. It shares that list

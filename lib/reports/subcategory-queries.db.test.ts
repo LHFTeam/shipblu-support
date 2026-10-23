@@ -5,7 +5,7 @@ import { withCleanDatabase } from '@/lib/testing/db';
 import { rolledUpRange } from './subcategory-queries';
 
 /**
- * Where the categorised history starts. A day nobody worked has no row in
+ * Where the subcategorised history starts. A day nobody worked has no row in
  * either rollup, so a window opening on one must not be reported as the
  * history starting inside it when it reaches further back.
  */

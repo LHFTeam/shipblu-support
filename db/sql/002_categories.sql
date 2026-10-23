@@ -1,5 +1,5 @@
 -- ===========================================================================
--- Ticket categorisation: the invariants Drizzle's DSL cannot express
+-- Ticket subcategorisation: the invariants Drizzle's DSL cannot express
 --
 -- Everything here is a CHECK constraint. The tables, columns and indexes are in
 -- db/schema/ and db/migrations/ where they belong — including both partial
@@ -15,12 +15,12 @@
 DO $$
 BEGIN
   -- -------------------------------------------------------------------------
-  -- A category key is `area.slug`, and `area` says the same thing
+  -- A subcategory key is `area.slug`, and `area` says the same thing
   --
   -- The `area` column is denormalised out of the key so a report can group by it
   -- without split_part in every query. Denormalised data with nothing holding it
   -- in step is data that will disagree, and the disagreement would show up as a
-  -- category quietly missing from an area's chart rather than as an error.
+  -- subcategory quietly missing from an area's chart rather than as an error.
   -- -------------------------------------------------------------------------
   IF NOT EXISTS (
     SELECT 1 FROM pg_constraint WHERE conname = 'ticket_categories_key_shape'
@@ -41,7 +41,7 @@ BEGIN
   -- -------------------------------------------------------------------------
   -- A merge pointer never points at itself
   --
-  -- `superseded_by_key` is how a category is merged without rewriting the
+  -- `superseded_by_key` is how a subcategory is merged without rewriting the
   -- assignments that already name it. The resolver follows one hop and does not
   -- recurse, so a self-reference would be an infinite loop in a report query if
   -- it ever did.
@@ -118,7 +118,7 @@ BEGIN
   END IF;
 
   -- -------------------------------------------------------------------------
-  -- The stored key matches the category it points at
+  -- The stored key matches the subcategory it points at
   --
   -- `category_key` is frozen at assignment time so a report run next year reads
   -- what was actually assigned rather than what the registry has since been

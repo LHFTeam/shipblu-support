@@ -223,7 +223,7 @@ export function describeEvent(type: string, data: Record<string, unknown>): stri
     // The six subcategorisation events, and they need cases here for exactly
     // the reason `unverified_submitter` above does: the default prints the type
     // with its underscores swapped for spaces and drops the payload, so the
-    // timeline read "category added" with no category in it. The actions all
+    // timeline read "category added" with no subcategory in it. The actions all
     // store what was decided; this is where it becomes readable.
     //
     // Each is read under two names, for good. They were written as

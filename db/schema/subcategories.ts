@@ -18,7 +18,7 @@ import { conversations, messages } from './conversations';
 import { subcategoryReviewStateEnum, linkSourceEnum } from './enums';
 
 /**
- * Which categories a conversation carries.
+ * Which subcategories a conversation carries.
  *
  * The two registries this points at live in `db/schema/config.ts`, beside
  * `ticket_statuses`, because `conversations` references them and everything else
@@ -26,8 +26,8 @@ import { subcategoryReviewStateEnum, linkSourceEnum } from './enums';
  * make the schema's import graph circular.
  *
  * Many-to-many, because a ticket is routinely about more than one thing. "The
- * courier never called and now I want to cancel" is two categories, and filing it
- * as one throws away the half somebody would have acted on.
+ * courier never called and now I want to cancel" is two subcategories, and
+ * filing it as one throws away the half somebody would have acted on.
  */
 export const conversationSubcategories = pgTable(
   'conversation_categories',
@@ -64,7 +64,7 @@ export const conversationSubcategories = pgTable(
      * The evidence grade, 0..1 — **not a probability**.
      *
      * A rules engine has no posterior. This says how directly the thing we
-     * matched names the category: 1 for a structured field, 0.9 for the whole
+     * matched names the subcategory: 1 for a structured field, 0.9 for the whole
      * message being a known phrase, 0.7 for several words in order, 0.55 for a
      * single keyword. It is declared by the rule author and constant for that
      * rule; it exists to be thresholded on, not read as a chance of being right.
@@ -102,8 +102,8 @@ export const conversationSubcategories = pgTable(
      * `detected` rows below the current version and rewrites them, so correcting
      * a pattern corrects the archive rather than only the tickets that arrive
      * next. `lib/assignment/skills.ts` gets that property for free by deriving
-     * everything; a stored category has to earn it, and this column is the price.
-     * It never touches a `manual` row and never touches a `rejected` one.
+     * everything; a stored subcategory has to earn it, and this column is the
+     * price. It never touches a `manual` row and never touches a `rejected` one.
      */
     detectorVersion: integer('detector_version').notNull().default(0),
 
@@ -116,7 +116,7 @@ export const conversationSubcategories = pgTable(
     reviewedAt: timestamp('reviewed_at', { withTimezone: true }),
 
     /**
-     * When this category was first earned, and when it was last re-earned.
+     * When this subcategory was first earned, and when it was last re-earned.
      *
      * Two timestamps because a ticket is a running thread: "they have been asking
      * about this since Tuesday" and "they mentioned it again an hour ago" are
@@ -138,7 +138,7 @@ export const conversationSubcategories = pgTable(
       .on(t.conversationId)
       .where(sql`${t.isPrimary}`),
 
-    // The driver report: every conversation in a category, by date.
+    // The driver report: every conversation in a subcategory, by date.
     index('conversation_categories_key_idx').on(t.subcategoryKey, t.firstSeenAt),
     index('conversation_categories_category_idx').on(t.subcategoryId),
 

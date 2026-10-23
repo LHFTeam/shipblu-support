@@ -10,10 +10,10 @@ import { canonicalUuid } from '@/lib/http/uuid';
 import { forgetSubcategoryIds } from '@/lib/subcategorise/apply';
 import type { AdminState } from '../settings-shared';
 
-// --- Categories and root causes ---------------------------------------------
+// --- Subcategories and root causes ------------------------------------------
 
 /**
- * Renaming a category, and taking one out of use.
+ * Renaming a subcategory, and taking one out of use.
  *
  * The labels are the whole reason this is a table rather than a constant, so
  * they are editable. Three things are not, and each would break something
@@ -29,9 +29,9 @@ import type { AdminState } from '../settings-shared';
  *   and a CHECK holds them together.
  *
  * There is no delete. The foreign key from `conversation_categories` is
- * `restrict`, so a category with tickets behind it cannot be removed at all —
- * deactivating takes it out of the picker and leaves every report ever drawn
- * from it still readable.
+ * `restrict`, so a subcategory with tickets behind it cannot be removed at
+ * all — deactivating takes it out of the picker and leaves every report ever
+ * drawn from it still readable.
  */
 export async function saveSubcategory(_state: AdminState, formData: FormData): Promise<AdminState> {
   await requirePermission('admin.subcategories');
@@ -40,7 +40,7 @@ export async function saveSubcategory(_state: AdminState, formData: FormData): P
   const labelEn = text(formData, 'labelEn');
   const labelAr = text(formData, 'labelAr');
 
-  if (!id) return { error: 'Unknown category' };
+  if (!id) return { error: 'Unknown subcategory' };
   if (!labelEn || !labelAr) {
     // Both, always. Arabic is the default locale and the labels are what a
     // report shown to an Egyptian operations lead is read in, so a blank Arabic
@@ -53,7 +53,7 @@ export async function saveSubcategory(_state: AdminState, formData: FormData): P
     .set({ labelEn, labelAr, updatedAt: new Date() })
     .where(eq(ticketSubcategories.id, id))
     .returning({ id: ticketSubcategories.id });
-  if (!updated.length) return { error: 'Unknown category' };
+  if (!updated.length) return { error: 'Unknown subcategory' };
 
   forgetSubcategoryIds();
   revalidatePath('/admin/subcategories');
@@ -68,20 +68,20 @@ export async function setSubcategoryActive(
 
   const id = canonicalUuid(formData.get('id'));
   const active = formData.get('active') === 'true';
-  if (!id) return { error: 'Unknown category' };
+  if (!id) return { error: 'Unknown subcategory' };
 
   const updated = await db
     .update(ticketSubcategories)
     .set({ isActive: active, updatedAt: new Date() })
     .where(eq(ticketSubcategories.id, id))
     .returning({ id: ticketSubcategories.id });
-  if (!updated.length) return { error: 'Unknown category' };
+  if (!updated.length) return { error: 'Unknown subcategory' };
 
-  // Retiring a category is how somebody stops an over-firing rule filling a
-  // report, so the detector has to stop assigning it — not just the picker stop
-  // offering it. This clears the registry cache in the web service; the worker,
-  // which is where the detector actually runs, picks the change up on its own
-  // cache's TTL. See `subcategoryIds()`.
+  // Retiring a subcategory is how somebody stops an over-firing rule filling a
+  // report, so the detector has to stop assigning it — not just the picker
+  // stop offering it. This clears the registry cache in the web service; the
+  // worker, which is where the detector actually runs, picks the change up on
+  // its own cache's TTL. See `subcategoryIds()`.
   forgetSubcategoryIds();
   revalidatePath('/admin/subcategories');
   return { error: null };

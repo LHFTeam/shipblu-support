@@ -118,9 +118,9 @@ const schema = z.object({
    * `CATEGORISE_*` until Stage 2.A of `plans/ticket-category-routing.md`, and
    * nothing reads the old names, so a value set under one is ignored.
    *
-   * `SUBCATEGORISE_DISABLED_RULES` is a comma-separated list of rule keys, and it
-   * is the one that matters in an incident: a rule found to be filing half the
-   * queue under one label is switched off in the time it takes to restart a
+   * `SUBCATEGORISE_DISABLED_RULES` is a comma-separated list of rule keys, and
+   * it is the one that matters in an incident: a rule found to be filing half
+   * the queue under one label is switched off in the time it takes to restart a
    * service, rather than the time it takes to ship a deploy. There is
    * deliberately no matching way to *add* a rule — turning one off is safe and
    * reversible, and adding one would be a regular expression in an env var with
@@ -346,7 +346,7 @@ const schema = z.object({
 
   /**
    * TypeSafe's System One API, read by three things, each switched on its own
-   * way: the hand-run shadow categorisation in `lib/subcategorise-ai/`, the
+   * way: the hand-run shadow subcategorisation in `lib/subcategorise-ai/`, the
    * priority classifier below, and the reply box's canned-response suggestions
    * in `lib/canned-suggest/`.
    *
@@ -385,7 +385,7 @@ const schema = z.object({
    *
    * Both read straight from `process.env` by `lib/priority-ai/settings.ts`, and
    * both strings rather than an enum and a number, for the reason the
-   * categoriser's thresholds above give: the switch is read inside
+   * subcategoriser's thresholds above give: the switch is read inside
    * `afterMessageStored`, on every ingest path, and a typo in it must turn the
    * feature off rather than throw for the whole application from `env()`.
    */

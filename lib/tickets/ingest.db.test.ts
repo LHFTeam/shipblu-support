@@ -29,7 +29,8 @@ import { ingestInboundEmail } from './ingest';
  * Against the seeded baseline only: no email channel, no SLA policy (the one
  * test about the SLA clock adds its own), no auto-response. So a new ticket has
  * no channel or group, and nothing lands in `jobs` — the lifecycle's enqueues
- * all wait on configuration this database does not have. The subcategoriser is the one consumer that always writes.
+ * all wait on configuration this database does not have. The subcategoriser is
+ * the one consumer that always writes.
  */
 
 withCleanDatabase();

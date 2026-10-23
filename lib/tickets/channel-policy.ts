@@ -238,9 +238,9 @@ export function readOnlyReason(channel: string): string | null {
  *
  * Narrower than read-only, and deliberately a separate list. A read-only
  * channel is one nobody on the team works, so it leaves the queue, the SLA
- * sweep, the categoriser and the reports. A WhatsApp ticket is still team
- * work — it is read, assigned, categorised, noted on and timed — and only the
- * customer-facing half of the composer is gone: the free-text reply and the
+ * sweep, the subcategoriser and the reports. A WhatsApp ticket is still team
+ * work — it is read, assigned, subcategorised, noted on and timed — and only
+ * the customer-facing half of the composer is gone: the free-text reply and the
  * approved template, the two things that put a message from this platform in
  * front of the customer. Private notes and side conversations stay, because
  * neither reaches the customer over the channel.

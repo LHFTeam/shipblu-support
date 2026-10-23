@@ -110,7 +110,9 @@ describe('labels', () => {
     // are what a report is read in, so a missing translation is a broken report
     // rather than a cosmetic gap.
     for (const subcategory of allSubcategories()) {
-      expect(detectLocale(subcategory.labelAr), `${subcategory.key} labelAr is not Arabic`).toBe('ar');
+      expect(detectLocale(subcategory.labelAr), `${subcategory.key} labelAr is not Arabic`).toBe(
+        'ar',
+      );
     }
     for (const cause of ROOT_CAUSES) {
       expect(detectLocale(cause.labelAr), `${cause.key} labelAr is not Arabic`).toBe('ar');
@@ -119,7 +121,9 @@ describe('labels', () => {
 
   it('has no Arabic in an English label', () => {
     for (const subcategory of allSubcategories()) {
-      expect(detectLocale(subcategory.labelEn), `${subcategory.key} labelEn is not English`).toBe('en');
+      expect(detectLocale(subcategory.labelEn), `${subcategory.key} labelEn is not English`).toBe(
+        'en',
+      );
     }
   });
 });

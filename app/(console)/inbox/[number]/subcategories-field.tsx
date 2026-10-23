@@ -76,7 +76,9 @@ export function SubcategoriesField({
                   </span>
                   {canSubcategorise ? (
                     <UnlinkButton
-                      action={subcategory.source === 'manual' ? removeSubcategory : rejectSubcategory}
+                      action={
+                        subcategory.source === 'manual' ? removeSubcategory : rejectSubcategory
+                      }
                       fields={{
                         conversationId: conversation.id,
                         subcategoryId: subcategory.subcategoryId,

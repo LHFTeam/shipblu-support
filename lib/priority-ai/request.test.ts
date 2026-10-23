@@ -56,7 +56,7 @@ describe('priorityRequest', () => {
     });
   });
 
-  it('truncates at the categoriser’s cutoff, so both questions read the same text', () => {
+  it('truncates at the subcategoriser’s cutoff, so both questions read the same text', () => {
     const long = { channel: 'email', bodyText: 'x'.repeat(MAX_TEXT_LENGTH + 50) };
     const state = priorityRequest(long, 'jev-latest', false).state as { message: string };
     expect(state.message).toHaveLength(MAX_TEXT_LENGTH);

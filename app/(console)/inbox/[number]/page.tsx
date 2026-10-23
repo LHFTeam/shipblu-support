@@ -58,10 +58,10 @@ export default async function ConversationPage({
   const canSubcategorise = can(agent, 'ticket.subcategorise');
 
   // Read whatever the permission, because the sidebar shows what a ticket is
-  // filed under to anybody who can open it — `ticket.subcategorise` gates changing
-  // it, not seeing it.
+  // filed under to anybody who can open it — `ticket.subcategorise` gates
+  // changing it, not seeing it.
   const mayPurge = can(agent, 'ticket.purge');
-  const [categories, causes, purgePreview, purgeRefusal] = await Promise.all([
+  const [subcategories, causes, purgePreview, purgeRefusal] = await Promise.all([
     subcategoryOptions(),
     rootCauseOptions(),
     // Counted on render rather than on click, because the counts are the whole
@@ -180,7 +180,7 @@ export default async function ConversationPage({
         canEditContact={canEditContact}
         canClose={canClose}
         canSubcategorise={canSubcategorise}
-        subcategoryOptions={categories}
+        subcategoryOptions={subcategories}
         rootCauses={causes}
         purgePreview={purgePreview}
         purgeRefusal={purgeRefusal}

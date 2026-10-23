@@ -5,16 +5,16 @@ import type { ChoiceQuestion, SystemOneRequest } from '@/lib/typesafe/client';
 /**
  * What this system asks Jev about a message's urgency, written down in one place.
  *
- * Pure and tested for the reason `lib/subcategorise-ai/request.ts` gives: a `choice`
- * question with a wrong `criteria` map does not fail, it answers over the wrong
- * vocabulary, and that answer looks exactly like a right one. Here the
- * vocabulary is `PRIORITIES` itself, so a level added to the enum is a level the
- * model is offered — and `criteria` below is typed by it, so it cannot be added
- * without a description.
+ * Pure and tested for the reason `lib/subcategorise-ai/request.ts` gives: a
+ * `choice` question with a wrong `criteria` map does not fail, it answers over
+ * the wrong vocabulary, and that answer looks exactly like a right one. Here
+ * the vocabulary is `PRIORITIES` itself, so a level added to the enum is a
+ * level the model is offered — and `criteria` below is typed by it, so it
+ * cannot be added without a description.
  *
- * The `state` is the categoriser's, built by the same `stateFor`. One shape for
- * "a customer's message and the few before it" means the two questions asked of
- * the same message are asked about the same text.
+ * The `state` is the subcategoriser's, built by the same `stateFor`. One shape
+ * for "a customer's message and the few before it" means the two questions
+ * asked of the same message are asked about the same text.
  */
 
 /** The name this question is filed under, and the answer read back by. */
@@ -29,11 +29,11 @@ export const PRIORITY_QUESTION = 'priority';
  * cash-on-delivery money is not.
  *
  * `low` carries the escape hatch. It is the answer for a message too short or
- * vague to judge, exactly as `meta.unclassified` is for categories: most of this
- * archive is a 22-to-39 character fragment, and a model offered four levels and
- * no way out pushes "؟" upwards. Under-ranking here costs little, because a
- * later message on the ticket can still raise it (`decide.ts`); over-ranking
- * moves a deadline.
+ * vague to judge, exactly as `meta.unclassified` is for subcategories: most of
+ * this archive is a 22-to-39 character fragment, and a model offered four
+ * levels and no way out pushes "؟" upwards. Under-ranking here costs little,
+ * because a later message on the ticket can still raise it (`decide.ts`);
+ * over-ranking moves a deadline.
  */
 export const PRIORITY_CRITERIA: Record<Priority, string> = {
   urgent:
@@ -46,7 +46,7 @@ export const PRIORITY_CRITERIA: Record<Priority, string> = {
 
 /**
  * The instruction, written out rather than assembled, for the reason the
- * categoriser's is: every clause answers something the corpus contains.
+ * subcategoriser's is: every clause answers something the corpus contains.
  */
 const INSTRUCTIONS = [
   'This is a message a customer sent to the support team of ShipBlu, a parcel',

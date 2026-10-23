@@ -17,12 +17,12 @@ import type { SessionAgent } from '@/lib/auth/session';
 import { loadConversation, refresh } from '@/lib/tickets/console-guards';
 import type { ActionState } from './action-state';
 
-// --- Categories and root cause ----------------------------------------------
+// --- Subcategories and root cause -------------------------------------------
 
 /**
  * An agent's answer to what the detector proposed.
  *
- * Four verbs on a category, and the shape of each is the human-in-the-loop
+ * Four verbs on a subcategory, and the shape of each is the human-in-the-loop
  * design rather than CRUD on a join table:
  *
  * - **confirm** says the rule was right, and keeps the `confidence` and
@@ -30,12 +30,12 @@ import type { ActionState } from './action-state';
  *   them on confirmation would destroy the only record of whether the rule was
  *   any good.
  * - **reject** says it was wrong, and **keeps the row**. A rejected assignment
- *   still occupies `(conversation, category)`, which is what stops the next
+ *   still occupies `(conversation, subcategory)`, which is what stops the next
  *   message re-suggesting it — the agent's judgement survives without a single
  *   `where` clause anywhere having to remember it.
  * - **add** is a person filing what the rules missed, which is the other half of
- *   the same signal: a category arriving by hand far more often than by rule is
- *   a gap in the lexicon.
+ *   the same signal: a subcategory arriving by hand far more often than by rule
+ *   is a gap in the lexicon.
  * - **remove** takes back an agent's own addition, and is the one path that
  *   deletes — there is nothing to learn from somebody undoing their own click.
  */
@@ -46,52 +46,55 @@ type SubcategoryTarget =
       agent: SessionAgent;
       conversationId: string;
       subcategoryId: string;
-      category: { id: string; key: string };
+      subcategory: { id: string; key: string };
       number: number;
     };
 
 async function resolveSubcategoryTarget(formData: FormData): Promise<SubcategoryTarget> {
   const agent = await requireAgent();
   if (!can(agent, 'ticket.subcategorise')) {
-    return { ok: false, error: 'You do not have permission to categorise tickets' };
+    return { ok: false, error: 'You do not have permission to subcategorise tickets' };
   }
 
   const conversationId = String(formData.get('conversationId') ?? '');
   const subcategoryId = String(formData.get('subcategoryId') ?? '');
-  if (!conversationId || !subcategoryId) return { ok: false, error: 'Choose a category' };
+  if (!conversationId || !subcategoryId) return { ok: false, error: 'Choose a subcategory' };
 
   // Re-read both sides rather than trusting the ids in the form: the
   // conversation so channel visibility is checked at this entry point too, and
-  // the category so a request naming a row that has since gone fails instead of
-  // writing a dangling assignment.
+  // the subcategory so a request naming a row that has since gone fails instead
+  // of writing a dangling assignment.
   const row = await loadConversation(agent, conversationId);
   if (!row) return { ok: false, error: 'Ticket not found' };
 
-  const category = await db
+  const subcategory = await db
     .select({ id: ticketSubcategories.id, key: ticketSubcategories.key })
     .from(ticketSubcategories)
     .where(eq(ticketSubcategories.id, subcategoryId))
     .limit(1);
 
-  if (!category[0]) return { ok: false, error: 'That category no longer exists' };
+  if (!subcategory[0]) return { ok: false, error: 'That subcategory no longer exists' };
 
   return {
     ok: true,
     agent,
     conversationId,
     subcategoryId,
-    category: category[0],
+    subcategory: subcategory[0],
     number: row.conversation.number,
   };
 }
 
-export async function addSubcategory(_state: ActionState, formData: FormData): Promise<ActionState> {
+export async function addSubcategory(
+  _state: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
   const target = await resolveSubcategoryTarget(formData);
   if (!target.ok) return { error: target.error };
-  const { agent, conversationId, subcategoryId, category, number } = target;
+  const { agent, conversationId, subcategoryId, subcategory, number } = target;
 
   // `onConflictDoUpdate` rather than `DoNothing`, and this is the one path
-  // allowed to overturn a rejection: a person adding a category the detector
+  // allowed to overturn a rejection: a person adding a subcategory the detector
   // suggested, or that somebody previously threw out, is making an explicit
   // decision and it should win.
   const claim = {
@@ -105,7 +108,7 @@ export async function addSubcategory(_state: ActionState, formData: FormData): P
 
   await db
     .insert(conversationSubcategories)
-    .values({ conversationId, subcategoryId, subcategoryKey: category.key, ...claim })
+    .values({ conversationId, subcategoryId, subcategoryKey: subcategory.key, ...claim })
     .onConflictDoUpdate({
       target: [conversationSubcategories.conversationId, conversationSubcategories.subcategoryId],
       set: claim,
@@ -116,7 +119,7 @@ export async function addSubcategory(_state: ActionState, formData: FormData): P
     conversationId,
     type: 'subcategory_added',
     actorAgentId: agent.id,
-    data: { subcategoryKey: category.key },
+    data: { subcategoryKey: subcategory.key },
   });
 
   refresh(number);
@@ -129,7 +132,7 @@ export async function confirmSubcategory(
 ): Promise<ActionState> {
   const target = await resolveSubcategoryTarget(formData);
   if (!target.ok) return { error: target.error };
-  const { agent, conversationId, subcategoryId, category, number } = target;
+  const { agent, conversationId, subcategoryId, subcategory, number } = target;
 
   await db
     .update(conversationSubcategories)
@@ -146,7 +149,7 @@ export async function confirmSubcategory(
     conversationId,
     type: 'subcategory_confirmed',
     actorAgentId: agent.id,
-    data: { subcategoryKey: category.key },
+    data: { subcategoryKey: subcategory.key },
   });
 
   refresh(number);
@@ -159,7 +162,7 @@ export async function rejectSubcategory(
 ): Promise<ActionState> {
   const target = await resolveSubcategoryTarget(formData);
   if (!target.ok) return { error: target.error };
-  const { agent, conversationId, subcategoryId, category, number } = target;
+  const { agent, conversationId, subcategoryId, subcategory, number } = target;
 
   // A state change, never a delete. `source` is left alone so a report can tell
   // "a rule was thrown out" from "an agent removed their own", and `is_primary`
@@ -185,7 +188,7 @@ export async function rejectSubcategory(
     conversationId,
     type: 'subcategory_rejected',
     actorAgentId: agent.id,
-    data: { subcategoryKey: category.key },
+    data: { subcategoryKey: subcategory.key },
   });
 
   refresh(number);
@@ -198,7 +201,7 @@ export async function removeSubcategory(
 ): Promise<ActionState> {
   const target = await resolveSubcategoryTarget(formData);
   if (!target.ok) return { error: target.error };
-  const { agent, conversationId, subcategoryId, category, number } = target;
+  const { agent, conversationId, subcategoryId, subcategory, number } = target;
 
   // Scoped to `manual`: deleting a detected row would throw away the evidence
   // that a rule fired, which is what the tuning pass reads. A detected row is
@@ -218,7 +221,7 @@ export async function removeSubcategory(
     conversationId,
     type: 'subcategory_removed',
     actorAgentId: agent.id,
-    data: { subcategoryKey: category.key },
+    data: { subcategoryKey: subcategory.key },
   });
 
   refresh(number);
@@ -235,7 +238,7 @@ export async function removeSubcategory(
 export async function setRootCause(_state: ActionState, formData: FormData): Promise<ActionState> {
   const agent = await requireAgent();
   if (!can(agent, 'ticket.subcategorise')) {
-    return { error: 'You do not have permission to categorise tickets' };
+    return { error: 'You do not have permission to subcategorise tickets' };
   }
 
   const conversationId = String(formData.get('conversationId') ?? '');

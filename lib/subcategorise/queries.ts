@@ -61,7 +61,10 @@ export async function subcategoriesForConversation(
       firstSeenAt: conversationSubcategories.firstSeenAt,
     })
     .from(conversationSubcategories)
-    .innerJoin(ticketSubcategories, eq(ticketSubcategories.id, conversationSubcategories.subcategoryId))
+    .innerJoin(
+      ticketSubcategories,
+      eq(ticketSubcategories.id, conversationSubcategories.subcategoryId),
+    )
     .where(eq(conversationSubcategories.conversationId, conversationId))
     .orderBy(
       desc(conversationSubcategories.isPrimary),
@@ -99,7 +102,9 @@ export async function subcategoryOptions(): Promise<SubcategoryOption[]> {
       audience: ticketSubcategories.audience,
     })
     .from(ticketSubcategories)
-    .where(and(eq(ticketSubcategories.isActive, true), ne(ticketSubcategories.key, 'meta.unclassified')))
+    .where(
+      and(eq(ticketSubcategories.isActive, true), ne(ticketSubcategories.key, 'meta.unclassified')),
+    )
     .orderBy(asc(ticketSubcategories.position));
 }
 
@@ -181,7 +186,10 @@ export async function reviewQueue(options: {
       excerpt: messages.bodyText,
     })
     .from(conversationSubcategories)
-    .innerJoin(ticketSubcategories, eq(ticketSubcategories.id, conversationSubcategories.subcategoryId))
+    .innerJoin(
+      ticketSubcategories,
+      eq(ticketSubcategories.id, conversationSubcategories.subcategoryId),
+    )
     .innerJoin(conversations, eq(conversations.id, conversationSubcategories.conversationId))
     .leftJoin(messages, eq(messages.id, conversationSubcategories.detectedInMessageId))
     .where(
@@ -198,7 +206,10 @@ export async function reviewQueue(options: {
         isNull(conversations.deletedAt),
       ),
     )
-    .orderBy(desc(conversationSubcategories.confidence), desc(conversationSubcategories.firstSeenAt))
+    .orderBy(
+      desc(conversationSubcategories.confidence),
+      desc(conversationSubcategories.firstSeenAt),
+    )
     .limit(options.limit ?? 50);
 
   return rows.map((row) => ({

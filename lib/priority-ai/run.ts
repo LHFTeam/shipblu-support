@@ -326,7 +326,7 @@ type LoadedRow = {
  * urgency reaches the ticket when the customer writes, and a wrong raise moves
  * a deadline where a missed one only leaves it.
  *
- * The categoriser's own test for "a customer wrote something", so the two
+ * The subcategoriser's own test for "a customer wrote something", so the two
  * questions are asked of the same messages; the bot channel through
  * `isReadOnlyChannel`, since nobody on the team works it and it is nearly all of
  * the volume. Machine mail is not the customer — the email ingest flags it and

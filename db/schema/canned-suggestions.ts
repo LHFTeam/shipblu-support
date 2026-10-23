@@ -199,10 +199,10 @@ export const cannedSuggestions = pgTable(
 /**
  * Whether the composer asks Jev at all.
  *
- * Its own switch rather than the presence of `TYPESAFE_API_KEY`, which is how the
- * shadow categoriser is gated: production already holds that key for the shadow
- * run, so key-as-flag would have switched suggestions on for every agent the
- * moment the code deployed. The key is a precondition; this is the decision.
+ * Its own switch rather than the presence of `TYPESAFE_API_KEY`, which is how
+ * the shadow subcategoriser is gated: production already holds that key for the
+ * shadow run, so key-as-flag would have switched suggestions on for every agent
+ * the moment the code deployed. The key is a precondition; this is the decision.
  *
  * One row, pinned to `id = 1` by `db/sql/003_constraints.sql`, the
  * `presence_policy` shape. No row is the resting state of a fresh install and

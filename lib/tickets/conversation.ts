@@ -46,7 +46,10 @@ import {
   type LinkedShipment,
   type LinkedShippingAccount,
 } from '@/lib/shipments/queries';
-import { type AssignedSubcategory, subcategoriesForConversation } from '@/lib/subcategorise/queries';
+import {
+  type AssignedSubcategory,
+  subcategoriesForConversation,
+} from '@/lib/subcategorise/queries';
 import {
   sideConversationsForConversation,
   type SideConversationView,
@@ -206,7 +209,7 @@ export type ConversationDetail = {
   /**
    * Which population asked, when the records established it.
    *
-   * Only used to *order* the category picker — a merchant's payout question
+   * Only used to *order* the subcategory picker — a merchant's payout question
    * offered first on a merchant's ticket. Never to filter: the value is
    * established from role flags that can be stale or absent, and a picker that
    * hides `billing.payout` from a ticket this got wrong is a control an agent
@@ -323,7 +326,17 @@ export async function getConversation(
     .limit(1);
   const unverifiedSubmitter = unverified.length > 0;
 
-  const [timeline, files, events, shipments, accounts, sides, subcategories, controlTakenAt, survey] =
+  const [
+    timeline,
+    files,
+    events,
+    shipments,
+    accounts,
+    sides,
+    subcategories,
+    controlTakenAt,
+    survey,
+  ] =
     // Nine reads on a pool of eight places: at most the pool at once, so one
     // ticket page can fill it but never queue behind itself (AGENTS.md,
     // Database) — one wave, as before, plus the ninth.

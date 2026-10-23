@@ -137,13 +137,13 @@ export async function seedBaseline(
     `  automation rules: ${rulesCreated} created, ${SEEDED_RULES.length - rulesCreated} already present`,
   );
 
-  // The category and root-cause registries. A reconcile rather than an
-  // overwrite: labels an admin has edited are left alone, and a category dropped
-  // from the code is reported rather than deleted, because the FK is `restrict`
-  // and there may be tickets behind it.
+  // The subcategory and root-cause registries. A reconcile rather than an
+  // overwrite: labels an admin has edited are left alone, and a subcategory
+  // dropped from the code is reported rather than deleted, because the FK is
+  // `restrict` and there may be tickets behind it.
   const taxonomy = await syncTaxonomy();
   log(
-    `  ticket categories: ${taxonomy.subcategoriesCreated} created, ${taxonomy.subcategoriesPresent} already present`,
+    `  ticket subcategories: ${taxonomy.subcategoriesCreated} created, ${taxonomy.subcategoriesPresent} already present`,
   );
   log(
     `  root causes: ${taxonomy.causesCreated} created, ${taxonomy.causesPresent} already present`,

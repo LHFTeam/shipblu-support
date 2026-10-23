@@ -13,8 +13,8 @@ const log = logger('rollup_metrics');
  * Two functions rather than one because they are counted from different
  * timestamps, and that difference is the design:
  *
- * - A **category** is counted from `conversations.created_at`. It describes
- *   demand: what arrived that day.
+ * - A **subcategory** is counted from `conversations.created_at`. It
+ *   describes demand: what arrived that day.
  * - A **cause** is counted from `coalesce(resolved_at, root_cause_set_at)`. It
  *   describes what was understood that day. A ticket that arrives in one month
  *   and is worked out in the next belongs to the month somebody worked it out,
@@ -34,10 +34,10 @@ const log = logger('rollup_metrics');
  * report calls `readOnlyChannels()`, because averaging a first response that
  * never comes into the figures for the ones that do is meaningless. Nothing in
  * these two tables is an average or a duration — they are counts of labels — and
- * the categoriser never writes on that channel anyway, so nothing from it can
- * reach these rows. Adding the filter would be a guard against something that
- * cannot happen, and would read as though these numbers were comparable with
- * `metrics_daily`, which they are not.
+ * the subcategoriser never writes on that channel anyway, so nothing from it
+ * can reach these rows. Adding the filter would be a guard against something
+ * that cannot happen, and would read as though these numbers were comparable
+ * with `metrics_daily`, which they are not.
  */
 
 type SubcategoryRow = typeof subcategoryMetricsDaily.$inferInsert;
@@ -49,11 +49,12 @@ function dayBounds(day: string, zone: string): { start: Date; end: Date } {
 }
 
 /**
- * Category counts for one day.
+ * Subcategory counts for one day.
  *
- * One grouped read rather than a query per category. `is_primary` and the review
- * state are counted with `filter` in the same pass, so the three assignment
- * bands and the two ticket counts all come from one scan of the day's rows.
+ * One grouped read rather than a query per subcategory. `is_primary` and the
+ * review state are counted with `filter` in the same pass, so the three
+ * assignment bands and the two ticket counts all come from one scan of the
+ * day's rows.
  *
  * Rejected assignments are excluded from every count. An agent throwing a
  * suggestion out is the system being corrected, not a ticket being about that

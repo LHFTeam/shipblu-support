@@ -512,15 +512,15 @@ export const agentMetricsDaily = pgTable(
  * not size — it is that `reconciles()` would have to be deleted. That assertion
  * checks a day's totals row equals the sum of its channel slices, and its own
  * comment calls it "the only thing standing between a double-counting bug and a
- * report that merely looks busy". Categories are **multi-valued**: a ticket
- * routinely carries two or three, so category slices can never sum to the total.
- * Adding one to a table whose contract is single-valued slices either breaks
- * that assertion or forces it to be relaxed, and relaxing it is worse than not
- * having the dimension.
+ * report that merely looks busy". Subcategories are **multi-valued**: a ticket
+ * routinely carries two or three, so subcategory slices can never sum to the
+ * total. Adding one to a table whose contract is single-valued slices either
+ * breaks that assertion or forces it to be relaxed, and relaxing it is worse
+ * than not having the dimension.
  *
- * Keyed on the **text key**, not the category's id, so a retired or merged
- * category still reports. A report drawn last quarter must stay readable after
- * somebody tidies the taxonomy.
+ * Keyed on the **text key**, not the subcategory's id, so a retired or merged
+ * subcategory still reports. A report drawn last quarter must stay readable
+ * after somebody tidies the taxonomy.
  *
  * `channel` is NOT NULL with no "all" slice — the opposite choice from
  * `metrics_daily`, deliberately. There is no totals row to reconcile against, so
@@ -548,19 +548,19 @@ export const subcategoryMetricsDaily = pgTable(
     id: uuid('id').primaryKey().defaultRandom(),
     day: date('day').notNull(),
 
-    /** The key as assigned, so a retired category still reports. */
+    /** The key as assigned, so a retired subcategory still reports. */
     subcategoryKey: text('category_key').notNull(),
     area: text('area').notNull(),
     channel: channelEnum('channel').notNull(),
 
-    /** Conversations created this day that carry this category as primary. */
+    /** Conversations created this day that carry this subcategory as primary. */
     ticketsPrimary: integer('tickets_primary').notNull().default(0),
     /**
      * …and carrying it at all.
      *
      * Deliberately does not sum to the day's ticket count, because a ticket with
-     * three categories appears under three of them. Anything rendering this has
-     * to say so, or the first person to add the column up files a bug.
+     * three subcategories appears under three of them. Anything rendering this
+     * has to say so, or the first person to add the column up files a bug.
      */
     ticketsAny: integer('tickets_any').notNull().default(0),
 
@@ -581,10 +581,10 @@ export const subcategoryMetricsDaily = pgTable(
 /**
  * Why tickets happened, per day, and who owns fixing it.
  *
- * The report the whole feature exists for. A category report says what the queue
- * was full of; only this says what to go and change — and because the owner is
- * carried here rather than joined at read time, "how much did the courier
- * network cost us last month" is one grouped read.
+ * The report the whole feature exists for. A subcategory report says what the
+ * queue was full of; only this says what to go and change — and because the
+ * owner is carried here rather than joined at read time, "how much did the
+ * courier network cost us last month" is one grouped read.
  *
  * `owner` is denormalised out of `ticket_root_causes` on purpose, and it is the
  * one denormalisation here: resolving it through the registry at read time would

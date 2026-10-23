@@ -309,7 +309,7 @@ export function listOpenInvites(now: Date) {
     .orderBy(desc(invites.createdAt));
 }
 
-/** Every category, retired ones included, in the order the taxonomy lists them. */
+/** Every subcategory, retired ones included, in the order the taxonomy lists them. */
 export function listTicketSubcategories() {
   return db
     .select()

@@ -8,11 +8,11 @@ import {
 } from '@/lib/testing/fake-db';
 
 /**
- * The admin actions take an agent's, a channel's, a category's or a cause's id
- * from a form field. A malformed one reached Postgres, which answers with error
- * 22P02 rather than with no rows — the action threw, returned no state, and the
- * admin saw a blank failure. A well-formed one naming no row either broke a
- * foreign key the same way or updated nothing and reported success.
+ * The admin actions take an agent's, a channel's, a subcategory's or a cause's
+ * id from a form field. A malformed one reached Postgres, which answers with
+ * error 22P02 rather than with no rows — the action threw, returned no state,
+ * and the admin saw a blank failure. A well-formed one naming no row either
+ * broke a foreign key the same way or updated nothing and reported success.
  */
 
 const ADMIN_ID = '0b6f3c2e-8a51-4d3e-9f0a-2c7d1e5b9a44';
@@ -54,12 +54,12 @@ describe('admin actions given an id no row can have', () => {
     [
       'saveSubcategory',
       () => actions.saveSubcategory(INITIAL, form({ id: MALFORMED, labelEn: 'A', labelAr: 'ا' })),
-      'Unknown category',
+      'Unknown subcategory',
     ],
     [
       'setSubcategoryActive',
       () => actions.setSubcategoryActive(INITIAL, form({ id: MALFORMED, active: 'true' })),
-      'Unknown category',
+      'Unknown subcategory',
     ],
     [
       'saveRootCause',
@@ -132,12 +132,12 @@ describe('admin actions given a well-formed id that names nothing', () => {
     [
       'saveSubcategory',
       () => actions.saveSubcategory(INITIAL, form({ id: NOBODY, labelEn: 'A', labelAr: 'ا' })),
-      'Unknown category',
+      'Unknown subcategory',
     ],
     [
       'setSubcategoryActive',
       () => actions.setSubcategoryActive(INITIAL, form({ id: NOBODY, active: 'true' })),
-      'Unknown category',
+      'Unknown subcategory',
     ],
     [
       'saveRootCause',

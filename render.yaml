@@ -184,7 +184,7 @@ projects:
             #                              named on its `whatsapp_accounts` row
             #
             #   TYPESAFE_API_KEY           TypeSafe System One: the shadow
-            #                              categorisation job, the priority
+            #                              subcategorisation job, the priority
             #                              classifier (with PRIORITY_AI), and the
             #                              reply box's suggestions while the admin
             #                              switch is on (canned_suggestion_settings)

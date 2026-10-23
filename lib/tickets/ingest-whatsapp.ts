@@ -543,7 +543,7 @@ function echoRow(
  *
  * **It reopens nothing and creates nothing.** A resolved ticket stays resolved,
  * and nothing downstream of a message runs — no SLA, automation, assignment,
- * out-of-hours reply, categorisation, priority classification or shipment
+ * out-of-hours reply, subcategorisation, priority classification or shipment
  * linking, none of which has anything to read in a 👍. With no conversation to
  * file it on — the person has no conversation on this number, or the newest
  * one is a copied history — it is not stored at all, and no contact is made
