@@ -799,6 +799,7 @@ describe('classifyMessagePriority: shadow, skips and failures', () => {
       .values({ name: 'Passer-by' })
       .returning({ id: contacts.id });
     const id = await ticket({
+      channel: 'facebook_comment',
       requesterContactId: customer!.id,
       externalId: 'facebook:comment:1',
     });

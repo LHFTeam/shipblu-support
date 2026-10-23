@@ -583,8 +583,9 @@ Two things it must be given rather than guess. **A Meta comment ticket has no
 messaging window**: it is answered on the comment edge, which `send_meta` reaches
 before it consults the clock, so the guard takes the ticket's channel and
 `external_id` and never blocks one — a `facebook_comment` or `instagram_comment`
-ticket by its channel, and one still filed on its platform's channel by its
-`external_id`. And **the clock is the real one** — the ingest lifecycle hands
+ticket by its channel, and one back on its platform's channel, as rolling back
+Stage 1.2 leaves every one (below), by its `external_id`. And **the clock is the
+real one** — the ingest lifecycle hands
 a message's own `sentAt` down as its timestamp, and that is exactly
 `lastCustomerMessageAt`, so passing it as `now` compares a value with itself and
 reports every window open. That is precisely the replayed backlog the guard is
@@ -611,12 +612,26 @@ never thank a commenter on the public thread. A TypeSafe request sends the
 platform rather than the channel, so the vocabulary the model was asked in does
 not move under it.
 
-Until the CHECK constraint in `plans/ticket-category-routing.md` §1.3 lands, a
-comment ticket can still sit on its platform's channel — every one ingested
-before 1.2 does, and `split_comment_channels` moves them — so **detecting a
-comment is the channel test _or_ the external id**
-— `isCommentTicket(channel, externalId)` in `lib/tickets/channel-policy.ts`, the
-one copy every reader calls — never either alone.
+**The database holds the pair.** Since Stage 1.3 of
+`plans/ticket-category-routing.md`, `conversations_comment_channel_matches_external_id`
+(`db/sql/008_comment_channel_check.sql`) refuses a ticket whose channel and
+external id disagree: a comment id off a comment channel, a comment channel
+without one, or one holding the other platform's comment. So a comment ticket
+is on its comment channel, and a test fixture builds it there too — a
+`*.db.test.ts` that inserts a comment id on `facebook` now fails at the insert.
+**Detecting a comment is still the channel test _or_ the external id** —
+`isCommentTicket(channel, externalId)` in `lib/tickets/channel-policy.ts`, the
+one copy every reader calls — on purpose: the plan's rollback of Stage 1.2
+undoes the move while 1.1's readers stay deployed. It re-deploys 1.1's ingest,
+which files new comments on `facebook`/`instagram`, then moves the old ones
+back, and from then on the external id is the only half that answers. Without
+it the out-of-hours picker and the survey's thanks would post in public, and the
+survey and the console reply would message privately. Meta's direct messages ask
+the same of `liveConversationFilter`, so a chat never continues a public thread.
+So a test of that shape does not build its ticket on `facebook`: it builds one
+the way 1.2 files it and moves it back with `withoutCommentChannelCheck()` from
+`lib/testing/db.ts`, which drops the CHECK for one `describe` with the plan's
+own SQL and restores it after.
 The difference is public wherever the software replies on its own, because a
 reply on a comment ticket is posted under the customer's comment where anybody
 reading the post sees it. The out-of-hours picker handles it: a rule with no
@@ -628,10 +643,11 @@ on the customer's ticket; and it names that comment as the reply's target, so
 a reply written before the job runs does not become it. It judges the message
 the lifecycle hands it by id, never the newest inbound row, which after a
 batch retry is a passer-by's reply stored before the requester's older comment. `pickRule` takes the stored channel and
-external id and reads a comment still filed on its platform as the comment
-channel it is moving to, so a rule naming the platform answers that platform's
-direct messages and nothing posted in public; every caller must supply the
-external id, so none can skip the mapping by forgetting it. Its reply leaves
+external id and reads a comment filed on its platform's channel as its comment
+channel — which the CHECK makes impossible today, and which keeps a rule naming
+the platform to that platform's direct messages once rolling back 1.2 has put
+comments back there; every caller must supply the external id, so none can skip
+the mapping by forgetting it. Its reply leaves
 `{{customer_name}}` blank, because the contact's name can have come from a
 private channel and the reply is published under the post. **The automation
 engine never answers a comment**: `sendCannedReply` refuses a `send_reply` on

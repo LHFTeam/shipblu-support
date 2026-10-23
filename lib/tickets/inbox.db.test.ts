@@ -14,7 +14,7 @@ import {
 } from '@/db/schema';
 import type { SessionAgent } from '@/lib/auth/session';
 import { forgetHoursCatalog } from '@/lib/hours/catalog';
-import { withCleanDatabase } from '@/lib/testing/db';
+import { withCleanDatabase, withoutCommentChannelCheck } from '@/lib/testing/db';
 import { getConversation } from './conversation';
 import { listInbox } from './inbox';
 import { PAGE_SIZE, parseFilters, parseInboxCursor } from './inbox-filters';
@@ -63,7 +63,15 @@ async function openStatusId(): Promise<string> {
 }
 
 async function ticket(
-  channel: 'facebook' | 'instagram' | 'whatsapp' | 'webchat' | 'email' | 'portal',
+  channel:
+    | 'facebook'
+    | 'facebook_comment'
+    | 'instagram'
+    | 'instagram_comment'
+    | 'whatsapp'
+    | 'webchat'
+    | 'email'
+    | 'portal',
   externalId: string | null,
   assigneeAgentId: string | null = null,
 ) {
@@ -84,8 +92,8 @@ async function ticket(
 describe('listInbox', () => {
   it('marks a Meta comment ticket, and not a direct-message one', async () => {
     const agent = await admin();
-    const comment = await ticket('instagram', 'instagram:comment:17900000000000001');
-    const facebookComment = await ticket('facebook', 'facebook:comment:123_456');
+    const comment = await ticket('instagram_comment', 'instagram:comment:17900000000000001');
+    const facebookComment = await ticket('facebook_comment', 'facebook:comment:123_456');
     const message = await ticket('facebook', null);
 
     const { rows } = await listInbox(agent, parseFilters({}));
@@ -729,5 +737,29 @@ describe('the Rated 1–2 view', () => {
       listInbox(agent, parseFilters({ status: 'all', rating: 'low', q: `#${number}` }));
     expect((await search(low.number)).rows.map((row) => row.id)).toEqual([low.id]);
     expect((await search(high.number)).rows).toEqual([]);
+  });
+});
+
+// The plan's rollback of Stage 1.2 moves every comment ticket back onto its
+// platform's channel, where only its external id says it is a public thread:
+// the inbox's badge and the ticket page's direct-message state both read it.
+describe('a comment ticket, once rolling back 1.2 has moved comments back', () => {
+  const { moveCommentsBack } = withoutCommentChannelCheck();
+
+  it('is still marked as one, and given no direct-message thread state', async () => {
+    const agent = await admin();
+    const comment = await ticket('facebook_comment', 'facebook:comment:123_456');
+    expect(await moveCommentsBack()).toBe(1);
+    const message = await ticket('facebook', null);
+
+    const { rows } = await listInbox(agent, parseFilters({}));
+    const byId = new Map(rows.map((row) => [row.id, row]));
+    expect(byId.get(comment)?.isComment).toBe(true);
+    expect(byId.get(message)?.isComment).toBe(false);
+
+    const onPost = await getConversation(agent, byId.get(comment)!.number);
+    const direct = await getConversation(agent, byId.get(message)!.number);
+    expect(onPost?.metaThread).toBeNull();
+    expect(direct?.metaThread).not.toBeNull();
   });
 });
