@@ -56,10 +56,14 @@ export function cairo(iso: string): Date {
   if (dt.toFormat(FIELDS) !== asWritten.toFormat(FIELDS)) {
     throw new Error(`not a Cairo wall-clock time, the clocks skip it: ${iso}`);
   }
-  // Cairo's clocks go back one hour, so an hour earlier reading the same fields
-  // means luxon took the repeated time's second instance; the first is that one.
-  const hourEarlier = dt.minus({ hours: 1 });
-  return (hourEarlier.toFormat(FIELDS) === dt.toFormat(FIELDS) ? hourEarlier : dt).toJSDate();
+  // The first instance of a repeated time is earlier than the second by the
+  // size of the change, the offset a day before less the offset now, and reads
+  // the same fields; when it does, luxon took the second. Measured rather than
+  // assumed to be Cairo's hour, so a change of another size cannot slip back
+  // to luxon's answer unnoticed.
+  const change = dt.minus({ days: 1 }).offset - dt.offset;
+  const first = dt.minus({ minutes: change });
+  return (change > 0 && first.toFormat(FIELDS) === dt.toFormat(FIELDS) ? first : dt).toJSDate();
 }
 
 /** The inverse, `yyyy-MM-ddTHH:mm` in Cairo, for asserting on a returned instant. */

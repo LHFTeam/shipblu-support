@@ -29,11 +29,11 @@ describe('cairo', () => {
     // summer's +03:00 gives the first instance and winter's +02:00 the second.
     // So the case above held only while the suite ran in summer time, and from
     // the night the clocks went back it would have failed on every run.
-    vi.useFakeTimers();
+    vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(cairo('2026-11-15T12:00'));
 
-    // Luxon alone now takes the second, or nothing below tests the choice.
-    expect(DateTime.fromISO('2026-10-29T23:30', { zone: 'Africa/Cairo' }).offset).toBe(120);
+    // The clock is in winter time, or nothing below tests the season.
+    expect(DateTime.now().setZone('Africa/Cairo').offset).toBe(120);
     expect(cairo('2026-10-29T23:30').toISOString()).toBe('2026-10-29T20:30:00.000Z');
     expect(cairo('2026-10-30T00:00').toISOString()).toBe('2026-10-29T22:00:00.000Z');
   });
