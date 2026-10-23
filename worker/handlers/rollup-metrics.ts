@@ -113,12 +113,20 @@ export function planDays(
 
   if (!start.isValid || !end.isValid || start > end) return { days: [], skipped: 0 };
 
-  const span = Math.floor(end.diff(start, 'days').days) + 1;
+  // Counted and walked on calendar dates, never on the instants that begin
+  // them. Cairo springs forward at midnight, so a day like 2026-04-24 begins at
+  // 01:00 and is 23 hours long: from its start to the next day's is 0.958 of a
+  // day, and flooring that left a range's first day out while `skipped` still
+  // read 0 (docs/PROJECT-STATE.md §6.101). A date read in UTC has no short day,
+  // which is how `windowDays` walks a report's range too.
+  const first = DateTime.fromISO(start.toISODate()!, { zone: 'utc' });
+  const last = DateTime.fromISO(end.toISODate()!, { zone: 'utc' });
+  const span = last.diff(first, 'days').days + 1;
   const kept = Math.min(span, MAX_DAYS);
 
   // Newest first, so a truncated rebuild fixes the days most likely to be read.
   return {
-    days: Array.from({ length: kept }, (_, offset) => end.minus({ days: offset }).toISODate()!),
+    days: Array.from({ length: kept }, (_, offset) => last.minus({ days: offset }).toISODate()!),
     skipped: span - kept,
   };
 }
