@@ -569,9 +569,12 @@ event as its bare type, while a new web reads an old worker's events in full.
    found all 15 current.
 4. **Verify.** `/admin/categories` lands on `/admin/subcategories`, and the
    ticket sidebar says Subcategories. Once all six services run the release, no
-   `categorised` or `category_*` row is newer than the moment the last of web
-   and the worker went live, and `subcategorised` appears on every channel that
-   had traffic since:
+   `categorised` or `category_*` row is newer than the moment the old web and
+   worker instances stopped (Render's shutdown grace after the last of them went
+   live), and every detector row since is `subcategorised`. It appears only
+   where a rule fired: never on `whatsapp_bot`, which the detector leaves out as
+   read-only, and perhaps not at all on a quiet channel such as email or
+   webchat:
 
    ```sql
    select c.channel, e.type, count(*) as n, max(e.created_at) as newest
@@ -1080,8 +1083,8 @@ The classifier's rules, and what each one closes:
   latency, tokens and a `request_fingerprint`:
   - **Run label.** Live runs carry the label `live`. Each archive backfill
     carries its own label, and the unique index is on (`run_label`,
-    `message_id`), as `backfill_categorise_ai`'s table is
-    (`db/schema/categorise-ai.ts:54-64,123`). So the same message can be
+    `message_id`), as `backfill_subcategorise_ai`'s table is
+    (`db/schema/subcategorise-ai.ts:54-64,123`). So the same message can be
     measured again under a new question. Settling and the ownership test read
     only `live` rows.
   - **Fingerprint:** a hash of the serialised `questions` object exactly as
@@ -1112,7 +1115,7 @@ message rather than breaking ingest.
 
 Every existing Jev request keeps its exact input across the comment split.
 `metaPlatformOf` maps a comment channel back to its platform in **both**
-`stateFor` functions, `lib/categorise-ai/request.ts` and
+`stateFor` functions, `lib/subcategorise-ai/request.ts` and
 `lib/canned-suggest/request.ts`. The priority request in particular stays
 byte-identical, and a test asserts it. The new classifier is told
 `is_public_comment` explicitly.
@@ -2150,8 +2153,8 @@ readers are harmless.
   `ticket_categories` and fail every replay.
 
 - **Raw SQL with no database test is tested before merge.** These were never
-  executed in CI: `categoryTotals`, `areaTotals`, `channelTotals`,
-  `causeCoverage`, `ruleScores`, `categoryUsage` and `runLabels`. They get a
+  executed in CI: `subcategoryTotals`, `areaTotals`, `channelTotals`,
+  `causeCoverage`, `ruleScores`, `subcategoryUsage` and `runLabels`. They get a
   `*.db.test.ts`, or one `execute_sql` each against a Supabase branch.
 - **Verification before merge:**
   - CI's `database` job, which migrates an empty Postgres and replays
@@ -2302,7 +2305,7 @@ enqueued, so no job type is ever unknown.
   - **`record`.** It writes only `ai_category_runs`, under its own run label
     and fingerprint, simulating settling, over human tickets since
     2026-08-18. That lets labelled evaluation start now rather than after weeks
-    of new traffic, following the `backfill_categorise_ai` precedent.
+    of new traffic, following the `backfill_subcategorise_ai` precedent.
   - **`apply`.** It sets the column and its `category_changed` event (actor
     `jev:category`) on open tickets, and nothing else.
     - **It respects ownership.** Under the row lock, it applies the same test

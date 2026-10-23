@@ -417,24 +417,25 @@ that is the part worth copying. 769 free-text messages, 59.6% → **85.3%
 classified**, and four gaps that no amount of design would have produced:
 Franco-Arab (Arabic in Latin script, a whole register of customer writing),
 ordinary English sentences, pasted addresses and dropped pins, and `شحنه ايه` —
-frequent enough to earn a category of its own. `تمام` alone, 61 occurrences, is
-the single most common free-text message in the archive. The precision pass then
-made three rules _less_ eager, the important one being that "I did not receive
-it" no longer accuses a courier of a false delivery scan; only the conjunction
-with a tracking claim does.
+frequent enough to earn a subcategory of its own. `تمام` alone, 61 occurrences,
+is the single most common free-text message in the archive. The precision pass
+then made three rules _less_ eager, the important one being that "I did not
+receive it" no longer accuses a courier of a false delivery scan; only the
+conjunction with a tracking claim does.
 
 **An earlier draft of this mined the bot archive and was wrong**, which is worth
 knowing because the archive is the biggest thing in this database and the next
 person will be drawn to it for the same reason. The bot's menu is a self-service
 flow, not a ticket stream: a customer pressing "confirm my details" has no
-support need, and a third of that archive is exactly that. Categorising it
-measures the bot's funnel and reports the result as support demand. Categorisation
-therefore excludes `whatsapp_bot` through the `readOnlyChannels()` helper that
-already meant this. The archive keeps one real use — **3,159 bot conversations
-contain free text the bot never answered**, which is the best available proxy for
-agent-bound complaints and a leading indicator of inbound volume. That is also
-why there is **no backfill job**: with the bot channel excluded there are 55
-conversations in the entire archive to categorise.
+support need, and a third of that archive is exactly that. Subcategorising it
+measures the bot's funnel and reports the result as support demand.
+Subcategorisation therefore excludes `whatsapp_bot` through the
+`readOnlyChannels()` helper that already meant this. The archive keeps one real
+use — **3,159 bot conversations contain free text the bot never answered**,
+which is the best available proxy for agent-bound complaints and a leading
+indicator of inbound volume. That is also why there is **no backfill job**: with
+the bot channel excluded there are 55 conversations in the entire archive to
+subcategorise.
 
 2026-10-23, in the code and not yet deployed: Stage 2.A renames the topic
 taxonomy to subcategory in code, UI, routes (old paths 307-redirect),

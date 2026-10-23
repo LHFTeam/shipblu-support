@@ -209,11 +209,11 @@ export async function rollupMetrics(job?: ClaimedJob): Promise<void> {
           .values(agentRows.map((row) => ({ ...row, day, computedAt: new Date() })));
       }
 
-      // The two subcategory tables join the same transaction rather than a job
-      // of their own, for the reason at the top of this file: two nightly jobs
-      // would be two answers to "which day is this". Rebuilt by delete and
-      // insert like the others, and safe to destroy for the same reason —
-      // `conversations.created_at` is immutable and
+      // The subcategory and root-cause tables join the same transaction rather
+      // than a job of their own, for the reason at the top of this file: two
+      // nightly jobs would be two answers to "which day is this". Rebuilt by
+      // delete and insert like the others, and safe to destroy for the same
+      // reason — `conversations.created_at` is immutable and
       // `conversation_categories.first_seen_at` is append-only, so every column
       // can be recomputed from scratch. The column that would break that is
       // "suggestions still open", which is why it is not there. `resolved_at`
@@ -235,10 +235,10 @@ export async function rollupMetrics(job?: ClaimedJob): Promise<void> {
     // Asserted on every write, not just on backfills: a day whose totals do not
     // equal the sum of its own channel slices is the exact shape of the bug
     // this job once shipped, and it is invisible in the output.
-    // Not extended to the two subcategory tables, and the absence is
-    // deliberate rather than an oversight: they have no totals row to reconcile
-    // against, because a ticket carrying three subcategories appears under
-    // three of them. That is also exactly why they are not a dimension on
+    // Not extended to the subcategory and root-cause tables, and the absence
+    // is deliberate rather than an oversight: they have no totals row to
+    // reconcile against, because a ticket carrying three subcategories appears
+    // under three of them. That is also exactly why they are not a dimension on
     // `metrics_daily` — see `db/schema/metrics.ts`.
     if (!reconciles(slices)) {
       inconsistent += 1;

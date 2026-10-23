@@ -226,7 +226,7 @@ export function describeEvent(type: string, data: Record<string, unknown>): stri
     // timeline read "category added" with no subcategory in it. The actions all
     // store what was decided; this is where it becomes readable.
     //
-    // Each is read under two names, for good. They were written as
+    // The first five are read under two names, for good. They were written as
     // `categorised` and `category_*`, with the key in `data.categoryKey`, until
     // Stage 2.A of `plans/ticket-category-routing.md`; stored history keeps its
     // words, and during a deploy both writers run side by side. Stage 3's own

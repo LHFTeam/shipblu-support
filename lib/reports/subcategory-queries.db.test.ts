@@ -12,7 +12,7 @@ import { rolledUpRange } from './subcategory-queries';
 
 withCleanDatabase();
 
-async function category(day: string) {
+async function subcategory(day: string) {
   await db
     .insert(subcategoryMetricsDaily)
     .values({ day, subcategoryKey: 'wismo', area: 'delivery', channel: 'email', ticketsAny: 1 });
@@ -26,10 +26,10 @@ async function cause(day: string) {
 
 describe('rolledUpRange', () => {
   it('takes the start of the history from before the window, past a quiet first day', async () => {
-    await category('2026-08-18');
+    await subcategory('2026-08-18');
     await cause('2026-08-19');
     // Nothing on the 20th, in either table: the window below opens on a gap.
-    await category('2026-08-21');
+    await subcategory('2026-08-21');
     await cause('2026-08-23');
 
     expect(await rolledUpRange({ from: '2026-08-20', to: '2026-08-25' })).toEqual({
@@ -41,7 +41,7 @@ describe('rolledUpRange', () => {
 
   it('still reports a history that really starts inside the window', async () => {
     await cause('2026-09-24');
-    await category('2026-09-25');
+    await subcategory('2026-09-25');
 
     expect(await rolledUpRange({ from: '2026-09-01', to: '2026-09-30' })).toEqual({
       first: '2026-09-24',
@@ -51,9 +51,9 @@ describe('rolledUpRange', () => {
   });
 
   it('counts a day once when both tables have it, and nothing after the window', async () => {
-    await category('2026-09-10');
+    await subcategory('2026-09-10');
     await cause('2026-09-10');
-    await category('2026-10-02');
+    await subcategory('2026-10-02');
 
     expect(await rolledUpRange({ from: '2026-09-01', to: '2026-09-30' })).toEqual({
       first: '2026-09-10',
@@ -63,7 +63,7 @@ describe('rolledUpRange', () => {
   });
 
   it('answers null for a window before any history', async () => {
-    await category('2026-09-10');
+    await subcategory('2026-09-10');
 
     expect(await rolledUpRange({ from: '2026-08-01', to: '2026-08-31' })).toEqual({
       first: null,
