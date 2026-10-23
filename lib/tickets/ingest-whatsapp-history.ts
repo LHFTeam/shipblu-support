@@ -27,12 +27,12 @@ import { requireResolvedStatusId } from './statuses';
  * resolved conversation, `source_system = 'import'`, holding both sides of it —
  * the customer's messages and the business's replies from the phone. None of
  * the machinery a live message sets off runs for it: no SLA clock, no
- * automation, no out-of-hours reply, no categorisation, no shipment linking, no
- * media download, and no 24-hour window. Every one of those is a decision about
- * a conversation happening now, and six months of finished chats arriving in
- * ten minutes would otherwise breach every SLA at once, auto-reply to
+ * automation, no out-of-hours reply, no subcategorisation, no shipment linking,
+ * no media download, and no 24-hour window. Every one of those is a decision
+ * about a conversation happening now, and six months of finished chats arriving
+ * in ten minutes would otherwise breach every SLA at once, auto-reply to
  * customers about messages they sent in April, and file a quarter of support
- * demand into today's category report.
+ * demand into today's subcategory report.
  *
  * So the columns those decisions read stay empty: `last_customer_message_at`
  * (which opens the window — an agent writing on an imported ticket gets the

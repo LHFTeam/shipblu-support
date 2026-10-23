@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { emptyBucket, reconciles, slicesFor, type Slice } from './rollup';
+import { cairo } from '@/lib/testing/time';
+import { dateIn, emptyBucket, reconciles, slicesFor, type Slice } from './rollup';
 
 /**
  * `metrics_daily` stores four slices per day — the totals, and then by group, by
@@ -108,5 +109,59 @@ describe('reconciles', () => {
       const [totals, ...rest] = day;
       expect(reconciles([surveys(null, { ...totals!.bucket, ...counts }), ...rest])).toBe(false);
     }
+  });
+});
+
+/**
+ * The day a row is listed under is the team's day. The bug this guards printed
+ * `toISOString().slice(0, 10)`, the UTC date, so a message that reached Cairo
+ * before 02:00 (03:00 under daylight saving) was listed on the day before.
+ *
+ * Every case below is one some wrong answer gets wrong: the UTC slice, a fixed
+ * +02:00, a fixed +03:00, or a zone argument ignored for Cairo's. Cairo is
+ * +02:00 in winter and +03:00 under daylight saving, and the two put an instant
+ * on different days only from 21:00 to 22:00 UTC — the hour before the team's
+ * midnight in winter and the hour after it in summer — so the cases that catch
+ * a fixed offset sit there.
+ */
+describe('dateIn', () => {
+  const ZONE = 'Africa/Cairo';
+
+  it('lists the small hours on the day they fall on, which UTC does not', () => {
+    // Before 03:00 under daylight saving, and before 02:00 without it, it is
+    // still the day before in UTC.
+    expect(dateIn(cairo('2026-10-14T02:59'), ZONE)).toBe('2026-10-14');
+    expect(dateIn(cairo('2026-01-15T01:59'), ZONE)).toBe('2026-01-15');
+  });
+
+  it('takes the offset from the zone database, not one fixed for the year', () => {
+    // Both are 21:30 UTC. Half past midnight under daylight saving is the day
+    // before at +02:00, and half past eleven in winter is the day after at
+    // +03:00.
+    expect(dateIn(cairo('2026-10-14T00:30'), ZONE)).toBe('2026-10-14');
+    expect(dateIn(cairo('2026-01-15T23:30'), ZONE)).toBe('2026-01-15');
+  });
+
+  it('follows the clocks across the night daylight saving ends', () => {
+    // Cairo's clocks go back from midnight to 23:00 between 29 and 30 October
+    // 2026, so 23:30 on the 29th happens twice; `cairo()` names the first, and
+    // the second is an hour after it. Half past midnight that morning is still
+    // +03:00, and the second 23:30 and the next night are +02:00, so every one
+    // of these is 21:30 UTC and lands on the wrong day under one fixed offset.
+    const secondPass = new Date(cairo('2026-10-29T23:30').getTime() + 60 * 60 * 1000);
+
+    expect(dateIn(cairo('2026-10-29T00:30'), ZONE)).toBe('2026-10-29');
+    expect(dateIn(secondPass, ZONE)).toBe('2026-10-29');
+    expect(dateIn(cairo('2026-10-30T23:30'), ZONE)).toBe('2026-10-30');
+  });
+
+  it('answers in the zone it is given, not in Cairo whatever it is asked', () => {
+    expect(dateIn(cairo('2026-10-14T02:59'), 'UTC')).toBe('2026-10-13');
+  });
+
+  it('refuses a zone it cannot read rather than answering nothing', () => {
+    // The reporting zone is `business_hours.timezone`, checked only by the
+    // hours form; a row edited in the database reaches here unchecked.
+    expect(() => dateIn(cairo('2026-10-14T02:59'), 'Africa/Kairo')).toThrow(/Africa\/Kairo/);
   });
 });

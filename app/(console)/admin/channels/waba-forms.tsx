@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { Badge, Field, Button, ErrorText, Input, Toggle } from '@/components/ui';
+import { formatDateTime } from '@/lib/format';
 import type { CredentialStatus } from '@/lib/whatsapp/credential-status';
 import { DangerAction, Disclosure, EditorForm } from '../forms-shared';
 import { deleteWhatsAppAccount, saveWhatsAppAccount } from './actions';
@@ -267,9 +268,10 @@ export function WhatsAppAccountEditor({
               empty account does.
             </p>
           ) : account.lastSyncedAt ? (
+            // In Cairo, like the credential card above it: a UTC-labelled time on
+            // the same row invites reading the card's unlabelled expiry as UTC too.
             <p className="mt-1 text-xs text-(--color-text-secondary)">
-              Templates last synced{' '}
-              {account.lastSyncedAt.toISOString().replace('T', ' ').slice(0, 16)} UTC
+              Templates last synced {formatDateTime(account.lastSyncedAt)}
             </p>
           ) : (
             <p className="mt-1 text-xs text-(--color-text-secondary)">

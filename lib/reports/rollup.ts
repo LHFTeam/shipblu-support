@@ -107,6 +107,29 @@ export function todayIn(zone: string): string {
 }
 
 /**
+ * The date an instant falls on in `zone`, as the `YYYY-MM-DD` a report prints.
+ *
+ * `at.toISOString().slice(0, 10)` is the obvious spelling and it is the UTC
+ * date: anything that happened in Cairo before 02:00 — 03:00 under daylight
+ * saving — prints as the day before, which is the evening shift's last messages
+ * and the night's first, on a date nobody received them. The zone is the
+ * caller's: the reporting zone where the date is a report's day, as
+ * `earliestDay` below, and `TEAM_TIME_ZONE` where it sits beside timestamps the
+ * console draws.
+ *
+ * Throws on a zone luxon cannot read rather than asserting the null away. The
+ * reporting zone comes from `business_hours.timezone`, which only the hours form
+ * checks, and a null typed as a string draws as an empty cell — or, through
+ * `earliestDay`, reads as an archive with nothing to rebuild — with no line in
+ * any log to say why.
+ */
+export function dateIn(at: Date, zone: string): string {
+  const date = DateTime.fromJSDate(at, { zone }).toISODate();
+  if (!date) throw new Error(`no date for ${String(at)} in time zone '${zone}'`);
+  return date;
+}
+
+/**
  * The window a report's range covers, as the `YYYY-MM-DD` the rollup writes.
  *
  * Lives here, beside `todayIn`, because it is the read side of the same rule:
@@ -177,7 +200,7 @@ export async function earliestDay(zone: string): Promise<string | null> {
   const first = rows[0]?.first;
   if (!first) return null;
 
-  return DateTime.fromJSDate(new Date(first), { zone }).toISODate();
+  return dateIn(new Date(first), zone);
 }
 
 export type Dimensions = { groupId: string | null; agentId: string | null; channel: string | null };

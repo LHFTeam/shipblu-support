@@ -199,7 +199,8 @@ export type NormalisedReceipt = {
  *
  * They are normalised apart from messages, and not turned into `messages` rows,
  * because none of them is something an agent can answer. A reaction rendered as
- * an inbound reply would be categorised, counted as support demand and answered.
+ * an inbound reply would be subcategorised, counted as support demand and
+ * answered.
  *
  * `opensWindow` is the distinction that matters, and it is not the same question
  * as "did the customer interact". See `applyMetaInteraction`.
@@ -241,8 +242,8 @@ export type NormalisedInteraction = {
  *
  * Normalised apart from messages for the reasons an interaction is, and more
  * so: a tapped "Great" filed as an inbound reply would reopen the resolved
- * ticket, restart its next-response clock, be categorised, become its inbox
- * preview and choose the language of the next automated reply — the
+ * ticket, restart its next-response clock, be subcategorised, become its
+ * inbox preview and choose the language of the next automated reply — the
  * discipline reactions taught (§6.94). It carries the survey it answers,
  * which is all `recordMetaFeedback` needs besides who sent it.
  */

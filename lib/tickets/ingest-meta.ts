@@ -357,9 +357,9 @@ export function customerWroteSet(at: Date) {
  * Three decisions, and each of them is a thing this could get wrong invisibly:
  *
  * **It writes no `messages` row.** None of these is something an agent can
- * answer, and a reaction rendered as an inbound reply would be categorised as
- * support demand, counted in the volume a manager staffs from, and shown to an
- * agent as a question. The `conversation_events` row is what a person reads
+ * answer, and a reaction rendered as an inbound reply would be subcategorised
+ * as support demand, counted in the volume a manager staffs from, and shown to
+ * an agent as a question. The `conversation_events` row is what a person reads
  * instead — it explains why a window is open, or why the customer went quiet
  * after a thumbs-up.
  *

@@ -10,7 +10,7 @@ import {
 } from './client';
 
 /**
- * The transport, and nothing about categorisation.
+ * The transport, and nothing about subcategorisation.
  *
  * What is worth asserting here is the one thing the queue reads: whether another
  * attempt could plausibly answer differently. Getting that wrong is expensive in

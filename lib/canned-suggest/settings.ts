@@ -83,7 +83,7 @@ export async function saveSuggestionSettings(
 /**
  * Whether a suggestion can be asked for right now: switched on, and a key to ask
  * with. The key alone is not enough — production holds one for the shadow
- * categoriser — and the switch alone is not either, because an environment with
+ * subcategoriser — and the switch alone is not either, because an environment with
  * no key would otherwise show agents a feature that can only ever say nothing.
  */
 export async function suggestionsLive(): Promise<boolean> {

@@ -12,6 +12,7 @@ import { ensureAccountForWaba, listAccounts, parseTokenEnvVar } from './accounts
 import { callGraph, WhatsAppApiError } from './client';
 import { parseCoexistence } from './coexistence';
 import { channelsOnNumber } from './coexistence-state';
+import { expiryPhrase } from './credential-status';
 import {
   credentialKeyProblem,
   REQUIRED_BUSINESS_TOKEN_SCOPES,
@@ -353,13 +354,12 @@ export async function beginCoexistenceOnboarding(
     expiresAt: inspection ? (inspection.expiresAt?.toISOString() ?? 'never') : 'unknown',
   });
 
+  // The expiry in the credential card's words (`expiryPhrase`), so the note
+  // and the card print the same day. Without an inspection it says nothing
+  // here: the warnings below already say the inspection did not answer.
   const notes = [
     `Signed in to Meta and stored the business token${
-      inspection
-        ? inspection.expiresAt
-          ? ` (expires ${inspection.expiresAt.toISOString().slice(0, 10)})`
-          : ' (never expires)'
-        : ''
+      inspection ? ` (${expiryPhrase(inspection.expiresAt)})` : ''
     }. Connecting the number now.`,
     committed.account.created ? `Business account "${wabaName ?? claim.wabaId}" was added.` : null,
     committed.account.reactivated

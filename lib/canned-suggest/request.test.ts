@@ -52,8 +52,8 @@ describe('suggestionQuestion', () => {
     expect(keyToId).toEqual({ r1: WHERE.id, r2: ARABIC_ONLY.id });
   });
 
-  // The categoriser's `meta.unclassified` was offered only because a registry
-  // row happened to be active. This one is added in code, every time.
+  // The subcategoriser's `meta.unclassified` was offered only because a
+  // registry row happened to be active. This one is added in code, every time.
   it('always offers none, and names it in the instructions', () => {
     const { question, keyToId } = suggestionQuestion([WHERE]);
     expect(question.criteria[NONE_KEY]).toMatch(/No saved reply fits/);

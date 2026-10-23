@@ -10,10 +10,10 @@ import {
 /**
  * What the reply composer asks TypeSafe, written down in one place.
  *
- * Pure, and tested, for the reason `lib/categorise-ai/request.ts` gives: a wrong
- * request shape is invisible in the response. A `choice` question keyed wrongly
- * still answers — over the wrong options — and the answer looks exactly like a
- * right one.
+ * Pure, and tested, for the reason `lib/subcategorise-ai/request.ts` gives: a
+ * wrong request shape is invisible in the response. A `choice` question keyed
+ * wrongly still answers — over the wrong options — and the answer looks exactly
+ * like a right one.
  *
  * The question is the one an agent answers by hand every time they open the
  * picker: given this conversation so far, which of the team's saved replies
@@ -29,10 +29,10 @@ export const SUGGESTION_QUESTION = 'canned_response';
  * The way out, and an option in its own right.
  *
  * Added here, in code, on every request — not left to a registry row that
- * happens to exist. The categoriser's `meta.unclassified` is offered only
+ * happens to exist. The subcategoriser's `meta.unclassified` is offered only
  * because its `ticket_categories` row is active, and nothing stops an admin
- * retiring it; a suggester without this key would put a confident-looking
- * guess in front of an agent for "ok thanks", which is the over-suggestion that
+ * retiring it; a suggester without this key would put a confident-looking guess
+ * in front of an agent for "ok thanks", which is the over-suggestion that
  * teaches people to ignore the feature.
  */
 export const NONE_KEY = 'none';
@@ -105,14 +105,14 @@ export type SuggestionContext = {
 /**
  * The instruction the model judges against.
  *
- * Written out rather than assembled, like the categoriser's, because each clause
- * answers something real: the language sentence because most of this traffic is
- * Egyptian Arabic and a fair share Franco-Arabic; the English sentence because
- * the criteria are shown in English while the reply will go out in Arabic, and
- * a model not told that might mark every option a poor fit for an Arabic
- * customer; and the last sentence because `none` is the answer to "ok thanks"
- * and to a question no saved reply covers, and a model given no way out names
- * something.
+ * Written out rather than assembled, like the subcategoriser's, because each
+ * clause answers something real: the language sentence because most of this
+ * traffic is Egyptian Arabic and a fair share Franco-Arabic; the English
+ * sentence because the criteria are shown in English while the reply will go
+ * out in Arabic, and a model not told that might mark every option a poor fit
+ * for an Arabic customer; and the last sentence because `none` is the answer to
+ * "ok thanks" and to a question no saved reply covers, and a model given no way
+ * out names something.
  */
 const INSTRUCTIONS = [
   'This is a conversation between a customer and the support team of ShipBlu, a',
@@ -148,7 +148,7 @@ function cut(text: string, max: number): string {
  * English because the library is translation pairs, so the meaning is the same
  * either way; English tokenises cheaper; and the criteria then stay identical
  * from one conversation to the next, which keeps requests comparable. The
- * categoriser already pairs English criteria with Arabic messages.
+ * subcategoriser already pairs English criteria with Arabic messages.
  */
 function judgedBody(option: CannedOptionForRequest): string {
   const bodies: BilingualBody = { ar: option.bodyTextAr, en: option.bodyTextEn };
@@ -211,9 +211,9 @@ export function suggestionQuestion(options: readonly CannedOptionForRequest[]): 
 /**
  * The `state` the question is asked about: the conversation, as an object.
  *
- * Not flattened into prose, for the categoriser's reason — the model must be able
- * to tell where one message ends and who wrote the next. Oldest first, so the
- * last element is the message being answered, which is how a person reads a
+ * Not flattened into prose, for the subcategoriser's reason — the model must be
+ * able to tell where one message ends and who wrote the next. Oldest first, so
+ * the last element is the message being answered, which is how a person reads a
  * thread too.
  *
  * A message with neither text nor a file says nothing and is left out. One with

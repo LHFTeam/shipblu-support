@@ -104,7 +104,7 @@ export default async function ReportsPage({
               this page answers, cut a different way.
             */}
             <Link
-              href={`/reports/categories?days=${days}`}
+              href={`/reports/subcategories?days=${days}`}
               className={buttonClass({ variant: 'secondary', size: 'sm' })}
             >
               What tickets are about

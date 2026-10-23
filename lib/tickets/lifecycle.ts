@@ -1,7 +1,7 @@
 import { assignConversation } from '@/lib/assignment';
 import { maybeSendAutoResponse } from '@/lib/auto-response';
 import { runAutomations } from '@/lib/automations';
-import { categoriseFromMessage } from '@/lib/categorise/apply';
+import { subcategoriseFromMessage } from '@/lib/subcategorise/apply';
 import { enqueuePriorityClassification } from '@/lib/priority-ai/enqueue';
 import { linkShipmentsFromMessage } from '@/lib/shipments/links';
 import { scheduleSurvey } from '@/lib/csat';
@@ -173,11 +173,11 @@ export type StoredMessage = {
    * Required and nullable rather than optional, and that is load-bearing.
    *
    * `direction?: string` compiles at every existing call site and silently
-   * disables categorisation on whichever ingest path was forgotten — which is
-   * precisely the failure this seam's own docstring warns about two paragraphs
-   * up. `direction: string` does not compile until somebody has answered the
-   * question for each path, which is the whole point of widening the type
-   * instead of re-reading the row inside the consumer: re-reading also
+   * disables subcategorisation on whichever ingest path was forgotten — which
+   * is precisely the failure this seam's own docstring warns about two
+   * paragraphs up. `direction: string` does not compile until somebody has
+   * answered the question for each path, which is the whole point of widening
+   * the type instead of re-reading the row inside the consumer: re-reading also
    * compiles, and also never asks.
    */
   direction: string;
@@ -191,13 +191,13 @@ export async function afterMessageStored(message: StoredMessage): Promise<void> 
   }
 
   // Its own try/catch rather than sharing one: a bug in shipment detection must
-  // not stop categorisation, or the reverse. Sequential rather than in parallel
-  // because both finish by touching the same `conversations` row, and two
-  // concurrent updates of one row from one pool is a deadlock.
+  // not stop subcategorisation, or the reverse. Sequential rather than in
+  // parallel because both finish by touching the same `conversations` row, and
+  // two concurrent updates of one row from one pool is a deadlock.
   try {
-    await categoriseFromMessage(message, 'notify');
+    await subcategoriseFromMessage(message, 'notify');
   } catch (error) {
-    log.error(`categorisation failed for message ${message.messageId}`, error);
+    log.error(`subcategorisation failed for message ${message.messageId}`, error);
   }
 
   // Only queued here; the provider call is a job (`classify_priority`). Every

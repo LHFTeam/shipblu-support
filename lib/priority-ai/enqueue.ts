@@ -1,7 +1,7 @@
 import { eq } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { conversations } from '@/db/schema';
-import { isCategorisableMessage } from '@/lib/categorise/apply';
+import { isSubcategorisableMessage } from '@/lib/subcategorise/apply';
 import { enqueue } from '@/lib/queue';
 import { isReadOnlyChannel } from '@/lib/tickets/channel-policy';
 import { hasCustomerText } from '@/lib/tickets/customer-text';
@@ -32,7 +32,7 @@ export async function enqueuePriorityClassification(message: {
   direction: string;
 }): Promise<void> {
   if (priorityAiMode() === 'off') return;
-  if (!isCategorisableMessage(message.kind, message.direction)) return;
+  if (!isSubcategorisableMessage(message.kind, message.direction)) return;
   if (!hasCustomerText(message.bodyText)) return;
 
   const [conversation] = await db

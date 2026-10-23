@@ -201,7 +201,7 @@ async function writeSkip(
   });
 
   // Touch the conversation so its `notify_change` trigger fires, as the
-  // categoriser does: neither row above notifies, and an agent who pressed
+  // subcategoriser does: neither row above notifies, and an agent who pressed
   // "Send now" is waiting on the open ticket for this answer. Delivered at
   // commit, so the refresh it causes reads the skip; `updated_at` is no queue
   // column, so it wakes this ticket and no queue.

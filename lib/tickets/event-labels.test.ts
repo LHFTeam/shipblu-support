@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { describeEvent } from './event-labels';
+import { describeActorLabel, describeEvent } from './event-labels';
 
 /**
  * The branches where a timeline sentence goes wrong without anything failing:
@@ -162,17 +162,42 @@ describe('describeEvent', () => {
     );
   });
 
-  it('reads the categorisation payloads, including the unreachable empty one', () => {
-    expect(describeEvent('categorised', { applied: ['wismo'], suggested: ['refund'] })).toBe(
-      'filed it under wismo and suggested refund',
-    );
-    expect(describeEvent('categorised', {})).toBe('read the message and found nothing to file');
+  it('reads the subcategorisation payloads, including the unreachable empty one', () => {
+    for (const type of ['categorised', 'subcategorised']) {
+      expect(describeEvent(type, { applied: ['wismo'], suggested: ['refund'] })).toBe(
+        'filed it under wismo and suggested refund',
+      );
+      expect(describeEvent(type, {})).toBe('read the message and found nothing to file');
+    }
     expect(describeEvent('root_cause_set', { rootCauseKey: 'courier_delay' })).toBe(
       'recorded the cause as courier_delay',
     );
     expect(describeEvent('root_cause_set', { rootCauseKey: null })).toBe(
       'cleared the recorded cause',
     );
+  });
+
+  // Written under the old names and key until Stage 2.A and the new ones since;
+  // stored rows keep theirs, so a ticket's history holds both for good.
+  it('reads an agent’s subcategory decisions under both names and both keys', () => {
+    for (const [prefix, key] of [
+      ['category', 'categoryKey'],
+      ['subcategory', 'subcategoryKey'],
+    ] as const) {
+      expect(describeEvent(`${prefix}_added`, { [key]: 'wismo' })).toBe('filed this under wismo');
+      expect(describeEvent(`${prefix}_confirmed`, { [key]: 'wismo' })).toBe('confirmed wismo');
+      expect(describeEvent(`${prefix}_rejected`, { [key]: 'wismo' })).toBe('rejected wismo');
+      expect(describeEvent(`${prefix}_removed`, { [key]: 'wismo' })).toBe('removed wismo');
+    }
+    expect(describeEvent('subcategory_added', {})).toBe('filed this under a subcategory');
+    expect(describeEvent('subcategory_rejected', {})).toBe('rejected a suggested subcategory');
+  });
+
+  it('prints the rules detector under one name, whichever it signed with', () => {
+    expect(describeActorLabel('category-detector')).toBe('subcategory-detector');
+    expect(describeActorLabel('subcategory-detector')).toBe('subcategory-detector');
+    expect(describeActorLabel('shipment-detector')).toBe('shipment-detector');
+    expect(describeActorLabel(null)).toBeNull();
   });
 
   it('only treats a literal true as a permission refusal', () => {

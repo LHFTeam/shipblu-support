@@ -1,5 +1,10 @@
 # Ticket categorisation
 
+> Since Stage 2.A of `plans/ticket-category-routing.md` (2026-10-23) this
+> taxonomy is called the subcategory, and its code lives in `lib/subcategorise/`
+> and `lib/subcategorise-ai/`; the text below keeps the names it was written
+> with.
+
 ## Context
 
 This helpdesk could not answer the first question anybody asks of one: what are

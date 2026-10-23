@@ -9,11 +9,11 @@
  * the console like any response somebody typed there.
  *
  * Organised by what the customer wrote about, following the areas in
- * `lib/categorise/taxonomy.ts`, so the response an agent reaches for sits under
- * the same heading as the category the ticket was filed under. Two audiences
- * write in and they need different answers to the same question: a recipient
- * waiting for a parcel, who never chose ShipBlu, and a merchant, who pays for
- * it. Where a folder holds both, the title says which.
+ * `lib/subcategorise/taxonomy.ts`, so the response an agent reaches for sits
+ * under the same heading as the subcategory the ticket was filed under. Two
+ * audiences write in and they need different answers to the same question: a
+ * recipient waiting for a parcel, who never chose ShipBlu, and a merchant, who
+ * pays for it. Where a folder holds both, the title says which.
  *
  * Six decisions are worth knowing before editing a response, and
  * `canned-library.test.ts` holds each one that can be checked.

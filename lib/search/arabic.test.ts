@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { normaliseForMatch } from '@/lib/categorise/normalise';
+import { normaliseForMatch } from '@/lib/subcategorise/normalise';
 import { ARABIC_LETTER_VARIANTS, arabicVariantPattern } from './arabic';
 
 /** Runs a pattern the way Postgres's `~*` would, near enough for these cases. */
@@ -47,12 +47,12 @@ describe('arabicVariantPattern', () => {
 });
 
 describe('ARABIC_LETTER_VARIANTS', () => {
-  // The categoriser folds by this table and the search widens by it, so each
-  // letter's search reaches every spelling the categoriser treats as it. Only
-  // that direction: the categoriser also strips tatweel and tashkeel from the
-  // text it reads, which a search cannot do to a column, so text it calls equal
-  // is not always text a search finds.
-  it('widens each letter to every spelling the categoriser folds into it', () => {
+  // The subcategoriser folds by this table and the search widens by it, so each
+  // letter's search reaches every spelling the subcategoriser treats as it.
+  // Only that direction: the subcategoriser also strips tatweel and tashkeel
+  // from the text it reads, which a search cannot do to a column, so text it
+  // calls equal is not always text a search finds.
+  it('widens each letter to every spelling the subcategoriser folds into it', () => {
     for (const { letter, variants } of ARABIC_LETTER_VARIANTS) {
       for (const spelling of [letter, ...variants]) {
         expect(normaliseForMatch(spelling), spelling).toBe(letter);

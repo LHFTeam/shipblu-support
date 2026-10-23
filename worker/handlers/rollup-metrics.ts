@@ -3,7 +3,7 @@ import { eq } from 'drizzle-orm';
 import { db } from '@/db/client';
 import {
   agentMetricsDaily,
-  categoryMetricsDaily,
+  subcategoryMetricsDaily,
   metricsDaily,
   rollupDays,
   rootCauseMetricsDaily,
@@ -11,7 +11,7 @@ import {
 import type { ClaimedJob } from '@/lib/queue';
 import { parseJobPayload, type JobPayload } from '@/lib/queue/payloads';
 import { computeAgentDay, withActivity } from '@/lib/reports/agent-rollup';
-import { computeCategoryDay, computeRootCauseDay } from '@/lib/reports/category-rollup';
+import { computeSubcategoryDay, computeRootCauseDay } from '@/lib/reports/subcategory-rollup';
 import {
   asRows,
   computeDay,
@@ -169,7 +169,7 @@ export async function rollupMetrics(job?: ClaimedJob): Promise<void> {
     const slices = await computeDay(day, context);
     const rows = asRows(day, slices);
     const agentRows = withActivity(await computeAgentDay(day, context));
-    const categoryRows = await computeCategoryDay(day, context);
+    const subcategoryRows = await computeSubcategoryDay(day, context);
     const causeRows = await computeRootCauseDay(day, context);
 
     // Delete-then-insert rather than an upsert on the unique index: Postgres
@@ -209,11 +209,11 @@ export async function rollupMetrics(job?: ClaimedJob): Promise<void> {
           .values(agentRows.map((row) => ({ ...row, day, computedAt: new Date() })));
       }
 
-      // The two category tables join the same transaction rather than a job of
-      // their own, for the reason at the top of this file: two nightly jobs
-      // would be two answers to "which day is this". Rebuilt by delete and
-      // insert like the others, and safe to destroy for the same reason —
-      // `conversations.created_at` is immutable and
+      // The subcategory and root-cause tables join the same transaction rather
+      // than a job of their own, for the reason at the top of this file: two
+      // nightly jobs would be two answers to "which day is this". Rebuilt by
+      // delete and insert like the others, and safe to destroy for the same
+      // reason — `conversations.created_at` is immutable and
       // `conversation_categories.first_seen_at` is append-only, so every column
       // can be recomputed from scratch. The column that would break that is
       // "suggestions still open", which is why it is not there. `resolved_at`
@@ -225,8 +225,8 @@ export async function rollupMetrics(job?: ClaimedJob): Promise<void> {
       // cause dated by it goes with it or falls back to `root_cause_set_at`.
       // Tickets closed before the close kept it need `restore_resolved_at` run
       // once before any backfill (`docs/PROJECT-STATE.md` §6.98).
-      await tx.delete(categoryMetricsDaily).where(eq(categoryMetricsDaily.day, day));
-      if (categoryRows.length) await tx.insert(categoryMetricsDaily).values(categoryRows);
+      await tx.delete(subcategoryMetricsDaily).where(eq(subcategoryMetricsDaily.day, day));
+      if (subcategoryRows.length) await tx.insert(subcategoryMetricsDaily).values(subcategoryRows);
 
       await tx.delete(rootCauseMetricsDaily).where(eq(rootCauseMetricsDaily.day, day));
       if (causeRows.length) await tx.insert(rootCauseMetricsDaily).values(causeRows);
@@ -235,11 +235,11 @@ export async function rollupMetrics(job?: ClaimedJob): Promise<void> {
     // Asserted on every write, not just on backfills: a day whose totals do not
     // equal the sum of its own channel slices is the exact shape of the bug
     // this job once shipped, and it is invisible in the output.
-    // Not extended to the two category tables, and the absence is deliberate
-    // rather than an oversight: they have no totals row to reconcile against,
-    // because a ticket carrying three categories appears under three of them.
-    // That is also exactly why they are not a dimension on `metrics_daily` —
-    // see `db/schema/metrics.ts`.
+    // Not extended to the subcategory and root-cause tables, and the absence
+    // is deliberate rather than an oversight: they have no totals row to
+    // reconcile against, because a ticket carrying three subcategories appears
+    // under three of them. That is also exactly why they are not a dimension on
+    // `metrics_daily` — see `db/schema/metrics.ts`.
     if (!reconciles(slices)) {
       inconsistent += 1;
       log.error(`${day}: totals do not match the sum of the channel slices`);
@@ -247,7 +247,7 @@ export async function rollupMetrics(job?: ClaimedJob): Promise<void> {
 
     log.info(
       `${day}: ${rows.length} rows, ${agentRows.length} agent-day(s), ` +
-        `${categoryRows.length} category row(s), ${causeRows.length} cause row(s)`,
+        `${subcategoryRows.length} subcategory row(s), ${causeRows.length} cause row(s)`,
     );
   }
 

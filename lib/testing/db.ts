@@ -5,7 +5,7 @@ import { seedBaseline } from '@/db/baseline';
 import { closeDb, db } from '@/db/client';
 import { forgetSuggestionSettings } from '@/lib/canned-suggest/settings';
 import { forgetCsatSettings } from '@/lib/csat/settings';
-import { forgetCategoryIds } from '@/lib/categorise/apply';
+import { forgetSubcategoryIds } from '@/lib/subcategorise/apply';
 import { forgetHoursCatalog } from '@/lib/hours/catalog';
 import { forgetPresencePolicy } from '@/lib/presence/policy';
 
@@ -153,16 +153,16 @@ END $$`;
  * The caches this process holds of rows that were just truncated.
  *
  * A reseed hands out new ids, so a registry cached by the previous test is a set
- * of foreign keys into nothing. The categoriser is the one that shows it: its
- * insert fails the `ticket_categories` foreign key, the lifecycle catches and
- * logs the error as it is meant to, and the test sees a ticket that was never
- * categorised — a quirk of the fixture, reading as one of the code.
+ * of foreign keys into nothing. The subcategoriser is the one that shows it:
+ * its insert fails the `ticket_categories` foreign key, the lifecycle catches
+ * and logs the error as it is meant to, and the test sees a ticket that was
+ * never subcategorised — a quirk of the fixture, reading as one of the code.
  *
  * Each module-level cache of database rows in `lib/` already has a `forget*`
  * that whatever writes those rows calls; one added later belongs here too.
  */
 function forgetDatabaseCaches(): void {
-  forgetCategoryIds();
+  forgetSubcategoryIds();
   forgetHoursCatalog();
   forgetPresencePolicy();
   forgetSuggestionSettings();

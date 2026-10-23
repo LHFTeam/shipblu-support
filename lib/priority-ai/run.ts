@@ -1,9 +1,9 @@
 import { and, asc, desc, eq, inArray, ne, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { aiPriorityRuns, conversationEvents, conversations, messages } from '@/db/schema';
-import { isCategorisableMessage } from '@/lib/categorise/apply';
-import { earlierMessages } from '@/lib/categorise-ai/context';
-import { predictionFrom, type AiPrediction } from '@/lib/categorise-ai/map';
+import { isSubcategorisableMessage } from '@/lib/subcategorise/apply';
+import { earlierMessages } from '@/lib/subcategorise-ai/context';
+import { predictionFrom, type AiPrediction } from '@/lib/subcategorise-ai/map';
 import { errorMessage } from '@/lib/errors';
 import { logger } from '@/lib/log';
 import { onPriorityChanged } from '@/lib/sla';
@@ -326,7 +326,7 @@ type LoadedRow = {
  * urgency reaches the ticket when the customer writes, and a wrong raise moves
  * a deadline where a missed one only leaves it.
  *
- * The categoriser's own test for "a customer wrote something", so the two
+ * The subcategoriser's own test for "a customer wrote something", so the two
  * questions are asked of the same messages; the bot channel through
  * `isReadOnlyChannel`, since nobody on the team works it and it is nearly all of
  * the volume. Machine mail is not the customer — the email ingest flags it and
@@ -344,7 +344,7 @@ type LoadedRow = {
  * about when it arrived.
  */
 function skipReason(row: LoadedRow): string | null {
-  if (!isCategorisableMessage(row.kind, row.direction)) return 'not an inbound reply';
+  if (!isSubcategorisableMessage(row.kind, row.direction)) return 'not an inbound reply';
   if (
     row.authorContactId &&
     row.requesterContactId &&

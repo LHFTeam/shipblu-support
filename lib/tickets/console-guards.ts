@@ -3,13 +3,13 @@ import { and, eq } from 'drizzle-orm';
 import { db } from '@/db/client';
 import {
   contacts,
-  conversationCategories,
+  conversationSubcategories,
   conversations,
-  ticketCategories,
+  ticketSubcategories,
   ticketStatuses,
 } from '@/db/schema';
 import type { SessionAgent } from '@/lib/auth/session';
-import { CAUSE_REQUIRED_AREAS } from '@/lib/categorise/taxonomy';
+import { CAUSE_REQUIRED_AREAS } from '@/lib/subcategorise/taxonomy';
 import type { ActionState } from '@/lib/http/action-state';
 import { isUuid } from '@/lib/http/uuid';
 import { canSeeChannel, consoleReplyReason, readOnlyReason } from '@/lib/tickets/channel-policy';
@@ -87,10 +87,10 @@ export function refuseIfNoConsoleReply(channel: string): ActionState | null {
 export function refresh(number: number) {
   revalidatePath(`/inbox/${number}`);
   revalidatePath('/inbox');
-  // The category review queue is a view onto these tickets' categories, so any
-  // ticket write can stale it. Here rather than in each action, for the reason
-  // channel-policy.ts gives about rules spread across call sites.
-  revalidatePath('/admin/categories/review');
+  // The subcategory review queue is a view onto these tickets' subcategories,
+  // so any ticket write can stale it. Here rather than in each action, for the
+  // reason channel-policy.ts gives about rules spread across call sites.
+  revalidatePath('/admin/subcategories/review');
 }
 
 /**
@@ -119,9 +119,9 @@ export async function refuseIfIncomplete(
 /**
  * Refuses to resolve a ticket that went wrong without saying why.
  *
- * The root cause is the dimension the business acts on — a category report says
- * what the queue is full of, and only this says what to go and fix — and it
- * cannot be detected, because the customer does not know it. Which means the
+ * The root cause is the dimension the business acts on — a subcategory report
+ * says what the queue is full of, and only this says what to go and fix — and
+ * it cannot be detected, because the customer does not know it. Which means the
  * only moment it can be captured is the one where somebody has just finished
  * looking into the ticket.
  *
@@ -135,26 +135,29 @@ export async function refuseIfIncomplete(
  * three-day auto-close would wedge tickets in a state no person was asked to
  * clear.
  *
- * The list of areas lives in `lib/categorise/taxonomy.ts` because the coverage
- * figure on the report has to measure the same population this gate demands —
- * two definitions of "owes a cause" is how a report comes to say 40% of tickets
- * are missing something that was never asked of most of them.
+ * The list of areas lives in `lib/subcategorise/taxonomy.ts` because the
+ * coverage figure on the report has to measure the same population this gate
+ * demands — two definitions of "owes a cause" is how a report comes to say 40%
+ * of tickets are missing something that was never asked of most of them.
  */
 export async function refuseIfNoRootCause(conversationId: string): Promise<ActionState | null> {
   const rows = await db
     .select({
       rootCauseId: conversations.rootCauseId,
-      area: ticketCategories.area,
+      area: ticketSubcategories.area,
     })
     .from(conversations)
     .leftJoin(
-      conversationCategories,
+      conversationSubcategories,
       and(
-        eq(conversationCategories.conversationId, conversations.id),
-        eq(conversationCategories.isPrimary, true),
+        eq(conversationSubcategories.conversationId, conversations.id),
+        eq(conversationSubcategories.isPrimary, true),
       ),
     )
-    .leftJoin(ticketCategories, eq(ticketCategories.id, conversationCategories.categoryId))
+    .leftJoin(
+      ticketSubcategories,
+      eq(ticketSubcategories.id, conversationSubcategories.subcategoryId),
+    )
     .where(eq(conversations.id, conversationId))
     .limit(1);
 

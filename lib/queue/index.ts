@@ -32,7 +32,7 @@ export type JobType =
   | 'backfill_shipment_links'
   | 'backfill_message_locations'
   | 'backfill_meta_profiles'
-  | 'backfill_categorise_ai'
+  | 'backfill_subcategorise_ai'
   | 'classify_priority'
   | 'normalise_kb_formatting'
   | 'restore_resolved_at'

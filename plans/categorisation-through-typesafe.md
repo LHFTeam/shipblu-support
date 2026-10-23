@@ -1,5 +1,10 @@
 # Categorisation through TypeSafe, in shadow
 
+> Since Stage 2.A of `plans/ticket-category-routing.md` (2026-10-23) this
+> taxonomy is called the subcategory, and its code lives in `lib/subcategorise/`
+> and `lib/subcategorise-ai/`; the text below keeps the names it was written
+> with.
+
 `lib/categorise/` files inbound tickets with compiled regex and phrase rules.
 This adds a second, entirely separate categoriser that asks TypeSafe's Jev the
 same question, records the answer in its own table beside what the rules said,
