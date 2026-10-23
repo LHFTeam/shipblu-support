@@ -190,6 +190,14 @@ worker/handlers/ one file per job type, registered in worker/handlers/index.ts
 proxy.ts         Next 16 middleware: host routing + the signed-out redirect
 ```
 
+**A rollback runbook in `db/runbooks/` lasts until the next migration.** It
+undoes a migration by renaming back and deleting that migration's row, and a
+later deploy applies the migration again only while it is the newest one
+applied. So its test reads `db/migrations/meta/_journal.json` and fails as soon
+as anything follows that migration, with a sentence saying what to do: the PR
+adding the new migration deletes the runbook and its test, and writes the way
+back from the new state into the stage's plan.
+
 Put logic in `lib/`, not in route files. A page or action authorises, calls into
 `lib/`, and revalidates. A page never imports `db/client`, and neither does a
 layout or a helper module beside it: a query there runs nowhere before

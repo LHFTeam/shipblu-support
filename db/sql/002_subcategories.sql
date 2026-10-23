@@ -119,7 +119,9 @@ BEGIN
   -- disagree, and every accountability report is drawn from the column.
   -- -------------------------------------------------------------------------
   IF NOT EXISTS (
-    SELECT 1 FROM pg_constraint WHERE conname = 'ticket_root_causes_key_shape'
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'ticket_root_causes_key_shape'
+      AND conrelid = 'public.ticket_root_causes'::regclass
   ) THEN
     ALTER TABLE ticket_root_causes
       ADD CONSTRAINT ticket_root_causes_key_shape
@@ -127,7 +129,9 @@ BEGIN
   END IF;
 
   IF NOT EXISTS (
-    SELECT 1 FROM pg_constraint WHERE conname = 'ticket_root_causes_owner_matches_key'
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'ticket_root_causes_owner_matches_key'
+      AND conrelid = 'public.ticket_root_causes'::regclass
   ) THEN
     ALTER TABLE ticket_root_causes
       ADD CONSTRAINT ticket_root_causes_owner_matches_key

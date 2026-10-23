@@ -32,9 +32,10 @@
 -- If the worker and crons were already on 2.B, deploy the previous commit to
 -- them too before resuming them. Not the other way round: run before this, the
 -- old 002_categories.sql looks for `ticket_categories` and fails the preDeploy.
--- Not after a preDeploy that failed between 0046 and db/sql either: this starts
--- from the names 002_subcategories.sql gives, so it raises and changes nothing,
--- and the way out is to deploy the same commit again.
+-- It also brings back a database whose preDeploy failed between 0046 and db/sql
+-- (the plan's "How it fails"), where 002_subcategories.sql never renamed the
+-- CHECKs and primary keys: those it leaves under the old names they still have.
+-- Deploying the same commit again is the other way out of that state.
 -- 2b-subcategory-rollback.db.test.ts runs this file and then 0046 and
 -- db/sql/002 again inside a transaction it rolls back, so the way back and the
 -- way forward are exercised on every CI run.
@@ -46,6 +47,7 @@
 DO $$
 DECLARE
   removed integer;
+  renamed record;
 BEGIN
   -- The tables are small and the worker is suspended, but web is serving: a
   -- lock this cannot get within 3 s is somebody else's open transaction, and
@@ -117,27 +119,43 @@ BEGIN
   ALTER INDEX ai_subcategory_runs_label_idx RENAME TO ai_category_runs_label_idx;
   ALTER INDEX ai_subcategory_runs_conversation_idx RENAME TO ai_category_runs_conversation_idx;
 
-  ALTER TABLE ticket_categories
-    RENAME CONSTRAINT ticket_subcategories_key_shape TO ticket_categories_key_shape;
-  ALTER TABLE ticket_categories
-    RENAME CONSTRAINT ticket_subcategories_area_matches_key TO ticket_categories_area_matches_key;
-  ALTER TABLE ticket_categories
-    RENAME CONSTRAINT ticket_subcategories_no_self_merge TO ticket_categories_no_self_merge;
-  ALTER TABLE ticket_categories
-    RENAME CONSTRAINT ticket_subcategories_pkey TO ticket_categories_pkey;
-  ALTER TABLE conversation_categories
-    RENAME CONSTRAINT conversation_subcategories_confidence_range
-    TO conversation_categories_confidence_range;
-  ALTER TABLE conversation_categories
-    RENAME CONSTRAINT conversation_subcategories_manual_is_certain
-    TO conversation_categories_manual_is_certain;
-  ALTER TABLE conversation_categories
-    RENAME CONSTRAINT conversation_subcategories_rejected_not_primary
-    TO conversation_categories_rejected_not_primary;
-  ALTER TABLE category_metrics_daily
-    RENAME CONSTRAINT subcategory_metrics_daily_pkey TO category_metrics_daily_pkey;
-  ALTER TABLE ai_category_runs
-    RENAME CONSTRAINT ai_subcategory_runs_pkey TO ai_category_runs_pkey;
+  -- The CHECKs and the primary keys Postgres named are renamed by
+  -- db/sql/002_subcategories.sql, which runs only after 0046 has committed. A
+  -- preDeploy that failed between the two leaves them under their old names
+  -- while everything above is new, so each is renamed back only where 002
+  -- renamed it, and a constraint under neither name raises like any other
+  -- missing name. The tables already have their old names again here.
+  FOR renamed IN
+    SELECT * FROM (VALUES
+      ('ticket_categories', 'ticket_subcategories_key_shape', 'ticket_categories_key_shape'),
+      ('ticket_categories', 'ticket_subcategories_area_matches_key', 'ticket_categories_area_matches_key'),
+      ('ticket_categories', 'ticket_subcategories_no_self_merge', 'ticket_categories_no_self_merge'),
+      ('ticket_categories', 'ticket_subcategories_pkey', 'ticket_categories_pkey'),
+      ('conversation_categories', 'conversation_subcategories_confidence_range', 'conversation_categories_confidence_range'),
+      ('conversation_categories', 'conversation_subcategories_manual_is_certain', 'conversation_categories_manual_is_certain'),
+      ('conversation_categories', 'conversation_subcategories_rejected_not_primary', 'conversation_categories_rejected_not_primary'),
+      ('category_metrics_daily', 'subcategory_metrics_daily_pkey', 'category_metrics_daily_pkey'),
+      ('ai_category_runs', 'ai_subcategory_runs_pkey', 'ai_category_runs_pkey')
+    ) AS r (relation, new_name, old_name)
+  LOOP
+    IF EXISTS (
+      SELECT 1 FROM pg_constraint
+      WHERE conname = renamed.new_name
+        AND conrelid = to_regclass('public.' || renamed.relation)
+    ) THEN
+      EXECUTE format(
+        'ALTER TABLE %I RENAME CONSTRAINT %I TO %I',
+        renamed.relation, renamed.new_name, renamed.old_name
+      );
+    ELSIF NOT EXISTS (
+      SELECT 1 FROM pg_constraint
+      WHERE conname = renamed.old_name
+        AND conrelid = to_regclass('public.' || renamed.relation)
+    ) THEN
+      RAISE EXCEPTION 'constraint % (or %) does not exist on %',
+        renamed.new_name, renamed.old_name, renamed.relation;
+    END IF;
+  END LOOP;
 
   -- 0046_subcategory_names, by the `when` its journal entry carries, which is
   -- what Drizzle stores as `created_at`. Exactly one row, or the database is not

@@ -693,12 +693,13 @@ on 2026-10-23 after 18:00 UTC.
   before it checks that the index exists. A write transaction open on one of
   those for more than 10 s fails the preDeploy **after** the rename. The log
   then shows `Applying 001_…` or `Applying 002_…` after the migrations ran, and
-  the old release is serving against renamed tables. Do not run the rollback
-  runbook in that state: it starts from the CHECK and `_pkey` names that 002
-  has not yet given, so it raises and changes nothing. Clear the lock and
-  deploy the same commit again. Drizzle skips 0046, and 002 is written for
-  exactly "tables renamed, constraints still old". Keep the worker and crons
-  suspended until it succeeds.
+  the old release is serving against renamed tables. There are two ways out.
+  Clear the lock and deploy the same commit again: Drizzle skips 0046, and 002
+  is written for exactly "tables renamed, constraints still old". Or roll back
+  by the runbook, which renames back only the CHECKs and `_pkey` names that 002
+  renamed, so it starts from this state as well as from a finished deploy; a
+  test builds the state and runs it. Keep the worker and crons suspended until
+  one of them succeeds.
 - **The raw SQL follows**, in `lib/reports/subcategory-queries.ts`,
   `lib/reports/subcategory-rollup.ts`, `lib/subcategorise/queries.ts`,
   `lib/subcategorise/seed.ts` and `lib/subcategorise-ai/report.ts`. Each
@@ -714,9 +715,13 @@ on 2026-10-23 after 18:00 UTC.
   by hand is exercised on every CI run. Drizzle applies a migration only when
   it is newer than the newest row, so deleting 0046's row brings it back only
   while nothing later has run. The runbook therefore refuses once a later
-  migration has been applied, and a second test holds it to that. So the PR
-  that adds a `0047` fails CI here, and has to decide what the way back is
-  then.
+  migration has been applied, and a second test holds it to that. A third runs
+  it from the half-applied state under "How it fails". The test also reads the
+  journal: the runbook's literal `when` for 0046 must match it, and once any
+  migration follows 0046 a case fails with a sentence saying what to do (delete
+  the runbook and its test in that PR, and write the way back from then), while
+  the cases that run the runbook are skipped rather than failing on its
+  exception.
 
 **Rehearsed locally, not on a Supabase branch.** The user chose this on
 2026-10-23, for two reasons. A Supabase branch replays only the migrations
