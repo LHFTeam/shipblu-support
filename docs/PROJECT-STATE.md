@@ -444,9 +444,9 @@ names an operator types are now `/admin/subcategories`,
 `/reports/subcategories`, `ticket.subcategorise`, `admin.subcategories`,
 `backfill_subcategorise_ai` and `SUBCATEGORISE_*`. Stored events keep
 `categorised` and `category_*` and are read beside the new `subcategorised` and
-`subcategory_*`. The tables keep the names this section gives them until Stage
-2.B of `plans/ticket-category-routing.md`, which frees "category" for the field
-Stage 3 adds.
+`subcategory_*`. The tables keep their `category` names until Stage 2.B of
+`plans/ticket-category-routing.md` (below), which frees "category" for the
+field Stage 3 adds.
 
 2026-10-23, in the code and not yet deployed: Stage 2.B renames the database to
 match. Migration `0046_subcategory_names` renames the four tables to

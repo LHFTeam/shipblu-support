@@ -16,17 +16,25 @@
 --   - the six CHECK constraints and the three primary keys Postgres named.
 --
 -- Then it deletes 0046's row from drizzle.__drizzle_migrations, so that a later
--- deploy of main applies 0046 again. Rows are untouched: a rename moves no data.
+-- deploy of main applies 0046 again. That holds only while 0046 is the newest
+-- migration applied, and it refuses otherwise. Rows are untouched: a rename
+-- moves no data.
 --
 -- One DO block, so it is one statement and one transaction however it is run:
 -- a name that is not there raises, and nothing is left half renamed. Run it on
 -- the session connection, never the transaction pooler, with the worker and
--- crons suspended (the plan's rollback, step 2):
+-- crons suspended (the plan's "Rolling back 2.B", step 2):
 --
 --   psql "$DATABASE_URL_SESSION" -v ON_ERROR_STOP=1 -f db/runbooks/2b-subcategory-rollback.sql
 --
 -- Then deploy the previous web commit by hand: its preDeploy replays the old
 -- db/sql/002_categories.sql, which finds its own names again and does nothing.
+-- If the worker and crons were already on 2.B, deploy the previous commit to
+-- them too before resuming them. Not the other way round: run before this, the
+-- old 002_categories.sql looks for `ticket_categories` and fails the preDeploy.
+-- Not after a preDeploy that failed between 0046 and db/sql either: this starts
+-- from the names 002_subcategories.sql gives, so it raises and changes nothing,
+-- and the way out is to deploy the same commit again.
 -- 2b-subcategory-rollback.db.test.ts runs this file and then 0046 and
 -- db/sql/002 again inside a transaction it rolls back, so the way back and the
 -- way forward are exercised on every CI run.
@@ -43,6 +51,15 @@ BEGIN
   -- lock this cannot get within 3 s is somebody else's open transaction, and
   -- failing names it faster than waiting does.
   PERFORM set_config('lock_timeout', '3s', true);
+
+  -- Deleting 0046's row makes Drizzle apply it again only while 0046 is the
+  -- newest migration applied: Drizzle compares each migration with the newest
+  -- row's `created_at`, not with the rows that are missing. Once a later
+  -- migration has run, this is no longer a way back, and it says so before it
+  -- renames anything.
+  IF EXISTS (SELECT 1 FROM drizzle.__drizzle_migrations WHERE created_at > 1792781241219) THEN
+    RAISE EXCEPTION 'a migration newer than 0046_subcategory_names has been applied, so deleting its row would not make the next deploy apply it again: this runbook is no longer the way back';
+  END IF;
 
   ALTER TYPE subcategory_audience RENAME TO category_audience;
   ALTER TYPE subcategory_review_state RENAME TO category_review_state;

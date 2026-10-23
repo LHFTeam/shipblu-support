@@ -641,12 +641,12 @@ on 2026-10-23 after 18:00 UTC.
   Their rows: 55, 823, 396 and 647.
 - **Migration `0046_subcategory_names`** is drizzle-kit's, committed as it
   wrote it. It was generated under a pseudo-terminal, since this environment
-  has none, with every one of the ten prompts answered from a list naming each
-  rename in advance; any other prompt would have killed the run before it wrote
-  anything. A second `generate` reports nothing to migrate. It renames the
-  types, tables and columns, drops and re-adds the seven foreign keys and the
-  composite primary key under new names, and drops and recreates the thirteen
-  indexes.
+  has none, with every one of the nine prompts (two types, four tables, three
+  columns) answered from a list naming each rename in advance; any other prompt
+  would have killed the run before it wrote anything. A second `generate`
+  reports nothing to migrate. It renames the types, tables and columns, drops
+  and re-adds the seven foreign keys and the composite primary key under new
+  names, and drops and recreates the thirteen indexes.
 - **Two foreign-key names are longer than the 63 bytes Postgres keeps**, so
   they are stored cut short:
   `conversation_subcategories_subcategory_id_ticket_subcategories_` and
@@ -656,27 +656,62 @@ on 2026-10-23 after 18:00 UTC.
 - **`db/sql/002_subcategories.sql`** renames the six CHECKs and the three
   `_pkey` names in a loop, each guarded on the constraint's name **and** its
   table through `to_regclass`, and then adds any CHECK still missing under its
-  new name. A fresh database takes the same path as production: every
-  migration runs before `db/sql`, so `0021` has created the tables under the
-  old names and `0046` has renamed them by then.
-- **Locks.** Re-adding the foreign keys takes SHARE ROW EXCLUSIVE on
-  `conversations`, `messages` and `agents` until the migration commits, which
-  blocks writes to them meanwhile. Validation reads only the 823 and 647 rows
-  that reference them. `db/migrate.ts` sets `lock_timeout` to 10 s, so a lock
-  it cannot get fails the preDeploy cleanly: nothing is applied and the old
-  release keeps serving. Locally, the whole migrate (`0046` and every
-  `db/sql` file) took 0.9 s on Postgres 17.11.
+  new name. For 2.B alone, a fresh database takes the same path as production:
+  every migration runs before `db/sql`, so `0021` has created the tables under
+  the old names and `0046` has renamed them by then.
+- **That order leaves a trap for Stages 3 and 4.** On a fresh database (CI,
+  `shipblu_test`, a staging that takes 2.B and Stage 3 in one deploy),
+  `ticket_categories_pkey`, `category_metrics_daily_pkey` and
+  `ai_category_runs_pkey` are still taken while every later migration runs,
+  because only `db/sql` renames them. A later table reusing one of those names
+  with an unnamed primary key is then created as `<table>_pkey1` there, but as
+  `<table>_pkey` in production. Moving the renames into a migration of their
+  own would close it, but that is a hand-written `--custom` migration, which
+  decision 2 rules out, so it is recorded instead. Stage 3's and Stage 4's own
+  sections say what they do about it.
+- **Locks.** Dropping the old foreign keys removes their triggers on
+  `conversations`, `messages` and `agents`, and Postgres takes ACCESS EXCLUSIVE
+  on each referenced table to do that. Re-adding them asks only SHARE ROW
+  EXCLUSIVE, but the stronger lock is held until 0046 commits. So reads of the
+  three tables block as well as writes, and every console request reads
+  `agents`. While the migration waits for one of these locks, every new query
+  on that table queues behind it, and a transaction that has only read the
+  table is enough to make it wait. Validation reads only the 823 and 647 rows
+  that reference them. Locally, the whole migrate (`0046` and every `db/sql`
+  file) took 0.9 s on Postgres 17.11.
+- **How it fails.** `db/migrate.ts` sets `lock_timeout` to 10 s. A lock 0046
+  cannot get fails the preDeploy cleanly: Drizzle's transaction rolls back,
+  nothing is applied, and the old release keeps serving. But `db/sql` runs only
+  after 0046 has committed, and 001's `CREATE INDEX IF NOT EXISTS` takes SHARE
+  on eight tables (`conversations`, `messages`, `contacts`, `companies`,
+  `kb_articles`, `shipments`, `shipping_accounts`, `side_conversation_messages`)
+  before it checks that the index exists. A write transaction open on one of
+  those for more than 10 s fails the preDeploy **after** the rename. The log
+  then shows `Applying 001_…` or `Applying 002_…` after the migrations ran, and
+  the old release is serving against renamed tables. Do not run the rollback
+  runbook in that state: it starts from the CHECK and `_pkey` names that 002
+  has not yet given, so it raises and changes nothing. Clear the lock and
+  deploy the same commit again. Drizzle skips 0046, and 002 is written for
+  exactly "tables renamed, constraints still old". Keep the worker and crons
+  suspended until it succeeds.
 - **The raw SQL follows**, in `lib/reports/subcategory-queries.ts`,
   `lib/reports/subcategory-rollup.ts`, `lib/subcategorise/queries.ts`,
   `lib/subcategorise/seed.ts` and `lib/subcategorise-ai/report.ts`. Each
-  function in them now has a database test that executes it on fixture rows,
-  so a missed name fails CI.
+  function in them that names a renamed table now has a database test that
+  executes it on fixture rows, so a missed name fails CI. `rootCauseOptions`,
+  which reads only `ticket_root_causes`, has none. The tier passes under both
+  `C.UTF-8` and `en_US.UTF-8`, the collation CI and production sort with.
 - **The rollback is `db/runbooks/2b-subcategory-rollback.sql`**: one `DO`
   block, so a name that is not there leaves nothing half renamed. Its test runs
   it and then `0046` and `002` again inside a transaction it rolls back. It
   asserts that the way back produces production's catalog exactly, and that
   the way forward restores every new name. That way, the runbook a person runs
-  by hand is exercised on every CI run.
+  by hand is exercised on every CI run. Drizzle applies a migration only when
+  it is newer than the newest row, so deleting 0046's row brings it back only
+  while nothing later has run. The runbook therefore refuses once a later
+  migration has been applied, and a second test holds it to that. So the PR
+  that adds a `0047` fails CI here, and has to decide what the way back is
+  then.
 
 **Rehearsed locally, not on a Supabase branch.** The user chose this on
 2026-10-23, for two reasons. A Supabase branch replays only the migrations
@@ -685,8 +720,9 @@ nearly empty. And it is billed while it exists. The rehearsal ran on a local
 Postgres 17.11:
 
 1. 2.A's code migrated an empty database. Its 39 names for the four tables
-   (constraints, indexes, the trigger and the types) are identical to
-   production's.
+   (the constraints, the indexes, the three renamed columns and the two types,
+   as listed in `PRODUCTION_BEFORE` in the runbook's test) are identical to
+   production's, and so is its one trigger.
 2. Rows were written in every table through 2.A's schema.
 3. This branch's migrate took 0.9 s. Every name was new and none old, every
    row survived, and every constraint was validated. `rollup_metrics` and
@@ -707,22 +743,48 @@ maintenance sequence below closes.
 1. **Order of merges.** #400 merges into `dev` first. 2.B's PR merges only
    after the release carrying 1.3, #396 and 2.A is deployed to all six
    services, so that 2.B's maintenance window ships alone.
-2. **Before the deploy.** Read `pg_stat_activity` for transactions open on
-   `conversations`, `messages`, `agents` or the four tables
-   (`docs/PROJECT-STATE.md` §5.5). Any one of them makes the migration fail at
-   its lock timeout. Note the time web's preDeploy starts.
+2. **Before the deploy.** List what holds a lock on the tables the deploy
+   locks: the seven 0046 does and the six more 001 does. Do not use the query
+   in `docs/PROJECT-STATE.md` §5.5: it lists only transactions older than five
+   minutes, which `transaction_timeout` reaps, so it reads clear when this
+   would not.
+
+   ```sql
+   select a.pid, l.relation::regclass as relation, l.mode, a.state,
+          now() - a.xact_start as age, left(a.query, 80) as query
+   from pg_locks l
+   join pg_stat_activity a using (pid)
+   where l.relation in (
+       'conversations'::regclass, 'messages'::regclass, 'agents'::regclass,
+       'ticket_categories'::regclass, 'conversation_categories'::regclass,
+       'category_metrics_daily'::regclass, 'ai_category_runs'::regclass,
+       'contacts'::regclass, 'companies'::regclass, 'kb_articles'::regclass,
+       'shipments'::regclass, 'shipping_accounts'::regclass,
+       'side_conversation_messages'::regclass)
+     and a.pid <> pg_backend_pid()
+   order by age desc;
+   ```
+
+   Nothing on it should be more than a few seconds old. It is a reading, not a
+   reservation. Note the time web's preDeploy starts.
+
 3. **During it**, the stage section's steps 2–6 apply: suspend the worker and
    crons, deploy web, load the pages, then deploy the worker and crons and
-   resume them.
+   resume them. If the preDeploy fails, read "How it fails" above before doing
+   anything else.
 4. **Step 7's list.** These are the inbound messages ingested on web between
-   the migration and cutover:
+   the migration and cutover. Web is every path that leaves
+   `channel_message_id` null: the widget, the portal (including a portal reply
+   on a ticket of any channel) and forms. The worker's email, WhatsApp and
+   Meta ingest always sets it, and the worker is suspended for the window.
 
    ```sql
    select c.number, c.channel, m.id as message_id, m.created_at
    from messages m
    join conversations c on c.id = m.conversation_id
    where m.direction = 'inbound' and m.kind = 'reply'
-     and (c.channel in ('webchat', 'portal') or c.form_id is not null)
+     and (c.channel in ('webchat', 'portal') or c.form_id is not null
+          or m.channel_message_id is null)
      and m.created_at between '<preDeploy start>' and '<web live>'
    order by m.created_at;
    ```
@@ -744,9 +806,11 @@ maintenance sequence below closes.
    It should return no rows. `subcategorised` events also continue on new
    messages.
 
-**Rolling back 2.B** is the stage section's runbook with the file named:
+**Rolling back 2.B** is the stage section's runbook, with the file named and
+the services it leaves out put back:
 
-1. Keep the worker and crons suspended.
+1. Suspend the worker and the four crons. If the deploy's step 3 already
+   resumed them on 2.B, suspend them again.
 2. On the session connection, run:
 
    ```sh
@@ -754,7 +818,29 @@ maintenance sequence below closes.
      -f db/runbooks/2b-subcategory-rollback.sql
    ```
 
-3. Deploy the previous web commit by hand.
+   It refuses once any migration newer than 0046 has been applied. Note when it
+   committed.
+
+3. Deploy the previous web commit by hand, and note when it goes live. Its
+   preDeploy replays the old `002_categories.sql`, which finds its own names and
+   does nothing. The order cannot be swapped: run before the runbook, the old
+   file reaches `ALTER TABLE ticket_categories` and fails with 42P01. So between
+   the two times, web serves 2.B's code against the old names for the previous
+   commit's whole build, preDeploy and start, minutes rather than seconds.
+   Meanwhile every ticket page fails, because `subcategoriesForConversation`
+   is in its `allLimited` batch, and every inbound web message loses its
+   subcategorisation.
+4. If the worker and crons ran 2.B, deploy the previous commit to the worker,
+   `shipblu-sla-sweep`, `shipblu-time-automations`,
+   `shipblu-whatsapp-template-sync` and `shipblu-nightly`. They have no
+   preDeploy and build their own copy. Then resume them all.
+5. List the messages step 3's window cost with the query in step 4 of
+   "Deploying 2.B", bounded by `'<runbook committed>'` and
+   `'<previous web live>'`, and subcategorise each one by hand as that step
+   says.
+6. Do not deploy `main` to any service until the roll-forward is intended.
+   With 0046's row gone, web's preDeploy applies it again, and the worker and
+   crons would run 2.B's code against the old names.
 
 It stops being a way back once Stage 3 has created the new
 `ticket_categories`, because the names collide. That stage deletes the file.
@@ -2288,8 +2374,9 @@ readers are harmless.
 
 **2.B — The database (maintenance sequence).**
 
-- **Schema.** The four table names, two column names, two enum type names, and
-  every explicit index string on those tables are renamed in `db/schema`:
+- **Schema.** The four table names, two column names (three, as built), two
+  enum type names, and every explicit index string on those tables are renamed
+  in `db/schema`:
   - `ticket_categories` → `ticket_subcategories`
   - `conversation_categories` → `conversation_subcategories`, with its columns
     `category_id` → `subcategory_id` and `category_key` → `subcategory_key`
@@ -2379,6 +2466,12 @@ cannot parse.
     `OLD.category_id IS DISTINCT FROM NEW.category_id` added to the
     `queue_relevant` list in `001_extensions_and_triggers.sql:370-385`. Without
     the second, open inboxes do not redraw when only the category changes.
+  - **The primary key's name.** On a fresh database `ticket_categories_pkey` is
+    still taken when this migration runs, because only `db/sql/002` renames the
+    old one ([2.B, as built](#2b-as-built)), so an unnamed key is created as
+    `ticket_categories_pkey1` there and as `ticket_categories_pkey` in
+    production. Nothing may name it until a migration of its own renames the
+    old three ahead of this one; deciding that is this stage's.
 - **Seeding.** `lib/categories/registry.ts` holds the starter set: four rows
   with English and Arabic labels and descriptions written for Jev. Being in
   code means the wording goes through review.
@@ -2482,7 +2575,9 @@ enqueued, so no job type is ever unknown.
       each `on_update` **and `time_based`** rule keyed on `category.id` would
       match. The time-based sweep re-evaluates every live ticket every 15
       minutes, so such a rule would act on the whole backlog within one run.
-- **Runs table.** `ai_category_runs`, whose name is free after the gate.
+- **Runs table.** `ai_category_runs`, whose name is free after the gate. Its
+  primary key meets the same fresh-database trap as Stage 3's
+  (`ai_category_runs_pkey1`); see [2.B, as built](#2b-as-built).
   - The unique index is on (`run_label`, `message_id`), with the
     upsert-over-`failed` discipline applying within a label.
   - Settling and ownership read only the `live` label.

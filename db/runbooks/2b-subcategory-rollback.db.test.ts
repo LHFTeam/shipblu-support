@@ -175,6 +175,30 @@ describe('the Stage 2.B rollback runbook', () => {
     // A rename moves no data: the same rows before and after the round trip.
     expect(seen.rowsAfter).toEqual(seen.rowsBefore);
   });
+
+  // Drizzle applies a migration only when it is newer than the newest row, so
+  // once anything after 0046 has run, deleting 0046's row would not bring it
+  // back. The runbook refuses before it renames anything, which is also what
+  // makes the PR adding a 0047 fail here and decide what the way back is then.
+  it('refuses once a migration newer than 0046 has been applied', async () => {
+    const runbook = await readFile(path.join(here, '2b-subcategory-rollback.sql'), 'utf8');
+    let refusal: unknown;
+    await client
+      .begin(async (tx) => {
+        await tx`
+          insert into drizzle.__drizzle_migrations (hash, created_at)
+          values ('later-migration', 1792781241220)`;
+        await tx.unsafe(runbook).catch((error: unknown) => {
+          refusal = error;
+        });
+        throw new RolledBack();
+      })
+      .catch((error: unknown) => {
+        if (!(error instanceof RolledBack)) throw error;
+      });
+
+    expect(String(refusal)).toContain('a migration newer than 0046_subcategory_names');
+  });
 });
 
 /** Every name the stage moves, for the given tables and types, sorted. */

@@ -117,7 +117,11 @@ describe('rolledUpRange', () => {
  * either edge would be off by a hundred.
  */
 async function subcategoryWeek() {
-  await subcategory('2026-09-19', { subcategoryKey: 'delivery.late', ticketsAny: 100 });
+  await subcategory('2026-09-19', {
+    subcategoryKey: 'delivery.late',
+    ticketsPrimary: 100,
+    ticketsAny: 100,
+  });
   await subcategory('2026-09-20', {
     subcategoryKey: 'delivery.late',
     ticketsPrimary: 3,
@@ -133,7 +137,11 @@ async function subcategoryWeek() {
     ticketsAny: 2,
     assignedSuggested: 2,
   });
-  await subcategory('2026-09-27', { subcategoryKey: 'delivery.late', ticketsAny: 100 });
+  await subcategory('2026-09-27', {
+    subcategoryKey: 'delivery.late',
+    ticketsPrimary: 100,
+    ticketsAny: 100,
+  });
 
   await subcategory('2026-09-22', {
     subcategoryKey: 'payment.refund',
