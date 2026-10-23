@@ -136,7 +136,10 @@ Every production write needs the user's go-ahead for that step, and the
    gate reads the frozen copies too, the post-deploy check reads what is
    stored, the 1.2 rollback deactivates one more kind of rule, and the
    external-id half stays, held by eight database cases in the shape the 1.2
-   rollback leaves.
+   rollback leaves. A review of those fixes then made the test helper unable to
+   truncate a database it refused, had `withCleanDatabase()` replay `008` before
+   every test, bounded the rollback's DROP at 3 s too, and named which cases go
+   with step 2's revert.
 2. **Merge `dev` into `main` only once 1.3's gate holds.** The gate is a
    read-only query. Read it on the day of the merge and quote it in the PR.
    The gate guards the merge rather than the deploy, because whoever next
@@ -241,10 +244,10 @@ as instructions. The reasons are given so that any of them can be argued with.
 
   It also inserts each accepted shape and expects it to succeed.
 
-  Locally, a database migrated before the branch has no CHECK. Since #395's
-  second review `withCleanDatabase()` replays `008` before every test, so the
-  suite adds it itself; migrating `shipblu_test` again is still the way to
-  bring the rest of `db/sql` up to date.
+  Locally, a database migrated before the branch has no CHECK. Since #395
+  (79fac1f) `withCleanDatabase()` replays `008` before every test, so the suite
+  adds it itself; migrating `shipblu_test` again is still the way to bring the
+  rest of `db/sql` up to date.
 
   As built: the seven fixtures were rewritten, and the one case that existed
   only for a pre-1.2 row (ingest-meta's "a reply on a thread filed before
@@ -1896,8 +1899,12 @@ readers are harmless.
    `split_comment_channels`, keep the job deleted: step 3 is an `UPDATE`, not
    the job. Where it meets the rollback-state cases #395 added, the ones that
    hold code #391/#392 wrote go with that code: send-reply's and locale's, and
-   `lib/auto-response/index.db.test.ts`, which #391 created. The rest hold 1.1's
-   readers, which stay. Never deploy an old commit such as `1f89219` instead: `main` also
+   `lib/auto-response/index.db.test.ts`, which #391 created. Ingest-meta's two
+   build their thread through 1.2's ingest, so under 1.1's it is filed on the
+   platform already and `moveCommentsBack()` moves nothing: drop that one
+   expectation from each and keep the rest, which is exactly what 1.1's ingest
+   must still get right. Send-csat's, meta-feedback's and the inbox's hold 1.1's
+   readers and stay as they are. Never deploy an old commit such as `1f89219` instead: `main` also
    carries other work since then, #390 among it. First
    deactivate every `auto_responses` row naming a comment channel: 1.1 still
    matches one, without `answersRequester`, so a passer-by's comment would earn

@@ -1,5 +1,4 @@
 import { readFile } from 'node:fs/promises';
-import path from 'node:path';
 import { sql } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach } from 'vitest';
 import { seedBaseline } from '@/db/baseline';
@@ -59,7 +58,10 @@ export function withCleanDatabase(): void {
  * the automation engine's refusal, the out-of-hours sender's requester check
  * and `requesterLocale`'s comment narrowing — so the rollback's step 2 reverts
  * them, and their cases with them; until then they hold the state in which the
- * CHECK is gone and the comments moved back with 1.2 still deployed.
+ * CHECK is gone and the comments moved back with 1.2 still deployed. The Meta
+ * ingest cases build their thread through 1.2's ingest itself, so under step 2
+ * the thread is already on its platform and has nothing to move; the plan's
+ * step 2 says what changes in them.
  *
  * After the block it empties the tables and replays `008`, emptying first
  * because the CHECK is added VALID and the block's last test leaves a row it
@@ -112,12 +114,20 @@ let commentCheckDropped = false;
 
 let commentChannelCheckSql: Promise<string> | null = null;
 
-/** `db/sql/008_comment_channel_check.sql`, read once: guarded, so replaying it is idempotent. */
+/**
+ * `db/sql/008_comment_channel_check.sql`, read once: guarded, so replaying it is
+ * idempotent. Found from this module rather than the working directory, since
+ * every test reads it and vitest runs from wherever the shell is; and a failed
+ * read is not kept, so one bad read does not fail every later test with it.
+ */
 function commentChannelCheck(): Promise<string> {
   commentChannelCheckSql ??= readFile(
-    path.join(process.cwd(), 'db/sql/008_comment_channel_check.sql'),
+    new URL('../../db/sql/008_comment_channel_check.sql', import.meta.url),
     'utf8',
-  );
+  ).catch((error: unknown) => {
+    commentChannelCheckSql = null;
+    throw error;
+  });
   return commentChannelCheckSql;
 }
 
