@@ -78,7 +78,11 @@ Each was put as a question with the alternatives below, and answered.
    Reactivating them undoes it. Reason: it can be undone, it never blocks an
    urgent offboarding, and it is how deactivation treats every other reference
    to an agent. `/admin/channels` shows a warning, which is what prompts the
-   handover.
+   handover. Asked in review whether those tickets' breaches should show on
+   the live board under the colleague working them instead, the team kept them
+   with the owner: the business process is to hand a departed owner's number
+   to a new owner straight away, so the gap is short, and one person stays
+   accountable on the board and in the report alike.
 4. **Breaches count against the owner from the day ownership is set.** There
    is no historical rebuild. Reason: the requirement starts accountability
    "once they do" own the number. With the policies misconfigured today,
@@ -252,9 +256,11 @@ every twenty seconds.
 
 What somebody is carrying stays on the assignee: Open, Awaiting reply, the
 oldest wait, and the capacity check. Breached can therefore exceed Open, and the
-copy beside it says so. The CSV column `resolved_while_assigned` keeps its name,
-because an export somebody reads by header must not change under them. The hint
-on `/reports/agents` says what it counts now.
+copy beside it says so. The agents CSV's `resolved_while_assigned` column is
+renamed `resolved_accountable`: it now counts resolutions accountable to the
+agent as well as those they held, and its old name would have been read in the
+old sense. The team confirmed nothing reads the export by that header yet. The
+hint on `/reports/agents` says what it counts.
 
 ## Who sees what
 
