@@ -1,3 +1,4 @@
+import { DateTime } from 'luxon';
 import { describe, expect, it } from 'vitest';
 import { planDays } from './rollup-metrics';
 
@@ -107,6 +108,15 @@ describe('planDays', () => {
       expect(planDays({ to: '2026-04-26' }, april, zone).days).toEqual(threeDays);
     });
 
+    it('counts that day among the ones the cap skips', () => {
+      // 2025-04-25 sprang forward at midnight too. From it through 2026-10-22 is
+      // 546 days: the cap keeps the newest 400, and the warning must name the
+      // other 146 rather than 145, or the operator re-runs and misses a day.
+      const plan = planDays({ from: '2025-04-25' }, april, zone);
+      expect(plan.days).toHaveLength(400);
+      expect(plan.skipped).toBe(146);
+    });
+
     it('counts the day the clocks go back as one day too', () => {
       const autumn = { today: '2026-11-05', earliest: null };
       expect(planDays({ from: '2026-10-29', to: '2026-10-30' }, autumn, zone).days).toEqual([
@@ -114,5 +124,22 @@ describe('planDays', () => {
         '2026-10-29',
       ]);
     });
+  });
+
+  it("gives every two-day range in a decade of Cairo's calendar both of its days", () => {
+    // Every changeover Egypt has had or has scheduled, without naming one, so a
+    // change to its rules moves the days under test rather than defeating it.
+    const short: string[] = [];
+    for (
+      let day = DateTime.fromISO('2020-01-01', { zone: 'utc' });
+      day.year < 2031;
+      day = day.plus({ days: 1 })
+    ) {
+      const from = day.toISODate()!;
+      const to = day.plus({ days: 1 }).toISODate()!;
+      const plan = planDays({ from, to }, { today: '2031-01-02', earliest: null }, zone);
+      if (plan.days.join() !== [to, from].join()) short.push(from);
+    }
+    expect(short).toEqual([]);
   });
 });
