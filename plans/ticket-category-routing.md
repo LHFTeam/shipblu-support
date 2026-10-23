@@ -81,7 +81,8 @@ update.
 | 1.2   | Merged: #391 (`31f7379`) and follow-up #392 (`7b7d276`), then `dev` → `main` in #393 (`634a28d`), which also carried another session's #390 | **Done.** All six services live on `634a28d` by 17:38 UTC on 2026-10-21, worker first. The user ran the backfill and the rollup from a shell, leaving no `jobs` row. Every check below reads clean |
 | 1.3   | Merged: #395 (`58c5ed9`), then `dev` → `main` in #397 (`447d8be`), which also carried #394, #396 and #398. As built below                   | **Done.** All six services live on `447d8be` by 18:36 UTC, web first. Its checks read clean (below), though no comment has arrived since                                                           |
 | 2.A   | Merged into `dev`: #400 (`a558c5b`), no migration. As built below                                                                           | Not deployed. Ships with the next `dev` → `main` merge, after its "Before" step (Deploying 2.A)                                                                                                    |
-| 2.B–6 | Not started                                                                                                                                 | —                                                                                                                                                                                                  |
+| 2.B   | In review: #403 (`claude/stage-2b-subcategory-sql`): migration `0046`, `db/sql/002`, a runbook, and its own "as built" section              | Not deployed. Merges only after 2.A's release is on all six services (1.3 and #396 already are), then deploys alone in a maintenance window                                                        |
+| 3–6   | Not started                                                                                                                                 | —                                                                                                                                                                                                  |
 
 **1.3's deploy, read on Render and production on 2026-10-23.**
 
@@ -209,16 +210,19 @@ Every production write needs the user's go-ahead for that step, and the
    UTC. 2.A has no migration and changes `db/sql` only in `002`'s comments.
    Nor has anything else on `dev` since #397 a migration or a `db/sql` change:
    #399 (`0d1289d`, a repo rule), #402 (`48896ce`, the review page's date),
-   #401 (`a3fb23d`, the stored token's expiry) and #408 (these docs). Rule 7
-   still holds, because the merge ships all of `dev`: read
-   `git log origin/main..origin/dev` on the day and every migration in it.
+   #401 (`a3fb23d`, the stored token's expiry), #408 (these docs) and #404
+   (`558d285`, the rollups' day boundaries). Rule 7 still holds, because the
+   merge ships all of `dev`: read `git log origin/main..origin/dev` on the day
+   and every migration in it.
 3. **Deploy 2.A**: web, then the worker, then the crons. Before it, run 2.A's
    "Before" step under [Deploying 2.A](#2a-as-built): any `CATEGORISE_*` value
    copied to its new name, the overrides and the old job re-read. After it, run
    2.A's handbook and verify steps.
-4. **Stage 2.B**, the SQL rename, follows once 2.A is deployed to all six
-   services. It needs the maintenance sequence in its stage section, and its
-   migration lands on its own (deploy rule 2).
+4. **Stage 2.B**, the SQL rename, is built as #403 and in review. It merges
+   into `dev` only once 2.A is deployed to all six services, and then deploys
+   alone in a maintenance window by the steps in that PR's copy of this plan.
+   It rolls back by the runbook it adds, which stops being a way back once any
+   later migration has run.
 5. **Before Stage 5**, a person does 0.2's reorder and 0.6's staffing, and the
    support lead answers the questions still open (below).
 
