@@ -27,21 +27,27 @@
 --
 --   psql "$DATABASE_URL_SESSION" -v ON_ERROR_STOP=1 -f db/runbooks/2b-subcategory-rollback.sql
 --
--- Then deploy the previous web commit by hand: its preDeploy replays the old
--- db/sql/002_categories.sql, which finds its own names again and does nothing.
--- If the worker and crons were already on 2.B, deploy the previous commit to
--- them too before resuming them. Not the other way round: run before this, the
--- old 002_categories.sql looks for `ticket_categories` and fails the preDeploy.
--- It also brings back a database whose preDeploy failed between 0046 and db/sql
--- (the plan's "How it fails"), where 002_subcategories.sql never renamed the
--- CHECKs and primary keys: those it leaves under the old names they still have.
+-- After a finished deploy, then deploy the previous web commit by hand: its
+-- preDeploy replays the old db/sql/002_categories.sql, which finds its own
+-- names again and does nothing. If the worker and crons were already on 2.B,
+-- deploy the previous commit to them too before resuming them. Not the other
+-- way round: run before this, the old 002_categories.sql looks for
+-- `ticket_categories` and fails the preDeploy.
+--
+-- It also brings back a database whose preDeploy failed between 0046 and
+-- db/sql (the plan's "How it fails"), where 002_subcategories.sql never renamed
+-- the CHECKs and primary keys: those it leaves under the old names they still
+-- have. There it is the whole rollback. Render never promoted the failed
+-- deploy, so web is still on the previous commit, and the worker and crons were
+-- never deployed; the previous release works again once this commits.
 -- Deploying the same commit again is the other way out of that state.
 -- 2b-subcategory-rollback.db.test.ts runs this file and then 0046 and
 -- db/sql/002 again inside a transaction it rolls back, so the way back and the
 -- way forward are exercised on every CI run.
 --
--- It stops being a way back once Stage 3 has created the new
--- `ticket_categories`, because the names collide. That stage deletes it.
+-- It stops being a way back once any migration after 0046 has been applied,
+-- Stage 3's new `ticket_categories` among them, and the PR that adds that
+-- migration deletes it and its test, which then fails and says so.
 -- ===========================================================================
 
 DO $$

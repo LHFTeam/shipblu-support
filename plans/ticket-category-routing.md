@@ -670,10 +670,17 @@ on 2026-10-23 after 18:00 UTC.
   `ai_category_runs_pkey` are still taken while every later migration runs,
   because only `db/sql` renames them. A later table reusing one of those names
   with an unnamed primary key is then created as `<table>_pkey1` there, but as
-  `<table>_pkey` in production. Moving the renames into a migration of their
-  own would close it, but that is a hand-written `--custom` migration, which
-  decision 2 rules out, so it is recorded instead. Stage 3's and Stage 4's own
-  sections say what they do about it.
+  `<table>_pkey` in production. Moving the three renames into a migration of
+  their own would close it. Decision 2's objection to `--custom`, that it
+  keeps the previous snapshot, does not reach this one: placed after 0046 it
+  copies 0046's snapshot, which already describes the schema, and CI's drift
+  step passes (tried in a scratch copy on 2026-10-23; the three renames took
+  about 1 ms on the three small tables). What it costs is a hand-written
+  migration, against the generated-only convention, and inside 2.B a runbook
+  that would have to remove two rows. So it is recorded here rather than done.
+  The cheapest place is the head of Stage 3's PR, guarded, where the runbook is
+  deleted anyway; Stage 3's and Stage 4's own sections say what they do about
+  it.
 - **Locks.** Dropping the old foreign keys removes their triggers on
   `conversations`, `messages` and `agents`, and Postgres takes ACCESS EXCLUSIVE
   on each referenced table to do that. Re-adding them asks only SHARE ROW
@@ -698,7 +705,10 @@ on 2026-10-23 after 18:00 UTC.
   is written for exactly "tables renamed, constraints still old". Or roll back
   by the runbook, which renames back only the CHECKs and `_pkey` names that 002
   renamed, so it starts from this state as well as from a finished deploy; a
-  test builds the state and runs it. Keep the worker and crons suspended until
+  test builds the state and runs it. From this state the runbook is the whole
+  rollback: Render never promoted the failed deploy, so web is still on the
+  previous commit, and the worker and crons were never deployed ("Rolling back
+  2.B" says which steps that leaves). Keep the worker and crons suspended until
   one of them succeeds.
 - **The raw SQL follows**, in `lib/reports/subcategory-queries.ts`,
   `lib/reports/subcategory-rollup.ts`, `lib/subcategorise/queries.ts`,
@@ -853,8 +863,16 @@ the services it leaves out put back:
    With 0046's row gone, web's preDeploy applies it again, and the worker and
    crons would run 2.B's code against the old names.
 
-It stops being a way back once Stage 3 has created the new
-`ticket_categories`, because the names collide. That stage deletes the file.
+**From a preDeploy that failed between 0046 and `db/sql`** ("How it fails"),
+only steps 1, 2, 5 and 6 apply. Web never left the previous commit, because
+Render does not promote a failed deploy, and the worker and crons were never
+deployed, so steps 3 and 4 have nothing to do: the previous release works again
+once the runbook commits. Step 5's window then runs from
+`'<preDeploy started>'`, before 0046 committed, to `'<runbook committed>'`.
+
+It stops being a way back once any migration after 0046 has been applied,
+Stage 3's new `ticket_categories` among them. The PR that adds that migration
+deletes the file and its test; the test fails and says so until it does.
 
 ### Working on this repo without the outgoing session's context
 
@@ -1164,8 +1182,11 @@ it:
   0**. CI's drift step (`.github/workflows/ci.yml:135-144`) would therefore
   pass a schema rename with no migration. Stage 0.1 makes that step fail on
   the message.
-- **The `--custom` flag is not used.** It saves the _old_ snapshot, so every
-  later generate would prompt again.
+- **The `--custom` flag is not used for the rename.** It saves the _old_
+  snapshot, so every later generate would prompt again. A `--custom` migration
+  that changes nothing the snapshot records, such as the implicit `_pkey`
+  names, does not have that problem; [2.B, as built](#2b-as-built) says where
+  that matters.
 
 ### 3. The new category is a registry row and a foreign key, like root causes
 
@@ -2407,7 +2428,8 @@ readers are harmless.
   - on production it renames the six CHECK constraints when the old name
     exists on that table and the new one does not;
   - on a fresh database it creates them under the new names;
-  - it renames the three implicit `_pkey` indexes, guarded on `indrelid`.
+  - it renames the three implicit `_pkey` constraints, and their indexes with
+    them, guarded on `conrelid` as built.
 
   A guard on the name alone would one day find Stage 3's constraint on the new
   `ticket_categories` and fail every replay.
@@ -2455,8 +2477,10 @@ readers are harmless.
      `002_categories.sql`, which now finds its old names again.
   5. Do not deploy `main` until the roll-forward is intended.
 
-  This exact sequence, including the later roll-forward, is rehearsed on the
-  Supabase branch before 2.B merges.
+  This exact sequence, including the later roll-forward, is rehearsed before
+  2.B merges. As built, it was rehearsed locally against production's names,
+  as the user chose on 2026-10-23, and [2.B, as built](#2b-as-built) has the
+  runbook and the steps that superseded this list.
 
 **Gate:** Stage 3 does not start until 2.B is deployed to all six services and
 verified. After that, nothing running can read `ticket_categories` expecting the
@@ -2482,7 +2506,11 @@ cannot parse.
     old one ([2.B, as built](#2b-as-built)), so an unnamed key is created as
     `ticket_categories_pkey1` there and as `ticket_categories_pkey` in
     production. Nothing may name it until a migration of its own renames the
-    old three ahead of this one; deciding that is this stage's.
+    old three ahead of this one; deciding that is this stage's. The cheapest
+    is a guarded `--custom` migration at the head of this stage's PR, renaming
+    each old `_pkey` only where it still exists: about 1 ms, and it passes the
+    drift step because it changes nothing the snapshot records. The fallback is
+    an explicit primary-key name here and in Stage 4.
 - **Seeding.** `lib/categories/registry.ts` holds the starter set: four rows
   with English and Arabic labels and descriptions written for Jev. Being in
   code means the wording goes through review.

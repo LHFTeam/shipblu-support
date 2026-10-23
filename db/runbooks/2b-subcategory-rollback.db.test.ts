@@ -33,8 +33,9 @@ const databaseUrl = process.env.TEST_DATABASE_URL;
  * 0046 as the journal records it. Drizzle stores an entry's `when` as the
  * row's `created_at`, and the runbook names 0046 by that number because it is
  * run by hand and can read nothing. So a 0046 generated again, whose `when`
- * moves, is caught here as a stale literal rather than as the runbook calling
- * 0046 itself "a migration newer than 0046".
+ * moves, fails here as a stale literal, and the cases that run the runbook are
+ * skipped rather than failing on its refusal of 0046's own row as "a migration
+ * newer than 0046".
  */
 const journal = JSON.parse(
   readFileSync(path.join(root, 'db/migrations/meta/_journal.json'), 'utf8'),
@@ -42,16 +43,24 @@ const journal = JSON.parse(
 const migration0046 = journal.entries.find((entry) => entry.tag === '0046_subcategory_names');
 if (!migration0046) throw new Error('no 0046_subcategory_names entry in the migration journal');
 const when0046 = migration0046.when;
+const runbookNamesWhen0046 = ((text: string) =>
+  text.includes(`created_at > ${when0046}`) && text.includes(`created_at = ${when0046}`))(
+  readFileSync(path.join(here, '2b-subcategory-rollback.sql'), 'utf8'),
+);
 
 /**
  * Every migration after 0046. Once there is one, CI's database has it applied
  * and the runbook refuses, as it must: deleting 0046's row would no longer make
  * a deploy apply it again. The test below then says so in a sentence, and the
- * two that run the runbook are skipped rather than failing on its exception.
+ * cases that run the runbook to completion are skipped rather than failing on
+ * its exception. The refusal case still runs, and still passes.
  */
 const laterMigrations = journal.entries
   .filter((entry) => entry.idx > migration0046.idx)
   .map((entry) => entry.tag);
+
+/** Why the cases that run the runbook to completion cannot, if they cannot. */
+const cannotRunRunbook = laterMigrations.length > 0 || !runbookNamesWhen0046;
 
 /** Production, read 2026-10-23 before Stage 2.B, by table. */
 const PRODUCTION_BEFORE: Snapshot = {
@@ -129,11 +138,13 @@ class RolledBack extends Error {}
 describe('the Stage 2.B rollback runbook', () => {
   let client: postgres.Sql;
 
-  it('names 0046 by the `when` its journal entry carries', async () => {
-    const runbook = await readFile(path.join(here, '2b-subcategory-rollback.sql'), 'utf8');
-    const stale = `runbook names a stale \`when\` for 0046_subcategory_names; the journal says ${when0046}`;
-    expect(runbook, stale).toContain(`created_at > ${when0046}`);
-    expect(runbook, stale).toContain(`created_at = ${when0046}`);
+  it('names 0046 by the `when` its journal entry carries', () => {
+    expect(
+      runbookNamesWhen0046,
+      `The runbook does not name 0046_subcategory_names as created_at ${when0046}, the \`when\` ` +
+        'its journal entry carries, in both its refusal and its delete. If 0046 was generated ' +
+        'again, copy the new `when` into both.',
+    ).toBe(true);
   });
 
   it('is deleted in the PR that adds a migration after 0046', () => {
@@ -156,7 +167,7 @@ describe('the Stage 2.B rollback runbook', () => {
     await client?.end({ timeout: 5 });
   });
 
-  it.skipIf(laterMigrations.length > 0)(
+  it.skipIf(cannotRunRunbook)(
     'puts back every name production had, and the next deploy puts the new ones back',
     async () => {
       const runbook = await readFile(path.join(here, '2b-subcategory-rollback.sql'), 'utf8');
@@ -214,7 +225,7 @@ describe('the Stage 2.B rollback runbook', () => {
   // lock before db/sql/002_subcategories.sql ran. Tables, columns, foreign keys
   // and indexes have their new names; the CHECKs and the primary keys Postgres
   // named still have their old ones. The runbook is a way back from there too.
-  it.skipIf(laterMigrations.length > 0)(
+  it.skipIf(cannotRunRunbook)(
     'puts back every name production had from a preDeploy that failed before db/sql',
     async () => {
       const runbook = await readFile(path.join(here, '2b-subcategory-rollback.sql'), 'utf8');
@@ -228,16 +239,7 @@ describe('the Stage 2.B rollback runbook', () => {
       await client
         .begin(async (tx) => {
           const { tables, types } = await renamedObjects(tx);
-
-          // From the migrated database back to production's names, then 0046
-          // alone, recorded the way Drizzle records it, and no db/sql after it.
-          await tx.unsafe(runbook);
-          for (const statement of migration.split('--> statement-breakpoint')) {
-            if (statement.trim()) await tx.unsafe(statement);
-          }
-          await tx`
-            insert into drizzle.__drizzle_migrations (hash, created_at)
-            values ('0046-without-db-sql', ${when0046})`;
+          await halfApply(tx, runbook, migration);
           seen.halfApplied = await snapshot(tx, tables, types);
 
           await tx.unsafe(runbook);
@@ -266,6 +268,49 @@ describe('the Stage 2.B rollback runbook', () => {
     },
   );
 
+  // A constraint under neither name is a database this was not written for (a
+  // fresh one whose db/sql never ran, say), and the runbook refuses it whole
+  // rather than renaming the rest around the gap.
+  it.skipIf(cannotRunRunbook)(
+    'refuses, and changes nothing, when a constraint has neither name',
+    async () => {
+      const runbook = await readFile(path.join(here, '2b-subcategory-rollback.sql'), 'utf8');
+      const migration = await readFile(
+        path.join(root, 'db/migrations/0046_subcategory_names.sql'),
+        'utf8',
+      );
+
+      const seen: { before?: Snapshot; after?: Snapshot; refusal?: unknown } = {};
+
+      await client
+        .begin(async (tx) => {
+          const { tables, types } = await renamedObjects(tx);
+          await halfApply(tx, runbook, migration);
+          await tx`alter table ticket_subcategories drop constraint ticket_categories_key_shape`;
+          seen.before = await snapshot(tx, tables, types);
+
+          await tx
+            .savepoint(async (sp) => {
+              await sp.unsafe(runbook);
+            })
+            .catch((error: unknown) => {
+              seen.refusal = error;
+            });
+          seen.after = await snapshot(tx, tables, types);
+
+          throw new RolledBack();
+        })
+        .catch((error: unknown) => {
+          if (!(error instanceof RolledBack)) throw error;
+        });
+
+      expect(String(seen.refusal)).toContain(
+        'constraint ticket_subcategories_key_shape (or ticket_categories_key_shape) does not exist on ticket_categories',
+      );
+      expect(seen.after).toEqual(seen.before);
+    },
+  );
+
   // Drizzle applies a migration only when it is newer than the newest row, so
   // once anything after 0046 has run, deleting 0046's row would not bring it
   // back. The runbook refuses before it renames anything. On the database CI
@@ -291,6 +336,21 @@ describe('the Stage 2.B rollback runbook', () => {
     expect(String(refusal)).toContain('a migration newer than 0046_subcategory_names');
   });
 });
+
+/**
+ * The state the plan's "How it fails" describes, built from the migrated
+ * database: the runbook back to production's names, then 0046 alone, recorded
+ * the way Drizzle records it, and no db/sql after it.
+ */
+async function halfApply(tx: postgres.TransactionSql, runbook: string, migration: string) {
+  await tx.unsafe(runbook);
+  for (const statement of migration.split('--> statement-breakpoint')) {
+    if (statement.trim()) await tx.unsafe(statement);
+  }
+  await tx`
+    insert into drizzle.__drizzle_migrations (hash, created_at)
+    values ('0046-without-db-sql', ${when0046})`;
+}
 
 /** The four tables and two types the stage renames, by OID, which a rename keeps. */
 async function renamedObjects(tx: postgres.TransactionSql) {
