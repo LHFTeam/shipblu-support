@@ -6702,6 +6702,21 @@ dryRun=true`, then without, gives those two theirs back from their
       `npm run job` writes none. Nothing in the repository passes one: the
       admin buttons and CI's database job send no bound, and no doc shows one.
 
+103.  **The test helper's repeated autumn hour depended on the season the suite
+      ran in.** _2026-10-23._ `cairo()` in `lib/testing/time.ts` documented that
+      a time the autumn change repeats resolves to its first instance, and left
+      the choice to luxon's `fromISO`, which makes it by the offset in force on
+      the day it runs (§6.102). Two tests written in summer relied on the first
+      instance: its own case and the `dateIn` case for the night daylight
+      saving ends, in `lib/reports/rollup.test.ts`. So CI would have gone red
+      from 2026-10-29 21:00 UTC until the end of April, in any host zone. The
+      helper now steps back by the change itself whenever an earlier instant
+      reads the same fields, and a case freezes the clock in winter to hold it
+      there. `DateTime.local(…)` and `DateTime.utc(…)` with date parts take
+      that offset from one instant instead, that of the first such call in any
+      zone, and keep it per zone, so a test building its instants that way
+      would hold whichever season the suite started in.
+
 ### Tooling notes for this environment
 
 Supabase and Render MCP tools work and are the fastest way to check real state —
