@@ -1,4 +1,4 @@
-import { asc, eq, sql } from 'drizzle-orm';
+import { asc, eq, inArray, sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { db } from '@/db/client';
 import {
@@ -741,6 +741,45 @@ describe('ingestMetaComment', () => {
       await raced;
 
       expect(await requesterKindOf(opened.conversationId)).toBeNull();
+    });
+
+    // Amira's own reply opened the ticket, and an agent is merging her into
+    // another record as her comment arrives. Waiting the merge out and moving
+    // the ticket then would hand it back to the contact merged away.
+    it('leaves the ticket where a merge of the first comment’s author puts it', async () => {
+      const opened = await ingestMetaComment(
+        comment({
+          commentId: 'post-1_c2',
+          parentCommentId: 'post-1_c1',
+          text: 'Any update?',
+          createdAt: LATER,
+        }),
+      );
+      const amira = await contactOf('1122334455');
+      await ingestMetaComment(
+        comment({ commentId: 'post-6_c1', postId: 'post-6', from: '7766554433' }),
+      );
+      const survivor = await contactOf('7766554433');
+
+      let raced: Promise<unknown> | undefined;
+      await db.transaction(async (tx) => {
+        // `mergeContacts`, in its order: both contacts, then their tickets.
+        await tx
+          .select({ id: contacts.id })
+          .from(contacts)
+          .where(inArray(contacts.id, [amira, survivor]))
+          .for('update');
+        await tx
+          .update(conversations)
+          .set({ requesterContactId: survivor })
+          .where(eq(conversations.requesterContactId, amira));
+        raced = ingestMetaComment(comment());
+        await untilSomebodyWaits();
+      });
+      await raced;
+
+      expect((await conversation(opened.conversationId)).requesterContactId).toBe(survivor);
+      expect(await requesterEvents(opened.conversationId)).toEqual([]);
     });
 
     // A contact merge re-points the ticket between the root's lookup and its

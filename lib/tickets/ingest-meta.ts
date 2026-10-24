@@ -572,12 +572,17 @@ type FoundConversation = {
  * under it arrived first. A redelivered root never gets this far: the
  * comment-id lookup at the top of `ingestMetaComment` returns first, and two
  * copies racing past it are rolled back whole by the unique index on the
- * message they both insert. The requester is read here, under the row's lock,
- * rather than taken from the lookup before the transaction: a contact merge can
- * re-point the ticket in between, and the event says who it moved from.
- * `no key update` is the strength the update takes anyway, so a reply on the
- * same thread, whose message insert only checks the key, does not queue
- * behind it.
+ * message they both insert.
+ *
+ * A contact merge re-points tickets while this runs, so the move is a
+ * compare-and-set: read the requester, and write only while it is still the
+ * one read, which is the one the event names. A merge that commits first makes
+ * the write match nothing, and the next read sees what it left. Not a locked
+ * read: that waits out a merge of the root's own author, reads the survivor
+ * and hands the ticket back to the contact merged away; and it holds the
+ * ticket ahead of the message insert's check of the author's contact, the
+ * reverse of the order a merge and a purge lock in, so the two deadlock. A
+ * plain read takes no lock at all when nothing moves.
  *
  * Two columns move with it. `requester_kind` is the requester's population,
  * read off their own record once and never revised (`establishRequesterKind`),
@@ -606,33 +611,48 @@ async function adoptRootAuthor(
     rootCommentId: string;
   },
 ): Promise<void> {
-  const [ticket] = await tx
-    .select({ requesterContactId: conversations.requesterContactId })
-    .from(conversations)
-    .where(eq(conversations.id, input.conversationId))
-    .for('no key update');
-  if (!ticket || ticket.requesterContactId === input.authorContactId) return;
+  // Each lost round is a merge that committed in between, which a person
+  // started; a third in a row is not traffic, so it fails the batch to retry.
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const [ticket] = await tx
+      .select({ requesterContactId: conversations.requesterContactId })
+      .from(conversations)
+      .where(eq(conversations.id, input.conversationId));
+    if (!ticket || ticket.requesterContactId === input.authorContactId) return;
 
-  await tx
-    .update(conversations)
-    .set({
-      requesterContactId: input.authorContactId,
-      requesterKind: null,
-      subject: input.subject,
-    })
-    .where(eq(conversations.id, input.conversationId));
+    const moved = await tx
+      .update(conversations)
+      .set({
+        requesterContactId: input.authorContactId,
+        requesterKind: null,
+        subject: input.subject,
+      })
+      .where(
+        and(
+          eq(conversations.id, input.conversationId),
+          eq(conversations.requesterContactId, ticket.requesterContactId),
+        ),
+      )
+      .returning({ id: conversations.id });
+    if (moved.length === 0) continue;
 
-  await tx.insert(conversationEvents).values({
-    conversationId: input.conversationId,
-    type: 'requester_changed',
-    actorLabel: `inbound_${input.platform}`,
-    data: {
-      reason: 'thread_root',
-      from: ticket.requesterContactId,
-      to: input.authorContactId,
-      rootCommentId: input.rootCommentId,
-    },
-  });
+    await tx.insert(conversationEvents).values({
+      conversationId: input.conversationId,
+      type: 'requester_changed',
+      actorLabel: `inbound_${input.platform}`,
+      data: {
+        reason: 'thread_root',
+        from: ticket.requesterContactId,
+        to: input.authorContactId,
+        rootCommentId: input.rootCommentId,
+      },
+    });
+    return;
+  }
+
+  throw new Error(
+    `the requester of conversation ${input.conversationId} kept changing under its root comment`,
+  );
 }
 
 /**
