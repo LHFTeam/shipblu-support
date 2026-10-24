@@ -8,6 +8,8 @@ import { suggestionKey } from '@/lib/canned-suggest/keyboard';
 import { formatDateTime } from '@/lib/format';
 import type { CannedResponseOption } from '@/lib/tickets/lookups';
 import {
+  canTakePrivateReply,
+  commentExcerpt,
   defaultPrivateReplyOption,
   type PrivateReplyOption,
 } from '@/lib/tickets/private-reply-options';
@@ -73,6 +75,9 @@ export function ReplyForm({
     onSuccess: onSent,
   });
   const [privately, setPrivately] = useState(false);
+  // Whether any of the customer's comments can still take a private reply —
+  // what the box may be ticked for. `privateReplyRefusal` refuses the rest.
+  const answerable = requesterComments.some(canTakePrivateReply);
   // Said on the button as well as in the notice above the tabs: the press is
   // the moment the agent commits, and "Send" under a public comment does not
   // say that everyone who can see the post will read it.
@@ -122,18 +127,21 @@ export function ReplyForm({
               // Can be unticked whatever happens to the list, so a box ticked
               // before the list emptied is never stuck sending privately; the
               // action refuses that send with the reason.
-              disabled={!privately && requesterComments.length === 0}
+              disabled={!privately && !answerable}
               onChange={(event) => setPrivately(event.target.checked)}
               className="mt-0.5 size-4 shrink-0 accent-(--color-control-accent)"
             />
             <span>
               <span className="font-medium">Reply privately instead</span>
               <span className="block text-(--color-text-secondary)">
-                {requesterComments.length > 0
+                {answerable
                   ? 'Moves the conversation into the direct message inbox. Meta allows this ' +
                     'once per comment, so it cannot be undone or repeated.'
-                  : 'Not on this ticket: a private reply goes to whoever wrote the comment it ' +
-                    'answers, and none of the comments here is the customer’s own.'}
+                  : requesterComments.length > 0
+                    ? 'Not on this ticket: each of the customer’s comments here was deleted ' +
+                      'from the post or has had its one private reply.'
+                    : 'Not on this ticket: a private reply goes to whoever wrote the comment ' +
+                      'it answers, and none of the comments here is the customer’s own.'}
               </span>
             </span>
           </label>
@@ -174,9 +182,13 @@ export function ReplyForm({
  * can see it, rather than left to whatever is newest when the job runs, which
  * on a busy post is a passer-by's reply filed on this ticket. Only the
  * requester's are offered, newest first, and the action re-reads the one posted
- * before it stores anything. The default skips a comment deleted from the post
- * or already answered privately, which Graph would refuse, and the label says
- * which those are (`defaultPrivateReplyOption`).
+ * before it stores anything. A comment deleted from the post or already
+ * answered privately, which Graph would refuse, is listed, labelled and
+ * disabled — the action refuses it too (`canTakePrivateReply`).
+ *
+ * Not moved by a live refresh once mounted: a newer comment arriving leaves the
+ * agent's choice where it was, and one that a colleague answers meanwhile is
+ * refused by the action with the reason, before anything is written.
  *
  * Uncontrolled, under the form's `key`: a send remounts it on the default
  * again, and a refusal leaves the agent's choice where it was (`useActionForm`).
@@ -194,7 +206,7 @@ function PrivateReplyTarget({ comments }: { comments: PrivateReplyOption[] }) {
         className="w-full font-conversation"
       >
         {comments.map((comment) => (
-          <option key={comment.id} value={comment.id}>
+          <option key={comment.id} value={comment.id} disabled={!canTakePrivateReply(comment)}>
             {optionLabel(comment)}
           </option>
         ))}
@@ -219,15 +231,9 @@ function optionLabel(comment: PrivateReplyOption): string {
     : comment.answered
       ? 'already answered privately'
       : null;
-  return [formatDateTime(comment.at), status, `\u2068${excerpt(comment.text)}\u2069`]
+  return [formatDateTime(comment.at), status, `\u2068${commentExcerpt(comment.text)}\u2069`]
     .filter(Boolean)
     .join(' — ');
-}
-
-/** A comment's text on one line, cut by character rather than by UTF-16 unit. */
-function excerpt(text: string): string {
-  const chars = Array.from(text.replace(/\s+/g, ' ').trim());
-  return chars.length > 80 ? `${chars.slice(0, 79).join('')}…` : chars.join('');
 }
 
 /**

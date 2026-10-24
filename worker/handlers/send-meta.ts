@@ -220,7 +220,9 @@ async function deliver(
       externalId: row.conversation.externalId,
       lastCommentId:
         meta.commentId ??
-        (await newestRequesterComment(row.conversation.id, row.conversation.requesterContactId)),
+        (await newestRequesterComment(row.conversation.id, row.conversation.requesterContactId))
+          ?.commentId ??
+        null,
     });
     if (!commentId) throw new Error('no comment to reply to on this ticket');
     return replyToComment({ platform, commentId, message: text });
@@ -240,7 +242,8 @@ async function deliver(
     // send to anybody else.
     const commentId =
       meta.commentId ??
-      (await newestRequesterComment(row.conversation.id, row.conversation.requesterContactId));
+      (await newestRequesterComment(row.conversation.id, row.conversation.requesterContactId))
+        ?.commentId;
     if (!commentId) throw new MetaSendRefusal(NO_REQUESTER_COMMENT);
 
     // Meta allows exactly one private reply per comment, ever. A second attempt

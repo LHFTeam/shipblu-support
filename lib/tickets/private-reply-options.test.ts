@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { defaultPrivateReplyOption, privateReplyOptions } from './private-reply-options';
+import {
+  canTakePrivateReply,
+  commentExcerpt,
+  defaultPrivateReplyOption,
+  privateReplyOptions,
+} from './private-reply-options';
 
 /**
  * What the composer offers a private reply. Only the requester's comments, since
@@ -59,6 +64,8 @@ describe('privateReplyOptions', () => {
 
     expect(options.map((option) => option.id)).toEqual([followUp.id, root.id]);
     expect(options[0]).toMatchObject({ text: followUp.bodyText, at: followUp.createdAt });
+    // A public reply naming the comment spends nothing: only a private one does.
+    expect(options[0]!.answered).toBe(false);
     expect(defaultPrivateReplyOption(options)).toBe(followUp.id);
   });
 
@@ -102,13 +109,35 @@ describe('privateReplyOptions', () => {
     expect(pending[0]!.answered).toBe(true);
   });
 
-  it('falls back to the newest when none can take a private reply, and to nothing when empty', () => {
+  it('chooses nothing when none can take a private reply, and lists nothing of anybody else’s', () => {
     const root = comment(AMIRA, 'c1', { moderation: { deleted: true } });
     const followUp = comment(AMIRA, 'c2');
     const options = privateReplyOptions([root, followUp, privateReply('c2', 'sent')], AMIRA);
 
-    expect(defaultPrivateReplyOption(options)).toBe(followUp.id);
+    expect(options.map(canTakePrivateReply)).toEqual([false, false]);
+    expect(defaultPrivateReplyOption(options)).toBeUndefined();
     expect(defaultPrivateReplyOption([])).toBeUndefined();
     expect(privateReplyOptions([comment(BOB, 'c3')], AMIRA)).toEqual([]);
+  });
+});
+
+describe('commentExcerpt', () => {
+  it('leaves a short comment whole, on one line', () => {
+    expect(commentExcerpt('  where is\n my   parcel?  ')).toBe('where is my parcel?');
+  });
+
+  // Cut at a space, so a letter keeps its marks: a code-point cut through
+  // «الشُّحْنَة» would part the shin from its shadda and damma.
+  it('cuts a long comment at the last space that fits', () => {
+    const words = Array.from({ length: 20 }, () => 'الشُّحْنَة').join(' ');
+    const cut = commentExcerpt(words);
+
+    expect(cut.endsWith('الشُّحْنَة…')).toBe(true);
+    expect(Array.from(cut).length).toBeLessThanOrEqual(80);
+  });
+
+  it('cuts by code point when there is no space to cut at', () => {
+    const cut = commentExcerpt('x'.repeat(200));
+    expect(cut).toBe(`${'x'.repeat(79)}…`);
   });
 });

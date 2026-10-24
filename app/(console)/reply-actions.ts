@@ -20,6 +20,7 @@ import { notReaction } from '@/lib/tickets/not-reaction';
 import {
   newestRequesterComment,
   NO_REQUESTER_COMMENT,
+  privateReplyRefusal,
   requesterCommentById,
 } from '@/lib/tickets/reply-comment';
 import {
@@ -152,7 +153,9 @@ export async function sendReply(_state: ActionState, formData: FormData): Promis
   //
   // A private reply answers the comment the agent picked, re-read here because
   // the id arrives in a form field, or the requester's newest when the form
-  // named none. A public reply has no picker and takes the newest: on
+  // named none — and not one deleted from the post or already answered
+  // privately, which Meta would refuse after the reply was on the timeline. A
+  // public reply has no picker and takes the newest still on the post: on
   // Instagram it is posted under the thread's root whatever this says
   // (`commentReplyTarget`).
   let commentId: string | null = null;
@@ -162,13 +165,18 @@ export async function sendReply(_state: ActionState, formData: FormData): Promis
       metaSendKind === 'private_reply' ? uuidField(formData, 'replyToMessageId') : null;
     if (picked === undefined) return { error: NOT_THE_REQUESTERS_COMMENT };
 
-    commentId = picked
+    const comment = picked
       ? await requesterCommentById(conversationId, requesterId, picked)
       : await newestRequesterComment(conversationId, requesterId);
 
-    if (!commentId && metaSendKind === 'private_reply') {
-      return { error: picked ? NOT_THE_REQUESTERS_COMMENT : NO_REQUESTER_COMMENT };
+    if (metaSendKind === 'private_reply') {
+      if (!comment) {
+        return { error: picked ? NOT_THE_REQUESTERS_COMMENT : NO_REQUESTER_COMMENT };
+      }
+      const refusal = await privateReplyRefusal(conversationId, comment);
+      if (refusal) return { error: refusal };
     }
+    commentId = comment?.commentId ?? null;
   }
 
   if (isMeta && metaSendKind === 'dm') {

@@ -6741,12 +6741,14 @@ dryRun=true`, then without, gives those two theirs back from their
       carrying `commentId` made it look like a comment to the moderation
       controls, so `moderatableComment` takes the row's direction.
 
-      Left as it was: 11 of those 55 comments were deleted from the console,
-      each the root and its requester's only comment. A reply to one is still
-      sent and refused by Graph, as before; the composer marks it and never
-      chooses it by default, but the server does not refuse it, because doing
-      so needs its own sentence and every case in production has no other
-      comment to fall back to.
+      The action also refuses a private reply to a comment deleted from the
+      post, or to one already answered by a private reply that has not failed,
+      and the composer disables both: Meta refuses each, but only after the
+      reply is on the timeline. 11 of those 55 comments had been deleted from
+      the console, each the root and its requester's only comment, and one
+      private reply (#13772) was sent after such a delete and failed. A public
+      reply takes the requester's newest comment still on the post; with none,
+      it goes under the deleted one and Graph refuses it, as before.
 
 ### Tooling notes for this environment
 

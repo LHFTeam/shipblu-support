@@ -36,7 +36,8 @@ const { db } = await import('@/db/client');
 const { agents, contacts, conversations, jobs, messages, ticketStatuses } =
   await import('@/db/schema');
 const { withCleanDatabase } = await import('@/lib/testing/db');
-const { NO_REQUESTER_COMMENT } = await import('@/lib/tickets/reply-comment');
+const { COMMENT_ANSWERED, COMMENT_DELETED, NO_REQUESTER_COMMENT } =
+  await import('@/lib/tickets/reply-comment');
 const { sendMeta } = await import('@/worker/handlers/send-meta');
 const { moderateComment } = await import('./meta-actions');
 const { sendReply } = await import('./reply-actions');
@@ -109,6 +110,22 @@ async function threadWithPasserBy() {
   const followUp = await comment(ticket, amira, 'post-1_c2', '2026-10-20T09:05:00Z');
   const passerBy = await comment(ticket, bob, 'post-1_c3', '2026-10-20T09:10:00Z');
   return { ticket, amira, bob, root, followUp, passerBy };
+}
+
+/** A comment as `moderate_meta_comment` leaves it once Graph confirmed the delete. */
+async function deleteFromPost(messageId: string, commentId: string) {
+  await db
+    .update(messages)
+    .set({
+      meta: {
+        metaKind: 'comment',
+        platform: 'facebook',
+        commentId,
+        isPublic: true,
+        moderation: { hidden: false, deleted: true, pending: null, error: null },
+      },
+    })
+    .where(eq(messages.id, messageId));
 }
 
 function form(values: Record<string, string>): FormData {
@@ -253,6 +270,49 @@ describe('a private reply on a comment ticket', () => {
     ).toEqual([]);
   });
 
+  // Meta refuses both, after the reply is on the timeline marked failed. The
+  // composer disables them; this is a stale tab or a second agent.
+  it('refuses a comment deleted from the post, and answers the newest still on it', async () => {
+    const { ticket, followUp } = await threadWithPasserBy();
+    await deleteFromPost(followUp, 'post-1_c2');
+
+    const refused = await reply(ticket, {
+      metaSendKind: 'private_reply',
+      replyToMessageId: followUp,
+    });
+    expect(refused.error).toBe(COMMENT_DELETED);
+    expect(await replies(ticket)).toEqual([]);
+
+    const state = await reply(ticket, { metaSendKind: 'private_reply' });
+    expect(state.error).toBeNull();
+    const [stored] = await replies(ticket);
+    expect(stored!.meta).toMatchObject({ commentId: ROOT });
+  });
+
+  it('refuses a comment that already has a private reply, unless that one failed', async () => {
+    const { ticket, followUp } = await threadWithPasserBy();
+
+    expect((await reply(ticket, { metaSendKind: 'private_reply' })).error).toBeNull();
+    const second = await reply(ticket, {
+      metaSendKind: 'private_reply',
+      replyToMessageId: followUp,
+    });
+    expect(second.error).toBe(COMMENT_ANSWERED);
+    expect(await replies(ticket)).toHaveLength(1);
+
+    // Graph refused the first, so it spent nothing.
+    await db
+      .update(messages)
+      .set({ deliveryStatus: 'failed' })
+      .where(and(eq(messages.conversationId, ticket), eq(messages.direction, 'outbound')));
+    const retry = await reply(ticket, {
+      metaSendKind: 'private_reply',
+      replyToMessageId: followUp,
+    });
+    expect(retry.error).toBeNull();
+    expect(await replies(ticket)).toHaveLength(2);
+  });
+
   it('refuses when none of the comments is the requester’s', async () => {
     const { ticket, bob } = await threadWithPasserBy();
     // Every comment Bob's, as on a ticket whose requester's comments are gone.
@@ -297,6 +357,18 @@ describe('a public reply on a comment ticket', () => {
     const [stored] = await replies(ticket);
     await sendMeta(job(stored!.id));
     expect(addressed(graph.replyToComment)).toEqual(['post-1_c2']);
+  });
+
+  // Graph refuses a reply under a comment that is gone; an older one of hers
+  // still on the post takes it.
+  it('is posted under her newest comment still on the post', async () => {
+    const { ticket, followUp } = await threadWithPasserBy();
+    await deleteFromPost(followUp, 'post-1_c2');
+
+    await reply(ticket, { metaSendKind: 'comment_reply' });
+
+    const [stored] = await replies(ticket);
+    expect(stored!.meta).toMatchObject({ commentId: ROOT });
   });
 
   // The picker belongs to the private reply; a public one ignores a posted id.
