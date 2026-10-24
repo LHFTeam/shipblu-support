@@ -38,8 +38,8 @@ export function dayWindow(day: string, zone: string): { start: Date; end: Date }
 // result read again on this zone's clock is off by the offset it named or dated
 // by UTC's today, so a list of the spellings to turn away is always one short.
 // The hour runs 00-23, as a scan bound's does: luxon reads `T24:00` as the next
-// midnight, a second spelling of it, and on the eve of a spring change would
-// call that midnight skipped though the date written was never touched.
+// midnight, a second spelling of it, which on the eve of a spring change this
+// function would then call skipped though the date written was never touched.
 const WALL_CLOCK = /^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):\d{2}(?::\d{2}(?:[.,]\d+)?)?$/;
 const MINUTE = 60_000;
 const DAY = 24 * 60 * MINUTE;
