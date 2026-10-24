@@ -1,5 +1,5 @@
 import { DateTime } from 'luxon';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   fieldLabel,
   formatForInput,
@@ -31,6 +31,8 @@ function field(overrides: Partial<TicketFieldDef> & { type: TicketFieldDef['type
 }
 
 describe('parseFieldValue', () => {
+  afterEach(() => vi.useRealTimers());
+
   it('stores a number as a number, so a comparison orders it', () => {
     // The bug this guards: "12" > "5" is false as strings, so a rule reading
     // "refund over 5" would skip every ticket between 10 and 99.
@@ -105,6 +107,47 @@ describe('parseFieldValue', () => {
     // August and in December. Hand-adding a constant +02:00 gets one of them wrong.
     expect(summer.ok && DateTime.fromISO(String(summer.value)).toUTC().hour).toBe(11);
     expect(winter.ok && DateTime.fromISO(String(winter.value)).toUTC().hour).toBe(12);
+  });
+
+  it('stores the first instance of the hour the autumn change repeats, whatever the season', () => {
+    // 23:30 on 29 October 2026 happens at +03:00 and again at +02:00. Luxon
+    // alone picks by the offset in force when it is asked, so a field sent in
+    // winter stored the second and the same answer sent in summer the first.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    for (const now of ['2026-07-15T12:00:00Z', '2026-11-15T12:00:00Z']) {
+      vi.setSystemTime(new Date(now));
+      expect(parseFieldValue(field({ type: 'datetime' }), '2026-10-29T23:30')).toEqual({
+        ok: true,
+        value: '2026-10-29T23:30:00.000+03:00',
+      });
+    }
+    expect(DateTime.fromISO('2026-10-29T23:30', { zone: 'Africa/Cairo' }).offset).toBe(120);
+  });
+
+  it('reads a datetime the spring change skipped, or one naming its offset, as it always did', () => {
+    // 24 April 2026 goes from 00:00 to 01:00; luxon moves 00:30 on by the gap.
+    expect(parseFieldValue(field({ type: 'datetime' }), '2026-04-24T00:30')).toEqual({
+      ok: true,
+      value: '2026-04-24T01:30:00.000+03:00',
+    });
+    expect(parseFieldValue(field({ type: 'datetime' }), '2026-08-30T14:00:00.000+03:00')).toEqual({
+      ok: true,
+      value: '2026-08-30T14:00:00.000+03:00',
+    });
+    expect(parseFieldValue(field({ type: 'datetime' }), '2026-08-30T14:00[Asia/Tokyo]')).toEqual({
+      ok: true,
+      value: '2026-08-30T08:00:00.000+03:00',
+    });
+  });
+
+  it("dates a datetime sent with no date by Cairo's today, as it always did", () => {
+    // 01:30 on 16 July in Cairo, still the 15th in UTC.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-07-15T22:30:00Z'));
+    expect(parseFieldValue(field({ type: 'datetime' }), '23:30')).toEqual({
+      ok: true,
+      value: '2026-07-16T23:30:00.000+03:00',
+    });
   });
 
   it('refuses a datetime it cannot read', () => {

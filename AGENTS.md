@@ -494,6 +494,19 @@ code writes. Every operator-run schema is strict now; the last four to move were
 still takes any object, so the entry is a convention the compiler does not
 force.
 
+An instant in a payload is read by its schema, never by the handler. jsonb
+holds it as text, and `new Date()` reads text with no offset in the host's zone
+and a bare date as UTC midnight, so `since=2026-10-01T00:00` meant one instant
+on Render and another on a laptop in Cairo (`docs/PROJECT-STATE.md` §6.102).
+`scanBound` in `payloads.ts` reads a backfill's `since` (inclusive) and `until`
+(exclusive) in Cairo, a date alone as that whole day, and an explicit `Z` or
+offset as given, and hands the handler a `Date`; its `z.input` stays a string,
+so `enqueue` takes the text and the reading happens only where the job runs. A
+calendar date that names a report day is not an instant and stays a
+`YYYY-MM-DD` string: `rollup_metrics`' `day`, `from` and `to` are cut into
+instants by the handler, with `dayWindow` in the reporting zone, which comes
+from `business_hours` and so cannot be known to the schema.
+
 **`PermanentJobError` is for a failure no retry can fix**, and it sends the job
 to `dead` on its first attempt instead of spending the rest. That means input
 that is wrong: a payload failing its schema (which `parseJobPayload` throws), or
@@ -1440,12 +1453,16 @@ a customer's inbox would show.
 **Time.** Cairo observes DST again. Build test instants from wall-clock with
 luxon and let the timezone database convert; never hand-convert fixtures. SLA
 clocks are working-time, resolved through `lib/hours/resolve.ts` by every
-consumer so a due date and the report measuring it cannot disagree. A rolled-up
-day's instants come from `dayWindow()` in `lib/reports/rollup.ts`, never from
+consumer so a due date and the report measuring it cannot disagree. A day's
+instants come from `dayWindow()` in `lib/hours/wall-clock.ts`, never from
 `start.plus({ days: 1 })`: Cairo springs forward at midnight, so that day opens
 at 01:00 and a day added to it ends an hour into the next. For the same reason
 a count of days is taken on the dates, never on the instants between them
-(`docs/PROJECT-STATE.md` §6.101).
+(`docs/PROJECT-STATE.md` §6.101). A date and time written with no offset names
+an instant through `wallClockInstant()` beside it, never
+`DateTime.fromISO(text, { zone })`, which picks between the two instances of
+the hour the autumn change repeats by the offset in force on the day it runs
+(§6.102).
 
 **A date a client component draws is joined from its fields.** It is written
 twice, by Node on the server and by the browser to hydrate, and the punctuation

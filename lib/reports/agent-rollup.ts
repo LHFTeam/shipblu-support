@@ -25,7 +25,8 @@ import {
   totalSeconds,
   type Span,
 } from './intervals';
-import { dayWindow, type ReportingContext } from './rollup';
+import { dayWindow } from '@/lib/hours/wall-clock';
+import type { ReportingContext } from './rollup';
 import { logger } from '@/lib/log';
 
 const log = logger('agent-rollup');

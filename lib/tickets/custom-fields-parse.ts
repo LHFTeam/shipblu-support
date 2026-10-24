@@ -1,5 +1,6 @@
 import { DateTime } from 'luxon';
 import { isBlank, type CustomFieldValues, type TicketFieldDef } from './custom-fields';
+import { wallClockInstant } from '@/lib/hours/wall-clock';
 import { TEAM_TIME_ZONE } from '@/lib/hours/zone';
 
 /**
@@ -177,10 +178,19 @@ function parseByType(def: TicketFieldDef, raw: string | string[]): ParsedValue {
       if (!text) return { ok: true, value: '' };
 
       // `datetime-local` submits a wall clock with no zone. Cairo observes DST
-      // again, so the offset is not a constant to add — luxon resolves it from
-      // the date, and what gets stored is an unambiguous instant that a rule can
-      // order against `now`.
-      const parsed = DateTime.fromISO(text, { zone: TEAM_TIME_ZONE });
+      // again, so the offset is not a constant to add — `wallClockInstant`
+      // resolves it from the date, and what gets stored is an unambiguous instant
+      // that a rule can order against `now`. In the hour the autumn change
+      // repeats it takes the first instance whenever the form is sent, where
+      // luxon took whichever the season of the submission favoured (§6.102).
+      // Text it does not read as a wall clock, one naming an offset or a zone, a
+      // time with no date, or a time the spring change skips, is read by luxon
+      // as it always was.
+      const at = wallClockInstant(text, TEAM_TIME_ZONE);
+      const parsed =
+        at instanceof Date
+          ? DateTime.fromJSDate(at, { zone: TEAM_TIME_ZONE })
+          : DateTime.fromISO(text, { zone: TEAM_TIME_ZONE });
       if (!parsed.isValid) return { ok: false, error: `${def.label} must be a date and time` };
       return { ok: true, value: parsed.toISO() };
     }
