@@ -289,10 +289,10 @@ describe('a scan bound', () => {
       expect(since('2026-04-24T00:30+02:00')).toEqual(new Date('2026-04-23T22:30:00Z'));
     });
 
-    // Written out in UTC, once, rather than through `cairo()`: the expectation
-    // must not come from luxon's own choice between the two instances, which is
-    // what this case freezes out, and `cairo()` left that choice to luxon until
-    // #409.
+    // Written out in UTC rather than through `cairo()`: the expectation must
+    // not come from the choice between the two instances that this case
+    // freezes, and `cairo()` makes it with the same `wallClockInstant()` the
+    // bound does.
     it('takes the first instance of the hour the autumn change repeats, whenever it runs', () => {
       vi.useFakeTimers({ toFake: ['Date'] });
 

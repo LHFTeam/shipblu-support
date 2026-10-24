@@ -17,6 +17,7 @@ describe('cairo', () => {
     expect(cairo('2026-04-23T23:59').toISOString()).toBe('2026-04-23T21:59:00.000Z');
     expect(cairo('2026-04-24T01:00').toISOString()).toBe('2026-04-23T22:00:00.000Z');
     expect(() => cairo('2026-04-24T00:30')).toThrow(/the clocks skip it/);
+    expect(() => cairo('2026-04-24')).toThrow(/the clocks skip it/);
   });
 
   it('resolves the hour the autumn change repeats to its first, summer-time instance', () => {

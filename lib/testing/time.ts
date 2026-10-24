@@ -1,4 +1,5 @@
 import { DateTime } from 'luxon';
+import { wallClockInstant } from '@/lib/hours/wall-clock';
 
 /**
  * Instants for tests, built from Cairo wall-clock time.
@@ -24,11 +25,15 @@ import { DateTime } from 'luxon';
  *
  * A time the autumn change repeats (`2026-10-29T23:30` happens at +03:00 and
  * again at +02:00) is ambiguous rather than wrong, and resolves to the first,
- * still in summer time. A test that means the second adds an hour to it. That
- * is chosen here rather than left to luxon, which picks between the two by the
- * offset the zone has when it is asked: it answered the first while the suite
- * ran in summer time and the second from the night the clocks went back, so
- * the two tests relying on the first would have failed in CI all winter.
+ * still in summer time. A test that means the second adds an hour to it. The
+ * text is read by `wallClockInstant()` in `lib/hours/wall-clock.ts`, which
+ * makes that choice the same way whenever it runs and is the one copy of it: a
+ * scan bound and a datetime field are read there too. Luxon left to itself
+ * picks between the two by the offset the zone has when it is asked, and
+ * answered the first while the suite ran in summer time and the second from
+ * the night the clocks went back (§6.103). Because this helper reads through
+ * it, `wallClockInstant()`'s own tests write their answers in UTC: one built
+ * here could only agree.
  *
  * Still on luxon, each for a reason: `forms/summary` builds the offset-carrying
  * `toISO()` string the parser stores, which is the thing under test; and the DST
@@ -39,30 +44,22 @@ import { DateTime } from 'luxon';
  */
 
 const CAIRO = 'Africa/Cairo';
-const FIELDS = "yyyy-MM-dd'T'HH:mm:ss.SSS";
 const WITH_OFFSET = /T[\d:.,]+(?:Z|[+-]\d{2}(?::?\d{2})?)$/i;
+const DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 /** `2026-09-03T09:30` on a Cairo wall clock, as the instant it names. */
 export function cairo(iso: string): Date {
+  // `wallClockInstant()` refuses these too, but cannot say that the fixture
+  // was converted by hand.
   if (WITH_OFFSET.test(iso)) {
     throw new Error(`not a Cairo wall-clock time, it names its own offset: ${iso}`);
   }
-  const dt = DateTime.fromISO(iso, { zone: CAIRO });
-  if (!dt.isValid) throw new Error(`not a Cairo wall-clock time: ${iso}`);
-  // The same string read with no zone at all holds the fields as written; a
-  // skipped time is the one case where Cairo's reading of them moved.
-  const asWritten = DateTime.fromISO(iso, { zone: 'utc' });
-  if (dt.toFormat(FIELDS) !== asWritten.toFormat(FIELDS)) {
-    throw new Error(`not a Cairo wall-clock time, the clocks skip it: ${iso}`);
-  }
-  // The first instance of a repeated time is earlier than the second by the
-  // size of the change, the offset a day before less the offset now, and reads
-  // the same fields; when it does, luxon took the second. Measured rather than
-  // assumed to be Cairo's hour, so a change of another size cannot slip back
-  // to luxon's answer unnoticed.
-  const change = dt.minus({ days: 1 }).offset - dt.offset;
-  const first = dt.minus({ minutes: change });
-  return (change > 0 && first.toFormat(FIELDS) === dt.toFormat(FIELDS) ? first : dt).toJSDate();
+  // A date alone names its midnight, which `wallClockInstant()` reads only
+  // written out, and a day the spring change opens at 01:00 has none.
+  const at = wallClockInstant(DATE.test(iso) ? `${iso}T00:00` : iso, CAIRO);
+  if (at === 'skipped') throw new Error(`not a Cairo wall-clock time, the clocks skip it: ${iso}`);
+  if (!at) throw new Error(`not a Cairo wall-clock time: ${iso}`);
+  return at;
 }
 
 /** The inverse, `yyyy-MM-ddTHH:mm` in Cairo, for asserting on a returned instant. */

@@ -1,5 +1,5 @@
 import { DateTime } from 'luxon';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cairo } from '@/lib/testing/time';
 import { dayWindow, wallClockInstant } from './wall-clock';
 
@@ -56,21 +56,43 @@ describe('dayWindow', () => {
   });
 });
 
-describe('wallClockInstant', () => {
+/**
+ * Every answer below is written in UTC rather than built with `cairo()`, which
+ * reads its text through this function and so could only agree with it. And
+ * each case runs on a host in UTC and in Cairo, because nothing here should
+ * read the host's zone, and these are the cases that would say so: a scan
+ * bound's tests switch hosts too, but most of their answers come from
+ * `cairo()`, which would move with this function, and those that still failed
+ * would point at the bound.
+ */
+describe.each([
+  ['UTC', '2026-10-01T00:00:00.000Z'],
+  ['Africa/Cairo', '2026-09-30T21:00:00.000Z'],
+])('wallClockInstant, on a host in %s', (host, hostMidnight) => {
   const CAIRO = 'Africa/Cairo';
-  afterEach(() => vi.useRealTimers());
+  const hostZone = process.env.TZ;
+  beforeEach(() => {
+    process.env.TZ = host;
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    // Assigning undefined would set the zone to the text "undefined".
+    if (hostZone === undefined) delete process.env.TZ;
+    else process.env.TZ = hostZone;
+  });
+
+  // The host's zone did change, or nothing below tests the host.
+  it('is on a host that reads a time with no offset on its own clock', () => {
+    expect(new Date('2026-10-01T00:00').toISOString()).toBe(hostMidnight);
+  });
 
   it('reads a date and time on the zone clock, in summer and in winter', () => {
-    expect(wallClockInstant('2026-08-15T14:30', CAIRO)).toEqual(cairo('2026-08-15T14:30'));
+    expect(wallClockInstant('2026-08-15T14:30', CAIRO)).toEqual(new Date('2026-08-15T11:30:00Z'));
     expect(wallClockInstant('2026-01-15T14:30:15.250', CAIRO)).toEqual(
-      cairo('2026-01-15T14:30:15.250'),
+      new Date('2026-01-15T12:30:15.250Z'),
     );
   });
 
-  // Written out in UTC, once, rather than through `cairo()`: the expectation
-  // must not come from luxon's own choice between the two instances, which is
-  // what this case freezes out, and `cairo()` left that choice to luxon until
-  // #409.
   it('answers the first instance of the hour the autumn change repeats, whenever it runs', () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     for (const now of ['2026-07-15T12:00:00Z', '2026-11-15T12:00:00Z']) {
@@ -86,8 +108,8 @@ describe('wallClockInstant', () => {
   it('says a time the spring change skipped was never shown, rather than moving it', () => {
     expect(wallClockInstant('2026-04-24T00:00', CAIRO)).toBe('skipped');
     expect(wallClockInstant('2026-04-24T00:59:59', CAIRO)).toBe('skipped');
-    expect(wallClockInstant('2026-04-24T01:00', CAIRO)).toEqual(cairo('2026-04-24T01:00'));
-    expect(wallClockInstant('2026-04-23T23:59', CAIRO)).toEqual(cairo('2026-04-23T23:59'));
+    expect(wallClockInstant('2026-04-24T01:00', CAIRO)).toEqual(new Date('2026-04-23T22:00:00Z'));
+    expect(wallClockInstant('2026-04-23T23:59', CAIRO)).toEqual(new Date('2026-04-23T21:59:00Z'));
   });
 
   // The zone is the caller's; nothing in the arithmetic is Cairo's hour.
