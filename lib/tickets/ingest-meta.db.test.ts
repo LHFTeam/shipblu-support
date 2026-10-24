@@ -1,4 +1,4 @@
-import { asc, eq } from 'drizzle-orm';
+import { asc, eq, inArray, sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { db } from '@/db/client';
 import {
@@ -19,6 +19,7 @@ import type {
   NormalisedDirectMessage,
   NormalisedInteraction,
 } from '@/lib/meta/types';
+import { subcategoriseFromMessage } from '@/lib/subcategorise/apply';
 import { withCleanDatabase, withoutCommentChannelCheck } from '@/lib/testing/db';
 import { applyMetaInteraction, ingestMetaComment, ingestMetaMessage } from './ingest-meta';
 
@@ -560,6 +561,269 @@ describe('ingestMetaComment', () => {
     ).toEqual([{ identifier: 'unknown:post-1_c1' }]);
   });
 
+  /*
+   * Deliveries are processed in no order, and a batch with an item that failed
+   * is run again whole, so a passer-by's reply under the customer's comment
+   * can be stored before the comment itself. The reply opens the ticket under
+   * its author; the comment, when it arrives, hands it to the customer.
+   */
+  describe('a thread whose first comment arrives after a reply to it', () => {
+    const BOB = '9988776655';
+    const bobsReply = (overrides: Partial<NormalisedComment> = {}) =>
+      comment({
+        commentId: 'post-1_c2',
+        parentCommentId: 'post-1_c1',
+        from: BOB,
+        fromName: 'Bob',
+        text: 'Same here, nobody answers',
+        createdAt: LATER,
+        ...overrides,
+      });
+
+    async function contactOf(identifier: string) {
+      const [row] = await db
+        .select({ id: contactIdentities.contactId })
+        .from(contactIdentities)
+        .where(eq(contactIdentities.identifier, identifier));
+      return row!.id;
+    }
+
+    async function requesterKindOf(conversationId: string) {
+      const [row] = await db
+        .select({ kind: conversations.requesterKind })
+        .from(conversations)
+        .where(eq(conversations.id, conversationId));
+      return row!.kind;
+    }
+
+    function requesterEvents(conversationId: string) {
+      return eventsOf(conversationId).then((events) =>
+        events.filter((event) => event.type === 'requester_changed'),
+      );
+    }
+
+    /**
+     * Bob a merchant and Amira with a parcel coming, both on record before Bob
+     * replies under her comment, so the three things the kind can be after the
+     * move — his, nobody's, hers — are three different values.
+     */
+    async function bothOnRecord() {
+      await ingestMetaComment(comment({ commentId: 'post-9_c1', postId: 'post-9', from: BOB }));
+      await ingestMetaComment(comment({ commentId: 'post-8_c1', postId: 'post-8' }));
+      await db
+        .update(contacts)
+        .set({ isShipper: true })
+        .where(eq(contacts.id, await contactOf(BOB)));
+      await db
+        .update(contacts)
+        .set({ isRecipient: true })
+        .where(eq(contacts.id, await contactOf('1122334455')));
+    }
+
+    it('makes the first comment’s author the requester when it arrives', async () => {
+      const opened = await ingestMetaComment(bobsReply());
+      const bob = await contactOf(BOB);
+      expect(await conversation(opened.conversationId)).toMatchObject({
+        requesterContactId: bob,
+        subject: 'Same here, nobody answers',
+      });
+
+      const root = await ingestMetaComment(comment());
+      const amira = await contactOf('1122334455');
+
+      expect(root).toMatchObject({
+        conversationId: opened.conversationId,
+        createdConversation: false,
+      });
+      // The subject is hers too: it was the opening comment's first line, Bob's.
+      expect(await conversation(opened.conversationId)).toMatchObject({
+        requesterContactId: amira,
+        subject: 'My parcel never came',
+      });
+      expect(await requesterEvents(opened.conversationId)).toEqual([
+        {
+          type: 'requester_changed',
+          actorLabel: 'inbound_facebook',
+          data: { reason: 'thread_root', from: bob, to: amira, rootCommentId: 'post-1_c1' },
+        },
+      ]);
+      expect(await messagesOf(opened.conversationId)).toHaveLength(2);
+
+      // Meta delivers the first comment again: it is a duplicate, and moves nothing.
+      expect(await ingestMetaComment(comment())).toMatchObject({ duplicate: true });
+      expect(await requesterEvents(opened.conversationId)).toHaveLength(1);
+    });
+
+    it('leaves it alone when the first comment came first', async () => {
+      // A reply never takes the ticket from the comment it answers.
+      const opened = await ingestMetaComment(comment());
+      await ingestMetaComment(bobsReply());
+
+      expect((await conversation(opened.conversationId)).requesterContactId).toBe(
+        await contactOf('1122334455'),
+      );
+      expect(await requesterEvents(opened.conversationId)).toEqual([]);
+    });
+
+    it('leaves it alone when the reply that came first was the requester’s own', async () => {
+      const opened = await ingestMetaComment(
+        comment({
+          commentId: 'post-1_c2',
+          parentCommentId: 'post-1_c1',
+          text: 'Any update?',
+          createdAt: LATER,
+        }),
+      );
+      await ingestMetaComment(comment());
+
+      expect(await conversation(opened.conversationId)).toMatchObject({
+        requesterContactId: await contactOf('1122334455'),
+        subject: 'Any update?',
+      });
+      expect(await requesterEvents(opened.conversationId)).toEqual([]);
+    });
+
+    it('reads the kind afresh off the first comment’s author', async () => {
+      await bothOnRecord();
+      const opened = await ingestMetaComment(bobsReply());
+      expect(await requesterKindOf(opened.conversationId)).toBe('merchant');
+
+      await ingestMetaComment(comment());
+      expect(await requesterKindOf(opened.conversationId)).toBe('recipient');
+    });
+
+    // A photo or a sticker gives the subcategoriser no words, but the kind is
+    // read off records, so it is read all the same.
+    it('reads it when the first comment has no words, too', async () => {
+      await bothOnRecord();
+      const opened = await ingestMetaComment(bobsReply());
+
+      await ingestMetaComment(comment({ text: '' }));
+      expect(await requesterKindOf(opened.conversationId)).toBe('recipient');
+    });
+
+    // Bob's own run reads the ticket while he holds it, and comes to write his
+    // kind only after the root has moved it to Amira.
+    it('keeps the replier’s run from writing his kind back over the move', async () => {
+      await bothOnRecord();
+      const amira = await contactOf('1122334455');
+      const opened = await ingestMetaComment(bobsReply());
+      // As Bob's ingest left the ticket, before his run read his record.
+      await db
+        .update(conversations)
+        .set({ requesterKind: null })
+        .where(eq(conversations.id, opened.conversationId));
+
+      let raced: Promise<unknown> | undefined;
+      await db.transaction(async (tx) => {
+        await tx
+          .select({ id: conversations.id })
+          .from(conversations)
+          .where(eq(conversations.id, opened.conversationId))
+          .for('update');
+        raced = subcategoriseFromMessage(
+          {
+            conversationId: opened.conversationId,
+            messageId: opened.messageId,
+            bodyText: 'Same here, nobody answers',
+            kind: 'reply',
+            direction: 'inbound',
+          },
+          'silent',
+        );
+        await untilSomebodyWaits();
+        // What `adoptRootAuthor` writes.
+        await tx
+          .update(conversations)
+          .set({ requesterContactId: amira, requesterKind: null })
+          .where(eq(conversations.id, opened.conversationId));
+      });
+      await raced;
+
+      expect(await requesterKindOf(opened.conversationId)).toBeNull();
+    });
+
+    // Amira's own reply opened the ticket, and an agent is merging her into
+    // another record as her comment arrives. Waiting the merge out and moving
+    // the ticket then would hand it back to the contact merged away.
+    it('leaves the ticket where a merge of the first comment’s author puts it', async () => {
+      const opened = await ingestMetaComment(
+        comment({
+          commentId: 'post-1_c2',
+          parentCommentId: 'post-1_c1',
+          text: 'Any update?',
+          createdAt: LATER,
+        }),
+      );
+      const amira = await contactOf('1122334455');
+      await ingestMetaComment(
+        comment({ commentId: 'post-6_c1', postId: 'post-6', from: '7766554433' }),
+      );
+      const survivor = await contactOf('7766554433');
+
+      let raced: Promise<unknown> | undefined;
+      await db.transaction(async (tx) => {
+        // `mergeContacts`, in its order: both contacts, then their tickets.
+        await tx
+          .select({ id: contacts.id })
+          .from(contacts)
+          .where(inArray(contacts.id, [amira, survivor]))
+          .for('update');
+        await tx
+          .update(conversations)
+          .set({ requesterContactId: survivor })
+          .where(eq(conversations.requesterContactId, amira));
+        raced = ingestMetaComment(comment());
+        await untilSomebodyWaits();
+      });
+      await raced;
+
+      expect((await conversation(opened.conversationId)).requesterContactId).toBe(survivor);
+      expect(await requesterEvents(opened.conversationId)).toEqual([]);
+    });
+
+    // A contact merge re-points the ticket between the root's lookup and its
+    // transaction. The move is decided on the row as the merge left it, and the
+    // event names who it actually replaced.
+    it('names the requester it replaced, not the one it was looked up with', async () => {
+      const CAROL = '5544332211';
+      const opened = await ingestMetaComment(bobsReply());
+      const bob = await contactOf(BOB);
+      await ingestMetaComment(comment({ commentId: 'post-7_c1', postId: 'post-7', from: CAROL }));
+      const carol = await contactOf(CAROL);
+
+      let raced: Promise<unknown> | undefined;
+      await db.transaction(async (tx) => {
+        await tx
+          .select({ id: conversations.id })
+          .from(conversations)
+          .where(eq(conversations.id, opened.conversationId))
+          .for('update');
+        // What merging Bob into Carol does to the tickets he requested.
+        await tx
+          .update(conversations)
+          .set({ requesterContactId: carol })
+          .where(eq(conversations.requesterContactId, bob));
+        raced = ingestMetaComment(comment());
+        await untilSomebodyWaits();
+      });
+      await raced;
+
+      expect(await requesterEvents(opened.conversationId)).toEqual([
+        {
+          type: 'requester_changed',
+          actorLabel: 'inbound_facebook',
+          data: {
+            reason: 'thread_root',
+            from: carol,
+            to: await contactOf('1122334455'),
+            rootCommentId: 'post-1_c1',
+          },
+        },
+      ]);
+    });
+  });
+
   it('writes nothing the second time a comment id arrives', async () => {
     const first = await ingestMetaComment(comment());
     const again = await ingestMetaComment(comment());
@@ -574,6 +838,19 @@ describe('ingestMetaComment', () => {
     expect(await messagesOf(first.conversationId)).toHaveLength(1);
   });
 });
+
+/** Resolves once another session is waiting on a lock this test holds. */
+async function untilSomebodyWaits(): Promise<void> {
+  for (let tries = 0; tries < 200; tries++) {
+    const [row] = await db.execute<{ waiting: number }>(
+      sql`select count(*)::int as waiting from pg_stat_activity
+          where datname = current_database() and wait_event_type = 'Lock'`,
+    );
+    if (row && row.waiting > 0) return;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error('nothing came to wait on the lock this test holds');
+}
 
 /**
  * Deliveries are processed in no order, and a batch with an item that failed is
