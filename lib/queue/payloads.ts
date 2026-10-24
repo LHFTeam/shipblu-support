@@ -72,7 +72,7 @@ function readBound(text: string, side: 'since' | 'until'): Date | string {
 
   let at: Date | 'skipped' | null;
   if (offset) {
-    const named = DateTime.fromISO(`${date}T${time}${offset}`, { setZone: true });
+    const named = DateTime.fromISO(`${date}T${time}${offset}`, { zone: 'utc', setZone: true });
     at = named.isValid ? named.toJSDate() : null;
   } else {
     at = wallClockInstant(`${date}T${time}`, TEAM_TIME_ZONE);

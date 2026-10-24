@@ -105,8 +105,8 @@ describe('parseFieldValue', () => {
 
     // Cairo observes DST again, so the same wall clock is a different instant in
     // August and in December. Hand-adding a constant +02:00 gets one of them wrong.
-    expect(summer.ok && DateTime.fromISO(String(summer.value)).toUTC().hour).toBe(11);
-    expect(winter.ok && DateTime.fromISO(String(winter.value)).toUTC().hour).toBe(12);
+    expect(summer.ok && DateTime.fromISO(String(summer.value), { zone: 'utc' }).hour).toBe(11);
+    expect(winter.ok && DateTime.fromISO(String(winter.value), { zone: 'utc' }).hour).toBe(12);
   });
 
   it('stores the first instance of the hour the autumn change repeats, whatever the season', () => {
