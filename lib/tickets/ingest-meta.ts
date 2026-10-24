@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, isNull } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull, ne } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { channels, conversationEvents, conversations, messages, ticketStatuses } from '@/db/schema';
 import type {
@@ -223,6 +223,26 @@ export async function ingestMetaComment(comment: NormalisedComment): Promise<Met
           { id: conversationId, reopenCount: existing.reopenCount },
           { actorLabel: `inbound_${comment.platform}`, reason: 'customer_replied' },
         );
+      }
+
+      // The thread's own first comment, arriving after a reply under it opened
+      // the ticket — a batch retried whole, or a delivery processed late. Its
+      // author is who the thread is about, and who the requester would have
+      // been had it arrived first, so they become it. Left on the replier,
+      // every reader that answers the requester and nobody else — the
+      // out-of-hours acknowledgement (`answersRequester`), the language
+      // automated replies go out in (`requesterLocale`) and the console's
+      // private reply — would treat the customer as a passer-by on their own
+      // thread, and the passer-by as the customer. A reply's author never
+      // takes it: they are somebody under the customer's comment.
+      if (!comment.parentCommentId) {
+        await adoptRootAuthor(tx, {
+          conversationId,
+          previous: existing.requesterContactId,
+          authorContactId: contactId,
+          platform: comment.platform,
+          rootCommentId: rootId,
+        });
       }
     } else {
       const statusId = await requireDefaultOpenStatusId(tx);
@@ -541,7 +561,53 @@ type FoundConversation = {
   number: number;
   statusCategory: 'open' | 'pending' | 'resolved' | 'closed';
   reopenCount: number;
+  requesterContactId: string;
 };
+
+/**
+ * Makes the author of a thread's root comment the requester of the ticket a
+ * reply under it opened, and says so on the timeline.
+ *
+ * Conditional on the requester still being somebody else, so a second run —
+ * the root's batch retried — writes nothing and records nothing. `previous`
+ * is what the ticket was found with, outside the transaction: the event's
+ * account of who it moved from, where the condition is what decides whether
+ * it moves at all.
+ */
+async function adoptRootAuthor(
+  tx: typeof db,
+  input: {
+    conversationId: string;
+    previous: string;
+    authorContactId: string;
+    platform: NormalisedComment['platform'];
+    rootCommentId: string;
+  },
+): Promise<void> {
+  const moved = await tx
+    .update(conversations)
+    .set({ requesterContactId: input.authorContactId })
+    .where(
+      and(
+        eq(conversations.id, input.conversationId),
+        ne(conversations.requesterContactId, input.authorContactId),
+      ),
+    )
+    .returning({ id: conversations.id });
+  if (moved.length === 0) return;
+
+  await tx.insert(conversationEvents).values({
+    conversationId: input.conversationId,
+    type: 'requester_changed',
+    actorLabel: `inbound_${input.platform}`,
+    data: {
+      reason: 'thread_root',
+      from: input.previous,
+      to: input.authorContactId,
+      rootCommentId: input.rootCommentId,
+    },
+  });
+}
 
 /**
  * The ticket a comment thread is filed on, by its `<platform>:comment:<root>`.
@@ -566,6 +632,7 @@ async function findByExternalId(externalId: string): Promise<FoundConversation |
       number: conversations.number,
       statusCategory: ticketStatuses.category,
       reopenCount: conversations.reopenCount,
+      requesterContactId: conversations.requesterContactId,
     })
     .from(conversations)
     .innerJoin(ticketStatuses, eq(ticketStatuses.id, conversations.statusId))

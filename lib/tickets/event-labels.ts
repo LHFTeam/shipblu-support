@@ -93,6 +93,16 @@ export function describeEvent(type: string, data: Record<string, unknown>): stri
       return data.to
         ? 'made the new owner of its WhatsApp number accountable for the ticket: breaches on it count against them'
         : 'cleared who is accountable for the ticket: its WhatsApp number has no owner now, so breaches count against whoever holds it';
+    /*
+     * Only ingest writes it today: a comment thread's first comment arriving
+     * after a reply under it had opened the ticket. Said, because the header
+     * now names somebody other than the person it named a minute ago, and the
+     * replier's earlier comments stop counting as the customer's.
+     */
+    case 'requester_changed':
+      return data.reason === 'thread_root'
+        ? 'made the author of the thread’s first comment the requester: a reply under it had arrived first and opened the ticket'
+        : 'changed the requester';
     case 'unassigned':
       return 'unassigned the ticket';
     case 'group_changed':

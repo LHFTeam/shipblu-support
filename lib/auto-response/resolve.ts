@@ -128,9 +128,12 @@ export type MessageContext = {
  *
  * On a public comment thread anybody may reply under the customer's comment,
  * and ingest files the reply on the customer's ticket — threading on the root
- * is what keeps one comment thread on one ticket. The requester is whoever's
- * comment on the thread was filed first, which is the root's author unless the
- * root failed to ingest before a reply to it did. The acknowledgement is
+ * is what keeps one comment thread on one ticket. The requester is the root
+ * comment's author: a reply stored before the root opens the ticket under its
+ * own author, and the root, when it arrives, takes it back (`adoptRootAuthor`
+ * in `lib/tickets/ingest-meta.ts`). Only a root that never arrives — posted
+ * before the webhook was subscribed — leaves the replier as the requester, and
+ * then the replier is the only one writing to us on it. The acknowledgement is
  * addressed to the requester and posted on that thread, so a passer-by's
  * comment must neither earn it nor spend the closed stretch the requester's
  * own next comment would. A direct message, an email or a chat has

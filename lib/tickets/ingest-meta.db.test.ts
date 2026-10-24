@@ -560,6 +560,94 @@ describe('ingestMetaComment', () => {
     ).toEqual([{ identifier: 'unknown:post-1_c1' }]);
   });
 
+  /*
+   * Deliveries are processed in no order, and a batch with an item that failed
+   * is run again whole, so a passer-by's reply under the customer's comment
+   * can be stored before the comment itself. The reply opens the ticket under
+   * its author; the comment, when it arrives, hands it to the customer.
+   */
+  describe('a thread whose first comment arrives after a reply to it', () => {
+    const BOB = '9988776655';
+    const bobsReply = (overrides: Partial<NormalisedComment> = {}) =>
+      comment({
+        commentId: 'post-1_c2',
+        parentCommentId: 'post-1_c1',
+        from: BOB,
+        fromName: 'Bob',
+        text: 'Same here, nobody answers',
+        createdAt: LATER,
+        ...overrides,
+      });
+
+    async function contactOf(identifier: string) {
+      const [row] = await db
+        .select({ id: contactIdentities.contactId })
+        .from(contactIdentities)
+        .where(eq(contactIdentities.identifier, identifier));
+      return row!.id;
+    }
+
+    function requesterEvents(conversationId: string) {
+      return eventsOf(conversationId).then((events) =>
+        events.filter((event) => event.type === 'requester_changed'),
+      );
+    }
+
+    it('makes the first comment’s author the requester when it arrives', async () => {
+      const opened = await ingestMetaComment(bobsReply());
+      const bob = await contactOf(BOB);
+      expect((await conversation(opened.conversationId)).requesterContactId).toBe(bob);
+
+      const root = await ingestMetaComment(comment());
+      const amira = await contactOf('1122334455');
+
+      expect(root).toMatchObject({
+        conversationId: opened.conversationId,
+        createdConversation: false,
+      });
+      expect((await conversation(opened.conversationId)).requesterContactId).toBe(amira);
+      expect(await requesterEvents(opened.conversationId)).toEqual([
+        {
+          type: 'requester_changed',
+          actorLabel: 'inbound_facebook',
+          data: { reason: 'thread_root', from: bob, to: amira, rootCommentId: 'post-1_c1' },
+        },
+      ]);
+      expect(await messagesOf(opened.conversationId)).toHaveLength(2);
+    });
+
+    it('moves it once, however often the first comment is delivered', async () => {
+      const opened = await ingestMetaComment(bobsReply());
+      await ingestMetaComment(comment());
+      await ingestMetaComment(comment());
+
+      expect(await requesterEvents(opened.conversationId)).toHaveLength(1);
+    });
+
+    it('leaves it alone when the first comment came first, or is the requester’s own', async () => {
+      // In order: a reply never takes the ticket from the comment it answers.
+      const inOrder = await ingestMetaComment(comment());
+      await ingestMetaComment(bobsReply());
+      expect((await conversation(inOrder.conversationId)).requesterContactId).toBe(
+        await contactOf('1122334455'),
+      );
+      expect(await requesterEvents(inOrder.conversationId)).toEqual([]);
+
+      // Out of order, but the reply was the customer's own: nothing to move.
+      const own = await ingestMetaComment(
+        comment({
+          commentId: 'post-2_c2',
+          parentCommentId: 'post-2_c1',
+          postId: 'post-2',
+          text: 'Any update?',
+          createdAt: LATER,
+        }),
+      );
+      await ingestMetaComment(comment({ commentId: 'post-2_c1', postId: 'post-2' }));
+      expect(await requesterEvents(own.conversationId)).toEqual([]);
+    });
+  });
+
   it('writes nothing the second time a comment id arrives', async () => {
     const first = await ingestMetaComment(comment());
     const again = await ingestMetaComment(comment());

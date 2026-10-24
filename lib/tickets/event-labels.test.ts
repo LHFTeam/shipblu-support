@@ -102,6 +102,13 @@ describe('describeEvent', () => {
     );
   });
 
+  it('says why the requester moved to the author of the thread’s first comment', () => {
+    expect(describeEvent('requester_changed', { reason: 'thread_root' })).toBe(
+      'made the author of the thread’s first comment the requester: a reply under it had arrived first and opened the ticket',
+    );
+    expect(describeEvent('requester_changed', {})).toBe('changed the requester');
+  });
+
   it('explains a skipped assignment, and falls back to the raw reason it does not know', () => {
     expect(describeEvent('assignment_skipped', { reason: 'all_at_capacity' })).toBe(
       'could not assign it: everybody available was at their ticket limit',
