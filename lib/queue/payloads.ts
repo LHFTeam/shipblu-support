@@ -1,18 +1,97 @@
+import { DateTime } from 'luxon';
 import { z } from 'zod';
 import { SURVEY_TRIGGERS } from '@/lib/csat/decision';
+import { dayWindow, wallClockInstant } from '@/lib/hours/wall-clock';
+import { TEAM_TIME_ZONE } from '@/lib/hours/zone';
 import { LOCALES } from '@/lib/kb/locale';
 import { RERUNNABLE_STEPS } from '@/db/schema';
 import { PermanentJobError, type ClaimedJob, type JobType } from '@/lib/queue';
 
 /**
- * A bound on a scan, handed straight to `new Date()`. Checked as something
- * `Date` can read, because what `npm run job` makes of `since=20260901` is a
- * number, which `new Date` reads as milliseconds into 1970, and a typo is an
- * Invalid Date that fails only when the query is bound.
+ * A scan's bounds, typed as text and handed to the handler as instants read on
+ * the team's clock. `since` is inclusive and `until` exclusive, so two runs that
+ * share an instant, written to the millisecond, neither repeat nor skip the rows
+ * on it. A date names a whole day at either end, so dates chain as
+ * `until=2026-10-07` and then `since=2026-10-08`, as `rollup_metrics` days do.
+ *
+ * The handlers used to call `new Date()` on the text, which reads
+ * `2026-10-01T00:00` in the host's zone and `2026-10-01` as UTC midnight. So one
+ * command meant 00:00Z on Render, which sets no `TZ`, and 21:00Z the evening
+ * before on a laptop in Cairo, and neither was the start of 1 October where the
+ * team works and every report cuts its days (`docs/PROJECT-STATE.md` §6.102).
+ * Read once here, a handler is given a `Date` and has nothing left to misread:
+ *
+ * - a time ending in `Z` or an offset is the instant it names;
+ * - a time without one is that time in Cairo, through `wallClockInstant`;
+ * - a date alone is that whole Cairo day, through `dayWindow`: `since` from its
+ *   start, `until` to its end. `since=2026-10-01 until=2026-10-07` covers the
+ *   7th, as `rollup_metrics from=2026-10-01 to=2026-10-07` does.
+ *
+ * Only those shapes, with a space allowed for the `T` as Postgres prints a
+ * timestamp. `Date.parse` read anything else it could, `Oct 1 2026` in the
+ * host's zone and `2026-02-30` as 2 March. A number never reaches here as text:
+ * `npm run job` makes `since=20260901` a number, which `new Date` read as
+ * milliseconds into 1970.
  */
-const instant = z.string().refine((value) => !Number.isNaN(Date.parse(value)), {
-  message: 'expected a date or a time Date can read',
-});
+function scanBound(side: 'since' | 'until') {
+  return z.string().transform((text, ctx) => {
+    const read = readBound(text, side);
+    if (typeof read === 'string') {
+      ctx.addIssue(read);
+      return z.NEVER;
+    }
+    return read;
+  });
+}
+
+const scanSince = scanBound('since');
+const scanUntil = scanBound('until');
+
+// Hours 00-23, so `T24:00` is not a second spelling of the next midnight, and
+// an offset held to hours 00-23 and minutes 00-59, as `Date.parse` held it:
+// luxon checks neither, and reads `+03:60` as +04:00.
+const BOUND =
+  /^(\d{4}-\d{2}-\d{2})(?:[T ]((?:[01]\d|2[0-3]):\d{2}(?::\d{2}(?:\.(\d+))?)?)(Z|[+-](?:[01]\d|2[0-3])(?::?[0-5]\d)?)?)?$/i;
+
+const UNREADABLE =
+  `expected 2026-10-01 or 2026-10-01T09:30 in ${TEAM_TIME_ZONE} time, ` +
+  `or a time ending in Z or an offset such as +03:00`;
+
+/** The instant `text` bounds a scan at, or the sentence refusing it. */
+function readBound(text: string, side: 'since' | 'until'): Date | string {
+  const parts = BOUND.exec(text);
+  const date = parts?.[1];
+  if (!parts || !date) return UNREADABLE;
+  const [, , time, fraction = '', offset] = parts;
+
+  if (!time) {
+    const day = dayWindow(date, TEAM_TIME_ZONE);
+    if (!day) return UNREADABLE;
+    return side === 'since' ? day.start : day.end;
+  }
+
+  let at: Date | 'skipped' | null;
+  if (offset) {
+    const named = DateTime.fromISO(`${date}T${time}${offset}`, { zone: 'utc', setZone: true });
+    at = named.isValid ? named.toJSDate() : null;
+  } else {
+    at = wallClockInstant(`${date}T${time}`, TEAM_TIME_ZONE);
+  }
+  if (at === null) return UNREADABLE;
+  if (at === 'skipped') {
+    return (
+      `${TEAM_TIME_ZONE}'s clocks skipped ${text} when they went forward; ` +
+      `give the offset it was meant at, or the date alone for that whole day`
+    );
+  }
+
+  // A `Date` holds milliseconds, and luxon drops the digits past them, which
+  // moves a bound earlier. That only widens `since`; it would narrow `until`,
+  // so a bound pasted from a `created_at` stopped short of rows it named. Every
+  // backfill here may see a row twice, so the millisecond after it is the
+  // safe side, never the one before.
+  return side === 'until' && /[1-9]/.test(fraction.slice(3)) ? new Date(at.getTime() + 1) : at;
+}
 
 /**
  * What a job's payload must hold, written once for the code that enqueues it
@@ -161,18 +240,18 @@ export const JOB_PAYLOADS = {
   // on a payload code writes; on one an operator types, `dryrun=true` would be
   // dropped and the run would write.
   backfill_shipment_links: z.strictObject({
-    /** ISO timestamps bounding which messages are scanned. */
-    since: instant.optional(),
-    until: instant.optional(),
+    /** Which messages are scanned, by when they were stored: see `scanBound`. */
+    since: scanSince.optional(),
+    until: scanUntil.optional(),
     /** Scan only, write nothing. Useful for checking a new pattern's yield. */
     dryRun: z.boolean().optional(),
     /** Stop after this many messages. Absent means the whole archive. */
     limit: z.number().int().positive().optional(),
   }),
   backfill_message_locations: z.strictObject({
-    /** ISO timestamps bounding which messages are scanned. */
-    since: instant.optional(),
-    until: instant.optional(),
+    /** Which messages are scanned, by when they were stored: see `scanBound`. */
+    since: scanSince.optional(),
+    until: scanUntil.optional(),
     /** Scan and report, write nothing. */
     dryRun: z.boolean().optional(),
     /** Stop after this many candidate messages. Absent means the whole archive. */
@@ -186,9 +265,9 @@ export const JOB_PAYLOADS = {
      */
     runLabel: z.union([z.string(), z.number().transform(String)]).optional(),
     limit: z.number().int().positive().optional(),
-    /** ISO timestamps bounding which messages are considered. */
-    since: instant.optional(),
-    until: instant.optional(),
+    /** Which messages are considered, by when they were stored: see `scanBound`. */
+    since: scanSince.optional(),
+    until: scanUntil.optional(),
     /** Comma-separated channels, replacing the default "everything but the bot". */
     channels: z.string().optional(),
     /** Send the preceding inbound messages as context. On by default. */

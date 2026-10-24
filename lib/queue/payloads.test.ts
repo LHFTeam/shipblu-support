@@ -1,6 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { DateTime } from 'luxon';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import { enqueue, PermanentJobError, type ClaimedJob } from '@/lib/queue';
+import { cairo } from '@/lib/testing/time';
 import { JOB_PAYLOADS, parseJobPayload } from './payloads';
 
 function job(payload: Record<string, unknown>): ClaimedJob {
@@ -163,20 +165,6 @@ describe('the backfills and the knowledge-base passes', () => {
     expect(() => parse(type, { dryRun: 'yes' })).toThrow(PermanentJobError);
   });
 
-  it('takes a scan bound Date can read, and refuses one it would misread', () => {
-    expect(parse('backfill_shipment_links', { since: '2026-09-01' })).toEqual({
-      since: '2026-09-01',
-    });
-    expect(parse('backfill_message_locations', { until: '2026-09-20T12:00:00Z' })).toEqual({
-      until: '2026-09-20T12:00:00Z',
-    });
-    // `since=20260901` at the command line: a number, milliseconds into 1970.
-    expect(() => parse('backfill_shipment_links', { since: 20260901 })).toThrow(PermanentJobError);
-    expect(() => parse('backfill_subcategorise_ai', { until: 'yesterday' })).toThrow(
-      PermanentJobError,
-    );
-  });
-
   // Review on #252: a misspelt option was dropped, and the job ran for real.
   it('refuses an option it does not know, so a misspelt dryRun does not write', () => {
     expect(() => parse('normalise_kb_formatting', { dryrun: true })).toThrow(PermanentJobError);
@@ -207,6 +195,164 @@ describe('the backfills and the knowledge-base passes', () => {
   });
 });
 
+/**
+ * `since=2026-10-01T00:00` was handed to `new Date()`, which reads a time with
+ * no offset in the host's zone: 00:00Z on Render, 21:00Z the evening before in
+ * Cairo, and neither one Cairo's midnight. So every case runs on a host in each
+ * zone, and the answer it expects is built from Cairo wall-clock time.
+ */
+describe('a scan bound', () => {
+  const BOUNDED = [
+    'backfill_shipment_links',
+    'backfill_message_locations',
+    'backfill_subcategorise_ai',
+  ] as const;
+  const read = (text: unknown, type: (typeof BOUNDED)[number] = 'backfill_shipment_links') =>
+    parseJobPayload(job({ since: text, until: text }), type);
+  const since = (text: unknown) => read(text).since;
+  const until = (text: unknown) => read(text).until;
+
+  const hostZone = process.env.TZ;
+  afterEach(() => {
+    vi.useRealTimers();
+    // Assigning undefined would set the zone to the text "undefined".
+    if (hostZone === undefined) delete process.env.TZ;
+    else process.env.TZ = hostZone;
+  });
+
+  describe.each([
+    ['UTC', '2026-10-01T00:00:00.000Z'],
+    ['Africa/Cairo', '2026-09-30T21:00:00.000Z'],
+  ])('on a host in %s', (zone, hostMidnight) => {
+    beforeEach(() => {
+      process.env.TZ = zone;
+    });
+
+    // The trap itself, so the cases below cannot pass on a host that never
+    // changed zone.
+    it("reads the text as `new Date` would on this host's clock", () => {
+      expect(new Date('2026-10-01T00:00').toISOString()).toBe(hostMidnight);
+    });
+
+    it('reads a time with no offset in Cairo, in summer and in winter, at either end', () => {
+      expect(read('2026-10-01T00:00')).toEqual({
+        since: cairo('2026-10-01T00:00'),
+        until: cairo('2026-10-01T00:00'),
+      });
+      expect(since('2026-10-01T09:30:15.250')).toEqual(cairo('2026-10-01T09:30:15.250'));
+      expect(until('2026-01-15T09:30')).toEqual(cairo('2026-01-15T09:30'));
+      // As Postgres prints one, pasted from a query.
+      expect(since('2026-01-15 09:30:00')).toEqual(cairo('2026-01-15T09:30'));
+    });
+
+    it('reads a date alone as that whole Cairo day: since from its start, until to its end', () => {
+      // As `rollup_metrics from=2026-10-01 to=2026-10-07` covers the 7th.
+      expect(since('2026-10-01')).toEqual(cairo('2026-10-01T00:00'));
+      expect(until('2026-10-07')).toEqual(cairo('2026-10-08T00:00'));
+      expect(read('2026-01-15')).toEqual({
+        since: cairo('2026-01-15T00:00'),
+        until: cairo('2026-01-16T00:00'),
+      });
+      // 24 April 2026 has no 00:00: the clocks went from 00:00 to 01:00, so
+      // the 23rd ends and the 24th begins at the jump.
+      expect(until('2026-04-23')).toEqual(cairo('2026-04-24T01:00'));
+      expect(since('2026-04-24')).toEqual(cairo('2026-04-24T01:00'));
+      // 29 October has 25 hours, the one before its midnight repeated.
+      expect(read('2026-10-29')).toEqual({
+        since: cairo('2026-10-29T00:00'),
+        until: cairo('2026-10-30T00:00'),
+      });
+    });
+
+    it('takes Z or an offset as the instant it names', () => {
+      expect(since('2026-10-01T00:00Z')).toEqual(new Date('2026-10-01T00:00:00Z'));
+      expect(until('2026-10-01T00:00:00+03:00')).toEqual(new Date('2026-09-30T21:00:00Z'));
+      expect(since('2026-01-15T09:30-0500')).toEqual(new Date('2026-01-15T14:30:00Z'));
+    });
+
+    // A `Date` holds milliseconds. Cut toward the past, an `until` pasted from a
+    // `created_at` would stop short of rows it covers.
+    it('widens a bound past a millisecond outward, never inward', () => {
+      expect(read('2026-01-15 09:30:00.123456+00')).toEqual({
+        since: new Date('2026-01-15T09:30:00.123Z'),
+        until: new Date('2026-01-15T09:30:00.124Z'),
+      });
+      expect(until('2026-01-15T09:30:00.1239')).toEqual(cairo('2026-01-15T09:30:00.124'));
+      // Digits that add nothing move nothing.
+      expect(until('2026-01-15 09:30:00.123000+00')).toEqual(new Date('2026-01-15T09:30:00.123Z'));
+    });
+
+    it('refuses a time the spring change skipped, naming what to give instead', () => {
+      expect(() => since('2026-04-24T00:30')).toThrow(PermanentJobError);
+      expect(() => until('2026-04-24T00:00')).toThrow(/clocks skipped 2026-04-24T00:00 /);
+      // An offset says which instant was meant.
+      expect(since('2026-04-24T00:30+02:00')).toEqual(new Date('2026-04-23T22:30:00Z'));
+    });
+
+    // Written out in UTC, once, rather than through `cairo()`: the expectation
+    // must not come from luxon's own choice between the two instances, which is
+    // what this case freezes out, and `cairo()` left that choice to luxon until
+    // #409.
+    it('takes the first instance of the hour the autumn change repeats, whenever it runs', () => {
+      vi.useFakeTimers({ toFake: ['Date'] });
+
+      for (const now of ['2026-07-15T12:00:00Z', '2026-11-15T12:00:00Z']) {
+        vi.setSystemTime(new Date(now));
+        expect(since('2026-10-29T23:30')).toEqual(new Date('2026-10-29T20:30:00Z'));
+        expect(until('2026-10-29T23:30+02:00')).toEqual(new Date('2026-10-29T21:30:00Z'));
+        expect(read('2026-10-29')).toEqual({
+          since: new Date('2026-10-28T21:00:00Z'),
+          until: new Date('2026-10-29T22:00:00Z'),
+        });
+      }
+      // Luxon itself answers the second in winter, so the loop above did reach
+      // the case it guards against.
+      expect(DateTime.fromISO('2026-10-29T23:30', { zone: 'Africa/Cairo' }).offset).toBe(120);
+    });
+
+    it.each(BOUNDED)('hands %s a Date for both ends', (type) => {
+      expect(read('2026-10-01', type)).toEqual({
+        since: cairo('2026-10-01T00:00'),
+        until: cairo('2026-10-02T00:00'),
+      });
+    });
+  });
+
+  it.each([
+    // `since=20260901` at the command line: a number, milliseconds into 1970.
+    20260901,
+    'yesterday',
+    // Each read by `Date.parse`, in the host's zone or not as written.
+    'Oct 1 2026',
+    '2026/10/01',
+    '2026-02-30',
+    '2026-10',
+    // Refused by `Date.parse` too, and kept so the shape stays as narrow.
+    '09:30',
+    '2026-10-01T09:30+03:00 ',
+    '2026-10-01+03:00',
+    '2026-10-01T25:00',
+    // Hour 24, which luxon reads as the next midnight: a second spelling of a
+    // date alone, and on 23 April a midnight the clocks skipped.
+    '2026-10-01T24:00',
+    '2026-04-23T24:00',
+    // Refused by `Date.parse` and read by luxon, which checks no offset's range
+    // and takes +03:60 as +04:00.
+    '2026-10-01T00:00+24:00',
+    '2026-10-01T00:00+03:60',
+    '2026-10-01T00:00+0360',
+    '2026-10-01T00:00+99:99',
+  ])('refuses %o rather than guessing what it meant', (text) => {
+    expect(() => read(text)).toThrow(PermanentJobError);
+  });
+
+  it('says what it expected when it refuses one', () => {
+    expect(() => read('Oct 1 2026')).toThrow(
+      /expected 2026-10-01 or 2026-10-01T09:30 in Africa\/Cairo time/,
+    );
+  });
+});
+
 // Never called: `tsc` is the assertion. Each line below the directive must fail
 // to compile, and would compile if `enqueue` were typed `Record<string, unknown>`.
 async function enqueueIsTypedFromTheSchema(messageId: string) {
@@ -222,6 +368,10 @@ async function enqueueIsTypedFromTheSchema(messageId: string) {
   await enqueue('fetch_meta_profile', { contactId: 'c', platform: 'email', userId: 'u' });
   // @ts-expect-error a moderation that does not exist
   await enqueue('moderate_meta_comment', { messageId, action: 'pin' });
+  // A bound crosses jsonb as text and becomes an instant only on the far side.
+  await enqueue('backfill_shipment_links', { since: '2026-10-01' });
+  // @ts-expect-error a bound already read, by somebody's clock
+  await enqueue('backfill_shipment_links', { since: new Date() });
 }
 void enqueueIsTypedFromTheSchema;
 

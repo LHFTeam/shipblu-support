@@ -1,4 +1,4 @@
-import { and, asc, eq, exists, gte, inArray, isNull, lte, ne, notInArray, sql } from 'drizzle-orm';
+import { and, asc, eq, exists, gte, inArray, isNull, lt, ne, notInArray, sql } from 'drizzle-orm';
 import type { SQL } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { aiSubcategoryRuns, conversationSubcategories, conversations, messages } from '@/db/schema';
@@ -178,8 +178,8 @@ async function candidateFilter(payload: Payload, runLabel: string): Promise<SQL[
   if (channels) where.push(inArray(conversations.channel, channels));
   else where.push(notInArray(conversations.channel, readOnlyChannels()));
 
-  if (payload.since) where.push(gte(messages.createdAt, new Date(payload.since)));
-  if (payload.until) where.push(lte(messages.createdAt, new Date(payload.until)));
+  if (payload.since) where.push(gte(messages.createdAt, payload.since));
+  if (payload.until) where.push(lt(messages.createdAt, payload.until));
 
   if (payload.onlyUnclassified === true) {
     where.push(

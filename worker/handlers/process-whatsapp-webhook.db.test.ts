@@ -456,7 +456,9 @@ describe('processWhatsAppWebhook: a number on the WhatsApp Business app', () => 
                   {
                     from: '12125557890',
                     id: 'wamid.april',
-                    timestamp: String(DateTime.fromISO('2026-04-02T10:00:00Z').toSeconds()),
+                    timestamp: String(
+                      DateTime.fromISO('2026-04-02T10:00:00Z', { zone: 'utc' }).toSeconds(),
+                    ),
                     type: 'text',
                     text: { body: 'Hello?' },
                   },
@@ -474,7 +476,7 @@ describe('processWhatsAppWebhook: a number on the WhatsApp Business app', () => 
     await coexistenceChannel();
     const CUSTOMER = '201001234567';
     const BUSINESS = '15550783881';
-    const seconds = (iso: string) => String(DateTime.fromISO(iso).toSeconds());
+    const seconds = (iso: string) => String(DateTime.fromISO(iso, { zone: 'utc' }).toSeconds());
 
     await deliver(
       value('messages', {

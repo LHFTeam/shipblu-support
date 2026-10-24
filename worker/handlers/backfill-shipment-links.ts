@@ -1,4 +1,4 @@
-import { and, asc, eq, gte, lte, type SQL } from 'drizzle-orm';
+import { and, asc, eq, gte, lt, type SQL } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { conversations, messages } from '@/db/schema';
 import type { ClaimedJob } from '@/lib/queue';
@@ -48,8 +48,8 @@ export async function backfillShipmentLinks(job: ClaimedJob): Promise<void> {
   const dryRun = payload.dryRun === true;
 
   const bounds: SQL[] = [];
-  if (payload.since) bounds.push(gte(messages.createdAt, new Date(payload.since)));
-  if (payload.until) bounds.push(lte(messages.createdAt, new Date(payload.until)));
+  if (payload.since) bounds.push(gte(messages.createdAt, payload.since));
+  if (payload.until) bounds.push(lt(messages.createdAt, payload.until));
 
   // Per channel, not just totalled.
   //

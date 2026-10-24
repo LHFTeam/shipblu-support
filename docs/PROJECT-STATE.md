@@ -6627,8 +6627,9 @@ dryRun=true`, then without, gives those two theirs back from their
       `category_metrics_daily` and `root_cause_metrics_daily`: a database probe
       with one ticket at 2026-04-24T21:30Z found it on both. Each of the three
       rollups wrote its day bounds out by hand, and this was the copy that
-      drifted, so all three now cut their day through `dayWindow` in
-      `lib/reports/rollup.ts`, each of whose ends is a `startOf('day')`. The
+      drifted, so all three now cut their day through `dayWindow`, in
+      `lib/reports/rollup.ts` then and `lib/hours/wall-clock.ts` since §6.102,
+      each of whose ends is a `startOf('day')`. The
       fall-back day (24:00 back to 23:00 on the last Thursday of
       October) is right either way, because its midnight exists. Production
       held none of the affected days when this was fixed, since the subcategory
@@ -6644,6 +6645,77 @@ dryRun=true`, then without, gives those two theirs back from their
       skipped it without a word. It now counts the span on the calendar dates, as
       `windowDays` does in UTC, and so should anything else counting days:
       never on the instants between them.
+
+102.  **A scan bound typed at `npm run job` named a different instant on each
+      host.** _2026-10-23._ `since` and `until` on `backfill_shipment_links`,
+      `backfill_message_locations` and `backfill_subcategorise_ai` were checked
+      only as something `Date.parse` could read, and each handler then called
+      `new Date(payload.since)`. ECMAScript reads a date-time with no offset in
+      the host's zone and a date alone as UTC midnight, so
+      `since=2026-10-01T00:00` was 00:00Z on Render, which sets no `TZ`, and
+      21:00Z the evening before on a laptop in Cairo. Neither was Cairo's
+      midnight, where the team names its times and every report cuts its day.
+      A run under `TZ=UTC` and another under `TZ=Africa/Cairo` confirmed it.
+
+      `scanBound` in `lib/queue/payloads.ts` now reads the text once, and the
+      handlers receive a `Date`:
+
+      - A time with no offset is read in Cairo, through `wallClockInstant` in
+        `lib/hours/wall-clock.ts`.
+      - A date alone is that whole Cairo day, through `dayWindow` beside it:
+        `since` from its start and `until` to its end, as `rollup_metrics to=`
+        covers its last day.
+      - A `Z` or an offset is taken as given.
+
+      `until` is exclusive (`lt`), so two runs sharing an instant written to
+      the millisecond neither repeat nor skip the rows on it. A date names a
+      whole day at either end, so dates chain as `until=2026-10-07` and then
+      `since=2026-10-08`. A time the spring change skips is refused, and one
+      the autumn change repeats takes its first instance.
+
+      `wallClockInstant` works the instance out from the zone's offsets rather
+      than asking `DateTime.fromISO(text, { zone })`. Luxon chooses between the
+      two instances by the offset in force on the day the code runs (#409), so
+      a bound in that hour would have moved by an hour between summer and
+      winter. A datetime custom field (`lib/tickets/custom-fields-parse.ts`)
+      was read the same way, so an answer of 23:30 on 29 October stored the
+      second instance when sent in winter and the first in summer; it goes
+      through `wallClockInstant` too, which takes only a date and a time with
+      nothing after it: text naming an offset or a zone, a time with no date,
+      and a time the spring change skips keep luxon's reading. A list of the
+      offset spellings to turn away was one short at first; luxon also reads a
+      bracketed zone (`…+03:00[Africa/Cairo]`), and that was read twice.
+
+      A bound with digits past the millisecond is widened outward: an `until`
+      a millisecond later, since luxon drops them. Without that, an `until`
+      pasted from a `created_at` stopped short of rows it named, and every
+      backfill here tolerates seeing a row twice.
+
+      `Date.parse` also read `Oct 1 2026` and `2026/10/01` in the host's zone,
+      and rolled `2026-02-30` over to 2 March. Those are now refused, as is
+      anything that is not an ISO date or date-time, hour 24 and an offset out
+      of range.
+
+      Whether a past run passed a bound with a time cannot be read back. On
+      2026-10-23 production's `jobs` table held no row of any of the three
+      types, `cleanup` deletes completed rows after seven days, and
+      `npm run job` writes none. Nothing in the repository passes one: the
+      admin buttons and CI's database job send no bound, and no doc shows one.
+
+103.  **The test helper's repeated autumn hour depended on the season the suite
+      ran in.** _2026-10-23._ `cairo()` in `lib/testing/time.ts` documented that
+      a time the autumn change repeats resolves to its first instance, and left
+      the choice to luxon's `fromISO`, which makes it by the offset in force on
+      the day it runs (§6.102). Two tests written in summer relied on the first
+      instance: its own case and the `dateIn` case for the night daylight
+      saving ends, in `lib/reports/rollup.test.ts`. So CI would have gone red
+      from 2026-10-29 21:00 UTC until the end of April, in any host zone. The
+      helper now steps back by the change itself whenever an earlier instant
+      reads the same fields, and a case freezes the clock in winter to hold it
+      there. `DateTime.local(…)` and `DateTime.utc(…)` with date parts take
+      that offset from one instant instead, that of the first such call in any
+      zone, and keep it per zone, so a test building its instants that way
+      would hold whichever season the suite started in.
 
 ### Tooling notes for this environment
 

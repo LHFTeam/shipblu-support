@@ -1,7 +1,8 @@
 import { sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import type { subcategoryMetricsDaily, rootCauseMetricsDaily } from '@/db/schema';
-import { dayWindow, type ReportingContext } from './rollup';
+import { dayWindow } from '@/lib/hours/wall-clock';
+import type { ReportingContext } from './rollup';
 import { logger } from '@/lib/log';
 
 const log = logger('rollup_metrics');
