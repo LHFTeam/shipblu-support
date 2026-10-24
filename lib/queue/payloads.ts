@@ -10,7 +10,9 @@ import { PermanentJobError, type ClaimedJob, type JobType } from '@/lib/queue';
 /**
  * A scan's bounds, typed as text and handed to the handler as instants read on
  * the team's clock. `since` is inclusive and `until` exclusive, so two runs that
- * share a bound neither repeat nor skip the rows on it.
+ * share an instant, written to the millisecond, neither repeat nor skip the rows
+ * on it. A date names a whole day at either end, so dates chain as
+ * `until=2026-10-07` and then `since=2026-10-08`, as `rollup_metrics` days do.
  *
  * The handlers used to call `new Date()` on the text, which reads
  * `2026-10-01T00:00` in the host's zone and `2026-10-01` as UTC midnight. So one

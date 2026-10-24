@@ -6667,9 +6667,11 @@ dryRun=true`, then without, gives those two theirs back from their
         covers its last day.
       - A `Z` or an offset is taken as given.
 
-      `until` is exclusive (`lt`), so two runs sharing a bound neither repeat
-      nor skip the rows on it. A time the spring change skips is refused, and
-      one the autumn change repeats takes its first instance.
+      `until` is exclusive (`lt`), so two runs sharing an instant written to
+      the millisecond neither repeat nor skip the rows on it. A date names a
+      whole day at either end, so dates chain as `until=2026-10-07` and then
+      `since=2026-10-08`. A time the spring change skips is refused, and one
+      the autumn change repeats takes its first instance.
 
       `wallClockInstant` works the instance out from the zone's offsets rather
       than asking `DateTime.fromISO(text, { zone })`. Luxon chooses between the
@@ -6678,8 +6680,11 @@ dryRun=true`, then without, gives those two theirs back from their
       winter. A datetime custom field (`lib/tickets/custom-fields-parse.ts`)
       was read the same way, so an answer of 23:30 on 29 October stored the
       second instance when sent in winter and the first in summer; it goes
-      through `wallClockInstant` too, and keeps luxon's reading for text naming
-      its own offset or a time the spring change skips.
+      through `wallClockInstant` too, which takes only a date and a time with
+      nothing after it: text naming an offset or a zone, a time with no date,
+      and a time the spring change skips keep luxon's reading. A list of the
+      offset spellings to turn away was one short at first; luxon also reads a
+      bracketed zone (`…+03:00[Africa/Cairo]`), and that was read twice.
 
       A bound with digits past the millisecond is widened outward: an `until`
       a millisecond later, since luxon drops them. Without that, an `until`

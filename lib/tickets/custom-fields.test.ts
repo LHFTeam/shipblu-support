@@ -134,6 +134,20 @@ describe('parseFieldValue', () => {
       ok: true,
       value: '2026-08-30T14:00:00.000+03:00',
     });
+    expect(parseFieldValue(field({ type: 'datetime' }), '2026-08-30T14:00[Asia/Tokyo]')).toEqual({
+      ok: true,
+      value: '2026-08-30T08:00:00.000+03:00',
+    });
+  });
+
+  it("dates a datetime sent with no date by Cairo's today, as it always did", () => {
+    // 01:30 on 16 July in Cairo, still the 15th in UTC.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-07-15T22:30:00Z'));
+    expect(parseFieldValue(field({ type: 'datetime' }), '23:30')).toEqual({
+      ok: true,
+      value: '2026-07-16T23:30:00.000+03:00',
+    });
   });
 
   it('refuses a datetime it cannot read', () => {

@@ -107,6 +107,12 @@ describe('wallClockInstant', () => {
   it('answers null for text that is not a wall-clock time, or a zone that is not one', () => {
     expect(wallClockInstant('2026-08-15T14:30+03:00', CAIRO)).toBeNull();
     expect(wallClockInstant('2026-08-15T14:30Z', CAIRO)).toBeNull();
+    // Each read by luxon with the zone it names and then, as a wall clock, off
+    // by that offset again; and a time with no date dated by UTC's today.
+    expect(wallClockInstant('2026-08-15T14:30+03:00[Africa/Cairo]', CAIRO)).toBeNull();
+    expect(wallClockInstant('2026-08-15T14:30[Asia/Tokyo]', CAIRO)).toBeNull();
+    expect(wallClockInstant('14:30', CAIRO)).toBeNull();
+    expect(wallClockInstant('14:30Z', CAIRO)).toBeNull();
     expect(wallClockInstant('2026-02-30T09:00', CAIRO)).toBeNull();
     expect(wallClockInstant('half past nine', CAIRO)).toBeNull();
     expect(wallClockInstant('2026-08-15T14:30', 'Africa/Atlantis')).toBeNull();

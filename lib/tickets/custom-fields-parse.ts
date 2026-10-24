@@ -183,8 +183,9 @@ function parseByType(def: TicketFieldDef, raw: string | string[]): ParsedValue {
       // that a rule can order against `now`. In the hour the autumn change
       // repeats it takes the first instance whenever the form is sent, where
       // luxon took whichever the season of the submission favoured (§6.102).
-      // Text it does not read as a wall clock, one naming its own offset or a
-      // time the spring change skips, is read by luxon as it always was.
+      // Text it does not read as a wall clock, one naming an offset or a zone, a
+      // time with no date, or a time the spring change skips, is read by luxon
+      // as it always was.
       const at = wallClockInstant(text, TEAM_TIME_ZONE);
       const parsed =
         at instanceof Date

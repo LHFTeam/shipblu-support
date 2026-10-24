@@ -32,14 +32,20 @@ export function dayWindow(day: string, zone: string): { start: Date; end: Date }
   return { start: start.toJSDate(), end: start.plus({ days: 1 }).startOf('day').toJSDate() };
 }
 
-const WITH_OFFSET = /T[\d:.,]+(?:Z|[+-]\d{2}(?::?\d{2})?)$/i;
+// A calendar date and a time, and nothing after it. Luxon's `fromISO` takes
+// more: a `Z`, an offset, a bracketed zone (`…+03:00[Africa/Cairo]`), a time
+// with no date. Each of those it would resolve while reading the fields, and the
+// result read again on this zone's clock is off by the offset it named or dated
+// by UTC's today, so a list of the spellings to turn away is always one short.
+const WALL_CLOCK = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:[.,]\d+)?)?$/;
 const MINUTE = 60_000;
 const DAY = 24 * 60 * MINUTE;
 
 /**
  * The instant a clock in `zone` showed `local`, a date and time written with no
  * offset (`2026-10-29T23:30`): `'skipped'` when no instant did, null when the
- * text is not such a date and time or the zone is not one.
+ * text is anything else (an offset, a zone, a time with no date) or the zone is
+ * not one. A caller holding such text reads it some other way.
  *
  * Usually one instant. In the hour an autumn change repeats there are two, and
  * this answers the first, still on summer time, whenever it runs:
@@ -54,7 +60,7 @@ const DAY = 24 * 60 * MINUTE;
  * while no zone changes its offset twice within two days.
  */
 export function wallClockInstant(local: string, zone: string): Date | 'skipped' | null {
-  if (WITH_OFFSET.test(local)) return null;
+  if (!WALL_CLOCK.test(local)) return null;
   const tz = IANAZone.create(zone);
   // The fields as written, on a clock that never changes, so nothing is
   // resolved yet.
