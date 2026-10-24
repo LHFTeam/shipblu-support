@@ -78,7 +78,6 @@ export async function subcategoriseFromMessage(
   realtime: 'notify' | 'silent',
 ): Promise<SubcategorisedFromMessage> {
   if (!isSubcategorisableMessage(input.kind, input.direction)) return EMPTY;
-  if (!input.bodyText.trim()) return EMPTY;
 
   const conversation = await db
     .select({
@@ -104,12 +103,17 @@ export async function subcategoriseFromMessage(
   // Established once, on the first inbound message that gets this far, and never
   // overwritten: a value already set was either established from these same
   // records or put there by a person, and neither should be revised by a later
-  // message. Costs one extra read per ticket rather than per message.
+  // message. Costs one extra read per ticket rather than per message. Ahead of
+  // the empty-text return because it reads records, never words: a photo
+  // comment that makes its author the requester (`adoptRootAuthor`) has none,
+  // and returning first left the ticket without a kind until somebody wrote.
   await establishRequesterKind(
     input.conversationId,
     conversation[0]!.requesterContactId,
     conversation[0]!.requesterKind,
   );
+
+  if (!input.bodyText.trim()) return EMPTY;
 
   const hits = detectSubcategories({ bodyText: input.bodyText });
   if (hits.length === 0) return EMPTY;

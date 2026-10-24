@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, isNull, ne } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { channels, conversationEvents, conversations, messages, ticketStatuses } from '@/db/schema';
 import type {
@@ -207,6 +207,7 @@ export async function ingestMetaComment(comment: NormalisedComment): Promise<Met
   // Read only for a thread that opens a ticket: a reply joining one keeps the
   // ticket's row and group, and on a busy post that is most comments.
   const channel = existing ? null : await channelFor(commentChannel);
+  const subject = subjectFrom(comment.text, UNNAMED_SUBJECT[`${comment.platform}Comment`]);
 
   const result = await db.transaction(async (tx) => {
     let conversationId: string;
@@ -238,8 +239,8 @@ export async function ingestMetaComment(comment: NormalisedComment): Promise<Met
       if (!comment.parentCommentId) {
         await adoptRootAuthor(tx, {
           conversationId,
-          previous: existing.requesterContactId,
           authorContactId: contactId,
+          subject,
           platform: comment.platform,
           rootCommentId: rootId,
         });
@@ -253,7 +254,7 @@ export async function ingestMetaComment(comment: NormalisedComment): Promise<Met
           channel: commentChannel,
           channelId: channel?.id ?? null,
           statusId,
-          subject: subjectFrom(comment.text, UNNAMED_SUBJECT[`${comment.platform}Comment`]),
+          subject,
           requesterContactId: contactId,
           groupId: channel?.defaultGroupId ?? null,
           externalId,
@@ -561,49 +562,65 @@ type FoundConversation = {
   number: number;
   statusCategory: 'open' | 'pending' | 'resolved' | 'closed';
   reopenCount: number;
-  requesterContactId: string;
 };
 
 /**
  * Makes the author of a thread's root comment the requester of the ticket a
  * reply under it opened, and says so on the timeline.
  *
- * Conditional on the requester being somebody else, so a root whose author
- * already holds the ticket — their own reply under it arrived first — writes
- * nothing and records nothing. A redelivered root never gets this far: the
+ * Nothing when the root's author already holds the ticket — their own reply
+ * under it arrived first. A redelivered root never gets this far: the
  * comment-id lookup at the top of `ingestMetaComment` returns first, and two
  * copies racing past it are rolled back whole by the unique index on the
- * message they both insert. `previous` is what the ticket was found with,
- * outside the transaction: the event's account of who it moved from, where the
- * condition is what decides whether it moves at all.
+ * message they both insert. The requester is read here, under the row's lock,
+ * rather than taken from the lookup before the transaction: a contact merge can
+ * re-point the ticket in between, and the event says who it moved from.
+ * `no key update` is the strength the update takes anyway, so a reply on the
+ * same thread, whose message insert only checks the key, does not queue
+ * behind it.
  *
- * `requester_kind` goes with it. It is the requester's population, read off
- * their own record once and never revised (`establishRequesterKind`), so left
- * alone it would go on describing the replier; cleared, the root's own
+ * Two columns move with it. `requester_kind` is the requester's population,
+ * read off their own record once and never revised (`establishRequesterKind`),
+ * so left alone it would go on describing the replier; cleared, the root's own
  * `afterMessageStored`, which runs once this commits, reads it off the new
- * requester. Nothing else writes the column, so clearing it overrides nobody.
+ * requester. And the subject is the opening comment's first line, which here
+ * was the replier's: it becomes the root's, as it would have been had the root
+ * arrived first. No person writes either column — nothing edits a subject, and
+ * the kind's only other writer is the one that reads it afresh — so neither
+ * move overrides anybody.
+ *
+ * Whatever the ticket's state: a closed thread still files later comments
+ * here, and the out-of-hours acknowledgement still answers by who the
+ * requester is. A root Meta sent without an author makes its placeholder the
+ * requester, as it does when that root opens the ticket itself. What was done
+ * under the replier stays done — the priority the classifier read off their
+ * words, like the acknowledgement `answersRequester` describes.
  */
 async function adoptRootAuthor(
   tx: typeof db,
   input: {
     conversationId: string;
-    previous: string;
     authorContactId: string;
+    subject: string;
     platform: NormalisedComment['platform'];
     rootCommentId: string;
   },
 ): Promise<void> {
-  const moved = await tx
+  const [ticket] = await tx
+    .select({ requesterContactId: conversations.requesterContactId })
+    .from(conversations)
+    .where(eq(conversations.id, input.conversationId))
+    .for('no key update');
+  if (!ticket || ticket.requesterContactId === input.authorContactId) return;
+
+  await tx
     .update(conversations)
-    .set({ requesterContactId: input.authorContactId, requesterKind: null })
-    .where(
-      and(
-        eq(conversations.id, input.conversationId),
-        ne(conversations.requesterContactId, input.authorContactId),
-      ),
-    )
-    .returning({ id: conversations.id });
-  if (moved.length === 0) return;
+    .set({
+      requesterContactId: input.authorContactId,
+      requesterKind: null,
+      subject: input.subject,
+    })
+    .where(eq(conversations.id, input.conversationId));
 
   await tx.insert(conversationEvents).values({
     conversationId: input.conversationId,
@@ -611,7 +628,7 @@ async function adoptRootAuthor(
     actorLabel: `inbound_${input.platform}`,
     data: {
       reason: 'thread_root',
-      from: input.previous,
+      from: ticket.requesterContactId,
       to: input.authorContactId,
       rootCommentId: input.rootCommentId,
     },
@@ -641,7 +658,6 @@ async function findByExternalId(externalId: string): Promise<FoundConversation |
       number: conversations.number,
       statusCategory: ticketStatuses.category,
       reopenCount: conversations.reopenCount,
-      requesterContactId: conversations.requesterContactId,
     })
     .from(conversations)
     .innerJoin(ticketStatuses, eq(ticketStatuses.id, conversations.statusId))
