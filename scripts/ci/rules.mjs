@@ -42,6 +42,7 @@ import { checkFormSystemKeys } from './rules/form-system-keys.mjs';
 import { checkAutomatedRepliesDoNotCountAsAgentReplies } from './rules/automated-reply-boundary.mjs';
 import { checkClientBundleStaysOutOfTheDatabase } from './rules/client-bundle.mjs';
 import { checkClientDatesJoinTheirFields } from './rules/client-dates.mjs';
+import { checkLuxonNamesItsZone } from './rules/luxon-zone.mjs';
 import { checkNoDeadExports } from './rules/dead-exports.mjs';
 import { checkPagesDoNotImportTheDatabase } from './rules/page-db.mjs';
 import { checkFormsDoNotReset } from './rules/form-reset.mjs';
@@ -94,5 +95,6 @@ export const RULES = [
   ['automated-reply-boundary', checkAutomatedRepliesDoNotCountAsAgentReplies],
   ['client-bundle', checkClientBundleStaysOutOfTheDatabase],
   ['client-dates', checkClientDatesJoinTheirFields],
+  ['luxon-zone', checkLuxonNamesItsZone],
   ['dead-exports', checkNoDeadExports],
 ];

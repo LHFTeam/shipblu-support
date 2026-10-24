@@ -1462,10 +1462,12 @@ a count of days is taken on the dates, never on the instants between them
 an instant through `wallClockInstant()` beside it, never
 `DateTime.fromISO(text, { zone })`, which picks between the two instances of
 the hour the autumn change repeats by the offset in force on the day it runs
-(§6.102). A test names the zone it reads a date in, too: CI runs in UTC, where
-every date has its midnight, so a bare `DateTime.fromISO(date)` passes there
-and fails on a machine in Cairo whenever a window opens on the day the clocks
-spring forward.
+(§6.102). Every luxon `DateTime` names the zone it reads in, too, and the
+`luxon-zone` repo rule refuses one that does not: CI runs in UTC, where every
+date has its midnight, so a bare `DateTime.fromISO(date)` passes there and
+fails on a machine in Cairo whenever a window opens on the day the clocks
+spring forward. A calendar date takes `'utc'`, as does a value carrying its own
+offset; a wall-clock time written without one goes through `wallClockInstant()`.
 
 **A date a client component draws is joined from its fields.** It is written
 twice, by Node on the server and by the browser to hydrate, and the punctuation

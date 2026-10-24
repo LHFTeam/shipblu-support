@@ -165,7 +165,7 @@ function parseByType(def: TicketFieldDef, raw: string | string[]): ParsedValue {
 
     case 'date': {
       if (!text) return { ok: true, value: '' };
-      if (!DateTime.fromFormat(text, 'yyyy-MM-dd').isValid) {
+      if (!DateTime.fromFormat(text, 'yyyy-MM-dd', { zone: 'utc' }).isValid) {
         return { ok: false, error: `${def.label} must be a date` };
       }
       // Kept as the calendar date it is, not converted to an instant. A due date
