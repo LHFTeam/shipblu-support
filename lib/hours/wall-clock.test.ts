@@ -1,5 +1,5 @@
 import { DateTime } from 'luxon';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cairo } from '@/lib/testing/time';
 import { dayWindow, wallClockInstant } from './wall-clock';
 
@@ -58,33 +58,13 @@ describe('dayWindow', () => {
 
 /**
  * Every answer below is written in UTC rather than built with `cairo()`, which
- * reads its text through this function and so could only agree with it. And
- * each case runs on a host in UTC and in Cairo, because nothing here should
- * read the host's zone, and these are the cases that would say so: a scan
- * bound's tests switch hosts too, but most of their answers come from
- * `cairo()`, which would move with this function, and those that still failed
- * would point at the bound.
+ * reads its text through this function and so could only agree with it. A scan
+ * bound's tests run it on a host in UTC and in Cairo, against answers written
+ * in UTC too.
  */
-describe.each([
-  ['UTC', '2026-10-01T00:00:00.000Z'],
-  ['Africa/Cairo', '2026-09-30T21:00:00.000Z'],
-])('wallClockInstant, on a host in %s', (host, hostMidnight) => {
+describe('wallClockInstant', () => {
   const CAIRO = 'Africa/Cairo';
-  const hostZone = process.env.TZ;
-  beforeEach(() => {
-    process.env.TZ = host;
-  });
-  afterEach(() => {
-    vi.useRealTimers();
-    // Assigning undefined would set the zone to the text "undefined".
-    if (hostZone === undefined) delete process.env.TZ;
-    else process.env.TZ = hostZone;
-  });
-
-  // The host's zone did change, or nothing below tests the host.
-  it('is on a host that reads a time with no offset on its own clock', () => {
-    expect(new Date('2026-10-01T00:00').toISOString()).toBe(hostMidnight);
-  });
+  afterEach(() => vi.useRealTimers());
 
   it('reads a date and time on the zone clock, in summer and in winter', () => {
     expect(wallClockInstant('2026-08-15T14:30', CAIRO)).toEqual(new Date('2026-08-15T11:30:00Z'));
@@ -136,6 +116,10 @@ describe.each([
     expect(wallClockInstant('14:30', CAIRO)).toBeNull();
     expect(wallClockInstant('14:30Z', CAIRO)).toBeNull();
     expect(wallClockInstant('2026-02-30T09:00', CAIRO)).toBeNull();
+    // Hour 24, which luxon reads as the next midnight: a second spelling of it,
+    // and on the eve of a spring change one called skipped.
+    expect(wallClockInstant('2026-08-15T24:00', CAIRO)).toBeNull();
+    expect(wallClockInstant('2026-04-23T24:00', CAIRO)).toBeNull();
     expect(wallClockInstant('half past nine', CAIRO)).toBeNull();
     expect(wallClockInstant('2026-08-15T14:30', 'Africa/Atlantis')).toBeNull();
   });

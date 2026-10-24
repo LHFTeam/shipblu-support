@@ -49,6 +49,20 @@ describe('cairo', () => {
   it('refuses a string it cannot read, rather than returning an Invalid Date', () => {
     expect(() => cairo('2026-02-30T09:00')).toThrow(/not a Cairo wall-clock time/);
     expect(() => cairo('half past nine')).toThrow(/not a Cairo wall-clock time/);
+    // Luxon reads these too: an hour alone, the basic format, a week date, an
+    // ordinal date and hour 24. `wallClockInstant()` reads none of them, so a
+    // fixture writes its time one way. The last is the 24th's midnight, which
+    // the spring change skips, but the text names the 23rd.
+    for (const iso of [
+      '2026-08-15T14',
+      '20260815T1430',
+      '2026-W33-6T14:30',
+      '2026-227T14:30',
+      '2026-08-15T24:00',
+      '2026-04-23T24:00',
+    ]) {
+      expect(() => cairo(iso)).toThrow(`not a Cairo wall-clock time: ${iso}`);
+    }
   });
 });
 

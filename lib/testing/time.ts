@@ -32,8 +32,9 @@ import { wallClockInstant } from '@/lib/hours/wall-clock';
  * picks between the two by the offset the zone has when it is asked, and
  * answered the first while the suite ran in summer time and the second from
  * the night the clocks went back (§6.103). Because this helper reads through
- * it, `wallClockInstant()`'s own tests write their answers in UTC: one built
- * here could only agree.
+ * it, `wallClockInstant()`'s own tests write their answers in UTC, and so does
+ * a test of anything else that reads a time through it, as a scan bound's do:
+ * one built here could only agree.
  *
  * Still on luxon, each for a reason: `forms/summary` builds the offset-carrying
  * `toISO()` string the parser stores, which is the thing under test; and the DST

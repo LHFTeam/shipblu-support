@@ -6712,11 +6712,11 @@ dryRun=true`, then without, gives those two theirs back from their
       from 2026-10-29 21:00 UTC until the end of April, in any host zone. The
       helper then stepped back by the change itself whenever an earlier instant
       read the same fields, and a case freezes the clock in winter to hold the
-      first instance there. Luxon's `DateTime.local(…)` and `DateTime.utc(…)`
-      with date parts do not use the offset in force on the day they run: they
-      take it from one instant, that of the first such call in any zone, and
-      keep it per zone, so a test building its instants that way would hold
-      whichever season the suite started in. The helper has since read its text
+      first instance there. Luxon's `DateTime.local(…)` with date parts and a
+      zone does not use the offset in force on the day it runs: it takes it
+      from one instant, that of the first such call in any zone, and keeps it
+      per zone, so a test building its instants that way would hold whichever
+      season the suite started in. The helper has since read its text
       through `wallClockInstant()` (§6.102), so that function's own tests write
       their answers in UTC: one built with `cairo()` could only agree.
 

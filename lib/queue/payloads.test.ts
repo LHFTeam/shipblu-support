@@ -199,7 +199,9 @@ describe('the backfills and the knowledge-base passes', () => {
  * `since=2026-10-01T00:00` was handed to `new Date()`, which reads a time with
  * no offset in the host's zone: 00:00Z on Render, 21:00Z the evening before in
  * Cairo, and neither one Cairo's midnight. So every case runs on a host in each
- * zone, and the answer it expects is built from Cairo wall-clock time.
+ * zone. A time's expected instant is written in UTC, since `cairo()` reads its
+ * text through the same `wallClockInstant()` as the bound and could only agree;
+ * a day's is built with `cairo()`, since the bound cuts a day with `dayWindow()`.
  */
 describe('a scan bound', () => {
   const BOUNDED = [
@@ -236,13 +238,13 @@ describe('a scan bound', () => {
 
     it('reads a time with no offset in Cairo, in summer and in winter, at either end', () => {
       expect(read('2026-10-01T00:00')).toEqual({
-        since: cairo('2026-10-01T00:00'),
-        until: cairo('2026-10-01T00:00'),
+        since: new Date('2026-09-30T21:00:00Z'),
+        until: new Date('2026-09-30T21:00:00Z'),
       });
-      expect(since('2026-10-01T09:30:15.250')).toEqual(cairo('2026-10-01T09:30:15.250'));
-      expect(until('2026-01-15T09:30')).toEqual(cairo('2026-01-15T09:30'));
+      expect(since('2026-10-01T09:30:15.250')).toEqual(new Date('2026-10-01T06:30:15.250Z'));
+      expect(until('2026-01-15T09:30')).toEqual(new Date('2026-01-15T07:30:00Z'));
       // As Postgres prints one, pasted from a query.
-      expect(since('2026-01-15 09:30:00')).toEqual(cairo('2026-01-15T09:30'));
+      expect(since('2026-01-15 09:30:00')).toEqual(new Date('2026-01-15T07:30:00Z'));
     });
 
     it('reads a date alone as that whole Cairo day: since from its start, until to its end', () => {
@@ -277,7 +279,7 @@ describe('a scan bound', () => {
         since: new Date('2026-01-15T09:30:00.123Z'),
         until: new Date('2026-01-15T09:30:00.124Z'),
       });
-      expect(until('2026-01-15T09:30:00.1239')).toEqual(cairo('2026-01-15T09:30:00.124'));
+      expect(until('2026-01-15T09:30:00.1239')).toEqual(new Date('2026-01-15T07:30:00.124Z'));
       // Digits that add nothing move nothing.
       expect(until('2026-01-15 09:30:00.123000+00')).toEqual(new Date('2026-01-15T09:30:00.123Z'));
     });
@@ -289,10 +291,8 @@ describe('a scan bound', () => {
       expect(since('2026-04-24T00:30+02:00')).toEqual(new Date('2026-04-23T22:30:00Z'));
     });
 
-    // Written out in UTC rather than through `cairo()`: the expectation must
-    // not come from the choice between the two instances that this case
-    // freezes, and `cairo()` makes it with the same `wallClockInstant()` the
-    // bound does.
+    // The day too is written out in UTC: its expectation must not come from
+    // the choice between the two instances that this case freezes.
     it('takes the first instance of the hour the autumn change repeats, whenever it runs', () => {
       vi.useFakeTimers({ toFake: ['Date'] });
 

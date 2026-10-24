@@ -37,15 +37,18 @@ export function dayWindow(day: string, zone: string): { start: Date; end: Date }
 // with no date. Each of those it would resolve while reading the fields, and the
 // result read again on this zone's clock is off by the offset it named or dated
 // by UTC's today, so a list of the spellings to turn away is always one short.
-const WALL_CLOCK = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:[.,]\d+)?)?$/;
+// The hour runs 00-23, as a scan bound's does: luxon reads `T24:00` as the next
+// midnight, a second spelling of it, and on the eve of a spring change would
+// call that midnight skipped though the date written was never touched.
+const WALL_CLOCK = /^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):\d{2}(?::\d{2}(?:[.,]\d+)?)?$/;
 const MINUTE = 60_000;
 const DAY = 24 * 60 * MINUTE;
 
 /**
  * The instant a clock in `zone` showed `local`, a date and time written with no
  * offset (`2026-10-29T23:30`): `'skipped'` when no instant did, null when the
- * text is anything else (an offset, a zone, a time with no date) or the zone is
- * not one. A caller holding such text reads it some other way.
+ * text is anything else (an offset, a zone, a time with no date, hour 24) or
+ * the zone is not one. A caller holding such text reads it some other way.
  *
  * Usually one instant. In the hour an autumn change repeats there are two, and
  * this answers the first, still on summer time, whenever it runs:
