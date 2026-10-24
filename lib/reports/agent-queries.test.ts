@@ -157,9 +157,10 @@ describe('rangeIn', () => {
   it('keeps the first day of a week that opens on the day Cairo springs forward', () => {
     // Frozen on 6 May 2027, so the week meets the day Cairo springs forward
     // (Friday 30 April, 00:00 to 01:00) on every run rather than once a year.
-    // A week counted back in hours rather than dates would open on the 29th.
+    // Half past midnight, because a week counted back in hours rather than
+    // dates then opens on the 29th whether it counts from midnight or from now.
     vi.useFakeTimers({ toFake: ['Date'] });
-    vi.setSystemTime(cairo('2027-05-06T12:00'));
+    vi.setSystemTime(cairo('2027-05-06T00:30'));
 
     expect(rangeIn(CAIRO, 7)).toEqual({ from: '2027-04-30', to: '2027-05-06' });
   });
