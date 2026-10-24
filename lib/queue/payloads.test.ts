@@ -209,7 +209,8 @@ describe('a scan bound', () => {
   ] as const;
   const read = (text: unknown, type: (typeof BOUNDED)[number] = 'backfill_shipment_links') =>
     parseJobPayload(job({ since: text, until: text }), type);
-  const at = (text: unknown) => read(text).since;
+  const since = (text: unknown) => read(text).since;
+  const until = (text: unknown) => read(text).until;
 
   const hostZone = process.env.TZ;
   afterEach(() => {
@@ -233,36 +234,59 @@ describe('a scan bound', () => {
       expect(new Date('2026-10-01T00:00').toISOString()).toBe(hostMidnight);
     });
 
-    it('reads a time with no offset on a Cairo clock, in summer and in winter', () => {
-      expect(at('2026-10-01T00:00')).toEqual(cairo('2026-10-01T00:00'));
-      expect(at('2026-10-01T09:30:15.250')).toEqual(cairo('2026-10-01T09:30:15.250'));
-      expect(at('2026-01-15T09:30')).toEqual(cairo('2026-01-15T09:30'));
+    it('reads a time with no offset in Cairo, in summer and in winter, at either end', () => {
+      expect(read('2026-10-01T00:00')).toEqual({
+        since: cairo('2026-10-01T00:00'),
+        until: cairo('2026-10-01T00:00'),
+      });
+      expect(since('2026-10-01T09:30:15.250')).toEqual(cairo('2026-10-01T09:30:15.250'));
+      expect(until('2026-01-15T09:30')).toEqual(cairo('2026-01-15T09:30'));
       // As Postgres prints one, pasted from a query.
-      expect(at('2026-01-15 09:30:00')).toEqual(cairo('2026-01-15T09:30'));
+      expect(since('2026-01-15 09:30:00')).toEqual(cairo('2026-01-15T09:30'));
     });
 
-    it('reads a date alone as the start of that day in Cairo', () => {
-      expect(at('2026-10-01')).toEqual(cairo('2026-10-01T00:00'));
-      expect(at('2026-01-15')).toEqual(cairo('2026-01-15T00:00'));
-      // 24 April 2026 has no 00:00: the clocks went from 00:00 to 01:00.
-      expect(at('2026-04-24')).toEqual(cairo('2026-04-24T01:00'));
-      // 30 October's midnight happens once: the hour that repeats is the one
-      // before it, 23:00 on the 29th.
-      expect(at('2026-10-30')).toEqual(cairo('2026-10-30T00:00'));
+    it('reads a date alone as that whole Cairo day: since from its start, until to its end', () => {
+      // As `rollup_metrics from=2026-10-01 to=2026-10-07` covers the 7th.
+      expect(since('2026-10-01')).toEqual(cairo('2026-10-01T00:00'));
+      expect(until('2026-10-07')).toEqual(cairo('2026-10-08T00:00'));
+      expect(read('2026-01-15')).toEqual({
+        since: cairo('2026-01-15T00:00'),
+        until: cairo('2026-01-16T00:00'),
+      });
+      // 24 April 2026 has no 00:00: the clocks went from 00:00 to 01:00, so
+      // the 23rd ends and the 24th begins at the jump.
+      expect(until('2026-04-23')).toEqual(cairo('2026-04-24T01:00'));
+      expect(since('2026-04-24')).toEqual(cairo('2026-04-24T01:00'));
+      // 29 October has 25 hours, the one before its midnight repeated.
+      expect(read('2026-10-29')).toEqual({
+        since: cairo('2026-10-29T00:00'),
+        until: cairo('2026-10-30T00:00'),
+      });
     });
 
     it('takes Z or an offset as the instant it names', () => {
-      expect(at('2026-10-01T00:00Z')).toEqual(new Date('2026-10-01T00:00:00Z'));
-      expect(at('2026-10-01T00:00:00+03:00')).toEqual(new Date('2026-09-30T21:00:00Z'));
-      expect(at('2026-01-15 09:30:00.123456+00')).toEqual(new Date('2026-01-15T09:30:00.123Z'));
-      expect(at('2026-01-15T09:30-0500')).toEqual(new Date('2026-01-15T14:30:00Z'));
+      expect(since('2026-10-01T00:00Z')).toEqual(new Date('2026-10-01T00:00:00Z'));
+      expect(until('2026-10-01T00:00:00+03:00')).toEqual(new Date('2026-09-30T21:00:00Z'));
+      expect(since('2026-01-15T09:30-0500')).toEqual(new Date('2026-01-15T14:30:00Z'));
+    });
+
+    // A `Date` holds milliseconds. Cut toward the past, an `until` pasted from a
+    // `created_at` would stop short of rows it covers.
+    it('widens a bound past a millisecond outward, never inward', () => {
+      expect(read('2026-01-15 09:30:00.123456+00')).toEqual({
+        since: new Date('2026-01-15T09:30:00.123Z'),
+        until: new Date('2026-01-15T09:30:00.124Z'),
+      });
+      expect(until('2026-01-15T09:30:00.1239')).toEqual(cairo('2026-01-15T09:30:00.124'));
+      // Digits that add nothing move nothing.
+      expect(until('2026-01-15 09:30:00.123000+00')).toEqual(new Date('2026-01-15T09:30:00.123Z'));
     });
 
     it('refuses a time the spring change skipped, naming what to give instead', () => {
-      expect(() => at('2026-04-24T00:30')).toThrow(PermanentJobError);
-      expect(() => at('2026-04-24T00:00')).toThrow(/clocks skipped 2026-04-24T00:00 /);
+      expect(() => since('2026-04-24T00:30')).toThrow(PermanentJobError);
+      expect(() => until('2026-04-24T00:00')).toThrow(/clocks skipped 2026-04-24T00:00 /);
       // An offset says which instant was meant.
-      expect(at('2026-04-24T00:30+02:00')).toEqual(new Date('2026-04-23T22:30:00Z'));
+      expect(since('2026-04-24T00:30+02:00')).toEqual(new Date('2026-04-23T22:30:00Z'));
     });
 
     // Written out in UTC, once, rather than through `cairo()`: the expectation
@@ -274,8 +298,12 @@ describe('a scan bound', () => {
 
       for (const now of ['2026-07-15T12:00:00Z', '2026-11-15T12:00:00Z']) {
         vi.setSystemTime(new Date(now));
-        expect(at('2026-10-29T23:30')).toEqual(new Date('2026-10-29T20:30:00Z'));
-        expect(at('2026-10-29T23:30+02:00')).toEqual(new Date('2026-10-29T21:30:00Z'));
+        expect(since('2026-10-29T23:30')).toEqual(new Date('2026-10-29T20:30:00Z'));
+        expect(until('2026-10-29T23:30+02:00')).toEqual(new Date('2026-10-29T21:30:00Z'));
+        expect(read('2026-10-29')).toEqual({
+          since: new Date('2026-10-28T21:00:00Z'),
+          until: new Date('2026-10-29T22:00:00Z'),
+        });
       }
       // Luxon itself answers the second in winter, so the loop above did reach
       // the case it guards against.
@@ -285,7 +313,7 @@ describe('a scan bound', () => {
     it.each(BOUNDED)('hands %s a Date for both ends', (type) => {
       expect(read('2026-10-01', type)).toEqual({
         since: cairo('2026-10-01T00:00'),
-        until: cairo('2026-10-01T00:00'),
+        until: cairo('2026-10-02T00:00'),
       });
     });
   });
@@ -304,6 +332,10 @@ describe('a scan bound', () => {
     '2026-10-01T09:30+03:00 ',
     '2026-10-01+03:00',
     '2026-10-01T25:00',
+    // Hour 24, which luxon reads as the next midnight: a second spelling of a
+    // date alone, and on 23 April a midnight the clocks skipped.
+    '2026-10-01T24:00',
+    '2026-04-23T24:00',
     // Refused by `Date.parse` and read by luxon, which checks no offset's range
     // and takes +03:60 as +04:00.
     '2026-10-01T00:00+24:00',
@@ -315,7 +347,9 @@ describe('a scan bound', () => {
   });
 
   it('says what it expected when it refuses one', () => {
-    expect(() => read('Oct 1 2026')).toThrow(/expected 2026-10-01 or 2026-10-01T09:30/);
+    expect(() => read('Oct 1 2026')).toThrow(
+      /expected 2026-10-01 or 2026-10-01T09:30 in Africa\/Cairo time/,
+    );
   });
 });
 

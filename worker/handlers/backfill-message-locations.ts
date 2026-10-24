@@ -1,4 +1,4 @@
-import { and, asc, eq, gte, lte, sql, type SQL } from 'drizzle-orm';
+import { and, asc, eq, gte, lt, sql, type SQL } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { conversations, messages } from '@/db/schema';
 import type { ClaimedJob } from '@/lib/queue';
@@ -50,7 +50,7 @@ export async function backfillMessageLocations(job: ClaimedJob): Promise<void> {
 
   const bounds: SQL[] = [];
   if (payload.since) bounds.push(gte(messages.createdAt, payload.since));
-  if (payload.until) bounds.push(lte(messages.createdAt, payload.until));
+  if (payload.until) bounds.push(lt(messages.createdAt, payload.until));
 
   // Only rows that could possibly carry one. The `like` is a cheap prefilter
   // that keeps this from parsing nine thousand JSON blobs to find eight hundred

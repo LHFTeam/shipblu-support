@@ -6627,8 +6627,9 @@ dryRun=true`, then without, gives those two theirs back from their
       `category_metrics_daily` and `root_cause_metrics_daily`: a database probe
       with one ticket at 2026-04-24T21:30Z found it on both. Each of the three
       rollups wrote its day bounds out by hand, and this was the copy that
-      drifted, so all three now cut their day through `dayWindow` in
-      `lib/reports/rollup.ts`, each of whose ends is a `startOf('day')`. The
+      drifted, so all three now cut their day through `dayWindow`, in
+      `lib/reports/rollup.ts` then and `lib/hours/wall-clock.ts` since §6.102,
+      each of whose ends is a `startOf('day')`. The
       fall-back day (24:00 back to 23:00 on the last Thursday of
       October) is right either way, because its midnight exists. Production
       held none of the affected days when this was fixed, since the subcategory
@@ -6655,20 +6656,44 @@ dryRun=true`, then without, gives those two theirs back from their
       21:00Z the evening before on a laptop in Cairo. Neither was Cairo's
       midnight, where the team names its times and every report cuts its day.
       A run under `TZ=UTC` and another under `TZ=Africa/Cairo` confirmed it.
-      `instant` in `lib/queue/payloads.ts` now reads the text once: a time with
-      no offset on a Cairo clock, a date alone as the start of that day in
-      Cairo, and a `Z` or an offset as given. The handlers receive a `Date`. A
-      time the spring change skips is refused. A time the autumn change repeats
-      takes its first instance. The resolver works that out from the zone's
-      offsets rather than asking `DateTime.fromISO(text, { zone })`, because
-      luxon chooses between the two instances by the offset in force on the day
-      the code runs (#409), so a bound in that hour would have moved by an hour
-      between summer and winter. `Date.parse` also read `Oct 1 2026` and
-      `2026/10/01` in the host's zone, and rolled `2026-02-30` over to 2 March.
-      Those are now refused, along with anything that is not an ISO date or
-      date-time. Whether a past run passed a bound with a time cannot be read
-      back. On 2026-10-23 production's `jobs` table held no row of any of the
-      three types, `cleanup` deletes completed rows after seven days, and
+
+      `scanBound` in `lib/queue/payloads.ts` now reads the text once, and the
+      handlers receive a `Date`:
+
+      - A time with no offset is read in Cairo, through `wallClockInstant` in
+        `lib/hours/wall-clock.ts`.
+      - A date alone is that whole Cairo day, through `dayWindow` beside it:
+        `since` from its start and `until` to its end, as `rollup_metrics to=`
+        covers its last day.
+      - A `Z` or an offset is taken as given.
+
+      `until` is exclusive (`lt`), so two runs sharing a bound neither repeat
+      nor skip the rows on it. A time the spring change skips is refused, and
+      one the autumn change repeats takes its first instance.
+
+      `wallClockInstant` works the instance out from the zone's offsets rather
+      than asking `DateTime.fromISO(text, { zone })`. Luxon chooses between the
+      two instances by the offset in force on the day the code runs (#409), so
+      a bound in that hour would have moved by an hour between summer and
+      winter. A datetime custom field (`lib/tickets/custom-fields-parse.ts`)
+      was read the same way, so an answer of 23:30 on 29 October stored the
+      second instance when sent in winter and the first in summer; it goes
+      through `wallClockInstant` too, and keeps luxon's reading for text naming
+      its own offset or a time the spring change skips.
+
+      A bound with digits past the millisecond is widened outward: an `until`
+      a millisecond later, since luxon drops them. Without that, an `until`
+      pasted from a `created_at` stopped short of rows it named, and every
+      backfill here tolerates seeing a row twice.
+
+      `Date.parse` also read `Oct 1 2026` and `2026/10/01` in the host's zone,
+      and rolled `2026-02-30` over to 2 March. Those are now refused, as is
+      anything that is not an ISO date or date-time, hour 24 and an offset out
+      of range.
+
+      Whether a past run passed a bound with a time cannot be read back. On
+      2026-10-23 production's `jobs` table held no row of any of the three
+      types, `cleanup` deletes completed rows after seven days, and
       `npm run job` writes none. Nothing in the repository passes one: the
       admin buttons and CI's database job send no bound, and no doc shows one.
 
