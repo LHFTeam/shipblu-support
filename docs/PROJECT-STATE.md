@@ -6710,12 +6710,16 @@ dryRun=true`, then without, gives those two theirs back from their
       instance: its own case and the `dateIn` case for the night daylight
       saving ends, in `lib/reports/rollup.test.ts`. So CI would have gone red
       from 2026-10-29 21:00 UTC until the end of April, in any host zone. The
-      helper now steps back by the change itself whenever an earlier instant
-      reads the same fields, and a case freezes the clock in winter to hold it
-      there. `DateTime.local(…)` and `DateTime.utc(…)` with date parts take
-      that offset from one instant instead, that of the first such call in any
-      zone, and keep it per zone, so a test building its instants that way
-      would hold whichever season the suite started in.
+      helper then stepped back by the change itself whenever an earlier instant
+      read the same fields, and a case freezes the clock in winter to hold the
+      first instance there. Luxon's `DateTime.local(…)` with date parts does not
+      use the offset in force on the day it runs: it guesses from one instant,
+      that of the first `local(…)` or `utc(…)` call with date parts in the
+      process, and keeps the guess per named zone, so a test building its
+      instants that way would hold whichever season the suite started in. A UTC
+      `DateTime` has no offset to guess. The helper has since read its text
+      through `wallClockInstant()` (§6.102), so that function's own tests write
+      their answers in UTC: one built with `cairo()` could only agree.
 
 104.  **An agent's private reply on a comment ticket went to whoever commented
       last.** _2026-10-23, found by reading the code; it had not happened._
