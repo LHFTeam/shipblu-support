@@ -19,22 +19,39 @@ const COMMENT_META = {
 
 describe('moderatableComment', () => {
   it('reads the comment a message names', () => {
-    expect(moderatableComment(COMMENT_META)).toEqual({
+    expect(moderatableComment(COMMENT_META, 'inbound')).toEqual({
       platform: 'instagram',
       commentId: 'ig-comment-1',
     });
   });
 
   it('is null for a direct message, a note and an outbound reply', () => {
-    expect(moderatableComment({ metaKind: 'direct_message', platform: 'instagram' })).toBeNull();
-    expect(moderatableComment({})).toBeNull();
-    expect(moderatableComment(null)).toBeNull();
-
-    // The console writes this shape for an agent's public reply: it is a comment
-    // ticket, but no comment id exists until Graph has accepted the reply — and
-    // moderating our own answer is not what these controls are for.
     expect(
-      moderatableComment({ metaKind: 'comment', platform: 'instagram', sendKind: 'comment_reply' }),
+      moderatableComment({ metaKind: 'direct_message', platform: 'instagram' }, 'inbound'),
+    ).toBeNull();
+    expect(moderatableComment({}, 'inbound')).toBeNull();
+    expect(moderatableComment(null, 'inbound')).toBeNull();
+
+    // A reply written before the console named the comment it answers: it is a
+    // comment ticket, and moderating our own answer is not what these controls
+    // are for.
+    expect(
+      moderatableComment(
+        { metaKind: 'comment', platform: 'instagram', sendKind: 'comment_reply' },
+        'outbound',
+      ),
+    ).toBeNull();
+  });
+
+  // The console now writes the comment a reply answers on the reply's own row.
+  // Read as the comment, a hide or delete naming the reply would act on the
+  // customer's comment and record it on our row.
+  it('is null for an agent’s reply that names the comment it answers', () => {
+    expect(
+      moderatableComment(
+        { ...COMMENT_META, sendKind: 'private_reply', isPublic: false },
+        'outbound',
+      ),
     ).toBeNull();
   });
 });
@@ -103,7 +120,7 @@ describe('the recorded state', () => {
       at: NOW.toISOString(),
     });
     // And the comment it describes is still readable beside it.
-    expect(moderatableComment(stored)?.commentId).toBe('ig-comment-1');
+    expect(moderatableComment(stored, 'inbound')?.commentId).toBe('ig-comment-1');
   });
 
   it('reads a hostile or half-written moderation object as nothing done', () => {

@@ -55,15 +55,25 @@ export type ModeratableComment = {
 };
 
 /**
- * The comment a message names, if it names one.
+ * The comment a message is, if it is one.
  *
  * Read from `meta` rather than from `channelMessageId`, which holds the comment
  * id for an inbound comment and the *reply's* id once an outbound reply has been
  * accepted — moderating on that would hide our own answer instead of the
  * comment.
+ *
+ * Inbound only, and the direction is an argument rather than left to callers:
+ * an agent's reply on a comment ticket carries `metaKind: 'comment'` too, and
+ * the id of the comment it answers on `meta.commentId`
+ * (`lib/tickets/reply-comment.ts`). Read without the direction, a moderation
+ * request naming the reply would hide or delete the customer's comment and
+ * record it on our row, where the customer's bubble never shows it.
  */
-export function moderatableComment(meta: unknown): ModeratableComment | null {
-  if (!isObject(meta)) return null;
+export function moderatableComment(
+  meta: unknown,
+  direction: 'inbound' | 'outbound',
+): ModeratableComment | null {
+  if (direction !== 'inbound' || !isObject(meta)) return null;
   if (meta.metaKind !== 'comment') return null;
 
   const commentId = typeof meta.commentId === 'string' ? meta.commentId : null;

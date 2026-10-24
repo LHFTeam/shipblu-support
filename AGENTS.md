@@ -689,6 +689,25 @@ posted under whichever comment came in last. Whether a rule may ever answer a
 comment is the support lead's call, in its own change, with a trigger that
 names the comment.
 
+**An agent's reply on a comment ticket names one of the requester's comments
+too.** A private reply is delivered to whoever wrote the comment it names, and
+Meta allows one per comment, ever, so answering the newest comment on the
+ticket can hand a passer-by what the agent wrote for the customer. `sendReply`
+names the comment the agent picked in the composer — re-read against the ticket
+and its requester, because its id arrives in a form field — or the requester's
+newest, and stores it as `meta.commentId`; a public reply takes their newest the
+same way, "newest" meaning still on the post where one is. It refuses a private
+reply to a comment deleted from the post, or to one already answered by a
+private reply that has not failed: Meta refuses both, but only once the reply
+is on the timeline, marked failed. The composer disables the same two
+(`canTakePrivateReply`). `send_meta` never falls back to anybody's comment: a
+row naming none takes the requester's newest (`lib/tickets/reply-comment.ts`),
+and a private reply with none of theirs is refused on the row. The composer's list and that
+read ask one question, `isRequesterComment` (`lib/meta/comments.ts`). Because an
+outbound row now carries `commentId`, `moderatableComment` takes the row's
+direction: a moderation request naming the reply would otherwise act on the
+customer's comment.
+
 Graph request shapes are written down in `lib/meta/comments.ts` and
 `lib/meta/send.ts` rather than built inline, and asserted there against Meta's
 reference, because **a wrong shape is invisible in the response**: Graph refuses

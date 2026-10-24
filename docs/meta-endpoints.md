@@ -231,8 +231,12 @@ responses never could.
 
 Meta allows exactly one private reply per comment, ever, and only within seven
 days of _that_ comment — so this is the one send in the product that genuinely
-cannot be retried, and it is addressed to the newest comment rather than the
-thread root, because naming the newest buys the most time.
+cannot be retried. It is addressed to one of the requester's own comments rather
+than the thread root: the one the agent picks, defaulting to their newest
+because that buys the most time. Never simply the newest comment on the ticket:
+anybody may reply under the customer's comment, ingest files that reply on the
+customer's ticket, and a private reply is delivered to whoever wrote the comment
+it names (`lib/tickets/reply-comment.ts`).
 
 ### 2.5 Hide, unhide, delete
 

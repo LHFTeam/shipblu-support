@@ -196,8 +196,8 @@ async function send(
     // Posted under the customer's comment on a comment ticket, and badged as
     // public on the timeline the way an agent's comment reply is. The comment
     // is the one `answersRequester` passed, named here because `send_meta`
-    // would otherwise look up the newest comment when the job runs — which, if
-    // a passer-by has replied since, is theirs.
+    // would otherwise take the requester's newest when the job runs, which on
+    // Facebook puts the reply under a later comment than the one acknowledged.
     meta: {
       autoResponse: holiday ? 'holiday' : 'out_of_hours',
       ...(isComment ? { isPublic: true } : {}),
