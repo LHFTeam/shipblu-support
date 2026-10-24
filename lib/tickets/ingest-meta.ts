@@ -207,6 +207,7 @@ export async function ingestMetaComment(comment: NormalisedComment): Promise<Met
   // Read only for a thread that opens a ticket: a reply joining one keeps the
   // ticket's row and group, and on a busy post that is most comments.
   const channel = existing ? null : await channelFor(commentChannel);
+  const subject = subjectFrom(comment.text, UNNAMED_SUBJECT[`${comment.platform}Comment`]);
 
   const result = await db.transaction(async (tx) => {
     let conversationId: string;
@@ -224,6 +225,26 @@ export async function ingestMetaComment(comment: NormalisedComment): Promise<Met
           { actorLabel: `inbound_${comment.platform}`, reason: 'customer_replied' },
         );
       }
+
+      // The thread's own first comment, arriving after a reply under it opened
+      // the ticket — a batch retried whole, or a delivery processed late. Its
+      // author is who the thread is about, and who the requester would have
+      // been had it arrived first, so they become it. Left on the replier,
+      // every reader that answers the requester and nobody else — the
+      // out-of-hours acknowledgement (`answersRequester`), the language
+      // automated replies go out in (`requesterLocale`) and the console's
+      // private reply — would treat the customer as a passer-by on their own
+      // thread, and the passer-by as the customer. A reply's author never
+      // takes it: they are somebody under the customer's comment.
+      if (!comment.parentCommentId) {
+        await adoptRootAuthor(tx, {
+          conversationId,
+          authorContactId: contactId,
+          subject,
+          platform: comment.platform,
+          rootCommentId: rootId,
+        });
+      }
     } else {
       const statusId = await requireDefaultOpenStatusId(tx);
 
@@ -233,7 +254,7 @@ export async function ingestMetaComment(comment: NormalisedComment): Promise<Met
           channel: commentChannel,
           channelId: channel?.id ?? null,
           statusId,
-          subject: subjectFrom(comment.text, UNNAMED_SUBJECT[`${comment.platform}Comment`]),
+          subject,
           requesterContactId: contactId,
           groupId: channel?.defaultGroupId ?? null,
           externalId,
@@ -542,6 +563,97 @@ type FoundConversation = {
   statusCategory: 'open' | 'pending' | 'resolved' | 'closed';
   reopenCount: number;
 };
+
+/**
+ * Makes the author of a thread's root comment the requester of the ticket a
+ * reply under it opened, and says so on the timeline.
+ *
+ * Nothing when the root's author already holds the ticket — their own reply
+ * under it arrived first. A redelivered root never gets this far: the
+ * comment-id lookup at the top of `ingestMetaComment` returns first, and two
+ * copies racing past it are rolled back whole by the unique index on the
+ * message they both insert.
+ *
+ * A contact merge re-points tickets while this runs, so the move is a
+ * compare-and-set: read the requester, and write only while it is still the
+ * one read, which is the one the event names. A merge that commits first makes
+ * the write match nothing, and the next read sees what it left. Not a locked
+ * read: that waits out a merge of the root's own author, reads the survivor
+ * and hands the ticket back to the contact merged away; and it holds the
+ * ticket ahead of the message insert's check of the author's contact, the
+ * reverse of the order a merge and a purge lock in, so the two deadlock. A
+ * plain read takes no lock at all when nothing moves.
+ *
+ * Two columns move with it. `requester_kind` is the requester's population,
+ * read off their own record once and never revised (`establishRequesterKind`),
+ * so left alone it would go on describing the replier; cleared, the root's own
+ * `afterMessageStored`, which runs once this commits, reads it off the new
+ * requester. And the subject is the opening comment's first line, which here
+ * was the replier's: it becomes the root's, as it would have been had the root
+ * arrived first. No person writes either column — nothing edits a subject, and
+ * the kind's only other writer is the one that reads it afresh — so neither
+ * move overrides anybody.
+ *
+ * Whatever the ticket's state: a closed thread still files later comments
+ * here, and the out-of-hours acknowledgement still answers by who the
+ * requester is. A root Meta sent without an author makes its placeholder the
+ * requester, as it does when that root opens the ticket itself. What was done
+ * under the replier stays done — the priority the classifier read off their
+ * words, like the acknowledgement `answersRequester` describes.
+ */
+async function adoptRootAuthor(
+  tx: typeof db,
+  input: {
+    conversationId: string;
+    authorContactId: string;
+    subject: string;
+    platform: NormalisedComment['platform'];
+    rootCommentId: string;
+  },
+): Promise<void> {
+  // Each lost round is a merge that committed in between, which a person
+  // started; a third in a row is not traffic, so it fails the batch to retry.
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const [ticket] = await tx
+      .select({ requesterContactId: conversations.requesterContactId })
+      .from(conversations)
+      .where(eq(conversations.id, input.conversationId));
+    if (!ticket || ticket.requesterContactId === input.authorContactId) return;
+
+    const moved = await tx
+      .update(conversations)
+      .set({
+        requesterContactId: input.authorContactId,
+        requesterKind: null,
+        subject: input.subject,
+      })
+      .where(
+        and(
+          eq(conversations.id, input.conversationId),
+          eq(conversations.requesterContactId, ticket.requesterContactId),
+        ),
+      )
+      .returning({ id: conversations.id });
+    if (moved.length === 0) continue;
+
+    await tx.insert(conversationEvents).values({
+      conversationId: input.conversationId,
+      type: 'requester_changed',
+      actorLabel: `inbound_${input.platform}`,
+      data: {
+        reason: 'thread_root',
+        from: ticket.requesterContactId,
+        to: input.authorContactId,
+        rootCommentId: input.rootCommentId,
+      },
+    });
+    return;
+  }
+
+  throw new Error(
+    `the requester of conversation ${input.conversationId} kept changing under its root comment`,
+  );
+}
 
 /**
  * The ticket a comment thread is filed on, by its `<platform>:comment:<root>`.
