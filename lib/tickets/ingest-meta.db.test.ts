@@ -587,6 +587,14 @@ describe('ingestMetaComment', () => {
       return row!.id;
     }
 
+    async function requesterKindOf(conversationId: string) {
+      const [row] = await db
+        .select({ kind: conversations.requesterKind })
+        .from(conversations)
+        .where(eq(conversations.id, conversationId));
+      return row!.kind;
+    }
+
     function requesterEvents(conversationId: string) {
       return eventsOf(conversationId).then((events) =>
         events.filter((event) => event.type === 'requester_changed'),
@@ -614,37 +622,54 @@ describe('ingestMetaComment', () => {
         },
       ]);
       expect(await messagesOf(opened.conversationId)).toHaveLength(2);
-    });
 
-    it('moves it once, however often the first comment is delivered', async () => {
-      const opened = await ingestMetaComment(bobsReply());
-      await ingestMetaComment(comment());
-      await ingestMetaComment(comment());
-
+      // Meta delivers the first comment again: it is a duplicate, and moves nothing.
+      expect(await ingestMetaComment(comment())).toMatchObject({ duplicate: true });
       expect(await requesterEvents(opened.conversationId)).toHaveLength(1);
     });
 
-    it('leaves it alone when the first comment came first, or is the requester’s own', async () => {
-      // In order: a reply never takes the ticket from the comment it answers.
-      const inOrder = await ingestMetaComment(comment());
+    it('leaves it alone when the first comment came first', async () => {
+      // A reply never takes the ticket from the comment it answers.
+      const opened = await ingestMetaComment(comment());
       await ingestMetaComment(bobsReply());
-      expect((await conversation(inOrder.conversationId)).requesterContactId).toBe(
+
+      expect((await conversation(opened.conversationId)).requesterContactId).toBe(
         await contactOf('1122334455'),
       );
-      expect(await requesterEvents(inOrder.conversationId)).toEqual([]);
+      expect(await requesterEvents(opened.conversationId)).toEqual([]);
+    });
 
-      // Out of order, but the reply was the customer's own: nothing to move.
-      const own = await ingestMetaComment(
+    it('leaves it alone when the reply that came first was the requester’s own', async () => {
+      const opened = await ingestMetaComment(
         comment({
-          commentId: 'post-2_c2',
-          parentCommentId: 'post-2_c1',
-          postId: 'post-2',
+          commentId: 'post-1_c2',
+          parentCommentId: 'post-1_c1',
           text: 'Any update?',
           createdAt: LATER,
         }),
       );
-      await ingestMetaComment(comment({ commentId: 'post-2_c1', postId: 'post-2' }));
-      expect(await requesterEvents(own.conversationId)).toEqual([]);
+      await ingestMetaComment(comment());
+
+      expect((await conversation(opened.conversationId)).requesterContactId).toBe(
+        await contactOf('1122334455'),
+      );
+      expect(await requesterEvents(opened.conversationId)).toEqual([]);
+    });
+
+    it('drops the kind read off the replier, so the root’s author is read afresh', async () => {
+      // Bob is a merchant, known before he replies under Amira's comment.
+      await ingestMetaComment(comment({ commentId: 'post-9_c1', postId: 'post-9', from: BOB }));
+      await db
+        .update(contacts)
+        .set({ isShipper: true })
+        .where(eq(contacts.id, await contactOf(BOB)));
+
+      const opened = await ingestMetaComment(bobsReply());
+      expect(await requesterKindOf(opened.conversationId)).toBe('merchant');
+
+      // Amira is nobody the records know, so nothing replaces it.
+      await ingestMetaComment(comment());
+      expect(await requesterKindOf(opened.conversationId)).toBeNull();
     });
   });
 

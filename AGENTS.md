@@ -672,10 +672,11 @@ the ticket's own requester (`answersRequester`, in `maybeSendAutoResponse`),
 because anybody may reply under a customer's comment and that reply is filed
 on the customer's ticket; and it names that comment as the reply's target, so
 a reply written before the job runs does not become it. The requester is the
-root comment's author: a reply stored before its root opens the ticket under
-the replier, and the root, when it arrives, makes its author the requester with
-a `requester_changed` event (`adoptRootAuthor` in `ingest-meta.ts`) — never a
-reply's author, who is somebody under the customer's comment. It judges the message
+root comment's author once the root is stored: a reply stored before its root
+opens the ticket under the replier, and the root, when it arrives, makes its
+author the requester with a `requester_changed` event (`adoptRootAuthor` in
+`ingest-meta.ts`). A later reply never moves it, because its author is somebody
+under the customer's comment. The sender judges the message
 the lifecycle hands it by id, never the newest inbound row, which after a
 batch retry is a passer-by's reply stored before the requester's older comment. `pickRule` takes the stored channel and
 external id and reads a comment filed on its platform's channel as its comment

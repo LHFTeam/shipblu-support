@@ -568,11 +568,20 @@ type FoundConversation = {
  * Makes the author of a thread's root comment the requester of the ticket a
  * reply under it opened, and says so on the timeline.
  *
- * Conditional on the requester still being somebody else, so a second run —
- * the root's batch retried — writes nothing and records nothing. `previous`
- * is what the ticket was found with, outside the transaction: the event's
- * account of who it moved from, where the condition is what decides whether
- * it moves at all.
+ * Conditional on the requester being somebody else, so a root whose author
+ * already holds the ticket — their own reply under it arrived first — writes
+ * nothing and records nothing. A redelivered root never gets this far: the
+ * comment-id lookup at the top of `ingestMetaComment` returns first, and two
+ * copies racing past it are rolled back whole by the unique index on the
+ * message they both insert. `previous` is what the ticket was found with,
+ * outside the transaction: the event's account of who it moved from, where the
+ * condition is what decides whether it moves at all.
+ *
+ * `requester_kind` goes with it. It is the requester's population, read off
+ * their own record once and never revised (`establishRequesterKind`), so left
+ * alone it would go on describing the replier; cleared, the root's own
+ * `afterMessageStored`, which runs once this commits, reads it off the new
+ * requester. Nothing else writes the column, so clearing it overrides nobody.
  */
 async function adoptRootAuthor(
   tx: typeof db,
@@ -586,7 +595,7 @@ async function adoptRootAuthor(
 ): Promise<void> {
   const moved = await tx
     .update(conversations)
-    .set({ requesterContactId: input.authorContactId })
+    .set({ requesterContactId: input.authorContactId, requesterKind: null })
     .where(
       and(
         eq(conversations.id, input.conversationId),
