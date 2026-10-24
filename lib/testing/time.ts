@@ -27,9 +27,8 @@ import { DateTime } from 'luxon';
  * still in summer time. A test that means the second adds an hour to it.
  *
  * Still on luxon, each for a reason: `forms/summary` builds the offset-carrying
- * `toISO()` string the parser stores, which is the thing under test; the DST case
- * in `reports/intervals` does arithmetic on `DateTime` values; and
- * `reports/agent-queries` compares calendar dates, not instants.
+ * `toISO()` string the parser stores, which is the thing under test; and the DST
+ * case in `reports/intervals` does arithmetic on `DateTime` values.
  *
  * Cairo by name, not `TEAM_TIME_ZONE`: these tests assert in Cairo, and should
  * keep doing so if the constant ever moves.
