@@ -2,10 +2,17 @@
 
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { GlobeIcon, SendIcon, XIcon } from '@/components/icons';
-import { Button, ErrorText, Select, Textarea } from '@/components/ui';
+import { Button, ErrorText, Label, Select, Textarea } from '@/components/ui';
 import { InfoTip } from '@/components/tooltip';
 import { suggestionKey } from '@/lib/canned-suggest/keyboard';
+import { formatDateTime } from '@/lib/format';
 import type { CannedResponseOption } from '@/lib/tickets/lookups';
+import {
+  canTakePrivateReply,
+  commentExcerpt,
+  defaultPrivateReplyOption,
+  type PrivateReplyOption,
+} from '@/lib/tickets/private-reply-options';
 import {
   availableLocales,
   insertCanned,
@@ -39,6 +46,7 @@ function bodiesOf(response: CannedResponseOption) {
 export function ReplyForm({
   conversationId,
   isCommentThread = false,
+  requesterComments,
   canned,
   customerLocale,
   knowledge,
@@ -48,6 +56,11 @@ export function ReplyForm({
 }: {
   conversationId: string;
   isCommentThread?: boolean;
+  /**
+   * The requester's comments on a comment ticket, newest first — the only ones
+   * a private reply may answer. Empty off a comment ticket.
+   */
+  requesterComments: PrivateReplyOption[];
   canned: CannedResponseOption[];
   customerLocale: CannedLocale;
   knowledge: KnowledgeContext | null;
@@ -62,6 +75,9 @@ export function ReplyForm({
     onSuccess: onSent,
   });
   const [privately, setPrivately] = useState(false);
+  // Whether any of the customer's comments can still take a private reply —
+  // what the box may be ticked for. `privateReplyRefusal` refuses the rest.
+  const answerable = requesterComments.some(canTakePrivateReply);
   // Said on the button as well as in the notice above the tabs: the press is
   // the moment the agent commits, and "Send" under a public comment does not
   // say that everyone who can see the post will read it.
@@ -103,21 +119,37 @@ export function ReplyForm({
       />
 
       {isCommentThread ? (
-        <label className="flex items-start gap-2 rounded-md border border-(--color-border-subtle) p-2 text-xs">
-          <input
-            type="checkbox"
-            checked={privately}
-            onChange={(event) => setPrivately(event.target.checked)}
-            className="mt-0.5 size-4 shrink-0 accent-(--color-control-accent)"
-          />
-          <span>
-            <span className="font-medium">Reply privately instead</span>
-            <span className="block text-(--color-text-secondary)">
-              Moves the conversation into the direct message inbox. Meta allows this once per
-              comment, so it cannot be undone or repeated.
+        <div className="flex flex-col gap-2 rounded-md border border-(--color-border-subtle) p-2 text-xs">
+          <label className="flex items-start gap-2">
+            <input
+              type="checkbox"
+              checked={privately}
+              // Can be unticked whatever happens to the list, so a box ticked
+              // before the list emptied is never stuck sending privately; the
+              // action refuses that send with the reason.
+              disabled={!privately && !answerable}
+              onChange={(event) => setPrivately(event.target.checked)}
+              className="mt-0.5 size-4 shrink-0 accent-(--color-control-accent)"
+            />
+            <span>
+              <span className="font-medium">Reply privately instead</span>
+              <span className="block text-(--color-text-secondary)">
+                {answerable
+                  ? 'Moves the conversation into the direct message inbox. Meta allows this ' +
+                    'once per comment, so it cannot be undone or repeated.'
+                  : requesterComments.length > 0
+                    ? 'Not on this ticket: each of the customer’s comments here was deleted ' +
+                      'from the post or has had its one private reply.'
+                    : 'Not on this ticket: a private reply goes to whoever wrote the comment ' +
+                      'it answers, and none of the comments here is the customer’s own.'}
+              </span>
             </span>
-          </span>
-        </label>
+          </label>
+
+          {privately && requesterComments.length > 0 ? (
+            <PrivateReplyTarget comments={requesterComments} />
+          ) : null}
+        </div>
       ) : null}
 
       <ErrorText>{state.error}</ErrorText>
@@ -140,6 +172,68 @@ export function ReplyForm({
       </div>
     </form>
   );
+}
+
+/**
+ * Which of the requester's comments a private reply answers.
+ *
+ * A private reply is a message addressed to a comment id, and Meta delivers it
+ * to whoever wrote that comment — so the comment is named here, where the agent
+ * can see it, rather than left to whatever is newest when the job runs, which
+ * on a busy post is a passer-by's reply filed on this ticket. Only the
+ * requester's are offered, newest first, and the action re-reads the one posted
+ * before it stores anything. A comment deleted from the post or already
+ * answered privately, which Graph would refuse, is listed, labelled and
+ * disabled — the action refuses it too (`canTakePrivateReply`).
+ *
+ * Not moved by a live refresh once mounted: a newer comment arriving leaves the
+ * agent's choice where it was, and one that a colleague answers meanwhile is
+ * refused by the action with the reason, before anything is written.
+ *
+ * Uncontrolled, under the form's `key`: a send remounts it on the default
+ * again, and a refusal leaves the agent's choice where it was (`useActionForm`).
+ */
+function PrivateReplyTarget({ comments }: { comments: PrivateReplyOption[] }) {
+  const id = useId();
+
+  return (
+    <div>
+      <Label htmlFor={id}>Answers the customer’s comment</Label>
+      <Select
+        id={id}
+        name="replyToMessageId"
+        defaultValue={defaultPrivateReplyOption(comments)}
+        className="w-full font-conversation"
+      >
+        {comments.map((comment) => (
+          <option key={comment.id} value={comment.id} disabled={!canTakePrivateReply(comment)}>
+            {optionLabel(comment)}
+          </option>
+        ))}
+      </Select>
+    </div>
+  );
+}
+
+/**
+ * When, whether it can still take a private reply, and what it said.
+ *
+ * The date leads because an option is one bidirectional run in an LTR select:
+ * an Arabic comment ahead of it would carry the date to the wrong end of the
+ * line. The comment itself is isolated (U+2068 … U+2069), since an option can
+ * hold no `<bdi>`: an Arabic excerpt then keeps its ellipsis at the cut and its
+ * words in order around an order number, and anything the customer's text
+ * opened and the cut left unclosed stops at the isolate's end.
+ */
+function optionLabel(comment: PrivateReplyOption): string {
+  const status = comment.deleted
+    ? 'deleted from the post'
+    : comment.answered
+      ? 'already answered privately'
+      : null;
+  return [formatDateTime(comment.at), status, `\u2068${commentExcerpt(comment.text)}\u2069`]
+    .filter(Boolean)
+    .join(' — ');
 }
 
 /**
@@ -363,7 +457,7 @@ function ReplyBody({
           ghost ??
           (isCommentThread
             ? privately
-              ? 'Send this privately to the commenter — one chance per comment.'
+              ? 'Send this privately to the customer — one chance per comment.'
               : 'Reply under the comment, where everyone can see it…'
             : 'Write a reply to the customer…')
         }

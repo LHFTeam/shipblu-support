@@ -4,6 +4,8 @@ import { previewConversationPurge } from '@/lib/admin/purge';
 import { hiddenScopeRefusal } from '@/lib/admin/purge-visibility';
 import { requireAgent } from '@/lib/auth/guard';
 import { can } from '@/lib/auth/permissions';
+import { toCategoryChoices } from '@/lib/categories/choices';
+import { listCategories } from '@/lib/categories/queries';
 import { suggestForAgent } from '@/lib/kb/agent-search';
 import { detectLocale } from '@/lib/kb/language';
 import { seedTerms } from '@/lib/kb/seed';
@@ -56,14 +58,21 @@ export default async function ConversationPage({
   const canViewContact = can(agent, 'contact.view');
   const canClose = can(agent, 'ticket.close');
   const canSubcategorise = can(agent, 'ticket.subcategorise');
+  const canSetCategory = can(agent, 'ticket.set_category');
 
   // Read whatever the permission, because the sidebar shows what a ticket is
   // filed under to anybody who can open it — `ticket.subcategorise` gates
   // changing it, not seeing it.
   const mayPurge = can(agent, 'ticket.purge');
-  const [subcategories, causes, purgePreview, purgeRefusal] = await Promise.all([
+  const [subcategories, causes, categories, purgePreview, purgeRefusal] = await Promise.all([
     subcategoryOptions(),
     rootCauseOptions(),
+    // For the sidebar's select, which every role holds `ticket.set_category`
+    // for. In this batch, which is narrower than the one below that sets the
+    // page's peak on the pool, and memoised for the request, so the inbox
+    // shell's own read of it for the filter, made in turn after the groups to
+    // spare the pool a place (§6.91), is a cache hit on a ticket page.
+    listCategories(),
     // Counted on render rather than on click, because the counts are the whole
     // argument the confirmation panel makes and a panel that has to fetch before
     // it can warn is a panel that gets clicked through. Only for an admin who
@@ -180,6 +189,8 @@ export default async function ConversationPage({
         canEditContact={canEditContact}
         canClose={canClose}
         canSubcategorise={canSubcategorise}
+        canSetCategory={canSetCategory}
+        categories={toCategoryChoices(categories)}
         subcategoryOptions={subcategories}
         rootCauses={causes}
         purgePreview={purgePreview}

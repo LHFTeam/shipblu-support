@@ -56,21 +56,23 @@ describe('dayWindow', () => {
   });
 });
 
+/**
+ * Every answer below is written in UTC rather than built with `cairo()`, which
+ * reads its text through this function and so could only agree with it. A scan
+ * bound's tests run it on a host in UTC and in Cairo, against answers written
+ * in UTC too.
+ */
 describe('wallClockInstant', () => {
   const CAIRO = 'Africa/Cairo';
   afterEach(() => vi.useRealTimers());
 
   it('reads a date and time on the zone clock, in summer and in winter', () => {
-    expect(wallClockInstant('2026-08-15T14:30', CAIRO)).toEqual(cairo('2026-08-15T14:30'));
+    expect(wallClockInstant('2026-08-15T14:30', CAIRO)).toEqual(new Date('2026-08-15T11:30:00Z'));
     expect(wallClockInstant('2026-01-15T14:30:15.250', CAIRO)).toEqual(
-      cairo('2026-01-15T14:30:15.250'),
+      new Date('2026-01-15T12:30:15.250Z'),
     );
   });
 
-  // Written out in UTC, once, rather than through `cairo()`: the expectation
-  // must not come from luxon's own choice between the two instances, which is
-  // what this case freezes out, and `cairo()` left that choice to luxon until
-  // #409.
   it('answers the first instance of the hour the autumn change repeats, whenever it runs', () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     for (const now of ['2026-07-15T12:00:00Z', '2026-11-15T12:00:00Z']) {
@@ -86,8 +88,8 @@ describe('wallClockInstant', () => {
   it('says a time the spring change skipped was never shown, rather than moving it', () => {
     expect(wallClockInstant('2026-04-24T00:00', CAIRO)).toBe('skipped');
     expect(wallClockInstant('2026-04-24T00:59:59', CAIRO)).toBe('skipped');
-    expect(wallClockInstant('2026-04-24T01:00', CAIRO)).toEqual(cairo('2026-04-24T01:00'));
-    expect(wallClockInstant('2026-04-23T23:59', CAIRO)).toEqual(cairo('2026-04-23T23:59'));
+    expect(wallClockInstant('2026-04-24T01:00', CAIRO)).toEqual(new Date('2026-04-23T22:00:00Z'));
+    expect(wallClockInstant('2026-04-23T23:59', CAIRO)).toEqual(new Date('2026-04-23T21:59:00Z'));
   });
 
   // The zone is the caller's; nothing in the arithmetic is Cairo's hour.
@@ -114,6 +116,10 @@ describe('wallClockInstant', () => {
     expect(wallClockInstant('14:30', CAIRO)).toBeNull();
     expect(wallClockInstant('14:30Z', CAIRO)).toBeNull();
     expect(wallClockInstant('2026-02-30T09:00', CAIRO)).toBeNull();
+    // Hour 24, which luxon reads as the next midnight: a second spelling of it,
+    // and on the eve of a spring change one called skipped.
+    expect(wallClockInstant('2026-08-15T24:00', CAIRO)).toBeNull();
+    expect(wallClockInstant('2026-04-23T24:00', CAIRO)).toBeNull();
     expect(wallClockInstant('half past nine', CAIRO)).toBeNull();
     expect(wallClockInstant('2026-08-15T14:30', 'Africa/Atlantis')).toBeNull();
   });

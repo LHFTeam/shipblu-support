@@ -11,6 +11,7 @@ const GROUPS = [
   { id: CUSTOMER_CARE, name: 'Customer Care', member: true },
   { id: MERCHANT_CARE, name: 'Merchant Care', member: false },
 ];
+const SALES = '7c2e9b14-3d5a-4f6e-8a1b-0c9d8e7f6a5b';
 
 function parsed(href: string) {
   const query = href.split('?')[1] ?? '';
@@ -28,8 +29,17 @@ describe('inboxViews', () => {
           channel: filters.channel,
           rating: filters.rating,
           group: filters.group,
+          category: filters.category,
         }).toEqual(item.filters);
       }
+    }
+  });
+
+  // The Category select covers every category until Stage 5 routes by one,
+  // and a view that named none would still have to clear what the select set.
+  it('offers no view per category, and every view clears the category', () => {
+    for (const section of inboxViews({ ...everything, groups: GROUPS })) {
+      for (const item of section.items) expect(item.filters.category).toBeNull();
     }
   });
 
@@ -69,6 +79,7 @@ describe('inboxViews', () => {
       channel: 'all',
       rating: 'low',
       group: null,
+      category: null,
     });
   });
 
@@ -153,16 +164,44 @@ describe('viewHref', () => {
     expect(
       viewHref(
         '/inbox/812',
-        { view: 'mine', statusCategory: 'unresolved', channel: 'all', rating: 'any', group: null },
+        {
+          view: 'mine',
+          statusCategory: 'unresolved',
+          channel: 'all',
+          rating: 'any',
+          group: null,
+          category: null,
+        },
         '',
       ),
     ).toBe('/inbox/812?view=mine');
   });
 
+  it('writes a category the parser reads back, beside the other axes', () => {
+    const filters = {
+      view: 'all',
+      statusCategory: 'pending',
+      channel: 'whatsapp',
+      rating: 'any',
+      group: MERCHANT_CARE,
+      category: SALES,
+    } as const;
+    const href = viewHref('/inbox', filters, 'refund');
+    expect(href).toContain(`category=${SALES}`);
+    expect(parsed(href)).toEqual({ ...filters, q: 'refund' });
+  });
+
   it('carries the search across a change of view', () => {
     const href = viewHref(
       '/inbox',
-      { view: 'all', statusCategory: 'pending', channel: 'all', rating: 'any', group: null },
+      {
+        view: 'all',
+        statusCategory: 'pending',
+        channel: 'all',
+        rating: 'any',
+        group: null,
+        category: null,
+      },
       'أحمد',
     );
     expect(parsed(href)).toMatchObject({ statusCategory: 'pending', q: 'أحمد' });
@@ -251,11 +290,31 @@ describe('activeViewId', () => {
     );
   });
 
+  // No view names a category, so a list cut to one is the selects' own — the
+  // header reads "Custom filter" rather than claiming All open, a channel or a
+  // status view, any of which would put a count beside it that is not its own.
+  it('lights no view over a list cut to one category', () => {
+    expect(activeViewId(sections, parseFilters({ category: SALES }), everything)).toBe(null);
+    expect(
+      activeViewId(sections, parseFilters({ channel: 'email', category: SALES }), everything),
+    ).toBe(null);
+    expect(
+      activeViewId(sections, parseFilters({ status: 'pending', category: SALES }), everything),
+    ).toBe(null);
+    // And the same axes without it are the views they always were.
+    expect(activeViewId(sections, parseFilters({ channel: 'email' }), everything)).toBe('ch-email');
+    expect(activeViewId(sections, parseFilters({ status: 'pending' }), everything)).toBe('pending');
+  });
+
   it('tells one group’s view from the unfiltered list', () => {
     const sections = inboxViews({ ...everything, groups: GROUPS });
     expect(activeViewId(sections, parseFilters({ group: MERCHANT_CARE }), everything)).toBe(
       `group-${MERCHANT_CARE}`,
     );
     expect(activeViewId(sections, parseFilters({}), everything)).toBe('all');
+    // A group's queue cut to one category is narrower than the group's view.
+    expect(
+      activeViewId(sections, parseFilters({ group: MERCHANT_CARE, category: SALES }), everything),
+    ).toBe(null);
   });
 });

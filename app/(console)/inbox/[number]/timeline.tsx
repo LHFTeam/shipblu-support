@@ -311,7 +311,12 @@ function MessageParts({
         </p>
       ) : null}
       {isInbound && isPublicMetaMessage(meta) ? (
-        <CommentModeration messageId={message.id} meta={message.meta} canModerate={canModerate} />
+        <CommentModeration
+          messageId={message.id}
+          direction={message.direction}
+          meta={message.meta}
+          canModerate={canModerate}
+        />
       ) : null}
     </>
   );

@@ -646,7 +646,7 @@ Elsewhere in the console:
   `rule_suppressed` beside `agent_suppressed` (`suppressionReason`), read off
   the newest `csat_suppressed` event (`suppressedBy`), as `resolvedByRule`
   reads who resolved a ticket, so no column was added. Both writers stamp
-  their event once they hold the ticket's row, as `PRIORITY_STAMP` does, so
+  their event once they hold the ticket's row, as `CHANGE_STAMP` (`lib/tickets/change-stamp.ts`) does, so
   "newest" is the order the flag was written. With the delay at 0 a rule in a
   later request can lose to the survey, as the agent's own toggle can.
 

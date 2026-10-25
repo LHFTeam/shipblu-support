@@ -127,7 +127,7 @@ describe('assignConversation on a ticket whose WhatsApp number has an owner', ()
 
       const outcome = await assignConversation(ticket.id, { now: FRIDAY });
 
-      expect(outcome).toEqual({ assignedTo: nayera, reason: null });
+      expect(outcome).toEqual({ assignedTo: nayera, reason: null, movedGroup: false });
       expect(await ticketRow(ticket.id)).toMatchObject({ assignee: nayera, groupId });
       expect(await eventsOf(ticket.id, ['assigned', 'assignment_skipped'])).toEqual([
         {
@@ -156,7 +156,7 @@ describe('assignConversation on a ticket whose WhatsApp number has an owner', ()
       actorLabel: 'automation:Route merchants',
     });
 
-    expect(outcome).toEqual({ assignedTo: nayera, reason: null });
+    expect(outcome).toEqual({ assignedTo: nayera, reason: null, movedGroup: true });
     expect(await ticketRow(ticket.id)).toMatchObject({ assignee: nayera, groupId: merchantCare });
     expect(await eventsOf(ticket.id, ['group_changed', 'assigned'])).toEqual([
       {
@@ -188,7 +188,7 @@ describe('assignConversation on a ticket whose WhatsApp number has an owner', ()
       actorLabel: 'automation:Route merchants',
     });
 
-    expect(outcome).toEqual({ assignedTo: null, reason: 'already_assigned' });
+    expect(outcome).toEqual({ assignedTo: null, reason: 'already_assigned', movedGroup: true });
     expect(await ticketRow(ticket.id)).toMatchObject({ assignee: nayera, groupId: merchantCare });
     expect(await eventsOf(ticket.id, ['group_changed', 'assigned'])).toEqual([
       {
@@ -208,7 +208,7 @@ describe('assignConversation on a ticket whose WhatsApp number has an owner', ()
 
     const outcome = await assignConversation(ticket.id, { groupId: merchantCare });
 
-    expect(outcome).toEqual({ assignedTo: null, reason: 'already_assigned' });
+    expect(outcome).toEqual({ assignedTo: null, reason: 'already_assigned', movedGroup: false });
     expect(await ticketRow(ticket.id)).toMatchObject({ assignee: bob, groupId: null });
   });
 
@@ -220,7 +220,7 @@ describe('assignConversation on a ticket whose WhatsApp number has an owner', ()
       groupId: '00000000-0000-4000-8000-000000000000',
     });
 
-    expect(outcome).toEqual({ assignedTo: nayera, reason: null });
+    expect(outcome).toEqual({ assignedTo: nayera, reason: null, movedGroup: false });
     expect(await ticketRow(ticket.id)).toMatchObject({ assignee: nayera, groupId: null });
     expect(await eventsOf(ticket.id, ['group_changed'])).toEqual([]);
   });
@@ -233,6 +233,7 @@ describe('assignConversation on a ticket whose WhatsApp number has an owner', ()
     expect(await assignConversation(ticket.id)).toEqual({
       assignedTo: null,
       reason: 'already_assigned',
+      movedGroup: false,
     });
     expect(await ticketRow(ticket.id)).toMatchObject({ assignee: bob, accountable: nayera });
   });
@@ -248,12 +249,34 @@ describe('assignConversation on a ticket whose WhatsApp number has an owner', ()
 
     const outcome = await assignConversation(ticket.id);
 
-    expect(outcome).toEqual({ assignedTo: omar, reason: null });
+    expect(outcome).toEqual({ assignedTo: omar, reason: null, movedGroup: false });
     expect(await ticketRow(ticket.id)).toMatchObject({ assignee: omar, accountable: nayera });
     expect((await eventsOf(ticket.id, ['assigned']))[0]!.data).toEqual({
       to: omar,
       strategy: 'round_robin',
     });
+  });
+
+  // The rota's own path, which no owner takes: the move is made once, before
+  // the branches, and reported, so a rule routing an unowned ticket owes the
+  // SLA its re-time and its second look (`lib/automations`, `Pass.groupMoved`).
+  it('moves a ticket the rota picks for into the group a rule named, and says so', async () => {
+    const nayera = await agent('Nayera Mohamed', { isActive: false });
+    const omar = await agent('Omar Agent', { presence: 'online', lastSeenAt: new Date() });
+    const support = await group('Merchant Care', { assignWithinHoursOnly: false });
+    await db.insert(groupMembers).values({ groupId: support, agentId: omar });
+    const ticket = await ownedTicket(nayera);
+
+    const outcome = await assignConversation(ticket.id, {
+      groupId: support,
+      actorLabel: 'automation:Route merchants',
+    });
+
+    expect(outcome).toEqual({ assignedTo: omar, reason: null, movedGroup: true });
+    expect(await ticketRow(ticket.id)).toMatchObject({ assignee: omar, groupId: support });
+    expect((await eventsOf(ticket.id, ['group_changed'])).map((event) => event.data)).toEqual([
+      { to: support },
+    ]);
   });
 
   // "Unassign" in the console writes the ticket and then runs the same

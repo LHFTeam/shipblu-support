@@ -49,6 +49,7 @@ export async function moderateMetaComment(job: ClaimedJob): Promise<void> {
     .select({
       id: messages.id,
       conversationId: messages.conversationId,
+      direction: messages.direction,
       meta: messages.meta,
     })
     .from(messages)
@@ -58,7 +59,7 @@ export async function moderateMetaComment(job: ClaimedJob): Promise<void> {
   const row = rows[0];
   if (!row) throw subjectGone('moderate_meta_comment', `message ${messageId}`);
 
-  const comment = moderatableComment(row.meta);
+  const comment = moderatableComment(row.meta, row.direction);
   if (!comment) throw new Error(`message ${messageId} is not a Meta comment`);
 
   const before = readCommentModeration(row.meta);

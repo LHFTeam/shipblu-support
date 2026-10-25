@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { commentIdOf, commentReplyTarget, commentRequest, rootCommentId } from './comments';
+import {
+  commentIdOf,
+  commentReplyTarget,
+  commentRequest,
+  isRequesterComment,
+  requesterCommentId,
+  rootCommentId,
+} from './comments';
 
 /**
  * Every assertion here is against Meta's reference rather than against
@@ -119,6 +126,56 @@ describe('commentIdOf', () => {
     expect(commentIdOf({ platform: 'facebook' }, 'm_abc')).toBeNull();
     expect(commentIdOf(null, 'm_abc')).toBeNull();
     expect(commentIdOf({ metaKind: 'comment' }, '')).toBeNull();
+  });
+});
+
+describe('isRequesterComment and requesterCommentId', () => {
+  const AMIRA = 'contact-amira';
+  const comment = (authorContactId: string | null, direction = 'inbound') => ({
+    direction,
+    authorContactId,
+    meta: { metaKind: 'comment', commentId: 'post-1_c2' },
+    channelMessageId: 'post-1_c2',
+  });
+
+  it('is the comment when the ticket’s requester wrote it', () => {
+    expect(isRequesterComment(comment(AMIRA), AMIRA)).toBe(true);
+    expect(requesterCommentId(comment(AMIRA), AMIRA)).toBe('post-1_c2');
+  });
+
+  // A row from before ingest stored the id: the composer, which holds no
+  // `channel_message_id`, still offers it, and the action reads its id as
+  // `commentIdOf` does.
+  it('reads a comment stored without its id in meta from the row', () => {
+    const legacy = {
+      direction: 'inbound',
+      authorContactId: AMIRA,
+      meta: { metaKind: 'comment' },
+      channelMessageId: 'post-1_c1',
+    };
+    expect(isRequesterComment(legacy, AMIRA)).toBe(true);
+    expect(requesterCommentId(legacy, AMIRA)).toBe('post-1_c1');
+  });
+
+  // Anybody may reply under the customer's comment, and ingest files it on
+  // their ticket: a private reply named after it would go to the passer-by.
+  it('is not a passer-by’s comment, our own reply, or anything not a comment', () => {
+    const refused = [
+      comment('contact-bob'),
+      comment(null),
+      comment(AMIRA, 'outbound'),
+      {
+        direction: 'inbound',
+        authorContactId: AMIRA,
+        meta: { metaKind: 'direct_message' },
+        channelMessageId: 'm_1',
+      },
+      { direction: 'inbound', authorContactId: AMIRA, meta: null, channelMessageId: 'm_2' },
+    ];
+    for (const message of refused) {
+      expect(isRequesterComment(message, AMIRA)).toBe(false);
+      expect(requesterCommentId(message, AMIRA)).toBeNull();
+    }
   });
 });
 

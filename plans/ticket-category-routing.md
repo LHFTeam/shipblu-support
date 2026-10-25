@@ -63,7 +63,7 @@ records the answers, and the plan below already reflects them.
 
 ## Status and handoff
 
-As of 2026-10-23, 22:00 UTC. A session picking this plan up starts here.
+As of 2026-10-25, 06:03 UTC. A session picking this plan up starts here.
 Everything after this section is the design as it was reasoned and as each stage
 was built. This section says where the work stands, what comes next and how, and
 what has already bitten. Whoever moves any of it updates this section in the
@@ -80,9 +80,87 @@ update.
 | 1.1   | Merged: #387, then `dev` → `main` in #389 (`1f89219`)                                                                                       | Live since 2026-10-21 10:13 UTC                                                                                                                                                                    |
 | 1.2   | Merged: #391 (`31f7379`) and follow-up #392 (`7b7d276`), then `dev` → `main` in #393 (`634a28d`), which also carried another session's #390 | **Done.** All six services live on `634a28d` by 17:38 UTC on 2026-10-21, worker first. The user ran the backfill and the rollup from a shell, leaving no `jobs` row. Every check below reads clean |
 | 1.3   | Merged: #395 (`58c5ed9`), then `dev` → `main` in #397 (`447d8be`), which also carried #394, #396 and #398. As built below                   | **Done.** All six services live on `447d8be` by 18:36 UTC, web first. Its checks read clean (below), though no comment has arrived since                                                           |
-| 2.A   | Merged into `dev`: #400 (`a558c5b`), no migration. As built below                                                                           | Not deployed. Ships with the next `dev` → `main` merge, after its "Before" step (Deploying 2.A)                                                                                                    |
-| 2.B   | In review: #403 (`claude/stage-2b-subcategory-sql`): migration `0046`, `db/sql/002`, a runbook. As built below                              | Not deployed. Merges only after 2.A's release is on all six services (1.3 and #396 already are), then deploys alone in a maintenance window (Deploying 2.B)                                        |
+| 2.A   | Merged: #400 (`a558c5b`), then `dev` → `main` in #406 (`e88d357`), which also carried #399, #401 and #402. As built below                   | **Done.** All six services live on `e88d357` by 22:13 UTC on 2026-10-23, deployed at once by an environment update. Its checks read clean (below)                                                  |
+| 2.B   | Merged: #403 (`1d21cdc`), then `dev` → `main` in #413 (`516c8ff`) and #415 (`48cb284`). As built below                                      | **Done.** All six services live on `48cb284` by 06:01 UTC on 2026-10-25, web first, with nothing suspended. Its checks read clean, and a new message was subcategorised; one read left (below)     |
 | 3–6   | Not started                                                                                                                                 | —                                                                                                                                                                                                  |
+
+**2.B's deploy and checks, read on Render and production on 2026-10-25.**
+
+- **The release.** #403 merged into `dev` as `1d21cdc` at 22:52 UTC on
+  2026-10-23, after 2.A was live, as its hold required. Then #413 took `dev`
+  into `main` at 23:01 UTC, and #415 again at 16:37 UTC on 2026-10-24. Neither
+  was deployed at once, so for about 31 hours `main` held a migration nothing
+  had run. In that state an environment variable change, which makes Render
+  redeploy every service at once (2.A's deploy, below), or a deploy of any one
+  service would have shipped 2.B outside its sequence. Nothing did.
+- **The deploy.** The user deployed web by hand on `48cb284` at 05:53:02 UTC on
+  2026-10-25, clearing the build cache. Its preDeploy logged
+  `Applying drizzle migrations...` at 05:55:10.4 and was applying `001` by
+  05:55:13.1, so 0046 committed in under 3 s; all nine `db/sql` files were done
+  at 05:55:13.8, and web was live at 05:56:10. Then, by hand on the same commit:
+
+  | Service                          | Live     |
+  | -------------------------------- | -------- |
+  | `shipblu-time-automations`       | 05:59:43 |
+  | `shipblu-whatsapp-template-sync` | 05:59:48 |
+  | `shipblu-nightly`                | 06:00:37 |
+  | `shipblu-sla-sweep`              | 06:01:07 |
+  | worker `shipblu-support-worker`  | 06:01:12 |
+
+- **Not as planned: nothing was suspended.** From 05:55:10 to 06:01:12 the old
+  worker (`e88d357`) ran against the renamed tables, and `shipblu-sla-sweep`
+  ran once on old code at 05:55:57, successfully. It cost nothing that can be
+  measured:
+  - no job run since 05:50 carries an error;
+  - neither web nor the worker logged a warning, an error or a line naming a
+    missing relation after 05:55, and web served no 5xx;
+  - the six inbound messages in the window were all on `whatsapp_bot`, which
+    the subcategoriser leaves out, and none came through web, so step 7's list
+    under [Deploying 2.B](#2b-as-built) is empty.
+- **The checks** (read 06:02–06:03 UTC):
+  - no relation or type keeps an old name;
+  - the six CHECKs, the composite primary key and the three `_pkey`s have the
+    new names;
+  - the four tables hold 55, 836, 408 and 647 rows, as before;
+  - `/api/health` reports `48cb284` with an empty queue (its one dead job is a
+    `subscribe_meta_webhooks` from 2026-09-21);
+  - `/admin/categories` answers 307 to `/admin/subcategories`.
+- **A new message, subcategorised** (read 16:20 UTC): 14 `subcategorised`
+  events between 07:22 and 16:05 UTC, on customers' replies on Instagram,
+  Facebook and WhatsApp, the first non-bot traffic after the deploy. Each wrote
+  its `conversation_subcategories` row under the message it names, with
+  `subcategory_key` equal to the key of the registry row it points at:
+  `service.request_human`, `billing.payout`, `delivery.no_contact`,
+  `delivery.late` and `meta.unclassified`.
+- **Still to read:** step 4's page loads, which need a person signed in: a
+  ticket page, a web chat ticket, `/admin/subcategories` and its shadow page.
+  Render's request log holds none since the deploy (read 16:20 UTC). The
+  rollback runbook stays the way back until a migration follows 0046.
+
+**2.A's deploy and checks, read on Render and production on 2026-10-23 and
+2026-10-25.**
+
+- **The release.** #406 merged `dev` (`a3fb23d`) into `main` at 22:08:48 UTC on
+  2026-10-23 as `e88d357`, carrying 2.A, #399, #401 and #402. Nobody deployed it
+  by hand. At 22:10 Render started a deploy on all six services at once, each
+  with `envUpdated` as its trigger: an environment variable changed, and Render
+  redeploys from `main` when one does. Web's preDeploy ran from 22:12:14 to
+  22:12:53 and applied no migration. All six were live between 22:11:20 and
+  22:13:27, the crons first. Web was not first, and 2.A, with no migration,
+  allowed that. `autoDeploy` read `no` on all six at 22:55.
+- **The checks** (read at 05:51 UTC on 2026-10-25):
+  - Nine detector events since the deploy, all `subcategorised` with actor
+    `subcategory-detector`: facebook 6, whatsapp 2, instagram 1. The first was
+    at 12:23 UTC on 2026-10-24.
+  - No `categorised` event since 20:50 UTC on 2026-10-23, before the deploy.
+  - 30,144 jobs run since 22:10 on 2026-10-23; none failed or died.
+  - No agent holds an override naming an old permission key.
+  - Render's logs for web and the worker hold no `CATEGORISE_*` line since the
+    deploy. 2.A logs one, once per process, for a value still set under an old
+    name, so none was left there. The same search finds the worker's
+    `process_webhook` lines, so it reads the right logs.
+  - The console handbook is still unseeded, so 2.A's handbook step has nothing
+    to do.
 
 **1.3's deploy, read on Render and production on 2026-10-23.**
 
@@ -206,23 +284,16 @@ Every production write needs the user's go-ahead for that step, and the
    live on it by 18:36 UTC, web first. Its checks read clean at 21:10 UTC
    (above), with one re-read left for the first comment. Its reviews are
    answered under [1.3, as built](#13-as-built).
-2. **Merge `dev` into `main`.** #400 merged into `dev` as `a558c5b` at 21:33
-   UTC. 2.A has no migration and changes `db/sql` only in `002`'s comments.
-   Nor has anything else on `dev` since #397 a migration or a `db/sql` change:
-   #399 (`0d1289d`, a repo rule), #402 (`48896ce`, the review page's date),
-   #401 (`a3fb23d`, the stored token's expiry), #408 (these docs) and #404
-   (`558d285`, the rollups' day boundaries). Rule 7 still holds, because the
-   merge ships all of `dev`: read `git log origin/main..origin/dev` on the day
-   and every migration in it.
-3. **Deploy 2.A**: web, then the worker, then the crons. Before it, run 2.A's
-   "Before" step under [Deploying 2.A](#2a-as-built): any `CATEGORISE_*` value
-   copied to its new name, the overrides and the old job re-read. After it, run
-   2.A's handbook and verify steps.
-4. **Stage 2.B**, the SQL rename, is built as #403 and in review. It merges
-   into `dev` only once 2.A is deployed to all six services, and then deploys
-   alone in a maintenance window by the steps under
-   [Deploying 2.B](#2b-as-built). It rolls back by the runbook named there,
-   which stops being a way back once any later migration has run.
+2. **2.A is deployed.** #406 (`e88d357`) took it to `main` on 2026-10-23, and
+   an environment update deployed all six services at once by 22:13 UTC. Its
+   checks read clean on 2026-10-25 (above).
+3. **2.B is deployed.** The user deployed it by hand on 2026-10-25, all six on
+   `48cb284` by 06:01 UTC, and its checks read clean (above), a new message's
+   subcategorisation included. One read is left: the four page loads. It
+   rolls back by the runbook under [Rolling back 2.B](#2b-as-built), which stops
+   being a way back once any later migration has run.
+4. **Stage 3**, the category field, merges once that read is done: its gate is
+   2.B deployed to all six services and verified.
 5. **Before Stage 5**, a person does 0.2's reorder and 0.6's staffing, and the
    support lead answers the questions still open (below).
 
@@ -842,10 +913,13 @@ maintenance sequence below closes.
 
 **Deploying 2.B.** The stage section's sequence holds, with these specifics:
 
-1. **Order of merges.** #400 merged into `dev` first, as `a558c5b`. 2.B's PR
-   merges only after the release carrying 2.A is deployed to all six services
-   (#397 had already shipped 1.3 and #396), so that 2.B's maintenance window
-   ships alone.
+1. **Order of merges.** #400 merged into `dev` first, as `a558c5b`, and #403
+   merged only after 2.A's release was on all six services, as `1d21cdc`. It
+   then reached `main` in #413 and #415 a day before its deploy. While `main`
+   holds a migration nothing has run, nothing deploys from it and no
+   environment variable changes outside the window: Render redeploys every
+   service at once on an environment change, which would run the migration
+   with nothing suspended (2.B's deploy, under Status and handoff).
 2. **Before the deploy.** List what holds a lock on the tables the deploy
    locks: the seven 0046 does and the six more 001 does. Do not use the query
    in `docs/PROJECT-STATE.md` §5.5: it lists only transactions older than five
@@ -956,6 +1030,15 @@ It stops being a way back once any migration after 0046 has been applied,
 Stage 3's new `ticket_categories` among them. The PR that adds that migration
 deletes the file and its test; the test fails and says so until it does.
 
+**Since Stage 3.1 it is gone from the tree**, deleted in the PR that adds
+`0047` and `0048` ([3.1, as built](#31-as-built)). Until that release's web
+preDeploy has run in production, it still works from history, unchanged:
+`git show 1d21cdc:db/runbooks/2b-subcategory-rollback.sql`. Once `0047` and
+`0048` are applied, 2.B has no way back by renaming: the new
+`ticket_categories` holds the name the old table would return to, and Drizzle
+would not apply `0046` again behind two newer rows. A problem found in 2.B
+after that is fixed forward, in a migration of its own.
+
 ### Working on this repo without the outgoing session's context
 
 - **`dev` is the integration branch, and GitHub used to delete it.** The
@@ -1050,10 +1133,13 @@ deletes the file and its test; the test fails and says so until it does.
   in `lib/tickets/outbound.ts` records. It was found during 1.1, and nothing
   here depends on it.
 - **Two more, found in #395's review and left out of its seam.**
-  - An agent's private reply on a comment thread is sent to the newest inbound
-    comment's author, who can be a passer-by: the console stores no comment id
-    and `send_meta` falls back to `lastInboundCommentId`, which asks no author.
-    Taken on by another session on 2026-10-23, outside this plan.
+  - _Closed, outside this plan, on 2026-10-23._ An agent's private reply on a
+    comment thread was sent to the newest inbound comment's author, who can be
+    a passer-by. The console now names one of the requester's own comments as
+    `meta.commentId`, re-read in `sendReply` (`lib/tickets/reply-comment.ts`);
+    a row naming none takes the requester's newest, and a private reply with
+    none of theirs is refused on the row. `lastInboundCommentId` now only
+    answers `inferSendKind`.
   - `findByExternalId` skips a soft-deleted ticket that the unique index still
     holds, so the next comment under it would fail 23505. Nothing soft-deletes
     a ticket yet; the lookup and the `ticket.purge` note say what the change
@@ -2664,6 +2750,216 @@ cannot parse.
     framing, the ownership rules, the event stamp, the SLA re-selection rule,
     and the reuse of the `ticket_categories` name after the gate.
   - A handbook article on the Category field.
+
+#### 3.1, as built
+
+On `claude/stage-3-category-field`. What it holds beyond the list above, and
+where it departs from it:
+
+- **Migrations.** `0047_free_old_pkey_names` is the hand-written one this stage
+  was to decide on (`drizzle-kit generate --custom`): a loop renaming the three
+  `_pkey` constraints 2.B left to `db/sql/002`, each guarded on its name and its
+  table. Its snapshot is 0046's, so the drift step regenerates nothing. On a
+  fresh database the new key is then `ticket_categories_pkey`, as in
+  production, where `0047` does nothing (read 2026-10-25: all three already
+  carry their new names, 47 migrations applied). `db/sql/002` stops renaming
+  them. `0048_ticket_categories` is generated: the registry,
+  `conversations.category_id` (`restrict`) and `conversations_category_idx` on
+  `(category_id, last_message_at)`. The route group's foreign key is
+  `set null`, like a channel's default group, and `deleteGroupIfUnused`
+  refuses while any category names the group, retired ones included.
+- **`db/sql`.** `003` adds `ticket_categories_key_format` and
+  `ticket_categories_labels_not_blank` (a blank label is a blank badge), each
+  guarded on its name and its table; `001`'s `queue_relevant` gains
+  `category_id`.
+- **The 2.B runbook and its test are deleted**, as the test required;
+  [Rolling back 2.B](#2b-as-built) says what replaces them.
+- **One writer.** `setConversationCategory` (`lib/categories/write.ts`) is
+  what the console and `set_category` call: the ticket's row locked, an
+  unchanged value writing nothing, a retired category refused, the key and
+  label stored on the event. `PRIORITY_STAMP` is generalised to
+  `CHANGE_STAMP` (`lib/tickets/change-stamp.ts`), the same `clock_timestamp()`.
+- **SLA.** `reselectPolicyBeforeFirstResponse(id, cause)` as decision 3 says,
+  doing nothing once a first response exists, when the same policy wins, when
+  none does, on a read-only channel or an imported history, on a deleted, spam
+  or merged ticket, and on a resolved or closed one, each asked first of the
+  row read without a lock so an answered ticket costs one read. The last is a
+  departure: a policy changed under a
+  resolved ticket's clocks came back out of a reopen with the new policy's name
+  on the old one's resolution deadline, or on none, because a reopen shifts the
+  clocks a ticket has rather than choosing them. So a category set while a
+  ticket is resolved moves its policy only when the category or the group next
+  changes after it reopens. The automation engine owes it once per pass
+  (`Pass.policyOwed`, named `category` over `group` when both moved) and skips
+  it on `on_create`, because `applySlaOnCreate` runs after that pass and reads
+  the category. A group is owed it only when it really moved: `assign_group`
+  and the console's group case write through `moveToGroupIfElsewhere`
+  (`lib/tickets/move-group.ts`), and `auto_assign` reads `movedGroup` off
+  `assignConversation`, because a rule naming the group a ticket is already in
+  matches on every pass, and a second look owed for nothing took up a raised
+  priority as though the group had moved. Neither writes a `group_changed`
+  event for a move that did not happen, which `assign_group` used to on every
+  pass. Both callers run it before `onGroupChanged` — the console in its
+  action, the engine once the pass is over (`Pass.groupMoved`) — so a move that
+  changes the policy writes one `sla_recalculated`; re-timed first, the old
+  policy's clocks moved to the new hours and then moved again. Its event is
+  `sla_recalculated` with `reason: 'policy'`, the cause and both policies'
+  names, and reads "moved the ticket from the Standard to the Sales SLA policy
+  after its category changed": by what set the choice off, since the policy is
+  chosen from everything the ticket is and the one that wins need not be keyed
+  on the category at all.
+- **Escalation per policy.** `sla_escalated` names its `policyId`, and the
+  sweep counts an escalation only under the policy the ticket holds now, so a
+  ticket escalated under the default and then filed under Sales still reaches
+  the Sales contacts when it misses Sales' target too. An event from before
+  names no policy and settles its kind under any, so no ticket is escalated
+  twice by the deploy.
+- **Permissions.** `ticket.set_category` on every agent, `admin.categories` on
+  admins. No agent held an override of either key (read 2026-10-25 06:3x UTC).
+- **Seed.** The starter descriptions say where each category's edges are, for
+  Jev, and `courier_jobs`' excludes a greeting or a bare "I want a job". The
+  seed reconciles by key, never overwrites, and marks as seeded only what it
+  inserts, reporting a starter key an admin's own category holds; CI's `database` job runs it
+  through `scripts/ci/db-jobs.txt`.
+- **The ticket.** A Category select beside Group and Priority, read-only text
+  for an agent without the permission; a retired category the ticket holds is
+  shown as "(retired)" rather than as "None", and so it is in the header badge
+  ("Category: Sales (retired)"), the read-only text and the inbox row
+  (`categoryLabel` in `lib/categories/choices.ts`). The timeline reads "set the category to Sales", with Jev's
+  probability from Stage 4, or "cleared the category".
+- **Rules.** `category.id` in the condition builder on the automations, SLA
+  and skills pages, a retired category named as such; "Set category" in the
+  action builder. A stored `set_category` with no id is refused at parse, as a
+  rule saved half-written.
+- **Admin.** `/admin/categories` adds, edits, retires (`DangerAction`'s two
+  clicks) and restores; nothing deletes. The rules are `lib/categories/admin.ts`:
+  the key checked as given and never written on an edit, `unknown` refused, a
+  duplicate refused naming its holder, both labels required. The route group is
+  re-read under a key-share lock, so a group delete at the same moment answers
+  the save with a sentence. The picker shows each group's strategy, "N of M
+  members accepting now", counted by assignment's own `filterCandidates`, and
+  its hours rule, and warns on a manual group or one with nobody in it. The three
+  `/admin/categories` redirects are gone; `/reports/categories` stays.
+- **Inbox.** `?category=<uuid>`, parsed like the group and applied inside
+  visibility, part of every view's filters and of the scroll signature, with no
+  preset view per category until Stage 5 routes by it. A Category select under
+  Status and Channel, and each row's label as a neutral badge, last in both
+  layouts. `listCategories` is memoised per request, so the ticket page and the
+  inbox shell share one read, and every page handing the registry to a client
+  component cuts it to id, label and state first (`toCategoryChoices`): a
+  wider row passes a narrower prop type and is serialised whole. `/api/inbox`
+  reads a repeated parameter as the page does, first value first
+  (`queryParams`), where it kept the last and a link naming two categories
+  scrolled into the second one's tickets — true of every axis before 3.1.
+- **Handbook.** A `category` article in the agents' folder; a Category filter
+  in `inbox`'s list of them; a line in `ticket-fields`; a Categories section in
+  the admins' `automation-and-forms`, saying rules and policies hold the
+  category itself, so a rename breaks neither; the role lists in `people` and
+  `owner-role`; and the two folders' descriptions.
+
+**Deploying 3.1.** Web first, because it migrates; then the worker and the four
+crons, because an old time-automations cron drops a `set_category` action
+without a word. It waits for 2.B's two remaining reads.
+
+1. **Before.** Read `git log origin/main..origin/dev` (rule 7) for what else
+   rides. Expect 47 rows in `drizzle.__drizzle_migrations`, the newest
+   `1792781241219`, and no `ticket_categories` relation. Run the lock check of
+   `docs/PROJECT-STATE.md` §5.5.
+2. **Deploy web.** Its preDeploy applies `0047` (nothing to do in production)
+   and `0048` in one transaction, then `db/sql`. `0048` takes ACCESS EXCLUSIVE
+   on `conversations` when it adds the column, and the foreign key's validation
+   of every row (72,119 rows, 20 MB, read 2026-10-25) and the index build come
+   after it in the same transaction, so that lock is held until it commits:
+   reads of tickets block as well as writes, for the whole migration — seconds,
+   because the new column is all null — and for up to `lock_timeout` (10 s,
+   `db/migrate.ts`) more if the lock queues behind an open transaction, which is
+   what step 1's lock check is for.
+3. **Deploy the worker and the four crons** on the same commit.
+4. **Seed.** `npm run job -- seed_ticket_categories` on the worker's shell, or
+   `insert into jobs (type, payload) values ('seed_ticket_categories', '{}')`.
+   It logs `[seed_ticket_categories] done created=sales,customer_support,merchant_support,courier_jobs present=0`;
+   run again, `created=none present=4`. If an admin added a category under a
+   starter key first — web is live before the seed runs, and the empty admin
+   page offers to add one — the run also logs `starter key held by an admin's
+category, left as it is: <key>`, and that key keeps the admin's wording.
+5. **Handbook.** Production held no console handbook at 2026-10-25 08:44 UTC:
+   no `handbook:` folder or article. If that still holds there is nothing to
+   do, because the first seed, whenever somebody runs it, writes 3.1's words.
+   If it has been seeded since, run
+   `npm run job -- seed_console_handbook dryRun=true` once web is live,
+   expecting `folders 0 created, 2 updated`, one article created and
+   `5 article(s) differ from this repository` (`inbox`, `ticket-fields`,
+   `people`, `automation-and-forms`, `owner-role`). A different count is a
+   console edit `overwrite=true` would replace, and is read first. Then
+   `overwrite=true`, which cuts one `kb_article_versions` row per article it
+   replaces. Rehearsed locally on 2026-10-25: `origin/dev`'s seed into an empty
+   database, then this branch's dry run, reported exactly that; the overwrite
+   replaced the five named, and a run after it found all 16 current.
+6. **Verify** (read-only):
+
+   ```sql
+   select
+     (select count(*) from drizzle.__drizzle_migrations) as migrations, -- 49
+     (select string_agg(conname, ', ' order by conname) from pg_constraint
+       where conrelid = 'public.ticket_categories'::regclass) as constraints,
+     (select string_agg(key, ', ' order by position) from ticket_categories) as categories,
+     (select prosrc like '%category_id%' from pg_proc
+       where proname = 'notify_conversation_change') as queues_redraw;
+   ```
+
+   Expect 49; `ticket_categories_key_format`, `ticket_categories_labels_not_blank`,
+   `ticket_categories_pkey` and the route group's foreign key; the four keys in
+   order; `true`. Then, signed in: `/admin/categories` lists the four, a ticket
+   page shows the select, and setting a category writes one `category_changed`
+   event naming the agent.
+
+**Rolling back 3.1.** The schema is additive, so it is code only: deploy the
+previous commit to web, then the worker and the crons. Its preDeploy applies
+nothing — every migration in its journal is older than the newest row — and its
+`db/sql` replays cleanly: `001` puts the trigger back without `category_id`,
+`002`'s `_pkey` rows look for the old names on the subcategory tables only and
+find none, and `003` neither knows nor drops the new CHECKs. The old code never
+reads `category_id`. Tickets keep their categories and events, which the old
+timeline prints as "category changed"; a rule holding a `set_category` action
+has it skipped and the rest performed (`parseActions`). Removing the table or
+the column would be a forward migration of its own. Four things the old code
+does differently with 3.1's data, and the first needs a step before the
+deploy:
+
+- **A stored condition on `category.id` changes meaning.** The old code has no
+  such fact, and its evaluator reads an unknown field as absent: `is`/`is any
+of` then match no ticket, so a category-keyed SLA policy stops applying and
+  its tickets fall to the next policy or the default, while `is not`, `is none
+of` and `is empty` match every ticket, and the time sweep acts on the whole
+  backlog within one run. So read the rows that name it first, and deactivate
+  or rewrite each, to restore after rolling forward (none, if nobody has
+  written one):
+
+  ```sql
+  select 'automation' as kind, name, is_active from automation_rules
+    where conditions::text like '%"category.id"%'
+  union all
+  select 'sla', name, is_active from sla_policies where conditions::text like '%"category.id"%'
+  union all
+  select 'skill', name, is_active from skills where conditions::text like '%"category.id"%';
+  ```
+
+- **A group delete stops asking about route groups.** The old
+  `deleteGroupIfUnused` does not count categories, so a group deleted while
+  rolled back sets its categories' `route_group_id` to null, and rolling
+  forward does not bring it back. Read `select key, route_group_id from
+ticket_categories` before and after.
+- **A `seed_ticket_categories` queued under the old worker goes `dead`**: it
+  has no handler, so each attempt fails, and the fifth is about five minutes
+  after the first. After rolling forward, run the seed again and check the
+  four keys with step 6's query.
+- **The handbook's articles keep 3.1's words** until the seed is run from the
+  older commit with `overwrite=true`; its folders do not wait for that. Any run
+  of the older seed but a dry one puts the `tickets` and `administration`
+  descriptions back and the tickets folder's article positions with them,
+  because folders and positions are synced every run, so the orphaned
+  `category` article then shares a position with `categorising`. It stays
+  either way, because the seed never deletes.
 
 **3.2 — Where a person sets it at creation.** Web, worker and crons; no schema
 beyond one column.

@@ -79,35 +79,25 @@ const nextConfig: NextConfig = {
   agentRules: false,
 
   /**
-   * The topic taxonomy's pages moved when it became the subcategory (Stage 2.A
+   * The topic taxonomy's report moved when it became the subcategory (Stage 2.A
    * of `plans/ticket-category-routing.md`), and a bookmark or a link pasted in
-   * a chat still names the old paths.
+   * a chat still names the old path. The query string carries over on its own
+   * (`?days=`).
    *
-   * Temporary, a 307, never a 308: Stage 3 puts the new category field's admin
-   * page at `/admin/categories`, and a permanent redirect is cached by every
-   * browser that followed it, so admins would keep landing on subcategories
-   * after the path means something else. For the same reason each source is
-   * exact rather than `/admin/categories/:path*`: redirects run before the
-   * filesystem, so a wildcard would hide Stage 3's whole tree. An exact source
-   * hides one page the same way, and Stage 3's tree may grow a `review` or a
-   * `shadow` of its own, so the PR that adds its page deletes all three
-   * `/admin/categories` entries; `/reports/categories` goes in whichever PR
-   * first puts a report there. The query string carries over on its own
-   * (`?days=`, `?run=`).
+   * Temporary, a 307, never a 308, and exact rather than
+   * `/reports/categories/:path*`: the path is meant to hold a report on the
+   * category field one day, and a permanent redirect is cached by every
+   * browser that followed it, while a wildcard would hide that page's whole
+   * tree, since redirects run before the filesystem. So it stays until a page
+   * lives there, and the PR adding that page deletes it.
+   *
+   * There were three more, for `/admin/categories` and its `review` and
+   * `shadow` pages. Stage 3 removed all three when the category field's admin
+   * page took the path, `review` and `shadow` included, so a child page of its
+   * own named either way is not hidden behind one.
    */
   async redirects() {
     return [
-      { source: '/admin/categories', destination: '/admin/subcategories', permanent: false },
-      {
-        source: '/admin/categories/review',
-        destination: '/admin/subcategories/review',
-        permanent: false,
-      },
-      {
-        source: '/admin/categories/shadow',
-        destination: '/admin/subcategories/shadow',
-        permanent: false,
-      },
       { source: '/reports/categories', destination: '/reports/subcategories', permanent: false },
     ];
   },

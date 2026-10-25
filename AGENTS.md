@@ -245,6 +245,16 @@ that modifies or deletes a migration that already exists:
 Database-level behaviour that Drizzle's DSL cannot express goes in `db/sql/`,
 not into a generated migration.
 
+One exception, for an order `db/sql/` cannot give: it replays after every
+migration, so SQL that a generated migration needs run _before_ it goes in a
+migration of its own, made by `npx drizzle-kit generate --custom`. That writes
+an empty file and a snapshot copied from the last one, so the drift check
+regenerates nothing; the file is filled in by hand before anything applies it,
+and is guarded so a database that does not need it passes straight through.
+`0047_free_old_pkey_names` is the one so far: a fresh database had to give up
+the old `ticket_categories_pkey` name before `0048` created the new table.
+Once applied it is as fixed as any other migration.
+
 ## Conventions
 
 **TypeScript.** Strict. Path alias `@/*` maps to the repo root. Prettier and
@@ -671,7 +681,13 @@ a comment channel answers there. The sender then answers only a comment from
 the ticket's own requester (`answersRequester`, in `maybeSendAutoResponse`),
 because anybody may reply under a customer's comment and that reply is filed
 on the customer's ticket; and it names that comment as the reply's target, so
-a reply written before the job runs does not become it. It judges the message
+a reply written before the job runs does not become it. The requester is the
+root comment's author once the root is stored: a reply stored before its root
+opens the ticket under the replier, and the root, when it arrives, makes its
+author the requester, and its first line the subject, with a
+`requester_changed` event (`adoptRootAuthor` in `ingest-meta.ts`). A later
+reply never moves it, because its author is somebody under the customer's
+comment. The sender judges the message
 the lifecycle hands it by id, never the newest inbound row, which after a
 batch retry is a passer-by's reply stored before the requester's older comment. `pickRule` takes the stored channel and
 external id and reads a comment filed on its platform's channel as its comment
@@ -688,6 +704,25 @@ passer-by's reply as readily as on the customer's — and its reply would be
 posted under whichever comment came in last. Whether a rule may ever answer a
 comment is the support lead's call, in its own change, with a trigger that
 names the comment.
+
+**An agent's reply on a comment ticket names one of the requester's comments
+too.** A private reply is delivered to whoever wrote the comment it names, and
+Meta allows one per comment, ever, so answering the newest comment on the
+ticket can hand a passer-by what the agent wrote for the customer. `sendReply`
+names the comment the agent picked in the composer — re-read against the ticket
+and its requester, because its id arrives in a form field — or the requester's
+newest, and stores it as `meta.commentId`; a public reply takes their newest the
+same way, "newest" meaning still on the post where one is. It refuses a private
+reply to a comment deleted from the post, or to one already answered by a
+private reply that has not failed: Meta refuses both, but only once the reply
+is on the timeline, marked failed. The composer disables the same two
+(`canTakePrivateReply`). `send_meta` never falls back to anybody's comment: a
+row naming none takes the requester's newest (`lib/tickets/reply-comment.ts`),
+and a private reply with none of theirs is refused on the row. The composer's list and that
+read ask one question, `isRequesterComment` (`lib/meta/comments.ts`). Because an
+outbound row now carries `commentId`, `moderatableComment` takes the row's
+direction: a moderation request naming the reply would otherwise act on the
+customer's comment.
 
 Graph request shapes are written down in `lib/meta/comments.ts` and
 `lib/meta/send.ts` rather than built inline, and asserted there against Meta's
@@ -1187,6 +1222,63 @@ strongest rule that contributed rather than from how many did, so a pile of
 single keywords is held below the auto band however many of them agree. See
 `plans/ticket-categorisation.md`.
 
+**The ticket category.** `conversations.category_id` names a row of
+`ticket_categories` — sales, customer support, merchant support, courier jobs —
+and says which team's work a ticket is: one per ticket, where subcategories are
+several, and independent of them (decision 3 of
+`plans/ticket-category-routing.md`). From Stage 5 it is what routes a fresh
+ticket. Five rules hold:
+
+- **A routing label, never a claim about the requester.** Words are evidence of
+  whose work a message is, and no evidence of who wrote it, so nothing that sets
+  a category writes `requester_kind`, and the starter descriptions in
+  `lib/categories/registry.ts` speak about what a message asks for.
+- **Every writer writes the column and a `category_changed` event in one
+  transaction**, the ticket's row locked first and the event stamped with
+  `CHANGE_STAMP` (`lib/tickets/change-stamp.ts`, priority's stamp generalised), so
+  the timeline orders two writers the way the column was written — which Jev's
+  ownership rule (Stage 4) reads to decide whether a person has answered for a
+  ticket. The console and the `set_category` action go through
+  `setConversationCategory` (`lib/categories/write.ts`), which writes nothing when
+  the value is unchanged, refuses a retired category, and stores the key and
+  label at the change so a renamed category still reads as what was chosen.
+- **Before the first response the SLA policy follows the category and the
+  group.** `reselectPolicyBeforeFirstResponse` (`lib/sla/index.ts`) chooses the
+  policy again after every category write commits — the backfill of Stage 4
+  excepted — and after every group move that can come before an answer: the
+  console's group case, `assign_group`, and a grouped `auto_assign` that moved.
+  A move is one that changed the group — `moveToGroupIfElsewhere`
+  (`lib/tickets/move-group.ts`), `movedGroup` off `assignConversation` —
+  because a rule naming the group a ticket is in matches on every pass, and a
+  second look owed for nothing takes up a raised priority as though the group
+  had moved. An `on_create` pass leaves it to `applySlaOnCreate`, which runs
+  after it and reads the category itself. It counts each clock from its own
+  anchor with the finished pauses credited, so it can give clocks to a ticket
+  that had none, and it does nothing once somebody has answered, on a resolved,
+  closed, deleted, spam or merged ticket, when the same policy wins, or when
+  none does. Every group writer calls it before `onGroupChanged` — the engine
+  once its pass is over — so a move that changes the policy is re-timed once.
+  `onGroupChanged` and `onPriorityChanged` still never re-select. Because a
+  ticket can now change policy after a breach, an escalation is keyed per
+  policy (`settlesEscalation` in `worker/handlers/sla-sweep.ts`).
+- **Retired, never deleted, and the key never changes.** The foreign key is
+  `restrict`; `ticket_categories_key_format` holds the key to lowercase words
+  joined by underscores and refuses `unknown`, which Jev answers for "none of
+  these". A rule's fact is `category.id`, the uuid off the row as `group.id` is,
+  so a loader that forgot a join cannot see null. `deleteGroupIfUnused` refuses
+  while a category routes to the group, retired ones included.
+- **The name was the subcategory registry's until Stage 2.B.** An event called
+  `category_added`, `category_confirmed` or the like is a subcategory event and
+  reads as one; `category_changed` is this field's. On a fresh database the old
+  `ticket_categories_pkey` was still taken when the new table was created, so
+  migration 0047 — hand-written, guarded, a no-op in production — renames the
+  three old `_pkey` names first, and both databases name the new key alike.
+
+`seed_ticket_categories` puts the starter set in by key and leaves every admin
+edit alone; production runs it by hand, since deploys run only `db:migrate`.
+`ticket.set_category` gates changing it (every agent holds it), and
+`admin.categories` the list on `/admin/categories`.
+
 **The one AI provider, and the three things it is allowed to touch.**
 `lib/typesafe/` calls TypeSafe's System One endpoint, and three modules ask it a
 question: `lib/subcategorise-ai/` asks which subcategory a message belongs to,
@@ -1243,7 +1335,7 @@ may lower a ticket, and later ones only raise; and every answer, applied or not,
 is a row in `ai_priority_runs` with its full distribution, because those rows
 are the only labels priority has. A new writer of `conversations.priority`
 writes the column and its `priority_changed` event in one transaction, stamps
-the event with `PRIORITY_STAMP` (`lib/tickets/priority-stamp.ts`) so events sort
+the event with `CHANGE_STAMP` (`lib/tickets/change-stamp.ts`) so events sort
 in the order the column was written, and calls `onPriorityChanged` after it
 commits — as the console, the `set_priority` automation and the classifier do.
 The policies price their targets per priority, and the classifier decides whose

@@ -44,6 +44,11 @@ export function conversationFacts(source: FactSource, now: Date = new Date()): F
     'status.id': c.statusId,
     'status.category': source.statusCategory,
     'group.id': c.groupId,
+    // The uuid off the row, as `group.id` is, rather than the key: a fact
+    // holding the key would need every loader — automations, SLA, assignment —
+    // to join the registry, and one that forgot would see null in silence, as
+    // `form.slug` already does for assignment.
+    'category.id': c.categoryId,
     'assignee.id': c.assigneeAgentId,
     'requester.email': source.requesterEmail ?? null,
     'form.slug': source.formSlug ?? null,

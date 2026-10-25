@@ -18,6 +18,12 @@ import { isLocale } from '@/lib/kb/locale';
 import { storeAgentReply } from '@/lib/tickets/agent-reply';
 import { notReaction } from '@/lib/tickets/not-reaction';
 import {
+  newestRequesterComment,
+  NO_REQUESTER_COMMENT,
+  privateReplyRefusal,
+  requesterCommentById,
+} from '@/lib/tickets/reply-comment';
+import {
   buildTemplateComponents,
   renderTemplatePreview,
   templateShape,
@@ -39,6 +45,10 @@ import {
 import type { ActionState } from './action-state';
 
 // --- Replies and notes ------------------------------------------------------
+
+const NOT_THE_REQUESTERS_COMMENT =
+  'That comment is not one this ticket’s customer wrote, so it cannot be answered privately: ' +
+  'the reply would go to whoever wrote it. Pick one of theirs.';
 
 export async function sendReply(_state: ActionState, formData: FormData): Promise<ActionState> {
   const agent = await requireAgent();
@@ -134,6 +144,41 @@ export async function sendReply(_state: ActionState, formData: FormData): Promis
       ? 'private_reply'
       : 'comment_reply';
 
+  // The comment a reply on a comment ticket answers, named now and stored on the
+  // reply, so the job sends to what was checked here rather than to whatever is
+  // newest when it runs. Always one of the requester's: anybody may reply under
+  // the customer's comment and that reply is filed on this ticket, so the
+  // newest comment can be a passer-by's — and a private reply goes to whoever
+  // wrote the comment it names, carrying what the agent wrote for the customer.
+  //
+  // A private reply answers the comment the agent picked, re-read here because
+  // the id arrives in a form field, or the requester's newest when the form
+  // named none — and not one deleted from the post or already answered
+  // privately, which Meta would refuse after the reply was on the timeline. A
+  // public reply has no picker and takes the newest still on the post: on
+  // Instagram it is posted under the thread's root whatever this says
+  // (`commentReplyTarget`).
+  let commentId: string | null = null;
+  if (isCommentThread) {
+    const requesterId = conversation.requesterContactId;
+    const picked =
+      metaSendKind === 'private_reply' ? uuidField(formData, 'replyToMessageId') : null;
+    if (picked === undefined) return { error: NOT_THE_REQUESTERS_COMMENT };
+
+    const comment = picked
+      ? await requesterCommentById(conversationId, requesterId, picked)
+      : await newestRequesterComment(conversationId, requesterId);
+
+    if (metaSendKind === 'private_reply') {
+      if (!comment) {
+        return { error: picked ? NOT_THE_REQUESTERS_COMMENT : NO_REQUESTER_COMMENT };
+      }
+      const refusal = await privateReplyRefusal(conversationId, comment);
+      if (refusal) return { error: refusal };
+    }
+    commentId = comment?.commentId ?? null;
+  }
+
   if (isMeta && metaSendKind === 'dm') {
     // Whether the thread can be answered at all comes before how long is left
     // to answer it — a reply into an inbox another app controls, or onto a page
@@ -183,6 +228,7 @@ export async function sendReply(_state: ActionState, formData: FormData): Promis
               // A public reply is on the record for everyone who can see the
               // post, so the timeline says which of the two this was.
               isPublic: metaSendKind === 'comment_reply',
+              ...(commentId ? { commentId } : {}),
             }
           : {},
   });

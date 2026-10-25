@@ -58,6 +58,16 @@ export function describeEvent(type: string, data: Record<string, unknown>): stri
       return typeof data.probability === 'number'
         ? `set priority to ${String(data.to ?? '')} (${Math.round(data.probability * 100)}% likely)`
         : `set priority to ${String(data.to ?? '')}`;
+    // Named by the label stored with the change, so a category renamed since
+    // still reads as what was chosen. Jev's answers (Stage 4) carry how sure it
+    // was, for the reason the priority case above gives.
+    case 'category_changed': {
+      if (!data.to) return 'cleared the category';
+      const named = `set the category to ${String(data.label ?? data.key ?? 'a category')}`;
+      return typeof data.probability === 'number'
+        ? `${named} (${Math.round(data.probability * 100)}% likely)`
+        : named;
+    }
     /*
      * The two ways a ticket becomes a WhatsApp number's owner's say so, because
      * otherwise "why is this hers?" has no answer on the page: nobody clicked
@@ -93,6 +103,16 @@ export function describeEvent(type: string, data: Record<string, unknown>): stri
       return data.to
         ? 'made the new owner of its WhatsApp number accountable for the ticket: breaches on it count against them'
         : 'cleared who is accountable for the ticket: its WhatsApp number has no owner now, so breaches count against whoever holds it';
+    /*
+     * Only ingest writes it today: a comment thread's first comment arriving
+     * after a reply under it had opened the ticket. Said, because the header
+     * now names somebody other than the person it named a minute ago, and the
+     * replier's earlier comments stop counting as the customer's.
+     */
+    case 'requester_changed':
+      return data.reason === 'thread_root'
+        ? 'made the author of the thread’s first comment the requester: a reply under it had arrived first and opened the ticket'
+        : 'changed the requester';
     case 'unassigned':
       return 'unassigned the ticket';
     case 'group_changed':
@@ -217,6 +237,19 @@ export function describeEvent(type: string, data: Record<string, unknown>): stri
       }
       if (data.reason === 'priority') {
         return `re-counted the due dates for ${String(data.priority ?? 'the new')} priority`;
+      }
+      // `reselectPolicyBeforeFirstResponse`: the ticket is held to a different
+      // policy now, and the agent is owed which one and what moved it there.
+      // Worded by the change that set the choice off, never as the policy
+      // matching it: the policy is chosen from everything the ticket is, so the
+      // default catching a ticket whose category no policy names, or one keyed
+      // on its priority, wins on a category change too.
+      if (data.reason === 'policy') {
+        const cause = data.cause === 'group' ? 'its group' : 'its category';
+        const policy = String(data.policy ?? 'new');
+        return data.previousPolicy
+          ? `moved the ticket from the ${String(data.previousPolicy)} to the ${policy} SLA policy after ${cause} changed`
+          : `held the ticket to the ${policy} SLA policy after ${cause} changed`;
       }
       return 're-counted the due dates';
 

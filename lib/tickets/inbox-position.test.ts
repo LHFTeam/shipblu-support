@@ -22,6 +22,7 @@ function filters(overrides: Partial<InboxFilters> = {}): InboxFilters {
     channel: 'all',
     rating: 'any',
     group: null,
+    category: null,
     q: '',
     ...overrides,
   };
@@ -40,10 +41,20 @@ describe('inboxSignature', () => {
       { statusCategory: 'resolved' } as const,
       { channel: 'whatsapp_bot' } as const,
       { rating: 'low' } as const,
+      { group: '0861a48b-8bd8-4ea0-b288-54460a63deee' },
+      { category: '7c2e9b14-3d5a-4f6e-8a1b-0c9d8e7f6a5b' },
       { q: '#42' },
     ]) {
       expect(inboxSignature(filters(overrides))).not.toBe(base);
     }
+  });
+
+  // Two categories are two lists: pages scrolled into under one must not seed
+  // the other, nor its offset land 1840px into rows it never fetched.
+  it('tells one category from another', () => {
+    expect(inboxSignature(filters({ category: '7c2e9b14-3d5a-4f6e-8a1b-0c9d8e7f6a5b' }))).not.toBe(
+      inboxSignature(filters({ category: 'c3e1f0a2-7b4d-4e8a-9f21-6d5c4b3a2e10' })),
+    );
   });
 
   it('is the same for the same filters, whatever order they were built in', () => {

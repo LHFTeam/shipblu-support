@@ -16,6 +16,7 @@ import {
 import { isReaction } from '@/lib/whatsapp/reaction';
 import { formatRemaining, windowState } from '@/lib/whatsapp/window';
 import type { PickerEntry } from '@/lib/side-conversations/queries';
+import { privateReplyOptions } from '@/lib/tickets/private-reply-options';
 import { StartSideConversationForm } from './side-conversations';
 import { ThreadControl } from './thread-control';
 import type { KnowledgeContext, TemplateOption } from './types';
@@ -99,6 +100,13 @@ export function Composer({
     conversation.messages.findLast(
       (message) => message.kind === 'reply' && !isReaction(message.meta),
     )?.id ?? null;
+
+  // What a private reply may answer: the requester's own comments, newest first,
+  // never a passer-by's reply filed on this ticket. The action re-reads the one
+  // the form posts (`lib/tickets/reply-comment.ts`).
+  const requesterComments = isCommentThread
+    ? privateReplyOptions(conversation.messages, conversation.requester.id)
+    : [];
 
   const [requestedTab, setRequestedTab] = useState<Tab>('reply');
 
@@ -307,6 +315,7 @@ export function Composer({
               <ReplyForm
                 conversationId={conversation.id}
                 isCommentThread={isCommentThread}
+                requesterComments={requesterComments}
                 canned={canned}
                 customerLocale={customerLocale}
                 knowledge={knowledge}

@@ -93,6 +93,45 @@ describe('describeEvent', () => {
     );
   });
 
+  it('names the category chosen, as it was called then, and how sure Jev was', () => {
+    expect(describeEvent('category_changed', { to: 'c-1', key: 'sales', label: 'Sales' })).toBe(
+      'set the category to Sales',
+    );
+    expect(describeEvent('category_changed', { to: 'c-1', key: 'sales', label: null })).toBe(
+      'set the category to sales',
+    );
+    expect(
+      describeEvent('category_changed', { to: 'c-1', label: 'Sales', probability: 0.912 }),
+    ).toBe('set the category to Sales (91% likely)');
+    expect(describeEvent('category_changed', { from: 'c-1', to: null })).toBe(
+      'cleared the category',
+    );
+  });
+
+  it('names the policy a ticket is held to, and the change that chose it again', () => {
+    expect(
+      describeEvent('sla_recalculated', { reason: 'policy', cause: 'category', policy: 'Sales' }),
+    ).toBe('held the ticket to the Sales SLA policy after its category changed');
+    expect(
+      describeEvent('sla_recalculated', {
+        reason: 'policy',
+        cause: 'group',
+        policy: 'Merchant',
+        previousPolicy: 'Standard',
+      }),
+    ).toBe('moved the ticket from the Standard to the Merchant SLA policy after its group changed');
+    // The default catching a ticket no other policy names is not "matching" its
+    // category, so the sentence never says it does.
+    expect(
+      describeEvent('sla_recalculated', {
+        reason: 'policy',
+        cause: 'category',
+        policy: 'Standard',
+        previousPolicy: 'Sales',
+      }),
+    ).not.toMatch(/matches/);
+  });
+
   it('names why the due dates moved', () => {
     expect(describeEvent('sla_recalculated', { reason: 'priority', priority: 'urgent' })).toBe(
       're-counted the due dates for urgent priority',
@@ -100,6 +139,13 @@ describe('describeEvent', () => {
     expect(describeEvent('sla_recalculated', { reason: 'group_hours' })).toBe(
       "re-counted the due dates on the new group's business hours",
     );
+  });
+
+  it('says why the requester moved to the author of the thread’s first comment', () => {
+    expect(describeEvent('requester_changed', { reason: 'thread_root' })).toBe(
+      'made the author of the thread’s first comment the requester: a reply under it had arrived first and opened the ticket',
+    );
+    expect(describeEvent('requester_changed', {})).toBe('changed the requester');
   });
 
   it('explains a skipped assignment, and falls back to the raw reason it does not know', () => {

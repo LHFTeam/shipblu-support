@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { PlusIcon } from '@/components/icons';
 import { Button, Select } from '@/components/ui';
 import { InfoTip } from '@/components/tooltip';
+import { categoryOptions, type CategoryChoice } from '@/lib/categories/choices';
 import { PRIORITY_CHOICES } from '@/lib/tickets/vocabulary';
 
 /**
@@ -19,6 +20,7 @@ export type Choice = { value: string; label: string };
 
 type ActionKind =
   | 'set_priority'
+  | 'set_category'
   | 'set_status'
   | 'assign_agent'
   | 'assign_group'
@@ -32,6 +34,7 @@ type ActionKind =
 
 const KINDS: { value: ActionKind; label: string }[] = [
   { value: 'set_priority', label: 'Set priority' },
+  { value: 'set_category', label: 'Set category' },
   { value: 'set_status', label: 'Set status' },
   { value: 'assign_agent', label: 'Assign to agent' },
   { value: 'assign_group', label: 'Assign to group' },
@@ -57,7 +60,7 @@ const STRATEGIES: Choice[] = [
   { value: 'load_balanced', label: 'load balanced' },
 ];
 
-const CATEGORIES: Choice[] = [
+const STATUS_CATEGORIES: Choice[] = [
   { value: 'open', label: 'Open' },
   { value: 'pending', label: 'Pending' },
   { value: 'resolved', label: 'Resolved' },
@@ -75,12 +78,15 @@ export function ActionBuilder({
   name,
   agents,
   groups,
+  categories,
   cannedResponses,
   initial,
 }: {
   name: string;
   agents: Choice[];
   groups: Choice[];
+  /** Every category, retired ones included, so a rule naming one still says which. */
+  categories: CategoryChoice[];
   cannedResponses: Choice[];
   initial: unknown;
 }) {
@@ -110,6 +116,7 @@ export function ActionBuilder({
             item={item}
             agents={agents}
             groups={groups}
+            categories={categories}
             cannedResponses={cannedResponses}
             onChange={(value) => update(index, { ...item, value })}
             onChangeExtra={(extra) => update(index, { ...item, extra })}
@@ -154,6 +161,7 @@ function ValueInput({
   item,
   agents,
   groups,
+  categories,
   cannedResponses,
   onChange,
   onChangeExtra,
@@ -161,6 +169,7 @@ function ValueInput({
   item: Item;
   agents: Choice[];
   groups: Choice[];
+  categories: CategoryChoice[];
   cannedResponses: Choice[];
   onChange: (value: string) => void;
   onChangeExtra: (value: string) => void;
@@ -179,8 +188,12 @@ function ValueInput({
   switch (item.type) {
     case 'set_priority':
       return select(PRIORITY_CHOICES, 'Choose a priority…');
+    // Active ones, and the one this rule already names if it has been retired
+    // since — which the engine skips, so the rule should be changed.
+    case 'set_category':
+      return select(categoryOptions(categories, item.value || null), 'Choose a category…');
     case 'set_status':
-      return select(CATEGORIES, 'Choose a status…');
+      return select(STATUS_CATEGORIES, 'Choose a status…');
     case 'assign_agent':
       return select(agents, 'Nobody (unassign)');
     case 'assign_group':
@@ -232,6 +245,8 @@ function toJson(items: Item[]): string {
     switch (item.type) {
       case 'set_priority':
         return { type: item.type, value: item.value };
+      case 'set_category':
+        return { type: item.type, categoryId: item.value };
       case 'set_status':
         return { type: item.type, category: item.value };
       case 'assign_agent':
@@ -284,19 +299,21 @@ function fromJson(input: unknown): Item[] {
     }
 
     const value =
-      type === 'set_status'
-        ? String(action.category ?? '')
-        : type === 'assign_agent'
-          ? String(action.agentId ?? '')
-          : type === 'assign_group'
-            ? String(action.groupId ?? '')
-            : type === 'send_reply'
-              ? String(action.cannedResponseId ?? '')
-              : type === 'add_watchers'
-                ? ((action.agentIds as string[] | undefined)?.[0] ?? '')
-                : Array.isArray(action.tags)
-                  ? (action.tags as string[]).join(', ')
-                  : String(action.value ?? '');
+      type === 'set_category'
+        ? String(action.categoryId ?? '')
+        : type === 'set_status'
+          ? String(action.category ?? '')
+          : type === 'assign_agent'
+            ? String(action.agentId ?? '')
+            : type === 'assign_group'
+              ? String(action.groupId ?? '')
+              : type === 'send_reply'
+                ? String(action.cannedResponseId ?? '')
+                : type === 'add_watchers'
+                  ? ((action.agentIds as string[] | undefined)?.[0] ?? '')
+                  : Array.isArray(action.tags)
+                    ? (action.tags as string[]).join(', ')
+                    : String(action.value ?? '');
 
     return [{ type, value }];
   });

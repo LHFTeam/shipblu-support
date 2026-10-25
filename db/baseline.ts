@@ -1,5 +1,6 @@
 import { and, eq, sql } from 'drizzle-orm';
 import { SEEDED_RULES } from '@/lib/automations/defaults';
+import { syncCategories } from '@/lib/categories/seed';
 import { syncTaxonomy } from '@/lib/subcategorise/seed';
 import { db } from './client';
 import { automationRules, businessHours, channels, groups, ticketStatuses } from './schema';
@@ -154,6 +155,18 @@ export async function seedBaseline(
         ...taxonomy.orphanedSubcategoryKeys,
         ...taxonomy.orphanedCauseKeys,
       ].join(', ')}`,
+    );
+  }
+
+  // The ticket categories, by the same reconcile, so tests and development
+  // have the four production gets from `seed_ticket_categories`.
+  const categories = await syncCategories();
+  log(
+    `  ticket categories: ${categories.created.length} created, ${categories.present} already present`,
+  );
+  if (categories.orphaned.length) {
+    log(
+      `  ticket categories no longer in the code (left alone, decide by hand): ${categories.orphaned.join(', ')}`,
     );
   }
 

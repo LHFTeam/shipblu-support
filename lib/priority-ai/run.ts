@@ -8,7 +8,7 @@ import { errorMessage } from '@/lib/errors';
 import { logger } from '@/lib/log';
 import { onPriorityChanged } from '@/lib/sla';
 import { afterTicketUpdate } from '@/lib/tickets/lifecycle';
-import { PRIORITY_STAMP } from '@/lib/tickets/priority-stamp';
+import { CHANGE_STAMP } from '@/lib/tickets/change-stamp';
 import { isReadOnlyChannel } from '@/lib/tickets/channel-policy';
 import { hasCustomerText } from '@/lib/tickets/customer-text';
 import { notReaction } from '@/lib/tickets/not-reaction';
@@ -210,7 +210,7 @@ export async function classifyMessagePriority(
     // "last applied", and every answer after is refused as somebody else's.
     // The console and the `set_priority` rule stamp their events the same way,
     // so an agent's change that waited on this lock sorts after it.
-    const lockedAt = PRIORITY_STAMP;
+    const lockedAt = CHANGE_STAMP;
 
     // The run row first. Two deliveries of one job racing past the check above
     // are already serialised by the row lock — the second reads the first's

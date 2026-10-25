@@ -5,6 +5,8 @@ import {
   listFormNames,
   listGroupNames,
 } from '@/lib/admin/settings';
+import { categoryLabel } from '@/lib/categories/choices';
+import { listCategories } from '@/lib/categories/queries';
 import { formName } from '@/lib/forms/naming';
 import { CHANNEL_LABELS } from '@/lib/tickets/channel-labels';
 import type { ConversationChannel } from '@/lib/tickets/channel-policy';
@@ -49,14 +51,16 @@ export async function ticketFieldOptions(
   given: {
     agents?: ReturnType<typeof listActiveAgents>;
     groups?: ReturnType<typeof listGroupNames>;
+    categories?: ReturnType<typeof listCategories>;
   } = {},
 ): Promise<FieldOption[]> {
-  const [custom, forms, groupNames, agentNames, deactivated] = await Promise.all([
+  const [custom, forms, groupNames, agentNames, deactivated, categories] = await Promise.all([
     listActiveTicketFields(),
     listFormNames(),
     given.groups ?? listGroupNames(),
     given.agents ?? listActiveAgents(),
     listDeactivatedAgents(),
+    given.categories ?? listCategories(),
   ]);
 
   const base: FieldOption[] = [
@@ -114,6 +118,20 @@ export async function ticketFieldOptions(
       label: 'Group',
       kind: 'choice',
       choices: groupNames.map((group) => ({ value: group.id, label: group.name })),
+    },
+    // The uuid, as for the group, so renaming a category never breaks a rule
+    // or a policy keyed on it. A retired one is no longer offered, and one a
+    // condition already names says which rather than reading as unknown.
+    {
+      value: 'category.id',
+      label: 'Category',
+      kind: 'choice',
+      choices: categories
+        .filter((category) => category.isActive)
+        .map((category) => ({ value: category.id, label: category.labelEn })),
+      retired: categories
+        .filter((category) => !category.isActive)
+        .map((category) => ({ value: category.id, label: categoryLabel(category.labelEn, false) })),
     },
     {
       value: 'assignee.id',

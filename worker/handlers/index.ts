@@ -21,6 +21,7 @@ import { runTimeAutomations } from './run-time-automations';
 import { rotateWhatsAppCredentials } from './rotate-whatsapp-credentials';
 import { seedCannedResponses } from './seed-canned-responses';
 import { seedConsoleHandbook } from './seed-console-handbook';
+import { seedTicketCategories } from './seed-ticket-categories';
 import { sendCsat } from './send-csat';
 import { sendEmail } from './send-email';
 import { sendMeta } from './send-meta';
@@ -72,6 +73,7 @@ export const handlers: Partial<Record<JobType, JobHandler>> = {
   run_time_automations: () => runTimeAutomations(),
   seed_canned_responses: (job) => seedCannedResponses(job),
   seed_console_handbook: (job) => seedConsoleHandbook(job),
+  seed_ticket_categories: (job) => seedTicketCategories(job),
   send_csat: sendCsat,
   send_email: sendEmail,
   send_meta: sendMeta,

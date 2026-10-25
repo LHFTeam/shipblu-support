@@ -1,4 +1,4 @@
-import { and, eq, exists, isNotNull, isNull, lt, not, or, sql } from 'drizzle-orm';
+import { and, eq, exists, isNotNull, isNull, lt, not, or, sql, type SQL } from 'drizzle-orm';
 import { db } from '@/db/client';
 import {
   conversationEvents,
@@ -188,10 +188,30 @@ function escalationRecorded(kind: 'first_response' | 'resolution') {
       .where(
         and(
           eq(conversationEvents.conversationId, conversations.id),
-          eq(conversationEvents.type, 'sla_escalated'),
-          sql`${conversationEvents.data}->>'kind' = ${kind}`,
+          settlesEscalation(kind, sql`${conversations.slaPolicyId}::text`),
         ),
       ),
+  );
+}
+
+/**
+ * An `sla_escalated` event that settles `kind` for the policy named by
+ * `policyId` (as text, which is what `->>` compares against).
+ *
+ * Per policy as well as per kind, because a ticket can change policy before
+ * anybody answers it (`reselectPolicyBeforeFirstResponse`): escalated under
+ * the default, then filed under Sales, it is owed the Sales contacts when it
+ * misses Sales' target too, and keyed on the kind alone the first escalation
+ * stood for both. An event written before it carried a policy names none, and
+ * settles the kind under any — so no ticket escalated then is escalated again.
+ * One predicate for the sweep's filter and `escalate`'s own check, so the two
+ * cannot come to disagree.
+ */
+function settlesEscalation(kind: 'first_response' | 'resolution', policyId: SQL) {
+  return and(
+    eq(conversationEvents.type, 'sla_escalated'),
+    sql`${conversationEvents.data}->>'kind' = ${kind}`,
+    sql`(${conversationEvents.data}->>'policyId' is null or ${conversationEvents.data}->>'policyId' = ${policyId})`,
   );
 }
 
@@ -258,21 +278,21 @@ async function escalate(
     kind === 'first_response'
       ? policy?.escalations?.firstResponse
       : policy?.escalations?.resolution;
-  if (!rule?.agentIds?.length || !dueAt) return 0;
+  if (!policy || !rule?.agentIds?.length || !dueAt) return 0;
 
   const escalateAt = dueAt.getTime() + (rule.afterMins ?? 0) * 60_000;
   if (now.getTime() < escalateAt) return 0;
 
   // The event row is the idempotency key: without it every five-minute sweep
-  // would re-escalate the same ticket for as long as it stays overdue.
+  // would re-escalate the same ticket for as long as it stays overdue. Per
+  // policy (`settlesEscalation`).
   const already = await db
     .select({ id: conversationEvents.id })
     .from(conversationEvents)
     .where(
       and(
         eq(conversationEvents.conversationId, conversationId),
-        eq(conversationEvents.type, 'sla_escalated'),
-        sql`${conversationEvents.data}->>'kind' = ${kind}`,
+        settlesEscalation(kind, sql`${policy.id}`),
       ),
     )
     .limit(1);
@@ -288,7 +308,7 @@ async function escalate(
     conversationId,
     type: 'sla_escalated',
     actorLabel: 'sla_sweep',
-    data: { kind, agentIds: rule.agentIds, afterMins: rule.afterMins ?? 0 },
+    data: { kind, policyId: policy.id, agentIds: rule.agentIds, afterMins: rule.afterMins ?? 0 },
   });
 
   return 1;

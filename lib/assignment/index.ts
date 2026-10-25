@@ -1,4 +1,4 @@
-import { and, eq, exists, isNull, sql } from 'drizzle-orm';
+import { and, eq, isNull, sql } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import { db } from '@/db/client';
 import {
@@ -18,6 +18,7 @@ import { groupHours } from '@/lib/hours/resolve';
 import { conversationFacts } from '@/lib/rules/facts';
 import { isReadOnlyChannel } from '@/lib/tickets/channel-policy';
 import { openBacklog } from '@/lib/tickets/backlog';
+import { moveToGroupIfElsewhere } from '@/lib/tickets/move-group';
 import { recordOwnerAssigned } from '@/lib/whatsapp/number-owner';
 import { filterCandidates, type CandidateRow } from './eligibility';
 import { pickLoadBalanced, pickRoundRobin } from './strategies';
@@ -69,7 +70,20 @@ export type SkipReason =
   | 'all_at_capacity'
   | 'no_skill_match';
 
-export type AssignmentOutcome = {
+export type AssignmentOutcome = Picked & {
+  /**
+   * Whether this call moved the ticket into the group the caller named — the
+   * routing half, which stands whether or not anybody was then picked. Read by
+   * the automation engine, which owes the SLA policy a second look only when
+   * the group really changed: comparing the rule's group with the ticket it
+   * started from also counts a ticket the rota left where it was (a holder who
+   * is not the number's owner, a group deleted since).
+   */
+  movedGroup: boolean;
+};
+
+/** Who the pick chose, or why it chose nobody. */
+type Picked = {
   assignedTo: string | null;
   reason: SkipReason | null;
 };
@@ -103,6 +117,21 @@ export async function assignConversation(
   conversationId: string,
   options: AssignOptions = {},
 ): Promise<AssignmentOutcome> {
+  const routed = { moved: false };
+  const picked = await routeAndPick(conversationId, options, routed);
+  return { ...picked, movedGroup: routed.moved };
+}
+
+/**
+ * The body of `assignConversation`, which every return below answers through:
+ * `routed` is how the group move, made once before the branches, reaches the
+ * outcome without each of a dozen returns repeating it.
+ */
+async function routeAndPick(
+  conversationId: string,
+  options: AssignOptions,
+  routed: { moved: boolean },
+): Promise<Picked> {
   const now = options.now ?? new Date();
 
   const accountable = alias(agents, 'accountable');
@@ -152,26 +181,28 @@ export async function assignConversation(
   const routeTo =
     options.groupId && options.groupId !== conversation.groupId ? options.groupId : null;
 
-  if (conversation.assigneeAgentId) {
-    // An owned ticket is assigned in the insert that creates it (`ownerStamp`),
-    // so a rule routing it meets it already held — by the owner, whom this
-    // call would have chosen anyway. The group the rule names still applies,
-    // as it does in the owner branch below: without it, an owned ticket never
-    // reaches the group whose SLA policy, hours and members the rule meant.
-    // Anybody else holding a ticket was given it on purpose, and a rule has
-    // never moved their ticket.
-    if (routeTo && assignable && conversation.assigneeAgentId === conversation.accountableAgentId) {
-      await moveToGroup(conversationId, routeTo, options.actorLabel);
-    }
-    return { assignedTo: null, reason: 'already_assigned' };
+  /*
+   * The move, made once and here, so the one write is the one answer
+   * (`movedGroup`) whichever branch below then picks. It applies to work to
+   * hand out, unassigned or held by its number's owner. An owned ticket is
+   * assigned in the insert that creates it (`ownerStamp`), so a rule routing it
+   * meets it held by the owner, whom this call would have chosen anyway, and
+   * without the move it never reaches the group whose SLA policy, hours and
+   * members the rule meant. Anybody else holding a ticket was given it on
+   * purpose, and a rule has never moved their ticket.
+   */
+  const holder = conversation.assigneeAgentId;
+  if (routeTo && assignable && (!holder || holder === conversation.accountableAgentId)) {
+    routed.moved = await moveToGroup(conversationId, routeTo, options.actorLabel);
   }
+
+  if (conversation.assigneeAgentId) return { assignedTo: null, reason: 'already_assigned' };
 
   if (!assignable) return { assignedTo: null, reason: 'not_assignable' };
 
   // The number's owner, ahead of everything the rota would ask — see the
   // module header for why none of it applies.
   if (conversation.accountableAgentId && ticket.accountableActive) {
-    if (routeTo) await moveToGroup(conversationId, routeTo, options.actorLabel);
     return handBackToOwner(
       conversationId,
       conversation.accountableAgentId,
@@ -206,9 +237,6 @@ export async function assignConversation(
    * rota looks lopsided.
    */
   const { lastAssignedAgentId: _preLockCursor, ...group } = groupRow;
-
-  // Before the pick, so the routing half stands whatever the pick finds.
-  if (routeTo) await moveToGroup(conversationId, routeTo, options.actorLabel);
 
   const strategy = options.strategy ?? group.assignmentStrategy;
   if (strategy === 'manual') return { assignedTo: null, reason: 'strategy_manual' };
@@ -335,23 +363,22 @@ export async function assignConversation(
  * because the owner's path reaches here without having looked the group up: a
  * rule naming a group deleted since would otherwise throw on the foreign key
  * and take the assignment down with it, where the rota answers `no_group`.
+ *
+ * And conditional on the ticket being somewhere else, which is what the answer
+ * reports (`movedGroup`). The caller decided to move it from a read taken
+ * without a lock, so an agent moving it to the same group in between left an
+ * update that matched the row anyway, and the rule recorded a move the agent
+ * had made — and owed the SLA policy a second look for it. Both conditions are
+ * `moveToGroupIfElsewhere`'s, the one definition of a move.
  */
 async function moveToGroup(
   conversationId: string,
   groupId: string,
   actorLabel: string | undefined,
-): Promise<void> {
-  const moved = await db
-    .update(conversations)
-    .set({ groupId })
-    .where(
-      and(
-        eq(conversations.id, conversationId),
-        exists(db.select({ id: groups.id }).from(groups).where(eq(groups.id, groupId))),
-      ),
-    )
-    .returning({ id: conversations.id });
-  if (moved.length === 0) return;
+): Promise<boolean> {
+  if (!(await moveToGroupIfElsewhere(conversationId, groupId, { groupMustExist: true }))) {
+    return false;
+  }
 
   await db.insert(conversationEvents).values({
     conversationId,
@@ -359,6 +386,7 @@ async function moveToGroup(
     actorLabel: actorLabel ?? 'auto_assign',
     data: { to: groupId },
   });
+  return true;
 }
 
 /**
@@ -373,7 +401,7 @@ async function handBackToOwner(
   ownerId: string,
   channelId: string | null,
   { actorLabel, now }: { actorLabel: string | undefined; now: Date },
-): Promise<AssignmentOutcome> {
+): Promise<Picked> {
   return db.transaction(async (tx) => {
     const updated = await tx
       .update(conversations)

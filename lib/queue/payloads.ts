@@ -297,6 +297,10 @@ export const JOB_PAYLOADS = {
     /** Also replace the title and body of articles that already exist. */
     overwrite: z.boolean().optional(),
   }),
+  // No options: it only inserts what is missing, so there is nothing to
+  // preview or overwrite. Strict all the same, so `dryRun=true` is refused
+  // rather than taken for a run that writes.
+  seed_ticket_categories: z.strictObject({}),
   seed_canned_responses: z.strictObject({
     /** Report what would change, write nothing. */
     dryRun: z.boolean().optional(),

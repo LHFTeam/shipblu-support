@@ -11,10 +11,11 @@ import { INITIAL } from './form-state';
 /**
  * Hide, unhide and delete, under a customer's public comment.
  *
- * Only under an *inbound* one: an outbound row carries no `commentId` until Meta
- * has accepted it, and deleting our own published answer is a different act
- * with a different audience — the customer who was answered — so it is not
- * folded in here.
+ * Only under an *inbound* one: an agent's reply on a comment ticket names the
+ * comment it answers in `commentId`, which is not the reply itself, and deleting
+ * our own published answer is a different act with a different audience — the
+ * customer who was answered — so it is not folded in here. `moderatableComment`
+ * takes the direction for that reason.
  *
  * The state is rendered for every agent and the buttons only for those who hold
  * `ticket.moderate_comment`. Somebody without the permission still needs to know
@@ -23,14 +24,16 @@ import { INITIAL } from './form-state';
  */
 export function CommentModeration({
   messageId,
+  direction,
   meta,
   canModerate,
 }: {
   messageId: string;
+  direction: 'inbound' | 'outbound';
   meta: Record<string, unknown>;
   canModerate: boolean;
 }) {
-  const comment = moderatableComment(meta);
+  const comment = moderatableComment(meta, direction);
   if (!comment) return null;
 
   const state = readCommentModeration(meta);
