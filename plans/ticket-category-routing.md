@@ -2677,6 +2677,126 @@ cannot parse.
     and the reuse of the `ticket_categories` name after the gate.
   - A handbook article on the Category field.
 
+#### 3.1, as built
+
+On `claude/stage-3-category-field`. What it holds beyond the list above, and
+where it departs from it:
+
+- **Migrations.** `0047_free_old_pkey_names` is the hand-written one this stage
+  was to decide on (`drizzle-kit generate --custom`): a loop renaming the three
+  `_pkey` constraints 2.B left to `db/sql/002`, each guarded on its name and its
+  table. Its snapshot is 0046's, so the drift step regenerates nothing. On a
+  fresh database the new key is then `ticket_categories_pkey`, as in
+  production, where `0047` does nothing (read 2026-10-25: all three already
+  carry their new names, 47 migrations applied). `db/sql/002` stops renaming
+  them. `0048_ticket_categories` is generated: the registry,
+  `conversations.category_id` (`restrict`) and `conversations_category_idx` on
+  `(category_id, last_message_at)`. The route group's foreign key is
+  `set null`, like a channel's default group, and `deleteGroupIfUnused`
+  refuses while any category names the group, retired ones included.
+- **`db/sql`.** `003` adds `ticket_categories_key_format` and
+  `ticket_categories_labels_not_blank` (a blank label is a blank badge), each
+  guarded on its name and its table; `001`'s `queue_relevant` gains
+  `category_id`.
+- **The 2.B runbook and its test are deleted**, as the test required;
+  [Rolling back 2.B](#2b-as-built) says what replaces them.
+- **One writer.** `setConversationCategory` (`lib/categories/write.ts`) is
+  what the console and `set_category` call: the ticket's row locked, an
+  unchanged value writing nothing, a retired category refused, the key and
+  label stored on the event. `PRIORITY_STAMP` is generalised to
+  `CHANGE_STAMP` (`lib/tickets/change-stamp.ts`), the same `clock_timestamp()`.
+- **SLA.** `reselectPolicyBeforeFirstResponse(id, cause)` as decision 3 says,
+  doing nothing once a first response exists, when the same policy wins, when
+  none does, and on a read-only channel or an imported history. The automation
+  engine owes it once per pass (`Pass.policyOwed`, named `category` over
+  `group` when both moved) and skips it on `on_create`, because
+  `applySlaOnCreate` runs after that pass and reads the category. The console's
+  group case calls it before `onGroupChanged`. Its event is `sla_recalculated`
+  with `reason: 'policy'`, the cause and both policies' names, and reads "held
+  the ticket to the Sales SLA policy, which matches its category now".
+- **Permissions.** `ticket.set_category` on every agent, `admin.categories` on
+  admins. No agent held an override of either key (read 2026-10-25 06:3x UTC).
+- **Seed.** The starter descriptions say where each category's edges are, for
+  Jev, and `courier_jobs`' excludes a greeting or a bare "I want a job". The
+  seed reconciles by key and never overwrites; CI's `database` job runs it
+  through `scripts/ci/db-jobs.txt`.
+- **The ticket.** A Category select beside Group and Priority, read-only text
+  for an agent without the permission; a retired category the ticket holds is
+  shown as "(retired)" rather than as "None". The header badge reads
+  "Category: Sales". The timeline reads "set the category to Sales", with Jev's
+  probability from Stage 4, or "cleared the category".
+- **Rules.** `category.id` in the condition builder on the automations, SLA
+  and skills pages, a retired category named as such; "Set category" in the
+  action builder. A stored `set_category` with no id is refused at parse, as a
+  rule saved half-written.
+- **Admin.** `/admin/categories` adds, edits, retires (`DangerAction`'s two
+  clicks) and restores; nothing deletes. The rules are `lib/categories/admin.ts`:
+  the key checked as given and never written on an edit, `unknown` refused, a
+  duplicate refused naming its holder, both labels required. The route group is
+  re-read under a key-share lock, so a group delete at the same moment answers
+  the save with a sentence. The picker shows each group's strategy, "N of M
+  members accepting now", counted by assignment's own `filterCandidates`, and
+  its hours rule, and warns on a manual group or one with nobody in it. The three
+  `/admin/categories` redirects are gone; `/reports/categories` stays.
+- **Inbox.** `?category=<uuid>`, parsed like the group and applied inside
+  visibility, part of every view's filters and of the scroll signature, with no
+  preset view per category until Stage 5 routes by it. A Category select under
+  Status and Channel, and each row's label as a neutral badge, last in both
+  layouts. `listCategories` is memoised per request, so the ticket page and the
+  inbox shell share one read.
+- **Handbook.** A `category` article in the agents' folder, a line in
+  `ticket-fields`, and a Categories section in the admins'
+  `automation-and-forms`.
+
+**Deploying 3.1.** Web first, because it migrates; then the worker and the four
+crons, because an old time-automations cron drops a `set_category` action
+without a word. It waits for 2.B's two remaining reads.
+
+1. **Before.** Read `git log origin/main..origin/dev` (rule 7) for what else
+   rides. Expect 47 rows in `drizzle.__drizzle_migrations`, the newest
+   `1792781241219`, and no `ticket_categories` relation. Run the lock check of
+   `docs/PROJECT-STATE.md` §5.5.
+2. **Deploy web.** Its preDeploy applies `0047` (nothing to do in production)
+   and `0048` in one transaction, then `db/sql`. `0048` takes ACCESS EXCLUSIVE
+   on `conversations` for the column, SHARE ROW EXCLUSIVE while the foreign key
+   validates every row (72,119 rows, 20 MB, read 2026-10-25) and SHARE for the
+   index build, all held until it commits: writes to tickets wait for seconds at
+   most, and reads wait only behind the ACCESS EXCLUSIVE.
+3. **Deploy the worker and the four crons** on the same commit.
+4. **Seed.** `npm run job -- seed_ticket_categories` on the worker's shell, or
+   `insert into jobs (type, payload) values ('seed_ticket_categories', '{}')`.
+   It logs `[seed_ticket_categories] done created=sales,customer_support,merchant_support,courier_jobs present=0`;
+   run again, `created=none present=4`.
+5. **Verify** (read-only):
+
+   ```sql
+   select
+     (select count(*) from drizzle.__drizzle_migrations) as migrations, -- 49
+     (select string_agg(conname, ', ' order by conname) from pg_constraint
+       where conrelid = 'public.ticket_categories'::regclass) as constraints,
+     (select string_agg(key, ', ' order by position) from ticket_categories) as categories,
+     (select prosrc like '%category_id%' from pg_proc
+       where proname = 'notify_conversation_change') as queues_redraw;
+   ```
+
+   Expect 49; `ticket_categories_key_format`, `ticket_categories_labels_not_blank`,
+   `ticket_categories_pkey` and the route group's foreign key; the four keys in
+   order; `true`. Then, signed in: `/admin/categories` lists the four, a ticket
+   page shows the select, and setting a category writes one `category_changed`
+   event naming the agent.
+
+**Rolling back 3.1.** The schema is additive, so it is code only: deploy the
+previous commit to web, then the worker and the crons. Its preDeploy applies
+nothing — every migration in its journal is older than the newest row — and its
+`db/sql` replays cleanly: `001` puts the trigger back without `category_id`,
+`002`'s `_pkey` rows look for the old names on the subcategory tables only and
+find none, and `003` neither knows nor drops the new CHECKs. The old code never
+reads `category_id`. Tickets keep their categories and events, which the old
+timeline prints as "category changed"; a rule holding a `set_category` action
+has it skipped and the rest performed (`parseActions`); a queued
+`seed_ticket_categories` waits for a handler. Removing the table or the column
+would be a forward migration of its own.
+
 **3.2 — Where a person sets it at creation.** Web, worker and crons; no schema
 beyond one column.
 
