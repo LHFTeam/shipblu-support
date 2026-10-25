@@ -81,7 +81,7 @@ update.
 | 1.2   | Merged: #391 (`31f7379`) and follow-up #392 (`7b7d276`), then `dev` → `main` in #393 (`634a28d`), which also carried another session's #390 | **Done.** All six services live on `634a28d` by 17:38 UTC on 2026-10-21, worker first. The user ran the backfill and the rollup from a shell, leaving no `jobs` row. Every check below reads clean |
 | 1.3   | Merged: #395 (`58c5ed9`), then `dev` → `main` in #397 (`447d8be`), which also carried #394, #396 and #398. As built below                   | **Done.** All six services live on `447d8be` by 18:36 UTC, web first. Its checks read clean (below), though no comment has arrived since                                                           |
 | 2.A   | Merged: #400 (`a558c5b`), then `dev` → `main` in #406 (`e88d357`), which also carried #399, #401 and #402. As built below                   | **Done.** All six services live on `e88d357` by 22:13 UTC on 2026-10-23, deployed at once by an environment update. Its checks read clean (below)                                                  |
-| 2.B   | Merged: #403 (`1d21cdc`), then `dev` → `main` in #413 (`516c8ff`) and #415 (`48cb284`). As built below                                      | **Done.** All six services live on `48cb284` by 06:01 UTC on 2026-10-25, web first, with nothing suspended. Its checks read clean, two reads left (below)                                          |
+| 2.B   | Merged: #403 (`1d21cdc`), then `dev` → `main` in #413 (`516c8ff`) and #415 (`48cb284`). As built below                                      | **Done.** All six services live on `48cb284` by 06:01 UTC on 2026-10-25, web first, with nothing suspended. Its checks read clean, and a new message was subcategorised; one read left (below)     |
 | 3–6   | Not started                                                                                                                                 | —                                                                                                                                                                                                  |
 
 **2.B's deploy and checks, read on Render and production on 2026-10-25.**
@@ -125,11 +125,17 @@ update.
   - `/api/health` reports `48cb284` with an empty queue (its one dead job is a
     `subscribe_meta_webhooks` from 2026-09-21);
   - `/admin/categories` answers 307 to `/admin/subcategories`.
-- **Still to read:** a `subcategorised` event on a message after 06:01, since
-  only bot traffic had arrived, and step 4's page loads, which need a person
-  signed in: a ticket page, a web chat ticket, `/admin/subcategories` and its
-  shadow page. The rollback runbook stays the way back until a migration
-  follows 0046.
+- **A new message, subcategorised** (read 16:20 UTC): 14 `subcategorised`
+  events between 07:22 and 16:05 UTC, on customers' replies on Instagram,
+  Facebook and WhatsApp, the first non-bot traffic after the deploy. Each wrote
+  its `conversation_subcategories` row under the message it names, with
+  `subcategory_key` equal to the key of the registry row it points at:
+  `service.request_human`, `billing.payout`, `delivery.no_contact`,
+  `delivery.late` and `meta.unclassified`.
+- **Still to read:** step 4's page loads, which need a person signed in: a
+  ticket page, a web chat ticket, `/admin/subcategories` and its shadow page.
+  Render's request log holds none since the deploy (read 16:20 UTC). The
+  rollback runbook stays the way back until a migration follows 0046.
 
 **2.A's deploy and checks, read on Render and production on 2026-10-23 and
 2026-10-25.**
@@ -282,12 +288,12 @@ Every production write needs the user's go-ahead for that step, and the
    an environment update deployed all six services at once by 22:13 UTC. Its
    checks read clean on 2026-10-25 (above).
 3. **2.B is deployed.** The user deployed it by hand on 2026-10-25, all six on
-   `48cb284` by 06:01 UTC, and its checks read clean (above). Two reads are
-   left: a `subcategorised` event on a new message, and the four page loads. It
+   `48cb284` by 06:01 UTC, and its checks read clean (above), a new message's
+   subcategorisation included. One read is left: the four page loads. It
    rolls back by the runbook under [Rolling back 2.B](#2b-as-built), which stops
    being a way back once any later migration has run.
-4. **Stage 3**, the category field, starts once those two reads are done: its
-   gate is 2.B deployed to all six services and verified.
+4. **Stage 3**, the category field, merges once that read is done: its gate is
+   2.B deployed to all six services and verified.
 5. **Before Stage 5**, a person does 0.2's reorder and 0.6's staffing, and the
    support lead answers the questions still open (below).
 

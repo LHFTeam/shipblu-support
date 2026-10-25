@@ -479,7 +479,9 @@ Migration `0046_subcategory_names` renames the four tables to
 `subcategory_audience` and `subcategory_review_state`; `db/sql/002` is now
 `002_subcategories.sql` and renames the six CHECKs and three `_pkey` names in
 place. Its deploy is a maintenance sequence, and its rollback is the runbook in
-`db/runbooks/`, both in the plan.
+`db/runbooks/`, both in the plan. The detector writes through the new names:
+14 `subcategorised` events on customers' Instagram, Facebook and WhatsApp
+replies by 16:05 UTC on the day, each row under its registry row's key.
 
 And now **the chat launcher knows the difference between a customer and us.**
 The help centre answers on the console's own hostname, so every agent reading an
