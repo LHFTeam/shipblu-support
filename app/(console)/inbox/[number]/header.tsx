@@ -9,6 +9,7 @@ import { RelativeTime } from '@/components/relative-time';
 import { Badge } from '@/components/ui';
 import { ago } from '@/lib/format';
 import { answeredFromConsole, isCommentTicket, isMetaChannel } from '@/lib/tickets/channel-policy';
+import { categoryLabel } from '@/lib/categories/choices';
 import type { ConversationDetail } from '@/lib/tickets/conversation';
 import { ProfileRefresh } from './profile-refresh';
 import { MetaWindowIndicator, WindowIndicator } from './window-indicator';
@@ -130,6 +131,17 @@ export function Header({
           ) : null}
           {conversation.reopenCount > 0 ? (
             <Badge tone="warning">Reopened ×{conversation.reopenCount}</Badge>
+          ) : null}
+          {/*
+              Which team's work it is. Here and not only in the sidebar's
+              select, because the sidebar is desktop-only and the category is
+              the first thing that says whose ticket this is. Spelled out, so
+              "Sales" next to a form's name cannot be read as either.
+            */}
+          {conversation.category ? (
+            <Badge tone="neutral">
+              Category: {categoryLabel(conversation.category.label, conversation.category.active)}
+            </Badge>
           ) : null}
           {conversation.formName ? <Badge tone="brand">{conversation.formName}</Badge> : null}
           {/*

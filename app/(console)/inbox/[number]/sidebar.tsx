@@ -15,6 +15,7 @@ import { PRIORITIES } from '@/lib/tickets/vocabulary';
 import { purgeTicket } from '../../ticket-actions';
 import { PurgePanel } from '../../purge-panel';
 import type { PurgePreview } from '@/lib/admin/purge-summary';
+import { categoryLabel, categoryOptions, type CategoryChoice } from '@/lib/categories/choices';
 import { SideConversationsField } from './side-conversations';
 import { CustomFields, FieldSelect, SidebarField, TagField } from './ticket-fields';
 import { ShipmentsField, ShippingAccountsField } from './shipments-field';
@@ -46,6 +47,8 @@ export function Sidebar({
   fields,
   canClose,
   canSubcategorise,
+  canSetCategory,
+  categories,
   subcategoryOptions,
   rootCauses,
   purgePreview,
@@ -60,6 +63,8 @@ export function Sidebar({
   fields: TicketFieldDef[];
   canClose: boolean;
   canSubcategorise: boolean;
+  canSetCategory: boolean;
+  categories: CategoryChoice[];
   subcategoryOptions: SubcategoryOption[];
   rootCauses: RootCauseOption[];
   purgePreview: PurgePreview | null;
@@ -158,6 +163,30 @@ export function Sidebar({
               ...groups.map((g) => ({ value: g.id, label: g.name })),
             ]}
           />
+        </SidebarField>
+
+        {/* Which team's work it is. Beside Group because from Stage 5 it is
+            what moves a fresh ticket into one. Shown to everybody; only
+            `ticket.set_category` may change it. */}
+        <SidebarField label="Category">
+          {canSetCategory ? (
+            <FieldSelect
+              conversationId={conversation.id}
+              field="category"
+              label="Category"
+              value={conversation.category?.id ?? ''}
+              options={[
+                { value: '', label: 'None' },
+                ...categoryOptions(categories, conversation.category?.id ?? null),
+              ]}
+            />
+          ) : (
+            <p className="text-sm">
+              {conversation.category
+                ? categoryLabel(conversation.category.label, conversation.category.active)
+                : 'None'}
+            </p>
+          )}
         </SidebarField>
 
         <SidebarField label="Priority">

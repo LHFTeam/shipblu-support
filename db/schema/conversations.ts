@@ -15,7 +15,14 @@ import {
   uuid,
 } from 'drizzle-orm/pg-core';
 import { agents, groups } from './agents';
-import { channels, ticketForms, ticketRootCauses, ticketStatuses, slaPolicies } from './config';
+import {
+  channels,
+  ticketCategories,
+  ticketForms,
+  ticketRootCauses,
+  ticketStatuses,
+  slaPolicies,
+} from './config';
 import { contacts } from './customers';
 import {
   channelEnum,
@@ -106,6 +113,24 @@ export const conversations = pgTable(
      * somebody worked it out — than the day the ticket was closed.
      */
     rootCauseSetAt: timestamp('root_cause_set_at', { withTimezone: true }),
+
+    /**
+     * Which team's work this ticket is — a row of `ticket_categories`.
+     *
+     * One per ticket, beside the root cause, and independent of the
+     * subcategories: those say what the customer is asking about and the
+     * detector sets them, this says which line of the business answers it, and
+     * routing keys on it. A routing label, not a claim about the requester, so
+     * nothing writing it writes `requester_kind`.
+     *
+     * Every writer writes it and a `category_changed` event in one
+     * transaction, the event stamped with `CHANGE_STAMP`, and before the first
+     * response re-selects the SLA policy (`reselectPolicyBeforeFirstResponse`).
+     * `restrict`: a category is retired, never deleted.
+     */
+    categoryId: uuid('category_id').references(() => ticketCategories.id, {
+      onDelete: 'restrict',
+    }),
 
     requesterContactId: uuid('requester_contact_id')
       .notNull()
@@ -294,6 +319,10 @@ export const conversations = pgTable(
       .where(sql`${t.accountableAgentId} is not null`),
     index('conversations_requester_idx').on(t.requesterContactId),
     index('conversations_form_idx').on(t.formId, t.createdAt),
+    // The inbox's category filter, newest activity first like the channel's.
+    // It also serves the foreign key's `restrict` check, which never runs: a
+    // category is retired rather than deleted.
+    index('conversations_category_idx').on(t.categoryId, t.lastMessageAt),
     index('conversations_channel_idx').on(t.channel, t.lastMessageAt),
     index('conversations_tags_idx').using('gin', t.tags),
     index('conversations_search_idx').using('gin', t.searchVector),

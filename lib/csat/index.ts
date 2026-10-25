@@ -755,7 +755,7 @@ export async function setSurveySuppressed(
 
 /**
  * The `created_at` of a `csat_suppressed` or `csat_unsuppressed` event, read
- * once the update before it holds the ticket's row lock — `PRIORITY_STAMP`'s
+ * once the update before it holds the ticket's row lock — `CHANGE_STAMP`'s
  * reasoning. The column default, `now()`, is when the transaction began, so an
  * agent's toggle that began first and wrote last would sort before a rule's
  * that committed in between, and `suppressedBy` would name the rule for the

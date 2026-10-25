@@ -23,7 +23,10 @@ import type { InboxFilters } from './inbox-filters';
  * left to `channelInfo()`, so a view and a badge cannot name a channel twice.
  */
 
-type ViewFilters = Pick<InboxFilters, 'view' | 'statusCategory' | 'channel' | 'rating' | 'group'>;
+type ViewFilters = Pick<
+  InboxFilters,
+  'view' | 'statusCategory' | 'channel' | 'rating' | 'group' | 'category'
+>;
 
 export type ViewIcon = 'user' | 'users' | 'inbox' | 'list' | 'clock' | 'check' | 'thumbs-down';
 
@@ -52,6 +55,13 @@ const OPEN_WORK: ViewFilters = {
   channel: 'all',
   rating: 'any',
   group: null,
+  // No view names a category: the Category select already offers each one,
+  // and a view apiece would lengthen the column only to repeat it, at least
+  // until a category decides which group a ticket lands in (Stage 5). The
+  // null still does work, because a view sets every axis: choosing one clears
+  // a category the select set, and a list cut to a category lights no view,
+  // since none of them is that list.
+  category: null,
 };
 
 export type InboxGroup = { id: string; name: string; member: boolean };
@@ -234,6 +244,7 @@ export function viewHref(base: string, filters: ViewFilters, q: string): string 
   if (filters.channel !== OPEN_WORK.channel) params.set('channel', filters.channel);
   if (filters.rating !== OPEN_WORK.rating) params.set('rating', filters.rating);
   if (filters.group) params.set('group', filters.group);
+  if (filters.category) params.set('category', filters.category);
   if (q) params.set('q', q);
 
   const query = params.toString();
@@ -265,7 +276,8 @@ export function activeViewId(
         item.filters.statusCategory === filters.statusCategory &&
         item.filters.channel === filters.channel &&
         item.filters.rating === filters.rating &&
-        item.filters.group === filters.group
+        item.filters.group === filters.group &&
+        item.filters.category === filters.category
       ) {
         return item.id;
       }

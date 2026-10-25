@@ -47,6 +47,13 @@ describe('realtime SQL producer contract', () => {
     expect(code).toContain('OLD.accountable_agent_id IS DISTINCT FROM NEW.accountable_agent_id');
   });
 
+  // The inbox filters on the category and badges every row with it, so a
+  // change to it alone must redraw the queues — or a filtered list keeps a
+  // ticket that has left it until somebody reloads.
+  it('treats a change of category as a queue change', () => {
+    expect(code).toContain('OLD.category_id IS DISTINCT FROM NEW.category_id');
+  });
+
   it('emits no global topic, so one write cannot wake every browser', () => {
     // The regression §6.23 was about: a single `conversation_changed` reaching
     // every console and widget turned one message insert into a full inbox

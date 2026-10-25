@@ -19,6 +19,12 @@ import {
 export type Action =
   | { type: 'set_priority'; value: Priority }
   | { type: 'set_status'; category: StatusCategory }
+  /**
+   * File the ticket under a category — "anything on the merchant number is
+   * merchant support". Recorded as the rule's choice (`automation:<name>`), so
+   * from Stage 4 Jev treats the category as owned and leaves it alone.
+   */
+  | { type: 'set_category'; categoryId: string }
   | { type: 'assign_agent'; agentId: string | null }
   | { type: 'assign_group'; groupId: string | null }
   /**
@@ -79,6 +85,13 @@ export function parseAction(input: unknown): Action | null {
       return isStatusCategory(node.category)
         ? { type: 'set_status', category: node.category }
         : null;
+
+    case 'set_category': {
+      // No "clear the category": a rule names where a ticket belongs, and one
+      // with no id is a rule saved half-written.
+      const categoryId = asIdOrNull(node.categoryId);
+      return categoryId ? { type: 'set_category', categoryId } : null;
+    }
 
     case 'assign_agent':
       return { type: 'assign_agent', agentId: asIdOrNull(node.agentId) };

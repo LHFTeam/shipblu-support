@@ -10,6 +10,7 @@ import {
   contacts,
   groups,
   messages,
+  ticketCategories,
   ticketForms,
   ticketStatuses,
 } from '@/db/schema';
@@ -147,6 +148,12 @@ export type ConversationDetail = {
   } | null;
   groupId: string | null;
   groupName: string | null;
+  /**
+   * Which team's work the ticket is, and its English label — the console's
+   * language — for the header's badge, which is the only place it shows below
+   * `lg`, where the sidebar is hidden.
+   */
+  category: { id: string; label: string; active: boolean } | null;
   requester: {
     id: string;
     name: string | null;
@@ -276,6 +283,8 @@ export async function getConversation(
       ownerName: numberOwner.name,
       ownerActive: numberOwner.isActive,
       groupName: groups.name,
+      categoryLabel: ticketCategories.labelEn,
+      categoryActive: ticketCategories.isActive,
       formNameAr: ticketForms.nameAr,
       formNameEn: ticketForms.nameEn,
       formSlug: ticketForms.slug,
@@ -298,6 +307,7 @@ export async function getConversation(
     )
     .leftJoin(numberOwner, eq(numberOwner.id, channels.ownerAgentId))
     .leftJoin(groups, eq(groups.id, conversations.groupId))
+    .leftJoin(ticketCategories, eq(ticketCategories.id, conversations.categoryId))
     .leftJoin(ticketForms, eq(ticketForms.id, conversations.formId))
     .where(and(...where))
     .limit(1);
@@ -517,6 +527,13 @@ export async function getConversation(
         : null,
     groupId: row.conversation.groupId,
     groupName: row.groupName,
+    category: row.conversation.categoryId
+      ? {
+          id: row.conversation.categoryId,
+          label: row.categoryLabel!,
+          active: row.categoryActive!,
+        }
+      : null,
     requester: {
       id: row.requesterId,
       name: row.requesterName,

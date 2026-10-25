@@ -311,6 +311,78 @@ export const ticketRootCauses = pgTable(
 );
 
 /**
+ * The category registry: which team's work a ticket is.
+ *
+ * One per ticket (`conversations.category_id`), where a ticket carries several
+ * subcategories, and a third question beside the two above: not what the
+ * customer is asking about, nor why it happened, but which line of the business
+ * answers it — sales, customer support, merchant support, courier jobs. It is
+ * what routing keys on (`plans/ticket-category-routing.md`, decision 5), so it
+ * is a routing label and never a statement about who the requester is:
+ * `requester_kind` is that, and words are no evidence of it, where they are
+ * evidence of whose work a message is. Nothing that sets a category writes
+ * `requester_kind`.
+ *
+ * A table rather than an enum like `priority`, because a new category is an
+ * admin's decision rather than a deploy, and because each one carries what an
+ * enum has nowhere to keep: two labels, the sentence Jev is shown for it, and
+ * the group it routes to. Rather than a custom ticket field, because a field
+ * has no foreign key and `admin.fields` can delete it or strip an option, and
+ * every stored value and route would then stop matching without a word.
+ *
+ * The name was the subcategory registry's until Stage 2.B renamed that table to
+ * `ticket_subcategories`; nothing here shares anything with its history.
+ */
+export const ticketCategories = pgTable(
+  'ticket_categories',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+
+    /**
+     * Lowercase letters and underscores, immutable once created, for the
+     * reasons `ticket_subcategories.key` is. A CHECK in `db/sql` holds the
+     * shape and refuses `unknown`, which Jev's classifier keeps for "none of
+     * these" (decision 4).
+     */
+    key: text('key').notNull(),
+
+    labelEn: text('label_en').notNull(),
+    labelAr: text('label_ar').notNull(),
+
+    /**
+     * What belongs here, in one or two sentences — the text Jev is shown beside
+     * the option, from Stage 4, and what an agent reads on the admin page. The
+     * seeded wording is in `lib/categories/registry.ts`, so it goes through
+     * review.
+     */
+    description: text('description'),
+
+    /** Order in the picker and on the admin page. */
+    position: integer('position').notNull().default(0),
+
+    /** Retired, never deleted: a category with tickets behind it keeps them. */
+    isActive: boolean('is_active').notNull().default(true),
+
+    /** Seeded from `lib/categories/registry.ts`. */
+    isSystem: boolean('is_system').notNull().default(false),
+
+    /**
+     * The group a ticket with this category goes to on a channel that routes
+     * by category (Stage 5). Null means "stay in the channel's default group".
+     *
+     * `set null` like a channel's and a form's default group, with the same
+     * answer on top: `deleteGroupIfUnused` refuses while any category names the
+     * group, under the group's row lock, so the delete never empties it.
+     */
+    routeGroupId: uuid('route_group_id').references(() => groups.id, { onDelete: 'set null' }),
+
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex('ticket_categories_key_idx').on(t.key)],
+);
+
+/**
  * Extra constraints on what one field will accept, beyond its type.
  *
  * Attached to the field rather than to the form element that places it: a

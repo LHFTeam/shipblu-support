@@ -5,6 +5,7 @@ import type { CannedResponseOption } from '@/lib/tickets/lookups';
 import type { TicketFieldDef } from '@/lib/tickets/custom-fields';
 import type { SubcategoryOption, RootCauseOption } from '@/lib/subcategorise/queries';
 import type { PurgePreview } from '@/lib/admin/purge-summary';
+import type { CategoryChoice } from '@/lib/categories/choices';
 import { readOnlyReason } from '@/lib/tickets/channel-policy';
 import type { PickerEntry } from '@/lib/side-conversations/queries';
 import type { CannedLocale } from '@/lib/tickets/canned';
@@ -74,6 +75,8 @@ export function ConversationView({
   canEditContact,
   canClose,
   canSubcategorise,
+  canSetCategory,
+  categories,
   subcategoryOptions,
   rootCauses,
   purgePreview,
@@ -107,6 +110,10 @@ export function ConversationView({
   canClose: boolean;
   /** Whether this agent may correct what a ticket is filed under. */
   canSubcategorise: boolean;
+  /** Whether this agent may change which team's work the ticket is. */
+  canSetCategory: boolean;
+  /** Every category, retired ones included, for the sidebar's select. */
+  categories: CategoryChoice[];
   /** The active taxonomy, for the picker. Empty until the seed has run. */
   subcategoryOptions: SubcategoryOption[];
   rootCauses: RootCauseOption[];
@@ -172,6 +179,8 @@ export function ConversationView({
         fields={fields}
         canClose={canClose}
         canSubcategorise={canSubcategorise}
+        canSetCategory={canSetCategory}
+        categories={categories}
         subcategoryOptions={subcategoryOptions}
         rootCauses={rootCauses}
         purgePreview={purgePreview}

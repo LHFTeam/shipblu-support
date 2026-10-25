@@ -1,10 +1,9 @@
 -- ===========================================================================
 -- Ticket subcategorisation: the invariants Drizzle's DSL cannot express
 --
--- Everything here is a CHECK constraint, and the names Postgres gave the
--- primary keys. The tables, columns and indexes are in db/schema/ and
--- db/migrations/ where they belong — including both partial indexes, which
--- drizzle-orm can express with .where() and therefore must.
+-- Everything here is a CHECK constraint. The tables, columns and indexes are
+-- in db/schema/ and db/migrations/ where they belong — including both partial
+-- indexes, which drizzle-orm can express with .where() and therefore must.
 --
 -- No RLS statements: the loop over `public` in 001 covers new tables, and
 -- maintaining a list beside it is what let seven tables reach production
@@ -23,12 +22,17 @@ BEGIN
   -- Until 2.B these tables were `ticket_categories`, `conversation_categories`,
   -- `category_metrics_daily` and `ai_category_runs`, and this file was
   -- 002_categories.sql. Migration 0046 renames the tables, but `ALTER TABLE …
-  -- RENAME` leaves the names of their CHECK constraints and of the primary keys
-  -- Postgres named itself (`<table>_pkey`), which Drizzle cannot see, so they
-  -- are renamed here: on a database that had them (production) in place, and on
-  -- a fresh one too, since every migration runs before this file and 0046 has
-  -- renamed tables created under the old names by then. Renaming a primary key
-  -- constraint renames its index with it.
+  -- RENAME` leaves the names of their CHECK constraints, which Drizzle cannot
+  -- see, so they are renamed here: on a database that had them (production) in
+  -- place, and on a fresh one too, since every migration runs before this file
+  -- and 0046 has renamed tables created under the old names by then.
+  --
+  -- The three primary keys Postgres named itself (`<table>_pkey`) were renamed
+  -- here too until Stage 3, which moved them into migration 0047: Stage 3's own
+  -- `ticket_categories` is created by a migration, and on a fresh database the
+  -- old `ticket_categories_pkey` was still taken then, so its key would have
+  -- been named `_pkey1` there and `_pkey` in production. Production had renamed
+  -- all three here already, so nothing there changed.
   --
   -- Each lookup names the table as well as the constraint. Stage 3 creates a
   -- new `ticket_categories` for the category field, and a guard on the name
@@ -41,12 +45,9 @@ BEGIN
       ('ticket_subcategories', 'ticket_categories_key_shape', 'ticket_subcategories_key_shape'),
       ('ticket_subcategories', 'ticket_categories_area_matches_key', 'ticket_subcategories_area_matches_key'),
       ('ticket_subcategories', 'ticket_categories_no_self_merge', 'ticket_subcategories_no_self_merge'),
-      ('ticket_subcategories', 'ticket_categories_pkey', 'ticket_subcategories_pkey'),
       ('conversation_subcategories', 'conversation_categories_confidence_range', 'conversation_subcategories_confidence_range'),
       ('conversation_subcategories', 'conversation_categories_manual_is_certain', 'conversation_subcategories_manual_is_certain'),
-      ('conversation_subcategories', 'conversation_categories_rejected_not_primary', 'conversation_subcategories_rejected_not_primary'),
-      ('subcategory_metrics_daily', 'category_metrics_daily_pkey', 'subcategory_metrics_daily_pkey'),
-      ('ai_subcategory_runs', 'ai_category_runs_pkey', 'ai_subcategory_runs_pkey')
+      ('conversation_subcategories', 'conversation_categories_rejected_not_primary', 'conversation_subcategories_rejected_not_primary')
     ) AS r (relation, old_name, new_name)
   LOOP
     IF EXISTS (

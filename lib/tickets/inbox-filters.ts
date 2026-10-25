@@ -27,6 +27,15 @@ export type InboxFilters = {
    * the agent cannot see returns nothing rather than widening anything.
    */
   group: string | null;
+  /**
+   * One ticket category's tickets, by id, or null for every ticket, with a
+   * category or without. The Category select sets it; no view does, because
+   * the select already offers every category, and a view per category is
+   * worth its place in the column only once a category decides a ticket's
+   * group (Stage 5). A retired category's id still filters, so a link to one
+   * keeps meaning what it said.
+   */
+  category: string | null;
   q: string;
 };
 
@@ -82,6 +91,27 @@ export function parseInboxCursor(value: string | null | undefined): InboxCursor 
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+/**
+ * A query string in the shape Next hands a page its `searchParams`: every value
+ * of a repeated key, in order.
+ *
+ * For `/api/inbox`, which serves the pages the list scrolls to and must read
+ * the filters exactly as the page that drew the first one did. It read them
+ * through `Object.fromEntries`, which keeps the last of a repeated key where
+ * `parseFilters` takes the first, so a link carrying two categories listed one
+ * on the first page and appended the other's tickets beneath it, under a
+ * select naming the first. Handing over every value leaves the choice to
+ * `parseFilters` on both paths.
+ */
+export function queryParams(search: URLSearchParams): Record<string, string[]> {
+  // No prototype: on a plain `{}`, a stray `constructor=1` in a link found the
+  // inherited member, `??=` left it there, and `.push` threw, so every scroll
+  // answered 500.
+  const params = Object.create(null) as Record<string, string[]>;
+  for (const [key, value] of search) (params[key] ??= []).push(value);
+  return params;
+}
+
 export function parseFilters(params: Record<string, string | string[] | undefined>): InboxFilters {
   const one = (key: string) => {
     const value = params[key];
@@ -93,6 +123,7 @@ export function parseFilters(params: Record<string, string | string[] | undefine
   const channel = one('channel');
   const rating = one('rating');
   const group = one('group');
+  const category = one('category');
 
   return {
     view: view === 'mine' || view === 'unassigned' || view === 'groups' ? view : 'all',
@@ -113,6 +144,9 @@ export function parseFilters(params: Record<string, string | string[] | undefine
     // Checked here rather than left to Postgres, which answers a malformed uuid
     // with 22P02 — a page that fails rather than a list that is empty.
     group: group && UUID_PATTERN.test(group) ? group.toLowerCase() : null,
+    // An id rather than a key, as the column is: the select's options are rows,
+    // and a key would cost the query a join to say the same thing.
+    category: category && UUID_PATTERN.test(category) ? category.toLowerCase() : null,
     q: (one('q') ?? '').trim(),
   };
 }

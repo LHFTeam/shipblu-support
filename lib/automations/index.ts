@@ -19,8 +19,15 @@ import { requesterLocale } from '@/lib/tickets/locale';
 import { automatedReplyBlocked, deliverAutomatedReply } from '@/lib/tickets/outbound';
 import { matches } from '@/lib/rules/conditions';
 import { conversationFacts } from '@/lib/rules/facts';
-import { onGroupChanged, onPriorityChanged, onStatusChanged } from '@/lib/sla';
-import { PRIORITY_STAMP } from '@/lib/tickets/priority-stamp';
+import { setConversationCategory } from '@/lib/categories/write';
+import {
+  onGroupChanged,
+  onPriorityChanged,
+  onStatusChanged,
+  reselectPolicyBeforeFirstResponse,
+} from '@/lib/sla';
+import { CHANGE_STAMP } from '@/lib/tickets/change-stamp';
+import { moveToGroupIfElsewhere } from '@/lib/tickets/move-group';
 import { resolveStamp } from '@/lib/tickets/resolve-stamp';
 import { reopenWithOwner } from '@/lib/whatsapp/number-owner';
 import { parseActions, type Action } from './actions';
@@ -110,7 +117,9 @@ export async function runAutomations(
     const ticket = await loadTicket(conversationId);
     if (!ticket) return 0;
 
-    return await applyRules(rules, ticket);
+    // An `on_create` pass runs before `applySlaOnCreate`, which reads the
+    // category and group the pass left, so it chooses no policy of its own.
+    return await applyRules(rules, ticket, new Date(), { slaApplied: trigger !== 'on_create' });
   } catch (error) {
     log.error(`${trigger} failed on ${conversationId}`, error);
     return 0;
@@ -122,9 +131,10 @@ export async function applyRules(
   rules: Rule[],
   ticket: TicketRow,
   now = new Date(),
+  { slaApplied = true }: { slaApplied?: boolean } = {},
 ): Promise<number> {
   const facts = conversationFacts(ticket, now);
-  const pass: Pass = { surveyOwed: false };
+  const pass: Pass = { surveyOwed: false, policyOwed: null, groupMoved: false };
   let applied = 0;
 
   try {
@@ -160,13 +170,40 @@ export async function applyRules(
     // the ticket's survey with it, and `scheduleSurvey` throws nothing that
     // could hide the error.
     if (pass.surveyOwed) await scheduleSurvey(ticket.conversation.id, 'rule');
+    // Once, from the ticket as the whole pass left it, so a rule that files a
+    // ticket and another that moves it choose one policy between them. In the
+    // `finally` for the survey's reason: the writes have committed.
+    if (pass.policyOwed && slaApplied) {
+      await reselectPolicyBeforeFirstResponse(ticket.conversation.id, pass.policyOwed);
+    }
+    // After the re-selection, the order the console's group case takes: a move
+    // that changed the policy has just been timed from the anchors on the new
+    // group's hours, so this finds nothing to move. Re-timed first, from the
+    // action, the old policy's clocks moved to the new hours and then the
+    // policy's moved them again — two timeline lines for one move, the first
+    // naming deadlines that never held. Once per pass however many rules moved
+    // the ticket, from the group the pass left it in.
+    if (pass.groupMoved) await onGroupChanged(ticket.conversation.id);
   }
 
   return applied;
 }
 
 /** What one pass over the rules owes once every rule in it has run. */
-type Pass = { surveyOwed: boolean };
+type Pass = {
+  surveyOwed: boolean;
+  /**
+   * The category or group moved, so the SLA policy is chosen again if nobody
+   * has answered yet — named by the category when both moved, since that is
+   * the one a policy is most likely keyed on.
+   */
+  policyOwed: 'category' | 'group' | null;
+  /**
+   * A rule moved the ticket's group, so its clocks are re-timed on the new
+   * group's hours (`onGroupChanged`) once the pass is over.
+   */
+  groupMoved: boolean;
+};
 
 /**
  * A `text[]` literal with one bound parameter per element.
@@ -209,7 +246,7 @@ async function applyAction(
       // event owning it, take it for the default, and write over the rule's
       // choice — with the rule's event then landing after, naming the rule for a
       // value the column no longer held. The event is stamped once the update
-      // holds the lock, for the reason `PRIORITY_STAMP` gives.
+      // holds the lock, for the reason `CHANGE_STAMP` gives.
       await db.transaction(async (tx) => {
         await tx
           .update(conversations)
@@ -219,7 +256,7 @@ async function applyAction(
           conversationId,
           type: 'priority_changed',
           actorLabel: `automation:${ruleName}`,
-          createdAt: PRIORITY_STAMP,
+          createdAt: CHANGE_STAMP,
           data: { to: action.value },
         });
       });
@@ -228,6 +265,19 @@ async function applyAction(
       // on_update or time rule escalating a live ticket is the case it is for.
       await onPriorityChanged(conversationId);
       return;
+
+    case 'set_category': {
+      const write = await setConversationCategory(conversationId, action.categoryId, {
+        label: `automation:${ruleName}`,
+      });
+      if (write.outcome === 'changed') pass.policyOwed = 'category';
+      // Said, because it is a rule not doing what its author asked for: the
+      // category it names was retired, or deleted from under it.
+      if (write.outcome === 'retired_category' || write.outcome === 'unknown_category') {
+        log.warn(`"${ruleName}" names a category that is ${write.outcome.split('_')[0]}`);
+      }
+      return;
+    }
 
     case 'set_status': {
       const rows = await db
@@ -291,25 +341,25 @@ async function applyAction(
       await record(action.agentId ? 'assigned' : 'unassigned', { to: action.agentId });
       return;
 
-    case 'assign_group':
-      await db
-        .update(conversations)
-        .set({ groupId: action.groupId })
-        .where(eq(conversations.id, conversationId));
+    case 'assign_group': {
+      // Only when it moves the ticket: a rule naming the group the ticket is
+      // already in matches on every pass (`moveToGroupIfElsewhere`).
+      if (!(await moveToGroupIfElsewhere(conversationId, action.groupId))) return;
+
       await record('group_changed', { to: action.groupId });
-      // The new group may work different hours, in which case the clocks move.
-      // A no-op on a brand new ticket, whose SLA has not been applied yet.
-      await onGroupChanged(conversationId);
+      // The new group may work different hours, in which case the clocks move,
+      // once the pass is over (`Pass.groupMoved`). Nothing to move on a brand
+      // new ticket, whose SLA has not been applied yet.
+      pass.groupMoved = true;
+      pass.policyOwed ??= 'group';
       return;
+    }
 
     case 'auto_assign': {
       // Writes the ticket itself and does not come back through this engine, in
       // keeping with the rule at the top of this file: an automation that
       // triggered an automation is how four hundred emails reach one customer.
-      const groupChanged =
-        action.groupId !== null && action.groupId !== ticket.conversation.groupId;
-
-      await assignConversation(conversationId, {
+      const outcome = await assignConversation(conversationId, {
         groupId: action.groupId,
         strategy: action.strategy === 'group_default' ? undefined : action.strategy,
         actorLabel: `automation:${ruleName}`,
@@ -317,8 +367,14 @@ async function applyAction(
 
       // The SLA counts against the group's calendar, so a rule that moved the
       // ticket has moved its due dates too — whether or not anybody was free to
-      // take it.
-      if (groupChanged) await onGroupChanged(conversationId);
+      // take it. Read off what the call did rather than off the rule and the
+      // ticket as the pass found it: a ticket held by somebody other than its
+      // number's owner, or routed to a group deleted since, stays where it was
+      // and owes nothing (`moveToGroupIfElsewhere`, for why that matters).
+      if (outcome.movedGroup) {
+        pass.groupMoved = true;
+        pass.policyOwed ??= 'group';
+      }
       return;
     }
 

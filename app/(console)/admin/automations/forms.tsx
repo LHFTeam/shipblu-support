@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { Badge, Button, Field, Input, Select, Toggle } from '@/components/ui';
+import type { CategoryChoice } from '@/lib/categories/choices';
 import { ActionBuilder, type Choice } from '../action-builder';
 import { ConditionBuilder, type FieldOption } from '../condition-builder';
 import { DangerAction, Disclosure, EditorForm } from '../forms-shared';
@@ -21,11 +22,19 @@ type Rule = {
 type BuilderProps = {
   agents: Choice[];
   groups: Choice[];
+  categories: CategoryChoice[];
   cannedResponses: Choice[];
   fields: FieldOption[];
 };
 
-function Fields({ rule, agents, groups, cannedResponses, fields }: BuilderProps & { rule?: Rule }) {
+function Fields({
+  rule,
+  agents,
+  groups,
+  categories,
+  cannedResponses,
+  fields,
+}: BuilderProps & { rule?: Rule }) {
   return (
     <>
       <div className="grid gap-3 sm:grid-cols-3">
@@ -69,6 +78,7 @@ function Fields({ rule, agents, groups, cannedResponses, fields }: BuilderProps 
           name="actions"
           agents={agents}
           groups={groups}
+          categories={categories}
           cannedResponses={cannedResponses}
           initial={rule?.actions ?? []}
         />

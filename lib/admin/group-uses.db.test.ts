@@ -10,6 +10,7 @@ import {
   groups,
   skills,
   slaPolicies,
+  ticketCategories,
   ticketForms,
   ticketStatuses,
   whatsappAccounts,
@@ -54,6 +55,7 @@ describe('groupUses', () => {
       slaPolicies: [],
       skills: [],
       cannedResponses: [],
+      categories: [],
     });
     expect(await deleteGroupIfUnused(id)).toBeNull();
     expect(await stillThere(id)).toBe(false);
@@ -155,6 +157,25 @@ describe('groupUses', () => {
         'named by automation rules “Pricing to sales”, “Sales is urgent”; named by SLA policy “Live sales”; ' +
         'required by skill “Arabic pricing”; the group of canned responses “Sales hello”, “Sales thanks” ' +
         'that a rule sends. Move them to another group first.',
+    );
+    expect(await stillThere(sales)).toBe(true);
+  });
+
+  it('names the categories that route to the group, retired ones too', async () => {
+    const sales = await group('Inbound Sales Team');
+    await db
+      .update(ticketCategories)
+      .set({ routeGroupId: sales })
+      .where(eq(ticketCategories.key, 'sales'));
+    await db
+      .update(ticketCategories)
+      .set({ routeGroupId: sales, isActive: false })
+      .where(eq(ticketCategories.key, 'courier_jobs'));
+
+    expect((await groupUses(sales)).categories).toEqual(['Sales', 'Courier jobs (retired)']);
+    expect(await deleteGroupIfUnused(sales)).toBe(
+      'That group is still in use: the route group of categories “Sales”, “Courier jobs (retired)”. ' +
+        'Move them to another group first.',
     );
     expect(await stillThere(sales)).toBe(true);
   });

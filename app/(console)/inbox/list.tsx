@@ -12,6 +12,7 @@ import { SearchInput } from '@/components/search-input';
 import { useNow } from '@/components/use-now';
 import { Badge, Button, buttonClass, EmptyState, ErrorText, Select } from '@/components/ui';
 import type { ViewsPanelSection } from '@/components/views-panel';
+import { categoryOptions, type CategoryChoice } from '@/lib/categories/choices';
 import { DEFAULT_LOCALE } from '@/lib/kb/locale';
 import type { InboxRow } from '@/lib/tickets/inbox';
 import type { InboxFilters } from '@/lib/tickets/inbox-filters';
@@ -50,6 +51,7 @@ export function InboxList({
   canViewAll = false,
   seesGroupQueues = false,
   groupName = null,
+  categories = [],
   canCreate = false,
   canViewContacts = false,
 }: {
@@ -72,6 +74,8 @@ export function InboxList({
   seesGroupQueues?: boolean;
   /** The name of the group `filters.group` names, when it is one the agent is offered. */
   groupName?: string | null;
+  /** Every ticket category, retired ones included, in the admin's order. */
+  categories?: CategoryChoice[];
   canCreate?: boolean;
   /** The avatar route answers 404 without `contact.view`, so the tile is not asked for one. */
   canViewContacts?: boolean;
@@ -113,6 +117,16 @@ export function InboxList({
   // moved up there is dropped from below rather than rendered twice.
   const seen = new Set(rows.map((row) => row.id));
   const visible = [...rows, ...olderRows.filter((row) => !seen.has(row.id))];
+
+  // The active categories, and the one the URL names even once it is retired,
+  // labelled so — the same options the ticket's own select offers.
+  const categoryChoices = categoryOptions(categories, filters.category);
+  // An id no category has: a link that outlived a database it was copied from,
+  // or one typed by hand. It matches no ticket, so the select says that rather
+  // than showing "All categories" over a list that is empty.
+  const unknownCategory =
+    filters.category !== null &&
+    !categoryChoices.some((choice) => choice.value === filters.category);
 
   const current = views.flatMap((section) => section.items).find((item) => item.id === activeView);
   // The view's count is the number of open and pending tickets in it, which is
@@ -193,46 +207,82 @@ export function InboxList({
 
         {/*
           Beside the views rather than replaced by them: these say what no view
-          does — Open alone, Closed, any status — and combine with each other.
+          does — Open alone, Closed, any status, one category — and combine
+          with each other.
         */}
-        <div className="flex gap-2">
-          {/* Status sizes itself to its longest option so "Open + pending"
-              never clips in the 320px column; channel takes what is left. The
-              `!` beats the field's own `w-full`, which sorts after `w-auto`. */}
-          <Select
-            value={filters.statusCategory}
-            onChange={(e) => setParam('status', e.target.value)}
-            aria-label="Status"
-            className="w-auto! shrink-0"
-          >
-            <option value="unresolved">Open + pending</option>
-            <option value="open">Open</option>
-            <option value="pending">Pending</option>
-            <option value="resolved">Resolved</option>
-            <option value="closed">Closed</option>
-            <option value="all">Any status</option>
-          </Select>
+        <div className="flex flex-col gap-2">
+          <div className="flex gap-2">
+            {/* Status sizes itself to its longest option so "Open + pending"
+                never clips in the 320px column; channel takes what is left. The
+                `!` beats the field's own `w-full`, which sorts after `w-auto`. */}
+            <Select
+              value={filters.statusCategory}
+              onChange={(e) => setParam('status', e.target.value)}
+              aria-label="Status"
+              className="w-auto! shrink-0"
+            >
+              <option value="unresolved">Open + pending</option>
+              <option value="open">Open</option>
+              <option value="pending">Pending</option>
+              <option value="resolved">Resolved</option>
+              <option value="closed">Closed</option>
+              <option value="all">Any status</option>
+            </Select>
 
-          <Select
-            value={filters.channel}
-            onChange={(e) => setParam('channel', e.target.value)}
-            aria-label="Channel"
-            className="min-w-0 flex-1"
-          >
-            <option value="all">All channels</option>
-            {/*
-              Built from the list the parser accepts, and labelled from the same
-              place as the badges, so an option cannot exist that the filter
-              ignores or that reads differently here than on the row.
-            */}
-            {FILTERABLE_CHANNELS.filter(
-              (channel) => canSeeBot || !isRestrictedChannel(channel),
-            ).map((channel) => (
-              <option key={channel} value={channel}>
-                {channelInfo(channel).label}
-              </option>
-            ))}
-          </Select>
+            <Select
+              value={filters.channel}
+              onChange={(e) => setParam('channel', e.target.value)}
+              aria-label="Channel"
+              className="min-w-0 flex-1"
+            >
+              <option value="all">All channels</option>
+              {/*
+                Built from the list the parser accepts, and labelled from the
+                same place as the badges, so an option cannot exist that the
+                filter ignores or that reads differently here than on the row.
+              */}
+              {FILTERABLE_CHANNELS.filter(
+                (channel) => canSeeBot || !isRestrictedChannel(channel),
+              ).map((channel) => (
+                <option key={channel} value={channel}>
+                  {channelInfo(channel).label}
+                </option>
+              ))}
+            </Select>
+          </div>
+
+          {/*
+            A line of its own, at every width: the row above already fills the
+            320px column, a phone's whole width holds little more, and a native
+            select clips its longest option rather than wrapping, so a third
+            control there would cut "All channels" and an admin's longer
+            category names alike.
+
+            No "Stop filtering" line follows it, as one follows the rated and
+            group views: those narrow by an axis no control shows, and this one
+            shows its own. Drawn only when there is something to choose, so a
+            registry whose every category is retired does not leave a control
+            with one option that does nothing.
+          */}
+          {categoryChoices.length > 0 || unknownCategory ? (
+            <Select
+              value={filters.category ?? ''}
+              onChange={(e) => setParam('category', e.target.value)}
+              aria-label="Category"
+            >
+              <option value="">All categories</option>
+              {unknownCategory ? (
+                <option value={filters.category ?? ''} disabled>
+                  Unknown category
+                </option>
+              ) : null}
+              {categoryChoices.map((choice) => (
+                <option key={choice.value} value={choice.value}>
+                  {choice.label}
+                </option>
+              ))}
+            </Select>
+          ) : null}
         </div>
 
         {/*
@@ -425,6 +475,10 @@ function RowBadges({ row, layout }: { row: InboxRow; layout: 'avatar' | 'ticket'
   const now = useNow();
   const badges = rowBadges(row, now, layout).map((badge) => (
     <Badge key={badge.key} tone={badge.tone}>
+      {/* A screen reader reads the badges as one run of words, where "Sales"
+          could be a status's name. The ticket header spells "Category:" out;
+          the row has no room to, so it says it only to the ear. */}
+      {badge.key === 'category' ? <span className="sr-only">Category: </span> : null}
       {badge.label}
     </Badge>
   ));
@@ -702,7 +756,7 @@ function reviveRow(row: SerialisedRow): InboxRow {
  * such tickets" rather than "not searchable".
  */
 const SEARCH_HINT =
-  "Matches a ticket's number (#812) and subject, the requester's name, email or phone, and any words in a message or side conversation. Arabic spellings of the same letter match each other, so احمد finds أحمد. A pasted tracking number or SBID finds that shipment's tickets; start with track: or sbid: to search only those. A ticket number finds its ticket whatever the Status filter says; everything else follows it, and the Channel filter applies to all of it. Tags, custom fields and the assignee are not searched.";
+  "Matches a ticket's number (#812) and subject, the requester's name, email or phone, and any words in a message or side conversation. Arabic spellings of the same letter match each other, so احمد finds أحمد. A pasted tracking number or SBID finds that shipment's tickets; start with track: or sbid: to search only those. A ticket number finds its ticket whatever the Status filter says; everything else follows it, and the Channel and Category filters apply to all of it. Tags, custom fields and the assignee are not searched.";
 
 /**
  * Debounced so typing a ticket number does not fire a query per keystroke —

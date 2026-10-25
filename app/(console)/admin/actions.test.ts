@@ -6,13 +6,15 @@ import {
   formData as form,
   refuseEveryQuery,
 } from '@/lib/testing/fake-db';
+import { GONE } from './settings-shared';
 
 /**
- * The admin actions take an agent's, a channel's, a subcategory's or a cause's
- * id from a form field. A malformed one reached Postgres, which answers with
- * error 22P02 rather than with no rows — the action threw, returned no state,
- * and the admin saw a blank failure. A well-formed one naming no row either
- * broke a foreign key the same way or updated nothing and reported success.
+ * The admin actions take an agent's, a channel's, a subcategory's, a cause's or
+ * a category's id from a form field. A malformed one reached Postgres, which
+ * answers with error 22P02 rather than with no rows — the action threw,
+ * returned no state, and the admin saw a blank failure. A well-formed one
+ * naming no row either broke a foreign key the same way or updated nothing and
+ * reported success.
  */
 
 const ADMIN_ID = '0b6f3c2e-8a51-4d3e-9f0a-2c7d1e5b9a44';
@@ -28,6 +30,7 @@ const actions = {
   ...(await import('./agents/actions')),
   ...(await import('./channels/actions')),
   ...(await import('./subcategories/actions')),
+  ...(await import('./categories/actions')),
 };
 
 const INITIAL = { error: null };
@@ -73,6 +76,28 @@ describe('admin actions given an id no row can have', () => {
     ],
   ])('%s refuses it with a sentence, without querying', async (_name, run, error) => {
     await expect(run()).resolves.toEqual({ error });
+    expectNoQuery();
+  });
+
+  it.each([
+    [
+      'saveCategory',
+      () => actions.saveCategory(INITIAL, form({ id: MALFORMED, labelEn: 'A', labelAr: 'ا' })),
+    ],
+    ['retireCategory', () => actions.retireCategory(INITIAL, form({ id: MALFORMED }))],
+    ['restoreCategory', () => actions.restoreCategory(INITIAL, form({ id: MALFORMED }))],
+  ])('%s refuses the category id with a sentence, without querying', async (_name, run) => {
+    await expect(run()).resolves.toEqual({ error: GONE });
+    expectNoQuery();
+  });
+
+  it('saveCategory refuses a malformed route group before reading anything', async () => {
+    const state = await actions.saveCategory(
+      INITIAL,
+      form({ key: 'wholesale', labelEn: 'Wholesale', labelAr: 'الجملة', routeGroupId: MALFORMED }),
+    );
+
+    expect(state.error).toMatch(/group/i);
     expectNoQuery();
   });
 
@@ -151,6 +176,17 @@ describe('admin actions given a well-formed id that names nothing', () => {
     ],
   ])('%s says so rather than reporting a change that did not happen', async (_name, run, error) => {
     await expect(run()).resolves.toEqual({ error });
+  });
+
+  // Saving one is a transaction, which this fake does not run; `admin.db.test.ts`
+  // holds that case against Postgres.
+  it.each([
+    ['retireCategory', () => actions.retireCategory(INITIAL, form({ id: NOBODY }))],
+    ['restoreCategory', () => actions.restoreCategory(INITIAL, form({ id: NOBODY }))],
+  ])('%s says the category is gone rather than reporting a change', async (_name, run) => {
+    const state = await run();
+    expect(state.error).toMatch(/no longer exists/);
+    expect(state.ok).toBeUndefined();
   });
 
   it('saveChannel refuses a default group that no longer exists, before writing', async () => {

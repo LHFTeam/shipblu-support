@@ -206,9 +206,66 @@ describe('slaSweep: escalations', () => {
     expect(escalated).toHaveLength(1);
     expect(escalated[0]!.data).toEqual({
       kind: 'first_response',
+      policyId: slaPolicyId,
       agentIds: [agentId],
       afterMins: 20,
     });
+  });
+
+  // Re-selection before the first response (Stage 3.1) moves a ticket to a
+  // policy whose escalation contacts are other people, and they are owed their
+  // own escalation when its target is missed too.
+  it('escalates again to the contacts of a policy the ticket moved to, and once', async () => {
+    const lead = await supervisor();
+    const salesLead = (
+      await db
+        .insert(agents)
+        .values({ name: 'Hana', email: 'hana@shipblu.test', role: 'supervisor' })
+        .returning({ id: agents.id })
+    )[0]!.id;
+    const standard = await policyEscalatingTo(lead, 0);
+    const id = await ticket({ slaPolicyId: standard, firstResponseDueAt: minutesAgo(10) });
+    await slaSweep();
+    expect(await watchers(id)).toEqual([lead]);
+
+    const [sales] = await db
+      .insert(slaPolicies)
+      .values({
+        name: 'Sales',
+        targets: TARGETS,
+        escalations: { firstResponse: { afterMins: 0, agentIds: [salesLead] } },
+      })
+      .returning({ id: slaPolicies.id });
+    // What the re-selection leaves when Sales' later target is still missed.
+    await db
+      .update(conversations)
+      .set({ slaPolicyId: sales!.id, firstResponseDueAt: minutesAgo(1) })
+      .where(eq(conversations.id, id));
+    await slaSweep();
+    await slaSweep();
+
+    expect((await watchers(id)).sort()).toEqual([lead, salesLead].sort());
+    expect((await events(id, 'sla_escalated')).map((row) => row.data)).toEqual([
+      expect.objectContaining({ policyId: standard, agentIds: [lead] }),
+      expect.objectContaining({ policyId: sales!.id, agentIds: [salesLead] }),
+    ]);
+  });
+
+  it('counts an escalation recorded before it named a policy as settling every policy', async () => {
+    const agentId = await supervisor();
+    const slaPolicyId = await policyEscalatingTo(agentId, 0);
+    const id = await ticket({ slaPolicyId, firstResponseDueAt: minutesAgo(10) });
+    await db.insert(conversationEvents).values({
+      conversationId: id,
+      type: 'sla_escalated',
+      actorLabel: 'sla_sweep',
+      data: { kind: 'first_response', agentIds: [agentId], afterMins: 0 },
+    });
+
+    await slaSweep();
+
+    expect(await watchers(id)).toEqual([]);
+    expect(await events(id, 'sla_escalated')).toHaveLength(1);
   });
 
   it('does not escalate before the wait is over', async () => {

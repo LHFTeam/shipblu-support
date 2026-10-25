@@ -38,6 +38,7 @@ export type JobType =
   | 'restore_resolved_at'
   | 'seed_console_handbook'
   | 'seed_canned_responses'
+  | 'seed_ticket_categories'
   | 'rotate_whatsapp_credentials'
   | 'complete_coexistence_onboarding'
   | 'cleanup';

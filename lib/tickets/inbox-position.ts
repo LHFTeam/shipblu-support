@@ -50,6 +50,7 @@ export function inboxSignature(filters: InboxFilters): string {
     filters.channel,
     filters.rating,
     filters.group ?? '',
+    filters.category ?? '',
     filters.q,
   ].join('|');
 }
