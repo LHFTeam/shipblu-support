@@ -5,6 +5,7 @@ import {
   listCannedTitles,
   listGroupNames,
 } from '@/lib/admin/settings';
+import { listCategories } from '@/lib/categories/queries';
 import { formatDateTime } from '@/lib/format';
 import { requirePermission } from '@/lib/auth/guard';
 import { NewRule, RuleEditor } from './forms';
@@ -36,12 +37,14 @@ export default async function AutomationsPage() {
 
   const agents = listActiveAgents();
   const groups = listGroupNames();
-  const [rules, agentList, groupList, canned, fieldOptions] = await Promise.all([
+  const categories = listCategories();
+  const [rules, agentList, groupList, categoryList, canned, fieldOptions] = await Promise.all([
     listAutomationRules(),
     agents,
     groups,
+    categories,
     listCannedTitles(),
-    ticketFieldOptions({ agents, groups }),
+    ticketFieldOptions({ agents, groups, categories }),
   ]);
 
   const agentChoices = agentList.map((agent) => ({
@@ -57,6 +60,7 @@ export default async function AutomationsPage() {
   const builderProps = {
     agents: agentChoices,
     groups: groupChoices,
+    categories: categoryList,
     cannedResponses: cannedChoices,
     fields: fieldOptions,
   };

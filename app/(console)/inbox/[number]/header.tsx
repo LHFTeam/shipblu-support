@@ -131,6 +131,15 @@ export function Header({
           {conversation.reopenCount > 0 ? (
             <Badge tone="warning">Reopened ×{conversation.reopenCount}</Badge>
           ) : null}
+          {/*
+              Which team's work it is. Here and not only in the sidebar's
+              select, because the sidebar is desktop-only and the category is
+              the first thing that says whose ticket this is. Spelled out, so
+              "Sales" next to a form's name cannot be read as either.
+            */}
+          {conversation.category ? (
+            <Badge tone="neutral">Category: {conversation.category.label}</Badge>
+          ) : null}
           {conversation.formName ? <Badge tone="brand">{conversation.formName}</Badge> : null}
           {/*
               Nobody proved who sent this. A form that anybody can submit

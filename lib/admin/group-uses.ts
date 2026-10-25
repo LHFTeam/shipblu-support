@@ -23,6 +23,7 @@ import {
   groups,
   skills,
   slaPolicies,
+  ticketCategories,
   ticketForms,
   whatsappAccounts,
   whatsappOnboardings,
@@ -96,6 +97,14 @@ export type GroupUses = {
   skills: string[];
   /** Naming the group, so deleted with it, and sent by an automation rule. */
   cannedResponses: string[];
+  /**
+   * Routing tickets to the group (`ticket_categories.route_group_id`), retired
+   * ones too: retiring a category stops new tickets taking it, not the ones it
+   * already holds being routed by it. The foreign key is `set null` like a
+   * channel's, so without this the delete would quietly send that category's
+   * tickets to their channel's default group.
+   */
+  categories: string[];
 };
 
 export async function groupUses(
@@ -255,6 +264,12 @@ export async function groupUses(
     )
     .orderBy(asc(cannedResponses.title));
 
+  const categoryRows = await on
+    .select({ label: ticketCategories.labelEn, isActive: ticketCategories.isActive })
+    .from(ticketCategories)
+    .where(eq(ticketCategories.routeGroupId, groupId))
+    .orderBy(asc(ticketCategories.position), asc(ticketCategories.key));
+
   return {
     tickets: ticketCount?.count ?? 0,
     channels: channelRows.map((row) => row.name),
@@ -268,6 +283,7 @@ export async function groupUses(
     slaPolicies: policyRows.map((row) => row.name),
     skills: skillRows.map((row) => row.name),
     cannedResponses: cannedRows.map((row) => row.title),
+    categories: categoryRows.map((row) => (row.isActive ? row.label : `${row.label} (retired)`)),
   };
 }
 
@@ -332,6 +348,9 @@ function groupDeleteRefusal(uses: GroupUses): string | null {
   if (uses.skills.length) parts.push(`required by ${list('skill', uses.skills)}`);
   if (uses.cannedResponses.length) {
     parts.push(`the group of ${list('canned response', uses.cannedResponses)} that a rule sends`);
+  }
+  if (uses.categories.length) {
+    parts.push(`the route group of ${list('category', uses.categories)}`);
   }
 
   if (parts.length === 0) return null;
