@@ -105,6 +105,18 @@ export const PERMISSIONS = [
    * know, so an override written under the old name would lapse silently.
    */
   'ticket.subcategorise',
+  /**
+   * Changing a ticket's category — which team's work it is.
+   *
+   * Separate from `ticket.edit_fields` and `ticket.subcategorise`, because from
+   * Stage 5 of `plans/ticket-category-routing.md` it is the field that routes a
+   * fresh ticket to a team, and setting it before the first response chooses
+   * the SLA policy the ticket is held to. Somebody who may fill in a ticket's
+   * questions or correct its topic is not thereby somebody who moves work
+   * between teams. Every agent holds it (decision 14 of the plan): they are the
+   * ones who read the ticket and see where it belongs.
+   */
+  'ticket.set_category',
   'ticket.edit_fields',
   /**
    * Opening a ticket on a customer's behalf, from a form.
@@ -208,11 +220,22 @@ export const PERMISSIONS = [
    * so a rename quietly re-labels every report anybody has ever drawn.
    *
    * Called `admin.categories` until Stage 2.A, for the same reason as
-   * `ticket.subcategorise`. Stage 3 gives `admin.categories` back to the new
-   * category field's admin page, so an override left under the old name would
-   * come back meaning that page.
+   * `ticket.subcategorise`. Stage 3 gave `admin.categories` back to the new
+   * category field's admin page, below, so an override left under the old name
+   * would have come back meaning that page; none existed when it did
+   * (2026-10-25).
    */
   'admin.subcategories',
+  /**
+   * The ticket category list on `/admin/categories`: adding, relabelling,
+   * ordering and retiring a category, and naming the group each routes to.
+   *
+   * Not `admin.subcategories`: a subcategory says what a ticket is about, and
+   * a category says which team works it. Once Stage 5 routes by category, the
+   * route group here decides where every fresh ticket on a routed channel goes,
+   * which is `admin.groups`' and `admin.automations`' reach, not a taxonomy's.
+   */
+  'admin.categories',
 
   /**
    * Ticket forms, separate from `admin.fields` because the blast radius is.
@@ -247,6 +270,7 @@ const AGENT: Permission[] = [
   'ticket.assign',
   'ticket.edit_fields',
   'ticket.subcategorise',
+  'ticket.set_category',
   'ticket.create',
   'contact.view',
   'contact.edit',
@@ -291,6 +315,7 @@ const ADMIN: Permission[] = [
   'admin.skills',
   'admin.fields',
   'admin.subcategories',
+  'admin.categories',
   'admin.forms',
   'admin.csat',
 ];

@@ -605,6 +605,140 @@ export async function onPriorityChanged(conversationId: string): Promise<void> {
 }
 
 /**
+ * The ticket's category or group changed before anybody answered it: the policy
+ * is chosen again, from everything the ticket now is.
+ *
+ * `onGroupChanged` and `onPriorityChanged` keep the policy because which targets
+ * a ticket is held to is what an agent was told when it arrived. Before the
+ * first response nobody has been told anything, so this is that same principle
+ * at the moment it was written for, not an exception to it. And it is what
+ * makes a policy keyed on the category reachable at all: `applySlaOnCreate`
+ * chooses at the first instant, when the category is seconds — or, after a
+ * greeting, minutes — away, so without this a category-keyed policy would
+ * match only tickets somebody happened to route by hand.
+ *
+ * Who made the change does not matter — Jev, a rule, a form, an agent or the
+ * router — and every writer of `category_id` calls this after its write
+ * commits, as do the group moves that can happen before a first response: the
+ * console's group case, `assign_group` and an `auto_assign` that moved. The one
+ * exception is `backfill_category_ai`, which labels an old backlog and never
+ * retargets it. A rule on `on_create` does not call it either, because
+ * `applySlaOnCreate` runs after that pass and reads the category itself.
+ *
+ * Built from the anchors rather than on `recomputeOwedClocks`, which returns
+ * early on a ticket with no clocks: this one can create them, on a ticket whose
+ * first selection found no policy and whose new category matches one. Each
+ * clock is the new policy's target counted from where it was first set from —
+ * `created_at`, or the customer's newest message for the next response — plus
+ * the time the ticket has already been excused on finished pauses, in the hours
+ * of its current group. A pause still open is left to `onStatusChanged`, which
+ * credits the whole of it when the clock resumes (`completedPauses`).
+ *
+ * When the same policy wins again it does nothing: re-timing for a new group's
+ * calendar is `onGroupChanged`'s, which the group writers call next. When no
+ * policy wins — no default, nothing matching — it also does nothing: dropping
+ * an obligation mid-ticket is a different decision from choosing one.
+ *
+ * Never on a read-only channel or an imported history, which `applySlaOnCreate`
+ * never gave a clock either.
+ */
+export async function reselectPolicyBeforeFirstResponse(
+  conversationId: string,
+  cause: 'category' | 'group',
+): Promise<void> {
+  try {
+    const policies = await loadPolicies();
+    if (policies.length === 0) return;
+    const catalog = await loadHoursCatalog();
+
+    await withTicketLocked(conversationId, async (tx, row) => {
+      const conversation = row.conversation;
+      if (conversation.firstRespondedAt) return;
+      if (conversation.sourceSystem === 'import') return;
+      if (readOnlyChannels().includes(conversation.channel)) return;
+
+      const policy = selectPolicy(policies, conversationFacts(row));
+      if (!policy || policy.id === conversation.slaPolicyId) return;
+
+      const hours = hoursForTicket(catalog, conversation.groupId, policy);
+      const priority = conversation.priority as Priority;
+      const target = targetFor(policy, priority);
+      const pauses = await completedPauses(conversationId, tx);
+
+      const fromAnchor = (minutes: number | null, from: Date): Date | null =>
+        minutes === null ? null : dueAt(hours, minutes + excusedSince(hours, pauses, from), from);
+
+      const firstResponse = fromAnchor(target.firstResponseMins, conversation.createdAt);
+      // A resolved ticket's resolution clock was met under the policy it had;
+      // choosing another does not reopen the question.
+      const resolution = conversation.resolvedAt
+        ? conversation.resolutionDueAt
+        : fromAnchor(target.resolutionMins, conversation.createdAt);
+      // Running only when the customer wrote again before anybody answered; a
+      // ticket with none keeps none, as `dueDatesOnCreate` gives none.
+      const nextResponse = conversation.nextResponseDueAt
+        ? fromAnchor(
+            target.nextResponseMins ?? target.firstResponseMins,
+            conversation.lastCustomerMessageAt ?? conversation.createdAt,
+          )
+        : null;
+
+      // As in `recomputeOwedClocks`: a flag stands for a target missed, and the
+      // target just changed. Only the sweep sets one, so a clock now in the past
+      // is left to it; one moved into the future is the case nothing else undoes.
+      const now = new Date();
+      const cleared = [
+        ...(conversation.firstResponseBreached && (!firstResponse || firstResponse > now)
+          ? (['first_response'] as const)
+          : []),
+        ...(conversation.resolutionBreached &&
+        !conversation.resolvedAt &&
+        (!resolution || resolution > now)
+          ? (['resolution'] as const)
+          : []),
+      ];
+
+      await tx
+        .update(conversations)
+        .set({
+          slaPolicyId: policy.id,
+          firstResponseDueAt: firstResponse,
+          nextResponseDueAt: nextResponse,
+          resolutionDueAt: resolution,
+          ...(cleared.includes('first_response') ? { firstResponseBreached: false } : {}),
+          ...(cleared.includes('resolution') ? { resolutionBreached: false } : {}),
+        })
+        .where(eq(conversations.id, conversationId));
+
+      // Named, because "the deadline moved" is a question an agent asks, and
+      // "the ticket is sales now, so it is held to Sales' targets" is the answer.
+      const previous = policyIn(policies, conversation.slaPolicyId);
+      await tx.insert(conversationEvents).values({
+        conversationId,
+        type: 'sla_recalculated',
+        actorLabel: 'sla',
+        data: {
+          reason: 'policy',
+          cause,
+          policyId: policy.id,
+          policy: policy.name,
+          previousPolicyId: conversation.slaPolicyId,
+          previousPolicy: previous?.name ?? null,
+          priority,
+          timezone: hours?.timezone ?? null,
+          firstResponseDueAt: firstResponse?.toISOString() ?? null,
+          nextResponseDueAt: nextResponse?.toISOString() ?? null,
+          resolutionDueAt: resolution?.toISOString() ?? null,
+          clearedBreaches: cleared,
+        },
+      });
+    });
+  } catch (error) {
+    log.error(`could not choose the policy again on ${conversationId}`, error);
+  }
+}
+
+/**
  * Re-times every clock still owed, from the anchors it was first set from,
  * against the ticket's current group and priority.
  *

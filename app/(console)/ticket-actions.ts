@@ -13,9 +13,10 @@ import { ok } from '@/lib/http/action-state';
 import { isUuid } from '@/lib/http/uuid';
 import { can } from '@/lib/auth/permissions';
 import { isPriority } from '@/lib/tickets/vocabulary';
-import { onGroupChanged, onPriorityChanged } from '@/lib/sla';
+import { setConversationCategory } from '@/lib/categories/write';
+import { onGroupChanged, onPriorityChanged, reselectPolicyBeforeFirstResponse } from '@/lib/sla';
 import { afterTicketUpdate } from '@/lib/tickets/lifecycle';
-import { PRIORITY_STAMP } from '@/lib/tickets/priority-stamp';
+import { CHANGE_STAMP } from '@/lib/tickets/change-stamp';
 import { isBlank } from '@/lib/tickets/custom-fields';
 import { parseFieldValue } from '@/lib/tickets/custom-fields-parse';
 import { getTicketField } from '@/lib/tickets/lookups';
@@ -149,9 +150,11 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
         });
       });
 
-      // Groups can keep their own operating days and holidays, so the due dates
-      // are re-counted on the new team's calendar rather than left pointing at
-      // hours that team does not work.
+      // Before anybody has answered, the policy itself may follow the new team
+      // (a policy can be keyed on the group); after, it holds. Either way the
+      // due dates are then re-counted on the new team's calendar, since groups
+      // can keep their own operating days and holidays.
+      await reselectPolicyBeforeFirstResponse(conversationId, 'group');
       await onGroupChanged(conversationId);
 
       // The new team may route automatically where the old one did not. A no-op
@@ -173,8 +176,8 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
           conversationId,
           type: 'priority_changed',
           actorAgentId: agent.id,
-          // After the update above has the row lock (`PRIORITY_STAMP`).
-          createdAt: PRIORITY_STAMP,
+          // After the update above has the row lock (`CHANGE_STAMP`).
+          createdAt: CHANGE_STAMP,
           data: { to: value },
         });
       });
@@ -182,6 +185,35 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
       // The policy prices its targets per priority, so the deadline follows the
       // badge rather than staying at whatever the ticket arrived as.
       await onPriorityChanged(conversationId);
+      break;
+    }
+
+    case 'category': {
+      // Its own permission rather than `ticket.edit_fields`, because from Stage
+      // 5 this is the field that routes a fresh ticket to a team: a role that
+      // may fill in a ticket's questions is not thereby one that moves work
+      // between teams. Every agent holds it today.
+      if (!can(agent, 'ticket.set_category')) {
+        return { error: "You cannot change this ticket's category" };
+      }
+      const categoryId = value || null;
+      if (categoryId && !isUuid(categoryId)) return { error: 'Unknown category' };
+
+      const write = await setConversationCategory(conversationId, categoryId, {
+        agentId: agent.id,
+      });
+      if (write.outcome === 'unknown_category') return { error: 'Unknown category' };
+      if (write.outcome === 'retired_category') {
+        return { error: 'That category has been retired — choose another' };
+      }
+      if (write.outcome === 'no_ticket') return { error: 'Ticket not found' };
+
+      // Before the first response, the policy follows the category (it may be
+      // keyed on it). A no-op once somebody has answered, or when the same
+      // policy wins again.
+      if (write.outcome === 'changed') {
+        await reselectPolicyBeforeFirstResponse(conversationId, 'category');
+      }
       break;
     }
 

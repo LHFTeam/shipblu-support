@@ -383,6 +383,9 @@ BEGIN
         -- reassignment does: the new owner's list gains the ticket.
         OLD.accountable_agent_id IS DISTINCT FROM NEW.accountable_agent_id OR
         OLD.group_id IS DISTINCT FROM NEW.group_id OR
+        -- The inbox filters on the category and draws it on every row, so a
+        -- change to it alone must redraw the queues as a group move does.
+        OLD.category_id IS DISTINCT FROM NEW.category_id OR
         OLD.tags IS DISTINCT FROM NEW.tags OR
         OLD.last_message_at IS DISTINCT FROM NEW.last_message_at OR
         OLD.last_customer_message_at IS DISTINCT FROM NEW.last_customer_message_at OR

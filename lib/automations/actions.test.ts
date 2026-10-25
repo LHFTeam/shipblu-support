@@ -20,6 +20,16 @@ describe('parseAction', () => {
     });
   });
 
+  it('files a ticket under the category a rule names, and never clears one', () => {
+    expect(parseAction({ type: 'set_category', categoryId: 'c-1' })).toEqual({
+      type: 'set_category',
+      categoryId: 'c-1',
+    });
+    // A rule saved without a choice is half-written, not "no category".
+    expect(parseAction({ type: 'set_category', categoryId: '' })).toBeNull();
+    expect(parseAction({ type: 'set_category' })).toBeNull();
+  });
+
   it('reads clearing an assignment as an explicit null', () => {
     // "Unassign" and "assign to nobody in particular" are the same instruction,
     // and both have to survive a round trip through jsonb.

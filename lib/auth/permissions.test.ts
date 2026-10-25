@@ -114,3 +114,17 @@ describe('the purge permissions', () => {
     );
   });
 });
+
+describe('the category permissions', () => {
+  it('lets every agent set a ticket’s category, and only admins manage the list', () => {
+    expect(can({ role: 'agent', permissions: {} }, 'ticket.set_category')).toBe(true);
+    expect(can({ role: 'supervisor', permissions: {} }, 'admin.categories')).toBe(false);
+    expect(can({ role: 'admin', permissions: {} }, 'admin.categories')).toBe(true);
+  });
+
+  it('keeps setting the category apart from editing fields', () => {
+    const agent = { role: 'agent' as const, permissions: { 'ticket.set_category': false } };
+    expect(can(agent, 'ticket.set_category')).toBe(false);
+    expect(can(agent, 'ticket.edit_fields')).toBe(true);
+  });
+});

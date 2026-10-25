@@ -330,6 +330,20 @@
       "when": 1792781241219,
       "tag": "0046_subcategory_names",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1792909171396,
+      "tag": "0047_free_old_pkey_names",
+      "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1792909175828,
+      "tag": "0048_ticket_categories",
+      "breakpoints": true
     }
   ]
 }

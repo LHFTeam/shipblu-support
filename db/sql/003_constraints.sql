@@ -205,3 +205,47 @@ BEGIN
       );
   END IF;
 END $$;
+
+-- --------------------------------------------------------------------------
+-- A ticket category's key, and its two labels
+--
+-- The key is what a rule, an export and Jev's answer name a category by, so it
+-- is held to one shape: lowercase words joined by single underscores. Hyphens
+-- and capitals belong in the labels. `unknown` is refused because Jev's
+-- classifier (plans/ticket-category-routing.md, decision 4) answers it for "none
+-- of these", and a category of that name would turn the escape hatch into a
+-- label a ticket can be filed under.
+--
+-- Named `_key_format`, not `_key_shape`: `ticket_categories_key_shape` is the
+-- name the subcategory registry's CHECK carried until Stage 2.B renamed that
+-- table, and a log line quoting one should never be mistaken for the other.
+--
+-- Each guard names the table as well as the constraint, as 002's do.
+-- --------------------------------------------------------------------------
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'ticket_categories_key_format'
+      AND conrelid = 'public.ticket_categories'::regclass
+  ) THEN
+    ALTER TABLE ticket_categories
+      ADD CONSTRAINT ticket_categories_key_format CHECK (
+        key ~ '^[a-z]+(_[a-z]+)*$' AND key <> 'unknown'
+      );
+  END IF;
+
+  -- Both labels, because the picker and the badge draw whichever language the
+  -- agent reads in, and NOT NULL alone lets '' through — a blank badge on every
+  -- ticket filed under it.
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'ticket_categories_labels_not_blank'
+      AND conrelid = 'public.ticket_categories'::regclass
+  ) THEN
+    ALTER TABLE ticket_categories
+      ADD CONSTRAINT ticket_categories_labels_not_blank CHECK (
+        btrim(label_en) <> '' AND btrim(label_ar) <> ''
+      );
+  END IF;
+END $$;
