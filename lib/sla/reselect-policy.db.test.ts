@@ -222,19 +222,37 @@ describe('reselectPolicyBeforeFirstResponse', () => {
     });
   });
 
-  it('re-times a running reply clock from the customer’s newest message', async () => {
-    const { sales } = await policies();
-    const { id, createdAt } = await ticket();
-    const wrote = at(createdAt, 50);
+  // Switching a policy off leaves its tickets on it, and the loaded policies
+  // are the active ones only.
+  it('names the policy a ticket moves off, even one switched off since', async () => {
+    const [legacy] = await db
+      .insert(slaPolicies)
+      .values({
+        name: 'Legacy',
+        hoursSource: 'round_the_clock',
+        targets: target(120, 480),
+        isDefault: true,
+      })
+      .returning({ id: slaPolicies.id });
+    const { id } = await ticket();
+    expect((await sla(id)).slaPolicyId).toBe(legacy!.id);
     await db
-      .update(conversations)
-      .set({ lastCustomerMessageAt: wrote, nextResponseDueAt: at(wrote, 120) })
-      .where(eq(conversations.id, id));
+      .update(slaPolicies)
+      .set({ isActive: false, isDefault: false })
+      .where(eq(slaPolicies.id, legacy!.id));
+    const { sales } = await policies(false);
 
     await setConversationCategory(id, await categoryId('sales'), { label: 'x' });
     await reselectPolicyBeforeFirstResponse(id, 'category');
 
-    expect(await sla(id)).toMatchObject({ slaPolicyId: sales, nextResponseDueAt: at(wrote, 30) });
+    expect((await sla(id)).slaPolicyId).toBe(sales);
+    expect((await events(id, 'sla_recalculated')).map((e) => e.data)).toEqual([
+      expect.objectContaining({
+        policy: 'Sales',
+        previousPolicyId: legacy!.id,
+        previousPolicy: 'Legacy',
+      }),
+    ]);
   });
 
   it('clears a breach the new policy’s later target has not reached', async () => {

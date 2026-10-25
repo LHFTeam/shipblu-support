@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { db } from '@/db/client';
 import { ticketCategories } from '@/db/schema';
 import { withCleanDatabase } from '@/lib/testing/db';
+import { createCategory } from './admin';
 import { STARTER_CATEGORIES } from './registry';
 import { syncCategories } from './seed';
 
@@ -48,6 +49,7 @@ describe('syncCategories', () => {
       created: [],
       present: STARTER_CATEGORIES.length,
       orphaned: [],
+      heldByAdmin: [],
     });
 
     const after = await db.select().from(ticketCategories).orderBy(ticketCategories.key);
@@ -82,6 +84,27 @@ describe('syncCategories', () => {
 
     expect((await syncCategories()).orphaned).toEqual(['wholesale']);
     expect(await row('wholesale')).toBeDefined();
+  });
+
+  // Web is live before anybody runs the seed, and the empty admin page offers
+  // to add one, so a starter key can be an admin's first.
+  it("leaves a starter key an admin's category holds as theirs, and says so", async () => {
+    await db.delete(ticketCategories).where(eq(ticketCategories.key, 'sales'));
+    expect(
+      await createCategory({
+        key: 'sales',
+        labelEn: 'New business',
+        labelAr: 'أعمال جديدة',
+        description: '',
+        position: 0,
+        routeGroupId: null,
+      }),
+    ).toBeNull();
+
+    const outcome = await syncCategories();
+
+    expect(outcome).toMatchObject({ created: [], heldByAdmin: ['sales'], orphaned: [] });
+    expect(await row('sales')).toMatchObject({ labelEn: 'New business', isSystem: false });
   });
 
   it('refuses a key the CHECK reserves or misshapes', async () => {

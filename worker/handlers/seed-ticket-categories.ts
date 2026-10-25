@@ -27,4 +27,12 @@ export async function seedTicketCategories(job: ClaimedJob): Promise<void> {
   if (outcome.orphaned.length) {
     log.warn(`seeded but no longer in the starter set: ${outcome.orphaned.join(', ')}`);
   }
+  // An admin added a category under a starter key before the seed ran. It is
+  // theirs and stays so; said, because the starter wording is not what holds
+  // that key.
+  if (outcome.heldByAdmin.length) {
+    log.warn(
+      `starter key held by an admin's category, left as it is: ${outcome.heldByAdmin.join(', ')}`,
+    );
+  }
 }

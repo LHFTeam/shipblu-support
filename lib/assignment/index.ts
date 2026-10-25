@@ -124,8 +124,8 @@ export async function assignConversation(
 
 /**
  * The body of `assignConversation`, which every return below answers through:
- * `routed` is how the group move, made on one of three branches before the
- * pick, reaches the outcome without each of a dozen returns repeating it.
+ * `routed` is how the group move, made once before the branches, reaches the
+ * outcome without each of a dozen returns repeating it.
  */
 async function routeAndPick(
   conversationId: string,
@@ -181,26 +181,28 @@ async function routeAndPick(
   const routeTo =
     options.groupId && options.groupId !== conversation.groupId ? options.groupId : null;
 
-  if (conversation.assigneeAgentId) {
-    // An owned ticket is assigned in the insert that creates it (`ownerStamp`),
-    // so a rule routing it meets it already held — by the owner, whom this
-    // call would have chosen anyway. The group the rule names still applies,
-    // as it does in the owner branch below: without it, an owned ticket never
-    // reaches the group whose SLA policy, hours and members the rule meant.
-    // Anybody else holding a ticket was given it on purpose, and a rule has
-    // never moved their ticket.
-    if (routeTo && assignable && conversation.assigneeAgentId === conversation.accountableAgentId) {
-      routed.moved = await moveToGroup(conversationId, routeTo, options.actorLabel);
-    }
-    return { assignedTo: null, reason: 'already_assigned' };
+  /*
+   * The move, made once and here, so the one write is the one answer
+   * (`movedGroup`) whichever branch below then picks. It applies to work to
+   * hand out, unassigned or held by its number's owner. An owned ticket is
+   * assigned in the insert that creates it (`ownerStamp`), so a rule routing it
+   * meets it held by the owner, whom this call would have chosen anyway, and
+   * without the move it never reaches the group whose SLA policy, hours and
+   * members the rule meant. Anybody else holding a ticket was given it on
+   * purpose, and a rule has never moved their ticket.
+   */
+  const holder = conversation.assigneeAgentId;
+  if (routeTo && assignable && (!holder || holder === conversation.accountableAgentId)) {
+    routed.moved = await moveToGroup(conversationId, routeTo, options.actorLabel);
   }
+
+  if (conversation.assigneeAgentId) return { assignedTo: null, reason: 'already_assigned' };
 
   if (!assignable) return { assignedTo: null, reason: 'not_assignable' };
 
   // The number's owner, ahead of everything the rota would ask — see the
   // module header for why none of it applies.
   if (conversation.accountableAgentId && ticket.accountableActive) {
-    if (routeTo) routed.moved = await moveToGroup(conversationId, routeTo, options.actorLabel);
     return handBackToOwner(
       conversationId,
       conversation.accountableAgentId,
@@ -235,9 +237,6 @@ async function routeAndPick(
    * rota looks lopsided.
    */
   const { lastAssignedAgentId: _preLockCursor, ...group } = groupRow;
-
-  // Before the pick, so the routing half stands whatever the pick finds.
-  if (routeTo) routed.moved = await moveToGroup(conversationId, routeTo, options.actorLabel);
 
   const strategy = options.strategy ?? group.assignmentStrategy;
   if (strategy === 'manual') return { assignedTo: null, reason: 'strategy_manual' };

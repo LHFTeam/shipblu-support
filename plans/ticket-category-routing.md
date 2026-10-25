@@ -2744,7 +2744,8 @@ where it departs from it:
   admins. No agent held an override of either key (read 2026-10-25 06:3x UTC).
 - **Seed.** The starter descriptions say where each category's edges are, for
   Jev, and `courier_jobs`' excludes a greeting or a bare "I want a job". The
-  seed reconciles by key and never overwrites; CI's `database` job runs it
+  seed reconciles by key, never overwrites, and marks as seeded only what it
+  inserts, reporting a starter key an admin's own category holds; CI's `database` job runs it
   through `scripts/ci/db-jobs.txt`.
 - **The ticket.** A Category select beside Group and Priority, read-only text
   for an agent without the permission; a retired category the ticket holds is
@@ -2803,7 +2804,10 @@ without a word. It waits for 2.B's two remaining reads.
 4. **Seed.** `npm run job -- seed_ticket_categories` on the worker's shell, or
    `insert into jobs (type, payload) values ('seed_ticket_categories', '{}')`.
    It logs `[seed_ticket_categories] done created=sales,customer_support,merchant_support,courier_jobs present=0`;
-   run again, `created=none present=4`.
+   run again, `created=none present=4`. If an admin added a category under a
+   starter key first — web is live before the seed runs, and the empty admin
+   page offers to add one — the run also logs `starter key held by an admin's
+category, left as it is: <key>`, and that key keeps the admin's wording.
 5. **Handbook.** Production held no console handbook at 2026-10-25 08:44 UTC:
    no `handbook:` folder or article. If that still holds there is nothing to
    do, because the first seed, whenever somebody runs it, writes 3.1's words.

@@ -631,8 +631,9 @@ export async function onPriorityChanged(conversationId: string): Promise<void> {
  * Built from the anchors rather than on `recomputeOwedClocks`, which returns
  * early on a ticket with no clocks: this one can create them, on a ticket whose
  * first selection found no policy and whose new category matches one. Each
- * clock is the new policy's target counted from where it was first set from —
- * `created_at`, or the customer's newest message for the next response — plus
+ * clock — the first response and the resolution, since an unanswered ticket
+ * has no next-response clock — is the new policy's target counted from
+ * `created_at`, plus
  * the time the ticket has already been excused on finished pauses, in the hours
  * of its current group. A pause still open is left to `onStatusChanged`, which
  * credits the whole of it when the clock resumes (`completedPauses`).
@@ -689,16 +690,12 @@ export async function reselectPolicyBeforeFirstResponse(
       const fromAnchor = (minutes: number | null, from: Date): Date | null =>
         minutes === null ? null : dueAt(hours, minutes + excusedSince(hours, pauses, from), from);
 
+      // Two clocks, not three: the next response has none before a first
+      // response — `dueDatesOnCreate` gives none and `startReplyClock` starts
+      // one only once somebody has answered — so the ticket this function may
+      // touch never carries one, and its column is left as it is.
       const firstResponse = fromAnchor(target.firstResponseMins, conversation.createdAt);
       const resolution = fromAnchor(target.resolutionMins, conversation.createdAt);
-      // Running only when the customer wrote again before anybody answered; a
-      // ticket with none keeps none, as `dueDatesOnCreate` gives none.
-      const nextResponse = conversation.nextResponseDueAt
-        ? fromAnchor(
-            target.nextResponseMins ?? target.firstResponseMins,
-            conversation.lastCustomerMessageAt ?? conversation.createdAt,
-          )
-        : null;
 
       const cleared = breachesCleared(conversation, { firstResponse, resolution }, new Date());
 
@@ -707,7 +704,6 @@ export async function reselectPolicyBeforeFirstResponse(
         .set({
           slaPolicyId: policy.id,
           firstResponseDueAt: firstResponse,
-          nextResponseDueAt: nextResponse,
           resolutionDueAt: resolution,
           ...(cleared.includes('first_response') ? { firstResponseBreached: false } : {}),
           ...(cleared.includes('resolution') ? { resolutionBreached: false } : {}),
@@ -716,7 +712,16 @@ export async function reselectPolicyBeforeFirstResponse(
 
       // Named, because "the deadline moved" is a question an agent asks, and
       // "the ticket is sales now, so it is held to Sales' targets" is the answer.
-      const previous = policyIn(policies, conversation.slaPolicyId);
+      // Read by id, active or not: a policy an admin switched off keeps its
+      // tickets, and `policies` holds only the active ones, so a ticket moving
+      // off one read as though it had held no policy before. On `tx`, which is
+      // already this call's connection, not a second place in the pool.
+      const [previous] = conversation.slaPolicyId
+        ? await tx
+            .select({ name: slaPolicies.name })
+            .from(slaPolicies)
+            .where(eq(slaPolicies.id, conversation.slaPolicyId))
+        : [];
       await tx.insert(conversationEvents).values({
         conversationId,
         type: 'sla_recalculated',
@@ -731,7 +736,6 @@ export async function reselectPolicyBeforeFirstResponse(
           priority,
           timezone: hours?.timezone ?? null,
           firstResponseDueAt: firstResponse?.toISOString() ?? null,
-          nextResponseDueAt: nextResponse?.toISOString() ?? null,
           resolutionDueAt: resolution?.toISOString() ?? null,
           clearedBreaches: cleared,
         },

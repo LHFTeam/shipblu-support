@@ -257,6 +257,28 @@ describe('assignConversation on a ticket whose WhatsApp number has an owner', ()
     });
   });
 
+  // The rota's own path, which no owner takes: the move is made once, before
+  // the branches, and reported, so a rule routing an unowned ticket owes the
+  // SLA its re-time and its second look (`lib/automations`, `Pass.groupMoved`).
+  it('moves a ticket the rota picks for into the group a rule named, and says so', async () => {
+    const nayera = await agent('Nayera Mohamed', { isActive: false });
+    const omar = await agent('Omar Agent', { presence: 'online', lastSeenAt: new Date() });
+    const support = await group('Merchant Care', { assignWithinHoursOnly: false });
+    await db.insert(groupMembers).values({ groupId: support, agentId: omar });
+    const ticket = await ownedTicket(nayera);
+
+    const outcome = await assignConversation(ticket.id, {
+      groupId: support,
+      actorLabel: 'automation:Route merchants',
+    });
+
+    expect(outcome).toEqual({ assignedTo: omar, reason: null, movedGroup: true });
+    expect(await ticketRow(ticket.id)).toMatchObject({ assignee: omar, groupId: support });
+    expect((await eventsOf(ticket.id, ['group_changed'])).map((event) => event.data)).toEqual([
+      { to: support },
+    ]);
+  });
+
   // "Unassign" in the console writes the ticket and then runs the same
   // lifecycle step as every other edit; on an owned ticket that is the owner
   // getting it back in the same request, not on the next sweep.

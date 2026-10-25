@@ -47,8 +47,11 @@ export const listCategories = cache(async (): Promise<CategoryRow[]> => {
 });
 
 /**
- * How many live tickets carry each category — what the admin page shows beside
- * Retire, so an admin can see what a category has behind it.
+ * How many tickets carry each category now, open or not, deleted ones left out
+ * — what the admin page shows beside Retire, in those words. Every ticket, not
+ * only open work, because the question beside Retire is what a category has
+ * behind it: the ones closed long ago keep it too, and they are what a report
+ * filed by category counts.
  */
 export async function categoryUsage(): Promise<Map<string, number>> {
   const rows = await db

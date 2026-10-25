@@ -245,6 +245,16 @@ that modifies or deletes a migration that already exists:
 Database-level behaviour that Drizzle's DSL cannot express goes in `db/sql/`,
 not into a generated migration.
 
+One exception, for an order `db/sql/` cannot give: it replays after every
+migration, so SQL that a generated migration needs run _before_ it goes in a
+migration of its own, made by `npx drizzle-kit generate --custom`. That writes
+an empty file and a snapshot copied from the last one, so the drift check
+regenerates nothing; the file is filled in by hand before anything applies it,
+and is guarded so a database that does not need it passes straight through.
+`0047_free_old_pkey_names` is the one so far: a fresh database had to give up
+the old `ticket_categories_pkey` name before `0048` created the new table.
+Once applied it is as fixed as any other migration.
+
 ## Conventions
 
 **TypeScript.** Strict. Path alias `@/*` maps to the repo root. Prettier and
