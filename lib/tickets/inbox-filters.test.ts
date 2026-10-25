@@ -156,4 +156,9 @@ describe('parseFilters', () => {
       parseFilters({ category: [sales, merchant], channel: ['email', 'whatsapp'], cursor: 'x' }),
     );
   });
+
+  it('reads a key named after an object member as any other stray key', () => {
+    const search = new URLSearchParams('constructor=1&__proto__=x&toString=1&hasOwnProperty=1');
+    expect(parseFilters(queryParams(search))).toEqual(parseFilters({}));
+  });
 });

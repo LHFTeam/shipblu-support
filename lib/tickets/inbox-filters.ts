@@ -104,7 +104,10 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
  * `parseFilters` on both paths.
  */
 export function queryParams(search: URLSearchParams): Record<string, string[]> {
-  const params: Record<string, string[]> = {};
+  // No prototype: on a plain `{}`, a stray `constructor=1` in a link found the
+  // inherited member, `??=` left it there, and `.push` threw, so every scroll
+  // answered 500.
+  const params = Object.create(null) as Record<string, string[]>;
   for (const [key, value] of search) (params[key] ??= []).push(value);
   return params;
 }

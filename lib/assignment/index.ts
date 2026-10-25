@@ -363,6 +363,13 @@ async function routeAndPick(
  * because the owner's path reaches here without having looked the group up: a
  * rule naming a group deleted since would otherwise throw on the foreign key
  * and take the assignment down with it, where the rota answers `no_group`.
+ *
+ * And conditional on the ticket being somewhere else, which is what the answer
+ * reports (`movedGroup`). The caller decided to move it from a read taken
+ * without a lock, so an agent moving it to the same group in between left an
+ * update that matched the row anyway, and the rule recorded a move the agent
+ * had made — and owed the SLA policy a second look for it
+ * (`moveToGroupIfElsewhere`).
  */
 async function moveToGroup(
   conversationId: string,
@@ -375,6 +382,7 @@ async function moveToGroup(
     .where(
       and(
         eq(conversations.id, conversationId),
+        sql`${conversations.groupId} is distinct from ${groupId}`,
         exists(db.select({ id: groups.id }).from(groups).where(eq(groups.id, groupId))),
       ),
     )

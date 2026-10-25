@@ -2856,7 +2856,7 @@ of` and `is empty` match every ticket, and the time sweep acts on the whole
   select 'automation' as kind, name, is_active from automation_rules
     where conditions::text like '%"category.id"%'
   union all
-  select 'sla', name, true from sla_policies where conditions::text like '%"category.id"%'
+  select 'sla', name, is_active from sla_policies where conditions::text like '%"category.id"%'
   union all
   select 'skill', name, is_active from skills where conditions::text like '%"category.id"%';
   ```
@@ -2870,9 +2870,13 @@ ticket_categories` before and after.
   has no handler, so each attempt fails, and the fifth is about five minutes
   after the first. After rolling forward, run the seed again and check the
   four keys with step 6's query.
-- **The handbook keeps 3.1's words** until the seed is run from the older
-  commit with `overwrite=true`, and the `category` article stays either way,
-  because the seed never deletes.
+- **The handbook's articles keep 3.1's words** until the seed is run from the
+  older commit with `overwrite=true`; its folders do not wait for that. Any run
+  of the older seed but a dry one puts the `tickets` and `administration`
+  descriptions back and the tickets folder's article positions with them,
+  because folders and positions are synced every run, so the orphaned
+  `category` article then shares a position with `categorising`. It stays
+  either way, because the seed never deletes.
 
 **3.2 — Where a person sets it at creation.** Web, worker and crons; no schema
 beyond one column.
