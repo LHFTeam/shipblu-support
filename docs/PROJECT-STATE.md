@@ -5,17 +5,30 @@ it is designed; **this file is about the state of the work** — what is live,
 what is merely built, what is left, and the mistakes that have already cost us
 time. Read both. Do not re-derive settled decisions.
 
-Last updated: 2026-10-23, against `main` at `447d8be`. The figures in §1 and §5
+Last updated: 2026-10-25, against `main` at `48cb284`. The figures in §1 and §5
 were last re-measured as a whole against production on 2026-09-20, and a
 paragraph re-read since gives its own date; where a number here disagrees with
 an older paragraph elsewhere in the file, the older one has not been re-checked.
 
-**Production runs `447d8be`, deployed on 2026-10-23, all six unsuspended
-services by 18:36:47 UTC:** web first for the migrations, then the worker, then
-the four crons. Each service's deploy, and when the old worker stopped, is in
+**Production runs `48cb284`, deployed by hand on 2026-10-25, all six
+unsuspended services by 06:01:12 UTC:** web first, whose preDeploy applied
+Stage 2.B's migration `0046_subcategory_names` (the SQL rename), then the crons
+and the worker. It is releases #413 and #415, which carry 2.B with #404, #407,
+#408, #409, #410, #412 and #414. The worker and crons were not suspended first,
+as 2.B's sequence asks, and for six minutes the old worker ran against renamed
+tables without one failed job (`plans/ticket-category-routing.md`, 2.B's
+deploy).
+
+Before it, #406 (`e88d357`, Stage 2.A, #399, #401 and #402) went out at 22:10
+UTC on 2026-10-23 without anyone deploying it: an environment variable change
+made Render redeploy all six from `main` at once. So once `main` carries a
+migration that production has not run, an environment change is a deploy.
+
+The release before those was #397 (`447d8be`), deployed by hand by 18:36:47 UTC
+on 2026-10-23: web first for the migrations, then the worker, then the four
+crons. Each service's deploy, and when the old worker stopped, is in
 `plans/ticket-category-routing.md` (1.3's deploy); this file repeats only the
-times §5.1 argues from. It is the `dev` → `main` release #397, which carries
-three changes:
+times §5.1 argues from. It carries three changes:
 
 - Stage 1.3's comment CHECK (`plans/ticket-category-routing.md`);
 - WhatsApp number owners (§1, §5.1);
@@ -446,7 +459,7 @@ indicator of inbound volume. That is also why there is **no backfill job**: with
 the bot channel excluded there are 55 conversations in the entire archive to
 subcategorise.
 
-2026-10-23, in the code and not yet deployed: Stage 2.A renames the topic
+Deployed on 2026-10-23 in #406 (`e88d357`): Stage 2.A renames the topic
 taxonomy to subcategory in code, UI, routes (old paths 307-redirect),
 permission keys, the job name and the variables; SQL names follow in 2.B. The
 names an operator types are now `/admin/subcategories`,
@@ -455,17 +468,20 @@ names an operator types are now `/admin/subcategories`,
 `categorised` and `category_*` and are read beside the new `subcategorised` and
 `subcategory_*`. The tables keep their `category` names until Stage 2.B of
 `plans/ticket-category-routing.md` (below), which frees "category" for the
-field Stage 3 adds.
+field Stage 3 adds. The detector has written `subcategorised` since: nine events
+by 2026-10-25 05:51 UTC, and none under the old name after the deploy.
 
-2026-10-23, in the code and not yet deployed: Stage 2.B renames the database to
-match. Migration `0046_subcategory_names` renames the four tables to
+Deployed on 2026-10-25 (`48cb284`): Stage 2.B renames the database to match.
+Migration `0046_subcategory_names` renames the four tables to
 `ticket_subcategories`, `conversation_subcategories`,
 `subcategory_metrics_daily` and `ai_subcategory_runs`, the three
 `category_id`/`category_key` columns to `subcategory_*`, and the enum types to
 `subcategory_audience` and `subcategory_review_state`; `db/sql/002` is now
 `002_subcategories.sql` and renames the six CHECKs and three `_pkey` names in
 place. Its deploy is a maintenance sequence, and its rollback is the runbook in
-`db/runbooks/`, both in the plan.
+`db/runbooks/`, both in the plan. The detector writes through the new names:
+14 `subcategorised` events on customers' Instagram, Facebook and WhatsApp
+replies by 16:05 UTC on the day, each row under its registry row's key.
 
 And now **the chat launcher knows the difference between a customer and us.**
 The help centre answers on the console's own hostname, so every agent reading an

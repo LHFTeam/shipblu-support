@@ -63,7 +63,7 @@ records the answers, and the plan below already reflects them.
 
 ## Status and handoff
 
-As of 2026-10-23, 22:00 UTC. A session picking this plan up starts here.
+As of 2026-10-25, 06:03 UTC. A session picking this plan up starts here.
 Everything after this section is the design as it was reasoned and as each stage
 was built. This section says where the work stands, what comes next and how, and
 what has already bitten. Whoever moves any of it updates this section in the
@@ -80,9 +80,87 @@ update.
 | 1.1   | Merged: #387, then `dev` → `main` in #389 (`1f89219`)                                                                                       | Live since 2026-10-21 10:13 UTC                                                                                                                                                                    |
 | 1.2   | Merged: #391 (`31f7379`) and follow-up #392 (`7b7d276`), then `dev` → `main` in #393 (`634a28d`), which also carried another session's #390 | **Done.** All six services live on `634a28d` by 17:38 UTC on 2026-10-21, worker first. The user ran the backfill and the rollup from a shell, leaving no `jobs` row. Every check below reads clean |
 | 1.3   | Merged: #395 (`58c5ed9`), then `dev` → `main` in #397 (`447d8be`), which also carried #394, #396 and #398. As built below                   | **Done.** All six services live on `447d8be` by 18:36 UTC, web first. Its checks read clean (below), though no comment has arrived since                                                           |
-| 2.A   | Merged into `dev`: #400 (`a558c5b`), no migration. As built below                                                                           | Not deployed. Ships with the next `dev` → `main` merge, after its "Before" step (Deploying 2.A)                                                                                                    |
-| 2.B   | In review: #403 (`claude/stage-2b-subcategory-sql`): migration `0046`, `db/sql/002`, a runbook. As built below                              | Not deployed. Merges only after 2.A's release is on all six services (1.3 and #396 already are), then deploys alone in a maintenance window (Deploying 2.B)                                        |
+| 2.A   | Merged: #400 (`a558c5b`), then `dev` → `main` in #406 (`e88d357`), which also carried #399, #401 and #402. As built below                   | **Done.** All six services live on `e88d357` by 22:13 UTC on 2026-10-23, deployed at once by an environment update. Its checks read clean (below)                                                  |
+| 2.B   | Merged: #403 (`1d21cdc`), then `dev` → `main` in #413 (`516c8ff`) and #415 (`48cb284`). As built below                                      | **Done.** All six services live on `48cb284` by 06:01 UTC on 2026-10-25, web first, with nothing suspended. Its checks read clean, and a new message was subcategorised; one read left (below)     |
 | 3–6   | Not started                                                                                                                                 | —                                                                                                                                                                                                  |
+
+**2.B's deploy and checks, read on Render and production on 2026-10-25.**
+
+- **The release.** #403 merged into `dev` as `1d21cdc` at 22:52 UTC on
+  2026-10-23, after 2.A was live, as its hold required. Then #413 took `dev`
+  into `main` at 23:01 UTC, and #415 again at 16:37 UTC on 2026-10-24. Neither
+  was deployed at once, so for about 31 hours `main` held a migration nothing
+  had run. In that state an environment variable change, which makes Render
+  redeploy every service at once (2.A's deploy, below), or a deploy of any one
+  service would have shipped 2.B outside its sequence. Nothing did.
+- **The deploy.** The user deployed web by hand on `48cb284` at 05:53:02 UTC on
+  2026-10-25, clearing the build cache. Its preDeploy logged
+  `Applying drizzle migrations...` at 05:55:10.4 and was applying `001` by
+  05:55:13.1, so 0046 committed in under 3 s; all nine `db/sql` files were done
+  at 05:55:13.8, and web was live at 05:56:10. Then, by hand on the same commit:
+
+  | Service                          | Live     |
+  | -------------------------------- | -------- |
+  | `shipblu-time-automations`       | 05:59:43 |
+  | `shipblu-whatsapp-template-sync` | 05:59:48 |
+  | `shipblu-nightly`                | 06:00:37 |
+  | `shipblu-sla-sweep`              | 06:01:07 |
+  | worker `shipblu-support-worker`  | 06:01:12 |
+
+- **Not as planned: nothing was suspended.** From 05:55:10 to 06:01:12 the old
+  worker (`e88d357`) ran against the renamed tables, and `shipblu-sla-sweep`
+  ran once on old code at 05:55:57, successfully. It cost nothing that can be
+  measured:
+  - no job run since 05:50 carries an error;
+  - neither web nor the worker logged a warning, an error or a line naming a
+    missing relation after 05:55, and web served no 5xx;
+  - the six inbound messages in the window were all on `whatsapp_bot`, which
+    the subcategoriser leaves out, and none came through web, so step 7's list
+    under [Deploying 2.B](#2b-as-built) is empty.
+- **The checks** (read 06:02–06:03 UTC):
+  - no relation or type keeps an old name;
+  - the six CHECKs, the composite primary key and the three `_pkey`s have the
+    new names;
+  - the four tables hold 55, 836, 408 and 647 rows, as before;
+  - `/api/health` reports `48cb284` with an empty queue (its one dead job is a
+    `subscribe_meta_webhooks` from 2026-09-21);
+  - `/admin/categories` answers 307 to `/admin/subcategories`.
+- **A new message, subcategorised** (read 16:20 UTC): 14 `subcategorised`
+  events between 07:22 and 16:05 UTC, on customers' replies on Instagram,
+  Facebook and WhatsApp, the first non-bot traffic after the deploy. Each wrote
+  its `conversation_subcategories` row under the message it names, with
+  `subcategory_key` equal to the key of the registry row it points at:
+  `service.request_human`, `billing.payout`, `delivery.no_contact`,
+  `delivery.late` and `meta.unclassified`.
+- **Still to read:** step 4's page loads, which need a person signed in: a
+  ticket page, a web chat ticket, `/admin/subcategories` and its shadow page.
+  Render's request log holds none since the deploy (read 16:20 UTC). The
+  rollback runbook stays the way back until a migration follows 0046.
+
+**2.A's deploy and checks, read on Render and production on 2026-10-23 and
+2026-10-25.**
+
+- **The release.** #406 merged `dev` (`a3fb23d`) into `main` at 22:08:48 UTC on
+  2026-10-23 as `e88d357`, carrying 2.A, #399, #401 and #402. Nobody deployed it
+  by hand. At 22:10 Render started a deploy on all six services at once, each
+  with `envUpdated` as its trigger: an environment variable changed, and Render
+  redeploys from `main` when one does. Web's preDeploy ran from 22:12:14 to
+  22:12:53 and applied no migration. All six were live between 22:11:20 and
+  22:13:27, the crons first. Web was not first, and 2.A, with no migration,
+  allowed that. `autoDeploy` read `no` on all six at 22:55.
+- **The checks** (read at 05:51 UTC on 2026-10-25):
+  - Nine detector events since the deploy, all `subcategorised` with actor
+    `subcategory-detector`: facebook 6, whatsapp 2, instagram 1. The first was
+    at 12:23 UTC on 2026-10-24.
+  - No `categorised` event since 20:50 UTC on 2026-10-23, before the deploy.
+  - 30,144 jobs run since 22:10 on 2026-10-23; none failed or died.
+  - No agent holds an override naming an old permission key.
+  - Render's logs for web and the worker hold no `CATEGORISE_*` line since the
+    deploy. 2.A logs one, once per process, for a value still set under an old
+    name, so none was left there. The same search finds the worker's
+    `process_webhook` lines, so it reads the right logs.
+  - The console handbook is still unseeded, so 2.A's handbook step has nothing
+    to do.
 
 **1.3's deploy, read on Render and production on 2026-10-23.**
 
@@ -206,23 +284,16 @@ Every production write needs the user's go-ahead for that step, and the
    live on it by 18:36 UTC, web first. Its checks read clean at 21:10 UTC
    (above), with one re-read left for the first comment. Its reviews are
    answered under [1.3, as built](#13-as-built).
-2. **Merge `dev` into `main`.** #400 merged into `dev` as `a558c5b` at 21:33
-   UTC. 2.A has no migration and changes `db/sql` only in `002`'s comments.
-   Nor has anything else on `dev` since #397 a migration or a `db/sql` change:
-   #399 (`0d1289d`, a repo rule), #402 (`48896ce`, the review page's date),
-   #401 (`a3fb23d`, the stored token's expiry), #408 (these docs) and #404
-   (`558d285`, the rollups' day boundaries). Rule 7 still holds, because the
-   merge ships all of `dev`: read `git log origin/main..origin/dev` on the day
-   and every migration in it.
-3. **Deploy 2.A**: web, then the worker, then the crons. Before it, run 2.A's
-   "Before" step under [Deploying 2.A](#2a-as-built): any `CATEGORISE_*` value
-   copied to its new name, the overrides and the old job re-read. After it, run
-   2.A's handbook and verify steps.
-4. **Stage 2.B**, the SQL rename, is built as #403 and in review. It merges
-   into `dev` only once 2.A is deployed to all six services, and then deploys
-   alone in a maintenance window by the steps under
-   [Deploying 2.B](#2b-as-built). It rolls back by the runbook named there,
-   which stops being a way back once any later migration has run.
+2. **2.A is deployed.** #406 (`e88d357`) took it to `main` on 2026-10-23, and
+   an environment update deployed all six services at once by 22:13 UTC. Its
+   checks read clean on 2026-10-25 (above).
+3. **2.B is deployed.** The user deployed it by hand on 2026-10-25, all six on
+   `48cb284` by 06:01 UTC, and its checks read clean (above), a new message's
+   subcategorisation included. One read is left: the four page loads. It
+   rolls back by the runbook under [Rolling back 2.B](#2b-as-built), which stops
+   being a way back once any later migration has run.
+4. **Stage 3**, the category field, merges once that read is done: its gate is
+   2.B deployed to all six services and verified.
 5. **Before Stage 5**, a person does 0.2's reorder and 0.6's staffing, and the
    support lead answers the questions still open (below).
 
@@ -842,10 +913,13 @@ maintenance sequence below closes.
 
 **Deploying 2.B.** The stage section's sequence holds, with these specifics:
 
-1. **Order of merges.** #400 merged into `dev` first, as `a558c5b`. 2.B's PR
-   merges only after the release carrying 2.A is deployed to all six services
-   (#397 had already shipped 1.3 and #396), so that 2.B's maintenance window
-   ships alone.
+1. **Order of merges.** #400 merged into `dev` first, as `a558c5b`, and #403
+   merged only after 2.A's release was on all six services, as `1d21cdc`. It
+   then reached `main` in #413 and #415 a day before its deploy. While `main`
+   holds a migration nothing has run, nothing deploys from it and no
+   environment variable changes outside the window: Render redeploys every
+   service at once on an environment change, which would run the migration
+   with nothing suspended (2.B's deploy, under Status and handoff).
 2. **Before the deploy.** List what holds a lock on the tables the deploy
    locks: the seven 0046 does and the six more 001 does. Do not use the query
    in `docs/PROJECT-STATE.md` §5.5: it lists only transactions older than five
