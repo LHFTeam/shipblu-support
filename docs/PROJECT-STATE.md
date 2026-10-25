@@ -10,21 +10,21 @@ were last re-measured as a whole against production on 2026-09-20, and a
 paragraph re-read since gives its own date; where a number here disagrees with
 an older paragraph elsewhere in the file, the older one has not been re-checked.
 
-**Production runs `e88d357`, deployed on 2026-10-23, all six unsuspended
-services by 22:13:27 UTC.** It is the `dev` → `main` release #406, which carries
-Stage 2.A (the subcategory rename in code), #399, #401 and #402. Nobody deployed
-it by hand: an environment variable change at 22:10 made Render redeploy all six
-from `main` at once, which 2.A, with no migration, allowed
-(`plans/ticket-category-routing.md`, 2.A's deploy).
+**Production runs `48cb284`, deployed by hand on 2026-10-25, all six
+unsuspended services by 06:01:12 UTC:** web first, whose preDeploy applied
+Stage 2.B's migration `0046_subcategory_names` (the SQL rename), then the crons
+and the worker. It is releases #413 and #415, which carry 2.B with #404, #407,
+#408, #409, #410, #412 and #414. The worker and crons were not suspended first,
+as 2.B's sequence asks, and for six minutes the old worker ran against renamed
+tables without one failed job (`plans/ticket-category-routing.md`, 2.B's
+deploy).
 
-**`main` is ahead of production by a migration.** Releases #413 and #415 took
-Stage 2.B (`0046_subcategory_names`, the SQL rename) to `main` with seven
-smaller PRs, and no service has deployed it: production's newest migration is
-`0045` and its tables keep the old names (read 2026-10-25 05:49 UTC). Until 2.B's
-maintenance window, deploy no service and change no environment variable or env
-group. Either ships 2.B outside its sequence ("Deploying 2.B" in the plan).
+Before it, #406 (`e88d357`, Stage 2.A, #399, #401 and #402) went out at 22:10
+UTC on 2026-10-23 without anyone deploying it: an environment variable change
+made Render redeploy all six from `main` at once. So once `main` carries a
+migration that production has not run, an environment change is a deploy.
 
-The release before #406 was #397 (`447d8be`), deployed by hand by 18:36:47 UTC
+The release before those was #397 (`447d8be`), deployed by hand by 18:36:47 UTC
 on 2026-10-23: web first for the migrations, then the worker, then the four
 crons. Each service's deploy, and when the old worker stopped, is in
 `plans/ticket-category-routing.md` (1.3's deploy); this file repeats only the
@@ -471,8 +471,8 @@ names an operator types are now `/admin/subcategories`,
 field Stage 3 adds. The detector has written `subcategorised` since: nine events
 by 2026-10-25 05:51 UTC, and none under the old name after the deploy.
 
-On `main` since 2026-10-23 (#413), and not yet deployed: Stage 2.B renames the
-database to match. Migration `0046_subcategory_names` renames the four tables to
+Deployed on 2026-10-25 (`48cb284`): Stage 2.B renames the database to match.
+Migration `0046_subcategory_names` renames the four tables to
 `ticket_subcategories`, `conversation_subcategories`,
 `subcategory_metrics_daily` and `ai_subcategory_runs`, the three
 `category_id`/`category_key` columns to `subcategory_*`, and the enum types to
