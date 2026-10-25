@@ -1212,6 +1212,54 @@ strongest rule that contributed rather than from how many did, so a pile of
 single keywords is held below the auto band however many of them agree. See
 `plans/ticket-categorisation.md`.
 
+**The ticket category.** `conversations.category_id` names a row of
+`ticket_categories` — sales, customer support, merchant support, courier jobs —
+and says which team's work a ticket is: one per ticket, where subcategories are
+several, and independent of them (decision 3 of
+`plans/ticket-category-routing.md`). From Stage 5 it is what routes a fresh
+ticket. Five rules hold:
+
+- **A routing label, never a claim about the requester.** Words are evidence of
+  whose work a message is, and no evidence of who wrote it, so nothing that sets
+  a category writes `requester_kind`, and the starter descriptions in
+  `lib/categories/registry.ts` speak about what a message asks for.
+- **Every writer writes the column and a `category_changed` event in one
+  transaction**, the ticket's row locked first and the event stamped with
+  `CHANGE_STAMP` (`lib/tickets/change-stamp.ts`, priority's stamp generalised), so
+  the timeline orders two writers the way the column was written — which Jev's
+  ownership rule (Stage 4) reads to decide whether a person has answered for a
+  ticket. The console and the `set_category` action go through
+  `setConversationCategory` (`lib/categories/write.ts`), which writes nothing when
+  the value is unchanged, refuses a retired category, and stores the key and
+  label at the change so a renamed category still reads as what was chosen.
+- **Before the first response the SLA policy follows the category and the
+  group.** `reselectPolicyBeforeFirstResponse` (`lib/sla/index.ts`) chooses the
+  policy again after every category write commits — the backfill of Stage 4
+  excepted — and after every group move that can come before an answer: the
+  console's group case, `assign_group`, and a grouped `auto_assign` that moved.
+  An `on_create` pass leaves it to `applySlaOnCreate`, which runs after it and
+  reads the category itself. It counts each clock from its own anchor with the
+  finished pauses credited, so it can give clocks to a ticket that had none, and
+  it does nothing once somebody has answered, when the same policy wins, or when
+  none does. `onGroupChanged` and `onPriorityChanged` still never re-select.
+- **Retired, never deleted, and the key never changes.** The foreign key is
+  `restrict`; `ticket_categories_key_format` holds the key to lowercase words
+  joined by underscores and refuses `unknown`, which Jev answers for "none of
+  these". A rule's fact is `category.id`, the uuid off the row as `group.id` is,
+  so a loader that forgot a join cannot see null. `deleteGroupIfUnused` refuses
+  while a category routes to the group, retired ones included.
+- **The name was the subcategory registry's until Stage 2.B.** An event called
+  `category_added`, `category_confirmed` or the like is a subcategory event and
+  reads as one; `category_changed` is this field's. On a fresh database the old
+  `ticket_categories_pkey` was still taken when the new table was created, so
+  migration 0047 — hand-written, guarded, a no-op in production — renames the
+  three old `_pkey` names first, and both databases name the new key alike.
+
+`seed_ticket_categories` puts the starter set in by key and leaves every admin
+edit alone; production runs it by hand, since deploys run only `db:migrate`.
+`ticket.set_category` gates changing it (every agent holds it), and
+`admin.categories` the list on `/admin/categories`.
+
 **The one AI provider, and the three things it is allowed to touch.**
 `lib/typesafe/` calls TypeSafe's System One endpoint, and three modules ask it a
 question: `lib/subcategorise-ai/` asks which subcategory a message belongs to,
@@ -1268,7 +1316,7 @@ may lower a ticket, and later ones only raise; and every answer, applied or not,
 is a row in `ai_priority_runs` with its full distribution, because those rows
 are the only labels priority has. A new writer of `conversations.priority`
 writes the column and its `priority_changed` event in one transaction, stamps
-the event with `PRIORITY_STAMP` (`lib/tickets/priority-stamp.ts`) so events sort
+the event with `CHANGE_STAMP` (`lib/tickets/change-stamp.ts`) so events sort
 in the order the column was written, and calls `onPriorityChanged` after it
 commits — as the console, the `set_priority` automation and the classifier do.
 The policies price their targets per priority, and the classifier decides whose

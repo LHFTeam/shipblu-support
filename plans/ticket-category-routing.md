@@ -956,6 +956,15 @@ It stops being a way back once any migration after 0046 has been applied,
 Stage 3's new `ticket_categories` among them. The PR that adds that migration
 deletes the file and its test; the test fails and says so until it does.
 
+**Since Stage 3.1 it is gone from the tree**, deleted in the PR that adds
+`0047` and `0048` ([3.1, as built](#31-as-built)). Until that release's web
+preDeploy has run in production, it still works from history, unchanged:
+`git show 1d21cdc:db/runbooks/2b-subcategory-rollback.sql`. Once `0047` and
+`0048` are applied, 2.B has no way back by renaming: the new
+`ticket_categories` holds the name the old table would return to, and Drizzle
+would not apply `0046` again behind two newer rows. A problem found in 2.B
+after that is fixed forward, in a migration of its own.
+
 ### Working on this repo without the outgoing session's context
 
 - **`dev` is the integration branch, and GitHub used to delete it.** The
