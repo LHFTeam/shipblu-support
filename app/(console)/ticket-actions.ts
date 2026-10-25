@@ -139,7 +139,8 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
       const moved = await db.transaction(async (tx) => {
         // Only a move: a page drawn before somebody else moved the ticket can
         // post the group it is already in (`moveToGroupIfElsewhere`).
-        if (!(await moveToGroupIfElsewhere(conversationId, groupId, tx))) return false;
+        if (!(await moveToGroupIfElsewhere(conversationId, groupId, { executor: tx })))
+          return false;
 
         // Recorded, where it was not before. Moving a ticket between teams is
         // the same weight of decision as reassigning it and the case above has

@@ -1,4 +1,4 @@
-import { and, eq, exists, isNull, sql } from 'drizzle-orm';
+import { and, eq, isNull, sql } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import { db } from '@/db/client';
 import {
@@ -18,6 +18,7 @@ import { groupHours } from '@/lib/hours/resolve';
 import { conversationFacts } from '@/lib/rules/facts';
 import { isReadOnlyChannel } from '@/lib/tickets/channel-policy';
 import { openBacklog } from '@/lib/tickets/backlog';
+import { moveToGroupIfElsewhere } from '@/lib/tickets/move-group';
 import { recordOwnerAssigned } from '@/lib/whatsapp/number-owner';
 import { filterCandidates, type CandidateRow } from './eligibility';
 import { pickLoadBalanced, pickRoundRobin } from './strategies';
@@ -368,26 +369,17 @@ async function routeAndPick(
  * reports (`movedGroup`). The caller decided to move it from a read taken
  * without a lock, so an agent moving it to the same group in between left an
  * update that matched the row anyway, and the rule recorded a move the agent
- * had made — and owed the SLA policy a second look for it
- * (`moveToGroupIfElsewhere`).
+ * had made — and owed the SLA policy a second look for it. Both conditions are
+ * `moveToGroupIfElsewhere`'s, the one definition of a move.
  */
 async function moveToGroup(
   conversationId: string,
   groupId: string,
   actorLabel: string | undefined,
 ): Promise<boolean> {
-  const moved = await db
-    .update(conversations)
-    .set({ groupId })
-    .where(
-      and(
-        eq(conversations.id, conversationId),
-        sql`${conversations.groupId} is distinct from ${groupId}`,
-        exists(db.select({ id: groups.id }).from(groups).where(eq(groups.id, groupId))),
-      ),
-    )
-    .returning({ id: conversations.id });
-  if (moved.length === 0) return false;
+  if (!(await moveToGroupIfElsewhere(conversationId, groupId, { groupMustExist: true }))) {
+    return false;
+  }
 
   await db.insert(conversationEvents).values({
     conversationId,

@@ -5,6 +5,7 @@ import {
   listFormNames,
   listGroupNames,
 } from '@/lib/admin/settings';
+import { categoryLabel } from '@/lib/categories/choices';
 import { listCategories } from '@/lib/categories/queries';
 import { formName } from '@/lib/forms/naming';
 import { CHANNEL_LABELS } from '@/lib/tickets/channel-labels';
@@ -130,7 +131,7 @@ export async function ticketFieldOptions(
         .map((category) => ({ value: category.id, label: category.labelEn })),
       retired: categories
         .filter((category) => !category.isActive)
-        .map((category) => ({ value: category.id, label: `${category.labelEn} (retired)` })),
+        .map((category) => ({ value: category.id, label: categoryLabel(category.labelEn, false) })),
     },
     {
       value: 'assignee.id',

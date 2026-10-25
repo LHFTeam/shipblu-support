@@ -1244,8 +1244,10 @@ ticket. Five rules hold:
   had moved. An `on_create` pass leaves it to `applySlaOnCreate`, which runs
   after it and reads the category itself. It counts each clock from its own
   anchor with the finished pauses credited, so it can give clocks to a ticket
-  that had none, and it does nothing once somebody has answered, on a resolved
-  or closed ticket, when the same policy wins, or when none does.
+  that had none, and it does nothing once somebody has answered, on a resolved,
+  closed, deleted, spam or merged ticket, when the same policy wins, or when
+  none does. Every group writer calls it before `onGroupChanged` — the engine
+  once its pass is over — so a move that changes the policy is re-timed once.
   `onGroupChanged` and `onPriorityChanged` still never re-select. Because a
   ticket can now change policy after a breach, an escalation is keyed per
   policy (`settlesEscalation` in `worker/handlers/sla-sweep.ts`).

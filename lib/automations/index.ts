@@ -134,7 +134,7 @@ export async function applyRules(
   { slaApplied = true }: { slaApplied?: boolean } = {},
 ): Promise<number> {
   const facts = conversationFacts(ticket, now);
-  const pass: Pass = { surveyOwed: false, policyOwed: null };
+  const pass: Pass = { surveyOwed: false, policyOwed: null, groupMoved: false };
   let applied = 0;
 
   try {
@@ -176,6 +176,14 @@ export async function applyRules(
     if (pass.policyOwed && slaApplied) {
       await reselectPolicyBeforeFirstResponse(ticket.conversation.id, pass.policyOwed);
     }
+    // After the re-selection, the order the console's group case takes: a move
+    // that changed the policy has just been timed from the anchors on the new
+    // group's hours, so this finds nothing to move. Re-timed first, from the
+    // action, the old policy's clocks moved to the new hours and then the
+    // policy's moved them again — two timeline lines for one move, the first
+    // naming deadlines that never held. Once per pass however many rules moved
+    // the ticket, from the group the pass left it in.
+    if (pass.groupMoved) await onGroupChanged(ticket.conversation.id);
   }
 
   return applied;
@@ -190,6 +198,11 @@ type Pass = {
    * the one a policy is most likely keyed on.
    */
   policyOwed: 'category' | 'group' | null;
+  /**
+   * A rule moved the ticket's group, so its clocks are re-timed on the new
+   * group's hours (`onGroupChanged`) once the pass is over.
+   */
+  groupMoved: boolean;
 };
 
 /**
@@ -334,9 +347,10 @@ async function applyAction(
       if (!(await moveToGroupIfElsewhere(conversationId, action.groupId))) return;
 
       await record('group_changed', { to: action.groupId });
-      // The new group may work different hours, in which case the clocks move.
-      // A no-op on a brand new ticket, whose SLA has not been applied yet.
-      await onGroupChanged(conversationId);
+      // The new group may work different hours, in which case the clocks move,
+      // once the pass is over (`Pass.groupMoved`). Nothing to move on a brand
+      // new ticket, whose SLA has not been applied yet.
+      pass.groupMoved = true;
       pass.policyOwed ??= 'group';
       return;
     }
@@ -358,7 +372,7 @@ async function applyAction(
       // number's owner, or routed to a group deleted since, stays where it was
       // and owes nothing (`moveToGroupIfElsewhere`, for why that matters).
       if (outcome.movedGroup) {
-        await onGroupChanged(conversationId);
+        pass.groupMoved = true;
         pass.policyOwed ??= 'group';
       }
       return;

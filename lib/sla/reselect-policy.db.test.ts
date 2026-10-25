@@ -4,6 +4,7 @@ import { db } from '@/db/client';
 import {
   agents,
   automationRules,
+  businessHours,
   contacts,
   conversationEvents,
   conversations,
@@ -14,6 +15,7 @@ import {
 } from '@/db/schema';
 import { runAutomations } from '@/lib/automations';
 import { setConversationCategory } from '@/lib/categories/write';
+import { forgetHoursCatalog } from '@/lib/hours/catalog';
 import { withCleanDatabase } from '@/lib/testing/db';
 import { applySlaOnCreate, onAgentReply, reselectPolicyBeforeFirstResponse } from './index';
 
@@ -291,12 +293,16 @@ describe('reselectPolicyBeforeFirstResponse', () => {
     }
   });
 
-  it('never reaches the bot channel or an imported history', async () => {
+  it('never reaches the bot channel, an imported history, or a ticket no SLA measures', async () => {
     await policies();
     const bot = await ticket({ channel: 'whatsapp_bot' });
     const imported = await ticket({ sourceSystem: 'import' });
+    const spam = await ticket({ isSpam: true });
+    const deleted = await ticket({ deletedAt: new Date() });
+    const survivor = await ticket();
+    const merged = await ticket({ mergedIntoId: survivor.id });
 
-    for (const { id } of [bot, imported]) {
+    for (const { id } of [bot, imported, spam, deleted, merged]) {
       await setConversationCategory(id, await categoryId('sales'), { label: 'x' });
       await reselectPolicyBeforeFirstResponse(id, 'category');
       expect(await events(id, 'sla_recalculated')).toEqual([]);
@@ -470,6 +476,66 @@ describe('the automation engine', () => {
     expect(await sla(id)).toMatchObject({ slaPolicyId: standard });
     expect(await events(id, 'sla_recalculated')).toEqual([]);
     expect(await events(id, 'group_changed')).toEqual([]);
+  });
+
+  // The console calls the re-selection and then `onGroupChanged`; the engine
+  // did it the other way round, so a move to a group with other hours first
+  // re-timed the old policy's clocks there and then replaced them — two
+  // timeline lines for one move, the first naming deadlines that never held.
+  it('re-times a rule’s move to a group with other hours once, under the policy it chose', async () => {
+    const [sundays] = await db
+      .insert(businessHours)
+      .values({
+        name: 'An hour on Sundays',
+        schedule: {
+          sun: [{ start: '00:00', end: '01:00' }],
+          mon: [],
+          tue: [],
+          wed: [],
+          thu: [],
+          fri: [],
+          sat: [],
+        },
+      })
+      .returning({ id: businessHours.id });
+    const [merchantCare] = await db
+      .insert(groups)
+      .values({ name: 'Merchant Care', businessHoursId: sundays!.id })
+      .returning({ id: groups.id });
+    forgetHoursCatalog();
+    // On the group's hours, both of them: the default's clocks would move to
+    // the new calendar if anything re-timed them before the re-selection.
+    const [care] = await db
+      .insert(slaPolicies)
+      .values({
+        name: 'Merchant Care',
+        hoursSource: 'group',
+        targets: target(45, 300),
+        position: 0,
+        conditions: { field: 'group.id', op: 'eq', value: merchantCare!.id },
+      })
+      .returning({ id: slaPolicies.id });
+    await db.insert(slaPolicies).values({
+      name: 'Standard',
+      hoursSource: 'group',
+      targets: target(120, 480),
+      position: 1,
+      isDefault: true,
+    });
+    const { id } = await ticket();
+    await db.insert(automationRules).values({
+      name: 'To Merchant Care',
+      trigger: 'on_update',
+      conditions: {},
+      actions: [{ type: 'assign_group', groupId: merchantCare!.id }],
+    });
+
+    await runAutomations('on_update', id);
+
+    expect((await sla(id)).slaPolicyId).toBe(care!.id);
+    expect((await events(id, 'sla_recalculated')).map((e) => e.data)).toEqual([
+      expect.objectContaining({ reason: 'policy', cause: 'group', policy: 'Merchant Care' }),
+    ]);
   });
 
   it('skips a retired category, and says nothing on the timeline', async () => {

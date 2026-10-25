@@ -1,6 +1,6 @@
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq, exists, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
-import { conversations } from '@/db/schema';
+import { conversations, groups } from '@/db/schema';
 
 /**
  * Puts a ticket in `groupId` when it is somewhere else, and answers whether it
@@ -16,13 +16,20 @@ import { conversations } from '@/db/schema';
  * the policy was chosen — a raised priority, a new tag — as though the group
  * had, against `onPriorityChanged`'s rule that a priority keeps its policy.
  *
- * The console's group case and `assign_group` write through this; the routing
- * half of `assignConversation` answers the same question as `movedGroup`.
+ * Every group writer moves through this — the console's group case,
+ * `assign_group`, and the routing half of `assignConversation`, which reports
+ * the answer as `movedGroup` — so they cannot come to disagree about what a
+ * move is. `groupMustExist` is the router's: it reaches here without having
+ * looked the group up, and a rule naming a group deleted since would otherwise
+ * throw on the foreign key and take the assignment down with it.
  */
 export async function moveToGroupIfElsewhere(
   conversationId: string,
   groupId: string | null,
-  executor: typeof db = db,
+  {
+    executor = db,
+    groupMustExist = false,
+  }: { executor?: typeof db; groupMustExist?: boolean } = {},
 ): Promise<boolean> {
   const moved = await executor
     .update(conversations)
@@ -31,6 +38,9 @@ export async function moveToGroupIfElsewhere(
       and(
         eq(conversations.id, conversationId),
         sql`${conversations.groupId} is distinct from ${groupId}`,
+        groupMustExist && groupId
+          ? exists(db.select({ id: groups.id }).from(groups).where(eq(groups.id, groupId)))
+          : undefined,
       ),
     )
     .returning({ id: conversations.id });

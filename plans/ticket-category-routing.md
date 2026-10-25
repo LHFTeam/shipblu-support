@@ -2707,8 +2707,10 @@ where it departs from it:
   `CHANGE_STAMP` (`lib/tickets/change-stamp.ts`), the same `clock_timestamp()`.
 - **SLA.** `reselectPolicyBeforeFirstResponse(id, cause)` as decision 3 says,
   doing nothing once a first response exists, when the same policy wins, when
-  none does, on a read-only channel or an imported history, and on a resolved
-  or closed ticket. That last is a departure: a policy changed under a
+  none does, on a read-only channel or an imported history, on a deleted, spam
+  or merged ticket, and on a resolved or closed one, each asked first of the
+  row read without a lock so an answered ticket costs one read. The last is a
+  departure: a policy changed under a
   resolved ticket's clocks came back out of a reopen with the new policy's name
   on the old one's resolution deadline, or on none, because a reopen shifts the
   clocks a ticket has rather than choosing them. So a category set while a
@@ -2723,7 +2725,10 @@ where it departs from it:
   matches on every pass, and a second look owed for nothing took up a raised
   priority as though the group had moved. Neither writes a `group_changed`
   event for a move that did not happen, which `assign_group` used to on every
-  pass. The console's group case calls it before `onGroupChanged`. Its event is
+  pass. Both callers run it before `onGroupChanged` — the console in its
+  action, the engine once the pass is over (`Pass.groupMoved`) — so a move that
+  changes the policy writes one `sla_recalculated`; re-timed first, the old
+  policy's clocks moved to the new hours and then moved again. Its event is
   `sla_recalculated` with `reason: 'policy'`, the cause and both policies'
   names, and reads "moved the ticket from the Standard to the Sales SLA policy
   after its category changed": by what set the choice off, since the policy is

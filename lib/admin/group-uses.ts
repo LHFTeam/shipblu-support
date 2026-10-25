@@ -28,6 +28,7 @@ import {
   whatsappAccounts,
   whatsappOnboardings,
 } from '@/db/schema';
+import { categoryLabel } from '@/lib/categories/choices';
 import { formName } from '@/lib/forms/naming';
 import { storedCredentialExists } from '@/lib/whatsapp/credentials';
 import { SUPERSEDED } from '@/lib/whatsapp/onboarding';
@@ -283,7 +284,7 @@ export async function groupUses(
     slaPolicies: policyRows.map((row) => row.name),
     skills: skillRows.map((row) => row.name),
     cannedResponses: cannedRows.map((row) => row.title),
-    categories: categoryRows.map((row) => (row.isActive ? row.label : `${row.label} (retired)`)),
+    categories: categoryRows.map((row) => categoryLabel(row.label, row.isActive)),
   };
 }
 

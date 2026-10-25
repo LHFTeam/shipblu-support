@@ -57,8 +57,9 @@ export async function InboxShell({
   // than side by side: the list beside them is the read the render waits for,
   // so the second costs it no time, where one more query at once would hold
   // one more of the pool's places for the length of every inbox render
-  // (§6.91). Whether they own a number is a third, asked only where it can
-  // widen what they see.
+  // (§6.91). On a ticket page the page has read the categories already, in a
+  // batch of its own, and the second is a cache hit. Whether they own a number
+  // is a third, asked only where it can widen what they see.
   const [{ rows, nextCursor }, counts, [groups, categories], ownsNumbers] = await Promise.all([
     listInbox(agent, filters),
     inboxCounts(agent),

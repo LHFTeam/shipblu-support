@@ -638,37 +638,45 @@ export async function onPriorityChanged(conversationId: string): Promise<void> {
  * credits the whole of it when the clock resumes (`completedPauses`).
  *
  * When the same policy wins again it does nothing: re-timing for a new group's
- * calendar is `onGroupChanged`'s, which every group writer also calls — the
- * console straight after this, the automation engine from the action itself,
- * before the pass's `finally` reaches this. When no policy wins — no default,
- * nothing matching — it also does nothing: dropping an obligation mid-ticket is
- * a different decision from choosing one.
+ * calendar is `onGroupChanged`'s, which every group writer calls straight after
+ * this — the console in its action, the automation engine once its pass is over
+ * — so a move that changes the policy is re-timed once, here, and
+ * `onGroupChanged` then finds nothing to move. Called the other way round, the
+ * old policy's clocks were first re-timed on the new group's hours and the
+ * timeline showed the deadlines moving twice, the first time to values that
+ * never held. When no policy wins — no default, nothing matching — it also does
+ * nothing: dropping an obligation mid-ticket is a different decision from
+ * choosing one.
  *
  * Never on a read-only channel or an imported history, which `applySlaOnCreate`
- * never gave a clock either; and never on a resolved or closed ticket, the
- * population the sweep stops measuring (`liveTicketsFilter`). Its clocks there
- * are a record of what it was held to, and a policy changed under them came
- * back out mismatched: a reopen shifts the clocks a ticket has rather than
- * choosing them, so the new policy's name sat on the old one's resolution
- * deadline, or on none. A category set while a ticket is resolved therefore
- * moves its policy only when the category or the group next changes after it
- * is reopened.
+ * never gave a clock either; never on a deleted, spam or merged ticket, which no
+ * SLA measures; and never on a resolved or closed one. Its clocks there are a
+ * record of what it was held to, and a policy changed under them came back out
+ * mismatched: a reopen shifts the clocks a ticket has rather than choosing them,
+ * so the new policy's name sat on the old one's resolution deadline, or on none.
+ * A category set while a ticket is resolved therefore moves its policy only
+ * when the category or the group next changes after it is reopened.
  */
 export async function reselectPolicyBeforeFirstResponse(
   conversationId: string,
   cause: 'category' | 'group',
 ): Promise<void> {
   try {
+    // Most category changes and group moves come after somebody has answered.
+    // Asked first of the row read without a lock, they cost that one read
+    // rather than the policies, the hours and a locked transaction, each a
+    // place in the pool (§6.91); asked again under the lock, since an answer
+    // can land in between.
+    const unlocked = await loadConversation(conversationId);
+    if (!unlocked || !policyChoosable(unlocked)) return;
+
     const policies = await loadPolicies();
     if (policies.length === 0) return;
     const catalog = await loadHoursCatalog();
 
     await withTicketLocked(conversationId, async (tx, row) => {
       const conversation = row.conversation;
-      if (conversation.firstRespondedAt) return;
-      if (conversation.sourceSystem === 'import') return;
-      if (readOnlyChannels().includes(conversation.channel)) return;
-      if (row.statusCategory !== 'open' && row.statusCategory !== 'pending') return;
+      if (!policyChoosable(row)) return;
 
       const policy = selectPolicy(policies, conversationFacts(row));
       if (!policy || policy.id === conversation.slaPolicyId) return;
@@ -692,18 +700,7 @@ export async function reselectPolicyBeforeFirstResponse(
           )
         : null;
 
-      // As in `recomputeOwedClocks`: a flag stands for a target missed, and the
-      // target just changed. Only the sweep sets one, so a clock now in the past
-      // is left to it; one moved into the future is the case nothing else undoes.
-      const now = new Date();
-      const cleared = [
-        ...(conversation.firstResponseBreached && (!firstResponse || firstResponse > now)
-          ? (['first_response'] as const)
-          : []),
-        ...(conversation.resolutionBreached && (!resolution || resolution > now)
-          ? (['resolution'] as const)
-          : []),
-      ];
+      const cleared = breachesCleared(conversation, { firstResponse, resolution }, new Date());
 
       await tx
         .update(conversations)
@@ -743,6 +740,47 @@ export async function reselectPolicyBeforeFirstResponse(
   } catch (error) {
     log.error(`could not choose the policy again on ${conversationId}`, error);
   }
+}
+
+/**
+ * Whether `reselectPolicyBeforeFirstResponse` may choose a ticket's policy
+ * again: nobody has answered it, it is live work — open or pending, not
+ * deleted, spam or merged — and it is on neither a read-only channel nor an
+ * imported history. The function's comment gives the reason for each.
+ */
+function policyChoosable(row: ConversationRow): boolean {
+  const conversation = row.conversation;
+  return (
+    !conversation.firstRespondedAt &&
+    conversation.sourceSystem !== 'import' &&
+    !readOnlyChannels().includes(conversation.channel) &&
+    (row.statusCategory === 'open' || row.statusCategory === 'pending') &&
+    !conversation.deletedAt &&
+    !conversation.isSpam &&
+    !conversation.mergedIntoId
+  );
+}
+
+/**
+ * The breach flags a re-time takes down, for both re-timers, so the rule is
+ * stated once. A flag stands for a target the ticket missed, and the target
+ * just changed: a clock now in the future has missed nothing it is held to,
+ * and a clock now unset has no target to miss. A clock still in the past keeps
+ * its flag, because only the sweep sets one and it records each breach with its
+ * event; clearing it here to be set again would count one missed response twice.
+ */
+function breachesCleared(
+  conversation: { firstResponseBreached: boolean; resolutionBreached: boolean },
+  due: { firstResponse: Date | null; resolution: Date | null },
+  now: Date,
+): ('first_response' | 'resolution')[] {
+  const clears = (breached: boolean, at: Date | null) => breached && (!at || at > now);
+  return [
+    ...(clears(conversation.firstResponseBreached, due.firstResponse)
+      ? (['first_response'] as const)
+      : []),
+    ...(clears(conversation.resolutionBreached, due.resolution) ? (['resolution'] as const) : []),
+  ];
 }
 
 /**
@@ -829,15 +867,10 @@ async function recomputeOwedClocks(
       // snapshot. Only the sweep sets the flag, so a re-time into the past leaves
       // it to the sweep, which records the breach with its event as for any
       // other; a re-time into the future is the one case nothing else would undo.
-      const now = new Date();
-      const cleared = [
-        ...(conversation.firstResponseBreached && firstResponse && firstResponse > now
-          ? (['first_response'] as const)
-          : []),
-        ...(conversation.resolutionBreached && resolution && resolution > now
-          ? (['resolution'] as const)
-          : []),
-      ];
+      // A clock here is never unset under a set flag — `recompute` keeps an
+      // existing due date whatever the target — so the shared rule's "unset
+      // clears it" half is the re-selection's (`breachesCleared`).
+      const cleared = breachesCleared(conversation, { firstResponse, resolution }, new Date());
 
       await tx
         .update(conversations)

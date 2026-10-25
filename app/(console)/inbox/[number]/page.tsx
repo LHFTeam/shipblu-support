@@ -68,8 +68,10 @@ export default async function ConversationPage({
     subcategoryOptions(),
     rootCauseOptions(),
     // For the sidebar's select, which every role holds `ticket.set_category`
-    // for. No extra query: it is memoised for the request, and the inbox shell
-    // around this page reads it for its filter.
+    // for. In this batch, which is narrower than the one below that sets the
+    // page's peak on the pool, and memoised for the request, so the inbox
+    // shell's own read of it for the filter, made in turn after the groups to
+    // spare the pool a place (§6.91), is a cache hit on a ticket page.
     listCategories(),
     // Counted on render rather than on click, because the counts are the whole
     // argument the confirmation panel makes and a panel that has to fetch before
