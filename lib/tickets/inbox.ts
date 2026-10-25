@@ -13,7 +13,14 @@ import {
 } from 'drizzle-orm';
 import { cache } from 'react';
 import { db } from '@/db/client';
-import { agents, conversations, contacts, messages, ticketStatuses } from '@/db/schema';
+import {
+  agents,
+  conversations,
+  contacts,
+  messages,
+  ticketCategories,
+  ticketStatuses,
+} from '@/db/schema';
 import type { SessionAgent } from '@/lib/auth/session';
 import { can } from '@/lib/auth/permissions';
 import { heldByOrInGroupsOf, inGroupsOf } from './assignment-scope';
@@ -95,6 +102,13 @@ export type InboxRow = {
    * on every render, to decide the colour of a badge.
    */
   sideState: 'waiting' | 'replied' | null;
+  /**
+   * Which team's work the ticket is, by the category's English label, or null
+   * while nothing has set one. A retired category is still named: the ticket
+   * still carries it, and the row says what the ticket holds, as the sidebar's
+   * select does.
+   */
+  categoryLabel: string | null;
 };
 
 /**
@@ -130,6 +144,9 @@ function selectInboxRows(where: SQL | undefined) {
       // `InboxCursor` for why the mapped `Date` above cannot serve.
       cursorTime: sql<string>`${conversations.lastMessageAt}::text`,
       tags: conversations.tags,
+      // A join, unlike the side conversations below: `category_id` names one
+      // registry row or none, so it cannot turn one ticket into two rows.
+      categoryLabel: ticketCategories.labelEn,
       // Both off the one lateral row, so the arrow is about the message the
       // preview shows by construction rather than because two subqueries broke
       // a tie the same way. False rather than null for a ticket with no message
@@ -153,6 +170,7 @@ function selectInboxRows(where: SQL | undefined) {
     .innerJoin(ticketStatuses, eq(ticketStatuses.id, conversations.statusId))
     .innerJoin(contacts, eq(contacts.id, conversations.requesterContactId))
     .leftJoin(agents, eq(agents.id, conversations.assigneeAgentId))
+    .leftJoin(ticketCategories, eq(ticketCategories.id, conversations.categoryId))
     .leftJoinLateral(newest, sql`true`)
     .where(where);
 }
@@ -197,6 +215,11 @@ export async function listInbox(
   // filter, so naming a group an agent does not belong to returns nothing.
   if (filters.group) where.push(eq(conversations.groupId, filters.group));
 
+  // The Category select, the same way: inside visibility, so it only ever
+  // narrows. On the column alone, never on `is_active`: a link to a category
+  // retired since still lists the tickets that carry it.
+  if (filters.category) where.push(eq(conversations.categoryId, filters.category));
+
   if (filters.channel !== 'all') {
     where.push(eq(conversations.channel, filters.channel));
   }
@@ -216,8 +239,9 @@ export async function listInbox(
   // #812 means that ticket whether it was resolved last week or is open now —
   // under the default "Open + pending" a resolved one answered "Nothing matches
   // those filters", which reads as "no such ticket". Visibility, the restricted
-  // channels, the view and the channel filter all still hold, so naming a
-  // ticket reaches nothing the agent could not already open from the list.
+  // channels, the view, the group, the category and the channel filter all
+  // still hold, so naming a ticket reaches nothing the agent could not already
+  // open from the list.
   const namedScope = [...where];
   let namedNumber: number | null = null;
 
@@ -358,6 +382,7 @@ export async function listInbox(
       preview: row.preview,
       lastFromUs: row.lastFromUs,
       sideState: row.sideState === 'replied' || row.sideState === 'waiting' ? row.sideState : null,
+      categoryLabel: row.categoryLabel,
     })),
   };
 }

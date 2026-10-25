@@ -21,6 +21,7 @@ const row = (overrides: Partial<Parameters<typeof rowBadges>[0]> = {}) => ({
   statusIsDefault: true,
   priority: 'medium',
   sideState: null,
+  categoryLabel: null,
   ...overrides,
 });
 
@@ -131,5 +132,51 @@ describe('rowBadges', () => {
     expect(labels(row({ statusName: 'Escalated', statusIsDefault: false }), NOW, 'avatar')).toEqual(
       ['Escalated'],
     );
+  });
+
+  it('names the category in words, and draws nothing while there is none', () => {
+    expect(rowBadges(row({ categoryLabel: 'Merchant support' }), NOW, 'avatar')).toEqual([
+      { key: 'category', tone: 'neutral', label: 'Merchant support' },
+    ]);
+    expect(rowBadges(row({ categoryLabel: null }), NOW, 'avatar')).toEqual([]);
+    expect(labels(row({ categoryLabel: null }), NOW, 'ticket')).toEqual(['Open']);
+  });
+
+  // Only what the ticket is: after everything going wrong or waiting on
+  // somebody, and after the comment marker, which changes how the reply goes
+  // out — in both rows, whatever else they reorder.
+  it('puts the category last in both rows', () => {
+    const busy = row({
+      channel: 'facebook',
+      isComment: true,
+      lastCustomerMessageAt: hoursAgo(200),
+      statusCategory: 'pending',
+      statusName: 'Waiting on finance',
+      priority: 'urgent',
+      sideState: 'replied',
+      categoryLabel: 'Sales',
+    });
+    expect(labels(busy, NOW, 'ticket')).toEqual([
+      'Waiting on finance',
+      'Urgent',
+      'Hub replied',
+      'Public comment',
+      'Sales',
+    ]);
+    expect(labels(busy, NOW, 'avatar')).toEqual([
+      'Hub replied',
+      'Urgent',
+      'Waiting on finance',
+      'Public comment',
+      'Sales',
+    ]);
+
+    const closing = row({
+      channel: 'whatsapp',
+      lastCustomerMessageAt: hoursAgo(23),
+      categoryLabel: 'Courier jobs',
+    });
+    expect(labels(closing, NOW, 'avatar')).toEqual(['1h 0m left', 'Courier jobs']);
+    expect(labels(closing, NOW, 'ticket')).toEqual(['Open', '1h 0m left', 'Courier jobs']);
   });
 });

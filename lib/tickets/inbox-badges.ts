@@ -26,7 +26,8 @@ type RowBadgeTone =
   | 'priority-urgent'
   | 'hub-waiting'
   | 'hub-replied'
-  | 'public';
+  | 'public'
+  | 'neutral';
 
 export type RowBadge = { key: string; tone: RowBadgeTone; label: string };
 
@@ -40,6 +41,7 @@ type BadgeRow = Pick<
   | 'statusIsDefault'
   | 'priority'
   | 'sideState'
+  | 'categoryLabel'
 >;
 
 /** Under two hours is when a WhatsApp window starts mattering; above that it is noise. */
@@ -78,7 +80,7 @@ function windowBadge(row: BadgeRow, now: Date | null): RowBadge | null {
 
 /**
  * `ticket` is the three-line row and keeps the order it always had — status,
- * window, priority, hub — with the comment marker last.
+ * window, priority, hub — with the comment marker and then the category last.
  *
  * `avatar` is ordered by urgency instead, and leaves out the default open
  * status, which most rows carry (a status an admin added to the open category,
@@ -92,6 +94,12 @@ function windowBadge(row: BadgeRow, now: Date | null): RowBadge | null {
  * identical to one nobody has picked up, and "the hub answered an hour ago and
  * nobody noticed" is the failure the badge exists for: waiting is a fact,
  * replied is a job.
+ *
+ * The category closes both rows. It is the one badge that is only what the
+ * ticket is: nothing about it is going wrong or waiting on anybody, and unlike
+ * the comment marker before it, it changes nothing about how the reply goes
+ * out. In a list cut to one category every row carries the same one, and the
+ * end of the line is where a repeated word costs least to read past.
  */
 export function rowBadges(
   row: BadgeRow,
@@ -119,10 +127,16 @@ export function rowBadges(
   const comment: RowBadge | null = row.isComment
     ? { key: 'comment', tone: 'public', label: 'Public comment' }
     : null;
+  // Neutral, as the ticket header's is: a category is nobody's alarm, and no
+  // colour belongs to one, so its name is the whole of what it says. Nothing
+  // is drawn while none is set.
+  const category: RowBadge | null = row.categoryLabel
+    ? { key: 'category', tone: 'neutral', label: row.categoryLabel }
+    : null;
 
   const ordered =
     layout === 'ticket'
-      ? [status, window, priority, hub, comment]
+      ? [status, window, priority, hub, comment, category]
       : [
           window?.tone === 'window-closing' ? window : null,
           hub?.tone === 'hub-replied' ? hub : null,
@@ -131,6 +145,7 @@ export function rowBadges(
           hub?.tone === 'hub-replied' ? null : hub,
           row.statusCategory === 'open' && row.statusIsDefault ? null : status,
           comment,
+          category,
         ];
 
   return ordered.filter((badge): badge is RowBadge => badge !== null);

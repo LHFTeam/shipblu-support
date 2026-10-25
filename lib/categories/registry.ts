@@ -57,7 +57,7 @@ export const STARTER_CATEGORIES: readonly StarterCategory[] = [
     labelEn: 'Merchant support',
     labelAr: 'دعم التجار',
     description:
-      "About a shipping account that already exists and the orders sent from it: creating " +
+      'About a shipping account that already exists and the orders sent from it: creating ' +
       'orders, pickups, cash-on-delivery transfers and payouts, invoices and fees, parcels ' +
       'returned to the sender, the dashboard, and store or API integrations.',
   },

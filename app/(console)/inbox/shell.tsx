@@ -1,8 +1,10 @@
 import { requireAgent } from '@/lib/auth/guard';
+import type { SessionAgent } from '@/lib/auth/session';
 import { can } from '@/lib/auth/permissions';
 import { channelInfo } from '@/components/channel';
 import { LiveUpdates } from '@/components/live-updates';
 import { ViewsPanel, type ViewsPanelSection } from '@/components/views-panel';
+import { listCategories } from '@/lib/categories/queries';
 import { inboxCounts, listInbox } from '@/lib/tickets/inbox';
 import { parseFilters } from '@/lib/tickets/inbox-filters';
 import { assignmentScope, inboxGroupsFor, ownsANumber } from '@/lib/tickets/visibility';
@@ -49,12 +51,17 @@ export async function InboxShell({
   const canViewGroups = scope?.includeGroups ?? false;
   // The counts are the ones the console layout already asked for on this
   // request; `inboxCounts` memoises them, so the views cost no second query.
-  // The groups are one small read, for the group views' names. Whether they
-  // own a number is another, asked only where it can widen what they see.
-  const [{ rows, nextCursor }, counts, groups, ownsNumbers] = await Promise.all([
+  // The groups are one small read, for the group views' names, and the
+  // categories another, for the Category select. Those two run in turn rather
+  // than side by side: the list beside them is the read the render waits for,
+  // so the second costs it no time, where one more query at once would hold
+  // one more of the pool's places for the length of every inbox render
+  // (§6.91). Whether they own a number is a third, asked only where it can
+  // widen what they see.
+  const [{ rows, nextCursor }, counts, [groups, categories], ownsNumbers] = await Promise.all([
     listInbox(agent, filters),
     inboxCounts(agent),
-    inboxGroupsFor(agent),
+    registries(agent),
     canViewAll ? false : ownsANumber(agent),
   ]);
 
@@ -110,6 +117,12 @@ export async function InboxShell({
           canViewAll={canViewAll}
           seesGroupQueues={seesGroupQueues(canViewGroups, groups)}
           groupName={groups.find((group) => group.id === filters.group)?.name ?? null}
+          // Retired ones too, so the select can still name the one a link
+          // filters on; it offers only the active ones for a new choice. Three
+          // fields, because everything else on the row — the Arabic label, the
+          // description written for Jev, the route group — is no business of
+          // the browser's.
+          categories={categories.map(({ id, labelEn, isActive }) => ({ id, labelEn, isActive }))}
           canCreate={can(agent, 'ticket.create')}
           canViewContacts={can(agent, 'contact.view')}
         />
@@ -122,4 +135,11 @@ export async function InboxShell({
       </section>
     </div>
   );
+}
+
+/** The two small registries the frame names things from, read in turn; see above. */
+async function registries(agent: SessionAgent) {
+  const groups = await inboxGroupsFor(agent);
+  const categories = await listCategories();
+  return [groups, categories] as const;
 }

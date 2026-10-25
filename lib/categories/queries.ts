@@ -1,3 +1,4 @@
+import { cache } from 'react';
 import { asc, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { conversations, ticketCategories } from '@/db/schema';
@@ -23,8 +24,12 @@ export type CategoryRow = {
  * condition still have to name one a ticket or a rule already holds, and the
  * inbox's filter has to say what a stale link filters on. Each picker offers
  * only the active ones for a new choice.
+ *
+ * Memoised for the request, like `inboxCounts`: the ticket page reads it for
+ * the sidebar and the inbox shell around it reads it for the filter, and the
+ * two would otherwise be two queries for one four-row table on every render.
  */
-export async function listCategories(): Promise<CategoryRow[]> {
+export const listCategories = cache(async (): Promise<CategoryRow[]> => {
   return db
     .select({
       id: ticketCategories.id,
@@ -39,7 +44,7 @@ export async function listCategories(): Promise<CategoryRow[]> {
     })
     .from(ticketCategories)
     .orderBy(asc(ticketCategories.position), asc(ticketCategories.key));
-}
+});
 
 /**
  * How many live tickets carry each category — what the admin page shows beside

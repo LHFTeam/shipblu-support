@@ -11,6 +11,7 @@ import {
   csatSurveys,
   groups,
   messages,
+  ticketCategories,
   ticketStatuses,
 } from '@/db/schema';
 import type { SessionAgent } from '@/lib/auth/session';
@@ -180,6 +181,72 @@ describe('listInbox', () => {
       assigneeAvatarUrl: null,
       assigneeColor: null,
     });
+  });
+
+  it('lists one category by id and names each ticket’s category on its row', async () => {
+    const agent = await admin();
+    // The baseline seeds the starter set, so the ids are read rather than made.
+    const registry = await db
+      .select({ id: ticketCategories.id, key: ticketCategories.key })
+      .from(ticketCategories);
+    const idOf = (key: string) => registry.find((row) => row.key === key)!.id;
+    const sales = idOf('sales');
+    const merchant = idOf('merchant_support');
+
+    const selling = await ticket('whatsapp', null);
+    const sellingByEmail = await ticket('email', null);
+    const merchantTicket = await ticket('facebook', null);
+    const none = await ticket('webchat', null);
+    await db.update(conversations).set({ categoryId: sales }).where(eq(conversations.id, selling));
+    await db
+      .update(conversations)
+      .set({ categoryId: sales })
+      .where(eq(conversations.id, sellingByEmail));
+    await db
+      .update(conversations)
+      .set({ categoryId: merchant })
+      .where(eq(conversations.id, merchantTicket));
+    // Retired after the tickets were filed: they still carry it, so a link to
+    // it still lists them, and the row still names what the ticket holds.
+    await db
+      .update(ticketCategories)
+      .set({ isActive: false })
+      .where(eq(ticketCategories.id, sales));
+
+    const ids = async (params: Record<string, string>) =>
+      (await listInbox(agent, parseFilters(params))).rows.map((row) => row.id).sort();
+
+    expect(await ids({ category: sales })).toEqual([selling, sellingByEmail].sort());
+    // Upper case, as a hand-typed link might carry it: the parser folds it.
+    expect(await ids({ category: merchant.toUpperCase() })).toEqual([merchantTicket]);
+    // With the other axes, not instead of them.
+    expect(await ids({ category: sales, channel: 'email' })).toEqual([sellingByEmail]);
+    expect(await ids({})).toEqual([selling, sellingByEmail, merchantTicket, none].sort());
+
+    const { rows } = await listInbox(agent, parseFilters({}));
+    const labelOf = new Map(rows.map((row) => [row.id, row.categoryLabel]));
+    expect(labelOf.get(selling)).toBe('Sales');
+    expect(labelOf.get(merchantTicket)).toBe('Merchant support');
+    expect(labelOf.get(none)).toBeNull();
+  });
+
+  it('keeps the category filter inside what the agent may see', async () => {
+    const sara = await signedIn('agent', 'sara@shipblu.test');
+    const [sales] = await db
+      .select({ id: ticketCategories.id })
+      .from(ticketCategories)
+      .where(eq(ticketCategories.key, 'sales'));
+    const hers = await ticket('whatsapp', null, sara.id);
+    // Unassigned and in no group of hers: outside what she may open.
+    const nobodys = await ticket('whatsapp', null);
+    await db
+      .update(conversations)
+      .set({ categoryId: sales!.id })
+      .where(inArray(conversations.id, [hers, nobodys]));
+
+    const { rows } = await listInbox(sara, parseFilters({ category: sales!.id }));
+
+    expect(rows.map((row) => row.id)).toEqual([hers]);
   });
 
   it('skips what the customer never saw: a system notice, a failed send, an autoresponder', async () => {

@@ -61,6 +61,7 @@ describe('parseFilters', () => {
       channel: 'all',
       rating: 'any',
       group: null,
+      category: null,
       q: '',
     });
   });
@@ -83,6 +84,18 @@ describe('parseFilters', () => {
     expect(parseFilters({ group: 'Merchant Care' }).group).toBeNull();
   });
 
+  it('reads a category by id, and refuses anything that is not one', () => {
+    const id = 'C3E1F0A2-7B4D-4E8A-9F21-6D5C4B3A2E10';
+    expect(parseFilters({ category: id }).category).toBe(id.toLowerCase());
+    // The key is not the address: the column holds the id, and a key would
+    // reach Postgres as a malformed uuid (22P02) rather than as no match.
+    expect(parseFilters({ category: 'sales' }).category).toBeNull();
+    expect(parseFilters({ category: '' }).category).toBeNull();
+    expect(parseFilters({ category: `${id}' or true --` }).category).toBeNull();
+    // Its own axis: a group's id is not read as a category, nor the reverse.
+    expect(parseFilters({ group: id })).toMatchObject({ group: id.toLowerCase(), category: null });
+  });
+
   it('no longer carries a page number', () => {
     // Pagination moved to a cursor the client holds, so a leftover ?page= from
     // an old bookmark must not reach the query.
@@ -96,6 +109,7 @@ describe('parseFilters', () => {
         status: 'resolved',
         channel: 'whatsapp',
         rating: 'low',
+        category: '5a0d6c1e-2f3b-4a4c-8d5e-6f7a8b9c0d1e',
         q: '  #42  ',
       }),
     ).toEqual({
@@ -104,6 +118,7 @@ describe('parseFilters', () => {
       channel: 'whatsapp',
       rating: 'low',
       group: null,
+      category: '5a0d6c1e-2f3b-4a4c-8d5e-6f7a8b9c0d1e',
       q: '#42',
     });
   });
