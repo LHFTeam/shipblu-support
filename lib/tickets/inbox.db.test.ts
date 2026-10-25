@@ -225,7 +225,8 @@ describe('listInbox', () => {
 
     const { rows } = await listInbox(agent, parseFilters({}));
     const labelOf = new Map(rows.map((row) => [row.id, row.categoryLabel]));
-    expect(labelOf.get(selling)).toBe('Sales');
+    // Named, and marked: the ticket holds a category nobody can choose now.
+    expect(labelOf.get(selling)).toBe('Sales (retired)');
     expect(labelOf.get(merchantTicket)).toBe('Merchant support');
     expect(labelOf.get(none)).toBeNull();
   });

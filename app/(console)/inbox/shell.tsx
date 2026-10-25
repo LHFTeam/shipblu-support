@@ -4,6 +4,7 @@ import { can } from '@/lib/auth/permissions';
 import { channelInfo } from '@/components/channel';
 import { LiveUpdates } from '@/components/live-updates';
 import { ViewsPanel, type ViewsPanelSection } from '@/components/views-panel';
+import { toCategoryChoices } from '@/lib/categories/choices';
 import { listCategories } from '@/lib/categories/queries';
 import { inboxCounts, listInbox } from '@/lib/tickets/inbox';
 import { parseFilters } from '@/lib/tickets/inbox-filters';
@@ -118,11 +119,9 @@ export async function InboxShell({
           seesGroupQueues={seesGroupQueues(canViewGroups, groups)}
           groupName={groups.find((group) => group.id === filters.group)?.name ?? null}
           // Retired ones too, so the select can still name the one a link
-          // filters on; it offers only the active ones for a new choice. Three
-          // fields, because everything else on the row — the Arabic label, the
-          // description written for Jev, the route group — is no business of
-          // the browser's.
-          categories={categories.map(({ id, labelEn, isActive }) => ({ id, labelEn, isActive }))}
+          // filters on; it offers only the active ones for a new choice. Cut to
+          // three fields (`toCategoryChoices`).
+          categories={toCategoryChoices(categories)}
           canCreate={can(agent, 'ticket.create')}
           canViewContacts={can(agent, 'contact.view')}
         />

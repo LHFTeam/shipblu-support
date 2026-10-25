@@ -28,6 +28,7 @@ import { assignmentScope, assignmentVisibility } from './visibility';
 import { hiddenChannels, isCommentTicket, restrictedChannels } from './channel-policy';
 import { notReaction } from './not-reaction';
 import { sbidMatches, trackingMatches } from '@/lib/shipments/queries';
+import { categoryLabel } from '@/lib/categories/choices';
 import { cleanQuery, textMatches } from '@/lib/search/text';
 import { parseSearchTerm } from './search';
 import { ratedLowRecently } from '@/lib/reports/csat-queries';
@@ -104,9 +105,9 @@ export type InboxRow = {
   sideState: 'waiting' | 'replied' | null;
   /**
    * Which team's work the ticket is, by the category's English label, or null
-   * while nothing has set one. A retired category is still named: the ticket
-   * still carries it, and the row says what the ticket holds, as the sidebar's
-   * select does.
+   * while nothing has set one. A retired category is still named, and marked
+   * as retired (`categoryLabel`): the ticket still carries it, and the row says
+   * what the ticket holds, as the sidebar's select does.
    */
   categoryLabel: string | null;
 };
@@ -147,6 +148,7 @@ function selectInboxRows(where: SQL | undefined) {
       // A join, unlike the side conversations below: `category_id` names one
       // registry row or none, so it cannot turn one ticket into two rows.
       categoryLabel: ticketCategories.labelEn,
+      categoryActive: ticketCategories.isActive,
       // Both off the one lateral row, so the arrow is about the message the
       // preview shows by construction rather than because two subqueries broke
       // a tie the same way. False rather than null for a ticket with no message
@@ -382,7 +384,10 @@ export async function listInbox(
       preview: row.preview,
       lastFromUs: row.lastFromUs,
       sideState: row.sideState === 'replied' || row.sideState === 'waiting' ? row.sideState : null,
-      categoryLabel: row.categoryLabel,
+      categoryLabel:
+        row.categoryLabel === null
+          ? null
+          : categoryLabel(row.categoryLabel, row.categoryActive ?? true),
     })),
   };
 }

@@ -564,7 +564,10 @@ async function changeClock(
  * spent parked on a status that stops the clock. The policy itself is not
  * re-selected: which targets a ticket is held to is what an agent was told when
  * it arrived, and quietly retargeting a ticket because it was routed elsewhere
- * is a different feature from honouring a team's calendar.
+ * is a different feature from honouring a team's calendar. Before the first
+ * response that feature does exist, and it is not this function:
+ * every group writer also calls `reselectPolicyBeforeFirstResponse`, which may
+ * choose another policy.
  *
  * Best-effort like the rest of this file, and a no-op when nothing would change
  * — a policy pinned to one schedule or counting round the clock resolves to the
@@ -635,12 +638,21 @@ export async function onPriorityChanged(conversationId: string): Promise<void> {
  * credits the whole of it when the clock resumes (`completedPauses`).
  *
  * When the same policy wins again it does nothing: re-timing for a new group's
- * calendar is `onGroupChanged`'s, which the group writers call next. When no
- * policy wins — no default, nothing matching — it also does nothing: dropping
- * an obligation mid-ticket is a different decision from choosing one.
+ * calendar is `onGroupChanged`'s, which every group writer also calls — the
+ * console straight after this, the automation engine from the action itself,
+ * before the pass's `finally` reaches this. When no policy wins — no default,
+ * nothing matching — it also does nothing: dropping an obligation mid-ticket is
+ * a different decision from choosing one.
  *
  * Never on a read-only channel or an imported history, which `applySlaOnCreate`
- * never gave a clock either.
+ * never gave a clock either; and never on a resolved or closed ticket, the
+ * population the sweep stops measuring (`liveTicketsFilter`). Its clocks there
+ * are a record of what it was held to, and a policy changed under them came
+ * back out mismatched: a reopen shifts the clocks a ticket has rather than
+ * choosing them, so the new policy's name sat on the old one's resolution
+ * deadline, or on none. A category set while a ticket is resolved therefore
+ * moves its policy only when the category or the group next changes after it
+ * is reopened.
  */
 export async function reselectPolicyBeforeFirstResponse(
   conversationId: string,
@@ -656,6 +668,7 @@ export async function reselectPolicyBeforeFirstResponse(
       if (conversation.firstRespondedAt) return;
       if (conversation.sourceSystem === 'import') return;
       if (readOnlyChannels().includes(conversation.channel)) return;
+      if (row.statusCategory !== 'open' && row.statusCategory !== 'pending') return;
 
       const policy = selectPolicy(policies, conversationFacts(row));
       if (!policy || policy.id === conversation.slaPolicyId) return;
@@ -669,11 +682,7 @@ export async function reselectPolicyBeforeFirstResponse(
         minutes === null ? null : dueAt(hours, minutes + excusedSince(hours, pauses, from), from);
 
       const firstResponse = fromAnchor(target.firstResponseMins, conversation.createdAt);
-      // A resolved ticket's resolution clock was met under the policy it had;
-      // choosing another does not reopen the question.
-      const resolution = conversation.resolvedAt
-        ? conversation.resolutionDueAt
-        : fromAnchor(target.resolutionMins, conversation.createdAt);
+      const resolution = fromAnchor(target.resolutionMins, conversation.createdAt);
       // Running only when the customer wrote again before anybody answered; a
       // ticket with none keeps none, as `dueDatesOnCreate` gives none.
       const nextResponse = conversation.nextResponseDueAt
@@ -691,9 +700,7 @@ export async function reselectPolicyBeforeFirstResponse(
         ...(conversation.firstResponseBreached && (!firstResponse || firstResponse > now)
           ? (['first_response'] as const)
           : []),
-        ...(conversation.resolutionBreached &&
-        !conversation.resolvedAt &&
-        (!resolution || resolution > now)
+        ...(conversation.resolutionBreached && (!resolution || resolution > now)
           ? (['resolution'] as const)
           : []),
       ];

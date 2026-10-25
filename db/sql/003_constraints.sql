@@ -209,8 +209,10 @@ END $$;
 -- --------------------------------------------------------------------------
 -- A ticket category's key, and its two labels
 --
--- The key is what a rule, an export and Jev's answer name a category by, so it
--- is held to one shape: lowercase words joined by single underscores. Hyphens
+-- The key is what every category_changed event freezes, what
+-- seed_ticket_categories finds a row by and, from Stage 4, what Jev's answer
+-- names a category by (rules and SLA policies hold the uuid), so it is held to
+-- one shape: lowercase words joined by single underscores. Hyphens
 -- and capitals belong in the labels. `unknown` is refused because Jev's
 -- classifier (plans/ticket-category-routing.md, decision 4) answers it for "none
 -- of these", and a category of that name would turn the escape hatch into a

@@ -5,6 +5,7 @@ import {
   listCannedTitles,
   listGroupNames,
 } from '@/lib/admin/settings';
+import { toCategoryChoices } from '@/lib/categories/choices';
 import { listCategories } from '@/lib/categories/queries';
 import { formatDateTime } from '@/lib/format';
 import { requirePermission } from '@/lib/auth/guard';
@@ -60,7 +61,7 @@ export default async function AutomationsPage() {
   const builderProps = {
     agents: agentChoices,
     groups: groupChoices,
-    categories: categoryList,
+    categories: toCategoryChoices(categoryList),
     cannedResponses: cannedChoices,
     fields: fieldOptions,
   };

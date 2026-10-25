@@ -27,6 +27,7 @@ import {
   reselectPolicyBeforeFirstResponse,
 } from '@/lib/sla';
 import { CHANGE_STAMP } from '@/lib/tickets/change-stamp';
+import { moveToGroupIfElsewhere } from '@/lib/tickets/move-group';
 import { resolveStamp } from '@/lib/tickets/resolve-stamp';
 import { reopenWithOwner } from '@/lib/whatsapp/number-owner';
 import { parseActions, type Action } from './actions';
@@ -327,26 +328,24 @@ async function applyAction(
       await record(action.agentId ? 'assigned' : 'unassigned', { to: action.agentId });
       return;
 
-    case 'assign_group':
-      await db
-        .update(conversations)
-        .set({ groupId: action.groupId })
-        .where(eq(conversations.id, conversationId));
+    case 'assign_group': {
+      // Only when it moves the ticket: a rule naming the group the ticket is
+      // already in matches on every pass (`moveToGroupIfElsewhere`).
+      if (!(await moveToGroupIfElsewhere(conversationId, action.groupId))) return;
+
       await record('group_changed', { to: action.groupId });
       // The new group may work different hours, in which case the clocks move.
       // A no-op on a brand new ticket, whose SLA has not been applied yet.
       await onGroupChanged(conversationId);
       pass.policyOwed ??= 'group';
       return;
+    }
 
     case 'auto_assign': {
       // Writes the ticket itself and does not come back through this engine, in
       // keeping with the rule at the top of this file: an automation that
       // triggered an automation is how four hundred emails reach one customer.
-      const groupChanged =
-        action.groupId !== null && action.groupId !== ticket.conversation.groupId;
-
-      await assignConversation(conversationId, {
+      const outcome = await assignConversation(conversationId, {
         groupId: action.groupId,
         strategy: action.strategy === 'group_default' ? undefined : action.strategy,
         actorLabel: `automation:${ruleName}`,
@@ -354,11 +353,11 @@ async function applyAction(
 
       // The SLA counts against the group's calendar, so a rule that moved the
       // ticket has moved its due dates too — whether or not anybody was free to
-      // take it.
-      // Owed even when the rota did not move it after all (a deleted group, an
-      // owner holding it): the re-selection reads the locked row and does
-      // nothing when the policy it finds is the one the ticket has.
-      if (groupChanged) {
+      // take it. Read off what the call did rather than off the rule and the
+      // ticket as the pass found it: a ticket held by somebody other than its
+      // number's owner, or routed to a group deleted since, stays where it was
+      // and owes nothing (`moveToGroupIfElsewhere`, for why that matters).
+      if (outcome.movedGroup) {
         await onGroupChanged(conversationId);
         pass.policyOwed ??= 'group';
       }

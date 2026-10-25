@@ -4,6 +4,7 @@ import { previewConversationPurge } from '@/lib/admin/purge';
 import { hiddenScopeRefusal } from '@/lib/admin/purge-visibility';
 import { requireAgent } from '@/lib/auth/guard';
 import { can } from '@/lib/auth/permissions';
+import { toCategoryChoices } from '@/lib/categories/choices';
 import { listCategories } from '@/lib/categories/queries';
 import { suggestForAgent } from '@/lib/kb/agent-search';
 import { detectLocale } from '@/lib/kb/language';
@@ -66,9 +67,9 @@ export default async function ConversationPage({
   const [subcategories, causes, categories, purgePreview, purgeRefusal] = await Promise.all([
     subcategoryOptions(),
     rootCauseOptions(),
-    // Read for everybody, as the subcategories are: the select names the
-    // ticket's category to anybody who can open it, and only changing it is
-    // gated.
+    // For the sidebar's select, which every role holds `ticket.set_category`
+    // for. No extra query: it is memoised for the request, and the inbox shell
+    // around this page reads it for its filter.
     listCategories(),
     // Counted on render rather than on click, because the counts are the whole
     // argument the confirmation panel makes and a panel that has to fetch before
@@ -187,7 +188,7 @@ export default async function ConversationPage({
         canClose={canClose}
         canSubcategorise={canSubcategorise}
         canSetCategory={canSetCategory}
-        categories={categories}
+        categories={toCategoryChoices(categories)}
         subcategoryOptions={subcategories}
         rootCauses={causes}
         purgePreview={purgePreview}

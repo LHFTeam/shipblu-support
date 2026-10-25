@@ -240,9 +240,16 @@ export function describeEvent(type: string, data: Record<string, unknown>): stri
       }
       // `reselectPolicyBeforeFirstResponse`: the ticket is held to a different
       // policy now, and the agent is owed which one and what moved it there.
+      // Worded by the change that set the choice off, never as the policy
+      // matching it: the policy is chosen from everything the ticket is, so the
+      // default catching a ticket whose category no policy names, or one keyed
+      // on its priority, wins on a category change too.
       if (data.reason === 'policy') {
         const cause = data.cause === 'group' ? 'its group' : 'its category';
-        return `held the ticket to the ${String(data.policy ?? 'new')} SLA policy, which matches ${cause} now`;
+        const policy = String(data.policy ?? 'new');
+        return data.previousPolicy
+          ? `moved the ticket from the ${String(data.previousPolicy)} to the ${policy} SLA policy after ${cause} changed`
+          : `held the ticket to the ${policy} SLA policy after ${cause} changed`;
       }
       return 're-counted the due dates';
 

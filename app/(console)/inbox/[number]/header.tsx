@@ -9,6 +9,7 @@ import { RelativeTime } from '@/components/relative-time';
 import { Badge } from '@/components/ui';
 import { ago } from '@/lib/format';
 import { answeredFromConsole, isCommentTicket, isMetaChannel } from '@/lib/tickets/channel-policy';
+import { categoryLabel } from '@/lib/categories/choices';
 import type { ConversationDetail } from '@/lib/tickets/conversation';
 import { ProfileRefresh } from './profile-refresh';
 import { MetaWindowIndicator, WindowIndicator } from './window-indicator';
@@ -138,7 +139,9 @@ export function Header({
               "Sales" next to a form's name cannot be read as either.
             */}
           {conversation.category ? (
-            <Badge tone="neutral">Category: {conversation.category.label}</Badge>
+            <Badge tone="neutral">
+              Category: {categoryLabel(conversation.category.label, conversation.category.active)}
+            </Badge>
           ) : null}
           {conversation.formName ? <Badge tone="brand">{conversation.formName}</Badge> : null}
           {/*

@@ -1237,11 +1237,18 @@ ticket. Five rules hold:
   policy again after every category write commits — the backfill of Stage 4
   excepted — and after every group move that can come before an answer: the
   console's group case, `assign_group`, and a grouped `auto_assign` that moved.
-  An `on_create` pass leaves it to `applySlaOnCreate`, which runs after it and
-  reads the category itself. It counts each clock from its own anchor with the
-  finished pauses credited, so it can give clocks to a ticket that had none, and
-  it does nothing once somebody has answered, when the same policy wins, or when
-  none does. `onGroupChanged` and `onPriorityChanged` still never re-select.
+  A move is one that changed the group — `moveToGroupIfElsewhere`
+  (`lib/tickets/move-group.ts`), `movedGroup` off `assignConversation` —
+  because a rule naming the group a ticket is in matches on every pass, and a
+  second look owed for nothing takes up a raised priority as though the group
+  had moved. An `on_create` pass leaves it to `applySlaOnCreate`, which runs
+  after it and reads the category itself. It counts each clock from its own
+  anchor with the finished pauses credited, so it can give clocks to a ticket
+  that had none, and it does nothing once somebody has answered, on a resolved
+  or closed ticket, when the same policy wins, or when none does.
+  `onGroupChanged` and `onPriorityChanged` still never re-select. Because a
+  ticket can now change policy after a breach, an escalation is keyed per
+  policy (`settlesEscalation` in `worker/handlers/sla-sweep.ts`).
 - **Retired, never deleted, and the key never changes.** The foreign key is
   `restrict`; `ticket_categories_key_format` holds the key to lowercase words
   joined by underscores and refuses `unknown`, which Jev answers for "none of

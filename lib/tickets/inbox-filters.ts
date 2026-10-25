@@ -91,6 +91,24 @@ export function parseInboxCursor(value: string | null | undefined): InboxCursor 
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+/**
+ * A query string in the shape Next hands a page its `searchParams`: every value
+ * of a repeated key, in order.
+ *
+ * For `/api/inbox`, which serves the pages the list scrolls to and must read
+ * the filters exactly as the page that drew the first one did. It read them
+ * through `Object.fromEntries`, which keeps the last of a repeated key where
+ * `parseFilters` takes the first, so a link carrying two categories listed one
+ * on the first page and appended the other's tickets beneath it, under a
+ * select naming the first. Handing over every value leaves the choice to
+ * `parseFilters` on both paths.
+ */
+export function queryParams(search: URLSearchParams): Record<string, string[]> {
+  const params: Record<string, string[]> = {};
+  for (const [key, value] of search) (params[key] ??= []).push(value);
+  return params;
+}
+
 export function parseFilters(params: Record<string, string | string[] | undefined>): InboxFilters {
   const one = (key: string) => {
     const value = params[key];

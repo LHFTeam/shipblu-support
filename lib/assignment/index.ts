@@ -69,7 +69,20 @@ export type SkipReason =
   | 'all_at_capacity'
   | 'no_skill_match';
 
-export type AssignmentOutcome = {
+export type AssignmentOutcome = Picked & {
+  /**
+   * Whether this call moved the ticket into the group the caller named — the
+   * routing half, which stands whether or not anybody was then picked. Read by
+   * the automation engine, which owes the SLA policy a second look only when
+   * the group really changed: comparing the rule's group with the ticket it
+   * started from also counts a ticket the rota left where it was (a holder who
+   * is not the number's owner, a group deleted since).
+   */
+  movedGroup: boolean;
+};
+
+/** Who the pick chose, or why it chose nobody. */
+type Picked = {
   assignedTo: string | null;
   reason: SkipReason | null;
 };
@@ -103,6 +116,21 @@ export async function assignConversation(
   conversationId: string,
   options: AssignOptions = {},
 ): Promise<AssignmentOutcome> {
+  const routed = { moved: false };
+  const picked = await routeAndPick(conversationId, options, routed);
+  return { ...picked, movedGroup: routed.moved };
+}
+
+/**
+ * The body of `assignConversation`, which every return below answers through:
+ * `routed` is how the group move, made on one of three branches before the
+ * pick, reaches the outcome without each of a dozen returns repeating it.
+ */
+async function routeAndPick(
+  conversationId: string,
+  options: AssignOptions,
+  routed: { moved: boolean },
+): Promise<Picked> {
   const now = options.now ?? new Date();
 
   const accountable = alias(agents, 'accountable');
@@ -161,7 +189,7 @@ export async function assignConversation(
     // Anybody else holding a ticket was given it on purpose, and a rule has
     // never moved their ticket.
     if (routeTo && assignable && conversation.assigneeAgentId === conversation.accountableAgentId) {
-      await moveToGroup(conversationId, routeTo, options.actorLabel);
+      routed.moved = await moveToGroup(conversationId, routeTo, options.actorLabel);
     }
     return { assignedTo: null, reason: 'already_assigned' };
   }
@@ -171,7 +199,7 @@ export async function assignConversation(
   // The number's owner, ahead of everything the rota would ask — see the
   // module header for why none of it applies.
   if (conversation.accountableAgentId && ticket.accountableActive) {
-    if (routeTo) await moveToGroup(conversationId, routeTo, options.actorLabel);
+    if (routeTo) routed.moved = await moveToGroup(conversationId, routeTo, options.actorLabel);
     return handBackToOwner(
       conversationId,
       conversation.accountableAgentId,
@@ -208,7 +236,7 @@ export async function assignConversation(
   const { lastAssignedAgentId: _preLockCursor, ...group } = groupRow;
 
   // Before the pick, so the routing half stands whatever the pick finds.
-  if (routeTo) await moveToGroup(conversationId, routeTo, options.actorLabel);
+  if (routeTo) routed.moved = await moveToGroup(conversationId, routeTo, options.actorLabel);
 
   const strategy = options.strategy ?? group.assignmentStrategy;
   if (strategy === 'manual') return { assignedTo: null, reason: 'strategy_manual' };
@@ -340,7 +368,7 @@ async function moveToGroup(
   conversationId: string,
   groupId: string,
   actorLabel: string | undefined,
-): Promise<void> {
+): Promise<boolean> {
   const moved = await db
     .update(conversations)
     .set({ groupId })
@@ -351,7 +379,7 @@ async function moveToGroup(
       ),
     )
     .returning({ id: conversations.id });
-  if (moved.length === 0) return;
+  if (moved.length === 0) return false;
 
   await db.insert(conversationEvents).values({
     conversationId,
@@ -359,6 +387,7 @@ async function moveToGroup(
     actorLabel: actorLabel ?? 'auto_assign',
     data: { to: groupId },
   });
+  return true;
 }
 
 /**
@@ -373,7 +402,7 @@ async function handBackToOwner(
   ownerId: string,
   channelId: string | null,
   { actorLabel, now }: { actorLabel: string | undefined; now: Date },
-): Promise<AssignmentOutcome> {
+): Promise<Picked> {
   return db.transaction(async (tx) => {
     const updated = await tx
       .update(conversations)

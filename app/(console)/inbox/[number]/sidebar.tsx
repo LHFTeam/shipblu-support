@@ -15,7 +15,7 @@ import { PRIORITIES } from '@/lib/tickets/vocabulary';
 import { purgeTicket } from '../../ticket-actions';
 import { PurgePanel } from '../../purge-panel';
 import type { PurgePreview } from '@/lib/admin/purge-summary';
-import { categoryOptions, type CategoryChoice } from '@/lib/categories/choices';
+import { categoryLabel, categoryOptions, type CategoryChoice } from '@/lib/categories/choices';
 import { SideConversationsField } from './side-conversations';
 import { CustomFields, FieldSelect, SidebarField, TagField } from './ticket-fields';
 import { ShipmentsField, ShippingAccountsField } from './shipments-field';
@@ -181,7 +181,11 @@ export function Sidebar({
               ]}
             />
           ) : (
-            <p className="text-sm">{conversation.category?.label ?? 'None'}</p>
+            <p className="text-sm">
+              {conversation.category
+                ? categoryLabel(conversation.category.label, conversation.category.active)
+                : 'None'}
+            </p>
           )}
         </SidebarField>
 

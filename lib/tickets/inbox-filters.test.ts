@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { encodeInboxCursor, parseFilters, parseInboxCursor } from './inbox-filters';
+import { encodeInboxCursor, parseFilters, parseInboxCursor, queryParams } from './inbox-filters';
 
 const ROW_ID = '3f1c9a4e-6b2d-4c8f-9a71-2e5d8c0b7f43';
 const ROW_TIME = '2026-08-19 23:24:51.640649+00';
@@ -139,5 +139,21 @@ describe('parseFilters', () => {
 
   it('takes the first value when a param is repeated', () => {
     expect(parseFilters({ channel: ['email', 'whatsapp'] }).channel).toBe('email');
+  });
+
+  // `/api/inbox` reads the query string, the page Next's `searchParams`; the
+  // two must agree on a repeated key, or scrolling appends another filter's rows.
+  it('reads a repeated param from a query string as the page reads it', () => {
+    const sales = '3f1c9a4e-6b2d-4c8f-9a71-2e5d8c0b7f43';
+    const merchant = '9b2e7d10-4a5c-4e3f-8d21-6c0f1a2b3c4d';
+    const search = new URLSearchParams(
+      `category=${sales}&category=${merchant}&channel=email&channel=whatsapp&cursor=x`,
+    );
+    const fromQuery = parseFilters(queryParams(search));
+    expect(fromQuery.category).toBe(sales);
+    expect(fromQuery.channel).toBe('email');
+    expect(fromQuery).toEqual(
+      parseFilters({ category: [sales, merchant], channel: ['email', 'whatsapp'], cursor: 'x' }),
+    );
   });
 });

@@ -2707,13 +2707,34 @@ where it departs from it:
   `CHANGE_STAMP` (`lib/tickets/change-stamp.ts`), the same `clock_timestamp()`.
 - **SLA.** `reselectPolicyBeforeFirstResponse(id, cause)` as decision 3 says,
   doing nothing once a first response exists, when the same policy wins, when
-  none does, and on a read-only channel or an imported history. The automation
-  engine owes it once per pass (`Pass.policyOwed`, named `category` over
-  `group` when both moved) and skips it on `on_create`, because
-  `applySlaOnCreate` runs after that pass and reads the category. The console's
-  group case calls it before `onGroupChanged`. Its event is `sla_recalculated`
-  with `reason: 'policy'`, the cause and both policies' names, and reads "held
-  the ticket to the Sales SLA policy, which matches its category now".
+  none does, on a read-only channel or an imported history, and on a resolved
+  or closed ticket. That last is a departure: a policy changed under a
+  resolved ticket's clocks came back out of a reopen with the new policy's name
+  on the old one's resolution deadline, or on none, because a reopen shifts the
+  clocks a ticket has rather than choosing them. So a category set while a
+  ticket is resolved moves its policy only when the category or the group next
+  changes after it reopens. The automation engine owes it once per pass
+  (`Pass.policyOwed`, named `category` over `group` when both moved) and skips
+  it on `on_create`, because `applySlaOnCreate` runs after that pass and reads
+  the category. A group is owed it only when it really moved: `assign_group`
+  and the console's group case write through `moveToGroupIfElsewhere`
+  (`lib/tickets/move-group.ts`), and `auto_assign` reads `movedGroup` off
+  `assignConversation`, because a rule naming the group a ticket is already in
+  matches on every pass, and a second look owed for nothing took up a raised
+  priority as though the group had moved. Neither writes a `group_changed`
+  event for a move that did not happen, which `assign_group` used to on every
+  pass. The console's group case calls it before `onGroupChanged`. Its event is
+  `sla_recalculated` with `reason: 'policy'`, the cause and both policies'
+  names, and reads "moved the ticket from the Standard to the Sales SLA policy
+  after its category changed": by what set the choice off, since the policy is
+  chosen from everything the ticket is and the one that wins need not be keyed
+  on the category at all.
+- **Escalation per policy.** `sla_escalated` names its `policyId`, and the
+  sweep counts an escalation only under the policy the ticket holds now, so a
+  ticket escalated under the default and then filed under Sales still reaches
+  the Sales contacts when it misses Sales' target too. An event from before
+  names no policy and settles its kind under any, so no ticket is escalated
+  twice by the deploy.
 - **Permissions.** `ticket.set_category` on every agent, `admin.categories` on
   admins. No agent held an override of either key (read 2026-10-25 06:3x UTC).
 - **Seed.** The starter descriptions say where each category's edges are, for
@@ -2722,8 +2743,9 @@ where it departs from it:
   through `scripts/ci/db-jobs.txt`.
 - **The ticket.** A Category select beside Group and Priority, read-only text
   for an agent without the permission; a retired category the ticket holds is
-  shown as "(retired)" rather than as "None". The header badge reads
-  "Category: Sales". The timeline reads "set the category to Sales", with Jev's
+  shown as "(retired)" rather than as "None", and so it is in the header badge
+  ("Category: Sales (retired)"), the read-only text and the inbox row
+  (`categoryLabel` in `lib/categories/choices.ts`). The timeline reads "set the category to Sales", with Jev's
   probability from Stage 4, or "cleared the category".
 - **Rules.** `category.id` in the condition builder on the automations, SLA
   and skills pages, a retired category named as such; "Set category" in the
@@ -2743,10 +2765,17 @@ where it departs from it:
   preset view per category until Stage 5 routes by it. A Category select under
   Status and Channel, and each row's label as a neutral badge, last in both
   layouts. `listCategories` is memoised per request, so the ticket page and the
-  inbox shell share one read.
-- **Handbook.** A `category` article in the agents' folder, a line in
-  `ticket-fields`, and a Categories section in the admins'
-  `automation-and-forms`.
+  inbox shell share one read, and every page handing the registry to a client
+  component cuts it to id, label and state first (`toCategoryChoices`): a
+  wider row passes a narrower prop type and is serialised whole. `/api/inbox`
+  reads a repeated parameter as the page does, first value first
+  (`queryParams`), where it kept the last and a link naming two categories
+  scrolled into the second one's tickets — true of every axis before 3.1.
+- **Handbook.** A `category` article in the agents' folder; a Category filter
+  in `inbox`'s list of them; a line in `ticket-fields`; a Categories section in
+  the admins' `automation-and-forms`, saying rules and policies hold the
+  category itself, so a rename breaks neither; the role lists in `people` and
+  `owner-role`; and the two folders' descriptions.
 
 **Deploying 3.1.** Web first, because it migrates; then the worker and the four
 crons, because an old time-automations cron drops a `set_category` action
@@ -2758,16 +2787,32 @@ without a word. It waits for 2.B's two remaining reads.
    `docs/PROJECT-STATE.md` §5.5.
 2. **Deploy web.** Its preDeploy applies `0047` (nothing to do in production)
    and `0048` in one transaction, then `db/sql`. `0048` takes ACCESS EXCLUSIVE
-   on `conversations` for the column, SHARE ROW EXCLUSIVE while the foreign key
-   validates every row (72,119 rows, 20 MB, read 2026-10-25) and SHARE for the
-   index build, all held until it commits: writes to tickets wait for seconds at
-   most, and reads wait only behind the ACCESS EXCLUSIVE.
+   on `conversations` when it adds the column, and the foreign key's validation
+   of every row (72,119 rows, 20 MB, read 2026-10-25) and the index build come
+   after it in the same transaction, so that lock is held until it commits:
+   reads of tickets block as well as writes, for the whole migration — seconds,
+   because the new column is all null — and for up to `lock_timeout` (10 s,
+   `db/migrate.ts`) more if the lock queues behind an open transaction, which is
+   what step 1's lock check is for.
 3. **Deploy the worker and the four crons** on the same commit.
 4. **Seed.** `npm run job -- seed_ticket_categories` on the worker's shell, or
    `insert into jobs (type, payload) values ('seed_ticket_categories', '{}')`.
    It logs `[seed_ticket_categories] done created=sales,customer_support,merchant_support,courier_jobs present=0`;
    run again, `created=none present=4`.
-5. **Verify** (read-only):
+5. **Handbook.** Production held no console handbook at 2026-10-25 08:44 UTC:
+   no `handbook:` folder or article. If that still holds there is nothing to
+   do, because the first seed, whenever somebody runs it, writes 3.1's words.
+   If it has been seeded since, run
+   `npm run job -- seed_console_handbook dryRun=true` once web is live,
+   expecting `folders 0 created, 2 updated`, one article created and
+   `5 article(s) differ from this repository` (`inbox`, `ticket-fields`,
+   `people`, `automation-and-forms`, `owner-role`). A different count is a
+   console edit `overwrite=true` would replace, and is read first. Then
+   `overwrite=true`, which cuts one `kb_article_versions` row per article it
+   replaces. Rehearsed locally on 2026-10-25: `origin/dev`'s seed into an empty
+   database, then this branch's dry run, reported exactly that; the overwrite
+   replaced the five named, and a run after it found all 16 current.
+6. **Verify** (read-only):
 
    ```sql
    select
@@ -2793,9 +2838,41 @@ nothing — every migration in its journal is older than the newest row — and 
 find none, and `003` neither knows nor drops the new CHECKs. The old code never
 reads `category_id`. Tickets keep their categories and events, which the old
 timeline prints as "category changed"; a rule holding a `set_category` action
-has it skipped and the rest performed (`parseActions`); a queued
-`seed_ticket_categories` waits for a handler. Removing the table or the column
-would be a forward migration of its own.
+has it skipped and the rest performed (`parseActions`). Removing the table or
+the column would be a forward migration of its own. Four things the old code
+does differently with 3.1's data, and the first needs a step before the
+deploy:
+
+- **A stored condition on `category.id` changes meaning.** The old code has no
+  such fact, and its evaluator reads an unknown field as absent: `is`/`is any
+of` then match no ticket, so a category-keyed SLA policy stops applying and
+  its tickets fall to the next policy or the default, while `is not`, `is none
+of` and `is empty` match every ticket, and the time sweep acts on the whole
+  backlog within one run. So read the rows that name it first, and deactivate
+  or rewrite each, to restore after rolling forward (none, if nobody has
+  written one):
+
+  ```sql
+  select 'automation' as kind, name, is_active from automation_rules
+    where conditions::text like '%"category.id"%'
+  union all
+  select 'sla', name, true from sla_policies where conditions::text like '%"category.id"%'
+  union all
+  select 'skill', name, is_active from skills where conditions::text like '%"category.id"%';
+  ```
+
+- **A group delete stops asking about route groups.** The old
+  `deleteGroupIfUnused` does not count categories, so a group deleted while
+  rolled back sets its categories' `route_group_id` to null, and rolling
+  forward does not bring it back. Read `select key, route_group_id from
+ticket_categories` before and after.
+- **A `seed_ticket_categories` queued under the old worker goes `dead`**: it
+  has no handler, so each attempt fails, and the fifth is about five minutes
+  after the first. After rolling forward, run the seed again and check the
+  four keys with step 6's query.
+- **The handbook keeps 3.1's words** until the seed is run from the older
+  commit with `overwrite=true`, and the `category` article stays either way,
+  because the seed never deletes.
 
 **3.2 — Where a person sets it at creation.** Web, worker and crons; no schema
 beyond one column.

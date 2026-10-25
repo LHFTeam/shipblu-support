@@ -2,6 +2,7 @@ import { and, asc, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { db } from '@/db/client';
 import {
+  agents,
   automationRules,
   contacts,
   conversationEvents,
@@ -264,6 +265,32 @@ describe('reselectPolicyBeforeFirstResponse', () => {
     expect(await sla(id)).toMatchObject({ slaPolicyId: sales!.id, firstResponseBreached: false });
   });
 
+  // A resolved ticket's clocks are a record of what it was held to. Changed
+  // under them, a reopen shifted the old policy's resolution deadline (or none)
+  // under the new policy's name.
+  it('leaves a resolved or closed ticket’s policy and clocks alone', async () => {
+    const { standard } = await policies();
+    for (const name of ['Resolved', 'Closed']) {
+      const { id } = await ticket();
+      const [status] = await db
+        .select({ id: ticketStatuses.id })
+        .from(ticketStatuses)
+        .where(eq(ticketStatuses.name, name));
+      await db
+        .update(conversations)
+        .set({ statusId: status!.id, resolvedAt: new Date() })
+        .where(eq(conversations.id, id));
+      const before = await sla(id);
+
+      await setConversationCategory(id, await categoryId('sales'), { label: 'x' });
+      await reselectPolicyBeforeFirstResponse(id, 'category');
+
+      expect(await sla(id)).toEqual(before);
+      expect(before.slaPolicyId).toBe(standard);
+      expect(await events(id, 'sla_recalculated')).toEqual([]);
+    }
+  });
+
   it('never reaches the bot channel or an imported history', async () => {
     await policies();
     const bot = await ticket({ channel: 'whatsapp_bot' });
@@ -362,6 +389,87 @@ describe('the automation engine', () => {
 
     expect((await sla(row!.id)).slaPolicyId).toBe(sales);
     expect(await events(row!.id, 'sla_recalculated')).toEqual([]);
+  });
+
+  // A rule naming the group a ticket is already in matches on every pass. Once
+  // something else has changed since the policy was chosen — here a raised
+  // priority, which keeps its policy (`onPriorityChanged`) — a second look
+  // owed for a move that never happened switched it.
+  it('owes nothing for a group rule that leaves the ticket where it is', async () => {
+    const [care] = await db
+      .insert(groups)
+      .values({ name: 'Customer Care' })
+      .returning({ id: groups.id });
+    await db.insert(slaPolicies).values({
+      name: 'Urgent',
+      hoursSource: 'round_the_clock',
+      targets: target(15, 120),
+      position: 0,
+      conditions: { field: 'priority', op: 'in', value: ['urgent'] },
+    });
+    const { standard } = await policies();
+    const inCare = await ticket({ groupId: care!.id });
+    const inNone = await ticket();
+    expect((await sla(inCare.id)).slaPolicyId).toBe(standard);
+    await db.update(conversations).set({ priority: 'urgent' });
+    await db.insert(automationRules).values([
+      {
+        name: 'Care keeps care',
+        trigger: 'on_update',
+        conditions: { field: 'group.id', op: 'eq', value: care!.id },
+        actions: [{ type: 'assign_group', groupId: care!.id }],
+      },
+      {
+        name: 'Ungrouped stays ungrouped',
+        trigger: 'on_update',
+        conditions: { field: 'group.id', op: 'is_empty' },
+        actions: [{ type: 'assign_group', groupId: null }],
+      },
+    ]);
+
+    for (const { id } of [inCare, inNone]) {
+      await runAutomations('on_update', id);
+
+      expect((await sla(id)).slaPolicyId).toBe(standard);
+      expect(await events(id, 'sla_recalculated')).toEqual([]);
+      expect(await events(id, 'group_changed')).toEqual([]);
+    }
+  });
+
+  it('owes nothing for an auto_assign the rota did not move', async () => {
+    const [merchantCare] = await db
+      .insert(groups)
+      .values({ name: 'Merchant Care' })
+      .returning({ id: groups.id });
+    await db.insert(slaPolicies).values({
+      name: 'Urgent',
+      hoursSource: 'round_the_clock',
+      targets: target(15, 120),
+      position: 0,
+      conditions: { field: 'priority', op: 'in', value: ['urgent'] },
+    });
+    const { standard } = await policies();
+    const [holder] = await db
+      .insert(agents)
+      .values({ name: 'Bob', email: 'bob@shipblu.test', role: 'agent' })
+      .returning({ id: agents.id });
+    // Held by somebody who is not its number's owner: a rule has never moved
+    // their ticket (`assignConversation`). Raised since its policy was chosen,
+    // so a second look owed for the move that did not happen would switch it.
+    const { id } = await ticket({ assigneeAgentId: holder!.id, assignedAt: new Date() });
+    await db.update(conversations).set({ priority: 'urgent' }).where(eq(conversations.id, id));
+    await db.insert(automationRules).values({
+      name: 'Route to Merchant Care',
+      trigger: 'on_update',
+      conditions: {},
+      actions: [{ type: 'auto_assign', groupId: merchantCare!.id, strategy: 'group_default' }],
+    });
+
+    await runAutomations('on_update', id);
+
+    expect(await sla(id)).toMatchObject({ slaPolicyId: standard });
+    expect(await events(id, 'sla_recalculated')).toEqual([]);
+    expect(await events(id, 'group_changed')).toEqual([]);
   });
 
   it('skips a retired category, and says nothing on the timeline', async () => {

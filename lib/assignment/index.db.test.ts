@@ -127,7 +127,7 @@ describe('assignConversation on a ticket whose WhatsApp number has an owner', ()
 
       const outcome = await assignConversation(ticket.id, { now: FRIDAY });
 
-      expect(outcome).toEqual({ assignedTo: nayera, reason: null });
+      expect(outcome).toEqual({ assignedTo: nayera, reason: null, movedGroup: false });
       expect(await ticketRow(ticket.id)).toMatchObject({ assignee: nayera, groupId });
       expect(await eventsOf(ticket.id, ['assigned', 'assignment_skipped'])).toEqual([
         {
@@ -156,7 +156,7 @@ describe('assignConversation on a ticket whose WhatsApp number has an owner', ()
       actorLabel: 'automation:Route merchants',
     });
 
-    expect(outcome).toEqual({ assignedTo: nayera, reason: null });
+    expect(outcome).toEqual({ assignedTo: nayera, reason: null, movedGroup: true });
     expect(await ticketRow(ticket.id)).toMatchObject({ assignee: nayera, groupId: merchantCare });
     expect(await eventsOf(ticket.id, ['group_changed', 'assigned'])).toEqual([
       {
@@ -188,7 +188,7 @@ describe('assignConversation on a ticket whose WhatsApp number has an owner', ()
       actorLabel: 'automation:Route merchants',
     });
 
-    expect(outcome).toEqual({ assignedTo: null, reason: 'already_assigned' });
+    expect(outcome).toEqual({ assignedTo: null, reason: 'already_assigned', movedGroup: true });
     expect(await ticketRow(ticket.id)).toMatchObject({ assignee: nayera, groupId: merchantCare });
     expect(await eventsOf(ticket.id, ['group_changed', 'assigned'])).toEqual([
       {
@@ -208,7 +208,7 @@ describe('assignConversation on a ticket whose WhatsApp number has an owner', ()
 
     const outcome = await assignConversation(ticket.id, { groupId: merchantCare });
 
-    expect(outcome).toEqual({ assignedTo: null, reason: 'already_assigned' });
+    expect(outcome).toEqual({ assignedTo: null, reason: 'already_assigned', movedGroup: false });
     expect(await ticketRow(ticket.id)).toMatchObject({ assignee: bob, groupId: null });
   });
 
@@ -220,7 +220,7 @@ describe('assignConversation on a ticket whose WhatsApp number has an owner', ()
       groupId: '00000000-0000-4000-8000-000000000000',
     });
 
-    expect(outcome).toEqual({ assignedTo: nayera, reason: null });
+    expect(outcome).toEqual({ assignedTo: nayera, reason: null, movedGroup: false });
     expect(await ticketRow(ticket.id)).toMatchObject({ assignee: nayera, groupId: null });
     expect(await eventsOf(ticket.id, ['group_changed'])).toEqual([]);
   });
@@ -233,6 +233,7 @@ describe('assignConversation on a ticket whose WhatsApp number has an owner', ()
     expect(await assignConversation(ticket.id)).toEqual({
       assignedTo: null,
       reason: 'already_assigned',
+      movedGroup: false,
     });
     expect(await ticketRow(ticket.id)).toMatchObject({ assignee: bob, accountable: nayera });
   });
@@ -248,7 +249,7 @@ describe('assignConversation on a ticket whose WhatsApp number has an owner', ()
 
     const outcome = await assignConversation(ticket.id);
 
-    expect(outcome).toEqual({ assignedTo: omar, reason: null });
+    expect(outcome).toEqual({ assignedTo: omar, reason: null, movedGroup: false });
     expect(await ticketRow(ticket.id)).toMatchObject({ assignee: omar, accountable: nayera });
     expect((await eventsOf(ticket.id, ['assigned']))[0]!.data).toEqual({
       to: omar,

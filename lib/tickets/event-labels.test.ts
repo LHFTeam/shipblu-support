@@ -108,13 +108,28 @@ describe('describeEvent', () => {
     );
   });
 
-  it('names the policy a ticket is held to once its category or group chose it', () => {
+  it('names the policy a ticket is held to, and the change that chose it again', () => {
     expect(
       describeEvent('sla_recalculated', { reason: 'policy', cause: 'category', policy: 'Sales' }),
-    ).toBe('held the ticket to the Sales SLA policy, which matches its category now');
+    ).toBe('held the ticket to the Sales SLA policy after its category changed');
     expect(
-      describeEvent('sla_recalculated', { reason: 'policy', cause: 'group', policy: 'Merchant' }),
-    ).toBe('held the ticket to the Merchant SLA policy, which matches its group now');
+      describeEvent('sla_recalculated', {
+        reason: 'policy',
+        cause: 'group',
+        policy: 'Merchant',
+        previousPolicy: 'Standard',
+      }),
+    ).toBe('moved the ticket from the Standard to the Merchant SLA policy after its group changed');
+    // The default catching a ticket no other policy names is not "matching" its
+    // category, so the sentence never says it does.
+    expect(
+      describeEvent('sla_recalculated', {
+        reason: 'policy',
+        cause: 'category',
+        policy: 'Standard',
+        previousPolicy: 'Sales',
+      }),
+    ).not.toMatch(/matches/);
   });
 
   it('names why the due dates moved', () => {

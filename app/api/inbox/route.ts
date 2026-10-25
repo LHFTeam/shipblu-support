@@ -1,6 +1,6 @@
 import { getSessionAgent } from '@/lib/auth/session';
 import { listInbox } from '@/lib/tickets/inbox';
-import { parseFilters, parseInboxCursor } from '@/lib/tickets/inbox-filters';
+import { parseFilters, parseInboxCursor, queryParams } from '@/lib/tickets/inbox-filters';
 
 export const dynamic = 'force-dynamic';
 
@@ -30,7 +30,8 @@ export async function GET(request: Request) {
   // the agent is already looking at.
   if (!cursor) return new Response('a valid cursor is required', { status: 400 });
 
-  const filters = parseFilters(Object.fromEntries(searchParams));
+  // Every value of a repeated key, as the page is given them (`queryParams`).
+  const filters = parseFilters(queryParams(searchParams));
   const { rows, nextCursor } = await listInbox(agent, filters, cursor);
 
   return Response.json({ rows, nextCursor });

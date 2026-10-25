@@ -17,6 +17,7 @@ import { setConversationCategory } from '@/lib/categories/write';
 import { onGroupChanged, onPriorityChanged, reselectPolicyBeforeFirstResponse } from '@/lib/sla';
 import { afterTicketUpdate } from '@/lib/tickets/lifecycle';
 import { CHANGE_STAMP } from '@/lib/tickets/change-stamp';
+import { moveToGroupIfElsewhere } from '@/lib/tickets/move-group';
 import { isBlank } from '@/lib/tickets/custom-fields';
 import { parseFieldValue } from '@/lib/tickets/custom-fields-parse';
 import { getTicketField } from '@/lib/tickets/lookups';
@@ -135,8 +136,10 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
         if (!group) return { error: 'Unknown group' };
       }
 
-      await db.transaction(async (tx) => {
-        await tx.update(conversations).set({ groupId }).where(eq(conversations.id, conversationId));
+      const moved = await db.transaction(async (tx) => {
+        // Only a move: a page drawn before somebody else moved the ticket can
+        // post the group it is already in (`moveToGroupIfElsewhere`).
+        if (!(await moveToGroupIfElsewhere(conversationId, groupId, tx))) return false;
 
         // Recorded, where it was not before. Moving a ticket between teams is
         // the same weight of decision as reassigning it and the case above has
@@ -148,7 +151,9 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
           actorAgentId: agent.id,
           data: { to: groupId },
         });
+        return true;
       });
+      if (!moved) break;
 
       // Before anybody has answered, the policy itself may follow the new team
       // (a policy can be keyed on the group); after, it holds. Either way the
