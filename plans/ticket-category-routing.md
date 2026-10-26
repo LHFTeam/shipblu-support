@@ -84,7 +84,7 @@ update.
 | 2.B   | Merged: #403 (`1d21cdc`), then `dev` → `main` in #413 (`516c8ff`) and #415 (`48cb284`). As built below                                      | **Done.** All six services live on `48cb284` by 06:01 UTC on 2026-10-25, web first, with nothing suspended. Its checks read clean, and a new message was subcategorised; one read left (below)                            |
 | 3.1   | Merged: #419 (`ff3bbfd`), then `dev` → `main` in #420 (`b9a4743`), which also carried #411, #416, #417 and #418. As built below             | **Done.** Web live on `b9a4743` at 19:44 UTC on 2026-10-25, the worker and the four crons by 08:05 UTC on 2026-10-26, and the four categories seeded at 08:13. Its checks read clean (below); the signed-in ones are left |
 | 3.2   | Not started. Mapped from the code on 2026-10-26: [3.2, how to build it](#32-how-to-build-it)                                                | —                                                                                                                                                                                                                         |
-| 4.0   | In review from `claude/jolly-noether-hxhez1-stage-4-0`, built from `dev` at `d05c131`: [4.0, as built](#40-as-built)                        | —                                                                                                                                                                                                                         |
+| 4.0   | In review: #425 (`claude/jolly-noether-hxhez1-stage-4-0`), built from `dev` at `d05c131`: [4.0, as built](#40-as-built)                     | —                                                                                                                                                                                                                         |
 | 4.1–6 | Not started. 4.1 comes once 4.0 is merged                                                                                                   | —                                                                                                                                                                                                                         |
 
 **3.1's deploy and checks, read on Render and production on 2026-10-25 and
@@ -369,8 +369,8 @@ Every production write needs the user's go-ahead for that step, and the
    is next. It is mapped, with a default taken for every question the map
    raised: [3.2, how to build it](#32-how-to-build-it). Nothing is written yet,
    and no branch holds 3.2 work. **Stage 4.0**, `afterRoutingChanged`, is built
-   independently of it and in review: [4.0, as built](#40-as-built). Jev (4.1)
-   becomes a writer once 4.0 is merged.
+   independently of it and in review as #425: [4.0, as built](#40-as-built).
+   Jev (4.1) becomes a writer once 4.0 is merged.
 6. **Before Stage 5**, a person does 0.2's reorder and 0.6's staffing, and the
    support lead answers the questions still open (below).
 
