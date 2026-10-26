@@ -3439,10 +3439,16 @@ holds beyond the map, and where it departs from it:
   the save leaves the same rows as "save, then retire". A ticket's
   `category_changed` would date the category after the retire, which is why
   `createTicket` holds it.
-- **Two races are left for a decision** (#424's review):
-  - an agent's pick retired between the action's check and `createTicket`,
-    which opens the ticket with no category;
-  - the chooser's "Form default" label going stale while the page is open.
+- **Two races are left as they are**, the user's decision on #424's review,
+  while production holds no forms:
+  - an agent's pick retired between the action's check and `createTicket`
+    opens the ticket with no category, which the agent sees on the ticket the
+    redirect lands on. Refusing instead would roll the ticket back after
+    `resolveContact` has already written a contact;
+  - the chooser's "Form default" label can go stale while the page is open. An
+    untouched chooser takes the default the form holds at submit, credited to
+    the form. A hidden field with the rendered default, refused when it
+    differs, is about twenty lines if forms come into use.
 
 **Not verified in a browser:** that Next keeps the page's client state across
 `?form=` links. The map read it from Next 16.3.1's source, and the test above
