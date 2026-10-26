@@ -124,8 +124,11 @@ export const conversations = pgTable(
      * nothing writing it writes `requester_kind`.
      *
      * Every writer writes it and a `category_changed` event in one
-     * transaction, the event stamped with `CHANGE_STAMP`, and before the first
-     * response re-selects the SLA policy (`afterRoutingChanged`).
+     * transaction, the event stamped with `CHANGE_STAMP`. On a ticket that
+     * exists that is `setConversationCategory`, followed before the first
+     * response by a re-selection of the SLA policy (`afterRoutingChanged`); at
+     * creation it is `createTicket`, in its insert, which needs none because
+     * the first selection reads it.
      * `restrict`: a category is retired, never deleted.
      */
     categoryId: uuid('category_id').references(() => ticketCategories.id, {

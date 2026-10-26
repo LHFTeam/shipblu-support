@@ -16,6 +16,7 @@ import {
 import { runAutomations } from '@/lib/automations';
 import { setConversationCategory } from '@/lib/categories/write';
 import { forgetHoursCatalog } from '@/lib/hours/catalog';
+import { createTicket } from '@/lib/portal/tickets';
 import { withCleanDatabase } from '@/lib/testing/db';
 import {
   afterRoutingChanged,
@@ -32,7 +33,8 @@ import {
  * that the clocks are counted from the ticket's own anchors with its finished
  * pauses credited, that a ticket nobody gave a clock gets one, and that the
  * category writer and the automation engine both reach it — and that an
- * `on_create` rule leaves the choice to `applySlaOnCreate`.
+ * `on_create` rule, or `createTicket` filing the category in its insert, leaves
+ * the choice to `applySlaOnCreate`.
  */
 
 withCleanDatabase();
@@ -134,6 +136,28 @@ async function events(id: string, type: string) {
 }
 
 const at = (from: Date, minutes: number) => new Date(from.getTime() + minutes * MINUTE);
+
+/**
+ * A ticket opened through `createTicket` with a category, credited to a form
+ * as its default is: the one writer that files the category in the insert, so
+ * everything `afterInboundMessage` runs on creation reads it from the row.
+ */
+async function opened(categoryId: string) {
+  const [contact] = await db
+    .insert(contacts)
+    .values({ name: 'Amira' })
+    .returning({ id: contacts.id });
+  const { conversationId } = await createTicket(contact!.id, {
+    subject: 'Rates',
+    body: 'How much to ship 200 parcels a month?',
+    category: { id: categoryId, chosenBy: { label: 'form:x' } },
+  });
+  const [row] = await db
+    .select({ categoryId: conversations.categoryId, createdAt: conversations.createdAt })
+    .from(conversations)
+    .where(eq(conversations.id, conversationId));
+  return { id: conversationId, ...row! };
+}
 
 describe('reselectPolicyBeforeFirstResponse', () => {
   it('holds a ticket filed under a category to that category’s policy, from its arrival', async () => {
@@ -518,6 +542,83 @@ describe('the automation engine', () => {
 
     expect((await sla(row!.id)).slaPolicyId).toBe(sales);
     expect(await events(row!.id, 'sla_recalculated')).toEqual([]);
+  });
+
+  // The same reading, for a category a form or the console's chooser files at
+  // creation. Written after `createTicket` returned, it would reach the first
+  // selection too late, and the re-selection that then caught up would record
+  // a move off a policy the ticket held for a second; in the insert, the first
+  // selection is the only one.
+  it('chooses the policy for a category a ticket is created with at the first selection', async () => {
+    const { sales } = await policies();
+    const salesId = await categoryId('sales');
+
+    const { id, createdAt } = await opened(salesId);
+
+    expect(await sla(id)).toMatchObject({
+      slaPolicyId: sales,
+      firstResponseDueAt: at(createdAt, 30),
+      resolutionDueAt: at(createdAt, 240),
+    });
+    expect(await events(id, 'sla_recalculated')).toEqual([]);
+    expect(await events(id, 'category_changed')).toEqual([
+      {
+        actorAgentId: null,
+        actorLabel: 'form:x',
+        data: { from: null, to: salesId, key: 'sales', label: 'Sales' },
+      },
+    ]);
+  });
+
+  // "Defaults, not overrides" (`NewTicket`): an on_create rule still has the
+  // last word over the category a form filed, and the policy is the rule's.
+  // Keyed on the category the ticket was created with, so the rule firing at
+  // all is the on_create facts reading the insert — one written after
+  // `createTicket` returned would leave this ticket on Sales.
+  it('lets an on_create rule re-file a ticket created with a category, and the policy follows the rule', async () => {
+    await policies();
+    const salesId = await categoryId('sales');
+    const merchantId = await categoryId('merchant_support');
+    const [merchant] = await db
+      .insert(slaPolicies)
+      .values({
+        name: 'Merchant support',
+        hoursSource: 'round_the_clock',
+        targets: target(45, 300),
+        position: 0,
+        conditions: { field: 'category.id', op: 'eq', value: merchantId },
+      })
+      .returning({ id: slaPolicies.id });
+    await db.insert(automationRules).values({
+      name: 'Sales enquiries are merchant support',
+      trigger: 'on_create',
+      conditions: { field: 'category.id', op: 'eq', value: salesId },
+      actions: [{ type: 'set_category', categoryId: merchantId }],
+    });
+
+    const { id, categoryId: filed, createdAt } = await opened(salesId);
+
+    expect(filed).toBe(merchantId);
+    expect(await sla(id)).toMatchObject({
+      slaPolicyId: merchant!.id,
+      firstResponseDueAt: at(createdAt, 45),
+      resolutionDueAt: at(createdAt, 300),
+    });
+    expect(await events(id, 'sla_recalculated')).toEqual([]);
+    // Two lines, each crediting whoever made it: the form's default at
+    // creation, then the rule's change from it.
+    expect(await events(id, 'category_changed')).toEqual([
+      {
+        actorAgentId: null,
+        actorLabel: 'form:x',
+        data: { from: null, to: salesId, key: 'sales', label: 'Sales' },
+      },
+      {
+        actorAgentId: null,
+        actorLabel: 'automation:Sales enquiries are merchant support',
+        data: { from: salesId, to: merchantId, key: 'merchant_support', label: 'Merchant support' },
+      },
+    ]);
   });
 
   // A rule naming the group a ticket is already in matches on every pass. Once

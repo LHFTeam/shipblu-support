@@ -20,6 +20,13 @@ export function toCategoryChoices(rows: readonly CategoryChoice[]): CategoryChoi
 }
 
 /**
+ * The console New form's value for "no category" over a form that has a
+ * default — beside the empty value, which leaves the form's default to apply.
+ * Here so the chooser and the action that reads it share one spelling.
+ */
+export const NO_CATEGORY = 'none';
+
+/**
  * A category's name as anything outside its own admin page draws it: marked
  * when it has been retired, so a ticket or a rule still holding one says so
  * rather than reading as a live choice.

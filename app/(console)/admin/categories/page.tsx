@@ -9,10 +9,11 @@ export const dynamic = 'force-dynamic';
 /**
  * Ticket categories: which team's work a ticket is.
  *
- * One per ticket, set by an agent or a rule — beside the subcategories, which
- * say what a ticket is about and can be several. A category is a routing label,
- * never a statement about who the customer is, so nothing here touches
- * `requester_kind` (`plans/ticket-category-routing.md`, decision 3).
+ * One per ticket, set by an agent, a rule or a form's default — beside the
+ * subcategories, which say what a ticket is about and can be several. A
+ * category is a routing label, never a statement about who the customer is, so
+ * nothing here touches `requester_kind` (`plans/ticket-category-routing.md`,
+ * decision 3).
  *
  * The route group is chosen here once and then acted on with nobody watching:
  * from Stage 5 a channel that routes by category sends each fresh ticket to it.
@@ -40,7 +41,7 @@ export default async function CategoriesPage() {
     <>
       <PageHeader
         title="Categories"
-        description="Which team's work a ticket is: one per ticket, set by an agent or a rule. It says which team answers, not who the customer is. Once a channel routes by category, a new ticket goes to its category's route group. Categories are retired, never deleted, and a key never changes once created."
+        description="Which team's work a ticket is: one per ticket, set by an agent, a rule or a form's default. It says which team answers, not who the customer is. Once a channel routes by category, a new ticket goes to its category's route group. Categories are retired, never deleted, and a key never changes once created."
         actions={<NewCategory routeGroups={routeGroups} nextPosition={nextPosition} />}
       />
 

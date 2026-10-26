@@ -1,6 +1,9 @@
 import Link from 'next/link';
 import { Card, EmptyState, PageHeader } from '@/components/ui';
 import { requirePermission } from '@/lib/auth/guard';
+import { can } from '@/lib/auth/permissions';
+import { toCategoryChoices } from '@/lib/categories/choices';
+import { listCategories } from '@/lib/categories/queries';
 import { elementsFor } from '@/lib/forms/elements';
 import { formDescription, formName, getFormBySlug, listForms } from '@/lib/forms/queries';
 import { ConsoleTicketForm } from './form';
@@ -22,10 +25,17 @@ export default async function NewTicketPage({
 }: {
   searchParams: Promise<{ form?: string }>;
 }) {
-  await requirePermission('ticket.create');
+  const agent = await requirePermission('ticket.create');
 
   const query = await searchParams;
-  const forms = await listForms('console');
+  // The chooser is drawn only for an agent who may set a category — the same
+  // permission as the ticket's own select — and the action refuses a value
+  // from anybody else, so hiding it is not the only thing standing in the way.
+  // The registry is read beside the forms, since neither waits on the other.
+  const [forms, categoryRows] = await Promise.all([
+    listForms('console'),
+    can(agent, 'ticket.set_category') ? listCategories() : null,
+  ]);
 
   if (forms.length === 0) {
     return (
@@ -61,6 +71,13 @@ export default async function NewTicketPage({
   const elements = elementsFor(form.elements, { audience: 'agent', anonymous: false }, fields);
   const description = formDescription(form, 'en');
 
+  const categories = categoryRows ? toCategoryChoices(categoryRows) : null;
+  // Named only while active: creation leaves a retired default off, so the
+  // chooser must not promise it.
+  const defaultCategory =
+    categories?.find((category) => category.id === form.defaultCategoryId && category.isActive) ??
+    null;
+
   return (
     <div className="app-scroll relative h-full overflow-y-auto p-4 sm:p-6">
       <div className="mx-auto w-full max-w-2xl">
@@ -87,6 +104,8 @@ export default async function NewTicketPage({
             elements={elements}
             fields={fields}
             defaultPriority={form.defaultPriority}
+            categories={categories}
+            defaultCategoryLabel={defaultCategory?.labelEn ?? null}
           />
         </Card>
       </div>

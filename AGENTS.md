@@ -1158,6 +1158,23 @@ Three rules hold, and each closes something a request could otherwise do:
   claimed address and the client address, and the console badges it. Do not
   "improve" this by writing a display name onto an existing contact.
 
+**A form's defaults are read when the ticket is created, and never again.**
+`createTicket` writes the default priority and the default category inside the
+transaction that opens the ticket, each with its event crediting `form:<slug>`
+when the form applied it, and nothing reads them back off the form afterwards.
+The two differ on the console: a form that places the priority question seeds
+it with the default and posts it back, so an agent who leaves it alone is
+credited with it, where the category chooser is never seeded and an untouched
+one is the form's. Priority learned why first: a default that wrote no event
+could be recognised only by reading the form as it is _now_, so a default an
+admin added later claimed every ticket the form had ever filed. The category
+adds a second reason to be in that transaction rather than after it: the
+on-create rules, the first policy selection and assignment's skill match all
+read the row before `createTicket` returns. A default retired since is left
+off, with a warning in the log, and the ticket still opens — a customer's ticket
+is never refused over an admin's retire. An agent choosing a category on the
+console's New form instead is under **The ticket category**, below.
+
 Files ride in the server action's multipart body; there is deliberately no
 upload endpoint, because on an open form that is an unauthenticated write to the
 storage bucket. They go through the same gate as every other answer — read only
@@ -1234,44 +1251,56 @@ ticket. Five rules hold:
   a category writes `requester_kind`, and the starter descriptions in
   `lib/categories/registry.ts` speak about what a message asks for.
 - **Every writer writes the column and a `category_changed` event in one
-  transaction**, the ticket's row locked first and the event stamped with
-  `CHANGE_STAMP` (`lib/tickets/change-stamp.ts`, priority's stamp generalised), so
-  the timeline orders two writers the way the column was written — which Jev's
-  ownership rule (Stage 4) reads to decide whether a person has answered for a
-  ticket. The console and the `set_category` action go through
-  `setConversationCategory` (`lib/categories/write.ts`), which writes nothing when
-  the value is unchanged, refuses a retired category, and stores the key and
-  label at the change so a renamed category still reads as what was chosen.
+  transaction**, the ticket's row locked first where it already exists and the
+  event stamped with `CHANGE_STAMP` (`lib/tickets/change-stamp.ts`, priority's
+  stamp generalised), so the timeline orders two writers the way the column was
+  written — which Jev's ownership rule (Stage 4) reads to decide whether a
+  person has answered for a ticket. The console and the `set_category` action
+  go through `setConversationCategory` (`lib/categories/write.ts`), which writes
+  nothing when the value is unchanged, refuses a retired category, and stores
+  the key and label at the change so a renamed category still reads as what was
+  chosen.
+  `createTicket` is the other writer, at creation: the column in its insert and
+  the event beside it, for the reason under **Ticket forms**. It cannot call
+  `setConversationCategory`, whose own transaction cannot see the uncommitted
+  row, so the two share halves instead — `holdCategory`, the registry read,
+  share-locked because the foreign key's key-share lock does not make a retire
+  wait, and `categoryChangedEvent`, the event's values — and cannot drift apart.
+  Where the first refuses a retired category, `createTicket` leaves it off and
+  opens the ticket.
 - **Before the first response the SLA policy follows the category and the
   group.** `reselectPolicyBeforeFirstResponse` (`lib/sla/index.ts`) chooses the
-  policy again after every category write commits — the backfill of Stage 4
-  excepted — and after every group move that can come before an answer: the
-  console's group case, `assign_group`, and a grouped `auto_assign` that moved.
-  A move is one that changed the group — `moveToGroupIfElsewhere`
-  (`lib/tickets/move-group.ts`), `movedGroup` off `assignConversation` —
-  because a rule naming the group a ticket is in matches on every pass, and a
-  second look owed for nothing takes up a raised priority as though the group
-  had moved. An `on_create` pass leaves it to `applySlaOnCreate`, which runs
-  after it and reads the category itself. It counts each clock from its own
-  anchor with the finished pauses credited, so it can give clocks to a ticket
-  that had none, and it does nothing once somebody has answered, on a resolved,
-  closed, deleted, spam or merged ticket, when the same policy wins, or when
-  none does. A writer reaches it through `afterRoutingChanged`, the one entry
-  point, which re-selects and then calls `onGroupChanged`, so a move that
+  policy again after every category write on a ticket that exists commits — the
+  backfill of Stage 4 excepted — and after every group move that can come before
+  an answer: the console's group case, `assign_group`, and a grouped
+  `auto_assign` that moved. A move is one that changed the group —
+  `moveToGroupIfElsewhere` (`lib/tickets/move-group.ts`), `movedGroup` off
+  `assignConversation` — because a rule naming the group a ticket is in matches
+  on every pass, and a second look owed for nothing takes up a raised priority
+  as though the group had moved. An `on_create` pass and `createTicket` leave it
+  to `applySlaOnCreate`, which runs after both and reads the category itself, so
+  a category-keyed policy is the first one chosen and no `sla_recalculated`
+  describes a change nothing made. The re-selection counts each clock from its
+  own anchor with the finished pauses credited, so it can give clocks to a
+  ticket that had none, and it does nothing once somebody has answered, on a
+  resolved, closed, deleted, spam or merged ticket, when the same policy wins,
+  or when none does. A writer reaches it through `afterRoutingChanged`, the one
+  entry point, which re-selects and then calls `onGroupChanged`, so a move that
   changes the policy is re-timed once and the order cannot be taken the wrong
   way round. It takes what the writers answer — whether the category changed,
   whether the group moved — and is called once the whole change is over: by the
-  console's group and category cases, by the engine once its pass is over (so
-  a rule that files a ticket and another that moves it choose one policy
-  between them), and by Jev from 4.1 and the router from Stage 5. Never from
-  inside a writer, which would choose once per action. The `routing-result` repo rule
+  console's group and category cases, by the engine once its pass is over (so a
+  rule that files a ticket and another that moves it choose one policy between
+  them), and by Jev from 4.1 and the router from Stage 5. Never from inside a
+  writer, which would choose once per action. The `routing-result` repo rule
   refuses a `setConversationCategory` or `moveToGroupIfElsewhere` call, or an
   `assignConversation` handed a group, whose answer is dropped, since that
   answer is the only thing saying a follow-up is owed. `onGroupChanged` and
   `onPriorityChanged` still never re-select. Because a ticket can now change
   policy after a breach, an escalation is keyed per policy
   (`settlesEscalation` in `worker/handlers/sla-sweep.ts`).
-- **Retired, never deleted, and the key never changes.** The foreign key is
+- **Retired, never deleted, and the key never changes.** Both foreign keys —
+  the ticket's and a form's default (`ticket_forms.default_category_id`) — are
   `restrict`; `ticket_categories_key_format` holds the key to lowercase words
   joined by underscores and refuses `unknown`, which Jev answers for "none of
   these". A rule's fact is `category.id`, the uuid off the row as `group.id` is,
@@ -1288,6 +1317,19 @@ ticket. Five rules hold:
 edit alone; production runs it by hand, since deploys run only `db:migrate`.
 `ticket.set_category` gates changing it (every agent holds it), and
 `admin.categories` the list on `/admin/categories`.
+
+The same permission gates the Category chooser on the console's New form: drawn
+only for an agent who holds it, and refused by the action from anybody else.
+The chooser is never seeded with the form's default. Left alone it posts an
+empty value, and `submitForm` applies the default as it reads the form at submit,
+credited to the form — an untouched default is no person's judgement, and from
+Stage 4 only a person's `category_changed` is ground truth for Jev. Seeded, it
+would post the default back as the agent's choice, and a stale one if an admin
+changed it in between. An agent's pick is credited to the agent, and `none`
+over a default writes no column and no event, since `to: null` would read
+"cleared the category" on a ticket that never had one. Only the agent variant
+of `Requester` carries a choice, so a help-centre POST cannot name a category
+however it is written: from Stage 4 a chosen category is one Jev leaves alone.
 
 **The one AI provider, and the three things it is allowed to touch.**
 `lib/typesafe/` calls TypeSafe's System One endpoint, and three modules ask it a
