@@ -2,7 +2,7 @@ import { eq } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { ticketCategories, ticketForms } from '@/db/schema';
 import { NO_CATEGORY } from '@/lib/categories/choices';
-import { isUuid } from '@/lib/http/uuid';
+import { canonicalUuid } from '@/lib/http/uuid';
 
 /**
  * The two places a person names a category for a ticket a form opens: an
@@ -45,8 +45,11 @@ export async function formDefaultCategoryRefusal(
   categoryId: string | null,
 ): Promise<string | null> {
   if (!categoryId) return null;
+  // Lower-cased so the comparison below agrees with the column's spelling.
+  const id = canonicalUuid(categoryId);
+  if (!id) return UNKNOWN;
 
-  const state = await categoryState(categoryId);
+  const state = await categoryState(id);
   if (!state) return UNKNOWN;
   if (state === 'active') return null;
 
@@ -56,7 +59,7 @@ export async function formDefaultCategoryRefusal(
     .from(ticketForms)
     .where(eq(ticketForms.id, formId))
     .limit(1);
-  return form?.defaultCategoryId === categoryId ? null : RETIRED;
+  return form?.defaultCategoryId === id ? null : RETIRED;
 }
 
 /**
@@ -80,10 +83,11 @@ export async function consoleCategoryChoice(
   if (!raw) return { categoryId: undefined };
   if (!canSet) return { error: "You cannot set a ticket's category" };
   if (raw === NO_CATEGORY) return { categoryId: null };
-  if (!isUuid(raw)) return { error: UNKNOWN };
+  const id = canonicalUuid(raw);
+  if (!id) return { error: UNKNOWN };
 
-  const state = await categoryState(raw);
+  const state = await categoryState(id);
   if (!state) return { error: UNKNOWN };
   if (state === 'retired') return { error: RETIRED };
-  return { categoryId: raw };
+  return { categoryId: id };
 }

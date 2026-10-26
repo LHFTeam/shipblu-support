@@ -273,7 +273,7 @@ export async function createTicket(contactId: string, input: NewTicket): Promise
         // `undefined` rather than null where the caller has no opinion, so
         // Drizzle omits the column and the schema default applies.
         priority: input.priority ?? undefined,
-        categoryId: category ? input.category!.id : null,
+        categoryId: category?.id ?? null,
         type: input.type ?? null,
         tags: input.tags ?? [],
         // Parsed and required-checked by the action before it gets here, against
@@ -321,7 +321,7 @@ export async function createTicket(contactId: string, input: NewTicket): Promise
         .values(
           categoryChangedEvent(
             row.id,
-            { from: null, to: input.category!.id, category },
+            { from: null, to: category.id, category },
             input.category!.chosenBy,
           ),
         );

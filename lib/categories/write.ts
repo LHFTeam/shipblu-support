@@ -1,6 +1,7 @@
 import { eq } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { conversationEvents, conversations, ticketCategories } from '@/db/schema';
+import { canonicalUuid } from '@/lib/http/uuid';
 import { CHANGE_STAMP } from '@/lib/tickets/change-stamp';
 
 /**
@@ -16,8 +17,12 @@ export type CategoryWrite =
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
-/** What a `category_changed` event freezes about the category it names. */
-type HeldCategory = { key: string; labelEn: string };
+/**
+ * A category a writer may set, with what its `category_changed` freezes about
+ * it — and its id as Postgres spells it back, which is the one the writer
+ * stores, in the column and in the event alike.
+ */
+type HeldCategory = { id: string; key: string; labelEn: string };
 
 /**
  * Share-locks a category for the rest of the transaction, or says why it may
@@ -25,6 +30,14 @@ type HeldCategory = { key: string; labelEn: string };
  * retiring it meanwhile waits for this write rather than landing between the
  * check and it — the foreign key's own lock is a key-share, which a retire does
  * not wait for.
+ *
+ * The id comes back lower-cased. Postgres reads `0B6F…` and `0b6f…` as one
+ * uuid and stores the column lower-case whatever it was handed, but the event's
+ * `data.to` is jsonb, kept as written — so an id typed in upper case into a
+ * hand-made POST would leave the event naming a spelling the column does not,
+ * and from Stage 4 Jev's ownership rule reads one against the other. Not a uuid
+ * at all is no category, rather than Postgres's 22P02 out of the transaction
+ * that opens a customer's ticket.
  *
  * One of the two halves both category writers share — `setConversationCategory`
  * and `createTicket`, which writes the column in its insert because a category
@@ -35,6 +48,8 @@ export async function holdCategory(
   tx: Tx,
   categoryId: string,
 ): Promise<HeldCategory | 'unknown_category' | 'retired_category'> {
+  const id = canonicalUuid(categoryId);
+  if (!id) return 'unknown_category';
   const [found] = await tx
     .select({
       key: ticketCategories.key,
@@ -42,11 +57,11 @@ export async function holdCategory(
       isActive: ticketCategories.isActive,
     })
     .from(ticketCategories)
-    .where(eq(ticketCategories.id, categoryId))
+    .where(eq(ticketCategories.id, id))
     .for('share');
   if (!found) return 'unknown_category';
   if (!found.isActive) return 'retired_category';
-  return { key: found.key, labelEn: found.labelEn };
+  return { id, key: found.key, labelEn: found.labelEn };
 }
 
 /**
@@ -113,7 +128,10 @@ export async function setConversationCategory(
       .where(eq(conversations.id, conversationId))
       .for('update');
     if (!ticket) return { outcome: 'no_ticket' };
-    if (ticket.categoryId === categoryId) return { outcome: 'unchanged' };
+    // Compared in the column's spelling, so asking in upper case for what the
+    // ticket already carries is still nothing to write.
+    const wanted = categoryId === null ? null : (canonicalUuid(categoryId) ?? categoryId);
+    if (ticket.categoryId === wanted) return { outcome: 'unchanged' };
 
     let category: HeldCategory | null = null;
     if (categoryId) {
@@ -121,19 +139,19 @@ export async function setConversationCategory(
       if (typeof held === 'string') return { outcome: held };
       category = held;
     }
+    const to = category?.id ?? null;
 
-    await tx.update(conversations).set({ categoryId }).where(eq(conversations.id, conversationId));
+    await tx
+      .update(conversations)
+      .set({ categoryId: to })
+      .where(eq(conversations.id, conversationId));
 
     await tx
       .insert(conversationEvents)
       .values(
-        categoryChangedEvent(
-          conversationId,
-          { from: ticket.categoryId, to: categoryId, category },
-          actor,
-        ),
+        categoryChangedEvent(conversationId, { from: ticket.categoryId, to, category }, actor),
       );
 
-    return { outcome: 'changed', from: ticket.categoryId, to: categoryId };
+    return { outcome: 'changed', from: ticket.categoryId, to };
   });
 }
