@@ -1170,10 +1170,10 @@ could be recognised only by reading the form as it is _now_, so a default an
 admin added later claimed every ticket the form had ever filed. The category
 adds a second reason to be in that transaction rather than after it: the
 on-create rules, the first policy selection and assignment's skill match all
-read the row before `createTicket` returns. A default retired since is left off, with a warning in the log, and the
-ticket still opens — a customer's ticket is never refused over an admin's
-retire. An agent choosing a category on the console's New form instead is under
-**The ticket category**, below.
+read the row before `createTicket` returns. A default retired since is left
+off, with a warning in the log, and the ticket still opens — a customer's ticket
+is never refused over an admin's retire. An agent choosing a category on the
+console's New form instead is under **The ticket category**, below.
 
 Files ride in the server action's multipart body; there is deliberately no
 upload endpoint, because on an open form that is an unauthenticated write to the
