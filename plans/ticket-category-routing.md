@@ -3086,8 +3086,11 @@ beyond one column.
 
 #### 3.2, how to build it
 
-Mapped from the code on 2026-10-26, against `dev` at `992286c`. Nothing has
-been written yet. Every line number below was read then; re-read the file
+Mapped from the code on 2026-10-26, against `dev` at `992286c`, by four
+readers and a critic that checked them against the code. The critic's
+corrections are folded in: assignment's skill match reads the category, the
+console chooser is not a copy of priority, and the action writes a contact
+before it can refuse. Nothing has been written yet. Every line number below was read then; re-read the file
 before you edit it.
 
 The defaults below are recommendations. They answer the questions the map
@@ -3103,9 +3106,13 @@ own transaction.** Everything else follows from it.
     category job;
   - `afterInboundMessage(…, true, …)`, which runs the `on_create` rules, then
     `applySlaOnCreate`, then auto-assignment (`lib/tickets/lifecycle.ts:73-78`).
-- So a category written after it returns arrives too late, three ways:
+- So a category written after it returns arrives too late, four ways:
   - the `on_create` rules miss it;
   - the first policy selection misses it;
+  - auto-assignment's skill match misses it. `routeAndPick` matches skills on
+    `conversationFacts`, which carries `category.id`
+    (`lib/assignment/index.ts:258-269`), and the Skills page offers it. A later
+    re-selection would fix the SLA, never the assignment;
   - from Stage 4, Jev could act first.
 
   This is the lesson `NewTicket.openedBy`'s comment records. `submitForm`'s
@@ -3126,7 +3133,12 @@ own transaction.** Everything else follows from it.
     - the actor: `actorAgentId`, or `actorLabel: 'form:<slug>'`.
   - Share one helper with `write.ts` for the registry read and the event's
     values, so the two writers cannot drift. A `tx`-taking function that
-    `setConversationCategory` wraps is the cleanest.
+    `setConversationCategory` wraps is the cleanest, with one trap: its
+    `ticket.categoryId === categoryId` check (`write.ts:55`) answers
+    `unchanged` and writes no event. So either insert the row with a null
+    category and let the shared writer update it in the same transaction
+    (which sees its own row), or share only the registry read and the event
+    values.
   - `write.ts`'s existing tests must pass unchanged
     (`reselect-policy.db.test.ts` "skips a retired category", "writes nothing
     when…", "refuses a category that is gone or retired").
@@ -3159,9 +3171,14 @@ own transaction.** Everything else follows from it.
   exactly that. The docstring gives `openedBy`'s reason. In `createTicket`,
   write as above. A retired or missing category is dropped: null column, no
   event, and a `log.warn`, like the engine's skip at
-  `lib/automations/index.ts:274-278`. A customer's ticket is never refused
-  over an admin's retire. No category means no event:
-  `tickets.db.test.ts:155-159` pins the bare event list.
+  `lib/automations/index.ts:274-278`. The module has no `logger` yet; add one
+  from `lib/log.ts`, since a bare `console` fails lint. A customer's ticket is
+  never refused over an admin's retire, so `createTicket` never refuses at all.
+  That also keeps `SubmitResult` as it is: its two `switch`es, in the console
+  action (`:61-76`) and the help centre's (`forms/actions.ts:70-88`), have no
+  default, and a new reason would need a case in each and a translated key in
+  the second. No category means no event: `tickets.db.test.ts:155-159` pins
+  the bare event list.
 - **`lib/forms/queries.ts`.** Add `defaultCategoryId: string | null` to
   `FormRecord`. `load()` already spreads the whole row, so only the type
   changes.
@@ -3197,25 +3214,37 @@ own transaction.** Everything else follows from it.
 - **The console's new-ticket page.**
   - `page.tsx:25`: keep the agent `requirePermission('ticket.create')` returns.
     Only when `can(agent, 'ticket.set_category')`, read `listCategories()` and
-    pass `toCategoryChoices(...)` plus the form's default, preselected only
-    while it is active.
+    pass `toCategoryChoices(...)`, and the form's default category's label
+    while it is active, for the hint below.
   - Put `key={slug}` on `<ConsoleTicketForm>`. Next keeps the page's client
     state across `?form=` links, since the router cache key ignores search
-    params, so switching forms would carry the first form's default. Priority
-    has the same latent bug. This was read from Next's source, not seen in a
+    params, so switching forms would carry a category the agent picked on the
+    first form onto the second. Priority's seed has the same latent bug. This
+    was read from Next 16.3.1's source (`layout-router.js:549`), not seen in a
     browser; check it in one.
-  - `form.tsx` gets `<Select name="categoryId">`, "None" plus
-    `categoryOptions(categories, null)`, importing only
-    `@/lib/categories/choices`. Anything else reaches `db/client` and fails
-    `client-bundle`.
-  - The action (`actions.ts`) reads `uuidField(formData, 'categoryId')`. The
-    name stays outside `system.*` and `custom.*`, and making it a
-    `SYSTEM_KEYS` entry would trip `form-system-keys` and the visibility
-    machinery. It refuses a value from an agent without
-    `ticket.set_category`, with `ticket-actions.ts:203`'s sentence. It
-    re-reads the row: "Unknown category", or "That category has been retired —
-    choose another", as `ticket-actions.ts:211-213`. Then it passes the result
-    on the agent requester. Refusals return before any write, and success
+  - `form.tsx` gets `<Select name="categoryId">`, which is never seeded with
+    the form's default. It offers three kinds of value:
+    - `''` first, labelled with the default ("Form default: Sales", or "No
+      category" when the form has none);
+    - an explicit `none`, "No category", offered only when the form has a
+      default;
+    - then `categoryOptions(categories, null)`.
+
+    It imports only `@/lib/categories/choices`. Anything else reaches
+    `db/client` and fails `client-bundle`.
+
+  - The action (`actions.ts`) reads `categoryId`: `''` is untouched,
+    `none` is none, anything else goes through `uuidField`. The name stays
+    outside `system.*` and `custom.*`, and making it a `SYSTEM_KEYS` entry
+    would trip `form-system-keys` and the visibility machinery. It refuses a
+    value other than `''` from an agent without `ticket.set_category`, with
+    `ticket-actions.ts:203`'s sentence. It re-reads the row: "Unknown
+    category", or "That category has been retired — choose another", as
+    `ticket-actions.ts:211-213`. Then it passes the result on the agent
+    requester: `undefined` for untouched, `null` for none, or the id.
+  - **Every refusal comes before `resolveContact` (`actions.ts:43-47`).**
+    That inserts a contact and its identity for a new address before
+    `submitForm` runs, so a refusal after it leaves a contact behind. Success
     redirects, so `action-revalidates` holds.
   - The form keeps `<form {...form}>` from `useActionForm`.
 - **Retiring a category a form defaults to** is allowed, as for rules.
@@ -3228,14 +3257,21 @@ own transaction.** Everything else follows from it.
 
 **Decisions the map raised, with the default taken.**
 
-- **An untouched preselected default is credited to the form.** The console
-  agent submits the form's default unchanged, and the event is recorded as
-  `form:<slug>`, not the agent. The server compares the value posted with
-  `form.defaultCategoryId`. The reason is Stage 4.2: its ground truth is only a
-  `category_changed` with an agent, and an untouched default is not a person's
-  judgement. Priority credits the agent, because its select has no "none"; that
-  is not copied.
-  - A different value is credited to the agent.
+- **An untouched chooser is the form's default, credited to the form.** The
+  chooser posts `''` unless the agent changes it, and `submitForm` then takes
+  `form.defaultCategoryId` as it reads the form at submit, recorded as
+  `form:<slug>`.
+  - **Why credit the form.** Stage 4.2's ground truth is only a
+    `category_changed` with an agent, and an untouched default is not a
+    person's judgement.
+  - **Why the chooser is never seeded.** A chooser seeded with the default
+    would post it back as the agent's choice. It would also post a stale one
+    if an admin changed the default between render and submit.
+  - **Priority is not a precedent here.** Its select is drawn only when the
+    form places the `system.priority` question (`form.tsx:87-120, 198`), and
+    otherwise its default is credited to the form. A chooser outside the
+    element list is always posted.
+  - A category the agent picks is credited to the agent.
   - "None" over a default writes no column and no event. An event with
     `to: null` would read "cleared the category" on a ticket that never had
     one. `opened_by_agent` still marks the ticket owned, as decision 4 says.
@@ -3249,8 +3285,9 @@ own transaction.** Everything else follows from it.
   made here.
 - **A form's default group can differ from its category's route group.** The
   ticket stays in the form's group, because decision 5 never routes a
-  `createTicket` ticket. Only the policy and reports follow the category. A
-  warning on the forms page is optional.
+  `createTicket` ticket. The policy, a skill match at assignment and reports
+  follow the category; the group does not. A warning on the forms page is
+  optional.
 
 **Tests.**
 
@@ -3267,7 +3304,7 @@ own transaction.** Everything else follows from it.
   - help centre `session` and `anonymous` get the default as `form:<slug>`;
   - an agent's different choice is the agent's;
   - an untouched default is the form's;
-  - "None" writes nothing;
+  - an explicit `none` over a default writes nothing;
   - a `categoryId` posted to a help-centre submission is ignored;
   - a default added to a form after a ticket was filed leaves that ticket
     alone. Model it on `run.db.test.ts:530-556`.
@@ -3288,6 +3325,12 @@ own transaction.** Everything else follows from it.
 - **`lib/categories/admin.db.test.ts`.** Retiring a category a form names
   leaves the form holding it. Deleting it raises 23503, which proves
   `restrict`.
+- **`lib/assignment/index.db.test.ts`.** In a `matchSkills` group, a skill
+  conditioned on `category.id`: a ticket created with that category is offered
+  only to the skill's holders.
+- **The console action's refusals** (malformed, unknown, retired, no
+  `ticket.set_category`), from a `lib/` helper so a `*.db.test.ts` reaches
+  them. One case asserts that a refused submission creates no `contacts` row.
 
 **Docs in the same PR.**
 
@@ -3307,8 +3350,20 @@ own transaction.** Everything else follows from it.
   Each body must stay a fixed point of `normaliseArticleHtml(sanitiseArticleHtml())`
   and over 600 characters of text (`handbook.test.ts`).
 
-- **`reselectPolicyBeforeFirstResponse`'s docstring** (`lib/sla/index.ts:623-629`).
-  Say a category written at creation is read by `applySlaOnCreate`.
+- **Comments 3.2 makes untrue.** Each says every category writer re-selects,
+  or that `setConversationCategory` is the only writer:
+  - `reselectPolicyBeforeFirstResponse`'s docstring (`lib/sla/index.ts:623-629`).
+    A category written at creation is a second exception beside `on_create`,
+    read by `applySlaOnCreate`.
+  - `db/schema/conversations.ts:126-129`, on `category_id`.
+  - `lib/categories/write.ts:17-21`.
+  - `lib/tickets/change-stamp.ts:6-9`. It assumes an update holding the row
+    lock; say a creation-time event is stamped too. `createTicket`'s own
+    `priority_changed` is not stamped, so either stamp it or name the
+    exception.
+  - `lib/categories/admin.ts:20-23, 150-156`. Name
+    `ticket_forms.default_category_id` and what a form holding a retired
+    default does.
 
 **Deploying 3.2.**
 
