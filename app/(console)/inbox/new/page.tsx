@@ -97,11 +97,7 @@ export default async function NewTicketPage({
         ) : null}
 
         <Card>
-          {/* Keyed on the form: Next keeps a page's client state across
-              `?form=` links, so without it a category or a priority chosen on
-              one form was carried onto the next. */}
           <ConsoleTicketForm
-            key={slug}
             slug={slug}
             elements={elements}
             fields={fields}

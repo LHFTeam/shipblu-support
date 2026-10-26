@@ -1160,14 +1160,17 @@ Three rules hold, and each closes something a request could otherwise do:
 
 **A form's defaults are read when the ticket is created, and never again.**
 `createTicket` writes the default priority and the default category inside the
-transaction that opens the ticket, each with its event crediting `form:<slug>`,
-and nothing reads them back off the form afterwards. Priority learned why
-first: a default that wrote no event could be recognised only by reading the
-form as it is _now_, so a default an admin added later claimed every ticket the
-form had ever filed. The category adds a second reason to be in that
-transaction rather than after it: the on-create rules, the first policy
-selection and assignment's skill match all read the row before `createTicket`
-returns. A default retired since is left off, with a warning in the log, and the
+transaction that opens the ticket, each with its event crediting `form:<slug>`
+when the form applied it, and nothing reads them back off the form afterwards.
+The two differ on the console: a form that places the priority question seeds
+it with the default and posts it back, so an agent who leaves it alone is
+credited with it, where the category chooser is never seeded and an untouched
+one is the form's. Priority learned why first: a default that wrote no event
+could be recognised only by reading the form as it is _now_, so a default an
+admin added later claimed every ticket the form had ever filed. The category
+adds a second reason to be in that transaction rather than after it: the
+on-create rules, the first policy selection and assignment's skill match all
+read the row before `createTicket` returns. A default retired since is left off, with a warning in the log, and the
 ticket still opens — a customer's ticket is never refused over an admin's
 retire. An agent choosing a category on the console's New form instead is under
 **The ticket category**, below.

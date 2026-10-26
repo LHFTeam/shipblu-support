@@ -3419,8 +3419,21 @@ holds beyond the map, and where it departs from it:
 - **The log line** for a category left off is
   `[create_ticket] category left off a new ticket category=<id> reason=<retired_category|unknown_category>`.
 
-**Not verified:** `key={slug}` in a browser. The map read it from Next's
-source; there is still no browser suite.
+- **The key is on the questions, not the whole form.** The map put
+  `key={slug}` on `<ConsoleTicketForm>`. Review found that wipes the customer's
+  email and name when the agent switches form, and those do not depend on the
+  form. So the email, the name and the submit stay in `ConsoleTicketForm`, and
+  `<FormQuestions key={slug}>` inside it holds the answers, the priority seed
+  and the category chooser. A happy-dom test, `app/(console)/inbox/new/form.test.ts`,
+  holds both halves.
+- **AGENTS.md credits the priority default precisely.** It credits
+  `form:<slug>` only where the form applies it: a console form that places the
+  priority question seeds it, so an agent who leaves it alone is credited.
+
+**Not verified in a browser:** that Next keeps the page's client state across
+`?form=` links. The map read it from Next 16.3.1's source, and the test above
+renders the component with new props as that implies, but there is still no
+browser suite.
 
 ### Stage 4 — Jev sets the category
 
