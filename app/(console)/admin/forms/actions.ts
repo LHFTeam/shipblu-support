@@ -6,6 +6,7 @@ import { ticketForms, groups, conversations } from '@/db/schema';
 import { requirePermission } from '@/lib/auth/guard';
 import { ok } from '@/lib/http/action-state';
 import { int, text, uuidField } from '@/lib/http/form-data';
+import { CATEGORY_REFUSALS } from '@/lib/categories/write';
 import { formDefaultCategoryRefusal } from '@/lib/forms/category';
 import { parseFormElements } from '@/lib/forms/elements';
 import { slugify } from '@/lib/kb/slug';
@@ -68,7 +69,7 @@ export async function saveTicketForm(
   const defaultGroupId = uuidField(formData, 'defaultGroupId');
   if (defaultGroupId === undefined) return { error: 'That group no longer exists' };
   const defaultCategoryId = uuidField(formData, 'defaultCategoryId');
-  if (defaultCategoryId === undefined) return { error: 'Unknown category' };
+  if (defaultCategoryId === undefined) return { error: CATEGORY_REFUSALS.unknown_category };
   const nameEn = text(formData, 'nameEn');
   const nameAr = text(formData, 'nameAr');
 

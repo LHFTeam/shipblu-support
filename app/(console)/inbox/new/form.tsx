@@ -54,9 +54,21 @@ type QuestionsProps = {
 
 export function ConsoleTicketForm({ slug, ...questions }: { slug: string } & QuestionsProps) {
   const { state, form } = useActionForm(createTicketFromForm, INITIAL);
+  // Which form the last answer is about. The answer is this component's and
+  // outlives a `?form=` switch — only the questions below remount — so without
+  // this a refusal of one form's answers ("Fill in Order number") stayed on
+  // screen under the next form's questions, which may not ask it.
+  const [answered, setAnswered] = useState(slug);
 
   return (
-    <form {...form} className="flex flex-col gap-4">
+    <form
+      {...form}
+      onSubmit={(event) => {
+        setAnswered(slug);
+        form.onSubmit(event);
+      }}
+      className="flex flex-col gap-4"
+    >
       <input type="hidden" name="slug" value={slug} />
 
       {/* Outside the keyed part below: who the ticket is for does not depend on
@@ -77,7 +89,7 @@ export function ConsoleTicketForm({ slug, ...questions }: { slug: string } & Que
           category chosen on it were carried onto the next. */}
       <FormQuestions key={slug} {...questions} />
 
-      <ErrorText>{state.error}</ErrorText>
+      <ErrorText>{answered === slug ? state.error : null}</ErrorText>
       <Submit />
     </form>
   );

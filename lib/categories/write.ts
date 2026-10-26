@@ -24,6 +24,51 @@ type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
  */
 type HeldCategory = { id: string; key: string; labelEn: string };
 
+type CategoryRead = HeldCategory | 'unknown_category' | 'retired_category';
+
+/**
+ * What a person is told when a category may not be set, in every place that
+ * sets one — the ticket sidebar, the console's New form and a form's default —
+ * so the three cannot come to answer differently about the same category.
+ */
+export const CATEGORY_REFUSALS = {
+  unknown_category: 'Unknown category',
+  retired_category: 'That category has been retired — choose another',
+} as const satisfies Record<'unknown_category' | 'retired_category', string>;
+
+/**
+ * The one read of the registry for a category somebody wants to set: gone,
+ * retired, or what its `category_changed` freezes about it. Not a uuid at all
+ * is no category, rather than Postgres's 22P02 out of the transaction that
+ * opens a customer's ticket.
+ *
+ * The id comes back lower-cased. Postgres reads `0B6F…` and `0b6f…` as one
+ * uuid and stores the column lower-case whatever it was handed, but the event's
+ * `data.to` is jsonb, kept as written — so an id typed in upper case into a
+ * hand-made POST would leave the event naming a spelling the column does not,
+ * and from Stage 4 Jev's ownership rule reads one against the other.
+ */
+async function readCategory(
+  on: typeof db | Tx,
+  categoryId: string,
+  lock: boolean,
+): Promise<CategoryRead> {
+  const id = canonicalUuid(categoryId);
+  if (!id) return 'unknown_category';
+  const query = on
+    .select({
+      key: ticketCategories.key,
+      labelEn: ticketCategories.labelEn,
+      isActive: ticketCategories.isActive,
+    })
+    .from(ticketCategories)
+    .where(eq(ticketCategories.id, id));
+  const [found] = lock ? await query.for('share') : await query;
+  if (!found) return 'unknown_category';
+  if (!found.isActive) return 'retired_category';
+  return { id, key: found.key, labelEn: found.labelEn };
+}
+
 /**
  * Share-locks a category for the rest of the transaction, or says why it may
  * not be set: gone, or retired. Share-locked rather than only read, so an admin
@@ -31,37 +76,23 @@ type HeldCategory = { id: string; key: string; labelEn: string };
  * check and it — the foreign key's own lock is a key-share, which a retire does
  * not wait for.
  *
- * The id comes back lower-cased. Postgres reads `0B6F…` and `0b6f…` as one
- * uuid and stores the column lower-case whatever it was handed, but the event's
- * `data.to` is jsonb, kept as written — so an id typed in upper case into a
- * hand-made POST would leave the event naming a spelling the column does not,
- * and from Stage 4 Jev's ownership rule reads one against the other. Not a uuid
- * at all is no category, rather than Postgres's 22P02 out of the transaction
- * that opens a customer's ticket.
- *
  * One of the two halves both category writers share — `setConversationCategory`
  * and `createTicket`, which writes the column in its insert because a category
  * written after the ticket commits arrives after the on-create rules, the first
  * policy selection and assignment's skill match have already read the row.
  */
-export async function holdCategory(
-  tx: Tx,
-  categoryId: string,
-): Promise<HeldCategory | 'unknown_category' | 'retired_category'> {
-  const id = canonicalUuid(categoryId);
-  if (!id) return 'unknown_category';
-  const [found] = await tx
-    .select({
-      key: ticketCategories.key,
-      labelEn: ticketCategories.labelEn,
-      isActive: ticketCategories.isActive,
-    })
-    .from(ticketCategories)
-    .where(eq(ticketCategories.id, id))
-    .for('share');
-  if (!found) return 'unknown_category';
-  if (!found.isActive) return 'retired_category';
-  return { id, key: found.key, labelEn: found.labelEn };
+export function holdCategory(tx: Tx, categoryId: string): Promise<CategoryRead> {
+  return readCategory(tx, categoryId, true);
+}
+
+/**
+ * The same question asked before a transaction opens, holding nothing: an
+ * early refusal with a sentence, for a caller about to do something a refusal
+ * should come before. It promises nothing about the write — the writer asks
+ * again under `holdCategory`.
+ */
+export function checkCategory(categoryId: string): Promise<CategoryRead> {
+  return readCategory(db, categoryId, false);
 }
 
 /**

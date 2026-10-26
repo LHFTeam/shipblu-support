@@ -13,7 +13,7 @@ import { ok } from '@/lib/http/action-state';
 import { isUuid } from '@/lib/http/uuid';
 import { can } from '@/lib/auth/permissions';
 import { isPriority } from '@/lib/tickets/vocabulary';
-import { setConversationCategory } from '@/lib/categories/write';
+import { CATEGORY_REFUSALS, setConversationCategory } from '@/lib/categories/write';
 import { onGroupChanged, onPriorityChanged, reselectPolicyBeforeFirstResponse } from '@/lib/sla';
 import { afterTicketUpdate } from '@/lib/tickets/lifecycle';
 import { CHANGE_STAMP } from '@/lib/tickets/change-stamp';
@@ -203,14 +203,13 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
         return { error: "You cannot change this ticket's category" };
       }
       const categoryId = value || null;
-      if (categoryId && !isUuid(categoryId)) return { error: 'Unknown category' };
+      if (categoryId && !isUuid(categoryId)) return { error: CATEGORY_REFUSALS.unknown_category };
 
       const write = await setConversationCategory(conversationId, categoryId, {
         agentId: agent.id,
       });
-      if (write.outcome === 'unknown_category') return { error: 'Unknown category' };
-      if (write.outcome === 'retired_category') {
-        return { error: 'That category has been retired — choose another' };
+      if (write.outcome === 'unknown_category' || write.outcome === 'retired_category') {
+        return { error: CATEGORY_REFUSALS[write.outcome] };
       }
       if (write.outcome === 'no_ticket') return { error: 'Ticket not found' };
 

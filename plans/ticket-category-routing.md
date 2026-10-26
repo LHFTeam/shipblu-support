@@ -3429,6 +3429,20 @@ holds beyond the map, and where it departs from it:
 - **AGENTS.md credits the priority default precisely.** It credits
   `form:<slug>` only where the form applies it: a console form that places the
   priority question seeds it, so an agent who leaves it alone is credited.
+- **One reader, one set of sentences.** `checkCategory` sits beside
+  `holdCategory` as the same read holding nothing, and `CATEGORY_REFUSALS`
+  holds the two sentences. The sidebar, the New form and the forms editor all
+  answer from them.
+- **A refusal on the New form shows only under the form it refused.** The
+  answer outlives a `?form=` switch, since only the questions remount.
+- **The forms editor's check stays unlocked.** A retire landing between it and
+  the save leaves the same rows as "save, then retire". A ticket's
+  `category_changed` would date the category after the retire, which is why
+  `createTicket` holds it.
+- **Two races are left for a decision** (#424's review):
+  - an agent's pick retired between the action's check and `createTicket`,
+    which opens the ticket with no category;
+  - the chooser's "Form default" label going stale while the page is open.
 
 **Not verified in a browser:** that Next keeps the page's client state across
 `?form=` links. The map read it from Next 16.3.1's source, and the test above

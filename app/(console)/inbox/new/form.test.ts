@@ -4,6 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { CategoryChoice } from '@/lib/categories/choices';
 import { parseFormElements } from '@/lib/forms/elements';
+import { createTicketFromForm } from './actions';
 import { ConsoleTicketForm } from './form';
 
 /**
@@ -91,5 +92,26 @@ describe('the New ticket form, when the agent switches form', () => {
     // and the priority is the second form's default, not the first's.
     expect(field<HTMLSelectElement>(container, 'select[name="categoryId"]').value).toBe('');
     expect(field<HTMLSelectElement>(container, 'select[name="system.priority"]').value).toBe('low');
+  });
+
+  // The answer is the form component's, which a switch re-renders rather than
+  // remounts, so a refusal of the first form's answers was still drawn under the
+  // second form's questions — which may not ask what it names.
+  it('shows a refusal under the form it refused, and not under the next one', async () => {
+    vi.mocked(createTicketFromForm).mockResolvedValueOnce({ error: 'Fill in Order number' });
+    const container = document.createElement('div');
+    document.body.append(container);
+    root = createRoot(container);
+
+    render(container, 'damaged-parcel', 'high');
+    field<HTMLInputElement>(container, 'input[name="requesterEmail"]').value = 'amira@example.com';
+    await act(async () => {
+      field<HTMLButtonElement>(container, 'button[type="submit"]').click();
+    });
+    expect(createTicketFromForm).toHaveBeenCalledTimes(1);
+    expect(container.textContent).toContain('Fill in Order number');
+
+    render(container, 'general-enquiry', 'low');
+    expect(container.textContent).not.toContain('Fill in Order number');
   });
 });

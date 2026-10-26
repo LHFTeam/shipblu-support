@@ -1,6 +1,7 @@
 import { eq } from 'drizzle-orm';
 import { db } from '@/db/client';
-import { ticketCategories, ticketForms } from '@/db/schema';
+import { ticketForms } from '@/db/schema';
+import { CATEGORY_REFUSALS, checkCategory } from '@/lib/categories/write';
 import { NO_CATEGORY } from '@/lib/categories/choices';
 import { canonicalUuid } from '@/lib/http/uuid';
 
@@ -8,7 +9,7 @@ import { canonicalUuid } from '@/lib/http/uuid';
  * The two places a person names a category for a ticket a form opens: an
  * admin setting a form's default, and an agent choosing one on the console's
  * New form. Here rather than in the action files so a `*.db.test.ts` reaches
- * both, and both answer in the ticket sidebar's sentences.
+ * both, and both answer in the ticket sidebar's sentences, `CATEGORY_REFUSALS`.
  *
  * Neither writes anything. The category itself is written by `createTicket`,
  * inside the transaction that opens the ticket, which reads the registry again
@@ -16,22 +17,15 @@ import { canonicalUuid } from '@/lib/http/uuid';
  * would otherwise leave off in silence.
  */
 
-const UNKNOWN = 'Unknown category';
-const RETIRED = 'That category has been retired — choose another';
-
-async function categoryState(categoryId: string): Promise<'active' | 'retired' | null> {
-  const [row] = await db
-    .select({ isActive: ticketCategories.isActive })
-    .from(ticketCategories)
-    .where(eq(ticketCategories.id, categoryId))
-    .limit(1);
-  if (!row) return null;
-  return row.isActive ? 'active' : 'retired';
-}
-
 /**
  * Whether a form may be saved defaulting to this category, or the sentence
  * refusing it.
+ *
+ * Unlocked, and that is enough: a retire landing between this answer and the
+ * save leaves the rows a save followed by a retire leaves, and a form whose
+ * default was retired after it was saved is a state the editor and creation
+ * already handle. A ticket is different — its `category_changed` would date the
+ * category after the retire — which is why `createTicket` holds it.
  *
  * A retired category is refused as a new choice, and kept when it is what the
  * form already holds: the editor names a retired default "(retired)" and posts
@@ -45,21 +39,20 @@ export async function formDefaultCategoryRefusal(
   categoryId: string | null,
 ): Promise<string | null> {
   if (!categoryId) return null;
-  // Lower-cased so the comparison below agrees with the column's spelling.
-  const id = canonicalUuid(categoryId);
-  if (!id) return UNKNOWN;
+  const checked = await checkCategory(categoryId);
+  if (checked === 'unknown_category') return CATEGORY_REFUSALS.unknown_category;
+  if (checked !== 'retired_category') return null;
 
-  const state = await categoryState(id);
-  if (!state) return UNKNOWN;
-  if (state === 'active') return null;
-
-  if (!formId) return RETIRED;
+  if (!formId) return CATEGORY_REFUSALS.retired_category;
   const [form] = await db
     .select({ defaultCategoryId: ticketForms.defaultCategoryId })
     .from(ticketForms)
     .where(eq(ticketForms.id, formId))
     .limit(1);
-  return form?.defaultCategoryId === id ? null : RETIRED;
+  // In the column's spelling, which is lower case whatever was posted.
+  return form?.defaultCategoryId === canonicalUuid(categoryId)
+    ? null
+    : CATEGORY_REFUSALS.retired_category;
 }
 
 /**
@@ -83,11 +76,7 @@ export async function consoleCategoryChoice(
   if (!raw) return { categoryId: undefined };
   if (!canSet) return { error: "You cannot set a ticket's category" };
   if (raw === NO_CATEGORY) return { categoryId: null };
-  const id = canonicalUuid(raw);
-  if (!id) return { error: UNKNOWN };
-
-  const state = await categoryState(id);
-  if (!state) return { error: UNKNOWN };
-  if (state === 'retired') return { error: RETIRED };
-  return { categoryId: id };
+  const checked = await checkCategory(raw);
+  if (typeof checked === 'string') return { error: CATEGORY_REFUSALS[checked] };
+  return { categoryId: checked.id };
 }

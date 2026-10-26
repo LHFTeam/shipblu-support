@@ -367,10 +367,10 @@ export async function submitForm(input: {
  * one. The form is read as it is now, at submission, and never again.
  */
 function categoryFor(form: FormRecord, requester: Requester): NewTicket['category'] {
-  const chosen = requester.kind === 'agent' ? requester.categoryId : undefined;
-  if (chosen === null) return undefined;
-  if (chosen !== undefined && requester.kind === 'agent') {
-    return { id: chosen, chosenBy: { agentId: requester.agentId } };
+  if (requester.kind === 'agent' && requester.categoryId !== undefined) {
+    return requester.categoryId === null
+      ? undefined
+      : { id: requester.categoryId, chosenBy: { agentId: requester.agentId } };
   }
   return form.defaultCategoryId
     ? { id: form.defaultCategoryId, chosenBy: { label: `form:${form.slug}` } }

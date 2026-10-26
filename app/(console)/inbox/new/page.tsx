@@ -28,7 +28,14 @@ export default async function NewTicketPage({
   const agent = await requirePermission('ticket.create');
 
   const query = await searchParams;
-  const forms = await listForms('console');
+  // The chooser is drawn only for an agent who may set a category — the same
+  // permission as the ticket's own select — and the action refuses a value
+  // from anybody else, so hiding it is not the only thing standing in the way.
+  // The registry is read beside the forms, since neither waits on the other.
+  const [forms, categoryRows] = await Promise.all([
+    listForms('console'),
+    can(agent, 'ticket.set_category') ? listCategories() : null,
+  ]);
 
   if (forms.length === 0) {
     return (
@@ -64,12 +71,7 @@ export default async function NewTicketPage({
   const elements = elementsFor(form.elements, { audience: 'agent', anonymous: false }, fields);
   const description = formDescription(form, 'en');
 
-  // The chooser is drawn only for an agent who may set a category — the same
-  // permission as the ticket's own select — and the action refuses a value
-  // from anybody else, so hiding it is not the only thing standing in the way.
-  const categories = can(agent, 'ticket.set_category')
-    ? toCategoryChoices(await listCategories())
-    : null;
+  const categories = categoryRows ? toCategoryChoices(categoryRows) : null;
   // Named only while active: creation leaves a retired default off, so the
   // chooser must not promise it.
   const defaultCategory =
