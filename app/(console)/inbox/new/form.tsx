@@ -5,6 +5,7 @@ import { useFormStatus } from 'react-dom';
 import { Button, ErrorText, Field, Input, Select, Textarea } from '@/components/ui';
 import { TicketFieldInput } from '@/components/ticket-field-input';
 import { useActionForm } from '@/components/use-action-form';
+import { categoryOptions, NO_CATEGORY, type CategoryChoice } from '@/lib/categories/choices';
 import { ACCEPT_ATTRIBUTE } from '@/lib/forms/files';
 import {
   elementHelp,
@@ -44,6 +45,8 @@ export function ConsoleTicketForm({
   elements,
   fields,
   defaultPriority,
+  categories,
+  defaultCategoryLabel,
 }: {
   slug: string;
   /** Already narrowed to the agent's view — see `elementsFor`. */
@@ -51,6 +54,10 @@ export function ConsoleTicketForm({
   fields: TicketFieldDef[];
   /** What the form would set if the agent does not touch the control. */
   defaultPriority: string | null;
+  /** The registry, or null for an agent who may not set a category: no chooser then. */
+  categories: CategoryChoice[] | null;
+  /** The form's default category while it is active, for the untouched option's label. */
+  defaultCategoryLabel: string | null;
 }) {
   const { state, form } = useActionForm(createTicketFromForm, INITIAL);
   const [custom, setCustom] = useState<CustomFieldValues>({});
@@ -142,6 +149,30 @@ export function ConsoleTicketForm({
           </Field>
         );
       })}
+
+      {categories ? (
+        <Field
+          label="Category"
+          hint="Which team's work this is. Left on the form's default, the form is recorded as choosing it."
+        >
+          {/* Never seeded with the default: the empty value means "the form's
+              default, as the form reads it on submit", so an untouched chooser
+              is credited to the form rather than posted back as the agent's
+              choice — and an admin changing the default meanwhile is not
+              overruled by a stale copy of it. */}
+          <Select name="categoryId" defaultValue="">
+            <option value="">
+              {defaultCategoryLabel ? `Form default: ${defaultCategoryLabel}` : 'No category'}
+            </option>
+            {defaultCategoryLabel ? <option value={NO_CATEGORY}>No category</option> : null}
+            {categoryOptions(categories, null).map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </Select>
+        </Field>
+      ) : null}
 
       <ErrorText>{state.error}</ErrorText>
       <Submit />

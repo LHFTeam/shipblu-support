@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { Badge, Field, Input, Select, Textarea, Toggle } from '@/components/ui';
+import { categoryOptions, type CategoryChoice } from '@/lib/categories/choices';
 import { DangerAction, Disclosure, EditorForm } from '../forms-shared';
 import { deleteTicketForm, saveTicketForm } from './actions';
 import { ElementsBuilder, type FieldChoice } from './elements-builder';
@@ -20,6 +21,7 @@ export type TicketForm = {
   showOnHelpCentre: boolean;
   showInConsole: boolean;
   defaultGroupId: string | null;
+  defaultCategoryId: string | null;
   defaultPriority: string | null;
   defaultType: string | null;
   defaultTags: string[];
@@ -33,11 +35,13 @@ export type TicketForm = {
 function Fields({
   form,
   groups,
+  categories,
   fields,
   nextPosition,
 }: {
   form?: TicketForm;
   groups: Choice[];
+  categories: CategoryChoice[];
   fields: FieldChoice[];
   nextPosition?: number;
 }) {
@@ -170,6 +174,20 @@ function Fields({
           </Select>
         </Field>
 
+        <Field
+          label="Category"
+          explain="Which team's work the ticket is, recorded as this form's choice when the ticket is created. An agent opening a ticket with the form can choose another, and an on-create automation still runs afterwards and still wins. Changing it later moves no ticket the form already opened. A retired category stays here, marked, and opens tickets with none."
+        >
+          <Select name="defaultCategoryId" defaultValue={form?.defaultCategoryId ?? ''}>
+            <option value="">No category</option>
+            {categoryOptions(categories, form?.defaultCategoryId ?? null).map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </Select>
+        </Field>
+
         <Field label="Priority">
           <Select name="defaultPriority" defaultValue={form?.defaultPriority ?? ''}>
             <option value="">Normal (medium)</option>
@@ -224,7 +242,12 @@ function Fields({
   );
 }
 
-export function NewForm(props: { groups: Choice[]; fields: FieldChoice[]; nextPosition: number }) {
+export function NewForm(props: {
+  groups: Choice[];
+  categories: CategoryChoice[];
+  fields: FieldChoice[];
+  nextPosition: number;
+}) {
   return (
     <Disclosure label="New form">
       {(close) => (
@@ -239,15 +262,22 @@ export function NewForm(props: { groups: Choice[]; fields: FieldChoice[]; nextPo
 export function FormEditor({
   form,
   groups,
+  categories,
   fields,
   questionCount,
 }: {
   form: TicketForm;
   groups: Choice[];
+  categories: CategoryChoice[];
   fields: FieldChoice[];
   questionCount: number;
 }) {
   const [editing, setEditing] = useState(false);
+  // A retired default opens tickets with no category, which is easy to miss
+  // with the editor closed — so the row says so.
+  const retiredDefault = categories.some(
+    (category) => category.id === form.defaultCategoryId && !category.isActive,
+  );
 
   if (!editing) {
     return (
@@ -268,6 +298,7 @@ export function FormEditor({
         {!form.isActive ? <Badge tone="neutral">Inactive</Badge> : null}
         {!form.requiresSignIn ? <Badge tone="warning">Open to anybody</Badge> : null}
         {!form.showOnHelpCentre ? <Badge tone="neutral">Agents only</Badge> : null}
+        {retiredDefault ? <Badge tone="warning">Default category retired</Badge> : null}
 
         <span className="ms-auto">
           <DangerAction action={deleteTicketForm} id={form.id} />
@@ -279,7 +310,7 @@ export function FormEditor({
   return (
     <EditorForm action={saveTicketForm} submitLabel="Save" onSaved={() => setEditing(false)}>
       <input type="hidden" name="id" value={form.id} />
-      <Fields form={form} groups={groups} fields={fields} />
+      <Fields form={form} groups={groups} categories={categories} fields={fields} />
     </EditorForm>
   );
 }

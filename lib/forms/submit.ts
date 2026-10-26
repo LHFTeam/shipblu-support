@@ -3,7 +3,7 @@ import { isPriority, type Priority } from '@/lib/tickets/vocabulary';
 import { conversationEvents, messages } from '@/db/schema';
 import { normaliseEmail, looksLikeEmail } from '@/lib/auth/normalise';
 import type { Locale } from '@/lib/kb/locale';
-import { createTicket } from '@/lib/portal/tickets';
+import { createTicket, type NewTicket } from '@/lib/portal/tickets';
 import { resolveContact } from '@/lib/tickets/contacts';
 import { applyFieldValue } from '@/lib/tickets/custom-fields-parse';
 import {
@@ -25,7 +25,7 @@ import {
   type SystemKey,
   type Viewer,
 } from './elements';
-import { formName, type LoadedForm } from './queries';
+import { formName, type FormRecord, type LoadedForm } from './queries';
 import { renderSubject } from './subject';
 import { renderAnswers } from './summary';
 import { resolveVisibility, type SystemValues } from './visibility';
@@ -49,7 +49,20 @@ export type Requester =
   | { kind: 'session'; contactId: string }
   /** Identified by what the form itself asked for, plus an address for the log. */
   | { kind: 'anonymous'; ip: string | null }
-  | { kind: 'agent'; contactId: string; agentId: string };
+  | {
+      kind: 'agent';
+      contactId: string;
+      agentId: string;
+      /**
+       * The console's category chooser, already re-read and authorised by the
+       * action: `undefined` when the agent left it on the form's default or was
+       * not offered it, `null` when they chose none, or the category they
+       * picked. Only this variant carries one, so a help-centre submission
+       * cannot name a category however its POST is written — from Stage 4 a
+       * category somebody chose is one Jev may not change.
+       */
+      categoryId?: string | null;
+    };
 
 export type SubmitResult =
   | { ok: true; number: number; conversationId: string; attachmentsFailed: string[] }
@@ -282,6 +295,7 @@ export async function submitForm(input: {
       : answered && input.requester.kind === 'agent'
         ? { agentId: input.requester.agentId }
         : { label: `form:${form.slug}` },
+    category: categoryFor(form, input.requester),
     type: form.defaultType,
     tags: form.defaultTags,
     // Recorded because `ticket.create` is justified as a reporting-integrity
@@ -340,6 +354,27 @@ export async function submitForm(input: {
     conversationId: created.conversationId,
     attachmentsFailed,
   };
+}
+
+/**
+ * The category a new ticket is created with, and who chose it.
+ *
+ * An agent's pick is the agent's. Otherwise the form's default, credited to the
+ * form whoever submitted it — an agent who left the chooser alone made no
+ * judgement, and from Stage 4 only a person's `category_changed` counts as
+ * ground truth for Jev. "None" over a default writes nothing at all: an event
+ * with `to: null` would read "cleared the category" on a ticket that never had
+ * one. The form is read as it is now, at submission, and never again.
+ */
+function categoryFor(form: FormRecord, requester: Requester): NewTicket['category'] {
+  const chosen = requester.kind === 'agent' ? requester.categoryId : undefined;
+  if (chosen === null) return undefined;
+  if (chosen !== undefined && requester.kind === 'agent') {
+    return { id: chosen, chosenBy: { agentId: requester.agentId } };
+  }
+  return form.defaultCategoryId
+    ? { id: form.defaultCategoryId, chosenBy: { label: `form:${form.slug}` } }
+    : undefined;
 }
 
 /** Only an agent is offered the control, and only the four real values count. */
