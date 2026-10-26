@@ -370,10 +370,65 @@ describe('afterRoutingChanged', () => {
     await afterRoutingChanged(id, { category: true, group: true });
 
     expect((await sla(id)).slaPolicyId).toBe(sales);
-    // One line: the re-selection, and no second one from re-timing the move,
-    // which found the new policy's clocks already counted.
+    // One line, named by the category rather than the group. Both policies run
+    // round the clock, so this pins the cause and not the order; the engine's
+    // "re-times a rule's move" below pins the order.
     expect((await events(id, 'sla_recalculated')).map((e) => e.data)).toEqual([
       expect.objectContaining({ reason: 'policy', cause: 'category', policy: 'Sales' }),
+    ]);
+  });
+
+  // The other half: a move the policy survives is still re-timed on the new
+  // group's hours. A re-selection that finds the same policy does nothing, so
+  // without `onGroupChanged` a group keeping its own calendar would never move
+  // the ticket's deadlines onto it.
+  it('re-times a move the same policy survives, on the new group’s hours', async () => {
+    const [sundays] = await db
+      .insert(businessHours)
+      .values({
+        name: 'An hour on Sundays',
+        schedule: {
+          sun: [{ start: '00:00', end: '01:00' }],
+          mon: [],
+          tue: [],
+          wed: [],
+          thu: [],
+          fri: [],
+          sat: [],
+        },
+      })
+      .returning({ id: businessHours.id });
+    const [merchantCare] = await db
+      .insert(groups)
+      .values({ name: 'Merchant Care', businessHoursId: sundays!.id })
+      .returning({ id: groups.id });
+    forgetHoursCatalog();
+    const [standard] = await db
+      .insert(slaPolicies)
+      .values({
+        name: 'Standard',
+        hoursSource: 'group',
+        targets: target(120, 480),
+        position: 0,
+        isDefault: true,
+      })
+      .returning({ id: slaPolicies.id });
+    const { id } = await ticket();
+    const before = await sla(id);
+    await db
+      .update(conversations)
+      .set({ groupId: merchantCare!.id })
+      .where(eq(conversations.id, id));
+
+    await afterRoutingChanged(id, { category: false, group: true });
+
+    const after = await sla(id);
+    expect(after.slaPolicyId).toBe(standard!.id);
+    expect(after.firstResponseDueAt!.getTime()).toBeGreaterThan(
+      before.firstResponseDueAt!.getTime(),
+    );
+    expect((await events(id, 'sla_recalculated')).map((e) => e.data)).toEqual([
+      expect.objectContaining({ reason: 'group_hours' }),
     ]);
   });
 });

@@ -84,7 +84,8 @@ update.
 | 2.B   | Merged: #403 (`1d21cdc`), then `dev` → `main` in #413 (`516c8ff`) and #415 (`48cb284`). As built below                                      | **Done.** All six services live on `48cb284` by 06:01 UTC on 2026-10-25, web first, with nothing suspended. Its checks read clean, and a new message was subcategorised; one read left (below)                            |
 | 3.1   | Merged: #419 (`ff3bbfd`), then `dev` → `main` in #420 (`b9a4743`), which also carried #411, #416, #417 and #418. As built below             | **Done.** Web live on `b9a4743` at 19:44 UTC on 2026-10-25, the worker and the four crons by 08:05 UTC on 2026-10-26, and the four categories seeded at 08:13. Its checks read clean (below); the signed-in ones are left |
 | 3.2   | Not started. Mapped from the code on 2026-10-26: [3.2, how to build it](#32-how-to-build-it)                                                | —                                                                                                                                                                                                                         |
-| 4–6   | Not started. 4.0 (`afterRoutingChanged`) comes first                                                                                        | —                                                                                                                                                                                                                         |
+| 4.0   | In review from `claude/jolly-noether-hxhez1-stage-4-0`, built from `dev` at `d05c131`: [4.0, as built](#40-as-built)                        | —                                                                                                                                                                                                                         |
+| 4.1–6 | Not started. 4.1 comes once 4.0 is merged                                                                                                   | —                                                                                                                                                                                                                         |
 
 **3.1's deploy and checks, read on Render and production on 2026-10-25 and
 2026-10-26.**
@@ -367,9 +368,9 @@ Every production write needs the user's go-ahead for that step, and the
 5. **Stage 3.2**, where a person sets the category when a ticket is created,
    is next. It is mapped, with a default taken for every question the map
    raised: [3.2, how to build it](#32-how-to-build-it). Nothing is written yet,
-   and no branch holds 3.2 work. Then **Stage 4**, whose first change is
-   `afterRoutingChanged` ([Stage 4](#stage-4--jev-sets-the-category)), before
-   Jev becomes a writer.
+   and no branch holds 3.2 work. **Stage 4.0**, `afterRoutingChanged`, is built
+   independently of it and in review: [4.0, as built](#40-as-built). Jev (4.1)
+   becomes a writer once 4.0 is merged.
 6. **Before Stage 5**, a person does 0.2's reorder and 0.6's staffing, and the
    support lead answers the questions still open (below).
 
@@ -1790,7 +1791,7 @@ ticket's routing row:
 | `pending` (the creation pass has not reached `beginRouting`) | Writes the category and nothing else. `beginRouting` routes on it, so a rule always gets the first word. |
 | `holding`                                                    | Calls `apply.ts` **instead of** `afterTicketUpdate`, which would be a second `on_update` pass.           |
 | An undecided shadow row                                      | Calls `apply.ts` in shadow mode to record the would-be decision, then `afterTicketUpdate` as usual.      |
-| Anything else (never entered routing, or already decided)    | `reselectPolicyBeforeFirstResponse`, then `afterTicketUpdate`, as priority does.                         |
+| Anything else (never entered routing, or already decided)    | `afterRoutingChanged` (4.0), then `afterTicketUpdate`, as priority does.                                 |
 
 **A decision is made in two phases, and the hold lasts until the rules have
 run.**
@@ -1804,8 +1805,10 @@ run.**
    Merchant Care", and any rule keyed on `category.id`, run before anybody is
    assigned. Nothing else can assign in between, because the ticket is still
    held.
-3. Under the lock, `routing_decided_at` is set, the row moves to `decided`, and
-   `reselectPolicyBeforeFirstResponse` runs on the group as it now stands.
+3. Under the lock, `routing_decided_at` is set and the row moves to `decided`.
+   Once that commits, `afterRoutingChanged` (4.0) runs with whether this
+   decision filed the category and whether step 1 moved the group. So a move
+   the policy survives is still re-timed on the route group's hours.
 4. `assignConversation` runs, then the held out-of-hours reply.
 
 This is the creation pass's own order (`lib/tickets/lifecycle.ts:26-43,93-99`).
@@ -3428,16 +3431,36 @@ owes no follow-up, because the first selection reads its category.
   because the ticket has no clocks yet: `recomputeOwedClocks` returns at once
   without a due date, and `applySlaOnCreate` runs after the pass.
 - **The repo rule was built:** `routing-result`
-  (`scripts/ci/rules/routing-result.mjs`). Outside tests it refuses a
-  `setConversationCategory` or `moveToGroupIfElsewhere` call whose answer is a
-  statement of its own or `void`ed. It has a floor of four calls and a fixture
-  test.
-- **Tests.** The existing re-selection tests pass unchanged. Three new cases
+  (`scripts/ci/rules/routing-result.mjs`), with a floor of four calls and a
+  fixture test. Outside tests it refuses a call whose answer is a statement of
+  its own or `void`ed, for three writers:
+  - `setConversationCategory`;
+  - `moveToGroupIfElsewhere`;
+  - `assignConversation`, only when its options can name a group. Without a
+    group it never moves the ticket.
+- **`onGroupChanged` is module-private.** Only `afterRoutingChanged` calls it
+  now. The comments that sent a category writer to
+  `reselectPolicyBeforeFirstResponse` name `afterRoutingChanged` instead.
+- **The engine's `assign_group` notes the move before writing its event.** The
+  move has committed, so a failure recording `group_changed` no longer loses
+  the follow-up.
+- **One gap is left, and it is older than 4.0.** An `auto_assign` that throws
+  after its group move has committed loses the follow-up. That happens when a
+  pick fails on the database, after the move but before
+  `assignConversation` returns `movedGroup`. The ticket stays in the new group
+  on the old policy until its routing next changes. Closing it means the engine
+  passing `assignConversation` a carrier that the move sets, kept through the
+  throw.
+- **Tests.** The existing re-selection tests pass unchanged. Four new cases
   were each seen to fail under the mutation they pin:
   - nothing changed owes nothing, though a re-selection would choose another
     policy;
-  - a category and a group changed together re-select once, named by the
-    category;
+  - a category and a group changed together re-select named by the category.
+    Both policies there run round the clock, so this pins the cause, not the
+    order; the engine's older "re-times a rule's move" case pins the order;
+  - a move the same policy survives is re-timed on the new group's hours, one
+    `sla_recalculated` with `reason: 'group_hours'`. It is the only case that
+    sees `afterRoutingChanged`'s call to `onGroupChanged`;
   - an engine pass that moves the group to one with a policy of its own, then
     files the category, writes one `sla_recalculated`. Chosen per action, it
     wrote two.

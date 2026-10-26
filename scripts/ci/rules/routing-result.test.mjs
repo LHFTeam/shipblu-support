@@ -64,6 +64,26 @@ describe('routing-result', () => {
     );
   });
 
+  // Without a group it never moves the ticket, so its answer owes nothing.
+  it('holds assignConversation to it only when its options can name a group', async () => {
+    const found = await run({
+      'lib/writer.ts': body(
+        'export async function a(id: string, groupId: string, options: AssignOptions) {',
+        '  await assignConversation(id);',
+        "  await assignConversation(id, { actorLabel: 'auto_assign' });",
+        '  const outcome = await assignConversation(id, { groupId });',
+        '  if (outcome.movedGroup) moved();',
+        "  await assignConversation(id, { groupId: groupId, actorLabel: 'x' });",
+        '  await assignConversation(id, { ...options });',
+        '  await assignConversation(id, options);',
+        '}',
+      ),
+    });
+
+    expect(found).toEqual([at(6), at(7), at(8)]);
+    expect(found[0].message).toMatch(/drops assignConversation\(\)'s answer/);
+  });
+
   it('fails loudly when it finds too few writer calls to be checking anything', async () => {
     const found = await runRule('routing-result', {
       'lib/writer.ts': body(

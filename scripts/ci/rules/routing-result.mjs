@@ -10,25 +10,40 @@ import { fail, lineOfNode, parseSource, read, requireAtLeast, scannableSource } 
 // `lib/sla`, called once by whoever made the change
 // (`plans/ticket-category-routing.md`, Stage 4.0). Whether anything changed is
 // in the writer's answer and nowhere else: `setConversationCategory` writes
-// nothing for a category the ticket already carries or one retired since, and
-// `moveToGroupIfElsewhere` nothing for the group the ticket is in. A caller
+// nothing for a category the ticket already carries or one retired since,
+// `moveToGroupIfElsewhere` nothing for the group the ticket is in, and
+// `assignConversation` handed a `groupId` answers `movedGroup`, false when the
+// ticket was already there or held by somebody it may not take from. A caller
 // that throws the answer away therefore cannot owe the follow-up correctly —
 // it either skips it, and a policy keyed on the category or group is never
 // reached, or calls it on every write, and a rule naming the group a ticket is
-// in re-selects on every pass. Jev (4.1) and the router (Stage 5) are the
-// writers still to come, so this is held now rather than remembered then.
+// in re-selects on every pass. The router (Stage 5) moves the group through
+// `moveToGroupIfElsewhere`, so it is held now rather than remembered then. Jev
+// (4.1) decides under its own row lock; a writer of its own that updates the
+// column itself adds itself to WRITERS in the PR that lands it.
 //
-// So, outside tests: a call to either writer is not a statement of its own —
+// So, outside tests: a call to any of them is not a statement of its own —
 // awaited or not, parenthesised or cast — nor `void`ed. Kept in a variable, in
 // a condition, returned or passed on, it is somebody's answer to use.
+// `assignConversation` counts only when its options can name a group: without
+// one it never moves the ticket, and the console's group case (assigning in the
+// group it has just moved to) and the lifecycle drop its answer owing nothing.
 //
 // What it cannot see: an answer kept and then ignored, which only reading the
-// caller can judge; a writer reached under another name (an alias, a method
-// taken into a variable); and `.then()` on the call, which nothing here uses.
-// Tests are left out because a fixture sets a category it never asks about.
+// caller can judge — returned from a callback or put in an array (a
+// `db.transaction`, a `Promise.all`) whose own result is then dropped is that
+// case too; a writer reached under another name (an alias, a method taken into
+// a variable); `.then()`, `.catch()` or `.finally()` on the call, which nothing
+// here uses; and an update of `category_id` or `group_id` written out rather
+// than made through a writer named here. Tests are left out because a fixture
+// sets a category it never asks about.
 // ---------------------------------------------------------------------------
 
-const WRITERS = new Set(['setConversationCategory', 'moveToGroupIfElsewhere']);
+const WRITERS = new Set([
+  'setConversationCategory',
+  'moveToGroupIfElsewhere',
+  'assignConversation',
+]);
 
 /** Wrappers that change nothing about whether a value is used. */
 function passesThrough(node) {
@@ -42,13 +57,33 @@ function passesThrough(node) {
   );
 }
 
+/**
+ * Whether `assignConversation`'s options can name a group to move to: an object
+ * written out with a `groupId`, or a spread that may carry one, or options
+ * built elsewhere, which only reading the caller could rule out.
+ */
+function canNameAGroup(options) {
+  if (!options) return false;
+  if (!ts.isObjectLiteralExpression(options)) return true;
+  return options.properties.some(
+    (property) =>
+      ts.isSpreadAssignment(property) ||
+      (property.name !== undefined &&
+        (ts.isIdentifier(property.name) || ts.isStringLiteral(property.name)) &&
+        property.name.text === 'groupId'),
+  );
+}
+
 function writerCalled(call) {
   const callee = call.expression;
-  if (ts.isIdentifier(callee)) return WRITERS.has(callee.text) ? callee.text : null;
-  if (ts.isPropertyAccessExpression(callee) && WRITERS.has(callee.name.text)) {
-    return callee.name.text;
-  }
-  return null;
+  const name = ts.isIdentifier(callee)
+    ? callee.text
+    : ts.isPropertyAccessExpression(callee)
+      ? callee.name.text
+      : null;
+  if (!name || !WRITERS.has(name)) return null;
+  if (name === 'assignConversation' && !canNameAGroup(call.arguments[1])) return null;
+  return name;
 }
 
 /** Whether the call's value, through any wrapper, is thrown away. */
@@ -89,7 +124,8 @@ export function checkRoutingResultKept() {
     visit(source);
   }
 
-  // Five calls outside tests today: the console's group and category cases,
-  // the engine's set_category and assign_group, and assignment's own move.
+  // Six calls outside tests today: the console's group and category cases,
+  // the engine's set_category, assign_group and auto_assign, and assignment's
+  // own move.
   requireAtLeast(rule, 'lib/ and app/', calls, 4, 'calls of a routing writer');
 }

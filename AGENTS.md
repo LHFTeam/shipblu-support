@@ -1263,13 +1263,14 @@ ticket. Five rules hold:
   whether the group moved — and is called once the whole change is over: by the
   console's group and category cases, by the engine once its pass is over (so
   a rule that files a ticket and another that moves it choose one policy
-  between them), and from Stage 4 by Jev and the router. Never from inside a
-  writer, which would choose once per action. The `routing-result` repo rule
-  refuses a `setConversationCategory` or `moveToGroupIfElsewhere` call whose
-  answer is dropped, since that answer is the only thing saying a follow-up is
-  owed. `onGroupChanged` and `onPriorityChanged` still never re-select. Because a
-  ticket can now change policy after a breach, an escalation is keyed per
-  policy (`settlesEscalation` in `worker/handlers/sla-sweep.ts`).
+  between them), and by Jev from 4.1 and the router from Stage 5. Never from
+  inside a writer, which would choose once per action. The `routing-result` repo rule
+  refuses a `setConversationCategory` or `moveToGroupIfElsewhere` call, or an
+  `assignConversation` handed a group, whose answer is dropped, since that
+  answer is the only thing saying a follow-up is owed. `onGroupChanged` and
+  `onPriorityChanged` still never re-select. Because a ticket can now change
+  policy after a breach, an escalation is keyed per policy
+  (`settlesEscalation` in `worker/handlers/sla-sweep.ts`).
 - **Retired, never deleted, and the key never changes.** The foreign key is
   `restrict`; `ticket_categories_key_format` holds the key to lowercase words
   joined by underscores and refuses `unknown`, which Jev answers for "none of

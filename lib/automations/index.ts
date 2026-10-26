@@ -335,11 +335,13 @@ async function applyAction(
       // already in matches on every pass (`moveToGroupIfElsewhere`).
       if (!(await moveToGroupIfElsewhere(conversationId, action.groupId))) return;
 
-      await record('group_changed', { to: action.groupId });
       // The new group may work different hours, in which case the clocks move,
       // once the pass is over (`Pass.groupMoved`). Nothing to move on a brand
-      // new ticket, whose SLA has not been applied yet.
+      // new ticket, whose SLA has not been applied yet. Noted before the event
+      // is written: the move has committed, so a failure recording it must not
+      // also lose the follow-up it owes.
       pass.groupMoved = true;
+      await record('group_changed', { to: action.groupId });
       return;
     }
 

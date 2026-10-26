@@ -573,7 +573,7 @@ async function changeClock(
  * — a policy pinned to one schedule or counting round the clock resolves to the
  * same hours in every group.
  */
-export async function onGroupChanged(conversationId: string): Promise<void> {
+async function onGroupChanged(conversationId: string): Promise<void> {
   await recomputeOwedClocks(conversationId, 'group_hours');
 }
 
@@ -612,12 +612,12 @@ export async function onPriorityChanged(conversationId: string): Promise<void> {
  * the one entry point every routing writer calls, so the order lives here and
  * a new writer cannot take it the wrong way round.
  *
- * The order is the policy first, then the calendar: `reselectPolicyBeforeFirstResponse`
- * times a move that changes the policy from its anchors on the new group's
- * hours, so `onGroupChanged` then finds nothing to move. Re-timed first, the old
- * policy's clocks moved to the new hours and then the new policy's moved them
- * again — two timeline lines for one move, the first naming deadlines that
- * never held. One call however much moved: a category and a group changed
+ * The order is the policy first, then the calendar:
+ * `reselectPolicyBeforeFirstResponse` times a move that changes the policy from
+ * its anchors on the new group's hours, so `onGroupChanged` then finds nothing
+ * to move. Re-timed first, the old policy's clocks moved to the new hours and
+ * then the new policy's moved them again — two timeline lines for one move, the
+ * first naming deadlines that never held. One call however much moved: a category and a group changed
  * together re-select once, named by the category, since that is the one a
  * policy is most likely keyed on.
  *
@@ -655,9 +655,8 @@ export async function afterRoutingChanged(
  * router — and every writer of `category_id` reaches this after its write
  * commits, through `afterRoutingChanged`, as do the group moves that can happen
  * before a first response: the console's group case, `assign_group` and an
- * `auto_assign` that moved. The one
- * exception is `backfill_category_ai`, which labels an old backlog and never
- * retargets it. A rule on `on_create` does not call it either, because
+ * `auto_assign` that moved. The one exception is `backfill_category_ai`, which
+ * labels an old backlog and never retargets it. A rule on `on_create` does not call it either, because
  * `applySlaOnCreate` runs after that pass and reads the category itself.
  *
  * Built from the anchors rather than on `recomputeOwedClocks`, which returns
@@ -673,9 +672,9 @@ export async function afterRoutingChanged(
  * When the same policy wins again it does nothing: re-timing for a new group's
  * calendar is `onGroupChanged`'s, which `afterRoutingChanged` calls straight
  * after this, so a move that changes the policy is re-timed once, here, and
- * `onGroupChanged` then finds nothing to move. When no policy wins — no default, nothing matching — it also does
- * nothing: dropping an obligation mid-ticket is a different decision from
- * choosing one.
+ * `onGroupChanged` then finds nothing to move. When no policy wins — no
+ * default, nothing matching — it also does nothing: dropping an obligation
+ * mid-ticket is a different decision from choosing one.
  *
  * Never on a read-only channel or an imported history, which `applySlaOnCreate`
  * never gave a clock either; never on a deleted, spam or merged ticket, which no
