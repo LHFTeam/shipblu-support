@@ -83,7 +83,7 @@ update.
 | 2.A   | Merged: #400 (`a558c5b`), then `dev` → `main` in #406 (`e88d357`), which also carried #399, #401 and #402. As built below                   | **Done.** All six services live on `e88d357` by 22:13 UTC on 2026-10-23, deployed at once by an environment update. Its checks read clean (below)                                                                         |
 | 2.B   | Merged: #403 (`1d21cdc`), then `dev` → `main` in #413 (`516c8ff`) and #415 (`48cb284`). As built below                                      | **Done.** All six services live on `48cb284` by 06:01 UTC on 2026-10-25, web first, with nothing suspended. Its checks read clean, and a new message was subcategorised; one read left (below)                            |
 | 3.1   | Merged: #419 (`ff3bbfd`), then `dev` → `main` in #420 (`b9a4743`), which also carried #411, #416, #417 and #418. As built below             | **Done.** Web live on `b9a4743` at 19:44 UTC on 2026-10-25, the worker and the four crons by 08:05 UTC on 2026-10-26, and the four categories seeded at 08:13. Its checks read clean (below); the signed-in ones are left |
-| 3.2   | Built on 2026-10-26 on `claude/jolly-noether-hxhez1`, not merged. As built: [3.2, as built](#32-as-built)                                   | —                                                                                                                                                                                                                         |
+| 3.2   | Built in #424 on 2026-10-26, not merged. As built: [3.2, as built](#32-as-built)                                                            | —                                                                                                                                                                                                                         |
 | 4–6   | Not started. 4.0 (`afterRoutingChanged`) comes first                                                                                        | —                                                                                                                                                                                                                         |
 
 **3.1's deploy and checks, read on Render and production on 2026-10-25 and
@@ -365,8 +365,8 @@ Every production write needs the user's go-ahead for that step, and the
    the seed included; the signed-in ones are left. Its review decisions are
    under [3.1, as built](#31-as-built).
 5. **Stage 3.2**, where a person sets the category when a ticket is created,
-   is built on `claude/jolly-noether-hxhez1` from the map, and waits for its
-   pull request into `dev`: [3.2, as built](#32-as-built). It deploys web
+   is built from the map and in review as #424 into `dev`:
+   [3.2, as built](#32-as-built). It deploys web
    first (migration `0049`), then the worker and the four crons, with nothing
    to seed. Then **Stage 4**, whose first change is `afterRoutingChanged`
    ([Stage 4](#stage-4--jev-sets-the-category)), before Jev becomes a writer.
