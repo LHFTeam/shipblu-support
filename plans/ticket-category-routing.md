@@ -366,9 +366,9 @@ Every production write needs the user's go-ahead for that step, and the
    under [3.1, as built](#31-as-built).
 5. **Stage 3.2**, where a person sets the category when a ticket is created,
    is built from the map and in review as #424 into `dev`:
-   [3.2, as built](#32-as-built). It deploys web
-   first (migration `0049`), then the worker and the four crons, with nothing
-   to seed. Then **Stage 4**, whose first change is `afterRoutingChanged`
+   [3.2, as built](#32-as-built). It deploys web first (migration `0049`),
+   then the worker and the four crons, with nothing to seed. Then
+   **Stage 4**, whose first change is `afterRoutingChanged`
    ([Stage 4](#stage-4--jev-sets-the-category)), before Jev becomes a writer.
 6. **Before Stage 5**, a person does 0.2's reorder and 0.6's staffing, and the
    support lead answers the questions still open (below).
