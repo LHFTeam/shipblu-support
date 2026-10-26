@@ -2,6 +2,7 @@ import { and, asc, eq, inArray } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { db } from '@/db/client';
 import {
+  agentSkills,
   agents,
   channels,
   contacts,
@@ -9,8 +10,11 @@ import {
   conversations,
   groupMembers,
   groups,
+  skills,
+  ticketCategories,
   ticketStatuses,
 } from '@/db/schema';
+import { createTicket } from '@/lib/portal/tickets';
 import { withCleanDatabase } from '@/lib/testing/db';
 import { afterTicketUpdate } from '@/lib/tickets/lifecycle';
 import { assignConversation } from './index';
@@ -19,7 +23,8 @@ import { assignConversation } from './index';
  * The owner's path through `assignConversation`, against Postgres: an
  * unassigned ticket on a WhatsApp number that belongs to somebody goes back to
  * them, past every gate the rota would ask about, and a deactivated owner is
- * nobody.
+ * nobody. And the skill match, reading a category `createTicket` filed in the
+ * ticket's insert.
  */
 
 withCleanDatabase();
@@ -294,5 +299,91 @@ describe('assignConversation on a ticket whose WhatsApp number has an owner', ()
     await afterTicketUpdate(ticket.id);
 
     expect(await ticketRow(ticket.id)).toMatchObject({ assignee: nayera, accountable: nayera });
+  });
+});
+
+// `createTicket`'s own `afterInboundMessage` assigns the ticket before it
+// returns, and the skill match reads `category.id` off the row then
+// (`conversationFacts`). So a category is in time for it only in the insert:
+// written after `createTicket` returned, it would miss the match, and nothing
+// after it re-assigns the way a re-selection re-chooses a policy.
+describe('a skill keyed on the category a ticket is created with', () => {
+  // The ring is ordered by id, so Amr sorts first and the rota alone picks him.
+  const AMR = '00000000-0000-4000-8000-000000000001';
+  const SALMA = '00000000-0000-4000-8000-000000000002';
+
+  /** A skill-matching sales desk: Salma holds the skill Sales tickets need, Amr does not. */
+  async function salesDesk(salmaValues: Partial<typeof agents.$inferInsert> = {}) {
+    const [sales] = await db
+      .select({ id: ticketCategories.id })
+      .from(ticketCategories)
+      .where(eq(ticketCategories.key, 'sales'));
+    const [skill] = await db
+      .insert(skills)
+      .values({ name: 'Sales', conditions: { field: 'category.id', op: 'eq', value: sales!.id } })
+      .returning({ id: skills.id });
+    const here = { presence: 'online' as const, lastSeenAt: new Date() };
+    const amr = await agent('Amr Agent', { id: AMR, ...here });
+    const salma = await agent('Salma Sales', { id: SALMA, ...here, ...salmaValues });
+    await db.insert(agentSkills).values({ agentId: salma, skillId: skill!.id });
+    const desk = await group('Inbound Sales', { matchSkills: true, assignWithinHoursOnly: false });
+    await db.insert(groupMembers).values([
+      { groupId: desk, agentId: amr },
+      { groupId: desk, agentId: salma },
+    ]);
+    return { salesId: sales!.id, skillId: skill!.id, amr, salma, desk };
+  }
+
+  /** A ticket a form opens on the desk, with the form's default category when given one. */
+  async function opened(groupId: string, categoryId?: string) {
+    const [contact] = await db
+      .insert(contacts)
+      .values({ name: 'Amira' })
+      .returning({ id: contacts.id });
+    const { conversationId } = await createTicket(contact!.id, {
+      subject: 'Rates',
+      body: 'How much to ship 200 parcels a month?',
+      groupId,
+      ...(categoryId ? { category: { id: categoryId, chosenBy: { label: 'form:sales' } } } : {}),
+    });
+    return conversationId;
+  }
+
+  it('offers a ticket created with the category only to the skill’s holders', async () => {
+    const { salesId, skillId, amr, salma, desk } = await salesDesk();
+
+    const filed = await opened(desk, salesId);
+    expect(await ticketRow(filed)).toMatchObject({ assignee: salma });
+    expect((await eventsOf(filed, ['assigned']))[0]!.data).toEqual({
+      to: salma,
+      strategy: 'round_robin',
+      skills: [skillId],
+    });
+
+    // Without the category it asks for no skill, and the rota moves on past
+    // Salma to Amr, who could not have had the first.
+    const unfiled = await opened(desk);
+    expect(await ticketRow(unfiled)).toMatchObject({ assignee: amr });
+    expect((await eventsOf(unfiled, ['assigned']))[0]!.data).toEqual({
+      to: amr,
+      strategy: 'round_robin',
+    });
+  });
+
+  it('keeps a ticket created with the category waiting while no holder is here', async () => {
+    const { salesId, amr, desk } = await salesDesk({ presence: 'offline' });
+
+    const filed = await opened(desk, salesId);
+    expect(await ticketRow(filed)).toMatchObject({ assignee: null });
+    expect(await eventsOf(filed, ['assigned', 'assignment_skipped'])).toEqual([
+      {
+        type: 'assignment_skipped',
+        actorAgentId: null,
+        actorLabel: 'auto_assign',
+        data: { reason: 'no_skill_match' },
+      },
+    ]);
+
+    expect(await ticketRow(await opened(desk))).toMatchObject({ assignee: amr });
   });
 });

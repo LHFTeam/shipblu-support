@@ -31,6 +31,7 @@ const actions = {
   ...(await import('./channels/actions')),
   ...(await import('./subcategories/actions')),
   ...(await import('./categories/actions')),
+  ...(await import('./forms/actions')),
 };
 
 const INITIAL = { error: null };
@@ -117,6 +118,34 @@ describe('admin actions given an id no row can have', () => {
     expect(state.error).toMatch(/out of date/);
     expectNoQuery();
   });
+
+  /**
+   * A form that would otherwise save — named, with a slug and an email question
+   * — so the uuid is the only thing wrong with it, and a check moved below the
+   * first query (the field list, the group, the slug clash) throws here instead
+   * of answering. The group default was `text(…) || null` until 3.2, and its
+   * malformed value was a 22P02 out of the action.
+   */
+  it.each([
+    ['defaultCategoryId', 'Unknown category'],
+    ['defaultGroupId', 'That group no longer exists'],
+  ])(
+    'saveTicketForm refuses a malformed %s with a sentence, without querying',
+    async (key, error) => {
+      const state = await actions.saveTicketForm(
+        INITIAL,
+        form({
+          nameEn: 'Delivery',
+          slug: 'delivery',
+          elements: JSON.stringify([{ kind: 'system', key: 'requester_email' }]),
+          [key]: MALFORMED,
+        }),
+      );
+
+      expect(state).toEqual({ error });
+      expectNoQuery();
+    },
+  );
 });
 
 describe('admin actions given an id that means the same row in another spelling', () => {

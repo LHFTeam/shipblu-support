@@ -530,9 +530,22 @@ export const ticketForms = pgTable(
      *
      * Null priority means the column default (`medium`) rather than a second way
      * of writing it, so a form that does not care does not have an opinion.
+     *
+     * The category is recorded as the form's choice at creation — a
+     * `category_changed` by `form:<slug>`, written by `createTicket` in the
+     * transaction that opens the ticket — and never read back from the form
+     * afterwards, for the reason `priorityChosenBy` gives: a default an admin
+     * adds later must not claim the tickets the form filed before it. A retired
+     * one stays here, marked on the forms page, and opens tickets with none.
+     * `restrict`, like `conversations.category_id`: nothing deletes a category,
+     * and `set null` would only ever fire on a hand-run delete, quietly
+     * clearing a form's default.
      */
     defaultGroupId: uuid('default_group_id').references(() => groups.id, {
       onDelete: 'set null',
+    }),
+    defaultCategoryId: uuid('default_category_id').references(() => ticketCategories.id, {
+      onDelete: 'restrict',
     }),
     defaultPriority: priorityEnum('default_priority'),
     defaultType: text('default_type'),

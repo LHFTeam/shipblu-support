@@ -63,7 +63,7 @@ records the answers, and the plan below already reflects them.
 
 ## Status and handoff
 
-As of 2026-10-25, 06:03 UTC. A session picking this plan up starts here.
+As of 2026-10-26, 08:45 UTC. A session picking this plan up starts here.
 Everything after this section is the design as it was reasoned and as each stage
 was built. This section says where the work stands, what comes next and how, and
 what has already bitten. Whoever moves any of it updates this section in the
@@ -74,15 +74,79 @@ update.
 
 ### Where it stands
 
-| Stage | Code                                                                                                                                        | Production                                                                                                                                                                                         |
-| ----- | ------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 0     | Merged: #386 (`01488c9`)                                                                                                                    | Live since 2026-10-20. Its two operational steps were never done (below)                                                                                                                           |
-| 1.1   | Merged: #387, then `dev` → `main` in #389 (`1f89219`)                                                                                       | Live since 2026-10-21 10:13 UTC                                                                                                                                                                    |
-| 1.2   | Merged: #391 (`31f7379`) and follow-up #392 (`7b7d276`), then `dev` → `main` in #393 (`634a28d`), which also carried another session's #390 | **Done.** All six services live on `634a28d` by 17:38 UTC on 2026-10-21, worker first. The user ran the backfill and the rollup from a shell, leaving no `jobs` row. Every check below reads clean |
-| 1.3   | Merged: #395 (`58c5ed9`), then `dev` → `main` in #397 (`447d8be`), which also carried #394, #396 and #398. As built below                   | **Done.** All six services live on `447d8be` by 18:36 UTC, web first. Its checks read clean (below), though no comment has arrived since                                                           |
-| 2.A   | Merged: #400 (`a558c5b`), then `dev` → `main` in #406 (`e88d357`), which also carried #399, #401 and #402. As built below                   | **Done.** All six services live on `e88d357` by 22:13 UTC on 2026-10-23, deployed at once by an environment update. Its checks read clean (below)                                                  |
-| 2.B   | Merged: #403 (`1d21cdc`), then `dev` → `main` in #413 (`516c8ff`) and #415 (`48cb284`). As built below                                      | **Done.** All six services live on `48cb284` by 06:01 UTC on 2026-10-25, web first, with nothing suspended. Its checks read clean, and a new message was subcategorised; one read left (below)     |
-| 3–6   | Not started                                                                                                                                 | —                                                                                                                                                                                                  |
+| Stage | Code                                                                                                                                        | Production                                                                                                                                                                                                                |
+| ----- | ------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0     | Merged: #386 (`01488c9`)                                                                                                                    | Live since 2026-10-20. Its two operational steps were never done (below)                                                                                                                                                  |
+| 1.1   | Merged: #387, then `dev` → `main` in #389 (`1f89219`)                                                                                       | Live since 2026-10-21 10:13 UTC                                                                                                                                                                                           |
+| 1.2   | Merged: #391 (`31f7379`) and follow-up #392 (`7b7d276`), then `dev` → `main` in #393 (`634a28d`), which also carried another session's #390 | **Done.** All six services live on `634a28d` by 17:38 UTC on 2026-10-21, worker first. The user ran the backfill and the rollup from a shell, leaving no `jobs` row. Every check below reads clean                        |
+| 1.3   | Merged: #395 (`58c5ed9`), then `dev` → `main` in #397 (`447d8be`), which also carried #394, #396 and #398. As built below                   | **Done.** All six services live on `447d8be` by 18:36 UTC, web first. Its checks read clean (below), though no comment has arrived since                                                                                  |
+| 2.A   | Merged: #400 (`a558c5b`), then `dev` → `main` in #406 (`e88d357`), which also carried #399, #401 and #402. As built below                   | **Done.** All six services live on `e88d357` by 22:13 UTC on 2026-10-23, deployed at once by an environment update. Its checks read clean (below)                                                                         |
+| 2.B   | Merged: #403 (`1d21cdc`), then `dev` → `main` in #413 (`516c8ff`) and #415 (`48cb284`). As built below                                      | **Done.** All six services live on `48cb284` by 06:01 UTC on 2026-10-25, web first, with nothing suspended. Its checks read clean, and a new message was subcategorised; one read left (below)                            |
+| 3.1   | Merged: #419 (`ff3bbfd`), then `dev` → `main` in #420 (`b9a4743`), which also carried #411, #416, #417 and #418. As built below             | **Done.** Web live on `b9a4743` at 19:44 UTC on 2026-10-25, the worker and the four crons by 08:05 UTC on 2026-10-26, and the four categories seeded at 08:13. Its checks read clean (below); the signed-in ones are left |
+| 3.2   | Built in #424 on 2026-10-26, not merged. As built: [3.2, as built](#32-as-built)                                                            | —                                                                                                                                                                                                                         |
+| 4–6   | Not started. 4.0 (`afterRoutingChanged`) comes first                                                                                        | —                                                                                                                                                                                                                         |
+
+**3.1's deploy and checks, read on Render and production on 2026-10-25 and
+2026-10-26.**
+
+- **Before** (read 19:40 UTC on 2026-10-25): 47 migrations, the newest
+  `1792781241219`; no `ticket_categories` relation; no long transaction and no
+  strong lock; one dead job, the `subscribe_meta_webhooks` from 2026-09-21.
+  `origin/main..origin/dev` held 3.1 and, beside it, #411, #416, #417 and #418,
+  none of which touches `db/migrations` or `db/sql`.
+- **The release and web.** #420 merged `dev` into `main` at 19:41:31 UTC as
+  `b9a4743`. Web was deployed on it through Render's API at 19:41:45. Its
+  preDeploy logged
+  `Applying drizzle migrations...` at 19:43:50.1 and
+  `Done: 9 post-migration file(s) applied.` at 19:43:52.5, so `0047`, `0048`
+  and `db/sql` took under 3 s between them, `0048`'s lock on `conversations`
+  included. Web was live at 19:44:45.
+- **Not as planned: the rest followed twelve hours later.** The worker and the
+  four crons stayed on `48cb284` overnight and were deployed on `b9a4743`
+  through Render's API the next morning:
+
+  | Service                          | Started  | Live     |
+  | -------------------------------- | -------- | -------- |
+  | worker `shipblu-support-worker`  | 08:03:18 | 08:05:33 |
+  | `shipblu-time-automations`       | 08:03:28 | 08:04:05 |
+  | `shipblu-sla-sweep`              | 08:03:26 | 08:04:07 |
+  | `shipblu-nightly`                | 08:03:32 | 08:04:08 |
+  | `shipblu-whatsapp-template-sync` | 08:03:30 | 08:04:13 |
+
+  The order exists so that an old time-automations cron never meets a
+  `set_category` action. In the gap it met none:
+  - no automation rule, SLA policy or skill names `set_category` or
+    `category.id` (the newest rule edit is from 2026-10-21);
+  - no `category_changed` event was written, and nothing under `/inbox` or
+    `/admin` was requested;
+  - all 2,709 jobs created since 19:43:50 completed, none with an error;
+  - neither web nor the worker logged a warning or an error, and web served no
+    5xx.
+
+  The old code against the new schema is the rollback's own state, which
+  [Rolling back 3.1](#31-as-built) already covers.
+
+- **The seed.** `seed_ticket_categories` was queued at 08:13:58.9 with
+  `ticket_categories` still empty. The worker logged
+  `[seed_ticket_categories] done created=sales,customer_support,merchant_support,courier_jobs present=0`
+  and completed it in 52 ms. The four rows are seeded, active, and have no
+  route group. The handbook step had nothing to do: production still holds no
+  `handbook:` folder, article or category.
+- **The checks** (read 08:14–08:17 UTC):
+  - 49 migrations;
+  - `ticket_categories_key_format`, `ticket_categories_labels_not_blank`,
+    `ticket_categories_pkey` and the route group's foreign key;
+  - the four keys in order;
+  - `notify_conversation_change` names `category_id`;
+  - no conversation holds a category yet;
+  - `/api/health` reports `b9a4743`, with nothing pending or processing and
+    the same one dead job.
+- **Still to read**, signed in: `/admin/categories` lists the four, a ticket
+  page shows the select, and setting a category writes one `category_changed`
+  event naming the agent. 2.B's page loads are still unread too (below): the
+  user chose to release 3.1 without them.
+- **2.B has no way back by renaming any more.** `0047` and `0048` are applied,
+  so [Rolling back 2.B](#2b-as-built) is fixed forward from here.
 
 **2.B's deploy and checks, read on Render and production on 2026-10-25.**
 
@@ -134,8 +198,10 @@ update.
   `delivery.late` and `meta.unclassified`.
 - **Still to read:** step 4's page loads, which need a person signed in: a
   ticket page, a web chat ticket, `/admin/subcategories` and its shadow page.
-  Render's request log holds none since the deploy (read 16:20 UTC). The
-  rollback runbook stays the way back until a migration follows 0046.
+  Render's request log holds none since the deploy (read 16:20 UTC), nor
+  since 3.1's (read 08:17 UTC on 2026-10-26). The rollback runbook was the way
+  back until a migration followed 0046, which 3.1's did at 19:43:50 UTC on
+  2026-10-25.
 
 **2.A's deploy and checks, read on Render and production on 2026-10-23 and
 2026-10-25.**
@@ -289,12 +355,22 @@ Every production write needs the user's go-ahead for that step, and the
    checks read clean on 2026-10-25 (above).
 3. **2.B is deployed.** The user deployed it by hand on 2026-10-25, all six on
    `48cb284` by 06:01 UTC, and its checks read clean (above), a new message's
-   subcategorisation included. One read is left: the four page loads. It
-   rolls back by the runbook under [Rolling back 2.B](#2b-as-built), which stops
-   being a way back once any later migration has run.
-4. **Stage 3**, the category field, merges once that read is done: its gate is
-   2.B deployed to all six services and verified.
-5. **Before Stage 5**, a person does 0.2's reorder and 0.6's staffing, and the
+   subcategorisation included. One read is left: the four page loads. Since
+   3.1's migrations ran it is fixed forward, not rolled back.
+4. **3.1 is deployed.** #419 was squashed into `dev` as `ff3bbfd`, and #420
+   (`b9a4743`) took it to `main` on 2026-10-25 with #411, #416, #417 and #418.
+   The user chose to release it with 2.B's page loads still unread. Web was
+   live on it at 19:44 UTC, and the worker and the four crons by 08:05 UTC the
+   next morning, with no effect from the gap. Its checks read clean (above),
+   the seed included; the signed-in ones are left. Its review decisions are
+   under [3.1, as built](#31-as-built).
+5. **Stage 3.2**, where a person sets the category when a ticket is created,
+   is built from the map and in review as #424 into `dev`:
+   [3.2, as built](#32-as-built). It deploys web first (migration `0049`),
+   then the worker and the four crons, with nothing to seed. Then
+   **Stage 4**, whose first change is `afterRoutingChanged`
+   ([Stage 4](#stage-4--jev-sets-the-category)), before Jev becomes a writer.
+6. **Before Stage 5**, a person does 0.2's reorder and 0.6's staffing, and the
    support lead answers the questions still open (below).
 
 ### 1.3, as built
@@ -1037,7 +1113,8 @@ preDeploy has run in production, it still works from history, unchanged:
 `0048` are applied, 2.B has no way back by renaming: the new
 `ticket_categories` holds the name the old table would return to, and Drizzle
 would not apply `0046` again behind two newer rows. A problem found in 2.B
-after that is fixed forward, in a migration of its own.
+after that is fixed forward, in a migration of its own. That is now: 3.1's web
+preDeploy applied both at 19:43:50 UTC on 2026-10-25.
 
 ### Working on this repo without the outgoing session's context
 
@@ -1094,8 +1171,10 @@ after that is fixed forward, in a migration of its own.
   `nqbcfnvqqyqawmffgiql`**, `SELECT`s only, unless the user has said yes to a
   specific write. Staging is `funavpkflkhthegahuay`.
 - **The database tier locally.** Start Postgres with
-  `pg_ctlcluster 16 main start` if it is down. Then migrate (again, whenever
-  `db/sql` or a migration changed) and run:
+  `pg_ctlcluster 16 main start` if it is down. The 3.1 session used
+  Postgres 17, CI's version, on port 5433 instead; a fresh container may have
+  either or neither. Keep the password out of the repo. Then migrate (again,
+  whenever `db/sql` or a migration changed) and run:
 
   ```bash
   T=postgresql://postgres:postgres@localhost:5432/shipblu_test
@@ -2753,8 +2832,8 @@ cannot parse.
 
 #### 3.1, as built
 
-On `claude/stage-3-category-field`. What it holds beyond the list above, and
-where it departs from it:
+Squashed into `dev` as `ff3bbfd` (#419). What it holds beyond the list above,
+and where it departs from it:
 
 - **Migrations.** `0047_free_old_pkey_names` is the hand-written one this stage
   was to decide on (`drizzle-kit generate --custom`): a loop renaming the three
@@ -2857,9 +2936,43 @@ where it departs from it:
   category itself, so a rename breaks neither; the role lists in `people` and
   `owner-role`; and the two folders' descriptions.
 
+**Decided on review.** #419 had three review rounds. Every finding was fixed
+or decided, and four were put to the user and decided on 2026-10-25:
+
+- **A `set_category` naming a bad id is not refused when the rule is saved.**
+  A non-uuid, an unknown category or a retired one is answered at run time: the
+  engine logs an error or warning naming the rule on each match. Checking the
+  uuid in `parseAction` would make it quieter, because `parseActions` drops an
+  unparsable action without a word. No console path produces a bad id, every
+  other id-bearing action is held to the same not-blank check, and refusing a
+  retired category at save would stop an admin saving any change to an older
+  rule until they replaced that action.
+- **A breach flag stays set when the re-selection moves a breached ticket to a
+  policy whose target has also passed.** One missed response is one breach,
+  recorded once by the sweep against the deadline in force when it was found,
+  as `recomputeOwedClocks` already does when a priority raise brings a breached
+  deadline earlier. Clearing the flag would record the same miss twice. What
+  follows the new policy is the escalation, keyed per policy above.
+  `breachesCleared` is the one copy of the rule.
+- **With no active default policy, correcting a category to one no policy
+  matches keeps the policy the wrong category chose**, with nothing on the
+  timeline. Left as it is: production has an active default, Live Support
+  (Customer Care), and `/admin/sla` warns when there is none. If that changes,
+  the cheap answer is an `sla_recalculated` event in the `!policy` branch when
+  the current policy's own conditions no longer match.
+- **Every writer of the category or the group calls the follow-up by hand.**
+  The console, the engine's `finally` and, from Stage 4, Jev must each remember
+  `reselectPolicyBeforeFirstResponse` and then `onGroupChanged`, and a writer
+  that forgets leaves a category-keyed policy unreachable with no test failing.
+  It becomes one function, `afterRoutingChanged`, as
+  [Stage 4's first change](#stage-4--jev-sets-the-category), before Jev is a
+  writer.
+
 **Deploying 3.1.** Web first, because it migrates; then the worker and the four
 crons, because an old time-automations cron drops a `set_category` action
-without a word. It waits for 2.B's two remaining reads.
+without a word. It waits for 2.B's two remaining reads. It did not, in the
+end: the user released it with the page loads unread
+([3.1's deploy](#status-and-handoff)).
 
 1. **Before.** Read `git log origin/main..origin/dev` (rule 7) for what else
    rides. Expect 47 rows in `drizzle.__drizzle_migrations`, the newest
@@ -2971,7 +3084,406 @@ beyond one column.
   owned. Production has no forms today, so this can follow later without
   blocking anything.
 
+#### 3.2, how to build it
+
+Mapped from the code on 2026-10-26, against `dev` at `992286c`, by four
+readers and a critic that checked them against the code. The critic's
+corrections are folded in: assignment's skill match reads the category, the
+console chooser is not a copy of priority, and the action writes a contact
+before it can refuse. It was built from this map on 2026-10-26: what it holds and where it departs are under [3.2, as built](#32-as-built). Every line number below was read then; re-read the file
+before you edit it.
+
+The defaults below are recommendations. They answer the questions the map
+raised, so a session can build without stopping. Where a default is a product
+call the user may want to make, it says so.
+
+**The one hard constraint: the category is written inside `createTicket`'s
+own transaction.** Everything else follows from it.
+
+- `createTicket` (`lib/portal/tickets.ts:224-307`) commits, then runs two hooks
+  before it returns:
+  - `afterMessageStored`, which queues the priority job and, from Stage 4, the
+    category job;
+  - `afterInboundMessage(…, true, …)`, which runs the `on_create` rules, then
+    `applySlaOnCreate`, then auto-assignment (`lib/tickets/lifecycle.ts:73-78`).
+- So a category written after it returns arrives too late, four ways:
+  - the `on_create` rules miss it;
+  - the first policy selection misses it;
+  - auto-assignment's skill match misses it. `routeAndPick` matches skills on
+    `conversationFacts`, which carries `category.id`
+    (`lib/assignment/index.ts:258-269`), and the Skills page offers it. A later
+    re-selection would fix the SLA, never the assignment;
+  - from Stage 4, Jev could act first.
+
+  This is the lesson `NewTicket.openedBy`'s comment records. `submitForm`'s
+  `unverified_submitter`, written after `createTicket`, is the shape not to
+  copy.
+
+- **`setConversationCategory` cannot be called inside that transaction.** It
+  opens its own `db.transaction`, which cannot see the uncommitted row and
+  answers `no_ticket`.
+- **The column goes in the insert, and the event in the same transaction.**
+  - Before the insert, read the registry row `for('share')`, as
+    `lib/categories/write.ts:59-71` does. The foreign key's own lock does not
+    block a retire, so without it a retired category could be filed.
+  - Write the column only if the row exists and is active.
+  - Write one `category_changed` with:
+    - `createdAt: CHANGE_STAMP`;
+    - `data: { from: null, to, key, label }`, with `label` from `labelEn`;
+    - the actor: `actorAgentId`, or `actorLabel: 'form:<slug>'`.
+  - Share one helper with `write.ts` for the registry read and the event's
+    values, so the two writers cannot drift. A `tx`-taking function that
+    `setConversationCategory` wraps is the cleanest, with one trap: its
+    `ticket.categoryId === categoryId` check (`write.ts:55`) answers
+    `unchanged` and writes no event. So either insert the row with a null
+    category and let the shared writer update it in the same transaction
+    (which sees its own row), or share only the registry read and the event
+    values.
+  - `write.ts`'s existing tests must pass unchanged
+    (`reselect-policy.db.test.ts` "skips a retired category", "writes nothing
+    when…", "refuses a category that is gone or retired").
+- **No re-selection at creation.** `applySlaOnCreate` reads the whole row
+  (`lib/sla/index.ts:96-114, 169-170`), and the `on_create` facts carry
+  `category.id` (`lib/rules/facts.ts:51`). So a category-keyed policy is chosen
+  at the first selection, with no `sla_recalculated`. Calling
+  `reselectPolicyBeforeFirstResponse` here would either write a misleading
+  event or waste a locked transaction.
+
+**The pieces, by file.**
+
+- **Schema.**
+  - Add
+    `defaultCategoryId: uuid('default_category_id').references(() => ticketCategories.id, { onDelete: 'restrict' })`
+    beside `defaultGroupId` in `ticketForms` (`db/schema/config.ts:533-539`).
+  - `restrict`, like `conversations.category_id`: nothing deletes a category,
+    and `set null` would only ever fire on a hand-run delete, quietly clearing
+    a form's default.
+  - Extend the "What the form presets" comment: the default is recorded at
+    creation as `form:<slug>` and never read back from the form.
+  - Then `npm run db:generate`, which writes `0049`. It is a plain
+    nullable-column add, so there is no rename prompt.
+  - Production has no forms, so the foreign key validates zero rows.
+  - Stage the new files before `repo-rules.mjs`.
+- **`lib/portal/tickets.ts`, `NewTicket`.** Add
+  `category?: { id: string; chosenBy: CategoryActor }`. The value and the actor
+  are in one field, so the type rules out a column with no event. Priority's
+  `priority` and `priorityChosenBy` are two separate fields, which allows
+  exactly that. The docstring gives `openedBy`'s reason. In `createTicket`,
+  write as above. A retired or missing category is dropped: null column, no
+  event, and a `log.warn`, like the engine's skip at
+  `lib/automations/index.ts:274-278`. The module has no `logger` yet; add one
+  from `lib/log.ts`, since a bare `console` fails lint. A customer's ticket is
+  never refused over an admin's retire, so `createTicket` never refuses at all.
+  That also keeps `SubmitResult` as it is: its two `switch`es, in the console
+  action (`:61-76`) and the help centre's (`forms/actions.ts:70-88`), have no
+  default, and a new reason would need a case in each and a translated key in
+  the second. No category means no event: `tickets.db.test.ts:155-159` pins
+  the bare event list.
+- **`lib/forms/queries.ts`.** Add `defaultCategoryId: string | null` to
+  `FormRecord`. `load()` already spreads the whole row, so only the type
+  changes.
+- **`lib/forms/submit.ts`.** Compute the category beside priority, at
+  `:267-296`.
+  - The console's choice travels only on the agent variant of `Requester`, as
+    a tri-state `categoryId?: string | null`:
+    - `undefined`: the chooser was not offered;
+    - `null`: the agent chose none;
+    - a uuid: the agent chose that category.
+  - The help centre's `session` and `anonymous` variants cannot carry one.
+    Never read it from `input.values`, or a hand-made POST to a public form
+    could file a category, which counts as owned from Stage 4.
+  - Default: the agent's answer when offered, otherwise
+    `form.defaultCategoryId`.
+- **Admin forms.**
+  - `app/(console)/admin/forms/page.tsx` adds `listCategories()` to its
+    `Promise.all` and passes `toCategoryChoices(...)`.
+  - `forms.tsx` gets an always-rendered
+    `<Select name="defaultCategoryId">`, with "No category" plus
+    `categoryOptions(categories, form?.defaultCategoryId ?? null)`, so a
+    retired stored default reads "(retired)" and saving unchanged does not
+    clear it.
+  - `saveTicketForm` (`actions.ts:57-168`) reads it with `uuidField`, before
+    the first query, so a malformed value is refused with a sentence. It
+    refuses an unknown category, and a retired one unless it equals what the
+    form already stores. Put that check in `lib/` (`lib/forms/` or
+    `lib/categories/`) so a `*.db.test.ts` reaches it.
+  - Do not copy the group default's `text(…) || null` (`:116`). A malformed
+    value there raises 22P02 and the action throws with no state. Switching
+    the group to `uuidField` too is a one-line fix of the same class, optional
+    in this PR.
+- **The console's new-ticket page.**
+  - `page.tsx:25`: keep the agent `requirePermission('ticket.create')` returns.
+    Only when `can(agent, 'ticket.set_category')`, read `listCategories()` and
+    pass `toCategoryChoices(...)`, and the form's default category's label
+    while it is active, for the hint below.
+  - Put `key={slug}` on `<ConsoleTicketForm>`. Next keeps the page's client
+    state across `?form=` links, since the router cache key ignores search
+    params, so switching forms would carry a category the agent picked on the
+    first form onto the second. Priority's seed has the same latent bug. This
+    was read from Next 16.3.1's source (`layout-router.js:549`), not seen in a
+    browser; check it in one.
+  - `form.tsx` gets `<Select name="categoryId">`, which is never seeded with
+    the form's default. It offers three kinds of value:
+    - `''` first, labelled with the default ("Form default: Sales", or "No
+      category" when the form has none);
+    - an explicit `none`, "No category", offered only when the form has a
+      default;
+    - then `categoryOptions(categories, null)`.
+
+    It imports only `@/lib/categories/choices`. Anything else reaches
+    `db/client` and fails `client-bundle`.
+
+  - The action (`actions.ts`) reads `categoryId`: `''` is untouched,
+    `none` is none, anything else goes through `uuidField`. The name stays
+    outside `system.*` and `custom.*`, and making it a `SYSTEM_KEYS` entry
+    would trip `form-system-keys` and the visibility machinery. It refuses a
+    value other than `''` from an agent without `ticket.set_category`, with
+    `ticket-actions.ts:203`'s sentence. It re-reads the row: "Unknown
+    category", or "That category has been retired — choose another", as
+    `ticket-actions.ts:211-213`. Then it passes the result on the agent
+    requester: `undefined` for untouched, `null` for none, or the id.
+  - **Every refusal comes before `resolveContact` (`actions.ts:43-47`).**
+    That inserts a contact and its identity for a new address before
+    `submitForm` runs, so a refusal after it leaves a contact behind. Success
+    redirects, so `action-revalidates` holds.
+  - The form keeps `<form {...form}>` from `useActionForm`.
+- **Retiring a category a form defaults to** is allowed, as for rules.
+  - The forms editor shows it "(retired)".
+  - Optionally, the collapsed row carries a warning `Badge` with words.
+  - Creation skips it.
+  - Update the comments on `setCategoryActive` and the `/admin/categories`
+    description, "set by an agent or a rule", to name forms.
+  - Listing forms beside Retire is left out: production has no forms.
+
+**Decisions the map raised, with the default taken.**
+
+- **An untouched chooser is the form's default, credited to the form.** The
+  chooser posts `''` unless the agent changes it, and `submitForm` then takes
+  `form.defaultCategoryId` as it reads the form at submit, recorded as
+  `form:<slug>`.
+  - **Why credit the form.** Stage 4.2's ground truth is only a
+    `category_changed` with an agent, and an untouched default is not a
+    person's judgement.
+  - **Why the chooser is never seeded.** A chooser seeded with the default
+    would post it back as the agent's choice. It would also post a stale one
+    if an admin changed the default between render and submit.
+  - **Priority is not a precedent here.** Its select is drawn only when the
+    form places the `system.priority` question (`form.tsx:87-120, 198`), and
+    otherwise its default is credited to the form. A chooser outside the
+    element list is always posted.
+  - A category the agent picks is credited to the agent.
+  - "None" over a default writes no column and no event. An event with
+    `to: null` would read "cleared the category" on a ticket that never had
+    one. `opened_by_agent` still marks the ticket owned, as decision 4 says.
+- **Decision 4 makes every console-opened ticket owned, so Jev never
+  classifies one.** That is true whatever the chooser says, "None" included.
+  Recorded here because it now has a visible consequence; the user may want to
+  revisit it in Stage 4.
+- **An `on_create` `set_category` rule overrides both the form's default and
+  an agent's choice.** That is the documented "defaults, not overrides", the
+  same as priority. Changing it for a person's choice is a product call, not
+  made here.
+- **A form's default group can differ from its category's route group.** The
+  ticket stays in the form's group, because decision 5 never routes a
+  `createTicket` ticket. The policy, a skill match at assignment and reports
+  follow the category; the group does not. A warning on the forms page is
+  optional.
+
+**Tests.**
+
+- **`lib/portal/tickets.db.test.ts`.** Extend "takes what a form presets"
+  (`:162-189`):
+  - the column is set;
+  - one `category_changed` with `actorLabel 'form:<slug>'`, `actorAgentId`
+    null, and `data { from: null, to, key, label }`;
+  - an agent actor gives `actorAgentId`;
+  - a retired category writes neither column nor event, and the ticket is
+    still created;
+  - the bare case keeps `[{ type: 'subcategorised' }]`.
+- **New `lib/forms/submit.db.test.ts`.** None exists today. Cases:
+  - help centre `session` and `anonymous` get the default as `form:<slug>`;
+  - an agent's different choice is the agent's;
+  - an untouched default is the form's;
+  - an explicit `none` over a default writes nothing;
+  - a `categoryId` posted to a help-centre submission is ignored;
+  - a default added to a form after a ticket was filed leaves that ticket
+    alone. Model it on `run.db.test.ts:530-556`.
+- **`lib/sla/reselect-policy.db.test.ts`.** Beside "leaves an on_create rule's
+  category to applySlaOnCreate" (`:388-420`):
+  - a ticket created with Sales gets the Sales policy and no
+    `sla_recalculated`;
+  - an `on_create` `set_category` overrides it, with one event of its own.
+- **`app/(console)/admin/actions.test.ts`.** Add the forms actions to its
+  import list: a malformed `defaultCategoryId` is refused before any query
+  (`expectNoQuery`).
+- **A database test of the save check.** In `lib/`:
+  - unknown refused;
+  - retired-unchanged accepted;
+  - newly retired refused;
+  - new form with a retired id refused;
+  - null clears.
+- **`lib/categories/admin.db.test.ts`.** Retiring a category a form names
+  leaves the form holding it. Deleting it raises 23503, which proves
+  `restrict`.
+- **`lib/assignment/index.db.test.ts`.** In a `matchSkills` group, a skill
+  conditioned on `category.id`: a ticket created with that category is offered
+  only to the skill's holders.
+- **The console action's refusals** (malformed, unknown, retired, no
+  `ticket.set_category`), from a `lib/` helper so a `*.db.test.ts` reaches
+  them. One case asserts that a refused submission creates no `contacts` row.
+
+**Docs in the same PR.**
+
+- **`AGENTS.md`, "Ticket forms".** The category default is written by
+  `createTicket` as `form:<slug>` in the creating transaction, and read at the
+  time, never later.
+- **`AGENTS.md`, "The ticket category".**
+  - Name `createTicket` as the insert-time writer, which neither goes through
+    `setConversationCategory` nor re-selects.
+  - Say the New form's chooser is gated by `ticket.set_category`.
+- **The handbook** (`lib/kb/handbook.ts`):
+  - `inbox` `:165-166`, the New button;
+  - `category` `:225`, a form among who sets it;
+  - `category` `:228`;
+  - `automation-and-forms` `:443-446` and `:450-456`.
+
+  Each body must stay a fixed point of `normaliseArticleHtml(sanitiseArticleHtml())`
+  and over 600 characters of text (`handbook.test.ts`).
+
+- **Comments 3.2 makes untrue.** Each says every category writer re-selects,
+  or that `setConversationCategory` is the only writer:
+  - `reselectPolicyBeforeFirstResponse`'s docstring (`lib/sla/index.ts:623-629`).
+    A category written at creation is a second exception beside `on_create`,
+    read by `applySlaOnCreate`.
+  - `db/schema/conversations.ts:126-129`, on `category_id`.
+  - `lib/categories/write.ts:17-21`.
+  - `lib/tickets/change-stamp.ts:6-9`. It assumes an update holding the row
+    lock; say a creation-time event is stamped too. `createTicket`'s own
+    `priority_changed` is not stamped, so either stamp it or name the
+    exception.
+  - `lib/categories/admin.ts:20-23, 150-156`. Name
+    `ticket_forms.default_category_id` and what a form holding a retired
+    default does.
+
+**Deploying 3.2.**
+
+1. Web first, because it migrates `0049`. This brief ACCESS EXCLUSIVE on
+   `ticket_forms` is over a table of zero rows in production.
+2. Then the worker and the four crons, on the same commit.
+3. Nothing to seed.
+4. If production holds a handbook by then, run `seed_console_handbook
+dryRun=true` first, and expect only the articles this PR changed to differ.
+   `overwrite=true` has no per-key filter.
+
+**Rolling back 3.2.** Code only: the column stays, and the old code never
+reads it.
+
+#### 3.2, as built
+
+Built on 2026-10-26 from the map above, against `dev` at `d05c131`. What it
+holds beyond the map, and where it departs from it:
+
+- **The shared halves.** `lib/categories/write.ts` exports `holdCategory`
+  (the registry read, share-locked) and `categoryChangedEvent` (the event's
+  values), and both `setConversationCategory` and `createTicket` call them.
+  The map's second option was taken: the row is inserted with its category,
+  rather than inserted bare and updated by the shared writer.
+- **Category ids are canonical.** `holdCategory` lower-cases the id it is
+  given and returns it, and both writers store that one. Found in review: an
+  upper-case id from a hand-made POST was stored lower-case in the column,
+  which is a `uuid`, and as typed in the event's `data.to`, which is jsonb, so
+  the two disagreed, and from Stage 4 Jev's ownership rule reads one against
+  the other. It also closes the same gap in 3.1's sidebar, which hands its
+  value to `setConversationCategory` as typed. Not a uuid at all is
+  `unknown_category`, with no query, so a malformed id can never make
+  `createTicket` throw 22P02 instead of opening the ticket.
+- **The refusals live in `lib/forms/category.ts`**:
+  - `formDefaultCategoryRefusal`, for the forms editor;
+  - `consoleCategoryChoice`, for the New form's action, which calls it before
+    `resolveContact`.
+
+  `NO_CATEGORY` (`'none'`) is in `lib/categories/choices.ts`, because the
+  client form needs it too.
+
+- **Two sentences differ from the map's.**
+  - Without `ticket.set_category`, the action says "You cannot set a ticket's
+    category": a ticket not yet opened has nothing to change.
+  - The forms editor reads `defaultGroupId` with `uuidField` as well, the
+    optional one-line fix the map named. A malformed group id is now "That
+    group no longer exists", where it was a 22P02 out of the action.
+- **The forms list marks a retired default** with a "Default category
+  retired" badge, the optional one the map named.
+- **`createTicket`'s `priority_changed` stays unstamped.** `change-stamp.ts`
+  names it as the one exception, for the reason it is harmless: nothing else
+  can have written a ticket's priority inside the transaction that creates it.
+- **The log line** for a category left off is
+  `[create_ticket] category left off a new ticket category=<id> reason=<retired_category|unknown_category>`.
+
+- **The key is on the questions, not the whole form.** The map put
+  `key={slug}` on `<ConsoleTicketForm>`. Review found that wipes the customer's
+  email and name when the agent switches form, and those do not depend on the
+  form. So the email, the name and the submit stay in `ConsoleTicketForm`, and
+  `<FormQuestions key={slug}>` inside it holds the answers, the priority seed
+  and the category chooser. A happy-dom test, `app/(console)/inbox/new/form.test.ts`,
+  holds both halves.
+- **AGENTS.md credits the priority default precisely.** It credits
+  `form:<slug>` only where the form applies it: a console form that places the
+  priority question seeds it, so an agent who leaves it alone is credited.
+- **One reader, one set of sentences.** `checkCategory` sits beside
+  `holdCategory` as the same read holding nothing, and `CATEGORY_REFUSALS`
+  holds the two sentences. The sidebar, the New form and the forms editor all
+  answer from them.
+- **A refusal on the New form shows only under the form it refused.** The
+  answer outlives a `?form=` switch, since only the questions remount.
+- **The forms editor's check stays unlocked.** A retire landing between it and
+  the save leaves the same rows as "save, then retire". A ticket's
+  `category_changed` would date the category after the retire, which is why
+  `createTicket` holds it.
+- **Two races are left as they are**, the user's decision on #424's review,
+  while production holds no forms:
+  - an agent's pick retired between the action's check and `createTicket`
+    opens the ticket with no category, which the agent sees on the ticket the
+    redirect lands on. Refusing instead would roll the ticket back after
+    `resolveContact` has already written a contact;
+  - the chooser's "Form default" label can go stale while the page is open. An
+    untouched chooser takes the default the form holds at submit, credited to
+    the form. A hidden field with the rendered default, refused when it
+    differs, is about twenty lines if forms come into use.
+
+**Not verified in a browser:** that Next keeps the page's client state across
+`?form=` links. The map read it from Next 16.3.1's source, and the test above
+renders the component with new props as that implies, but there is still no
+browser suite.
+
 ### Stage 4 — Jev sets the category
+
+**4.0 — One follow-up for every routing writer.** Code only, no schema: web,
+then the worker and the four crons, which carry the automation engine. Decided
+on #419's review, before Jev becomes a writer.
+
+- **Code.**
+  - `afterRoutingChanged(id, { category, group })` in `lib/sla`. It runs
+    `reselectPolicyBeforeFirstResponse` and then `onGroupChanged`, the order
+    both callers use since 3.1, so a move that changes the policy is re-timed
+    once.
+  - Its only input is what the writers already return:
+    - `setConversationCategory`'s outcome;
+    - `moveToGroupIfElsewhere`'s boolean;
+    - `assignConversation`'s `movedGroup`.
+  - The console's group and category cases, and the engine's `finally`, each
+    make one call to it. So do Jev (4.1) and the router (Stage 5).
+  - The order then lives in one place.
+- **Not a hook inside the writers.** The engine has to re-select once per pass,
+  after every rule has run. Otherwise a rule that files a ticket and another
+  that moves it choose two policies in turn. A hook in `setConversationCategory`
+  or `moveToGroupIfElsewhere` would fire once per action.
+- **Optionally, a repo rule.** It would refuse a `setConversationCategory` call
+  whose result is dropped. The result is what tells the caller a follow-up is
+  owed.
+- **Tests.** The re-selection tests in `reselect-policy.db.test.ts` keep
+  passing unchanged through the new entry point. One case covers a writer that
+  changed both the category and the group, which still writes a single
+  `sla_recalculated`.
 
 **4.1 — The classifier, shipped off.** Web first (it migrates the new tables),
 then the worker and all four crons. With the switch at `off` nothing is
@@ -3019,9 +3531,8 @@ enqueued, so no job type is ever unknown.
 - **Wiring.** `afterMessageStored` enqueues the job in its own `try/catch`,
   beside priority's.
 - **After commit.**
-  - **Until Stage 5:** an applied answer calls
-    `reselectPolicyBeforeFirstResponse`, then `afterTicketUpdate`, as
-    priority's does.
+  - **Until Stage 5:** an applied answer calls `afterRoutingChanged` (4.0),
+    then `afterTicketUpdate`, as priority's does.
   - **From Stage 5:** the four cases in decision 5's table, chosen by the
     ticket's routing row.
 - **Tests.**

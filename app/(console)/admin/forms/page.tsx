@@ -1,6 +1,8 @@
 import { Card, EmptyState, PageHeader } from '@/components/ui';
 import { listFormFieldChoices, listGroupNames, listTicketForms } from '@/lib/admin/settings';
 import { requirePermission } from '@/lib/auth/guard';
+import { toCategoryChoices } from '@/lib/categories/choices';
+import { listCategories } from '@/lib/categories/queries';
 import { parseFormElements } from '@/lib/forms/elements';
 import { listAllTicketFields } from '@/lib/tickets/lookups';
 import { FormEditor, NewForm } from './forms';
@@ -17,14 +19,16 @@ export const dynamic = 'force-dynamic';
 export default async function FormsPage() {
   await requirePermission('admin.forms');
 
-  const [forms, groupList, fieldList, defs] = await Promise.all([
+  const [forms, groupList, fieldList, defs, categoryList] = await Promise.all([
     listTicketForms(),
     listGroupNames(),
     listFormFieldChoices(),
     listAllTicketFields(),
+    listCategories(),
   ]);
 
   const groupChoices = groupList.map((group) => ({ value: group.id, label: group.name }));
+  const categories = toCategoryChoices(categoryList);
   const fieldChoices = fieldList.map((field) => ({
     key: field.key,
     label: field.label,
@@ -40,7 +44,12 @@ export default async function FormsPage() {
         title="Forms"
         description="Named sets of questions that open a ticket. A form decides what is asked, what is asked only when something else was answered, and which queue the answers land in."
         actions={
-          <NewForm groups={groupChoices} fields={fieldChoices} nextPosition={forms.length + 1} />
+          <NewForm
+            groups={groupChoices}
+            categories={categories}
+            fields={fieldChoices}
+            nextPosition={forms.length + 1}
+          />
         }
       />
 
@@ -50,6 +59,7 @@ export default async function FormsPage() {
             <FormEditor
               form={form}
               groups={groupChoices}
+              categories={categories}
               fields={fieldChoices}
               // Parsed, not the raw document length. The count is the only
               // signal on this screen that a form has drifted from what was

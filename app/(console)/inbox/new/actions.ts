@@ -3,6 +3,8 @@
 import { redirect } from 'next/navigation';
 import { requirePermission } from '@/lib/auth/guard';
 import { looksLikeEmail, normaliseEmail } from '@/lib/auth/normalise';
+import { can } from '@/lib/auth/permissions';
+import { consoleCategoryChoice } from '@/lib/forms/category';
 import { getFormBySlug } from '@/lib/forms/queries';
 import { labelsFor, submitForm } from '@/lib/forms/submit';
 import { DEFAULT_LOCALE } from '@/lib/kb/locale';
@@ -37,6 +39,14 @@ export async function createTicketFromForm(
   const email = normaliseEmail(String(formData.get('requesterEmail') ?? ''));
   if (!looksLikeEmail(email)) return { error: 'Enter the customer’s email address' };
 
+  // Before the contact is resolved: that inserts a contact for a new address,
+  // and a refusal after it would leave one behind for a ticket never opened.
+  const category = await consoleCategoryChoice(
+    text(formData, 'categoryId'),
+    can(agent, 'ticket.set_category'),
+  );
+  if ('error' in category) return { error: category.error };
+
   // Resolved the same way an inbound email is, so a ticket an agent opens joins
   // the customer's existing history rather than starting a second stranger with
   // the same address.
@@ -49,7 +59,12 @@ export async function createTicketFromForm(
   const result = await submitForm({
     loaded,
     values: formData,
-    requester: { kind: 'agent', contactId: contact.contactId, agentId: agent.id },
+    requester: {
+      kind: 'agent',
+      contactId: contact.contactId,
+      agentId: agent.id,
+      categoryId: category.categoryId,
+    },
     // The console is English; the ticket's wording follows the form the agent is
     // reading, not the customer's own locale. Worth knowing rather than hiding:
     // the answers are stored by value and only the summary in the first message

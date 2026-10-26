@@ -5,6 +5,7 @@ import { useFormStatus } from 'react-dom';
 import { Button, ErrorText, Field, Input, Select, Textarea } from '@/components/ui';
 import { TicketFieldInput } from '@/components/ticket-field-input';
 import { useActionForm } from '@/components/use-action-form';
+import { categoryOptions, NO_CATEGORY, type CategoryChoice } from '@/lib/categories/choices';
 import { ACCEPT_ATTRIBUTE } from '@/lib/forms/files';
 import {
   elementHelp,
@@ -39,20 +40,69 @@ import { createTicketFromForm, type ConsoleFormState } from './actions';
 
 const INITIAL: ConsoleFormState = { error: null };
 
-export function ConsoleTicketForm({
-  slug,
-  elements,
-  fields,
-  defaultPriority,
-}: {
-  slug: string;
+type QuestionsProps = {
   /** Already narrowed to the agent's view — see `elementsFor`. */
   elements: FormElement[];
   fields: TicketFieldDef[];
   /** What the form would set if the agent does not touch the control. */
   defaultPriority: string | null;
-}) {
+  /** The registry, or null for an agent who may not set a category: no chooser then. */
+  categories: CategoryChoice[] | null;
+  /** The form's default category while it is active, for the untouched option's label. */
+  defaultCategoryLabel: string | null;
+};
+
+export function ConsoleTicketForm({ slug, ...questions }: { slug: string } & QuestionsProps) {
   const { state, form } = useActionForm(createTicketFromForm, INITIAL);
+  // Which form the last answer is about. The answer is this component's and
+  // outlives a `?form=` switch — only the questions below remount — so without
+  // this a refusal of one form's answers ("Fill in Order number") stayed on
+  // screen under the next form's questions, which may not ask it.
+  const [answered, setAnswered] = useState(slug);
+
+  return (
+    <form
+      {...form}
+      onSubmit={(event) => {
+        setAnswered(slug);
+        form.onSubmit(event);
+      }}
+      className="flex flex-col gap-4"
+    >
+      <input type="hidden" name="slug" value={slug} />
+
+      {/* Outside the keyed part below: who the ticket is for does not depend on
+          the form, and an agent who typed the caller's address and then saw the
+          request belongs to another form must not type it again. */}
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Field label="Customer email" hint="Joins their existing tickets, or starts a contact.">
+          <Input name="requesterEmail" type="email" required autoFocus autoComplete="off" />
+        </Field>
+        <Field label="Customer name" hint="Only used if we do not know them yet.">
+          <Input name="requesterName" autoComplete="off" />
+        </Field>
+      </div>
+
+      {/* Keyed on the form: Next keeps a page's client state across `?form=`
+          links, since the router's cache key ignores search params, so without
+          it the answers, the priority seeded from one form's default and a
+          category chosen on it were carried onto the next. */}
+      <FormQuestions key={slug} {...questions} />
+
+      <ErrorText>{answered === slug ? state.error : null}</ErrorText>
+      <Submit />
+    </form>
+  );
+}
+
+/** Everything the chosen form decides: its questions, the priority it seeds and the category chooser. */
+function FormQuestions({
+  elements,
+  fields,
+  defaultPriority,
+  categories,
+  defaultCategoryLabel,
+}: QuestionsProps) {
   const [custom, setCustom] = useState<CustomFieldValues>({});
   // Seeded, not left empty. The select rendered `value={value || 'medium'}`
   // while state stayed '', so the DOM submitted `medium` and the client's
@@ -72,18 +122,7 @@ export function ConsoleTicketForm({
   });
 
   return (
-    <form {...form} className="flex flex-col gap-4">
-      <input type="hidden" name="slug" value={slug} />
-
-      <div className="grid gap-3 sm:grid-cols-2">
-        <Field label="Customer email" hint="Joins their existing tickets, or starts a contact.">
-          <Input name="requesterEmail" type="email" required autoFocus autoComplete="off" />
-        </Field>
-        <Field label="Customer name" hint="Only used if we do not know them yet.">
-          <Input name="requesterName" autoComplete="off" />
-        </Field>
-      </div>
-
+    <>
       {visible.map((element, index) => {
         if (element.kind === 'heading') {
           return (
@@ -143,9 +182,30 @@ export function ConsoleTicketForm({
         );
       })}
 
-      <ErrorText>{state.error}</ErrorText>
-      <Submit />
-    </form>
+      {categories ? (
+        <Field
+          label="Category"
+          hint="Which team's work this is. Left on the form's default, the form is recorded as choosing it."
+        >
+          {/* Never seeded with the default: the empty value means "the form's
+              default, as the form reads it on submit", so an untouched chooser
+              is credited to the form rather than posted back as the agent's
+              choice — and an admin changing the default meanwhile is not
+              overruled by a stale copy of it. */}
+          <Select name="categoryId" defaultValue="">
+            <option value="">
+              {defaultCategoryLabel ? `Form default: ${defaultCategoryLabel}` : 'No category'}
+            </option>
+            {defaultCategoryLabel ? <option value={NO_CATEGORY}>No category</option> : null}
+            {categoryOptions(categories, null).map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </Select>
+        </Field>
+      ) : null}
+    </>
   );
 }
 

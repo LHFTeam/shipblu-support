@@ -1,0 +1,2 @@
+ALTER TABLE "ticket_forms" ADD COLUMN "default_category_id" uuid;--> statement-breakpoint
+ALTER TABLE "ticket_forms" ADD CONSTRAINT "ticket_forms_default_category_id_ticket_categories_id_fk" FOREIGN KEY ("default_category_id") REFERENCES "public"."ticket_categories"("id") ON DELETE restrict ON UPDATE no action;

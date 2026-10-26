@@ -33,6 +33,8 @@ export type FormRecord = {
   showOnHelpCentre: boolean;
   showInConsole: boolean;
   defaultGroupId: string | null;
+  /** Read once, as the ticket is created — see `ticket_forms.default_category_id`. */
+  defaultCategoryId: string | null;
   defaultPriority: Priority | null;
   defaultType: string | null;
   defaultTags: string[];

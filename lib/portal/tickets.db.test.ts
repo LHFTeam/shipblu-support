@@ -1,5 +1,5 @@
-import { asc, eq } from 'drizzle-orm';
-import { describe, expect, it } from 'vitest';
+import { and, asc, eq, sql } from 'drizzle-orm';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { db } from '@/db/client';
 import {
   agents,
@@ -9,6 +9,7 @@ import {
   conversations,
   groups,
   messages,
+  ticketCategories,
   ticketForms,
   ticketStatuses,
 } from '@/db/schema';
@@ -44,6 +45,7 @@ async function conversation(id: string) {
       subject: conversations.subject,
       status: ticketStatuses.name,
       priority: conversations.priority,
+      categoryId: conversations.categoryId,
       type: conversations.type,
       tags: conversations.tags,
       customFields: conversations.customFields,
@@ -91,6 +93,41 @@ async function agentRow(name: string): Promise<string> {
   return row.id;
 }
 
+/** One of the four categories the baseline seeds, by its key. */
+async function categoryId(key: string): Promise<string> {
+  const [row] = await db
+    .select({ id: ticketCategories.id })
+    .from(ticketCategories)
+    .where(eq(ticketCategories.key, key));
+  if (!row) throw new Error(`no category ${key}`);
+  return row.id;
+}
+
+/**
+ * The ticket's `category_changed` events, and whether each was stamped after
+ * the ticket's own row: `created_at` is `now()`, the instant the transaction
+ * began, so only `CHANGE_STAMP` — the clock read when the event is inserted —
+ * lands later. Compared in SQL, because a `Date` keeps milliseconds and the
+ * transaction can run inside one.
+ */
+async function categoryEvents(conversationId: string) {
+  return db
+    .select({
+      actorAgentId: conversationEvents.actorAgentId,
+      actorLabel: conversationEvents.actorLabel,
+      data: conversationEvents.data,
+      stampedAfterOpening: sql<boolean>`${conversationEvents.createdAt} > ${conversations.createdAt}`,
+    })
+    .from(conversationEvents)
+    .innerJoin(conversations, eq(conversations.id, conversationEvents.conversationId))
+    .where(
+      and(
+        eq(conversationEvents.conversationId, conversationId),
+        eq(conversationEvents.type, 'category_changed'),
+      ),
+    );
+}
+
 async function resolveAsAgent(conversationId: string): Promise<string> {
   const [agent] = await db
     .insert(agents)
@@ -127,6 +164,7 @@ describe('createTicket', () => {
       subject: 'Parcel damaged',
       status: 'Open',
       priority: 'medium',
+      categoryId: null,
       type: null,
       tags: [],
       customFields: {},
@@ -166,6 +204,7 @@ describe('createTicket', () => {
       .insert(ticketForms)
       .values({ slug: 'claims' })
       .returning({ id: ticketForms.id });
+    const sales = await categoryId('sales');
 
     const created = await createTicket(contactId, {
       subject: 'Claim',
@@ -176,15 +215,140 @@ describe('createTicket', () => {
       type: 'claim',
       tags: ['refund'],
       customFields: { order: '5512' },
+      category: { id: sales, chosenBy: { label: 'form:claims' } },
     });
 
     expect(await conversation(created.conversationId)).toMatchObject({
       formId: form?.id,
       groupId: group?.id,
       priority: 'high',
+      categoryId: sales,
       type: 'claim',
       tags: ['refund'],
       customFields: { order: '5512' },
+    });
+    // In the transaction that opened the ticket, so the on-create rules, the
+    // first policy selection and assignment all read a category somebody is
+    // named for. The form is the actor, not a person: from Stage 4 only an
+    // agent's choice is ground truth, and a default is nobody's judgement. The
+    // key and the English label are frozen as they were, so the timeline still
+    // says what was chosen after an admin renames it.
+    expect(await categoryEvents(created.conversationId)).toEqual([
+      {
+        actorAgentId: null,
+        actorLabel: 'form:claims',
+        data: { from: null, to: sales, key: 'sales', label: 'Sales' },
+        stampedAfterOpening: true,
+      },
+    ]);
+  });
+
+  it('names the agent who chose the category, and no label', async () => {
+    const contactId = await customer();
+    const agentId = await agentRow('Mona');
+    const support = await categoryId('customer_support');
+
+    const created = await createTicket(contactId, {
+      subject: 'Where is it?',
+      body: 'Called in.',
+      category: { id: support, chosenBy: { agentId } },
+    });
+
+    expect((await conversation(created.conversationId)).categoryId).toBe(support);
+    expect(await categoryEvents(created.conversationId)).toEqual([
+      {
+        actorAgentId: agentId,
+        actorLabel: null,
+        data: { from: null, to: support, key: 'customer_support', label: 'Customer support' },
+        stampedAfterOpening: true,
+      },
+    ]);
+  });
+
+  // Postgres reads an id in capitals as the same uuid and stores the column
+  // lower-case whatever it was handed, but `data.to` is jsonb, kept as written.
+  // A hand-made POST spelling the id in capitals would leave the event naming a
+  // spelling the column does not, and from Stage 4 Jev's ownership rule reads
+  // one against the other.
+  it('names the category in its event exactly as the column stores it, whatever case it came in', async () => {
+    const contactId = await customer();
+    const sales = await categoryId('sales');
+
+    const created = await createTicket(contactId, {
+      subject: 'Prices',
+      body: 'How much for 100 parcels a month?',
+      category: { id: sales.toUpperCase(), chosenBy: { label: 'form:sales' } },
+    });
+
+    const { categoryId: stored } = await conversation(created.conversationId);
+    expect(stored).toBe(sales);
+    expect(await categoryEvents(created.conversationId)).toEqual([
+      {
+        actorAgentId: null,
+        actorLabel: 'form:sales',
+        data: { from: null, to: stored, key: 'sales', label: 'Sales' },
+        stampedAfterOpening: true,
+      },
+    ]);
+  });
+
+  describe('opens the ticket with no category, and says why in the log, when the category is', () => {
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    // A customer's ticket is never refused over an admin's retire: the form
+    // keeps a retired default, and the ticket it opens simply has none — no
+    // column, and no event claiming a choice the ticket does not carry.
+    it.each([
+      {
+        state: 'retired',
+        reason: 'retired_category',
+        category: async () => {
+          const merchant = await categoryId('merchant_support');
+          await db
+            .update(ticketCategories)
+            .set({ isActive: false })
+            .where(eq(ticketCategories.id, merchant));
+          return merchant;
+        },
+      },
+      {
+        state: 'gone',
+        reason: 'unknown_category',
+        category: async () => '00000000-0000-0000-0000-000000000000',
+      },
+      // Not a uuid at all, from a hand-made POST: no category either, rather
+      // than Postgres's 22P02 out of the transaction, which would refuse the
+      // customer's ticket over a field they never saw.
+      {
+        state: 'not a uuid',
+        reason: 'unknown_category',
+        category: async () => 'not-a-uuid',
+      },
+    ])('$state', async ({ reason, category }) => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const contactId = await customer();
+      const id = await category();
+
+      const created = await createTicket(contactId, {
+        subject: 'Claim',
+        body: 'Please refund.',
+        category: { id, chosenBy: { label: 'form:claims' } },
+      });
+
+      expect(await conversation(created.conversationId)).toMatchObject({
+        subject: 'Claim',
+        status: 'Open',
+        categoryId: null,
+      });
+      expect(await messagesOf(created.conversationId)).toMatchObject([
+        { bodyText: 'Please refund.' },
+      ]);
+      expect(await categoryEvents(created.conversationId)).toEqual([]);
+      expect(warn).toHaveBeenCalledWith(
+        `[create_ticket] category left off a new ticket category=${id} reason=${reason}`,
+      );
     });
   });
 });
