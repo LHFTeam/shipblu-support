@@ -63,7 +63,7 @@ records the answers, and the plan below already reflects them.
 
 ## Status and handoff
 
-As of 2026-10-25, 06:03 UTC. A session picking this plan up starts here.
+As of 2026-10-26, 08:20 UTC. A session picking this plan up starts here.
 Everything after this section is the design as it was reasoned and as each stage
 was built. This section says where the work stands, what comes next and how, and
 what has already bitten. Whoever moves any of it updates this section in the
@@ -74,15 +74,78 @@ update.
 
 ### Where it stands
 
-| Stage | Code                                                                                                                                        | Production                                                                                                                                                                                         |
-| ----- | ------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 0     | Merged: #386 (`01488c9`)                                                                                                                    | Live since 2026-10-20. Its two operational steps were never done (below)                                                                                                                           |
-| 1.1   | Merged: #387, then `dev` → `main` in #389 (`1f89219`)                                                                                       | Live since 2026-10-21 10:13 UTC                                                                                                                                                                    |
-| 1.2   | Merged: #391 (`31f7379`) and follow-up #392 (`7b7d276`), then `dev` → `main` in #393 (`634a28d`), which also carried another session's #390 | **Done.** All six services live on `634a28d` by 17:38 UTC on 2026-10-21, worker first. The user ran the backfill and the rollup from a shell, leaving no `jobs` row. Every check below reads clean |
-| 1.3   | Merged: #395 (`58c5ed9`), then `dev` → `main` in #397 (`447d8be`), which also carried #394, #396 and #398. As built below                   | **Done.** All six services live on `447d8be` by 18:36 UTC, web first. Its checks read clean (below), though no comment has arrived since                                                           |
-| 2.A   | Merged: #400 (`a558c5b`), then `dev` → `main` in #406 (`e88d357`), which also carried #399, #401 and #402. As built below                   | **Done.** All six services live on `e88d357` by 22:13 UTC on 2026-10-23, deployed at once by an environment update. Its checks read clean (below)                                                  |
-| 2.B   | Merged: #403 (`1d21cdc`), then `dev` → `main` in #413 (`516c8ff`) and #415 (`48cb284`). As built below                                      | **Done.** All six services live on `48cb284` by 06:01 UTC on 2026-10-25, web first, with nothing suspended. Its checks read clean, and a new message was subcategorised; one read left (below)     |
-| 3–6   | Not started                                                                                                                                 | —                                                                                                                                                                                                  |
+| Stage | Code                                                                                                                                        | Production                                                                                                                                                                                                                |
+| ----- | ------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0     | Merged: #386 (`01488c9`)                                                                                                                    | Live since 2026-10-20. Its two operational steps were never done (below)                                                                                                                                                  |
+| 1.1   | Merged: #387, then `dev` → `main` in #389 (`1f89219`)                                                                                       | Live since 2026-10-21 10:13 UTC                                                                                                                                                                                           |
+| 1.2   | Merged: #391 (`31f7379`) and follow-up #392 (`7b7d276`), then `dev` → `main` in #393 (`634a28d`), which also carried another session's #390 | **Done.** All six services live on `634a28d` by 17:38 UTC on 2026-10-21, worker first. The user ran the backfill and the rollup from a shell, leaving no `jobs` row. Every check below reads clean                        |
+| 1.3   | Merged: #395 (`58c5ed9`), then `dev` → `main` in #397 (`447d8be`), which also carried #394, #396 and #398. As built below                   | **Done.** All six services live on `447d8be` by 18:36 UTC, web first. Its checks read clean (below), though no comment has arrived since                                                                                  |
+| 2.A   | Merged: #400 (`a558c5b`), then `dev` → `main` in #406 (`e88d357`), which also carried #399, #401 and #402. As built below                   | **Done.** All six services live on `e88d357` by 22:13 UTC on 2026-10-23, deployed at once by an environment update. Its checks read clean (below)                                                                         |
+| 2.B   | Merged: #403 (`1d21cdc`), then `dev` → `main` in #413 (`516c8ff`) and #415 (`48cb284`). As built below                                      | **Done.** All six services live on `48cb284` by 06:01 UTC on 2026-10-25, web first, with nothing suspended. Its checks read clean, and a new message was subcategorised; one read left (below)                            |
+| 3.1   | Merged: #419 (`ff3bbfd`), then `dev` → `main` in #420 (`b9a4743`), which also carried #411, #416, #417 and #418. As built below             | **Done.** Web live on `b9a4743` at 19:44 UTC on 2026-10-25, the worker and the four crons by 08:05 UTC on 2026-10-26, and the four categories seeded at 08:13. Its checks read clean (below); the signed-in ones are left |
+| 3.2–6 | Not started                                                                                                                                 | —                                                                                                                                                                                                                         |
+
+**3.1's deploy and checks, read on Render and production on 2026-10-25 and
+2026-10-26.**
+
+- **Before** (read 19:40 UTC on 2026-10-25): 47 migrations, the newest
+  `1792781241219`; no `ticket_categories` relation; no long transaction and no
+  strong lock; one dead job, the `subscribe_meta_webhooks` from 2026-09-21.
+  `origin/main..origin/dev` held 3.1 and, beside it, #411, #416, #417 and #418,
+  none of which touches `db/migrations` or `db/sql`.
+- **The release and web.** #420 merged `dev` into `main` at 19:41:31 UTC as
+  `b9a4743`. Web was deployed on it through Render's API at 19:41:45. Its
+  preDeploy logged
+  `Applying drizzle migrations...` at 19:43:50.1 and
+  `Done: 9 post-migration file(s) applied.` at 19:43:52.5, so `0047`, `0048`
+  and `db/sql` took under 3 s between them, `0048`'s lock on `conversations`
+  included. Web was live at 19:44:45.
+- **Not as planned: the rest followed twelve hours later.** The worker and the
+  four crons stayed on `48cb284` overnight and were deployed on `b9a4743`
+  through Render's API the next morning:
+
+  | Service                          | Started  | Live     |
+  | -------------------------------- | -------- | -------- |
+  | worker `shipblu-support-worker`  | 08:03:18 | 08:05:33 |
+  | `shipblu-time-automations`       | 08:03:28 | 08:04:05 |
+  | `shipblu-sla-sweep`              | 08:03:26 | 08:04:07 |
+  | `shipblu-nightly`                | 08:03:32 | 08:04:08 |
+  | `shipblu-whatsapp-template-sync` | 08:03:30 | 08:04:13 |
+
+  The order exists so that an old time-automations cron never meets a
+  `set_category` action. In the gap it met none:
+  - no automation rule, SLA policy or skill names `set_category` or
+    `category.id` (the newest rule edit is from 2026-10-21);
+  - no `category_changed` event was written, and nothing under `/inbox` or
+    `/admin` was requested;
+  - all 2,709 jobs created since 19:43:50 completed, none with an error;
+  - neither web nor the worker logged a warning or an error, and web served no
+    5xx.
+
+  The old code against the new schema is the rollback's own state, which
+  [Rolling back 3.1](#31-as-built) already covers.
+
+- **The seed.** `seed_ticket_categories` was queued at 08:13:58.9 with
+  `ticket_categories` still empty. The worker logged
+  `[seed_ticket_categories] done created=sales,customer_support,merchant_support,courier_jobs present=0`
+  and completed it in 52 ms. The four rows are seeded, active, and have no
+  route group. The handbook step had nothing to do: production still holds no
+  `handbook:` folder, article or category.
+- **The checks** (read 08:14–08:17 UTC):
+  - 49 migrations;
+  - `ticket_categories_key_format`, `ticket_categories_labels_not_blank`,
+    `ticket_categories_pkey` and the route group's foreign key;
+  - the four keys in order;
+  - `notify_conversation_change` names `category_id`;
+  - no conversation holds a category yet;
+  - `/api/health` reports `b9a4743`, with nothing pending or processing and
+    the same one dead job.
+- **Still to read**, signed in: `/admin/categories` lists the four, a ticket
+  page shows the select, and setting a category writes one `category_changed`
+  event naming the agent. 2.B's page loads are still unread too (below): the
+  user chose to release 3.1 without them.
+- **2.B has no way back by renaming any more.** `0047` and `0048` are applied,
+  so [Rolling back 2.B](#2b-as-built) is fixed forward from here.
 
 **2.B's deploy and checks, read on Render and production on 2026-10-25.**
 
@@ -134,8 +197,10 @@ update.
   `delivery.late` and `meta.unclassified`.
 - **Still to read:** step 4's page loads, which need a person signed in: a
   ticket page, a web chat ticket, `/admin/subcategories` and its shadow page.
-  Render's request log holds none since the deploy (read 16:20 UTC). The
-  rollback runbook stays the way back until a migration follows 0046.
+  Render's request log holds none since the deploy (read 16:20 UTC), nor
+  since 3.1's (read 08:17 UTC on 2026-10-26). The rollback runbook was the way
+  back until a migration followed 0046, which 3.1's did at 19:43:50 UTC on
+  2026-10-25.
 
 **2.A's deploy and checks, read on Render and production on 2026-10-23 and
 2026-10-25.**
@@ -289,12 +354,19 @@ Every production write needs the user's go-ahead for that step, and the
    checks read clean on 2026-10-25 (above).
 3. **2.B is deployed.** The user deployed it by hand on 2026-10-25, all six on
    `48cb284` by 06:01 UTC, and its checks read clean (above), a new message's
-   subcategorisation included. One read is left: the four page loads. It
-   rolls back by the runbook under [Rolling back 2.B](#2b-as-built), which stops
-   being a way back once any later migration has run.
-4. **Stage 3**, the category field, merges once that read is done: its gate is
-   2.B deployed to all six services and verified.
-5. **Before Stage 5**, a person does 0.2's reorder and 0.6's staffing, and the
+   subcategorisation included. One read is left: the four page loads. Since
+   3.1's migrations ran it is fixed forward, not rolled back.
+4. **3.1 is deployed.** #419 was squashed into `dev` as `ff3bbfd`, and #420
+   (`b9a4743`) took it to `main` on 2026-10-25 with #411, #416, #417 and #418.
+   The user chose to release it with 2.B's page loads still unread. Web was
+   live on it at 19:44 UTC, and the worker and the four crons by 08:05 UTC the
+   next morning, with no effect from the gap. Its checks read clean (above),
+   the seed included; the signed-in ones are left. Its review decisions are
+   under [3.1, as built](#31-as-built).
+5. **Stage 3.2**, where a person sets the category when a ticket is created,
+   is next. Then **Stage 4**, whose first change is `afterRoutingChanged`
+   ([Stage 4](#stage-4--jev-sets-the-category)), before Jev becomes a writer.
+6. **Before Stage 5**, a person does 0.2's reorder and 0.6's staffing, and the
    support lead answers the questions still open (below).
 
 ### 1.3, as built
@@ -1037,7 +1109,8 @@ preDeploy has run in production, it still works from history, unchanged:
 `0048` are applied, 2.B has no way back by renaming: the new
 `ticket_categories` holds the name the old table would return to, and Drizzle
 would not apply `0046` again behind two newer rows. A problem found in 2.B
-after that is fixed forward, in a migration of its own.
+after that is fixed forward, in a migration of its own. That is now: 3.1's web
+preDeploy applied both at 19:43:50 UTC on 2026-10-25.
 
 ### Working on this repo without the outgoing session's context
 
@@ -2753,8 +2826,8 @@ cannot parse.
 
 #### 3.1, as built
 
-On `claude/stage-3-category-field`. What it holds beyond the list above, and
-where it departs from it:
+Squashed into `dev` as `ff3bbfd` (#419). What it holds beyond the list above,
+and where it departs from it:
 
 - **Migrations.** `0047_free_old_pkey_names` is the hand-written one this stage
   was to decide on (`drizzle-kit generate --custom`): a loop renaming the three
@@ -2857,9 +2930,43 @@ where it departs from it:
   category itself, so a rename breaks neither; the role lists in `people` and
   `owner-role`; and the two folders' descriptions.
 
+**Decided on review.** #419 had three review rounds. Every finding was fixed
+or decided, and four were put to the user and decided on 2026-10-25:
+
+- **A `set_category` naming a bad id is not refused when the rule is saved.**
+  A non-uuid, an unknown category or a retired one is answered at run time: the
+  engine logs an error or warning naming the rule on each match. Checking the
+  uuid in `parseAction` would make it quieter, because `parseActions` drops an
+  unparsable action without a word. No console path produces a bad id, every
+  other id-bearing action is held to the same not-blank check, and refusing a
+  retired category at save would stop an admin saving any change to an older
+  rule until they replaced that action.
+- **A breach flag stays set when the re-selection moves a breached ticket to a
+  policy whose target has also passed.** One missed response is one breach,
+  recorded once by the sweep against the deadline in force when it was found,
+  as `recomputeOwedClocks` already does when a priority raise brings a breached
+  deadline earlier. Clearing the flag would record the same miss twice. What
+  follows the new policy is the escalation, keyed per policy above.
+  `breachesCleared` is the one copy of the rule.
+- **With no active default policy, correcting a category to one no policy
+  matches keeps the policy the wrong category chose**, with nothing on the
+  timeline. Left as it is: production has an active default, Live Support
+  (Customer Care), and `/admin/sla` warns when there is none. If that changes,
+  the cheap answer is an `sla_recalculated` event in the `!policy` branch when
+  the current policy's own conditions no longer match.
+- **Every writer of the category or the group calls the follow-up by hand.**
+  The console, the engine's `finally` and, from Stage 4, Jev must each remember
+  `reselectPolicyBeforeFirstResponse` and then `onGroupChanged`, and a writer
+  that forgets leaves a category-keyed policy unreachable with no test failing.
+  It becomes one function, `afterRoutingChanged`, as
+  [Stage 4's first change](#stage-4--jev-sets-the-category), before Jev is a
+  writer.
+
 **Deploying 3.1.** Web first, because it migrates; then the worker and the four
 crons, because an old time-automations cron drops a `set_category` action
-without a word. It waits for 2.B's two remaining reads.
+without a word. It waits for 2.B's two remaining reads. It did not, in the
+end: the user released it with the page loads unread
+([3.1's deploy](#status-and-handoff)).
 
 1. **Before.** Read `git log origin/main..origin/dev` (rule 7) for what else
    rides. Expect 47 rows in `drizzle.__drizzle_migrations`, the newest
@@ -2973,6 +3080,34 @@ beyond one column.
 
 ### Stage 4 — Jev sets the category
 
+**4.0 — One follow-up for every routing writer.** Code only, no schema: web,
+then the worker and the four crons, which carry the automation engine. Decided
+on #419's review, before Jev becomes a writer.
+
+- **Code.**
+  - `afterRoutingChanged(id, { category, group })` in `lib/sla`. It runs
+    `reselectPolicyBeforeFirstResponse` and then `onGroupChanged`, the order
+    both callers use since 3.1, so a move that changes the policy is re-timed
+    once.
+  - Its only input is what the writers already return:
+    - `setConversationCategory`'s outcome;
+    - `moveToGroupIfElsewhere`'s boolean;
+    - `assignConversation`'s `movedGroup`.
+  - The console's group and category cases, and the engine's `finally`, each
+    make one call to it. So do Jev (4.1) and the router (Stage 5).
+  - The order then lives in one place.
+- **Not a hook inside the writers.** The engine has to re-select once per pass,
+  after every rule has run. Otherwise a rule that files a ticket and another
+  that moves it choose two policies in turn. A hook in `setConversationCategory`
+  or `moveToGroupIfElsewhere` would fire once per action.
+- **Optionally, a repo rule.** It would refuse a `setConversationCategory` call
+  whose result is dropped. The result is what tells the caller a follow-up is
+  owed.
+- **Tests.** The re-selection tests in `reselect-policy.db.test.ts` keep
+  passing unchanged through the new entry point. One case covers a writer that
+  changed both the category and the group, which still writes a single
+  `sla_recalculated`.
+
 **4.1 — The classifier, shipped off.** Web first (it migrates the new tables),
 then the worker and all four crons. With the switch at `off` nothing is
 enqueued, so no job type is ever unknown.
@@ -3019,9 +3154,8 @@ enqueued, so no job type is ever unknown.
 - **Wiring.** `afterMessageStored` enqueues the job in its own `try/catch`,
   beside priority's.
 - **After commit.**
-  - **Until Stage 5:** an applied answer calls
-    `reselectPolicyBeforeFirstResponse`, then `afterTicketUpdate`, as
-    priority's does.
+  - **Until Stage 5:** an applied answer calls `afterRoutingChanged` (4.0),
+    then `afterTicketUpdate`, as priority's does.
   - **From Stage 5:** the four cases in decision 5's table, chosen by the
     ticket's routing row.
 - **Tests.**
