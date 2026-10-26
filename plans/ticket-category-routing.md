@@ -63,7 +63,7 @@ records the answers, and the plan below already reflects them.
 
 ## Status and handoff
 
-As of 2026-10-26, 08:20 UTC. A session picking this plan up starts here.
+As of 2026-10-26, 08:45 UTC. A session picking this plan up starts here.
 Everything after this section is the design as it was reasoned and as each stage
 was built. This section says where the work stands, what comes next and how, and
 what has already bitten. Whoever moves any of it updates this section in the
@@ -83,7 +83,8 @@ update.
 | 2.A   | Merged: #400 (`a558c5b`), then `dev` → `main` in #406 (`e88d357`), which also carried #399, #401 and #402. As built below                   | **Done.** All six services live on `e88d357` by 22:13 UTC on 2026-10-23, deployed at once by an environment update. Its checks read clean (below)                                                                         |
 | 2.B   | Merged: #403 (`1d21cdc`), then `dev` → `main` in #413 (`516c8ff`) and #415 (`48cb284`). As built below                                      | **Done.** All six services live on `48cb284` by 06:01 UTC on 2026-10-25, web first, with nothing suspended. Its checks read clean, and a new message was subcategorised; one read left (below)                            |
 | 3.1   | Merged: #419 (`ff3bbfd`), then `dev` → `main` in #420 (`b9a4743`), which also carried #411, #416, #417 and #418. As built below             | **Done.** Web live on `b9a4743` at 19:44 UTC on 2026-10-25, the worker and the four crons by 08:05 UTC on 2026-10-26, and the four categories seeded at 08:13. Its checks read clean (below); the signed-in ones are left |
-| 3.2–6 | Not started                                                                                                                                 | —                                                                                                                                                                                                                         |
+| 3.2   | Not started. Mapped from the code on 2026-10-26: [3.2, how to build it](#32-how-to-build-it)                                                | —                                                                                                                                                                                                                         |
+| 4–6   | Not started. 4.0 (`afterRoutingChanged`) comes first                                                                                        | —                                                                                                                                                                                                                         |
 
 **3.1's deploy and checks, read on Render and production on 2026-10-25 and
 2026-10-26.**
@@ -364,8 +365,11 @@ Every production write needs the user's go-ahead for that step, and the
    the seed included; the signed-in ones are left. Its review decisions are
    under [3.1, as built](#31-as-built).
 5. **Stage 3.2**, where a person sets the category when a ticket is created,
-   is next. Then **Stage 4**, whose first change is `afterRoutingChanged`
-   ([Stage 4](#stage-4--jev-sets-the-category)), before Jev becomes a writer.
+   is next. It is mapped, with a default taken for every question the map
+   raised: [3.2, how to build it](#32-how-to-build-it). Nothing is written yet,
+   and no branch holds 3.2 work. Then **Stage 4**, whose first change is
+   `afterRoutingChanged` ([Stage 4](#stage-4--jev-sets-the-category)), before
+   Jev becomes a writer.
 6. **Before Stage 5**, a person does 0.2's reorder and 0.6's staffing, and the
    support lead answers the questions still open (below).
 
@@ -1167,8 +1171,10 @@ preDeploy applied both at 19:43:50 UTC on 2026-10-25.
   `nqbcfnvqqyqawmffgiql`**, `SELECT`s only, unless the user has said yes to a
   specific write. Staging is `funavpkflkhthegahuay`.
 - **The database tier locally.** Start Postgres with
-  `pg_ctlcluster 16 main start` if it is down. Then migrate (again, whenever
-  `db/sql` or a migration changed) and run:
+  `pg_ctlcluster 16 main start` if it is down. The 3.1 session used
+  Postgres 17, CI's version, on port 5433 instead; a fresh container may have
+  either or neither. Keep the password out of the repo. Then migrate (again,
+  whenever `db/sql` or a migration changed) and run:
 
   ```bash
   T=postgresql://postgres:postgres@localhost:5432/shipblu_test
@@ -3077,6 +3083,245 @@ beyond one column.
 - The console's new-ticket form gets a category chooser, which counts as
   owned. Production has no forms today, so this can follow later without
   blocking anything.
+
+#### 3.2, how to build it
+
+Mapped from the code on 2026-10-26, against `dev` at `992286c`. Nothing has
+been written yet. Every line number below was read then; re-read the file
+before you edit it.
+
+The defaults below are recommendations. They answer the questions the map
+raised, so a session can build without stopping. Where a default is a product
+call the user may want to make, it says so.
+
+**The one hard constraint: the category is written inside `createTicket`'s
+own transaction.** Everything else follows from it.
+
+- `createTicket` (`lib/portal/tickets.ts:224-307`) commits, then runs two hooks
+  before it returns:
+  - `afterMessageStored`, which queues the priority job and, from Stage 4, the
+    category job;
+  - `afterInboundMessage(…, true, …)`, which runs the `on_create` rules, then
+    `applySlaOnCreate`, then auto-assignment (`lib/tickets/lifecycle.ts:73-78`).
+- So a category written after it returns arrives too late, three ways:
+  - the `on_create` rules miss it;
+  - the first policy selection misses it;
+  - from Stage 4, Jev could act first.
+
+  This is the lesson `NewTicket.openedBy`'s comment records. `submitForm`'s
+  `unverified_submitter`, written after `createTicket`, is the shape not to
+  copy.
+
+- **`setConversationCategory` cannot be called inside that transaction.** It
+  opens its own `db.transaction`, which cannot see the uncommitted row and
+  answers `no_ticket`.
+- **The column goes in the insert, and the event in the same transaction.**
+  - Before the insert, read the registry row `for('share')`, as
+    `lib/categories/write.ts:59-71` does. The foreign key's own lock does not
+    block a retire, so without it a retired category could be filed.
+  - Write the column only if the row exists and is active.
+  - Write one `category_changed` with:
+    - `createdAt: CHANGE_STAMP`;
+    - `data: { from: null, to, key, label }`, with `label` from `labelEn`;
+    - the actor: `actorAgentId`, or `actorLabel: 'form:<slug>'`.
+  - Share one helper with `write.ts` for the registry read and the event's
+    values, so the two writers cannot drift. A `tx`-taking function that
+    `setConversationCategory` wraps is the cleanest.
+  - `write.ts`'s existing tests must pass unchanged
+    (`reselect-policy.db.test.ts` "skips a retired category", "writes nothing
+    when…", "refuses a category that is gone or retired").
+- **No re-selection at creation.** `applySlaOnCreate` reads the whole row
+  (`lib/sla/index.ts:96-114, 169-170`), and the `on_create` facts carry
+  `category.id` (`lib/rules/facts.ts:51`). So a category-keyed policy is chosen
+  at the first selection, with no `sla_recalculated`. Calling
+  `reselectPolicyBeforeFirstResponse` here would either write a misleading
+  event or waste a locked transaction.
+
+**The pieces, by file.**
+
+- **Schema.**
+  - Add
+    `defaultCategoryId: uuid('default_category_id').references(() => ticketCategories.id, { onDelete: 'restrict' })`
+    beside `defaultGroupId` in `ticketForms` (`db/schema/config.ts:533-539`).
+  - `restrict`, like `conversations.category_id`: nothing deletes a category,
+    and `set null` would only ever fire on a hand-run delete, quietly clearing
+    a form's default.
+  - Extend the "What the form presets" comment: the default is recorded at
+    creation as `form:<slug>` and never read back from the form.
+  - Then `npm run db:generate`, which writes `0049`. It is a plain
+    nullable-column add, so there is no rename prompt.
+  - Production has no forms, so the foreign key validates zero rows.
+  - Stage the new files before `repo-rules.mjs`.
+- **`lib/portal/tickets.ts`, `NewTicket`.** Add
+  `category?: { id: string; chosenBy: CategoryActor }`. The value and the actor
+  are in one field, so the type rules out a column with no event. Priority's
+  `priority` and `priorityChosenBy` are two separate fields, which allows
+  exactly that. The docstring gives `openedBy`'s reason. In `createTicket`,
+  write as above. A retired or missing category is dropped: null column, no
+  event, and a `log.warn`, like the engine's skip at
+  `lib/automations/index.ts:274-278`. A customer's ticket is never refused
+  over an admin's retire. No category means no event:
+  `tickets.db.test.ts:155-159` pins the bare event list.
+- **`lib/forms/queries.ts`.** Add `defaultCategoryId: string | null` to
+  `FormRecord`. `load()` already spreads the whole row, so only the type
+  changes.
+- **`lib/forms/submit.ts`.** Compute the category beside priority, at
+  `:267-296`.
+  - The console's choice travels only on the agent variant of `Requester`, as
+    a tri-state `categoryId?: string | null`:
+    - `undefined`: the chooser was not offered;
+    - `null`: the agent chose none;
+    - a uuid: the agent chose that category.
+  - The help centre's `session` and `anonymous` variants cannot carry one.
+    Never read it from `input.values`, or a hand-made POST to a public form
+    could file a category, which counts as owned from Stage 4.
+  - Default: the agent's answer when offered, otherwise
+    `form.defaultCategoryId`.
+- **Admin forms.**
+  - `app/(console)/admin/forms/page.tsx` adds `listCategories()` to its
+    `Promise.all` and passes `toCategoryChoices(...)`.
+  - `forms.tsx` gets an always-rendered
+    `<Select name="defaultCategoryId">`, with "No category" plus
+    `categoryOptions(categories, form?.defaultCategoryId ?? null)`, so a
+    retired stored default reads "(retired)" and saving unchanged does not
+    clear it.
+  - `saveTicketForm` (`actions.ts:57-168`) reads it with `uuidField`, before
+    the first query, so a malformed value is refused with a sentence. It
+    refuses an unknown category, and a retired one unless it equals what the
+    form already stores. Put that check in `lib/` (`lib/forms/` or
+    `lib/categories/`) so a `*.db.test.ts` reaches it.
+  - Do not copy the group default's `text(…) || null` (`:116`). A malformed
+    value there raises 22P02 and the action throws with no state. Switching
+    the group to `uuidField` too is a one-line fix of the same class, optional
+    in this PR.
+- **The console's new-ticket page.**
+  - `page.tsx:25`: keep the agent `requirePermission('ticket.create')` returns.
+    Only when `can(agent, 'ticket.set_category')`, read `listCategories()` and
+    pass `toCategoryChoices(...)` plus the form's default, preselected only
+    while it is active.
+  - Put `key={slug}` on `<ConsoleTicketForm>`. Next keeps the page's client
+    state across `?form=` links, since the router cache key ignores search
+    params, so switching forms would carry the first form's default. Priority
+    has the same latent bug. This was read from Next's source, not seen in a
+    browser; check it in one.
+  - `form.tsx` gets `<Select name="categoryId">`, "None" plus
+    `categoryOptions(categories, null)`, importing only
+    `@/lib/categories/choices`. Anything else reaches `db/client` and fails
+    `client-bundle`.
+  - The action (`actions.ts`) reads `uuidField(formData, 'categoryId')`. The
+    name stays outside `system.*` and `custom.*`, and making it a
+    `SYSTEM_KEYS` entry would trip `form-system-keys` and the visibility
+    machinery. It refuses a value from an agent without
+    `ticket.set_category`, with `ticket-actions.ts:203`'s sentence. It
+    re-reads the row: "Unknown category", or "That category has been retired —
+    choose another", as `ticket-actions.ts:211-213`. Then it passes the result
+    on the agent requester. Refusals return before any write, and success
+    redirects, so `action-revalidates` holds.
+  - The form keeps `<form {...form}>` from `useActionForm`.
+- **Retiring a category a form defaults to** is allowed, as for rules.
+  - The forms editor shows it "(retired)".
+  - Optionally, the collapsed row carries a warning `Badge` with words.
+  - Creation skips it.
+  - Update the comments on `setCategoryActive` and the `/admin/categories`
+    description, "set by an agent or a rule", to name forms.
+  - Listing forms beside Retire is left out: production has no forms.
+
+**Decisions the map raised, with the default taken.**
+
+- **An untouched preselected default is credited to the form.** The console
+  agent submits the form's default unchanged, and the event is recorded as
+  `form:<slug>`, not the agent. The server compares the value posted with
+  `form.defaultCategoryId`. The reason is Stage 4.2: its ground truth is only a
+  `category_changed` with an agent, and an untouched default is not a person's
+  judgement. Priority credits the agent, because its select has no "none"; that
+  is not copied.
+  - A different value is credited to the agent.
+  - "None" over a default writes no column and no event. An event with
+    `to: null` would read "cleared the category" on a ticket that never had
+    one. `opened_by_agent` still marks the ticket owned, as decision 4 says.
+- **Decision 4 makes every console-opened ticket owned, so Jev never
+  classifies one.** That is true whatever the chooser says, "None" included.
+  Recorded here because it now has a visible consequence; the user may want to
+  revisit it in Stage 4.
+- **An `on_create` `set_category` rule overrides both the form's default and
+  an agent's choice.** That is the documented "defaults, not overrides", the
+  same as priority. Changing it for a person's choice is a product call, not
+  made here.
+- **A form's default group can differ from its category's route group.** The
+  ticket stays in the form's group, because decision 5 never routes a
+  `createTicket` ticket. Only the policy and reports follow the category. A
+  warning on the forms page is optional.
+
+**Tests.**
+
+- **`lib/portal/tickets.db.test.ts`.** Extend "takes what a form presets"
+  (`:162-189`):
+  - the column is set;
+  - one `category_changed` with `actorLabel 'form:<slug>'`, `actorAgentId`
+    null, and `data { from: null, to, key, label }`;
+  - an agent actor gives `actorAgentId`;
+  - a retired category writes neither column nor event, and the ticket is
+    still created;
+  - the bare case keeps `[{ type: 'subcategorised' }]`.
+- **New `lib/forms/submit.db.test.ts`.** None exists today. Cases:
+  - help centre `session` and `anonymous` get the default as `form:<slug>`;
+  - an agent's different choice is the agent's;
+  - an untouched default is the form's;
+  - "None" writes nothing;
+  - a `categoryId` posted to a help-centre submission is ignored;
+  - a default added to a form after a ticket was filed leaves that ticket
+    alone. Model it on `run.db.test.ts:530-556`.
+- **`lib/sla/reselect-policy.db.test.ts`.** Beside "leaves an on_create rule's
+  category to applySlaOnCreate" (`:388-420`):
+  - a ticket created with Sales gets the Sales policy and no
+    `sla_recalculated`;
+  - an `on_create` `set_category` overrides it, with one event of its own.
+- **`app/(console)/admin/actions.test.ts`.** Add the forms actions to its
+  import list: a malformed `defaultCategoryId` is refused before any query
+  (`expectNoQuery`).
+- **A database test of the save check.** In `lib/`:
+  - unknown refused;
+  - retired-unchanged accepted;
+  - newly retired refused;
+  - new form with a retired id refused;
+  - null clears.
+- **`lib/categories/admin.db.test.ts`.** Retiring a category a form names
+  leaves the form holding it. Deleting it raises 23503, which proves
+  `restrict`.
+
+**Docs in the same PR.**
+
+- **`AGENTS.md`, "Ticket forms".** The category default is written by
+  `createTicket` as `form:<slug>` in the creating transaction, and read at the
+  time, never later.
+- **`AGENTS.md`, "The ticket category".**
+  - Name `createTicket` as the insert-time writer, which neither goes through
+    `setConversationCategory` nor re-selects.
+  - Say the New form's chooser is gated by `ticket.set_category`.
+- **The handbook** (`lib/kb/handbook.ts`):
+  - `inbox` `:165-166`, the New button;
+  - `category` `:225`, a form among who sets it;
+  - `category` `:228`;
+  - `automation-and-forms` `:443-446` and `:450-456`.
+
+  Each body must stay a fixed point of `normaliseArticleHtml(sanitiseArticleHtml())`
+  and over 600 characters of text (`handbook.test.ts`).
+
+- **`reselectPolicyBeforeFirstResponse`'s docstring** (`lib/sla/index.ts:623-629`).
+  Say a category written at creation is read by `applySlaOnCreate`.
+
+**Deploying 3.2.**
+
+1. Web first, because it migrates `0049`. This brief ACCESS EXCLUSIVE on
+   `ticket_forms` is over a table of zero rows in production.
+2. Then the worker and the four crons, on the same commit.
+3. Nothing to seed.
+4. If production holds a handbook by then, run `seed_console_handbook
+dryRun=true` first, and expect only the articles this PR changed to differ.
+   `overwrite=true` has no per-key filter.
+
+**Rolling back 3.2.** Code only: the column stays, and the old code never
+reads it.
 
 ### Stage 4 — Jev sets the category
 
