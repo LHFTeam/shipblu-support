@@ -620,13 +620,15 @@ export async function onPriorityChanged(conversationId: string): Promise<void> {
  * greeting, minutes — away, so without this a category-keyed policy would
  * match only tickets somebody happened to route by hand.
  *
- * Who made the change does not matter — Jev, a rule, a form, an agent or the
- * router — and every writer of `category_id` calls this after its write
- * commits, as do the group moves that can happen before a first response: the
- * console's group case, `assign_group` and an `auto_assign` that moved. The one
- * exception is `backfill_category_ai`, which labels an old backlog and never
- * retargets it. A rule on `on_create` does not call it either, because
- * `applySlaOnCreate` runs after that pass and reads the category itself.
+ * Who made the change does not matter — Jev, a rule, an agent or the router —
+ * and every writer of `category_id` on a ticket that exists calls this after
+ * its write commits, as do the group moves that can happen before a first
+ * response: the console's group case, `assign_group` and an `auto_assign` that
+ * moved. The one exception is `backfill_category_ai`, which labels an old
+ * backlog and never retargets it. Two writers act before the first selection
+ * and so never need it, because `applySlaOnCreate` runs after them and reads
+ * the category itself: a rule on `on_create`, and `createTicket`, which writes
+ * a form's default or an agent's pick in the insert that opens the ticket.
  *
  * Built from the anchors rather than on `recomputeOwedClocks`, which returns
  * early on a ticket with no clocks: this one can create them, on a ticket whose

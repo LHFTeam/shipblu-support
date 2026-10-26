@@ -17,10 +17,12 @@ import { groups, ticketCategories } from '@/db/schema';
  *   after a relabel, and from Stage 4 Jev answers with a key. A key that moved
  *   would leave both naming a category that no longer answers to it. So
  *   `updateCategory` takes no key at all, rather than one it ignores.
- * - **Whether it exists.** There is no delete: `conversations.category_id` is
- *   `restrict`, and a category with tickets behind it keeps them. Retiring
- *   takes it out of every picker and refuses it as a new value
- *   (`setConversationCategory`), and restoring puts it back.
+ * - **Whether it exists.** There is no delete: `conversations.category_id` and
+ *   `ticket_forms.default_category_id` are `restrict`, and a category with
+ *   tickets or forms behind it keeps them. Retiring takes it out of every
+ *   picker and refuses it as a new value (`setConversationCategory`, and
+ *   `createTicket`, which opens the ticket without it), and restoring puts it
+ *   back.
  * - **`is_system`**, which says the row came from the seed. An admin's
  *   category is never one, so `seed_ticket_categories` reporting an orphan
  *   always means a key the code dropped.
@@ -153,7 +155,9 @@ export async function updateCategory(id: string, input: CategoryEdit): Promise<s
  * tab pressing Retire on a row the first already retired got what it asked for.
  *
  * Tickets already carrying a retired category keep it, and nothing else moves:
- * the ticket's select and a rule's condition go on naming it, marked retired.
+ * the ticket's select, a rule's condition and a form's default go on naming it,
+ * marked retired. A form defaulting to it opens tickets with no category until
+ * an admin picks another or restores this one.
  */
 export async function setCategoryActive(id: string, active: boolean): Promise<string | null> {
   const changed = await db

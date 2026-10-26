@@ -83,7 +83,7 @@ update.
 | 2.A   | Merged: #400 (`a558c5b`), then `dev` → `main` in #406 (`e88d357`), which also carried #399, #401 and #402. As built below                   | **Done.** All six services live on `e88d357` by 22:13 UTC on 2026-10-23, deployed at once by an environment update. Its checks read clean (below)                                                                         |
 | 2.B   | Merged: #403 (`1d21cdc`), then `dev` → `main` in #413 (`516c8ff`) and #415 (`48cb284`). As built below                                      | **Done.** All six services live on `48cb284` by 06:01 UTC on 2026-10-25, web first, with nothing suspended. Its checks read clean, and a new message was subcategorised; one read left (below)                            |
 | 3.1   | Merged: #419 (`ff3bbfd`), then `dev` → `main` in #420 (`b9a4743`), which also carried #411, #416, #417 and #418. As built below             | **Done.** Web live on `b9a4743` at 19:44 UTC on 2026-10-25, the worker and the four crons by 08:05 UTC on 2026-10-26, and the four categories seeded at 08:13. Its checks read clean (below); the signed-in ones are left |
-| 3.2   | Not started. Mapped from the code on 2026-10-26: [3.2, how to build it](#32-how-to-build-it)                                                | —                                                                                                                                                                                                                         |
+| 3.2   | Built in #424 on 2026-10-26, not merged. As built: [3.2, as built](#32-as-built)                                                            | —                                                                                                                                                                                                                         |
 | 4–6   | Not started. 4.0 (`afterRoutingChanged`) comes first                                                                                        | —                                                                                                                                                                                                                         |
 
 **3.1's deploy and checks, read on Render and production on 2026-10-25 and
@@ -365,11 +365,11 @@ Every production write needs the user's go-ahead for that step, and the
    the seed included; the signed-in ones are left. Its review decisions are
    under [3.1, as built](#31-as-built).
 5. **Stage 3.2**, where a person sets the category when a ticket is created,
-   is next. It is mapped, with a default taken for every question the map
-   raised: [3.2, how to build it](#32-how-to-build-it). Nothing is written yet,
-   and no branch holds 3.2 work. Then **Stage 4**, whose first change is
-   `afterRoutingChanged` ([Stage 4](#stage-4--jev-sets-the-category)), before
-   Jev becomes a writer.
+   is built from the map and in review as #424 into `dev`:
+   [3.2, as built](#32-as-built). It deploys web first (migration `0049`),
+   then the worker and the four crons, with nothing to seed. Then
+   **Stage 4**, whose first change is `afterRoutingChanged`
+   ([Stage 4](#stage-4--jev-sets-the-category)), before Jev becomes a writer.
 6. **Before Stage 5**, a person does 0.2's reorder and 0.6's staffing, and the
    support lead answers the questions still open (below).
 
@@ -3090,7 +3090,7 @@ Mapped from the code on 2026-10-26, against `dev` at `992286c`, by four
 readers and a critic that checked them against the code. The critic's
 corrections are folded in: assignment's skill match reads the category, the
 console chooser is not a copy of priority, and the action writes a contact
-before it can refuse. Nothing has been written yet. Every line number below was read then; re-read the file
+before it can refuse. It was built from this map on 2026-10-26: what it holds and where it departs are under [3.2, as built](#32-as-built). Every line number below was read then; re-read the file
 before you edit it.
 
 The defaults below are recommendations. They answer the questions the map
@@ -3377,6 +3377,83 @@ dryRun=true` first, and expect only the articles this PR changed to differ.
 
 **Rolling back 3.2.** Code only: the column stays, and the old code never
 reads it.
+
+#### 3.2, as built
+
+Built on 2026-10-26 from the map above, against `dev` at `d05c131`. What it
+holds beyond the map, and where it departs from it:
+
+- **The shared halves.** `lib/categories/write.ts` exports `holdCategory`
+  (the registry read, share-locked) and `categoryChangedEvent` (the event's
+  values), and both `setConversationCategory` and `createTicket` call them.
+  The map's second option was taken: the row is inserted with its category,
+  rather than inserted bare and updated by the shared writer.
+- **Category ids are canonical.** `holdCategory` lower-cases the id it is
+  given and returns it, and both writers store that one. Found in review: an
+  upper-case id from a hand-made POST was stored lower-case in the column,
+  which is a `uuid`, and as typed in the event's `data.to`, which is jsonb, so
+  the two disagreed, and from Stage 4 Jev's ownership rule reads one against
+  the other. It also closes the same gap in 3.1's sidebar, which hands its
+  value to `setConversationCategory` as typed. Not a uuid at all is
+  `unknown_category`, with no query, so a malformed id can never make
+  `createTicket` throw 22P02 instead of opening the ticket.
+- **The refusals live in `lib/forms/category.ts`**:
+  - `formDefaultCategoryRefusal`, for the forms editor;
+  - `consoleCategoryChoice`, for the New form's action, which calls it before
+    `resolveContact`.
+
+  `NO_CATEGORY` (`'none'`) is in `lib/categories/choices.ts`, because the
+  client form needs it too.
+
+- **Two sentences differ from the map's.**
+  - Without `ticket.set_category`, the action says "You cannot set a ticket's
+    category": a ticket not yet opened has nothing to change.
+  - The forms editor reads `defaultGroupId` with `uuidField` as well, the
+    optional one-line fix the map named. A malformed group id is now "That
+    group no longer exists", where it was a 22P02 out of the action.
+- **The forms list marks a retired default** with a "Default category
+  retired" badge, the optional one the map named.
+- **`createTicket`'s `priority_changed` stays unstamped.** `change-stamp.ts`
+  names it as the one exception, for the reason it is harmless: nothing else
+  can have written a ticket's priority inside the transaction that creates it.
+- **The log line** for a category left off is
+  `[create_ticket] category left off a new ticket category=<id> reason=<retired_category|unknown_category>`.
+
+- **The key is on the questions, not the whole form.** The map put
+  `key={slug}` on `<ConsoleTicketForm>`. Review found that wipes the customer's
+  email and name when the agent switches form, and those do not depend on the
+  form. So the email, the name and the submit stay in `ConsoleTicketForm`, and
+  `<FormQuestions key={slug}>` inside it holds the answers, the priority seed
+  and the category chooser. A happy-dom test, `app/(console)/inbox/new/form.test.ts`,
+  holds both halves.
+- **AGENTS.md credits the priority default precisely.** It credits
+  `form:<slug>` only where the form applies it: a console form that places the
+  priority question seeds it, so an agent who leaves it alone is credited.
+- **One reader, one set of sentences.** `checkCategory` sits beside
+  `holdCategory` as the same read holding nothing, and `CATEGORY_REFUSALS`
+  holds the two sentences. The sidebar, the New form and the forms editor all
+  answer from them.
+- **A refusal on the New form shows only under the form it refused.** The
+  answer outlives a `?form=` switch, since only the questions remount.
+- **The forms editor's check stays unlocked.** A retire landing between it and
+  the save leaves the same rows as "save, then retire". A ticket's
+  `category_changed` would date the category after the retire, which is why
+  `createTicket` holds it.
+- **Two races are left as they are**, the user's decision on #424's review,
+  while production holds no forms:
+  - an agent's pick retired between the action's check and `createTicket`
+    opens the ticket with no category, which the agent sees on the ticket the
+    redirect lands on. Refusing instead would roll the ticket back after
+    `resolveContact` has already written a contact;
+  - the chooser's "Form default" label can go stale while the page is open. An
+    untouched chooser takes the default the form holds at submit, credited to
+    the form. A hidden field with the rendered default, refused when it
+    differs, is about twenty lines if forms come into use.
+
+**Not verified in a browser:** that Next keeps the page's client state across
+`?form=` links. The map read it from Next 16.3.1's source, and the test above
+renders the component with new props as that implies, but there is still no
+browser suite.
 
 ### Stage 4 — Jev sets the category
 

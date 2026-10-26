@@ -19,5 +19,12 @@ import { sql } from 'drizzle-orm';
  *
  * `clock_timestamp()` read after the lock is taken orders the events the way
  * the column was written, which is the only order a reader can reason from.
+ *
+ * `createTicket`'s `category_changed` is stamped too, though no second writer
+ * can reach a row its own transaction has not committed: one spelling for every
+ * category event, so Stage 4's ownership rule reads them all the same way. Its
+ * `priority_changed` keeps the column default, the one exception, for the same
+ * reason it is harmless — nothing else can have written that ticket's priority
+ * yet.
  */
 export const CHANGE_STAMP = sql<Date>`clock_timestamp()`;

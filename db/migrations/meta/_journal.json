@@ -344,6 +344,13 @@
       "when": 1792909175828,
       "tag": "0048_ticket_categories",
       "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1793037218791,
+      "tag": "0049_form_default_category",
+      "breakpoints": true
     }
   ]
 }

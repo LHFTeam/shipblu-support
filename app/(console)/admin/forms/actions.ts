@@ -6,6 +6,8 @@ import { ticketForms, groups, conversations } from '@/db/schema';
 import { requirePermission } from '@/lib/auth/guard';
 import { ok } from '@/lib/http/action-state';
 import { int, text, uuidField } from '@/lib/http/form-data';
+import { CATEGORY_REFUSALS } from '@/lib/categories/write';
+import { formDefaultCategoryRefusal } from '@/lib/forms/category';
 import { parseFormElements } from '@/lib/forms/elements';
 import { slugify } from '@/lib/kb/slug';
 import { isPriority } from '@/lib/tickets/vocabulary';
@@ -62,6 +64,12 @@ export async function saveTicketForm(
 
   const id = uuidField(formData, 'id');
   if (id === undefined) return { error: GONE };
+  // Read as uuids before anything asks the database: a malformed one is
+  // Postgres's 22P02, which throws out of the action with no state to show.
+  const defaultGroupId = uuidField(formData, 'defaultGroupId');
+  if (defaultGroupId === undefined) return { error: 'That group no longer exists' };
+  const defaultCategoryId = uuidField(formData, 'defaultCategoryId');
+  if (defaultCategoryId === undefined) return { error: CATEGORY_REFUSALS.unknown_category };
   const nameEn = text(formData, 'nameEn');
   const nameAr = text(formData, 'nameAr');
 
@@ -113,7 +121,6 @@ export async function saveTicketForm(
     };
   }
 
-  const defaultGroupId = text(formData, 'defaultGroupId') || null;
   if (defaultGroupId) {
     const exists = await db
       .select({ id: groups.id })
@@ -124,6 +131,9 @@ export async function saveTicketForm(
     // what an admin gets if the group was deleted while this screen was open.
     if (!exists.length) return { error: 'That group no longer exists' };
   }
+
+  const categoryRefusal = await formDefaultCategoryRefusal(id, defaultCategoryId);
+  if (categoryRefusal) return { error: categoryRefusal };
 
   const priority = text(formData, 'defaultPriority');
   const values = {
@@ -137,6 +147,7 @@ export async function saveTicketForm(
     showOnHelpCentre: formData.get('showOnHelpCentre') === 'on',
     showInConsole: formData.get('showInConsole') === 'on',
     defaultGroupId,
+    defaultCategoryId,
     defaultPriority: isPriority(priority) ? priority : null,
     defaultType: text(formData, 'defaultType') || null,
     defaultTags: text(formData, 'defaultTags')

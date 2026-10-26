@@ -9,11 +9,15 @@ import {
   messages,
   ticketStatuses,
 } from '@/db/schema';
+import { categoryChangedEvent, holdCategory, type CategoryActor } from '@/lib/categories/write';
+import { logger } from '@/lib/log';
 import { readOnlyChannels } from '@/lib/tickets/channel-policy';
 import { notReaction } from '@/lib/tickets/not-reaction';
 import { afterInboundMessage, afterMessageStored } from '@/lib/tickets/lifecycle';
 import { reopenResolved } from '@/lib/tickets/reopen';
 import { requireDefaultOpenStatusId } from '@/lib/tickets/statuses';
+
+const log = logger('create_ticket');
 
 /**
  * The customer's own view of their tickets.
@@ -202,6 +206,22 @@ export type NewTicket = {
    * the person and a query for agent-set priorities finds the ticket.
    */
   priorityChosenBy?: { agentId: string } | { label: string };
+  /**
+   * The category, and who chose it: an agent's pick in the console, or the
+   * form's default as `form:<slug>`. Written in the insert, with its
+   * `category_changed` in the same transaction, for `openedBy`'s reason and
+   * three more: the on-create rules, the first policy selection and
+   * assignment's skill match all read the row before `createTicket` returns,
+   * so a category set afterwards would arrive after every one of them. The
+   * value and the actor are one field, so a column with no event saying who
+   * set it cannot be asked for — `priority` and `priorityChosenBy` are two,
+   * which allows exactly that.
+   *
+   * A category retired or gone by the time the transaction reads it is left
+   * off — no column, no event, a warning in the log — and the ticket is still
+   * created: a customer's ticket is never refused over an admin's retire.
+   */
+  category?: { id: string; chosenBy: CategoryActor };
 };
 
 /**
@@ -228,6 +248,15 @@ export async function createTicket(contactId: string, input: NewTicket): Promise
   const created = await db.transaction(async (tx) => {
     const statusId = await requireDefaultOpenStatusId(tx);
 
+    // Read before the insert, so the column is only ever written with a live
+    // category, and held, so a retire waits for this ticket rather than landing
+    // between the read and the insert.
+    const held = input.category ? await holdCategory(tx, input.category.id) : null;
+    const category = typeof held === 'string' ? null : held;
+    if (input.category && typeof held === 'string') {
+      log.warn(`category left off a new ticket category=${input.category.id} reason=${held}`);
+    }
+
     const inserted = await tx
       .insert(conversations)
       .values({
@@ -244,6 +273,7 @@ export async function createTicket(contactId: string, input: NewTicket): Promise
         // `undefined` rather than null where the caller has no opinion, so
         // Drizzle omits the column and the schema default applies.
         priority: input.priority ?? undefined,
+        categoryId: category?.id ?? null,
         type: input.type ?? null,
         tags: input.tags ?? [],
         // Parsed and required-checked by the action before it gets here, against
@@ -279,6 +309,22 @@ export async function createTicket(contactId: string, input: NewTicket): Promise
           : { actorLabel: input.priorityChosenBy.label }),
         data: { to: input.priority },
       });
+    }
+
+    // No re-selection of the policy follows: `applySlaOnCreate` reads the row
+    // after this commits, so a policy keyed on the category is chosen at the
+    // first selection, and an `sla_recalculated` here would describe a change
+    // nothing made.
+    if (category) {
+      await tx
+        .insert(conversationEvents)
+        .values(
+          categoryChangedEvent(
+            row.id,
+            { from: null, to: category.id, category },
+            input.category!.chosenBy,
+          ),
+        );
     }
 
     if (input.openedBy) {

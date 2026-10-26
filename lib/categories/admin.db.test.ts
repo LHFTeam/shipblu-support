@@ -1,7 +1,7 @@
 import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { db } from '@/db/client';
-import { groups, ticketCategories } from '@/db/schema';
+import { groups, ticketCategories, ticketForms } from '@/db/schema';
 import { deleteGroupIfUnused } from '@/lib/admin/group-uses';
 import { withCleanDatabase } from '@/lib/testing/db';
 import { holdNextTransaction, untilWaitingOnALock } from '@/lib/testing/hold-transaction';
@@ -239,6 +239,63 @@ describe('setCategoryActive', () => {
 
   it('refuses a category that is not there', async () => {
     await expect(setCategoryActive(NOBODY, false)).resolves.toMatch(/no longer exists/);
+  });
+});
+
+/**
+ * A form's default category, `ticket_forms.default_category_id`. Retiring is
+ * allowed, as it is for a rule naming one: the forms editor shows the default
+ * "(retired)" and creation leaves it off the ticket. Deleting is not, and the
+ * foreign key is what says so.
+ */
+describe('a category a form defaults to', () => {
+  async function formDefaultingTo(categoryId: string) {
+    const [created] = await db
+      .insert(ticketForms)
+      .values({ slug: 'delivery', nameEn: 'Delivery', defaultCategoryId: categoryId })
+      .returning({ id: ticketForms.id });
+    return created!.id;
+  }
+
+  async function defaultOf(formId: string) {
+    const [found] = await db
+      .select({ defaultCategoryId: ticketForms.defaultCategoryId })
+      .from(ticketForms)
+      .where(eq(ticketForms.id, formId));
+    return found?.defaultCategoryId;
+  }
+
+  // Clearing it here would lose what the admin chose without a word, and
+  // restoring the category would not bring it back.
+  it('is retired with the form still holding it', async () => {
+    const sales = (await row('sales'))!;
+    const form = await formDefaultingTo(sales.id);
+
+    await expect(setCategoryActive(sales.id, false)).resolves.toBeNull();
+
+    expect((await row('sales'))?.isActive).toBe(false);
+    expect(await defaultOf(form)).toBe(sales.id);
+  });
+
+  // `restrict`, like `conversations.category_id`: nothing in the app deletes a
+  // category, so only a hand-run delete reaches this, and `set null` would let
+  // it clear a form's default in silence. Checked by the constraint's name, so
+  // the refusal is the form's and not some other row's.
+  it('cannot be deleted, by the form’s foreign key', async () => {
+    const sales = (await row('sales'))!;
+    const form = await formDefaultingTo(sales.id);
+
+    await expect(
+      db.delete(ticketCategories).where(eq(ticketCategories.id, sales.id)),
+    ).rejects.toMatchObject({
+      cause: {
+        code: '23503',
+        constraint_name: 'ticket_forms_default_category_id_ticket_categories_id_fk',
+      },
+    });
+
+    expect(await row('sales')).toMatchObject({ id: sales.id });
+    expect(await defaultOf(form)).toBe(sales.id);
   });
 });
 
