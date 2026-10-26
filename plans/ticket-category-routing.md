@@ -83,9 +83,48 @@ update.
 | 2.A   | Merged: #400 (`a558c5b`), then `dev` → `main` in #406 (`e88d357`), which also carried #399, #401 and #402. As built below                   | **Done.** All six services live on `e88d357` by 22:13 UTC on 2026-10-23, deployed at once by an environment update. Its checks read clean (below)                                                                         |
 | 2.B   | Merged: #403 (`1d21cdc`), then `dev` → `main` in #413 (`516c8ff`) and #415 (`48cb284`). As built below                                      | **Done.** All six services live on `48cb284` by 06:01 UTC on 2026-10-25, web first, with nothing suspended. Its checks read clean, and a new message was subcategorised; one read left (below)                            |
 | 3.1   | Merged: #419 (`ff3bbfd`), then `dev` → `main` in #420 (`b9a4743`), which also carried #411, #416, #417 and #418. As built below             | **Done.** Web live on `b9a4743` at 19:44 UTC on 2026-10-25, the worker and the four crons by 08:05 UTC on 2026-10-26, and the four categories seeded at 08:13. Its checks read clean (below); the signed-in ones are left |
-| 3.2   | Built in #424 on 2026-10-26, not merged. As built: [3.2, as built](#32-as-built)                                                            | —                                                                                                                                                                                                                         |
-| 4.0   | In review: #425 (`claude/jolly-noether-hxhez1-stage-4-0`), built from `dev` at `d05c131`: [4.0, as built](#40-as-built)                     | —                                                                                                                                                                                                                         |
+| 3.2   | Merged: #424 (`07a5527`), then `dev` → `main` in #426 (`f761e5e`), which also carried #421, #422 and #423. As built below                   | **Done.** All six services live on `f761e5e` by 23:32 UTC on 2026-10-26, web first. Its checks read clean (below); the signed-in ones are left                                                                            |
+| 4.0   | In review: #425 (`claude/jolly-noether-hxhez1-stage-4-0`), with `dev` merged in after 3.2: [4.0, as built](#40-as-built)                    | —                                                                                                                                                                                                                         |
 | 4.1–6 | Not started. 4.1 comes once 4.0 is merged                                                                                                   | —                                                                                                                                                                                                                         |
+
+**3.2's deploy and checks, read on Render and production on 2026-10-26.**
+
+- **Before** (read 23:00 and again at 23:24 UTC): 49 migrations, the newest
+  `1792909175828`; `ticket_forms` empty and without `default_category_id`; no
+  long transaction and no strong lock on `ticket_forms` or
+  `ticket_categories`; nothing queued; the same one dead job. All six services
+  ran `b9a4743`, and `origin/main..origin/dev` held 3.2 and the three plan PRs
+  #421, #422 and #423, none of which touches `db/`.
+- **The release and web.** #424 was squashed into `dev` as `07a5527`, its tree
+  identical to the reviewed head `e773fd6`. #426 merged `dev` into `main` as
+  `f761e5e`, and web was deployed on it through Render's API at 23:25:06. Its
+  preDeploy logged `Applying drizzle migrations...` at 23:27:08.9 and was
+  applying `001` by 23:27:09.1, so `0049` took under 0.2 s; all nine `db/sql`
+  files were done at 23:27:09.7. Web was live at 23:27:54.
+- **Then the rest, on the same commit**, through Render's API at 23:29:
+
+  | Service                          | Live     |
+  | -------------------------------- | -------- |
+  | `shipblu-time-automations`       | 23:30:03 |
+  | `shipblu-whatsapp-template-sync` | 23:30:07 |
+  | `shipblu-sla-sweep`              | 23:30:07 |
+  | `shipblu-nightly`                | 23:30:08 |
+  | worker `shipblu-support-worker`  | 23:31:58 |
+
+- **The checks** (read 23:29–23:41 UTC):
+  - 50 migrations, the newest `1793037218791` (`0049`);
+  - `ticket_forms.default_category_id` a nullable `uuid`, its foreign key
+    `restrict`;
+  - the four categories active, no ticket categorised, no form with a default
+    and no `category_changed` event, since production holds no form;
+  - all 67 jobs created since the migration completed, none with an error;
+  - neither web nor the worker logged a warning or an error, and web served no
+    5xx;
+  - `/api/health` reports `f761e5e`, with nothing pending or processing and
+    the same one dead job.
+- **Still to read**, signed in: `/admin/forms` offers the Default category
+  select, and the console's New form draws the Category chooser for an agent
+  holding `ticket.set_category`.
 
 **3.1's deploy and checks, read on Render and production on 2026-10-25 and
 2026-10-26.**
@@ -365,13 +404,13 @@ Every production write needs the user's go-ahead for that step, and the
    next morning, with no effect from the gap. Its checks read clean (above),
    the seed included; the signed-in ones are left. Its review decisions are
    under [3.1, as built](#31-as-built).
-5. **Stage 3.2**, where a person sets the category when a ticket is created,
-   is built from the map and in review as #424 into `dev`:
-   [3.2, as built](#32-as-built). It deploys web first (migration `0049`),
-   then the worker and the four crons, with nothing to seed. **Stage 4.0**,
-   `afterRoutingChanged`, is built independently of it and in review as #425:
-   [4.0, as built](#40-as-built). Jev (4.1) becomes a writer once 4.0 is
-   merged.
+5. **3.2 is deployed.** #424 was squashed into `dev` as `07a5527`, and #426
+   (`f761e5e`) took it to `main` on 2026-10-26 with #421, #422 and #423, the
+   user having left the review's two races as they are. All six services were
+   live on it by 23:32 UTC, web first, and its checks read clean (above); the
+   signed-in ones are left. **Stage 4.0**, `afterRoutingChanged`, is in review
+   as #425, with `dev` merged in: [4.0, as built](#40-as-built). Jev (4.1)
+   becomes a writer once 4.0 is merged.
 6. **Before Stage 5**, a person does 0.2's reorder and 0.6's staffing, and the
    support lead answers the questions still open (below).
 
