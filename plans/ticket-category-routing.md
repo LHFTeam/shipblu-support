@@ -3408,6 +3408,40 @@ on #419's review, before Jev becomes a writer.
   changed both the category and the group, which still writes a single
   `sla_recalculated`.
 
+#### 4.0, as built
+
+Built on 2026-10-26 from `dev` at `d05c131`, independent of 3.2: `createTicket`
+owes no follow-up, because the first selection reads its category.
+
+- **`afterRoutingChanged(id, { category, group })`** in `lib/sla/index.ts`
+  takes two booleans, which callers read off the writers' answers. Neither set
+  is a no-op; otherwise it re-selects, named by the category when both moved,
+  and then calls `onGroupChanged` when the group moved.
+- **The callers.**
+  - The console's group case calls it with `group: true`, once the move has
+    committed.
+  - The console's category case calls it with the outcome, `changed` or not.
+  - The engine's `Pass` now carries `categoryChanged` and `groupMoved` where
+    it carried `policyOwed`, and its `finally` makes the one call.
+- **One behaviour moved, to no effect.** An `on_create` pass that moved a
+  group used to call `onGroupChanged` on its own. It now calls nothing,
+  because the ticket has no clocks yet: `recomputeOwedClocks` returns at once
+  without a due date, and `applySlaOnCreate` runs after the pass.
+- **The repo rule was built:** `routing-result`
+  (`scripts/ci/rules/routing-result.mjs`). Outside tests it refuses a
+  `setConversationCategory` or `moveToGroupIfElsewhere` call whose answer is a
+  statement of its own or `void`ed. It has a floor of four calls and a fixture
+  test.
+- **Tests.** The existing re-selection tests pass unchanged. Three new cases
+  were each seen to fail under the mutation they pin:
+  - nothing changed owes nothing, though a re-selection would choose another
+    policy;
+  - a category and a group changed together re-select once, named by the
+    category;
+  - an engine pass that moves the group to one with a policy of its own, then
+    files the category, writes one `sla_recalculated`. Chosen per action, it
+    wrote two.
+
 **4.1 — The classifier, shipped off.** Web first (it migrates the new tables),
 then the worker and all four crons. With the switch at `off` nothing is
 enqueued, so no job type is ever unknown.

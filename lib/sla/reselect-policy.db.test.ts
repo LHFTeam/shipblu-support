@@ -17,7 +17,12 @@ import { runAutomations } from '@/lib/automations';
 import { setConversationCategory } from '@/lib/categories/write';
 import { forgetHoursCatalog } from '@/lib/hours/catalog';
 import { withCleanDatabase } from '@/lib/testing/db';
-import { applySlaOnCreate, onAgentReply, reselectPolicyBeforeFirstResponse } from './index';
+import {
+  afterRoutingChanged,
+  applySlaOnCreate,
+  onAgentReply,
+  reselectPolicyBeforeFirstResponse,
+} from './index';
 
 /**
  * Choosing the policy again when the category or the group changes before the
@@ -328,6 +333,51 @@ describe('reselectPolicyBeforeFirstResponse', () => {
   });
 });
 
+describe('afterRoutingChanged', () => {
+  // What every routing writer calls once its write has committed (Stage 4.0).
+  // A writer that changed nothing owes nothing, even where a re-selection
+  // would choose another policy: the answer that said so is what it is handed.
+  it('owes nothing when nothing changed, and chooses once when something did', async () => {
+    const { sales, standard } = await policies();
+    const { id } = await ticket();
+    // Filed without the follow-up, so only the call below can move the policy.
+    await setConversationCategory(id, await categoryId('sales'), { label: 'x' });
+
+    await afterRoutingChanged(id, { category: false, group: false });
+    expect((await sla(id)).slaPolicyId).toBe(standard);
+    expect(await events(id, 'sla_recalculated')).toEqual([]);
+
+    await afterRoutingChanged(id, { category: true, group: false });
+    expect((await sla(id)).slaPolicyId).toBe(sales);
+    expect((await events(id, 'sla_recalculated')).map((e) => e.data)).toEqual([
+      expect.objectContaining({ reason: 'policy', cause: 'category', policy: 'Sales' }),
+    ]);
+  });
+
+  it('chooses once for a category and a group changed together, named by the category', async () => {
+    const { sales } = await policies();
+    const [merchantCare] = await db
+      .insert(groups)
+      .values({ name: 'Merchant Care' })
+      .returning({ id: groups.id });
+    const { id } = await ticket();
+    await setConversationCategory(id, await categoryId('sales'), { label: 'x' });
+    await db
+      .update(conversations)
+      .set({ groupId: merchantCare!.id })
+      .where(eq(conversations.id, id));
+
+    await afterRoutingChanged(id, { category: true, group: true });
+
+    expect((await sla(id)).slaPolicyId).toBe(sales);
+    // One line: the re-selection, and no second one from re-timing the move,
+    // which found the new policy's clocks already counted.
+    expect((await events(id, 'sla_recalculated')).map((e) => e.data)).toEqual([
+      expect.objectContaining({ reason: 'policy', cause: 'category', policy: 'Sales' }),
+    ]);
+  });
+});
+
 describe('the automation engine', () => {
   it('files the ticket and chooses its policy once the pass is over', async () => {
     const { sales } = await policies();
@@ -553,6 +603,68 @@ describe('the automation engine', () => {
     expect((await sla(id)).slaPolicyId).toBe(care!.id);
     expect((await events(id, 'sla_recalculated')).map((e) => e.data)).toEqual([
       expect.objectContaining({ reason: 'policy', cause: 'group', policy: 'Merchant Care' }),
+    ]);
+  });
+
+  // The group moves first, to a group with a policy of its own, and the
+  // category lands after it, keyed to a policy ranked above both. Chosen per
+  // action, the ticket would take the group's policy and then the category's,
+  // two timeline lines; chosen once, from where the pass left it, one.
+  it('chooses one policy for a pass that moves the ticket and then files it', async () => {
+    const [merchantCare] = await db
+      .insert(groups)
+      .values({ name: 'Merchant Care' })
+      .returning({ id: groups.id });
+    const [sales] = await db
+      .insert(slaPolicies)
+      .values([
+        {
+          name: 'Sales',
+          hoursSource: 'round_the_clock',
+          targets: target(30, 240),
+          position: 0,
+          conditions: { field: 'category.id', op: 'eq', value: await categoryId('sales') },
+        },
+        {
+          name: 'Merchant Care',
+          hoursSource: 'round_the_clock',
+          targets: target(45, 300),
+          position: 1,
+          conditions: { field: 'group.id', op: 'eq', value: merchantCare!.id },
+        },
+        {
+          name: 'Standard',
+          hoursSource: 'round_the_clock',
+          targets: target(120, 480),
+          position: 2,
+          isDefault: true,
+        },
+      ])
+      .returning({ id: slaPolicies.id });
+    const { id } = await ticket();
+    await db.insert(automationRules).values([
+      {
+        name: 'To Merchant Care',
+        trigger: 'on_update',
+        conditions: {},
+        position: 0,
+        actions: [{ type: 'assign_group', groupId: merchantCare!.id }],
+      },
+      {
+        name: 'Merchant number is sales',
+        trigger: 'on_update',
+        conditions: {},
+        position: 1,
+        actions: [{ type: 'set_category', categoryId: await categoryId('sales') }],
+      },
+    ]);
+
+    await runAutomations('on_update', id);
+
+    expect((await sla(id)).slaPolicyId).toBe(sales!.id);
+    expect(await events(id, 'group_changed')).toHaveLength(1);
+    expect((await events(id, 'sla_recalculated')).map((e) => e.data)).toEqual([
+      expect.objectContaining({ reason: 'policy', cause: 'category', policy: 'Sales' }),
     ]);
   });
 

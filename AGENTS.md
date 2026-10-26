@@ -1256,9 +1256,18 @@ ticket. Five rules hold:
   anchor with the finished pauses credited, so it can give clocks to a ticket
   that had none, and it does nothing once somebody has answered, on a resolved,
   closed, deleted, spam or merged ticket, when the same policy wins, or when
-  none does. Every group writer calls it before `onGroupChanged` — the engine
-  once its pass is over — so a move that changes the policy is re-timed once.
-  `onGroupChanged` and `onPriorityChanged` still never re-select. Because a
+  none does. A writer reaches it through `afterRoutingChanged`, the one entry
+  point, which re-selects and then calls `onGroupChanged`, so a move that
+  changes the policy is re-timed once and the order cannot be taken the wrong
+  way round. It takes what the writers answer — whether the category changed,
+  whether the group moved — and is called once the whole change is over: by the
+  console's group and category cases, by the engine once its pass is over (so
+  a rule that files a ticket and another that moves it choose one policy
+  between them), and from Stage 4 by Jev and the router. Never from inside a
+  writer, which would choose once per action. The `routing-result` repo rule
+  refuses a `setConversationCategory` or `moveToGroupIfElsewhere` call whose
+  answer is dropped, since that answer is the only thing saying a follow-up is
+  owed. `onGroupChanged` and `onPriorityChanged` still never re-select. Because a
   ticket can now change policy after a breach, an escalation is keyed per
   policy (`settlesEscalation` in `worker/handlers/sla-sweep.ts`).
 - **Retired, never deleted, and the key never changes.** The foreign key is
