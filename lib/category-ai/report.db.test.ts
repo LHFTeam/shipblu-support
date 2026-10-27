@@ -298,13 +298,26 @@ describe('categoryAiReport', () => {
     );
   });
 
-  // Four asked in shadow, then the switch to apply: the live job capped the
-  // sixth message on the asks the shadow view holds, and so does the sweep.
+  // Three asked in shadow, then the switch to apply: one ask left, which the
+  // fifth message took, so the sixth is unasked at a higher bar. Every row the
+  // live cap does not count — another label's, a failure, a row with no
+  // answer — sits before the sixth, so letting any one of them through would
+  // cap it and read it as settled nowhere instead.
   it('counts the asks the label holds in its other views towards the cap', async () => {
     const t = await ticket();
-    for (const at of [0, 1, 2, 3]) {
+    for (const at of [0, 1, 2]) {
       await answer(t.id, at, 'unknown', 'unknown', { messageId: await message(t.id, at) });
     }
+    await answer(t.id, 3, 'unknown', 'unknown', {
+      runLabel: 'archive-1',
+      mode: 'record',
+      messageId: await message(t.id, 3),
+    });
+    await answer(t.id, 3.2, 'failed', 'sales', {
+      error: 'category retired since',
+      messageId: await message(t.id, 3.2),
+    });
+    await answer(t.id, 3.4, 'capped', null, { messageId: await message(t.id, 3.4) });
     await answer(t.id, 4, 'applied', 'sales', {
       mode: 'apply',
       probability: 0.65,
@@ -314,23 +327,15 @@ describe('categoryAiReport', () => {
       mode: 'apply',
       messageId: await message(t.id, 5),
     });
-    // Another label's answers are another cap's.
-    await answer(t.id, 6, 'unknown', 'unknown', {
-      runLabel: 'archive-1',
-      messageId: await message(t.id, 6),
-    });
 
     const report = await categoryAiReport('live', QUESTION, 'apply');
 
     expect(report.sweep.find((row) => row.threshold === 0.7)).toMatchObject({
       settled: 0,
-      unasked: 0,
+      unasked: 1,
     });
   });
 
-  // m1 settled at 0.65 under the live job; m2 was queued before the agent's
-  // reply and judged after it. A backfill judges as of arrival, so the same
-  // rows under a record label leave m2 unasked.
   it('reads a message judged after the first reply as out of the window', async () => {
     const t = await ticket({ firstRespondedAt: minute(10) });
     const first = await message(t.id, 0);
@@ -450,6 +455,8 @@ describe('deadClassifyJobs', () => {
   // A run by hand after the outage: the message has its live row now, so it
   // is in the report's figures and not missing from them.
   it('leaves out a message a later live row answered, or recorded failing', async () => {
+    // A failure is a row like any other: the footer counts it where nothing
+    // else on the ticket was judged.
     const t = await ticket();
     const answered = await message(t.id, 0);
     const failed = await message(t.id, 1);
@@ -475,5 +482,23 @@ describe('deadClassifyJobs', () => {
       },
     ]);
     expect(await deadClassifyJobs()).toEqual({ count: 3, first: minute(12), last: minute(20) });
+  });
+
+  // A purge cascades the ticket's messages and runs, and keeps the dead job:
+  // nothing could answer that message now, so it is no gap to report.
+  it('leaves out a message purged since', async () => {
+    const t = await ticket();
+    const kept = await message(t.id, 0);
+    const purged = await message(t.id, 1);
+    await db.insert(jobs).values(
+      [kept, purged].map((messageId, n) => ({
+        type: 'classify_category' as const,
+        status: 'dead' as const,
+        payload: { messageId },
+        createdAt: minute(10 + n),
+      })),
+    );
+    await db.delete(messages).where(eq(messages.id, purged));
+    expect(await deadClassifyJobs()).toEqual({ count: 1, first: minute(10), last: minute(10) });
   });
 });

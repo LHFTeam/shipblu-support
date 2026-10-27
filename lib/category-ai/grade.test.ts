@@ -523,6 +523,31 @@ describe('settleAt, the threshold sweep', () => {
     expect(settleAt(burst, 0.5)).toEqual({ kind: 'settled', key: 'sales' });
   });
 
+  // Seven in a burst: m6 commits first and settles; m4 and m5 then find five
+  // answers and are capped, m5's call having failed. Every job that reached
+  // Jev was inside the live cap, so the sweep and the rules reach m6.
+  it('never caps a row whose job reached Jev, failed or not', () => {
+    const burst = [
+      ...Array.from({ length: 4 }, (_, n) => run('t', n, 'unknown', 'unknown', 0.9)),
+      run('t', 4, 'capped', 'unknown', 0.9),
+      run('t', 5, 'failed'),
+      run('t', 6, 'would_apply', 'sales', 0.9, { baselineKey: 'sales' }),
+    ];
+    expect(settleAt(burst, 0.6)).toEqual({ kind: 'settled', key: 'sales' });
+    expect(verdict(burst).baseline).toBe('sales');
+    // An answer held by an after_settle row asked inside the cap is read.
+    expect(
+      settleAt(
+        [
+          ...Array.from({ length: 4 }, (_, n) => run('t', n, 'unknown', 'unknown', 0.9)),
+          run('t', 4, 'would_apply', 'customer_support', 0.65),
+          run('t', 5, 'after_settle', 'sales', 0.9),
+        ],
+        0.7,
+      ),
+    ).toEqual({ kind: 'settled', key: 'sales' });
+  });
+
   // Four messages asked in shadow, then the switch to apply: the apply view
   // holds the fifth and the sixth, and the live job capped the sixth.
   it('counts the asks the label holds in its other views towards the cap', () => {
@@ -743,6 +768,55 @@ describe('what a label can grade', () => {
 
   // A rule filing tickets Jev settled as sales: the two labels stand for the
   // two tickets a label could reach, not for the ten.
+  // Shadow, early on: Jev settled 50 as merchant support and none is labelled
+  // yet, while the never-settled tickets people labelled hold 12 of it. The
+  // stratum holding every hit has not been read, so no recall is drawn.
+  it('has no recall while no ticket Jev settled as the category is labelled', () => {
+    const graded = grade(
+      input(
+        [
+          ...Array.from({ length: 50 }, (_, n) =>
+            run(`m${n}`, 0, 'would_apply', 'merchant_support', 0.9),
+          ),
+          ...Array.from({ length: 12 }, (_, n) => run(`u${n}`, 0, 'below_threshold', 'sales', 0.3)),
+        ],
+        Array.from({ length: 12 }, (_, n) => person(`u${n}`, 30, 'merchant_support')),
+      ),
+    );
+    const merchant = graded.categories.find((each) => each.key === 'merchant_support')!;
+    expect(merchant.recall).toBeNull();
+    expect(graded.settlesUnlabellable).toBe(false);
+  });
+
+  // Spam Jev answered unknown, deleted and merged tickets: in no state a
+  // supervisor can label, so not stood for by the tickets people label.
+  it('leaves out of the weights the tickets that can no longer be labelled', () => {
+    const runs = [
+      ...Array.from({ length: 4 }, (_, n) => run(`s${n}`, 0, 'would_apply', 'sales', 0.9)),
+      ...Array.from({ length: 4 }, (_, n) => run(`u${n}`, 0, 'below_threshold', 'sales', 0.3)),
+      ...Array.from({ length: 6 }, (_, n) => run(`x${n}`, 0, 'unknown', 'unknown', 0.9)),
+    ];
+    const tickets = new Map<string, GradingTicket>(
+      [...new Set(runs.map((each) => each.conversationId))].map((id, n) => [
+        id,
+        { number: n, labellable: !id.startsWith('x'), windowOpen: false },
+      ]),
+    );
+    const events = [
+      person('s0', 30, 'sales'),
+      person('u0', 30, 'sales'),
+      person('u1', 30, 'courier_jobs'),
+    ];
+    const graded = grade(input(runs, events, { tickets }));
+    // 4 sales tickets stand for 4; 2 never-settled labels stand for 4, not 10.
+    expect(graded.categories.find((each) => each.key === 'sales')!.recall).toEqual({
+      right: 1,
+      of: 2,
+      rate: 4 / 6,
+    });
+    expect(graded).toMatchObject({ writtenFirst: 0, beyondLabels: 6 });
+  });
+
   it('weighs a stratum by the tickets a label could reach', () => {
     const shadow = [
       ...Array.from({ length: 10 }, (_, n) => run(`s${n}`, 0, 'would_apply', 'sales', 0.9)),

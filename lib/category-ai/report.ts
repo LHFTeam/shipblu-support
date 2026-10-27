@@ -4,6 +4,7 @@ import {
   count,
   desc,
   eq,
+  exists,
   inArray,
   isNotNull,
   max,
@@ -21,6 +22,7 @@ import {
   conversationEvents,
   conversations,
   jobs,
+  messages,
 } from '@/db/schema';
 import { listCategories } from '@/lib/categories/queries';
 import { statusCategoryOf } from '@/lib/tickets/status-category';
@@ -292,17 +294,20 @@ function asOutcome(value: string): CategoryOutcome {
 }
 
 /**
- * `classify_category` jobs in `dead` whose message still has no live row: the
- * one way a message the live classifier was meant to decide about ends with
- * none, which no other figure on the page can see
- * (`plans/ticket-category-routing.md`, 4.1, as built). Never cleaned up, so
- * the count would be every one there has been; a message a run by hand has
- * since answered — or recorded failing, which the page counts — has its row,
- * and leaves it.
+ * `classify_category` jobs in `dead` whose message is still there with no
+ * live row: the one way a message the live classifier was meant to decide
+ * about ends with none, which no other figure on the page can see
+ * (`plans/ticket-category-routing.md`, 4.1, as built). Dead jobs are never
+ * cleaned up, and a purge keeps them as history, so the count would otherwise
+ * be every one there has been. A message a run by hand has since given a row
+ * leaves it, whether the row answered or failed: a failure is a row like any
+ * other, and the footer counts it where nothing else on the ticket was judged.
+ * A message purged since leaves it too, and nothing could answer it now.
  *
  * The payload's id is compared only once it reads as a uuid: a job that died
  * because its payload failed its schema holds whatever was written, and a
- * cast of that would refuse the whole page.
+ * cast of that would refuse the whole page. Such a job names no message to
+ * look for, and stays in the count.
  */
 export async function deadClassifyJobs(): Promise<{
   count: number;
@@ -317,16 +322,27 @@ export async function deadClassifyJobs(): Promise<{
       and(
         eq(jobs.type, 'classify_category'),
         eq(jobs.status, 'dead'),
-        notExists(
-          db
-            .select({ one: sql`1` })
-            .from(aiCategoryRuns)
-            .where(
-              and(
-                eq(aiCategoryRuns.messageId, messageId),
-                eq(aiCategoryRuns.runLabel, CATEGORY_AI_LIVE_LABEL),
-              ),
+        or(
+          sql`${messageId} is null`,
+          and(
+            exists(
+              db
+                .select({ one: sql`1` })
+                .from(messages)
+                .where(eq(messages.id, messageId)),
             ),
+            notExists(
+              db
+                .select({ one: sql`1` })
+                .from(aiCategoryRuns)
+                .where(
+                  and(
+                    eq(aiCategoryRuns.messageId, messageId),
+                    eq(aiCategoryRuns.runLabel, CATEGORY_AI_LIVE_LABEL),
+                  ),
+                ),
+            ),
+          ),
         ),
       ),
     );

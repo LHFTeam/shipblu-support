@@ -3958,9 +3958,11 @@ wait for the user's go-ahead, after 4.1 is deployed.
     - a threshold sweep;
     - what Jev filed and a person changed since;
     - the tickets to label.
-  - The count of `classify_category` jobs in `dead` whose message has no live
-    row yet, 4.1's one gap, is a warning on the live label's views and when no
-    run is chosen. A message answered by hand since leaves it.
+  - The count of `classify_category` jobs in `dead` whose message is still
+    there with no live row, 4.1's one gap, is a warning on the live label's
+    views and when no run is chosen. A message given a row by hand since,
+    answered or failed, leaves it, and so does one purged since, which a purge
+    leaves the dead job of.
   - The handbook's reports article gains the screen and how to label for it,
     and the categories admin paragraph names it.
 - **Where it departs from the spec, or adds to it.**
@@ -3978,13 +3980,17 @@ wait for the user's go-ahead, after 4.1 is deployed.
     under "Filed by Jev": what it filed in answer to the run's messages, how
     many a person moved since, and to what. That is the figure step 3's
     merchant-support watch reads.
-  - **So a ticket written to first is in no rate.** No label can reach it,
-    and kept in the weights it would be stood for by tickets unlike it. In
-    `apply` every settle is Jev's filing, so the labelled tickets are all ones
-    Jev never settled: recall read there was 0% by construction. The rates
-    describe the tickets a label could reach, the page says how many were
-    left out, and a category every settle of which was written to reads
-    "Not measurable" rather than 0%. Under `apply`, Filed by Jev is the grade.
+  - **So a ticket no label can reach is in no rate read off labels**: one
+    something wrote first, and one deleted, spam, merged or carrying a
+    category no event explains. Kept in the weights it would be stood for by
+    tickets unlike it. In `apply` every settle is Jev's filing, so the
+    labelled tickets are all ones Jev never settled, and recall read there
+    was 0% by construction; spam, which Jev answers `unknown`, inflated every
+    category's misses. Those rates describe the tickets a label could reach,
+    the page says how many were left out, and a category none of whose
+    settled tickets is labelled reads "Not measurable" rather than 0%: its
+    stratum holds every hit, unread — in shadow, until somebody labels one;
+    in apply, for good. Under `apply`, Filed by Jev is the grade.
   - **Rates that mix Jev's answers are weighted.** The labelling list draws
     the same number of tickets from each answer, so a rare answer's tickets
     are labelled at a far higher rate. Precision within one answer needs
@@ -4010,9 +4016,10 @@ wait for the user's go-ahead, after 4.1 is deployed.
     count as not known, not as unsettled. An `after_settle` row that holds an
     answer is read, and an `owned` or `capped` row out of job order is passed
     over. The cap of five is counted as the live job counts it, every answer
-    the label holds in any mode and to any version of the question. A row Jev
-    judged is never capped, since the live job counts in commit order and asked
-    it inside its cap. That is what "the threshold set from the report"
+    the label holds in any mode and to any version of the question. A row
+    whose job reached Jev — judged, failed, or answered before a settle landed
+    — is never capped, since the live job counts in commit order and asked it
+    inside its cap. That is what "the threshold set from the report"
     reads.
   - **The sample is chosen by Jev's answer and shown without it.** Strata are
     Jev's settling category, plus "never settled" so recall has misses. Each

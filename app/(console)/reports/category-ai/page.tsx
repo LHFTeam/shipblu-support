@@ -87,6 +87,7 @@ export default async function CategoryAiReportPage({
   );
   const name = (key: string | null, none: string) =>
     key === null ? none : (labels.get(key) ?? key);
+  const unreachable = report ? report.writtenFirst + report.beyondLabels : 0;
 
   return (
     <div className="app-scroll relative h-full overflow-y-auto p-4 sm:p-6">
@@ -191,22 +192,24 @@ export default async function CategoryAiReportPage({
               ) : null}
               {report.settlesUnlabellable ? (
                 <Notice tone="info" icon>
-                  Every ticket Jev settled in this run was written to before anybody could label it
-                  {chosen.mode === 'apply' ? <> &mdash; by Jev, filing it</> : null}, and agreeing
-                  with a filing leaves no label. So no rate here grades what Jev settled: Right and
-                  precision are empty and recall is not measurable. Filed by Jev is the grade, by
-                  how often a person moved a filing; the labels here are of tickets Jev never
-                  settled, which is what it missed.
+                  No label can reach any ticket Jev settled in this run: each was written to before
+                  anybody labelled it
+                  {report.filed.length > 0 ? <> &mdash; by Jev, filing it</> : null}, or can no
+                  longer be labelled. So no rate here grades what Jev settled: Right and precision
+                  are empty and recall is not measurable.{' '}
+                  {report.filed.length > 0
+                    ? 'Filed by Jev is the grade, by how often a person moved a filing; the labels here are of tickets Jev never settled, which is what it missed.'
+                    : 'The labels here are of tickets Jev never settled, which is what it missed.'}
                 </Notice>
-              ) : report.writtenFirst > 0 ? (
+              ) : unreachable > 0 ? (
                 <Notice tone="info" icon>
-                  {report.writtenFirst === 1
-                    ? 'One judged ticket was'
-                    : `${report.writtenFirst} judged tickets were`}{' '}
-                  written to by Jev, a rule or a form before anybody labelled{' '}
-                  {report.writtenFirst === 1 ? 'it' : 'them'}, and agreeing with what was written
-                  leaves no label. Every rate here describes the other{' '}
-                  {report.total.judged - report.writtenFirst}.
+                  {unreachable === 1 ? 'One judged ticket' : `${unreachable} judged tickets`} cannot
+                  be graded: written to by Jev, a rule or a form before anybody labelled{' '}
+                  {unreachable === 1 ? 'it' : 'them'}, where agreeing leaves no label, or deleted,
+                  spam or merged since. Every rate read off labels &mdash; Right, precision, recall
+                  and the rules&rsquo; &mdash; describes the other{' '}
+                  {report.total.judged - unreachable}; the shares of what Jev answered count every
+                  judged ticket.
                 </Notice>
               ) : null}
             </div>
@@ -305,8 +308,9 @@ export default async function CategoryAiReportPage({
                       each labelled ticket counts for as many tickets of its answer as it stands
                       for: the percentage estimates every ticket in the run a label could reach, and
                       the counts beside it are the labelled tickets it was read on. Not measurable
-                      is a category every ticket Jev settled as which was written to first: its hits
-                      are the tickets nobody can label.
+                      is a category none of whose tickets Jev settled as it is labelled: they hold
+                      every hit, and none has been read &mdash; yet, in shadow; ever, in apply,
+                      where each was Jev&rsquo;s filing.
                     </InfoTip>
                   </span>,
                   'Rules precision',
@@ -464,11 +468,13 @@ export default async function CategoryAiReportPage({
               or a form before Jev was asked; {report.outOfPlay.settled_elsewhere} settled outside
               this run, under another version of the question, in the other mode or by a
               backfill&rsquo;s filing; {report.outOfPlay.capped} capped; {report.outOfPlay.failed}{' '}
-              whose every call failed. {report.writtenFirst} judged ticket
-              {report.writtenFirst === 1 ? ' was' : 's were'} written to by Jev, a rule or a form
-              before anybody labelled {report.writtenFirst === 1 ? 'it' : 'them'}, and{' '}
-              {report.writtenFirst === 1 ? 'is' : 'are'} in no rate, {report.labelledAfterWrite}{' '}
-              labelled since: agreeing with what was written leaves no label to grade.
+              whose every call failed. In no rate read off labels: {report.writtenFirst} judged
+              ticket
+              {report.writtenFirst === 1 ? '' : 's'} written to by Jev, a rule or a form before
+              anybody labelled {report.writtenFirst === 1 ? 'it' : 'them'},{' '}
+              {report.labelledAfterWrite} labelled since &mdash; agreeing with what was written
+              leaves no label to grade &mdash; and {report.beyondLabels} deleted, spam or merged
+              since, or carrying a category nothing on the timeline wrote.
             </p>
           </>
         )
