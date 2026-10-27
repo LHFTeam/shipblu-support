@@ -349,19 +349,26 @@ async function applyAction(
       // Writes the ticket itself and does not come back through this engine, in
       // keeping with the rule at the top of this file: an automation that
       // triggered an automation is how four hundred emails reach one customer.
-      const outcome = await assignConversation(conversationId, {
-        groupId: action.groupId,
-        strategy: action.strategy === 'group_default' ? undefined : action.strategy,
-        actorLabel: `automation:${ruleName}`,
-      });
-
       // The SLA counts against the group's calendar, so a rule that moved the
       // ticket has moved its due dates too — whether or not anybody was free to
       // take it. Read off what the call did rather than off the rule and the
       // ticket as the pass found it: a ticket held by somebody other than its
       // number's owner, or routed to a group deleted since, stays where it was
       // and owes nothing (`moveToGroupIfElsewhere`, for why that matters).
-      if (outcome.movedGroup) pass.groupMoved = true;
+      // Through `routed` rather than the answer, and in a `finally`, for
+      // `assign_group`'s reason: the move commits before the pick, so a pick
+      // that throws must not also lose the follow-up the move owes.
+      const routed = { moved: false };
+      try {
+        await assignConversation(conversationId, {
+          groupId: action.groupId,
+          strategy: action.strategy === 'group_default' ? undefined : action.strategy,
+          actorLabel: `automation:${ruleName}`,
+          routed,
+        });
+      } finally {
+        if (routed.moved) pass.groupMoved = true;
+      }
       return;
     }
 

@@ -1285,7 +1285,8 @@ ticket. Five rules hold:
   ticket that had none, and it does nothing once somebody has answered, on a
   resolved, closed, deleted, spam or merged ticket, when the same policy wins,
   or when none does. A writer reaches it through `afterRoutingChanged`, the one
-  entry point, which re-selects and then calls `onGroupChanged`, so a move that
+  entry point, which re-selects and then, unless that re-timed the clocks
+  itself, calls `onGroupChanged` — both private to `lib/sla` — so a move that
   changes the policy is re-timed once and the order cannot be taken the wrong
   way round. It takes what the writers answer — whether the category changed,
   whether the group moved — and is called once the whole change is over: by the
@@ -1295,7 +1296,10 @@ ticket. Five rules hold:
   writer, which would choose once per action. The `routing-result` repo rule
   refuses a `setConversationCategory` or `moveToGroupIfElsewhere` call, or an
   `assignConversation` handed a group, whose answer is dropped, since that
-  answer is the only thing saying a follow-up is owed. `onGroupChanged` and
+  answer is the only thing saying a follow-up is owed — and a module calling
+  one that never calls `afterRoutingChanged`, unless it exports a writer of its
+  own. A caller that must hear of a move through a throw after it passes
+  `assignConversation` a `routed` carrier, as the engine does. `onGroupChanged` and
   `onPriorityChanged` still never re-select. Because a ticket can now change
   policy after a breach, an escalation is keyed per policy
   (`settlesEscalation` in `worker/handlers/sla-sweep.ts`).

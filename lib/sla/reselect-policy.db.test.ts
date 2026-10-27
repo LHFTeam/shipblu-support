@@ -1,4 +1,4 @@
-import { and, asc, eq } from 'drizzle-orm';
+import { and, asc, eq, sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { db } from '@/db/client';
 import {
@@ -18,12 +18,7 @@ import { setConversationCategory } from '@/lib/categories/write';
 import { forgetHoursCatalog } from '@/lib/hours/catalog';
 import { createTicket } from '@/lib/portal/tickets';
 import { withCleanDatabase } from '@/lib/testing/db';
-import {
-  afterRoutingChanged,
-  applySlaOnCreate,
-  onAgentReply,
-  reselectPolicyBeforeFirstResponse,
-} from './index';
+import { afterRoutingChanged, applySlaOnCreate, onAgentReply } from './index';
 
 /**
  * Choosing the policy again when the category or the group changes before the
@@ -159,6 +154,8 @@ async function opened(categoryId: string) {
   return { id: conversationId, ...row! };
 }
 
+// Private to `lib/sla`, so a writer cannot call one half of the follow-up;
+// reached here as every writer reaches it, for a category change.
 describe('reselectPolicyBeforeFirstResponse', () => {
   it('holds a ticket filed under a category to that category’s policy, from its arrival', async () => {
     const { sales, standard } = await policies();
@@ -166,7 +163,7 @@ describe('reselectPolicyBeforeFirstResponse', () => {
     expect((await sla(id)).slaPolicyId).toBe(standard);
 
     await setConversationCategory(id, await categoryId('sales'), { label: 'automation:test' });
-    await reselectPolicyBeforeFirstResponse(id, 'category');
+    await afterRoutingChanged(id, { category: true, group: false });
 
     expect(await sla(id)).toMatchObject({
       slaPolicyId: sales,
@@ -193,7 +190,7 @@ describe('reselectPolicyBeforeFirstResponse', () => {
     const before = await sla(id);
 
     await setConversationCategory(id, await categoryId('merchant_support'), { label: 'x' });
-    await reselectPolicyBeforeFirstResponse(id, 'category');
+    await afterRoutingChanged(id, { category: true, group: false });
 
     expect(await sla(id)).toEqual(before);
     expect(before.slaPolicyId).toBe(standard);
@@ -206,7 +203,7 @@ describe('reselectPolicyBeforeFirstResponse', () => {
     await onAgentReply(id);
 
     await setConversationCategory(id, await categoryId('sales'), { label: 'x' });
-    await reselectPolicyBeforeFirstResponse(id, 'category');
+    await afterRoutingChanged(id, { category: true, group: false });
 
     expect((await sla(id)).slaPolicyId).toBe(standard);
     expect(await events(id, 'sla_recalculated')).toEqual([]);
@@ -218,7 +215,7 @@ describe('reselectPolicyBeforeFirstResponse', () => {
     expect(await sla(id)).toMatchObject({ slaPolicyId: null, firstResponseDueAt: null });
 
     await setConversationCategory(id, await categoryId('sales'), { label: 'x' });
-    await reselectPolicyBeforeFirstResponse(id, 'category');
+    await afterRoutingChanged(id, { category: true, group: false });
 
     expect(await sla(id)).toMatchObject({
       slaPolicyId: sales,
@@ -242,7 +239,7 @@ describe('reselectPolicyBeforeFirstResponse', () => {
     ]);
 
     await setConversationCategory(id, await categoryId('sales'), { label: 'x' });
-    await reselectPolicyBeforeFirstResponse(id, 'category');
+    await afterRoutingChanged(id, { category: true, group: false });
 
     expect(await sla(id)).toMatchObject({
       slaPolicyId: sales,
@@ -272,7 +269,7 @@ describe('reselectPolicyBeforeFirstResponse', () => {
     const { sales } = await policies(false);
 
     await setConversationCategory(id, await categoryId('sales'), { label: 'x' });
-    await reselectPolicyBeforeFirstResponse(id, 'category');
+    await afterRoutingChanged(id, { category: true, group: false });
 
     expect((await sla(id)).slaPolicyId).toBe(sales);
     expect((await events(id, 'sla_recalculated')).map((e) => e.data)).toEqual([
@@ -309,7 +306,7 @@ describe('reselectPolicyBeforeFirstResponse', () => {
       .where(eq(conversations.id, id));
 
     await setConversationCategory(id, await categoryId('sales'), { label: 'x' });
-    await reselectPolicyBeforeFirstResponse(id, 'category');
+    await afterRoutingChanged(id, { category: true, group: false });
 
     expect(await sla(id)).toMatchObject({ slaPolicyId: sales!.id, firstResponseBreached: false });
   });
@@ -332,7 +329,7 @@ describe('reselectPolicyBeforeFirstResponse', () => {
       const before = await sla(id);
 
       await setConversationCategory(id, await categoryId('sales'), { label: 'x' });
-      await reselectPolicyBeforeFirstResponse(id, 'category');
+      await afterRoutingChanged(id, { category: true, group: false });
 
       expect(await sla(id)).toEqual(before);
       expect(before.slaPolicyId).toBe(standard);
@@ -351,7 +348,7 @@ describe('reselectPolicyBeforeFirstResponse', () => {
 
     for (const { id } of [bot, imported, spam, deleted, merged]) {
       await setConversationCategory(id, await categoryId('sales'), { label: 'x' });
-      await reselectPolicyBeforeFirstResponse(id, 'category');
+      await afterRoutingChanged(id, { category: true, group: false });
       expect(await events(id, 'sla_recalculated')).toEqual([]);
     }
   });
@@ -702,10 +699,78 @@ describe('the automation engine', () => {
     expect(await events(id, 'group_changed')).toEqual([]);
   });
 
-  // The console calls the re-selection and then `onGroupChanged`; the engine
-  // did it the other way round, so a move to a group with other hours first
-  // re-timed the old policy's clocks there and then replaced them — two
-  // timeline lines for one move, the first naming deadlines that never held.
+  // The move commits before the pick runs, so a failure after it — here the
+  // timeline line, refused by a trigger — still owes the clocks the new
+  // group's calendar. Read off the call's answer, the throw took it along.
+  it('re-times an auto_assign’s move when the call fails after it', async () => {
+    const [sundays] = await db
+      .insert(businessHours)
+      .values({
+        name: 'An hour on Sundays',
+        schedule: {
+          sun: [{ start: '00:00', end: '01:00' }],
+          mon: [],
+          tue: [],
+          wed: [],
+          thu: [],
+          fri: [],
+          sat: [],
+        },
+      })
+      .returning({ id: businessHours.id });
+    const [merchantCare] = await db
+      .insert(groups)
+      .values({ name: 'Merchant Care', businessHoursId: sundays!.id })
+      .returning({ id: groups.id });
+    forgetHoursCatalog();
+    await db.insert(slaPolicies).values({
+      name: 'Standard',
+      hoursSource: 'group',
+      targets: target(120, 480),
+      position: 0,
+      isDefault: true,
+    });
+    const { id } = await ticket();
+    const before = await sla(id);
+    await db.insert(automationRules).values({
+      name: 'Route to Merchant Care',
+      trigger: 'on_update',
+      conditions: {},
+      actions: [{ type: 'auto_assign', groupId: merchantCare!.id, strategy: 'group_default' }],
+    });
+
+    await db.execute(sql`
+      create function refuse_group_changed() returns trigger language plpgsql
+      as $$ begin raise exception 'refused for the test'; end $$`);
+    await db.execute(sql`
+      create trigger refuse_group_changed before insert on conversation_events
+      for each row when (new.type = 'group_changed') execute function refuse_group_changed()`);
+    try {
+      await runAutomations('on_update', id);
+    } finally {
+      await db.execute(sql`drop trigger refuse_group_changed on conversation_events`);
+      await db.execute(sql`drop function refuse_group_changed()`);
+    }
+
+    const [row] = await db
+      .select({ groupId: conversations.groupId })
+      .from(conversations)
+      .where(eq(conversations.id, id));
+    expect(row!.groupId).toBe(merchantCare!.id);
+    expect(await events(id, 'group_changed')).toEqual([]);
+    expect((await sla(id)).firstResponseDueAt!.getTime()).toBeGreaterThan(
+      before.firstResponseDueAt!.getTime(),
+    );
+    expect((await events(id, 'sla_recalculated')).map((e) => e.data)).toEqual([
+      expect.objectContaining({ reason: 'group_hours' }),
+    ]);
+  });
+
+  // The order inside `afterRoutingChanged`, through the engine's pass: the
+  // policy first, then the calendar. The engine once re-timed first, so a move
+  // to a group with other hours re-timed the old policy's clocks there and then
+  // replaced them — two timeline lines for one move, the first naming
+  // deadlines that never held.
   it('re-times a rule’s move to a group with other hours once, under the policy it chose', async () => {
     const [sundays] = await db
       .insert(businessHours)

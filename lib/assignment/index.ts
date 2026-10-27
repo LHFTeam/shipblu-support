@@ -73,11 +73,12 @@ export type SkipReason =
 export type AssignmentOutcome = Picked & {
   /**
    * Whether this call moved the ticket into the group the caller named — the
-   * routing half, which stands whether or not anybody was then picked. Read by
-   * the automation engine, which owes the SLA policy a second look only when
-   * the group really changed: comparing the rule's group with the ticket it
-   * started from also counts a ticket the rota left where it was (a holder who
-   * is not the number's owner, a group deleted since).
+   * routing half, which stands whether or not anybody was then picked. A
+   * caller owes the SLA policy a second look only when the group really
+   * changed: comparing the rule's group with the ticket it started from also
+   * counts a ticket the rota left where it was (a holder who is not the
+   * number's owner, a group deleted since). The automation engine reads the
+   * same answer through `routed`, which survives a throw after the move.
    */
   movedGroup: boolean;
 };
@@ -105,6 +106,15 @@ export type AssignOptions = {
   /** Names the rule or job that asked, for the timeline. */
   actorLabel?: string;
   now?: Date;
+  /**
+   * Told of the move the moment it commits, for a caller that owes a follow-up
+   * for it even when the call then throws — the automation engine, whose
+   * `finally` re-times the clocks. The move commits before the pick runs, so a
+   * pick that fails afterwards takes `movedGroup` down with it and leaves the
+   * ticket in the new group on the old one's policy and hours. A fresh
+   * `{ moved: false }`; `movedGroup` reads the same answer once the call returns.
+   */
+  routed?: { moved: boolean };
 };
 
 /**
@@ -117,7 +127,7 @@ export async function assignConversation(
   conversationId: string,
   options: AssignOptions = {},
 ): Promise<AssignmentOutcome> {
-  const routed = { moved: false };
+  const routed = options.routed ?? { moved: false };
   const picked = await routeAndPick(conversationId, options, routed);
   return { ...picked, movedGroup: routed.moved };
 }
@@ -193,7 +203,7 @@ async function routeAndPick(
    */
   const holder = conversation.assigneeAgentId;
   if (routeTo && assignable && (!holder || holder === conversation.accountableAgentId)) {
-    routed.moved = await moveToGroup(conversationId, routeTo, options.actorLabel);
+    await moveToGroup(conversationId, routeTo, options.actorLabel, routed);
   }
 
   if (conversation.assigneeAgentId) return { assignedTo: null, reason: 'already_assigned' };
@@ -375,18 +385,21 @@ async function moveToGroup(
   conversationId: string,
   groupId: string,
   actorLabel: string | undefined,
-): Promise<boolean> {
+  routed: { moved: boolean },
+): Promise<void> {
   if (!(await moveToGroupIfElsewhere(conversationId, groupId, { groupMustExist: true }))) {
-    return false;
+    return;
   }
 
+  // Reported before the event is written: the move has committed, so a
+  // failure recording it must not also lose the follow-up it owes.
+  routed.moved = true;
   await db.insert(conversationEvents).values({
     conversationId,
     type: 'group_changed',
     actorLabel: actorLabel ?? 'auto_assign',
     data: { to: groupId },
   });
-  return true;
 }
 
 /**

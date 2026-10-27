@@ -614,12 +614,16 @@ export async function onPriorityChanged(conversationId: string): Promise<void> {
  *
  * The order is the policy first, then the calendar:
  * `reselectPolicyBeforeFirstResponse` times a move that changes the policy from
- * its anchors on the new group's hours, so `onGroupChanged` then finds nothing
- * to move. Re-timed first, the old policy's clocks moved to the new hours and
- * then the new policy's moved them again — two timeline lines for one move, the
- * first naming deadlines that never held. One call however much moved: a category and a group changed
+ * its anchors on the new group's hours, so `onGroupChanged` runs only when the
+ * re-selection kept the policy. After one that re-timed it would find nothing
+ * to move, at the cost of every policy loaded again and a second locked
+ * transaction, each a place in the pool (§6.91). Re-timed first, the old
+ * policy's clocks moved to the new hours and then the new policy's moved them
+ * again — two timeline lines for one move, the first naming deadlines that
+ * never held. One call however much moved: a category and a group changed
  * together re-select once, named by the category, since that is the one a
- * policy is most likely keyed on.
+ * policy is most likely keyed on. The re-selection is private to this module
+ * for the same reason `onGroupChanged` is, so a writer cannot call one half.
  *
  * It takes what the writers already answer — `setConversationCategory`'s
  * outcome, `moveToGroupIfElsewhere`'s boolean, `assignConversation`'s
@@ -634,8 +638,11 @@ export async function afterRoutingChanged(
   changed: { category: boolean; group: boolean },
 ): Promise<void> {
   if (!changed.category && !changed.group) return;
-  await reselectPolicyBeforeFirstResponse(conversationId, changed.category ? 'category' : 'group');
-  if (changed.group) await onGroupChanged(conversationId);
+  const retimed = await reselectPolicyBeforeFirstResponse(
+    conversationId,
+    changed.category ? 'category' : 'group',
+  );
+  if (changed.group && !retimed) await onGroupChanged(conversationId);
 }
 
 /**
@@ -673,11 +680,12 @@ export async function afterRoutingChanged(
  * credits the whole of it when the clock resumes (`completedPauses`).
  *
  * When the same policy wins again it does nothing: re-timing for a new group's
- * calendar is `onGroupChanged`'s, which `afterRoutingChanged` calls straight
- * after this, so a move that changes the policy is re-timed once, here, and
- * `onGroupChanged` then finds nothing to move. When no policy wins — no
- * default, nothing matching — it also does nothing: dropping an obligation
- * mid-ticket is a different decision from choosing one.
+ * calendar is `onGroupChanged`'s, which `afterRoutingChanged` calls after this
+ * whenever it answers false, so a move that changes the policy is re-timed
+ * once, here. When no policy wins — no default, nothing matching — it also
+ * does nothing: dropping an obligation mid-ticket is a different decision from
+ * choosing one. It answers true only once the new policy's clocks have
+ * committed, so a failure part-way leaves the calendar to `onGroupChanged`.
  *
  * Never on a read-only channel or an imported history, which `applySlaOnCreate`
  * never gave a clock either; never on a deleted, spam or merged ticket, which no
@@ -688,10 +696,10 @@ export async function afterRoutingChanged(
  * A category set while a ticket is resolved therefore moves its policy only
  * when the category or the group next changes after it is reopened.
  */
-export async function reselectPolicyBeforeFirstResponse(
+async function reselectPolicyBeforeFirstResponse(
   conversationId: string,
   cause: 'category' | 'group',
-): Promise<void> {
+): Promise<boolean> {
   try {
     // Most category changes and group moves come after somebody has answered.
     // Asked first of the row read without a lock, they cost that one read
@@ -699,12 +707,13 @@ export async function reselectPolicyBeforeFirstResponse(
     // place in the pool (§6.91); asked again under the lock, since an answer
     // can land in between.
     const unlocked = await loadConversation(conversationId);
-    if (!unlocked || !policyChoosable(unlocked)) return;
+    if (!unlocked || !policyChoosable(unlocked)) return false;
 
     const policies = await loadPolicies();
-    if (policies.length === 0) return;
+    if (policies.length === 0) return false;
     const catalog = await loadHoursCatalog();
 
+    let retimed = false;
     await withTicketLocked(conversationId, async (tx, row) => {
       const conversation = row.conversation;
       if (!policyChoosable(row)) return;
@@ -770,9 +779,12 @@ export async function reselectPolicyBeforeFirstResponse(
           clearedBreaches: cleared,
         },
       });
+      retimed = true;
     });
+    return retimed;
   } catch (error) {
     log.error(`could not choose the policy again on ${conversationId}`, error);
+    return false;
   }
 }
 

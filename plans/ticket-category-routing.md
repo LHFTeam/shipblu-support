@@ -3536,7 +3536,10 @@ owes no follow-up, because the first selection reads its category.
 - **`afterRoutingChanged(id, { category, group })`** in `lib/sla/index.ts`
   takes two booleans, which callers read off the writers' answers. Neither set
   is a no-op; otherwise it re-selects, named by the category when both moved,
-  and then calls `onGroupChanged` when the group moved.
+  and then calls `onGroupChanged` when the group moved and the re-selection
+  kept the policy. A re-selection that changed it has already timed the clocks
+  on the new group's hours, so the second call would only reload the policies
+  and take a second locked transaction to find nothing.
 - **The callers.**
   - The console's group case calls it with `group: true`, once the move has
     committed.
@@ -3555,19 +3558,36 @@ owes no follow-up, because the first selection reads its category.
   - `moveToGroupIfElsewhere`;
   - `assignConversation`, only when its options can name a group. Without a
     group it never moves the ticket.
-- **`onGroupChanged` is module-private.** Only `afterRoutingChanged` calls it
-  now. The comments that sent a category writer to
+- **Both halves are module-private.** `onGroupChanged` and
+  `reselectPolicyBeforeFirstResponse` are called only by `afterRoutingChanged`,
+  so Jev and the router cannot call one half; the re-selection's tests reach it
+  the way every writer does. The comments that sent a category writer to
   `reselectPolicyBeforeFirstResponse` name `afterRoutingChanged` instead.
-- **The engine's `assign_group` notes the move before writing its event.** The
-  move has committed, so a failure recording `group_changed` no longer loses
-  the follow-up.
-- **One gap is left, and it is older than 4.0.** An `auto_assign` that throws
-  after its group move has committed loses the follow-up. That happens when a
-  pick fails on the database, after the move but before
-  `assignConversation` returns `movedGroup`. The ticket stays in the new group
-  on the old policy until its routing next changes. Closing it means the engine
-  passing `assignConversation` a carrier that the move sets, kept through the
-  throw.
+- **The engine notes a move before anything after it can fail.** `assign_group`
+  notes it before writing its event. `auto_assign` hands `assignConversation`
+  a `routed` carrier (`AssignOptions.routed`), which the move sets as it
+  commits, and reads it in a `finally`. Read off the answer, a pick that failed
+  on the database after the move took the follow-up with it, and the ticket sat
+  in the new group on the old policy and hours until its routing next changed.
+  A test makes the move's `group_changed` insert fail with a trigger and sees
+  the clocks re-timed anyway; it fails against the engine that read the answer.
+- **The rule has a module half.** A module that calls a writer also calls
+  `afterRoutingChanged`, unless it exports a writer of its own and so hands the
+  answer on (`lib/assignment`, `lib/categories/write.ts`). The call half alone
+  passed a new caller that kept the answer and owed nothing for it. It also
+  reads `o['writer']()` and a computed `['groupId']` key now, and takes a
+  `routed` carrier as the answer.
+- **Two review findings were answered without code.**
+  - A pass that moves a ticket A→B→A, or files it X→Y→X, still re-selects.
+    Comparing the pass's end with the ticket as the pass loaded it would race:
+    an agent's move in between makes a real move read as none, and the skipped
+    follow-up leaves the ticket on the other group's policy. Getting it right
+    means each writer answering the value it replaced, for two rules that
+    contradict each other in one pass; the re-selection they cost chooses from
+    the ticket as it stands, before anybody has answered.
+  - The rule does not look for a call dropped under `&&`, `?:` or a comma,
+    because `npm run lint` already refuses each of those statements
+    (`no-unused-expressions`, at `--max-warnings=0`). The header says so.
 - **Tests.** The existing re-selection tests pass unchanged. Four new cases
   were each seen to fail under the mutation they pin:
   - nothing changed owes nothing, though a re-selection would choose another

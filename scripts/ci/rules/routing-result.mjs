@@ -22,21 +22,34 @@ import { fail, lineOfNode, parseSource, read, requireAtLeast, scannableSource } 
 // (4.1) decides under its own row lock; a writer of its own that updates the
 // column itself adds itself to WRITERS in the PR that lands it.
 //
-// So, outside tests: a call to any of them is not a statement of its own —
-// awaited or not, parenthesised or cast — nor `void`ed. Kept in a variable, in
-// a condition, returned or passed on, it is somebody's answer to use.
-// `assignConversation` counts only when its options can name a group: without
-// one it never moves the ticket, and the console's group case (assigning in the
-// group it has just moved to) and the lifecycle drop its answer owing nothing.
+// So, outside tests, two halves:
 //
-// What it cannot see: an answer kept and then ignored, which only reading the
-// caller can judge — returned from a callback or put in an array (a
-// `db.transaction`, a `Promise.all`) whose own result is then dropped is that
-// case too; a writer reached under another name (an alias, a method taken into
-// a variable); `.then()`, `.catch()` or `.finally()` on the call, which nothing
-// here uses; and an update of `category_id` or `group_id` written out rather
-// than made through a writer named here. Tests are left out because a fixture
-// sets a category it never asks about.
+//   - A call to any of them is not a statement of its own — awaited or not,
+//     parenthesised or cast — nor `void`ed. Kept in a variable, in a
+//     condition, returned or passed on, it is somebody's answer to use.
+//     `assignConversation` counts only when its options can name a group:
+//     without one it never moves the ticket, and the console's group case
+//     (assigning in the group it has just moved to) and the lifecycle drop its
+//     answer owing nothing. Given a `routed` carrier it answers through that
+//     instead, which is how the engine hears of a move the pick after it then
+//     failed (`AssignOptions.routed`).
+//   - A module that calls one also calls `afterRoutingChanged`, unless it
+//     exports a writer of its own and so hands the answer on: `lib/assignment`
+//     answers `movedGroup`, `lib/categories/write.ts` wraps its transaction's
+//     writer. That is what catches a new caller — Jev, the router — that keeps
+//     the answer and never owes anything for it.
+//
+// What it cannot see: an answer kept and then ignored in a module that does
+// call `afterRoutingChanged` somewhere, which only reading the caller can judge
+// — returned from a callback or put in an array (a `db.transaction`, a
+// `Promise.all`) whose own result is then dropped is that case too; a writer
+// reached under another name (an alias, a method taken into a variable);
+// `.then()`, `.catch()` or `.finally()` on the call, which nothing here uses;
+// and an update of `category_id` or `group_id` written out rather than made
+// through a writer named here. A call dropped under `&&`, `?:` or a comma is
+// not looked for: `npm run lint` refuses each of those statements first
+// (`no-unused-expressions`). Tests are left out because a fixture sets a
+// category it never asks about.
 // ---------------------------------------------------------------------------
 
 const WRITERS = new Set([
@@ -58,32 +71,86 @@ function passesThrough(node) {
 }
 
 /**
- * Whether `assignConversation`'s options can name a group to move to: an object
- * written out with a `groupId`, or a spread that may carry one, or options
- * built elsewhere, which only reading the caller could rule out.
+ * The name a property is written under — `groupId`, `'groupId'` or
+ * `['groupId']` — or undefined for a computed key that could be anything.
  */
-function canNameAGroup(options) {
-  if (!options) return false;
-  if (!ts.isObjectLiteralExpression(options)) return true;
+function keyOf(name) {
+  if (ts.isIdentifier(name) || ts.isStringLiteralLike(name)) return name.text;
+  if (ts.isComputedPropertyName(name) && ts.isStringLiteralLike(name.expression)) {
+    return name.expression.text;
+  }
+  return undefined;
+}
+
+/**
+ * Whether an options object written out can carry `key`: a property of that
+ * name, a spread or a computed key, which may hold one. Options built
+ * elsewhere are judged by the caller.
+ */
+function mayCarry(options, key) {
   return options.properties.some(
     (property) =>
       ts.isSpreadAssignment(property) ||
-      (property.name !== undefined &&
-        (ts.isIdentifier(property.name) || ts.isStringLiteral(property.name)) &&
-        property.name.text === 'groupId'),
+      (property.name !== undefined && [key, undefined].includes(keyOf(property.name))),
   );
 }
 
-function writerCalled(call) {
+/**
+ * Whether `assignConversation`'s options can name a group to move to: an object
+ * that may carry a `groupId`, or options built elsewhere, which only reading
+ * the caller could rule out.
+ */
+function canNameAGroup(options) {
+  if (!options) return false;
+  return !ts.isObjectLiteralExpression(options) || mayCarry(options, 'groupId');
+}
+
+/** An `assignConversation` handed a `routed` carrier, written out, answers through it. */
+function answersThroughCarrier(name, call) {
+  const options = call.arguments[1];
+  return (
+    name === 'assignConversation' &&
+    options !== undefined &&
+    ts.isObjectLiteralExpression(options) &&
+    options.properties.some(
+      (property) => property.name !== undefined && keyOf(property.name) === 'routed',
+    )
+  );
+}
+
+/** The name a call is made by: `f()`, `o.f()` or `o['f']()`. */
+function calleeName(call) {
   const callee = call.expression;
-  const name = ts.isIdentifier(callee)
-    ? callee.text
-    : ts.isPropertyAccessExpression(callee)
-      ? callee.name.text
-      : null;
+  if (ts.isIdentifier(callee)) return callee.text;
+  if (ts.isPropertyAccessExpression(callee)) return callee.name.text;
+  if (ts.isElementAccessExpression(callee) && ts.isStringLiteralLike(callee.argumentExpression)) {
+    return callee.argumentExpression.text;
+  }
+  return null;
+}
+
+function writerCalled(call) {
+  const name = calleeName(call);
   if (!name || !WRITERS.has(name)) return null;
   if (name === 'assignConversation' && !canNameAGroup(call.arguments[1])) return null;
   return name;
+}
+
+/** Whether the module exports a function named as a writer, handing its answer on. */
+function exportsAWriter(source) {
+  const exported = (node) =>
+    ts.canHaveModifiers(node) &&
+    (ts.getModifiers(node) ?? []).some((m) => m.kind === ts.SyntaxKind.ExportKeyword);
+  return source.statements.some(
+    (statement) =>
+      exported(statement) &&
+      ((ts.isFunctionDeclaration(statement) && WRITERS.has(statement.name?.text)) ||
+        (ts.isVariableStatement(statement) &&
+          statement.declarationList.declarations.some(
+            (declaration) =>
+              ts.isIdentifier(declaration.name) && WRITERS.has(declaration.name.text),
+          ))),
+  );
 }
 
 /** Whether the call's value, through any wrapper, is thrown away. */
@@ -105,12 +172,16 @@ export function checkRoutingResultKept() {
     if (![...WRITERS].some((name) => text.includes(name))) continue;
 
     const source = parseSource(file);
+    let firstWriter = null;
+    let followsUp = false;
     const visit = (node) => {
       if (ts.isCallExpression(node)) {
+        if (calleeName(node) === 'afterRoutingChanged') followsUp = true;
         const writer = writerCalled(node);
         if (writer) {
           calls++;
-          if (discarded(node)) {
+          firstWriter ??= { writer, node };
+          if (discarded(node) && !answersThroughCarrier(writer, node)) {
             fail(
               rule,
               `${file}:${lineOfNode(source, node)}`,
@@ -122,6 +193,14 @@ export function checkRoutingResultKept() {
       ts.forEachChild(node, visit);
     };
     visit(source);
+
+    if (firstWriter && !followsUp && !exportsAWriter(source)) {
+      fail(
+        rule,
+        `${file}:${lineOfNode(source, firstWriter.node)}`,
+        `calls ${firstWriter.writer}() and never afterRoutingChanged() — a module that changes a ticket's routing owes the follow-up once the whole change is over, or exports a writer of its own that hands the answer on`,
+      );
+    }
   }
 
   // Six calls outside tests today: the console's group and category cases,
