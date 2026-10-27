@@ -85,8 +85,35 @@ update.
 | 3.1   | Merged: #419 (`ff3bbfd`), then `dev` → `main` in #420 (`b9a4743`), which also carried #411, #416, #417 and #418. As built below             | **Done.** Web live on `b9a4743` at 19:44 UTC on 2026-10-25, the worker and the four crons by 08:05 UTC on 2026-10-26, and the four categories seeded at 08:13. Its checks read clean (below); the signed-in ones are left |
 | 3.2   | Merged: #424 (`07a5527`), then `dev` → `main` in #426 (`f761e5e`), which also carried #421, #422 and #423. As built below                   | **Done.** All six services live on `f761e5e` by 23:32 UTC on 2026-10-26, web first. Its checks read clean (below); the signed-in ones are left                                                                            |
 | 4.0   | Merged: #425 (`1c733c2`), then `dev` → `main` in #428 (`156004d`). As built below                                                           | **Done.** All six services live on `156004d` by 07:45:42 UTC on 2026-10-27, web first. Its checks read clean (below)                                                                                                      |
-| 4.1   | In review: #427 (`claude/jolly-noether-hxhez1-stage-4-1`), on `dev` since #425 merged: [4.1, as built](#41-as-built)                        | —                                                                                                                                                                                                                         |
-| 4.2–6 | 4.2's report in progress, stacked on #427. 5 and 6 not started                                                                              | —                                                                                                                                                                                                                         |
+| 4.1   | Merged: #427 (`959404a`), then `dev` → `main` in #430 (`dbf4376`). As built below                                                           | **Done.** All six services live on `dbf4376` by 12:07:54 UTC on 2026-10-27, web first, with `0050` applied. Shipped off: no settings row. Its checks read clean (below)                                                   |
+| 4.2–6 | 4.2's report in review as #429, on `dev`: [4.2's report, as built](#42s-report-as-built). 4.2's operations, 5 and 6 not started             | —                                                                                                                                                                                                                         |
+
+**4.1's deploy and checks, read on Render and production on 2026-10-27.**
+
+- **Before** (read 12:02 UTC): 50 migrations, the newest `1793037218791`
+  (`0049`); neither `ai_category_runs` nor `category_ai_settings` existed; no
+  transaction older than a minute and no strong lock held; nothing pending or
+  running in `jobs`, and the same one dead job. Web and the worker ran
+  `156004d`, and `origin/main` was `dbf4376`.
+- **The release and web.** #427 was squashed into `dev` as `959404a`, its tree
+  identical to the reviewed head `080a5a4`. #430 merged `dev` into `main` as
+  `dbf4376` once its checks were green. Web was deployed on it through Render's
+  API at 12:02:29. Its preDeploy logged `Applying drizzle migrations...` at
+  12:04:23.6 and was applying `001` by 12:04:23.9, so `0050` took under 0.31 s;
+  all nine `db/sql` files were done at 12:04:24.7. Web was live at 12:05:10.
+  The worker followed at 12:05:41 and the four crons at 12:05:43–50. The crons
+  were live by 12:06:29 and the worker at 12:07:54.
+- **The checks** (read 12:04–12:32 UTC):
+  - 51 migrations, the newest `1793058419292`;
+  - both tables exist with RLS on, and carry their five CHECKs
+    (`ai_category_runs_failed_has_error` and the four on the settings row);
+  - no settings row, so the classifier is off and nothing is queued for it;
+    `ai_category_runs` is empty;
+  - all 1,531 jobs created since the deploy completed;
+  - none of the six services logged a warning or an error, and web served no
+    5xx;
+  - `/api/health` reports `dbf4376`, with nothing pending or processing and
+    the same one dead job.
 
 **4.0's deploy and checks, read on Render and production on 2026-10-27.**
 
@@ -433,11 +460,19 @@ Every production write needs the user's go-ahead for that step, and the
    signed-in ones are left.
 6. **4.0 is deployed.** #425 was squashed into `dev` as `1c733c2`, and #428
    (`156004d`) took it to `main` on 2026-10-27. All six services were live on
-   it by 07:45:42 UTC, web first, and its checks read clean (above). **Stage
-   4.1**, Jev's category classifier, is in review as #427, on `dev` since #425
-   merged, and ships off: [4.1, as built](#41-as-built). 4.2's report is
-   built beside it, stacked on #427.
-7. **Before Stage 5**, a person does 0.2's reorder and 0.6's staffing, and the
+   it by 07:45:42 UTC, web first, and its checks read clean (above).
+7. **4.1 is deployed, and off.** #427 was squashed into `dev` as `959404a`, and
+   #430 (`dbf4376`) took it to `main` on 2026-10-27. All six services were live
+   on it by 12:07:54 UTC, web first, and its checks read clean (above). The
+   classifier stays off until an admin switches it on at `/admin/categories`.
+   The way back is to redeploy `156004d`; the tables stay, since nothing
+   reads them there. 4.2's report, `/reports/category-ai`, is in review as
+   #429: [4.2's report, as built](#42s-report-as-built), which also fixes the
+   live job's locked ticket read, so the switch stays off until #429 is
+   deployed to the worker too. 4.2's operations
+   (the archive record run, shadow, labelling, apply, the backlog) each wait
+   for the user's go-ahead.
+8. **Before Stage 5**, a person does 0.2's reorder and 0.6's staffing, and the
    support lead answers the questions still open (below).
 
 ### 1.3, as built
@@ -3904,6 +3939,170 @@ gains another first, 0050 is regenerated rather than renumbered.
 
    Then run it without `dryRun`.
 
+#### 4.2's report, as built
+
+Built on 2026-10-27, stacked on 4.1 (#427), since it reads `ai_category_runs`.
+Code only: no migration, no `db/sql`, no job, no variable, so it deploys with
+web alone. The operations in steps 1 and 3–5 are each a production write and
+wait for the user's go-ahead, after 4.1 is deployed.
+
+- **What landed.**
+  - `lib/category-ai/grade.ts` judges, purely, and its rules are
+    `grade.test.ts`. `lib/category-ai/report.ts` reads, with
+    `report.db.test.ts` against Postgres.
+  - `/reports/category-ai`, behind `report.view` and linked from `/reports`,
+    takes one run label, one `request_fingerprint` and one mode from a list of
+    every such triple, newest first. For that run it shows:
+    - right, settled, settled on the first message and unknown, per channel and
+      in total;
+    - precision and recall per category, Jev's and the rules' side by side;
+    - the confusion matrix;
+    - a threshold sweep;
+    - what Jev filed and a person changed since;
+    - the tickets to label.
+  - The count of `classify_category` jobs in `dead` whose message is still
+    there with no live row, 4.1's one gap, is a warning on the live label's
+    views and when no run is chosen. A message given a row by hand since,
+    answered or failed, leaves it, and so does one purged since, which a purge
+    leaves the dead job of.
+  - The handbook's reports article gains the screen and how to label for it,
+    and the categories admin paragraph names it.
+- **Where it departs from the spec, or adds to it.**
+  - **The mode is part of the run.** The spec chose a label and a fingerprint.
+    Under `live`, a ticket settled in shadow is asked again once `apply` is on,
+    so the two modes' answers graded together would grade a shadow key against
+    a ticket apply filed under another. A view that holds more than one
+    threshold says so, and the sweep is exact only at or below the lowest.
+  - **A label is a person's latest `category_changed` before anything else
+    wrote the category**: not Jev, not a rule, not a form. A person who agrees
+    with a write changes nothing and leaves no event, so every label after one
+    is a disagreement. One given before a rule moved the category stays the
+    label when the person sets it back, or changes it again. Graded, those labels would make
+    every such answer wrong. They are counted apart, and Jev's own filings
+    under "Filed by Jev": what it filed in answer to the run's messages, how
+    many a person moved since, and to what. That is the figure step 3's
+    merchant-support watch reads.
+  - **So a ticket no label can reach is in no rate read off labels**: one
+    something wrote first, and one deleted, spam, merged or carrying a
+    category no event explains. Kept in the weights it would be stood for by
+    tickets unlike it. In `apply` every settle is Jev's filing, so the
+    labelled tickets are all ones Jev never settled, and recall read there
+    was 0% by construction; spam, which Jev answers `unknown`, inflated every
+    category's misses. Those rates describe the tickets a label could reach,
+    the page says how many were left out, and a category none of whose
+    settled tickets is labelled reads "Not measurable" rather than 0%: its
+    stratum holds every hit, unread — in shadow, until somebody labels one;
+    in apply, for good. So does every category while none of the tickets Jev
+    never settled is labelled, which hold most of the misses: recall read
+    high there, at 100% where no other stratum had a label either. Under
+    `apply`, Filed by Jev is the grade.
+  - **Rates that mix Jev's answers are weighted.** The labelling list draws
+    the same number of tickets from each answer, so a rare answer's tickets
+    are labelled at a far higher rate. Precision within one answer needs
+    nothing. Recall, the overall rate, the rules' rates and the sweep's weigh
+    each labelled ticket by its stratum's gradable tickets over its labels, so
+    they estimate every ticket in the run a label could reach. The raw counts print beside every one of them, and
+    the confusion matrix stays unweighted counts.
+  - **The rules are graded on their own terms over the same labelled tickets.**
+    Their answer is the first message the detector maps to a category, inside
+    Jev's window, which is bounded as the sweep bounds Jev's. Five places, one
+    for each message Jev answered or stopped asking about once settled
+    (`after_settle`), none for a failure. A message Jev judged is always
+    inside. An `owned` or `capped` row ends the window only when nothing after
+    it was asked. Grading them on Jev's settling message instead would charge
+    them with Jev's choice of message.
+  - **Messages are judged in the live job's order**: by instant, then message
+    id (`arrivedBefore`). WhatsApp stamps a burst to the second, and a row id
+    would order such a pair at random.
+  - **The sweep re-settles each ticket from its rows.** At or below the
+    threshold the run used, the answer is exact: every message up to the settle
+    was asked. Above it, a ticket whose settle falls below the bar moves on to
+    messages Jev was never asked (`after_settle` with no answer), and those
+    count as not known, not as unsettled. An `after_settle` row that holds an
+    answer is read, and an `owned` or `capped` row out of job order is passed
+    over. The cap of five is counted as the live job counts it, every answer
+    the label holds in any mode and to any version of the question. A row
+    whose job reached Jev — judged, failed, or answered before a settle landed
+    — is never capped, since the live job counts in commit order and asked it
+    inside its cap. That is what "the threshold set from the report"
+    reads.
+  - **The sample is chosen by Jev's answer and shown without it.** Strata are
+    Jev's settling category, plus "never settled" so recall has misses. Each
+    stratum's first ten go into one list in id order, a fixed random order for
+    a v4 uuid, with only the ticket number and channel. A supervisor told "Jev
+    said sales" before opening a ticket is being asked to agree, and the label
+    would be Jev's answer read back. The page shows each stratum's labels
+    against the 30 that step 3 wants. It does not show how many wait in each:
+    beside one list, a stratum that alone has tickets waiting names every one.
+  - **Only tickets with no category now are offered**, besides nobody having
+    labelled them and nothing having written. Choosing the category a ticket
+    already has writes nothing, so on a ticket a rule filed, agreeing leaves
+    no label. A ticket is offered only once the live job can no longer ask
+    about it — answered, resolved or closed, or asked five times under the
+    live label (`jevMayStillAsk`, which the live job's own refusals make up)
+    — whatever the view settled it on. Labelled earlier, its next live message
+    would be owned. A ticket a shadow or record view settled can still be
+    unsettled in the live run, where it would become a miss Jev never had the
+    chance to avoid.
+  - **A message judged after the first reply is out of Jev's window.** The
+    live job asks whether a ticket settled before whether it was answered, so
+    a message queued before the reply and judged after it is recorded
+    `after_settle`, where without the settle it would be `capped`. The sweep
+    and the rules' window read it as closed, not unasked. The live job judges
+    when its job runs; a backfill as of the message's arrival.
+  - **A filing is matched by the message it answered, or by its instant** once
+    the message is deleted and the row loses its id. A failure that kept its
+    prediction is no answer in any figure. Two deleted messages of one instant
+    keep the order their rows are read in, by row id.
+  - **The categories drawn are the active ones**, and any retired one the
+    run's answers or labels name. A link to a run past the list's 200 is
+    looked up on its own.
+  - **Deploying it.** Code only, to all six services: besides the page, #429
+    fixes code the worker runs — the live job's and the backfill's locked
+    ticket reads, which `dbf4376` still makes through a join that loses the
+    ticket when its status changes under the lock, and `classifierTicket`,
+    which kept a refused read. So the classifier stays off until #429 is in
+    `main` with the worker deployed: shadow, and the backfill's `apply`, wait
+    for it as well as for the go-ahead. The handbook's reports article
+    changed too, and production held no console handbook at 2026-10-27
+    12:50 UTC (no `handbook-` folder or article, no `seed_console_handbook`
+    job ever), so there is nothing to seed: the first seed, whenever somebody
+    runs it, writes these words. If it has been seeded since, run
+    `seed_console_handbook dryRun=true` once web is live, read the articles it
+    reports, then `overwrite=true`, which has no per-key filter.
+- **Found while building.**
+  - **A ticket that fits no category cannot be labelled so.** Choosing None
+    on a ticket with no category writes nothing (`setConversationCategory`
+    answers `unchanged`). So a greeting Jev settled as sales stays unlabelled,
+    and that false positive never reaches precision. Choosing a category and
+    then None would record it, but each choice is a real change, which runs the
+    category's rules and, before a first reply, re-chooses the SLA policy. The
+    page and the handbook tell a supervisor to leave such a ticket unlabelled.
+    Recording "none fits" needs a writer of its own, for example a review
+    event, so it is the support lead's call (Still open).
+  - **Labelling an open ticket is a real change**, with the same rules and
+    SLA effects, so the page and the handbook say so. The archive's resolved
+    tickets carry the fewest effects. Nothing restricts the sample to them,
+    since a shadow week's open tickets are the live distribution.
+  - **An adversarial review** found the tie order, the unweighted mixing of
+    strata, the modes mixed under `live`, the rules' longer window after a
+    settle, labels after a rule's write, open windows in the sample, the
+    stratum counts naming the answer, the sweep's overcount of not known, and
+    filings counted across questions. Each is fixed with a test, seen to fail
+    without it.
+- **Left, with the reason.**
+  - A label from an agent since deleted has lost its `actor_agent_id`, so it
+    reads as nobody's. The spec makes the agent id the ground truth, and agents
+    are deactivated rather than deleted.
+  - A ticket whose messages were asked under two questions is graded under
+    each with that question's rows alone, so "settled on the first message"
+    means the first asked under that question.
+  - Weights treat labels given in ordinary work like the sample's: within a
+    stratum they are the evidence there is.
+  - Category names are today's labels, on an older question's view too.
+  - No slice by `requester_kind` or `has_shipment` is drawn. Both columns
+    are on every row, for a later cut.
+
 ### Stage 5 — routing by category
 
 **5.1 — The router.** Web first (it migrates), then the worker, then all four
@@ -4232,3 +4431,11 @@ None blocks Stage 1. The first two are needed before Stage 5 turns on.
   `sendCannedReply` refuses every `send_reply` on a comment ticket. Allowing one
   needs a trigger that names the comment that set the rule off, which the
   engine does not have, and it is a change of its own. The default is never.
+- **How a supervisor says a ticket fits no category.** Found building 4.2's
+  report: choosing None on a ticket with no category writes nothing, so a
+  greeting Jev settled as a category cannot be labelled as one, and that false
+  positive never reaches precision. Recording it needs a writer of its own — a
+  review event beside the select, say, which the grading reads as "no category"
+  — and whether the evaluation needs it before `apply` is the support lead's
+  call. Without it, step 3's precision counts only tickets a person put a
+  category on.

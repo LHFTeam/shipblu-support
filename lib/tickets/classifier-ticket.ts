@@ -15,6 +15,11 @@ export type ClassifierTicket = { channel: ConversationChannel; firstRespondedAt:
  * Null when the ticket is gone, or on a read-only channel: the bot, which
  * nobody on the team works and which is nearly all of the volume, so a job per
  * bot message would be most of the queue, spent on tickets the job refuses.
+ *
+ * A read that fails is forgotten, so the next enqueuer reads again: each one
+ * queues in its own try/catch so that one failing cannot stop the other, and
+ * a refusal at the pool's admission gate handed on would stop it all the
+ * same — with no row and no dead job to show the message was never asked.
  */
 export function classifierTicket(conversationId: string): () => Promise<ClassifierTicket | null> {
   let read: Promise<ClassifierTicket | null> | null = null;
@@ -24,5 +29,11 @@ export function classifierTicket(conversationId: string): () => Promise<Classifi
       .from(conversations)
       .where(eq(conversations.id, conversationId))
       .limit(1)
-      .then(([ticket]) => (ticket && !isReadOnlyChannel(ticket.channel) ? ticket : null)));
+      .then(
+        ([ticket]) => (ticket && !isReadOnlyChannel(ticket.channel) ? ticket : null),
+        (error: unknown) => {
+          read = null;
+          throw error;
+        },
+      ));
 }
