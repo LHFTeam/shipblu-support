@@ -12,6 +12,7 @@ import { assignConversation } from '@/lib/assignment';
 import { reclaimDue } from '@/lib/assignment/reclaim';
 import { openBacklog } from '@/lib/tickets/backlog';
 import { logger } from '@/lib/log';
+import { isHeld } from '@/lib/routing/hold';
 
 const log = logger('assign_sweep');
 
@@ -214,6 +215,9 @@ async function escalateStale(): Promise<number> {
       id: conversations.id,
       escalateToAgentId: groups.escalateToAgentId,
       escalateAfterMins: groups.escalateAfterMins,
+      routingWindowEndsAt: conversations.routingWindowEndsAt,
+      routingDecidedAt: conversations.routingDecidedAt,
+      assigneeAgentId: conversations.assigneeAgentId,
     })
     .from(conversations)
     .innerJoin(ticketStatuses, eq(ticketStatuses.id, conversations.statusId))
@@ -246,9 +250,14 @@ async function escalateStale(): Promise<number> {
 
   const escalatedBefore = new Set(already.map((row) => row.conversationId));
   let escalated = 0;
+  const now = new Date();
 
   for (const row of stale) {
     if (escalatedBefore.has(row.id)) continue;
+    // A ticket held for the router is unassigned by design, and in a group it
+    // may be about to leave: escalating it would make the group's lead a
+    // watcher on another team's ticket. The next sweep after the hold decides.
+    if (isHeld(row, now)) continue;
     const agentId = row.escalateToAgentId;
     if (!agentId) continue;
 
