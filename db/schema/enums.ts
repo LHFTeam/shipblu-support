@@ -397,3 +397,46 @@ export const csatAnswerSourceEnum = pgEnum('csat_answer_source', [
   'meta_feedback',
   'meta_quick_reply',
 ]);
+
+/**
+ * How a channel's new tickets find their group (`plans/ticket-category-routing.md`,
+ * decision 5). Read only through `routingModeOf` in `lib/routing/mode.ts`, which
+ * answers `default_group` for a coexistence number or the bot whatever this says.
+ *
+ *  - `default_group`    the channel's default group, as before Stage 5.
+ *  - `category_shadow`  the default group still, while the router records where
+ *                       each ticket would have gone.
+ *  - `category`         assignment and the out-of-hours reply wait until the
+ *                       router has settled the ticket's group by its category.
+ *
+ * Created with `CREATE TYPE` in the migration that uses it, so its values may
+ * be defaulted there: deploy rule 5 is about a value added to an existing type.
+ */
+export const routingModeEnum = pgEnum('routing_mode', [
+  'default_group',
+  'category_shadow',
+  'category',
+]);
+
+/**
+ * Where one ticket's routing stands. `pending` from the insert until the
+ * creation pass reaches `beginRouting`, `holding` after it, `decided` once the
+ * decision is complete — or, on a shadow row, once the would-be one is recorded.
+ */
+export const routingStageEnum = pgEnum('routing_stage', ['pending', 'holding', 'decided']);
+
+/**
+ * What a routing decision came to. The first six are `decide`'s, tested in that
+ * order (`lib/routing/decide.ts`); `manual` and `rule` are written by `endHold`
+ * when a person or an automation rule decided first.
+ */
+export const routingOutcomeEnum = pgEnum('routing_outcome', [
+  'taken',
+  'not_open',
+  'released',
+  'category',
+  'no_route_for_category',
+  'fallback',
+  'manual',
+  'rule',
+]);

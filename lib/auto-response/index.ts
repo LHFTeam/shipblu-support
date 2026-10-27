@@ -5,6 +5,9 @@ import { loadHoursCatalog } from '@/lib/hours/catalog';
 import { groupHours } from '@/lib/hours/resolve';
 import { holidayName, holidayOn, isWithinBusinessHours, nextOpeningAt } from '@/lib/hours';
 import { textToHtml } from '@/lib/html/sanitize';
+import { isHeld } from '@/lib/routing/hold';
+import { statusCategoryOf } from '@/lib/tickets/status-category';
+import type { StatusCategory } from '@/lib/tickets/vocabulary';
 import { commentIdOf } from '@/lib/meta/comments';
 import {
   isCommentTicket,
@@ -46,6 +49,11 @@ type Ticket = {
   isSpam: boolean;
   deletedAt: Date | null;
   lastCustomerMessageAt: Date | null;
+  lastAgentMessageAt: Date | null;
+  statusCategory: StatusCategory | null;
+  assigneeAgentId: string | null;
+  routingWindowEndsAt: Date | null;
+  routingDecidedAt: Date | null;
   externalId: string | null;
   requesterContactId: string;
   autoRespondedAt: Date | null;
@@ -57,7 +65,9 @@ type Ticket = {
  * Send the out-of-hours acknowledgement for a customer's message, if one applies.
  *
  * Called from the ticket lifecycle for every inbound customer message on every
- * channel, with the message that was just stored. Best-effort, like the other
+ * channel, with the message that was just stored — and, for a ticket the
+ * router held, once the hold ends (`afterHoldEnded`), with the message that
+ * opened it. Best-effort, like the other
  * lifecycle hooks: this runs inside ingest jobs, and throwing here would fail
  * the job and have the retry re-run every engine that already succeeded —
  * including sending this reply again.
@@ -93,9 +103,20 @@ async function send(
 
   if (ticket.deletedAt || ticket.isSpam) return;
 
+  // Open or pending only. Every ingest path reopens a resolved ticket before
+  // the creation pass or a reply reaches here, but the held reply is sent by
+  // whatever ends a routing hold, up to forty minutes later — after a rule or
+  // an agent may have resolved the ticket in between.
+  if (ticket.statusCategory !== 'open' && ticket.statusCategory !== 'pending') return;
+
   // A conversation the team never had. The bot answers these itself, from a
   // number whose replies we do not receive.
   if (isReadOnlyChannel(ticket.channel)) return;
+
+  // Held for the router: the group, and so the calendar, is not settled, and
+  // whatever ends the hold sends this then (`afterHoldEnded`). Before the
+  // claim, so the closed stretch is still unspent when it does.
+  if (isHeld(ticket, at)) return;
 
   const rule = pickRule(rules, {
     groupId: ticket.groupId,
@@ -110,6 +131,13 @@ async function send(
   // every ticket at every hour of the day.
   if (!hours) return;
   if (isWithinBusinessHours(hours, at)) return;
+
+  // A person has answered in this closed stretch, so "we are closed" would
+  // contradict them. Reachable only by the held reply: every other caller has
+  // just stored the customer's message. Ending a hold by replying out of hours
+  // claims nothing, so the second half keeps a customer who writes again in
+  // the same evening from being told so after the agent's reply either.
+  if (answeredInThisStretch(hours, ticket, at)) return;
 
   // An out-of-office answering our acknowledgement, which answers it back, is
   // the loop RFC 3834 exists to prevent — and a bounce is a machine that cannot
@@ -217,6 +245,23 @@ async function send(
 }
 
 /**
+ * Whether a person replied after the customer's last message, or during the
+ * closed stretch `at` is in — out of hours, with nothing opened since.
+ */
+function answeredInThisStretch(
+  hours: Parameters<typeof nextOpeningAt>[0],
+  ticket: Pick<Ticket, 'lastAgentMessageAt' | 'lastCustomerMessageAt'>,
+  at: Date,
+): boolean {
+  const answered = ticket.lastAgentMessageAt;
+  if (!answered) return false;
+  if (ticket.lastCustomerMessageAt && answered.getTime() >= ticket.lastCustomerMessageAt.getTime()) {
+    return true;
+  }
+  return !isWithinBusinessHours(hours, answered) && !hasOpenedSince(hours, answered, at);
+}
+
+/**
  * Has the office opened at all between the last acknowledgement and now?
  *
  * Asked of the calendar rather than of a cooldown in minutes, because the answer
@@ -290,6 +335,12 @@ async function loadTicket(conversationId: string): Promise<Ticket | null> {
       isSpam: conversations.isSpam,
       deletedAt: conversations.deletedAt,
       lastCustomerMessageAt: conversations.lastCustomerMessageAt,
+      lastAgentMessageAt: conversations.lastAgentMessageAt,
+      // The status guard, and the hold's columns beside it.
+      statusCategory: statusCategoryOf(),
+      assigneeAgentId: conversations.assigneeAgentId,
+      routingWindowEndsAt: conversations.routingWindowEndsAt,
+      routingDecidedAt: conversations.routingDecidedAt,
       // Only to tell a comment ticket from a direct message: the rule picker
       // and the 24-hour guard both read it.
       externalId: conversations.externalId,
@@ -300,11 +351,6 @@ async function loadTicket(conversationId: string): Promise<Ticket | null> {
       contactName: contacts.name,
     })
     .from(conversations)
-    // No join to `ticket_statuses`: every ingest path reopens a resolved ticket
-    // before this runs (see `reopen` in lib/tickets/ingest-meta.ts and its two
-    // siblings), so there is no resolved ticket here to guard against — and a
-    // join that filters nothing and selects nothing is a cost on every inbound
-    // message.
     .leftJoin(contacts, eq(contacts.id, conversations.requesterContactId))
     .where(eq(conversations.id, conversationId))
     .limit(1);

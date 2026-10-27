@@ -18,6 +18,7 @@ import { normaliseKbFormatting } from './normalise-kb-formatting';
 import { notifyLowRating } from './notify-low-rating';
 import { presenceSweep } from './presence-sweep';
 import { processWebhook } from './process-webhook';
+import { settleRoutingJob } from './settle-routing';
 import { rollupMetrics } from './rollup-metrics';
 import { runTimeAutomations } from './run-time-automations';
 import { rotateWhatsAppCredentials } from './rotate-whatsapp-credentials';
@@ -60,6 +61,7 @@ export const handlers: Partial<Record<JobType, JobHandler>> = {
   check_meta_permissions: () => checkMetaPermissions(),
   classify_priority: (job) => classifyPriority(job),
   classify_category: (job) => classifyCategory(job),
+  settle_routing: (job) => settleRoutingJob(job),
   test_comment_permission: (job) => testCommentPermission(job),
   cleanup,
   complete_coexistence_onboarding: completeCoexistenceOnboarding,

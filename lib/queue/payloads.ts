@@ -156,6 +156,10 @@ export const JOB_PAYLOADS = {
   // enqueued by `enqueueCategoryClassification`, re-run by hand after a
   // `failed` run whose dedupe key is spent.
   classify_category: z.strictObject({ messageId: z.uuid() }),
+  // Enqueued in a routed ticket's insert transaction for the end of its
+  // window, keyed on the ticket; re-run by hand after it dies, so strict, and a
+  // uuid because the id goes straight into a locked read.
+  settle_routing: z.strictObject({ conversationId: z.uuid() }),
   // `trigger` says who asked — an agent, a rule, or the sidebar's "Send now" —
   // because the admin may switch off surveys for rule-resolved tickets, and the
   // job cannot tell a rule's resolve from an agent's off the row.

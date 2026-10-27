@@ -15,6 +15,8 @@ import {
 import { loadHoursCatalog } from '@/lib/hours/catalog';
 import { isWithinBusinessHours } from '@/lib/hours';
 import { groupHours } from '@/lib/hours/resolve';
+import { endHold } from '@/lib/routing/end-hold';
+import { isHeld } from '@/lib/routing/hold';
 import { conversationFacts } from '@/lib/rules/facts';
 import { isReadOnlyChannel } from '@/lib/tickets/channel-policy';
 import { openBacklog } from '@/lib/tickets/backlog';
@@ -55,6 +57,13 @@ import { activeSkills, matchingSkills } from './skills';
  * moves the ticket there first, because a rule routing it is describing where
  * the work belongs whoever then holds it. A deactivated owner is nobody here,
  * and the ticket takes the rota like any other.
+ *
+ * And one kind of ticket waits: one held for the router
+ * (`plans/ticket-category-routing.md`, decision 5), whose group is not
+ * settled yet. Assigning it in the group it arrived in and then taking it back
+ * when it moved would break the first rule above, and show the ticket in one
+ * agent's queue before it vanished; so every path answers `awaiting_route`
+ * until the hold ends, and whatever ends it assigns it then.
  */
 
 export type AssignmentStrategy = (typeof groups.$inferSelect)['assignmentStrategy'];
@@ -68,7 +77,15 @@ export type SkipReason =
   | 'no_group_members'
   | 'none_available'
   | 'all_at_capacity'
-  | 'no_skill_match';
+  | 'no_skill_match'
+  /**
+   * Held for the router (`lib/routing/hold.ts`): the ticket's group is not
+   * settled yet, and whatever ends the hold assigns it then. Never recorded —
+   * a timeline entry per skip once produced 1,432 rows for 137 tickets.
+   */
+  | 'awaiting_route'
+  /** The ticket left the group between the read and the lock. Whoever moved it assigns it. */
+  | 'moved';
 
 export type AssignmentOutcome = Picked & {
   /**
@@ -113,8 +130,17 @@ export type AssignOptions = {
    * pick that fails afterwards takes `movedGroup` down with it and leaves the
    * ticket in the new group on the old one's policy and hours. A fresh
    * `{ moved: false }`; `movedGroup` reads the same answer once the call returns.
+   * `endedHold` is set beside it when the move ended a routing hold
+   * (`endsHoldAs`), which owes the held reply once the caller is done.
    */
-  routed?: { moved: boolean };
+  routed?: { moved: boolean; endedHold?: boolean };
+  /**
+   * Ends a routing hold (`endHold`), as this outcome, in the transaction that
+   * moves the ticket into `groupId` — and only when it does move it. A rule's
+   * `auto_assign` naming another group has decided where the ticket goes;
+   * one naming the group it is in has decided nothing, and stays held.
+   */
+  endsHoldAs?: 'rule' | 'manual';
 };
 
 /**
@@ -140,7 +166,7 @@ export async function assignConversation(
 async function routeAndPick(
   conversationId: string,
   options: AssignOptions,
-  routed: { moved: boolean },
+  routed: { moved: boolean; endedHold?: boolean },
 ): Promise<Picked> {
   const now = options.now ?? new Date();
 
@@ -202,13 +228,26 @@ async function routeAndPick(
    * purpose, and a rule has never moved their ticket.
    */
   const holder = conversation.assigneeAgentId;
+  let endedHold = false;
   if (routeTo && assignable && (!holder || holder === conversation.accountableAgentId)) {
-    await moveToGroup(conversationId, routeTo, options.actorLabel, routed);
+    endedHold = await moveToGroup(conversationId, routeTo, options, routed);
   }
 
   if (conversation.assigneeAgentId) return { assignedTo: null, reason: 'already_assigned' };
 
   if (!assignable) return { assignedTo: null, reason: 'not_assignable' };
+
+  /*
+   * Held for the router, ahead of the owner and the rota both: the hold is
+   * absolute, and whatever ends it assigns the ticket then (`afterHoldEnded`).
+   * Read off the snapshot, because a hold is born in the ticket's insert and
+   * afterwards only ends: a stale "held" costs a skip that whoever ended it
+   * makes good, and a stale "not held" cannot exist. Checked again under the
+   * lock below all the same. A move this call made for a rule has ended it.
+   */
+  if (!endedHold && isHeld(conversation, now)) {
+    return { assignedTo: null, reason: 'awaiting_route' };
+  }
 
   // The number's owner, ahead of everything the rota would ask — see the
   // module header for why none of it applies.
@@ -281,6 +320,33 @@ async function routeAndPick(
 
   const outcome = await db.transaction(async (tx) => {
     /*
+     * The ticket's row first, then the group's: the order the router, the
+     * console and every other writer that moves a ticket take them in, so an
+     * assignment never waits on a move that waits on it. And the re-read under
+     * it is the answer, not a guess: a ticket moved out of this group, picked
+     * up by hand or put on hold since the snapshot cannot be assigned here.
+     * No join under the lock — under READ COMMITTED a locked read that waited
+     * re-checks the joined rows and can answer no row at all.
+     */
+    const [current] = await tx
+      .select({
+        assigneeAgentId: conversations.assigneeAgentId,
+        groupId: conversations.groupId,
+        routingWindowEndsAt: conversations.routingWindowEndsAt,
+        routingDecidedAt: conversations.routingDecidedAt,
+      })
+      .from(conversations)
+      .where(eq(conversations.id, conversationId))
+      .for('update');
+    if (!current) return { assignedTo: null, reason: 'not_assignable' as SkipReason };
+    // An agent may have picked the ticket up by hand since the check above.
+    if (current.assigneeAgentId) {
+      return { assignedTo: null, reason: 'already_assigned' as SkipReason };
+    }
+    if (current.groupId !== groupId) return { assignedTo: null, reason: 'moved' as SkipReason };
+    if (isHeld(current, now)) return { assignedTo: null, reason: 'awaiting_route' as SkipReason };
+
+    /*
      * Serialise this group's assignments against each other.
      *
      * Without the lock, two tickets arriving in the same second read the same
@@ -296,17 +362,6 @@ async function routeAndPick(
       .from(groups)
       .where(eq(groups.id, groupId))
       .for('update');
-
-    // Re-read the assignee inside the lock. Between the check above and here,
-    // an agent may have picked the ticket up by hand.
-    const current = await tx
-      .select({ assigneeAgentId: conversations.assigneeAgentId })
-      .from(conversations)
-      .where(eq(conversations.id, conversationId))
-      .limit(1);
-    if (current[0]?.assigneeAgentId) {
-      return { assignedTo: null, reason: 'already_assigned' as SkipReason };
-    }
 
     const roster = await loadRoster(tx, groupId);
     if (roster.length === 0) {
@@ -334,10 +389,15 @@ async function routeAndPick(
 
     if (!agentId) return { assignedTo: null, reason: 'none_available' as SkipReason };
 
-    await tx
+    // Still guarded, the module's one invariant, though the row is locked; and
+    // checked, so a write that matched nothing advances no cursor and records
+    // no assignment that did not happen.
+    const taken = await tx
       .update(conversations)
       .set({ assigneeAgentId: agentId, assignedAt: now })
-      .where(and(eq(conversations.id, conversationId), isNull(conversations.assigneeAgentId)));
+      .where(and(eq(conversations.id, conversationId), isNull(conversations.assigneeAgentId)))
+      .returning({ id: conversations.id });
+    if (taken.length === 0) return { assignedTo: null, reason: 'already_assigned' as SkipReason };
 
     await tx.update(groups).set({ lastAssignedAgentId: agentId }).where(eq(groups.id, groupId));
 
@@ -384,22 +444,41 @@ async function routeAndPick(
 async function moveToGroup(
   conversationId: string,
   groupId: string,
-  actorLabel: string | undefined,
-  routed: { moved: boolean },
-): Promise<void> {
-  if (!(await moveToGroupIfElsewhere(conversationId, groupId, { groupMustExist: true }))) {
-    return;
-  }
+  { actorLabel, endsHoldAs }: Pick<AssignOptions, 'actorLabel' | 'endsHoldAs'>,
+  routed: { moved: boolean; endedHold?: boolean },
+): Promise<boolean> {
+  // The hold ends in the move's own transaction, so neither commits without
+  // the other: stamped first, the sweep could assign the ticket in the group it
+  // is about to leave; stamped after, a crash between would leave it in the
+  // rule's group still held, for the router to move away from the rule.
+  const result = await db.transaction(async (tx) => {
+    if (
+      !(await moveToGroupIfElsewhere(conversationId, groupId, {
+        executor: tx,
+        groupMustExist: true,
+      }))
+    ) {
+      return { moved: false, endedHold: false };
+    }
+    const endedHold = endsHoldAs
+      ? await endHold(tx, conversationId, endsHoldAs, { label: actorLabel ?? 'auto_assign' })
+      : false;
+    return { moved: true, endedHold };
+  });
+  if (!result.moved) return false;
 
   // Reported before the event is written: the move has committed, so a
-  // failure recording it must not also lose the follow-up it owes.
+  // failure recording it must not also lose the follow-up it owes. Outside the
+  // move's transaction for the same reason.
   routed.moved = true;
+  if (result.endedHold) routed.endedHold = true;
   await db.insert(conversationEvents).values({
     conversationId,
     type: 'group_changed',
     actorLabel: actorLabel ?? 'auto_assign',
     data: { to: groupId },
   });
+  return result.endedHold;
 }
 
 /**

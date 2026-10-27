@@ -16,6 +16,8 @@ import {
 import { earlierMessages } from '@/lib/subcategorise-ai/context';
 import { errorMessage } from '@/lib/errors';
 import { logger } from '@/lib/log';
+import { routeNow } from '@/lib/routing/apply';
+import { undecidedRouting } from '@/lib/routing/state';
 import { afterRoutingChanged } from '@/lib/sla';
 import { isCommentTicket } from '@/lib/tickets/channel-policy';
 import { skipReason } from '@/lib/tickets/classifiable';
@@ -290,7 +292,9 @@ export async function classifyMessageCategory(
         runLabel: CATEGORY_AI_LIVE_LABEL,
       },
     );
-    return { kind: 'decided' as const, outcome, write };
+    // Under the lock the write holds, because the stage moves under it.
+    const routing = await undecidedRouting(tx, row.conversationId);
+    return { kind: 'decided' as const, outcome, write, routing };
   });
 
   if (decided === null) return { status: 'gone' };
@@ -304,18 +308,29 @@ export async function classifyMessageCategory(
       to: predicted,
       probability: prediction.probability,
     });
-    await afterCategoryApplied(row.conversationId, decided.write);
+    await afterCategoryApplied(row.conversationId, decided.write, decided.routing ?? null);
   }
 
   return { status: 'recorded', outcome: decided.outcome, predicted };
 }
 
 /**
- * What a written category owes once it has committed: until Stage 5, the SLA
- * policy chosen again before the first reply, then the observer rules and
- * auto-assignment, exactly as after a console edit — so a rule keyed on the
- * category fires for a ticket Jev filed. Both best-effort inside. In one
- * function so Stage 5 can swap it for decision 5's four cases.
+ * What a written category owes once it has committed, which depends on where
+ * the ticket's routing stands (`plans/ticket-category-routing.md`, decision 5):
+ *
+ * - **Live and `pending`** — the creation pass has not reached `beginRouting`,
+ *   which routes on this category. Nothing more here, so a rule always gets
+ *   the first word.
+ * - **Live and `holding`** — routed now (`routeNow`), *instead of* the update
+ *   pass below: the router runs that pass itself, between its decision and the
+ *   assignment, and a second would assign before the first had finished.
+ * - **Undecided shadow** — the would-be decision recorded, then the rest as
+ *   though routing did not exist.
+ * - **Anything else** — never routed, or decided already, and so a relabel
+ *   only: the SLA policy chosen again before the first reply, then the
+ *   observer rules and auto-assignment, exactly as after a console edit — so a
+ *   rule keyed on the category fires for a ticket Jev filed. Both best-effort
+ *   inside.
  *
  * Only a write that changed the column: setting what the ticket already
  * carries wrote nothing a rule could react to.
@@ -325,7 +340,16 @@ export async function classifyMessageCategory(
  * redelivered job finds its own row and stops. The ticket then waits for its
  * next routing change, or a person's, to be re-timed and to meet its rules.
  */
-async function afterCategoryApplied(conversationId: string, write: CategoryWrite): Promise<void> {
+async function afterCategoryApplied(
+  conversationId: string,
+  write: CategoryWrite,
+  routing: Awaited<ReturnType<typeof undecidedRouting>>,
+): Promise<void> {
+  if (routing && !routing.shadow) {
+    if (routing.stage === 'holding') await routeNow(conversationId, { label: CATEGORY_AI_ACTOR });
+    return;
+  }
+  if (routing) await routeNow(conversationId, { label: CATEGORY_AI_ACTOR });
   await afterRoutingChanged(conversationId, {
     category: write.outcome === 'changed',
     group: false,
