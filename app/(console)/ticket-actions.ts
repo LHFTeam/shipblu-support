@@ -14,7 +14,7 @@ import { isUuid } from '@/lib/http/uuid';
 import { can } from '@/lib/auth/permissions';
 import { isPriority } from '@/lib/tickets/vocabulary';
 import { CATEGORY_REFUSALS, setConversationCategory } from '@/lib/categories/write';
-import { onGroupChanged, onPriorityChanged, reselectPolicyBeforeFirstResponse } from '@/lib/sla';
+import { afterRoutingChanged, onPriorityChanged } from '@/lib/sla';
 import { afterTicketUpdate } from '@/lib/tickets/lifecycle';
 import { CHANGE_STAMP } from '@/lib/tickets/change-stamp';
 import { moveToGroupIfElsewhere } from '@/lib/tickets/move-group';
@@ -160,8 +160,7 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
       // (a policy can be keyed on the group); after, it holds. Either way the
       // due dates are then re-counted on the new team's calendar, since groups
       // can keep their own operating days and holidays.
-      await reselectPolicyBeforeFirstResponse(conversationId, 'group');
-      await onGroupChanged(conversationId);
+      await afterRoutingChanged(conversationId, { category: false, group: true });
 
       // The new team may route automatically where the old one did not. A no-op
       // if somebody already holds the ticket, which is the usual case.
@@ -214,11 +213,12 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
       if (write.outcome === 'no_ticket') return { error: 'Ticket not found' };
 
       // Before the first response, the policy follows the category (it may be
-      // keyed on it). A no-op once somebody has answered, or when the same
-      // policy wins again.
-      if (write.outcome === 'changed') {
-        await reselectPolicyBeforeFirstResponse(conversationId, 'category');
-      }
+      // keyed on it). A no-op once somebody has answered, when the same policy
+      // wins again, or when the ticket already carried the category.
+      await afterRoutingChanged(conversationId, {
+        category: write.outcome === 'changed',
+        group: false,
+      });
       break;
     }
 

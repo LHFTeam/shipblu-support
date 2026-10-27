@@ -565,15 +565,15 @@ async function changeClock(
  * re-selected: which targets a ticket is held to is what an agent was told when
  * it arrived, and quietly retargeting a ticket because it was routed elsewhere
  * is a different feature from honouring a team's calendar. Before the first
- * response that feature does exist, and it is not this function:
- * every group writer also calls `reselectPolicyBeforeFirstResponse`, which may
- * choose another policy.
+ * response that feature does exist, and it is not this function: every group
+ * writer calls both through `afterRoutingChanged`, whose
+ * `reselectPolicyBeforeFirstResponse` may choose another policy first.
  *
  * Best-effort like the rest of this file, and a no-op when nothing would change
  * — a policy pinned to one schedule or counting round the clock resolves to the
  * same hours in every group.
  */
-export async function onGroupChanged(conversationId: string): Promise<void> {
+async function onGroupChanged(conversationId: string): Promise<void> {
   await recomputeOwedClocks(conversationId, 'group_hours');
 }
 
@@ -608,6 +608,44 @@ export async function onPriorityChanged(conversationId: string): Promise<void> {
 }
 
 /**
+ * What a write of a ticket's category or group owes once it has committed —
+ * the one entry point every routing writer calls, so the order lives here and
+ * a new writer cannot take it the wrong way round.
+ *
+ * The order is the policy first, then the calendar:
+ * `reselectPolicyBeforeFirstResponse` times a move that changes the policy from
+ * its anchors on the new group's hours, so `onGroupChanged` runs only when the
+ * re-selection kept the policy. After one that re-timed it would find nothing
+ * to move, at the cost of every policy loaded again and a second locked
+ * transaction, each a place in the pool (§6.91). Re-timed first, the old
+ * policy's clocks moved to the new hours and then the new policy's moved them
+ * again — two timeline lines for one move, the first naming deadlines that
+ * never held. One call however much moved: a category and a group changed
+ * together re-select once, named by the category, since that is the one a
+ * policy is most likely keyed on. The re-selection is private to this module
+ * for the same reason `onGroupChanged` is, so a writer cannot call one half.
+ *
+ * It takes what the writers already answer — `setConversationCategory`'s
+ * outcome, `moveToGroupIfElsewhere`'s boolean, `assignConversation`'s
+ * `movedGroup` — and is called by whoever holds them once the whole change is
+ * over, never from inside a writer: the automation engine collects a pass's
+ * moves and calls this once in its `finally`, so a rule that files a ticket and
+ * another that moves it choose one policy between them, where a hook in each
+ * writer would choose one per action.
+ */
+export async function afterRoutingChanged(
+  conversationId: string,
+  changed: { category: boolean; group: boolean },
+): Promise<void> {
+  if (!changed.category && !changed.group) return;
+  const retimed = await reselectPolicyBeforeFirstResponse(
+    conversationId,
+    changed.category ? 'category' : 'group',
+  );
+  if (changed.group && !retimed) await onGroupChanged(conversationId);
+}
+
+/**
  * The ticket's category or group changed before anybody answered it: the policy
  * is chosen again, from everything the ticket now is.
  *
@@ -620,15 +658,16 @@ export async function onPriorityChanged(conversationId: string): Promise<void> {
  * greeting, minutes — away, so without this a category-keyed policy would
  * match only tickets somebody happened to route by hand.
  *
- * Who made the change does not matter — Jev, a rule, an agent or the router —
- * and every writer of `category_id` on a ticket that exists calls this after
- * its write commits, as do the group moves that can happen before a first
- * response: the console's group case, `assign_group` and an `auto_assign` that
- * moved. The one exception is `backfill_category_ai`, which labels an old
- * backlog and never retargets it. Two writers act before the first selection
- * and so never need it, because `applySlaOnCreate` runs after them and reads
- * the category itself: a rule on `on_create`, and `createTicket`, which writes
- * a form's default or an agent's pick in the insert that opens the ticket.
+ * Who made the change does not matter — Jev, a rule, a form, an agent or the
+ * router — and every writer of `category_id` on a ticket that exists reaches
+ * this after its write commits, through `afterRoutingChanged`, as do the group
+ * moves that can happen before a first response: the console's group case,
+ * `assign_group` and an `auto_assign` that moved. The one exception is
+ * `backfill_category_ai`, which labels an old backlog and never retargets it.
+ * Two writers act before the first selection and so never need it, because
+ * `applySlaOnCreate` runs after them and reads the category itself: a rule on
+ * `on_create`, and `createTicket`, which writes a form's default or an agent's
+ * pick in the insert that opens the ticket.
  *
  * Built from the anchors rather than on `recomputeOwedClocks`, which returns
  * early on a ticket with no clocks: this one can create them, on a ticket whose
@@ -641,15 +680,12 @@ export async function onPriorityChanged(conversationId: string): Promise<void> {
  * credits the whole of it when the clock resumes (`completedPauses`).
  *
  * When the same policy wins again it does nothing: re-timing for a new group's
- * calendar is `onGroupChanged`'s, which every group writer calls straight after
- * this — the console in its action, the automation engine once its pass is over
- * — so a move that changes the policy is re-timed once, here, and
- * `onGroupChanged` then finds nothing to move. Called the other way round, the
- * old policy's clocks were first re-timed on the new group's hours and the
- * timeline showed the deadlines moving twice, the first time to values that
- * never held. When no policy wins — no default, nothing matching — it also does
- * nothing: dropping an obligation mid-ticket is a different decision from
- * choosing one.
+ * calendar is `onGroupChanged`'s, which `afterRoutingChanged` calls after this
+ * whenever it answers false, so a move that changes the policy is re-timed
+ * once, here. When no policy wins — no default, nothing matching — it also
+ * does nothing: dropping an obligation mid-ticket is a different decision from
+ * choosing one. It answers true only once the new policy's clocks have
+ * committed, so a failure part-way leaves the calendar to `onGroupChanged`.
  *
  * Never on a read-only channel or an imported history, which `applySlaOnCreate`
  * never gave a clock either; never on a deleted, spam or merged ticket, which no
@@ -660,10 +696,10 @@ export async function onPriorityChanged(conversationId: string): Promise<void> {
  * A category set while a ticket is resolved therefore moves its policy only
  * when the category or the group next changes after it is reopened.
  */
-export async function reselectPolicyBeforeFirstResponse(
+async function reselectPolicyBeforeFirstResponse(
   conversationId: string,
   cause: 'category' | 'group',
-): Promise<void> {
+): Promise<boolean> {
   try {
     // Most category changes and group moves come after somebody has answered.
     // Asked first of the row read without a lock, they cost that one read
@@ -671,12 +707,13 @@ export async function reselectPolicyBeforeFirstResponse(
     // place in the pool (§6.91); asked again under the lock, since an answer
     // can land in between.
     const unlocked = await loadConversation(conversationId);
-    if (!unlocked || !policyChoosable(unlocked)) return;
+    if (!unlocked || !policyChoosable(unlocked)) return false;
 
     const policies = await loadPolicies();
-    if (policies.length === 0) return;
+    if (policies.length === 0) return false;
     const catalog = await loadHoursCatalog();
 
+    let retimed = false;
     await withTicketLocked(conversationId, async (tx, row) => {
       const conversation = row.conversation;
       if (!policyChoosable(row)) return;
@@ -742,9 +779,12 @@ export async function reselectPolicyBeforeFirstResponse(
           clearedBreaches: cleared,
         },
       });
+      retimed = true;
     });
+    return retimed;
   } catch (error) {
     log.error(`could not choose the policy again on ${conversationId}`, error);
+    return false;
   }
 }
 

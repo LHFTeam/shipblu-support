@@ -20,12 +20,7 @@ import { automatedReplyBlocked, deliverAutomatedReply } from '@/lib/tickets/outb
 import { matches } from '@/lib/rules/conditions';
 import { conversationFacts } from '@/lib/rules/facts';
 import { setConversationCategory } from '@/lib/categories/write';
-import {
-  onGroupChanged,
-  onPriorityChanged,
-  onStatusChanged,
-  reselectPolicyBeforeFirstResponse,
-} from '@/lib/sla';
+import { afterRoutingChanged, onPriorityChanged, onStatusChanged } from '@/lib/sla';
 import { CHANGE_STAMP } from '@/lib/tickets/change-stamp';
 import { moveToGroupIfElsewhere } from '@/lib/tickets/move-group';
 import { resolveStamp } from '@/lib/tickets/resolve-stamp';
@@ -134,7 +129,7 @@ export async function applyRules(
   { slaApplied = true }: { slaApplied?: boolean } = {},
 ): Promise<number> {
   const facts = conversationFacts(ticket, now);
-  const pass: Pass = { surveyOwed: false, policyOwed: null, groupMoved: false };
+  const pass: Pass = { surveyOwed: false, categoryChanged: false, groupMoved: false };
   let applied = 0;
 
   try {
@@ -171,19 +166,17 @@ export async function applyRules(
     // could hide the error.
     if (pass.surveyOwed) await scheduleSurvey(ticket.conversation.id, 'rule');
     // Once, from the ticket as the whole pass left it, so a rule that files a
-    // ticket and another that moves it choose one policy between them. In the
-    // `finally` for the survey's reason: the writes have committed.
-    if (pass.policyOwed && slaApplied) {
-      await reselectPolicyBeforeFirstResponse(ticket.conversation.id, pass.policyOwed);
+    // ticket and another that moves it choose one policy between them and the
+    // clocks move once, from the group the pass left it in. In the `finally`
+    // for the survey's reason: the writes have committed. Not on an `on_create`
+    // pass: `applySlaOnCreate` runs after it and reads the category and group
+    // it left, and the ticket has no clocks yet for a move to re-time.
+    if (slaApplied) {
+      await afterRoutingChanged(ticket.conversation.id, {
+        category: pass.categoryChanged,
+        group: pass.groupMoved,
+      });
     }
-    // After the re-selection, the order the console's group case takes: a move
-    // that changed the policy has just been timed from the anchors on the new
-    // group's hours, so this finds nothing to move. Re-timed first, from the
-    // action, the old policy's clocks moved to the new hours and then the
-    // policy's moved them again — two timeline lines for one move, the first
-    // naming deadlines that never held. Once per pass however many rules moved
-    // the ticket, from the group the pass left it in.
-    if (pass.groupMoved) await onGroupChanged(ticket.conversation.id);
   }
 
   return applied;
@@ -193,15 +186,11 @@ export async function applyRules(
 type Pass = {
   surveyOwed: boolean;
   /**
-   * The category or group moved, so the SLA policy is chosen again if nobody
-   * has answered yet — named by the category when both moved, since that is
-   * the one a policy is most likely keyed on.
+   * A rule changed the ticket's category or moved its group — what
+   * `afterRoutingChanged` takes once the pass is over: the policy chosen again
+   * if nobody has answered yet, and the clocks re-timed on a new group's hours.
    */
-  policyOwed: 'category' | 'group' | null;
-  /**
-   * A rule moved the ticket's group, so its clocks are re-timed on the new
-   * group's hours (`onGroupChanged`) once the pass is over.
-   */
+  categoryChanged: boolean;
   groupMoved: boolean;
 };
 
@@ -270,7 +259,7 @@ async function applyAction(
       const write = await setConversationCategory(conversationId, action.categoryId, {
         label: `automation:${ruleName}`,
       });
-      if (write.outcome === 'changed') pass.policyOwed = 'category';
+      if (write.outcome === 'changed') pass.categoryChanged = true;
       // Said, because it is a rule not doing what its author asked for: the
       // category it names was retired, or deleted from under it.
       if (write.outcome === 'retired_category' || write.outcome === 'unknown_category') {
@@ -346,12 +335,13 @@ async function applyAction(
       // already in matches on every pass (`moveToGroupIfElsewhere`).
       if (!(await moveToGroupIfElsewhere(conversationId, action.groupId))) return;
 
-      await record('group_changed', { to: action.groupId });
       // The new group may work different hours, in which case the clocks move,
       // once the pass is over (`Pass.groupMoved`). Nothing to move on a brand
-      // new ticket, whose SLA has not been applied yet.
+      // new ticket, whose SLA has not been applied yet. Noted before the event
+      // is written: the move has committed, so a failure recording it must not
+      // also lose the follow-up it owes.
       pass.groupMoved = true;
-      pass.policyOwed ??= 'group';
+      await record('group_changed', { to: action.groupId });
       return;
     }
 
@@ -359,21 +349,25 @@ async function applyAction(
       // Writes the ticket itself and does not come back through this engine, in
       // keeping with the rule at the top of this file: an automation that
       // triggered an automation is how four hundred emails reach one customer.
-      const outcome = await assignConversation(conversationId, {
-        groupId: action.groupId,
-        strategy: action.strategy === 'group_default' ? undefined : action.strategy,
-        actorLabel: `automation:${ruleName}`,
-      });
-
       // The SLA counts against the group's calendar, so a rule that moved the
       // ticket has moved its due dates too — whether or not anybody was free to
       // take it. Read off what the call did rather than off the rule and the
       // ticket as the pass found it: a ticket held by somebody other than its
       // number's owner, or routed to a group deleted since, stays where it was
       // and owes nothing (`moveToGroupIfElsewhere`, for why that matters).
-      if (outcome.movedGroup) {
-        pass.groupMoved = true;
-        pass.policyOwed ??= 'group';
+      // Through `routed` rather than the answer, and in a `finally`, for
+      // `assign_group`'s reason: the move commits before the pick, so a pick
+      // that throws must not also lose the follow-up the move owes.
+      const routed = { moved: false };
+      try {
+        await assignConversation(conversationId, {
+          groupId: action.groupId,
+          strategy: action.strategy === 'group_default' ? undefined : action.strategy,
+          actorLabel: `automation:${ruleName}`,
+          routed,
+        });
+      } finally {
+        if (routed.moved) pass.groupMoved = true;
       }
       return;
     }

@@ -141,10 +141,10 @@ export function categoryChangedEvent(
  * there, and a rule or a picker naming it from before is out of date.
  *
  * What it does not do is anything that follows from the change. The caller
- * re-chooses the SLA policy once this has committed
- * (`reselectPolicyBeforeFirstResponse`) and runs whatever observer rules it
- * runs, because those take the ticket's lock themselves and must not wait on
- * this transaction. And it never writes `requester_kind`: the category says
+ * passes the outcome to `afterRoutingChanged` once this has committed, which
+ * re-chooses the SLA policy, and runs whatever observer rules it runs, because
+ * those take the ticket's lock themselves and must not wait on this
+ * transaction. And it never writes `requester_kind`: the category says
  * whose work a ticket is, not who the requester is.
  */
 export async function setConversationCategory(

@@ -48,6 +48,7 @@ import { checkPagesDoNotImportTheDatabase } from './rules/page-db.mjs';
 import { checkFormsDoNotReset } from './rules/form-reset.mjs';
 import { checkActionsRevalidate } from './rules/action-revalidates.mjs';
 import { checkButtonTypeIsFixed } from './rules/button-type.mjs';
+import { checkRoutingResultKept } from './rules/routing-result.mjs';
 
 export const RULES = [
   ['env-parity', checkEnvParity],
@@ -84,6 +85,7 @@ export const RULES = [
   ['form-reset', checkFormsDoNotReset],
   ['action-revalidates', checkActionsRevalidate],
   ['button-type', checkButtonTypeIsFixed],
+  ['routing-result', checkRoutingResultKept],
   ['page-db', checkPagesDoNotImportTheDatabase],
   ['light-only', checkLightOnly],
   ['framing', checkFramingHeaders],
