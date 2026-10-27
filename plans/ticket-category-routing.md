@@ -467,7 +467,9 @@ Every production write needs the user's go-ahead for that step, and the
    classifier stays off until an admin switches it on at `/admin/categories`.
    The way back is to redeploy `156004d`; the tables stay, since nothing
    reads them there. 4.2's report, `/reports/category-ai`, is in review as
-   #429: [4.2's report, as built](#42s-report-as-built). 4.2's operations
+   #429: [4.2's report, as built](#42s-report-as-built), which also fixes the
+   live job's locked ticket read, so the switch stays off until #429 is
+   deployed to the worker too. 4.2's operations
    (the archive record run, shadow, labelling, apply, the backlog) each wait
    for the user's go-ahead.
 8. **Before Stage 5**, a person does 0.2's reorder and 0.6's staffing, and the
@@ -4052,7 +4054,13 @@ wait for the user's go-ahead, after 4.1 is deployed.
   - **The categories drawn are the active ones**, and any retired one the
     run's answers or labels name. A link to a run past the list's 200 is
     looked up on its own.
-  - **Deploying it.** Web alone, code only. The handbook's reports article
+  - **Deploying it.** Code only, to all six services: besides the page, #429
+    fixes code the worker runs — the live job's and the backfill's locked
+    ticket reads, which `dbf4376` still makes through a join that loses the
+    ticket when its status changes under the lock, and `classifierTicket`,
+    which kept a refused read. So the classifier stays off until #429 is in
+    `main` with the worker deployed: shadow, and the backfill's `apply`, wait
+    for it as well as for the go-ahead. The handbook's reports article
     changed too, and production held no console handbook at 2026-10-27
     12:50 UTC (no `handbook-` folder or article, no `seed_console_handbook`
     job ever), so there is nothing to seed: the first seed, whenever somebody

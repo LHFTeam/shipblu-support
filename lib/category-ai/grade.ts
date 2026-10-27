@@ -707,8 +707,10 @@ function slice(
     judged: judged.length,
     settled: settled.length,
     settledOnFirst: settled.filter((verdict) => verdict.settle!.onFirstMessage).length,
-    answers: sum(verdicts, (verdict) => verdict.answers),
-    unknowns: sum(verdicts, (verdict) => verdict.unknowns),
+    // Over the judged tickets, as every figure but the footer's: a ticket
+    // owned when the answer came back kept it, and was never judged on it.
+    answers: sum(judged, (verdict) => verdict.answers),
+    unknowns: sum(judged, (verdict) => verdict.unknowns),
     labelled: labelled.length,
     jev: estimate(
       labelled.filter((verdict) => verdict.settle !== null),

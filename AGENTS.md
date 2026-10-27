@@ -1433,7 +1433,7 @@ one label, question and mode at a time, and its rules are
 the live job judges messages; ground truth only a person's `category_changed`
 given before Jev, a rule or a form wrote the category, since agreeing with a
 write leaves no event and every label after one is a disagreement — so a ticket
-written to first is in no rate, and in `apply`, where every settle is Jev's
+written to first is in no rate read off labels, and in `apply`, where every settle is Jev's
 filing, Filed by Jev is the grade; rates that mix Jev's answers weighted for a
 sample drawn evenly from each; the cap counted as the live job counts it, across
 the label's other views; and a labelling list that never says what Jev chose,

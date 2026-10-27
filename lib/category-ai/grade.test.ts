@@ -599,6 +599,16 @@ describe('grade', () => {
   ];
   const report = grade(input(runs, events, { thresholds: [0.5, 0.8] }));
 
+  // A person labelled the ticket while Jev's call was out: the row kept the
+  // answer, the ticket was never judged, and the footer says it is in no
+  // figure — the Unknown share included.
+  it('counts the answers of judged tickets only', () => {
+    const graded = grade(
+      input([run('o', 0, 'owned', 'unknown', 0.9), run('j', 0, 'would_apply', 'sales', 0.9)]),
+    );
+    expect(graded.total).toMatchObject({ answers: 1, unknowns: 0 });
+  });
+
   it('slices every figure by channel, the busiest first, and in total', () => {
     expect(report.slices.map((slice) => slice.channel)).toEqual(['whatsapp', 'email']);
     expect(report.total).toEqual({

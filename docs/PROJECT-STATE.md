@@ -1580,7 +1580,9 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
 - **Jev's category classifier is deployed and switched off** (Stage 4.1 of
   `plans/ticket-category-routing.md`; `lib/category-ai/`): live on `dbf4376`
   since 2026-10-27 12:07 UTC, with `0050`'s two tables in production, no
-  settings row and no answers. Once on, it asks
+  settings row and no answers. Leave it off until #429 is deployed, worker
+  included: `dbf4376`'s locked ticket read loses a ticket whose status changes
+  under the lock, and the job goes to `dead`. Once on, it asks
   which team's work each of the first five customer messages on an unanswered
   ticket is, and under `apply` files the ticket — never over a category a
   person, a rule, a form's default or an agent opening the ticket chose. Its

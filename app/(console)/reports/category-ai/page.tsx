@@ -196,10 +196,18 @@ export default async function CategoryAiReportPage({
                   anybody labelled it
                   {report.filed.length > 0 ? <> &mdash; by Jev, filing it</> : null}, or can no
                   longer be labelled. So no rate here grades what Jev settled: Right and precision
-                  are empty and recall is not measurable.{' '}
+                  are empty at the threshold used, and a lower one in the sweep grades only the
+                  tickets that lower bar would add; recall is not measurable.{' '}
                   {report.filed.length > 0
                     ? 'Filed by Jev is the grade, by how often a person moved a filing; the labels here are of tickets Jev never settled, which is what it missed.'
                     : 'The labels here are of tickets Jev never settled, which is what it missed.'}
+                </Notice>
+              ) : unreachable > 0 && unreachable === report.total.judged ? (
+                <Notice tone="info" icon>
+                  No ticket in this run can be graded by a label: each was written to by Jev, a rule
+                  or a form before anybody labelled it, where agreeing leaves no label, or was
+                  deleted, marked spam or merged since. Only the shares of what Jev answered are
+                  drawn.
                 </Notice>
               ) : unreachable > 0 ? (
                 <Notice tone="info" icon>
@@ -207,7 +215,7 @@ export default async function CategoryAiReportPage({
                   be graded: written to by Jev, a rule or a form before anybody labelled{' '}
                   {unreachable === 1 ? 'it' : 'them'}, where agreeing leaves no label, or deleted,
                   spam or merged since. Every rate read off labels &mdash; Right, precision, recall
-                  and the rules&rsquo; &mdash; describes the other{' '}
+                  and the rules&rsquo;, here and in the sweep &mdash; describes the other{' '}
                   {report.total.judged - unreachable}; the shares of what Jev answered count every
                   judged ticket.
                 </Notice>
@@ -424,7 +432,7 @@ export default async function CategoryAiReportPage({
 
             <Section
               title="To label"
-              hint="Tickets nobody has labelled and nothing has filed. They are chosen by what Jev settled on, so a rare category gets labels too, and from the tickets it never settled once Jev can no longer be asked about them, so recall has misses to count — but the list does not say which, so each label is the person's own reading of the ticket. Open one and choose its category in the Category select: a real change, which runs the rules keyed on the category and, before a first reply, chooses the SLA policy again, as any change does. There is no way yet to record that a ticket fits none of the categories, so leave one like that unlabelled."
+              hint={`Tickets nobody has labelled and nothing has filed, once Jev can no longer be asked about them. ${report.sample.some((stratum) => stratum.key !== null) ? 'They are chosen by what Jev settled on, so a rare category gets labels too, and from the tickets it never settled, so recall has misses to count' : 'In this run they are the tickets Jev never settled, since no label can reach one it did, so the labels count what it missed'} — but the list does not say which, so each label is the person's own reading of the ticket. Open one and choose its category in the Category select: a real change, which runs the rules keyed on the category and, before a first reply, chooses the SLA policy again, as any change does. There is no way yet to record that a ticket fits none of the categories, so leave one like that unlabelled.`}
             >
               {/* Empty when every ticket was written to first, as in apply
                   before Jev has missed anything: no stratum can take a label. */}
