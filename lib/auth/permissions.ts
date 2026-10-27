@@ -234,6 +234,10 @@ export const PERMISSIONS = [
    * a category says which team works it. Once Stage 5 routes by category, the
    * route group here decides where every fresh ticket on a routed channel goes,
    * which is `admin.groups`' and `admin.automations`' reach, not a taxonomy's.
+   *
+   * And the switch for Jev's category classifier, on the same page: whether
+   * Jev files tickets under these categories, and how sure it must be, is
+   * decided by whoever decides what the categories are.
    */
   'admin.categories',
 

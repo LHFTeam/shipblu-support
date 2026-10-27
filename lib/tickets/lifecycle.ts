@@ -2,6 +2,7 @@ import { assignConversation } from '@/lib/assignment';
 import { maybeSendAutoResponse } from '@/lib/auto-response';
 import { runAutomations } from '@/lib/automations';
 import { subcategoriseFromMessage } from '@/lib/subcategorise/apply';
+import { enqueueCategoryClassification } from '@/lib/category-ai/enqueue';
 import { enqueuePriorityClassification } from '@/lib/priority-ai/enqueue';
 import { linkShipmentsFromMessage } from '@/lib/shipments/links';
 import { scheduleSurvey } from '@/lib/csat';
@@ -89,9 +90,10 @@ export async function afterInboundMessage(
 
 /**
  * Something about the ticket changed that observer rules should see: an agent's
- * edit in the console, or a priority the classifier applied
- * (`lib/priority-ai/run.ts`), which calls this from a worker job with no agent
- * session. So nothing here may assume a person or a request.
+ * edit in the console, or a priority or a category a classifier applied
+ * (`lib/priority-ai/run.ts`, `lib/category-ai/run.ts`), which call this from a
+ * worker job with no agent session. So nothing here may assume a person or a
+ * request.
  */
 export async function afterTicketUpdate(conversationId: string): Promise<void> {
   await runAutomations('on_update', conversationId);
@@ -207,5 +209,14 @@ export async function afterMessageStored(message: StoredMessage): Promise<void> 
     await enqueuePriorityClassification(message);
   } catch (error) {
     log.error(`could not queue priority classification for ${message.messageId}`, error);
+  }
+
+  // The category classifier's own job (`classify_category`), in its own
+  // try/catch for the reason the two above have theirs: one classifier failing
+  // to queue must not stop the other.
+  try {
+    await enqueueCategoryClassification(message);
+  } catch (error) {
+    log.error(`could not queue category classification for ${message.messageId}`, error);
   }
 }

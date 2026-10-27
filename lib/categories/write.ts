@@ -46,7 +46,7 @@ export const CATEGORY_REFUSALS = {
  * uuid and stores the column lower-case whatever it was handed, but the event's
  * `data.to` is jsonb, kept as written — so an id typed in upper case into a
  * hand-made POST would leave the event naming a spelling the column does not,
- * and from Stage 4 Jev's ownership rule reads one against the other.
+ * and Jev's ownership rule (`categoryOwned`) reads one against the other.
  */
 async function readCategory(
   on: typeof db | Tx,
@@ -105,6 +105,7 @@ export function categoryChangedEvent(
   conversationId: string,
   change: { from: string | null; to: string | null; category: HeldCategory | null },
   actor: CategoryActor,
+  detail?: CategoryEventDetail,
 ) {
   return {
     conversationId,
@@ -116,24 +117,42 @@ export function categoryChangedEvent(
       to: change.to,
       key: change.category?.key ?? null,
       label: change.category?.labelEn ?? null,
+      ...detail,
     },
   };
 }
 
 /**
+ * What a classifier's write adds to its event: the evidence a `priority_changed`
+ * from Jev carries — the probability, which the timeline already renders, and
+ * the model — and which message the answer was about, and when it was written,
+ * so the classifier can tell from the event alone whether a later message's
+ * answer arrived after this one settled the ticket.
+ */
+export type CategoryEventDetail = {
+  probability: number | null;
+  model: string | null;
+  messageId: string | null;
+  messageCreatedAt: string;
+  runLabel: string;
+};
+
+/**
  * Writes `conversations.category_id` and its `category_changed` event, in one
  * transaction — the one way the console and the automation engine set a
  * category on a ticket that exists, so neither can write the column without the
- * event that says who did. The other writer is `createTicket`, which sets it in
- * the insert that opens the ticket, from the same two halves above.
+ * event that says who did. Jev's classifier writes the same way inside its own
+ * transaction (`setConversationCategoryOn`, below). The other writer is
+ * `createTicket`, which sets it in the insert that opens the ticket, from the
+ * same two halves above.
  *
  * Shaped like priority's writers, for the reason `CHANGE_STAMP` gives: the
  * ticket's row is locked before anything is compared, and the event is stamped
  * once the update holds that lock, so the timeline orders two writers the way
- * the column was written. Jev's classifier (Stage 4) decides whether it may
- * still set a ticket's category from those events, so an event sorting before
- * the change it overruled would hand a ticket back to the model after a person
- * had answered for it.
+ * the column was written. Jev's classifier decides whether it may still set a
+ * ticket's category from those events, so an event sorting before the change
+ * it overruled would hand a ticket back to the model after a person had
+ * answered for it.
  *
  * Setting what the ticket already carries writes nothing — no update, no
  * event — so a time rule matching every fifteen minutes records its decision
@@ -152,37 +171,62 @@ export async function setConversationCategory(
   categoryId: string | null,
   actor: CategoryActor,
 ): Promise<CategoryWrite> {
-  return db.transaction(async (tx): Promise<CategoryWrite> => {
-    const [ticket] = await tx
-      .select({ categoryId: conversations.categoryId })
-      .from(conversations)
-      .where(eq(conversations.id, conversationId))
-      .for('update');
-    if (!ticket) return { outcome: 'no_ticket' };
-    // Compared in the column's spelling, so asking in upper case for what the
-    // ticket already carries is still nothing to write.
-    const wanted = categoryId === null ? null : (canonicalUuid(categoryId) ?? categoryId);
-    if (ticket.categoryId === wanted) return { outcome: 'unchanged' };
+  return db.transaction((tx) => setConversationCategoryOn(tx, conversationId, categoryId, actor));
+}
 
-    let category: HeldCategory | null = null;
-    if (categoryId) {
-      const held = await holdCategory(tx, categoryId);
-      if (typeof held === 'string') return { outcome: held };
-      category = held;
-    }
-    const to = category?.id ?? null;
+/**
+ * `setConversationCategory`'s write, inside a transaction the caller already
+ * holds — for a writer that decides under the ticket's lock and must write
+ * under the same one, as Jev's classifier does: it reads who owns the category
+ * and whether the ticket has settled, and nothing may land between that answer
+ * and the write. Calling `setConversationCategory` from inside that transaction
+ * instead would open a second one on another pooled connection, whose row lock
+ * waits on the first while the first waits on it.
+ *
+ * Locks the ticket's row again, which inside one transaction costs nothing, so
+ * the lock order — ticket, then category — is the same whoever calls it.
+ */
+export async function setConversationCategoryOn(
+  tx: Tx,
+  conversationId: string,
+  categoryId: string | null,
+  actor: CategoryActor,
+  detail?: CategoryEventDetail,
+): Promise<CategoryWrite> {
+  const [ticket] = await tx
+    .select({ categoryId: conversations.categoryId })
+    .from(conversations)
+    .where(eq(conversations.id, conversationId))
+    .for('update');
+  if (!ticket) return { outcome: 'no_ticket' };
+  // Compared in the column's spelling, so asking in upper case for what the
+  // ticket already carries is still nothing to write.
+  const wanted = categoryId === null ? null : (canonicalUuid(categoryId) ?? categoryId);
+  if (ticket.categoryId === wanted) return { outcome: 'unchanged' };
 
-    await tx
-      .update(conversations)
-      .set({ categoryId: to })
-      .where(eq(conversations.id, conversationId));
+  let category: HeldCategory | null = null;
+  if (categoryId) {
+    const held = await holdCategory(tx, categoryId);
+    if (typeof held === 'string') return { outcome: held };
+    category = held;
+  }
+  const to = category?.id ?? null;
 
-    await tx
-      .insert(conversationEvents)
-      .values(
-        categoryChangedEvent(conversationId, { from: ticket.categoryId, to, category }, actor),
-      );
+  await tx
+    .update(conversations)
+    .set({ categoryId: to })
+    .where(eq(conversations.id, conversationId));
 
-    return { outcome: 'changed', from: ticket.categoryId, to };
-  });
+  await tx
+    .insert(conversationEvents)
+    .values(
+      categoryChangedEvent(
+        conversationId,
+        { from: ticket.categoryId, to, category },
+        actor,
+        detail,
+      ),
+    );
+
+  return { outcome: 'changed', from: ticket.categoryId, to };
 }

@@ -185,8 +185,89 @@ describe('the backfills and the knowledge-base passes', () => {
     );
   });
 
+  // The same for the category classifier, and an id that is not one is refused
+  // before Postgres answers it with 22P02.
+  it('holds classify_category to a message id and nothing else', () => {
+    const messageId = '00000000-0000-4000-8000-000000000001';
+    expect(parse('classify_category', { messageId })).toEqual({ messageId });
+    expect(() => parse('classify_category', { messageId, dryRun: true })).toThrow(
+      PermanentJobError,
+    );
+    expect(() => parse('classify_category', { messageId: 'not-a-uuid' })).toThrow(
+      PermanentJobError,
+    );
+  });
+
   it('keeps a run label of digits as the text it was typed as', () => {
     expect(parse('backfill_subcategorise_ai', { runLabel: 2026 })).toEqual({ runLabel: '2026' });
+  });
+
+  // A number does not give back the text it was typed as — `2026.10` comes
+  // back `2026.1` — so the category backfill, whose labels decide which rows
+  // a run resumes, refuses one rather than guessing.
+  it.each([2026, 2026.1, 7])(
+    'refuses a category backfill label typed as the number %s',
+    (label) => {
+      expect(() => parse('backfill_category_ai', { mode: 'record', runLabel: label })).toThrow(
+        PermanentJobError,
+      );
+      expect(() => parse('backfill_category_ai', { mode: 'apply', fromLabel: label })).toThrow(
+        PermanentJobError,
+      );
+    },
+  );
+
+  describe('backfill_category_ai', () => {
+    const record = { mode: 'record', runLabel: 'archive-1' } as const;
+
+    // CI's line, and the two runs 4.2 makes.
+    it.each([
+      { mode: 'record', runLabel: 'ci', dryRun: true, limit: 1 },
+      { mode: 'record', runLabel: 'archive-1' },
+      { mode: 'apply', fromLabel: 'backlog-1', dryRun: true },
+    ])('takes %o', (payload) => {
+      expect(parse('backfill_category_ai', payload)).toEqual(payload);
+    });
+
+    it('reads since as an instant on the team’s clock', () => {
+      expect(parse('backfill_category_ai', { ...record, since: '2026-10-01' })).toEqual({
+        ...record,
+        since: cairo('2026-10-01T00:00'),
+      });
+    });
+
+    // The two modes write different things, so neither is a default, and
+    // each refuses the other's label rather than ignoring it.
+    it.each([
+      [{ runLabel: 'archive-1' }, 'no mode'],
+      [{ mode: 'record' }, 'record with no label'],
+      [{ ...record, fromLabel: 'archive-0' }, 'record with a label to file from'],
+      [{ mode: 'apply' }, 'apply with nothing to file from'],
+      [{ mode: 'apply', fromLabel: 'backlog-1', runLabel: 'x' }, 'apply with a label to write'],
+      [{ mode: 'shadow', runLabel: 'x' }, 'a mode it does not have'],
+    ])('refuses %o: %s', (payload, _why) => {
+      expect(() => parse('backfill_category_ai', payload)).toThrow(PermanentJobError);
+    });
+
+    // Settling and ownership read the live label, so a backfill under it
+    // would decide live tickets.
+    it.each(['live', ' live ', '', '  '])('refuses the label %o', (label) => {
+      expect(() => parse('backfill_category_ai', { mode: 'record', runLabel: label })).toThrow(
+        PermanentJobError,
+      );
+      expect(() => parse('backfill_category_ai', { mode: 'apply', fromLabel: label })).toThrow(
+        PermanentJobError,
+      );
+    });
+
+    it('refuses a dryRun that is not a boolean, and one misspelt, rather than writing', () => {
+      expect(() => parse('backfill_category_ai', { ...record, dryRun: 1 })).toThrow(
+        PermanentJobError,
+      );
+      expect(() => parse('backfill_category_ai', { ...record, dryrun: true })).toThrow(
+        PermanentJobError,
+      );
+    });
   });
 
   it('takes only a locale the help centre has', () => {

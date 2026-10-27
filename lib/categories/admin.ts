@@ -1,6 +1,7 @@
 import { and, eq, ne } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { groups, ticketCategories } from '@/db/schema';
+import { UNKNOWN_CATEGORY_KEY } from './registry';
 
 /**
  * Adding, editing and retiring a category: the writes behind
@@ -14,7 +15,7 @@ import { groups, ticketCategories } from '@/db/schema';
  *
  * - **The key**, once the category exists. Every `category_changed` event
  *   freezes the key it was set to, so the timeline still says what was chosen
- *   after a relabel, and from Stage 4 Jev answers with a key. A key that moved
+ *   after a relabel, and Jev answers with a key (`lib/category-ai/`). A key that moved
  *   would leave both naming a category that no longer answers to it. So
  *   `updateCategory` takes no key at all, rather than one it ignores.
  * - **Whether it exists.** There is no delete: `conversations.category_id` and
@@ -47,9 +48,6 @@ export type NewCategory = CategoryEdit & { key: string };
  */
 const KEY_FORMAT = /^[a-z]+(_[a-z]+)*$/;
 
-/** Jev's answer for "none of these" (decision 4), which no category may be called. */
-const RESERVED_KEY = 'unknown';
-
 /** `position` is a 32-bit integer; Postgres answers anything wider with 22003, out of the action. */
 const POSITION_LIMIT = 2_147_483_647;
 
@@ -80,7 +78,7 @@ const CATEGORY_GONE = 'That category no longer exists — reload the page and tr
  */
 export async function createCategory(input: NewCategory): Promise<string | null> {
   const { key } = input;
-  if (key === RESERVED_KEY) {
+  if (key === UNKNOWN_CATEGORY_KEY) {
     return '“unknown” is kept for Jev’s answer when a message fits none of the categories, so no category can be called that';
   }
   if (!KEY_FORMAT.test(key)) {

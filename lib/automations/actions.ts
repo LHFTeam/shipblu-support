@@ -22,7 +22,7 @@ export type Action =
   /**
    * File the ticket under a category — "anything on the merchant number is
    * merchant support". Recorded as the rule's choice (`automation:<name>`), so
-   * from Stage 4 Jev treats the category as owned and leaves it alone.
+   * Jev treats the category as owned and leaves it alone.
    */
   | { type: 'set_category'; categoryId: string }
   | { type: 'assign_agent'; agentId: string | null }

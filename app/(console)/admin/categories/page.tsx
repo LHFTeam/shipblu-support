@@ -1,15 +1,19 @@
 import { Notice, PageHeader } from '@/components/ui';
 import { requirePermission } from '@/lib/auth/guard';
+import { readCategoryAiSettings } from '@/lib/category-ai/settings';
 import { categoryUsage, listCategories } from '@/lib/categories/queries';
 import { routeGroupSummaries } from '@/lib/categories/route-groups';
+import { typesafeConfigured } from '@/lib/typesafe/client';
+import { ClassifierForm } from './classifier-form';
 import { CategoriesTable, NewCategory } from './forms';
 
 export const dynamic = 'force-dynamic';
 
 /**
- * Ticket categories: which team's work a ticket is.
+ * Ticket categories: which team's work a ticket is, and the switch for Jev's
+ * classifier, which files new tickets under them.
  *
- * One per ticket, set by an agent, a rule or a form's default — beside the
+ * One per ticket, set by an agent, a rule, a form's default or Jev — beside the
  * subcategories, which say what a ticket is about and can be several. A
  * category is a routing label, never a statement about who the customer is, so
  * nothing here touches `requester_kind` (`plans/ticket-category-routing.md`,
@@ -23,14 +27,19 @@ export const dynamic = 'force-dynamic';
  *
  * Nothing on this page deletes. `conversations.category_id` is `restrict`, and
  * a retired category keeps every ticket filed under it.
+ *
+ * The classifier's settings are read uncached, so the form saved back is the
+ * row as it stands rather than a memo up to thirty seconds old
+ * (`lib/category-ai/settings.ts`).
  */
 export default async function CategoriesPage() {
   await requirePermission('admin.categories');
 
-  const [categories, usage, routeGroups] = await Promise.all([
+  const [categories, usage, routeGroups, classifier] = await Promise.all([
     listCategories(),
     categoryUsage(),
     routeGroupSummaries(),
+    readCategoryAiSettings(),
   ]);
 
   // One past the last, so a new category lands at the end of every picker
@@ -41,8 +50,17 @@ export default async function CategoriesPage() {
     <>
       <PageHeader
         title="Categories"
-        description="Which team's work a ticket is: one per ticket, set by an agent, a rule or a form's default. It says which team answers, not who the customer is. Once a channel routes by category, a new ticket goes to its category's route group. Categories are retired, never deleted, and a key never changes once created."
+        description="Which team's work a ticket is: one per ticket, set by an agent, a rule, a form's default or Jev. It says which team answers, not who the customer is. Once a channel routes by category, a new ticket goes to its category's route group. Categories are retired, never deleted, and a key never changes once created."
         actions={<NewCategory routeGroups={routeGroups} nextPosition={nextPosition} />}
+      />
+
+      <ClassifierForm
+        mode={classifier.mode}
+        minProbability={classifier.minProbability}
+        routingWindowMinutes={classifier.routingWindowMinutes}
+        keyConfigured={typesafeConfigured()}
+        changedAt={classifier.changedAt}
+        changedBy={classifier.changedBy}
       />
 
       {categories.length === 0 ? (

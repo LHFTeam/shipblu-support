@@ -121,9 +121,8 @@ export function CategoriesTable({
             Key{' '}
             <InfoTip label="Key">
               How the category is named where no person reads it: every change of a ticket&rsquo;s
-              category records it, and Jev, once it chooses categories, answers with one. Fixed once
-              the category exists — a renamed key would leave both naming something that no longer
-              answers to it.
+              category records it, and Jev answers with one when it chooses. Fixed once the category
+              exists — a renamed key would leave both naming something that no longer answers to it.
             </InfoTip>
           </>,
           'Arabic',
@@ -186,6 +185,10 @@ export function CategoriesTable({
                   <>
                     {group.name}
                     <span className="block text-xs">{STRATEGY_LABELS[group.strategy]}</span>
+                    <span className="block text-xs">
+                      {group.acceptingNow} of {group.members} accepting now
+                    </span>
+                    <RouteGroupWarning group={group} />
                   </>
                 ) : (
                   <span className="text-xs">Channel&rsquo;s default</span>
@@ -264,7 +267,7 @@ function CategoryFields({
       </div>
       <Field
         label="Description"
-        hint="What belongs here and where its edges are. Once Jev chooses categories it reads this beside the option, so say what does not belong as well as what does."
+        hint="What belongs here and where its edges are. Jev reads this beside the option when it chooses a category, so say what does not belong as well as what does."
       >
         <Textarea name="description" rows={3} defaultValue={category?.description ?? ''} />
       </Field>
@@ -360,6 +363,29 @@ function RouteGroupFacts({ group }: { group: RouteGroupSummary }) {
       ) : null}
     </>
   );
+}
+
+/**
+ * The editor's two warnings, short enough for the table's cell: the list is
+ * where an admin scans every category's readiness at once, and a route group
+ * that would leave tickets unassigned should not need an editor opened to see.
+ */
+function RouteGroupWarning({ group }: { group: RouteGroupSummary }) {
+  if (group.strategy === 'manual') {
+    return (
+      <span className="mt-1 block">
+        <Badge tone="warning">Nobody assigned automatically</Badge>
+      </span>
+    );
+  }
+  if (group.members === 0) {
+    return (
+      <span className="mt-1 block">
+        <Badge tone="warning">No active members</Badge>
+      </span>
+    );
+  }
+  return null;
 }
 
 /**

@@ -210,8 +210,8 @@ END $$;
 -- A ticket category's key, and its two labels
 --
 -- The key is what every category_changed event freezes, what
--- seed_ticket_categories finds a row by and, from Stage 4, what Jev's answer
--- names a category by (rules and SLA policies hold the uuid), so it is held to
+-- seed_ticket_categories finds a row by and what Jev's answer names a
+-- category by (rules and SLA policies hold the uuid), so it is held to
 -- one shape: lowercase words joined by single underscores. Hyphens
 -- and capitals belong in the labels. `unknown` is refused because Jev's
 -- classifier (plans/ticket-category-routing.md, decision 4) answers it for "none
@@ -248,6 +248,81 @@ BEGIN
     ALTER TABLE ticket_categories
       ADD CONSTRAINT ticket_categories_labels_not_blank CHECK (
         btrim(label_en) <> '' AND btrim(label_ar) <> ''
+      );
+  END IF;
+END $$;
+
+-- --------------------------------------------------------------------------
+-- category_ai_settings holds exactly one row, with values the classifier can read
+--
+-- The category classifier's switch, threshold and routing window, set on
+-- /admin/categories. One row for the canned_suggestion_settings reason: a
+-- second would be read or not depending on which one a query ordered first.
+-- The ranges are the admin action's too, held here so a row edited straight in
+-- the database cannot hand the classifier a threshold above 1 — which applies
+-- nothing, silently — or a mode it does not know, which it reads as off.
+-- --------------------------------------------------------------------------
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'category_ai_settings_singleton'
+      AND conrelid = 'public.category_ai_settings'::regclass
+  ) THEN
+    ALTER TABLE category_ai_settings
+      ADD CONSTRAINT category_ai_settings_singleton CHECK (id = 1);
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'category_ai_settings_mode_known'
+      AND conrelid = 'public.category_ai_settings'::regclass
+  ) THEN
+    ALTER TABLE category_ai_settings
+      ADD CONSTRAINT category_ai_settings_mode_known CHECK (mode IN ('off', 'shadow', 'apply'));
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'category_ai_settings_min_probability_range'
+      AND conrelid = 'public.category_ai_settings'::regclass
+  ) THEN
+    ALTER TABLE category_ai_settings
+      ADD CONSTRAINT category_ai_settings_min_probability_range CHECK (
+        min_probability >= 0 AND min_probability <= 1
+      );
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'category_ai_settings_window_range'
+      AND conrelid = 'public.category_ai_settings'::regclass
+  ) THEN
+    ALTER TABLE category_ai_settings
+      ADD CONSTRAINT category_ai_settings_window_range CHECK (
+        routing_window_minutes BETWEEN 1 AND 30
+      );
+  END IF;
+END $$;
+
+-- --------------------------------------------------------------------------
+-- A category run that failed says why, and one that did not carries no error
+--
+-- The live job and the backfill both replace a failed row with the first real
+-- answer for its message and label (the upsert over 'failed'). A row that
+-- failed without an error, or answered with one, would make "replace the
+-- failure" and "replace the error" two different sets of rows.
+-- --------------------------------------------------------------------------
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'ai_category_runs_failed_has_error'
+      AND conrelid = 'public.ai_category_runs'::regclass
+  ) THEN
+    ALTER TABLE ai_category_runs
+      ADD CONSTRAINT ai_category_runs_failed_has_error CHECK (
+        (outcome = 'failed') = (error IS NOT NULL)
       );
   END IF;
 END $$;

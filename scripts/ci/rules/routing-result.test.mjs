@@ -56,12 +56,13 @@ describe('routing-result', () => {
         '  (await moveToGroupIfElsewhere(id, groupId));',
         "  categories.setConversationCategory(id, null, { label: 'x' });",
         "  categories['setConversationCategory'](id, null, { label: 'x' });",
+        "  await setConversationCategoryOn(tx, id, null, { label: 'x' });",
         '  await afterRoutingChanged(id, { category: true, group: true });',
         '}',
       ),
     });
 
-    expect(found).toEqual([at(2), at(3), at(4), at(5), at(6)]);
+    expect(found).toEqual([at(2), at(3), at(4), at(5), at(6), at(7)]);
     expect(found[0].message).toMatch(
       /drops setConversationCategory\(\)'s answer.*afterRoutingChanged/,
     );
@@ -135,6 +136,34 @@ describe('routing-result', () => {
     expect(found[0].message).toMatch(
       /calls moveToGroupIfElsewhere\(\) and never afterRoutingChanged\(\)/,
     );
+  });
+
+  // A write that owes nothing by design says so at the call, with its reason;
+  // the waiver covers that call alone, and never a dropped answer.
+  it('lets a call waive the module half, with a reason, and only that call', async () => {
+    const found = await run({
+      'lib/writer.ts': body(
+        'export async function a(id: string, groupId: string) {',
+        '  // routing-result: no follow-up — files a backlog and fires nothing',
+        "  const write = await setConversationCategoryOn(tx, id, null, { label: 'x' });",
+        '  // routing-result: no follow-up',
+        '  if (!(await moveToGroupIfElsewhere(id, groupId))) return write;',
+        '}',
+      ),
+      'lib/dropped.ts': body(
+        'export async function b(id: string) {',
+        '  // routing-result: no follow-up — files a backlog and fires nothing',
+        "  await setConversationCategoryOn(tx, id, null, { label: 'x' });",
+        '}',
+      ),
+    });
+
+    expect(found).toEqual([
+      expect.objectContaining({ rule: 'routing-result', where: 'lib/dropped.ts:3' }),
+      at(5),
+    ]);
+    expect(found[0].message).toMatch(/drops setConversationCategoryOn\(\)'s answer/);
+    expect(found[1].message).toMatch(/never afterRoutingChanged/);
   });
 
   it('fails loudly when it finds too few writer calls to be checking anything', async () => {

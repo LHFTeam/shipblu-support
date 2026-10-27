@@ -9,8 +9,10 @@ import { fail, lineOfNode, parseSource, read, requireAtLeast, scannableSource } 
 // clocks re-timed on the new group's hours — `afterRoutingChanged` in
 // `lib/sla`, called once by whoever made the change
 // (`plans/ticket-category-routing.md`, Stage 4.0). Whether anything changed is
-// in the writer's answer and nowhere else: `setConversationCategory` writes
-// nothing for a category the ticket already carries or one retired since,
+// in the writer's answer and nowhere else: `setConversationCategory` — and
+// `setConversationCategoryOn`, its body for a caller already holding the
+// ticket's lock, as Jev's classifier does — writes nothing for a category the
+// ticket already carries or one retired since,
 // `moveToGroupIfElsewhere` nothing for the group the ticket is in, and
 // `assignConversation` handed a `groupId` answers `movedGroup`, false when the
 // ticket was already there or held by somebody it may not take from. A caller
@@ -18,9 +20,10 @@ import { fail, lineOfNode, parseSource, read, requireAtLeast, scannableSource } 
 // it either skips it, and a policy keyed on the category or group is never
 // reached, or calls it on every write, and a rule naming the group a ticket is
 // in re-selects on every pass. The router (Stage 5) moves the group through
-// `moveToGroupIfElsewhere`, so it is held now rather than remembered then. Jev
-// (4.1) decides under its own row lock; a writer of its own that updates the
-// column itself adds itself to WRITERS in the PR that lands it.
+// `moveToGroupIfElsewhere`, and Jev (4.1) writes through
+// `setConversationCategoryOn` under its own row lock, so both are held here. A
+// writer that updates the column itself adds itself to WRITERS in the PR that
+// lands it.
 //
 // So, outside tests, two halves:
 //
@@ -37,7 +40,13 @@ import { fail, lineOfNode, parseSource, read, requireAtLeast, scannableSource } 
 //     exports a writer of its own and so hands the answer on: `lib/assignment`
 //     answers `movedGroup`, `lib/categories/write.ts` wraps its transaction's
 //     writer. That is what catches a new caller — Jev, the router — that keeps
-//     the answer and never owes anything for it.
+//     the answer and never owes anything for it. A write that by design owes
+//     nothing says so where it is made, the way a single bare `console` takes
+//     an `eslint-disable-next-line` with its reason: a comment opening
+//     `routing-result: no follow-up — <why>` on the statement making the call.
+//     `backfill_category_ai`'s apply mode is the one so far, which files a
+//     backlog and fires nothing (plan 4.1). It waives this half only; the
+//     answer is still kept.
 //
 // What it cannot see: an answer kept and then ignored in a module that does
 // call `afterRoutingChanged` somewhere, which only reading the caller can judge
@@ -54,6 +63,7 @@ import { fail, lineOfNode, parseSource, read, requireAtLeast, scannableSource } 
 
 const WRITERS = new Set([
   'setConversationCategory',
+  'setConversationCategoryOn',
   'moveToGroupIfElsewhere',
   'assignConversation',
 ]);
@@ -153,6 +163,27 @@ function exportsAWriter(source) {
   );
 }
 
+const WAIVER = /routing-result: no follow-up\s+(—|--)\s+\S/;
+
+/**
+ * Whether the statement making the call opens with a waiver of the module
+ * half — a leading comment naming why this write owes no follow-up.
+ */
+function waived(call, source) {
+  let statement = call;
+  while (
+    statement.parent &&
+    !ts.isBlock(statement.parent) &&
+    !ts.isSourceFile(statement.parent) &&
+    !ts.isCaseClause(statement.parent) &&
+    !ts.isDefaultClause(statement.parent)
+  ) {
+    statement = statement.parent;
+  }
+  const comments = ts.getLeadingCommentRanges(source.text, statement.getFullStart()) ?? [];
+  return comments.some((range) => WAIVER.test(source.text.slice(range.pos, range.end)));
+}
+
 /** Whether the call's value, through any wrapper, is thrown away. */
 function discarded(call) {
   let node = call;
@@ -180,7 +211,7 @@ export function checkRoutingResultKept() {
         const writer = writerCalled(node);
         if (writer) {
           calls++;
-          firstWriter ??= { writer, node };
+          if (!waived(node, source)) firstWriter ??= { writer, node };
           if (discarded(node) && !answersThroughCarrier(writer, node)) {
             fail(
               rule,
@@ -203,8 +234,9 @@ export function checkRoutingResultKept() {
     }
   }
 
-  // Six calls outside tests today: the console's group and category cases,
-  // the engine's set_category, assign_group and auto_assign, and assignment's
-  // own move.
+  // Nine calls outside tests today: the console's group and category cases,
+  // the engine's set_category, assign_group and auto_assign, assignment's own
+  // move, the wrapper in lib/categories/write.ts, Jev's classifier, and the
+  // backfill's apply mode — waived from the module half, still counted here.
   requireAtLeast(rule, 'lib/ and app/', calls, 4, 'calls of a routing writer');
 }

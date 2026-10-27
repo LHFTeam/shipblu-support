@@ -22,7 +22,8 @@ import { sql } from 'drizzle-orm';
  *
  * `createTicket`'s `category_changed` is stamped too, though no second writer
  * can reach a row its own transaction has not committed: one spelling for every
- * category event, so Stage 4's ownership rule reads them all the same way. Its
+ * category event, so Jev's ownership rule (`categoryOwned`) reads them all the
+ * same way. Its
  * `priority_changed` keeps the column default, the one exception, for the same
  * reason it is harmless — nothing else can have written that ticket's priority
  * yet.

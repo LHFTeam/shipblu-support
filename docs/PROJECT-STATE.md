@@ -5,13 +5,19 @@ it is designed; **this file is about the state of the work** — what is live,
 what is merely built, what is left, and the mistakes that have already cost us
 time. Read both. Do not re-derive settled decisions.
 
-Last updated: 2026-10-25, against `main` at `48cb284`. The figures in §1 and §5
+Last updated: 2026-10-27, against `main` at `f761e5e`. The figures in §1 and §5
 were last re-measured as a whole against production on 2026-09-20, and a
 paragraph re-read since gives its own date; where a number here disagrees with
 an older paragraph elsewhere in the file, the older one has not been re-checked.
 
-**Production runs `48cb284`, deployed by hand on 2026-10-25, all six
-unsuspended services by 06:01:12 UTC:** web first, whose preDeploy applied
+**Production runs `f761e5e`, deployed by hand on 2026-10-26, all six services
+by 23:32 UTC:** release #426, which carries Stage 3.2 (#424) — a form's default
+category and the console's category chooser. Web went first, and its preDeploy
+applied `0049_form_default_category`; then the worker and the four crons
+(`plans/ticket-category-routing.md`, 3.2's deploy and checks).
+
+The release before it, `48cb284`, was deployed by hand on 2026-10-25, all six
+unsuspended services by 06:01:12 UTC: web first, whose preDeploy applied
 Stage 2.B's migration `0046_subcategory_names` (the SQL rename), then the crons
 and the worker. It is releases #413 and #415, which carry 2.B with #404, #407,
 #408, #409, #410, #412 and #414. The worker and crons were not suspended first,
@@ -1571,17 +1577,41 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
   second, by analogy with the 647 shadow subcategorisation calls (p50 234 ms) — and
   every row stores both.
 
+- **Jev's category classifier is built and switched off** (Stage 4.1 of
+  `plans/ticket-category-routing.md`; `lib/category-ai/`). Once on, it asks
+  which team's work each of the first five customer messages on an unanswered
+  ticket is, and under `apply` files the ticket — never over a category a
+  person, a rule, a form's default or an agent opening the ticket chose. Its
+  switch is on `/admin/categories` (`category_ai_settings`, no row = off), not
+  the key, which production already holds; the threshold beside it defaults to
+  0.6 and every answer records the one it met. Turning it on is 4.2's sequence:
+  `backfill_category_ai mode=record runLabel=<label>` over the archive, then
+  `shadow` for at least two weeks while a supervisor labels a sample, then
+  `apply`, then `backfill_category_ai mode=record` again under a fresh label with
+  no `since=` — it has no status scope, and must reach the oldest open ticket —
+  and `mode=apply fromLabel=<that label>`, which files only the open ones. Read
+  apply's dry run first: it names every rule filing would wake. The record
+  backfill is hand-run and sends customer text to TypeSafe whenever it is
+  started with the key set, whatever the switch says. Messenger and the coexistence number are
+  labelled like everything else: on Messenger, answered in Freshchat, nothing
+  here sets `first_responded_at`, so only the five-message cap stops it; on the
+  coexistence number the phone's first reply does. Rollback is the switch,
+  effective within thirty seconds per instance; nothing it wrote needs undoing
+  for that, and a category it set is changed like any other.
+
 ### 5.2 Live-provider verification
 
 Everything below passes unit tests. Each is a round trip, or the half of one
 nobody has run, that somebody has to actually watch against the real provider:
 
-- **The priority classifier, in shadow first** (`plans/priority-through-typesafe.md`).
-  It ships off. Set `PRIORITY_AI=shadow` in the `shipblu-support-production`
-  env group, beside `TYPESAFE_API_KEY` — never on a service, which would
-  silently win over the group — let a day of inbound traffic through, and read
-  the rows back by hand before `apply` — no real Jev response has been parsed
-  by this code. Per channel, since one channel is most of the volume:
+- **The priority classifier is live in `apply`** (`plans/priority-through-typesafe.md`).
+  It ran in `shadow` from 2026-10-09 (510 runs) and has run in `apply` since
+  12:35 UTC on 2026-10-13. Read on 2026-10-27: 1,361 runs in `apply`, of which
+  184 raised or set a ticket's priority — WhatsApp 74, Facebook 65, Instagram
+  33, Facebook comments 7, Instagram comments 3, webchat 2 — 279 held below the
+  threshold, 637 not raised and 261 unchanged. What is left to verify is the
+  threshold, against the agents' own corrections. Per channel, since one channel
+  is most of the volume:
 
   ```sql
   select c.channel, r.outcome, r.predicted, count(*),
