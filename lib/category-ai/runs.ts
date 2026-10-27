@@ -65,6 +65,29 @@ export function categorySkipReason(row: { sourceSystem: string; mergedIntoId: st
 }
 
 /**
+ * Why a ticket is in nobody's queue, so not one Jev files: deleted, spam,
+ * merged into another, or resolved or closed — work that is over, where
+ * filing it would only run the rules keyed on its category against a ticket
+ * nobody is routing. The live job asks it before and after its call, and the
+ * backfill's apply mode before filing, so the two never disagree about which
+ * tickets Jev may write to.
+ */
+export function queueRefusal(ticket: {
+  deletedAt: Date | null;
+  isSpam: boolean;
+  mergedIntoId: string | null;
+  statusCategory: string;
+}): string | null {
+  if (ticket.deletedAt) return 'deleted';
+  if (ticket.isSpam) return 'spam';
+  if (ticket.mergedIntoId) return 'merged';
+  if (ticket.statusCategory !== 'open' && ticket.statusCategory !== 'pending') {
+    return 'resolved or closed';
+  }
+  return null;
+}
+
+/**
  * One question to Jev and its answer, read against the keys it was offered.
  * Throws what the client throws; the caller decides what a failure means for
  * its run.

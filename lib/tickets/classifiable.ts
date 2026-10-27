@@ -93,3 +93,19 @@ function isMachineMail(meta: unknown): boolean {
   const flags = meta as Record<string, unknown>;
   return flags.isAutoReply === true || flags.isBounce === true;
 }
+
+/**
+ * The checks a stored message passes before either classifier queues a job for
+ * it, which need nothing but the message: a customer's reply, carrying words
+ * of their own. One copy, so the two enqueuers cannot come to disagree about
+ * which messages qualify, as `skipReason` keeps the two jobs from it.
+ */
+export function queueableMessage(message: {
+  kind: string;
+  direction: string;
+  bodyText: string;
+}): boolean {
+  return (
+    isSubcategorisableMessage(message.kind, message.direction) && hasCustomerText(message.bodyText)
+  );
+}

@@ -138,32 +138,60 @@ describe('routing-result', () => {
     );
   });
 
-  // A write that owes nothing by design says so at the call, with its reason;
-  // the waiver covers that call alone, and never a dropped answer.
-  it('lets a call waive the module half, with a reason, and only that call', async () => {
+  // A write that owes nothing by design is a writer of its own, which only its
+  // named module may call, and whose answer is still kept.
+  it('lets only the backfill file without a follow-up, and still keeps the answer', async () => {
     const found = await run({
+      'lib/category-ai/backfill.ts': body(
+        'export async function a(id: string) {',
+        "  const write = await fileBacklogCategory(tx, id, 'c', detail);",
+        '  return write;',
+        '}',
+      ),
       'lib/writer.ts': body(
-        'export async function a(id: string, groupId: string) {',
-        '  // routing-result: no follow-up — files a backlog and fires nothing',
-        "  const write = await setConversationCategoryOn(tx, id, null, { label: 'x' });",
-        '  // routing-result: no follow-up',
-        '  if (!(await moveToGroupIfElsewhere(id, groupId))) return write;',
+        'export async function b(id: string) {',
+        "  const write = await fileBacklogCategory(tx, id, 'c', detail);",
+        '  return write;',
         '}',
       ),
       'lib/dropped.ts': body(
-        'export async function b(id: string) {',
-        '  // routing-result: no follow-up — files a backlog and fires nothing',
-        "  await setConversationCategoryOn(tx, id, null, { label: 'x' });",
+        'export async function c(id: string) {',
+        "  await fileBacklogCategory(tx, id, 'c', detail);",
+        '}',
+      ),
+      // Its home exports it, and hands the answer on like any writer.
+      'lib/categories/write.ts': body(
+        'export async function fileBacklogCategory(tx: Tx, id: string, c: string, d: Detail) {',
+        "  return setConversationCategoryOn(tx, id, c, { label: 'jev' }, d);",
         '}',
       ),
     });
 
     expect(found).toEqual([
-      expect.objectContaining({ rule: 'routing-result', where: 'lib/dropped.ts:3' }),
-      at(5),
+      expect.objectContaining({ rule: 'routing-result', where: 'lib/dropped.ts:2' }),
+      expect.objectContaining({ rule: 'routing-result', where: 'lib/dropped.ts:2' }),
+      at(2),
     ]);
-    expect(found[0].message).toMatch(/drops setConversationCategoryOn\(\)'s answer/);
-    expect(found[1].message).toMatch(/never afterRoutingChanged/);
+    expect(found.map((each) => each.message)).toEqual([
+      expect.stringMatching(/is lib\/category-ai\/backfill\.ts's alone/),
+      expect.stringMatching(/drops fileBacklogCategory\(\)'s answer/),
+      expect.stringMatching(/is lib\/category-ai\/backfill\.ts's alone/),
+    ]);
+  });
+
+  it('no longer reads a comment as a waiver', async () => {
+    const found = await run({
+      'lib/writer.ts': body(
+        'export async function a(id: string) {',
+        '  // routing-result: no follow-up — files a backlog and fires nothing',
+        "  const write = await setConversationCategoryOn(tx, id, null, { label: 'x' });",
+        '  return write;',
+        '}',
+      ),
+    });
+
+    expect(found).toEqual([at(3)]);
+    expect(found[0].message).toMatch(/never afterRoutingChanged/);
   });
 
   it('fails loudly when it finds too few writer calls to be checking anything', async () => {

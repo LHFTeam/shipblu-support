@@ -7,6 +7,7 @@ import {
   conversations,
   messages,
   ticketCategories,
+  ticketStatuses,
 } from '@/db/schema';
 import {
   holdCategory,
@@ -26,6 +27,7 @@ import { categoryBaseline } from './baseline';
 import {
   CATEGORY_AI_ACTOR,
   CLASSIFIED_MESSAGE_CAP,
+  arrivedBefore,
   categoryOwned,
   decide,
   ownedByEvent,
@@ -35,12 +37,13 @@ import {
   type TicketFacts,
 } from './decide';
 import { categoryOptionsForAi } from './options';
-import { categoryRequest } from './request';
+import { categoryRequest, questionFingerprint } from './request';
 import {
   askJev,
   categorySkipReason,
   classifiableColumns,
   insertRun,
+  queueRefusal,
   recordFailure,
   type Executor,
 } from './runs';
@@ -58,7 +61,10 @@ const log = logger('classify_category');
  * can run minutes later, after a retry, after the switch was turned off, or by
  * hand. The settings are read uncached: a job that cannot read its switch goes
  * back to the queue rather than guessing it, and turning the classifier off
- * stops the jobs already queued at once.
+ * stops the jobs already queued at once. They are read again under the
+ * ticket's lock once Jev has answered, so a job already waiting on the call
+ * when an admin switches it off, or back to shadow, decides by the switch as it
+ * is then.
  */
 
 export type ClassifyResult =
@@ -110,25 +116,16 @@ export async function classifyMessageCategory(
   if (existing) return { status: 'already_classified' };
 
   const withContext = true;
-  const earlier = await earlierMessages(row.conversationId, row.createdAt, row.authorContactId);
   const categoryOptions = await categoryOptionsForAi();
 
   // A question that cannot be built — no active category, or one named
   // `unknown` — is a configuration state, the same for every message, so it
   // is logged and skipped rather than written as a failed row per message.
-  let built: ReturnType<typeof categoryRequest>;
+  // Its fingerprint is all a row decided without asking needs, so the
+  // message's context is read only once Jev is going to be asked.
+  let fingerprint: string;
   try {
-    built = categoryRequest(
-      {
-        channel: row.channel,
-        bodyText: row.bodyText,
-        earlier,
-        isPublicComment: isCommentTicket(row.channel, row.externalId),
-      },
-      categoryOptions,
-      typesafeModel(),
-      withContext,
-    );
+    fingerprint = questionFingerprint(categoryOptions);
   } catch (error) {
     log.error(`could not build the category question for message ${messageId}`, error);
     return { status: 'skipped', reason: `the question could not be built: ${errorMessage(error)}` };
@@ -141,7 +138,7 @@ export async function classifyMessageCategory(
     messageCreatedAt: row.createdAt,
     runLabel: CATEGORY_AI_LIVE_LABEL,
     mode,
-    requestFingerprint: built.fingerprint,
+    requestFingerprint: fingerprint,
     withContext,
     minProbability: settings.minProbability,
     baselineCategoryKey: baseline.categoryKey,
@@ -164,7 +161,7 @@ export async function classifyMessageCategory(
   // call reads both halves in one place.
   const current = await readTicket(db, row.conversationId, false);
   if (!current) return { status: 'gone' };
-  const leftBefore = leftTheQueue(current);
+  const leftBefore = queueRefusal(current);
   if (leftBefore) return { status: 'skipped', reason: leftBefore };
   const known = await ticketFacts(db, row.conversationId, current, at, mode);
   const before = preCallOutcome({ ...known, owned: known.ownedByEvent });
@@ -177,6 +174,19 @@ export async function classifyMessageCategory(
     if (!inserted) return { status: 'already_classified' };
     return { status: 'recorded', outcome: before, predicted: null };
   }
+
+  const context = await earlierMessages(row.conversationId, row.createdAt, row.authorContactId);
+  const built = categoryRequest(
+    {
+      channel: row.channel,
+      bodyText: row.bodyText,
+      earlier: context,
+      isPublicComment: isCommentTicket(row.channel, row.externalId),
+    },
+    categoryOptions,
+    typesafeModel(),
+    withContext,
+  );
 
   let asked: Awaited<ReturnType<typeof askJev>>;
   try {
@@ -211,25 +221,37 @@ export async function classifyMessageCategory(
   const decided = await db.transaction(async (tx) => {
     const ticket = await readTicket(tx, row.conversationId, true);
     if (!ticket) return null;
-    // Deleted, marked spam or merged while Jev was asked: nobody's queue holds
-    // it any more, so nothing is written and no rule pass is owed.
-    const left = leftTheQueue(ticket);
+    // Deleted, marked spam, merged, resolved or closed while Jev was asked:
+    // nobody's queue holds it any more, so nothing is written and no rule pass
+    // is owed.
+    const left = queueRefusal(ticket);
     if (left) return { kind: 'left' as const, reason: left };
 
-    const facts = await ticketFacts(tx, row.conversationId, ticket, at, mode);
+    // The switch as it is now, not as it was before the call: an admin who
+    // turns the classifier off because of what it filed stops this write too.
+    // Off is the switch found off, which leaves no row.
+    const now = await readCategoryAiSettings(tx);
+    if (now.mode === 'off') {
+      return { kind: 'left' as const, reason: 'the category classifier was switched off' };
+    }
+
+    const facts = await ticketFacts(tx, row.conversationId, ticket, at, now.mode);
     let outcome: CategoryOutcome = decide({
       ...facts,
-      mode,
+      mode: now.mode,
       predictedKey: predicted,
       probability: prediction.probability,
-      minProbability: settings.minProbability,
+      minProbability: now.minProbability,
     });
 
     // The category held before the run row is written, so a category an admin
     // retired while Jev was being asked is recorded as the failure it is
-    // rather than as a write that then did not happen. A failed row does not
-    // settle, does not count towards the cap, and a run by hand fills it.
-    const categoryId = outcome === 'applied' ? built.keyToId[predicted] : undefined;
+    // rather than as a write that then did not happen. In shadow too, which
+    // would otherwise settle on an answer `apply` could not write. A failed
+    // row does not settle, does not count towards the cap, and a run by hand
+    // fills it.
+    const categoryId =
+      outcome === 'applied' || outcome === 'would_apply' ? built.keyToId[predicted] : undefined;
     let error: string | null = null;
     if (categoryId) {
       const held = await holdCategory(tx, categoryId);
@@ -244,6 +266,8 @@ export async function classifyMessageCategory(
     // per label is the table's promise, and only a `failed` row gives way.
     const inserted = await insertRun(tx, {
       ...answered,
+      mode: now.mode,
+      minProbability: now.minProbability,
       outcome,
       error,
       categoryKeyBefore: ticket.categoryKey,
@@ -316,15 +340,8 @@ type TicketState = {
   deletedAt: Date | null;
   isSpam: boolean;
   mergedIntoId: string | null;
+  statusCategory: string;
 };
-
-/** Why a ticket that was in a queue when the job started is in none now. */
-function leftTheQueue(ticket: TicketState): string | null {
-  if (ticket.deletedAt) return 'deleted';
-  if (ticket.isSpam) return 'spam';
-  if (ticket.mergedIntoId) return 'merged';
-  return null;
-}
 
 /**
  * The ticket's category and whether anybody has answered it, and the key of
@@ -343,11 +360,13 @@ async function readTicket(
       deletedAt: conversations.deletedAt,
       isSpam: conversations.isSpam,
       mergedIntoId: conversations.mergedIntoId,
+      statusCategory: ticketStatuses.category,
     })
     .from(conversations)
+    .innerJoin(ticketStatuses, eq(ticketStatuses.id, conversations.statusId))
     .where(eq(conversations.id, conversationId))
     .limit(1);
-  const [ticket] = lock ? await query.for('update') : await query;
+  const [ticket] = lock ? await query.for('update', { of: conversations }) : await query;
   if (!ticket) return null;
 
   let categoryKey: string | null = null;
@@ -404,7 +423,10 @@ async function ticketFacts(
     const data = event.data as Record<string, unknown> | null;
     const writtenAt = typeof data?.messageCreatedAt === 'string' ? data.messageCreatedAt : null;
     const answered = typeof data?.messageId === 'string' ? data.messageId : null;
-    return writtenAt !== null && earlier(new Date(writtenAt), answered, at);
+    return (
+      writtenAt !== null &&
+      arrivedBefore({ createdAt: new Date(writtenAt), messageId: answered }, at) < 0
+    );
   });
 
   const [settling] = await executor
@@ -447,14 +469,4 @@ async function ticketFacts(
     settled: settledByWrite || Boolean(settling),
     capped: ticket.firstRespondedAt !== null || (asked?.value ?? 0) >= CLASSIFIED_MESSAGE_CAP,
   };
-}
-
-/** Whether a message, by its `created_at` then its id, was written before `at`. */
-function earlier(
-  createdAt: Date,
-  messageId: string | null,
-  at: { messageId: string; createdAt: Date },
-): boolean {
-  if (createdAt.getTime() !== at.createdAt.getTime()) return createdAt < at.createdAt;
-  return messageId !== null && messageId < at.messageId;
 }

@@ -40,13 +40,14 @@ import { fail, lineOfNode, parseSource, read, requireAtLeast, scannableSource } 
 //     exports a writer of its own and so hands the answer on: `lib/assignment`
 //     answers `movedGroup`, `lib/categories/write.ts` wraps its transaction's
 //     writer. That is what catches a new caller — Jev, the router — that keeps
-//     the answer and never owes anything for it. A write that by design owes
-//     nothing says so where it is made, the way a single bare `console` takes
-//     an `eslint-disable-next-line` with its reason: a comment opening
-//     `routing-result: no follow-up — <why>` on the statement making the call.
-//     `backfill_category_ai`'s apply mode is the one so far, which files a
-//     backlog and fires nothing (plan 4.1). It waives this half only; the
-//     answer is still kept.
+//     the answer and never owes anything for it.
+//
+// A write that by design owes nothing is a writer of its own, named in
+// NO_FOLLOW_UP with the one module that may call it, so the exemption is a
+// property of a function a reviewer can read rather than of a comment any call
+// site could carry. `fileBacklogCategory` is the one so far:
+// `backfill_category_ai`'s apply mode files a backlog and fires nothing (plan
+// 4.1). Its answer is still kept, and a call from any other module fails.
 //
 // What it cannot see: an answer kept and then ignored in a module that does
 // call `afterRoutingChanged` somewhere, which only reading the caller can judge
@@ -67,6 +68,9 @@ const WRITERS = new Set([
   'moveToGroupIfElsewhere',
   'assignConversation',
 ]);
+
+/** Writers that owe no follow-up by design, each with the one module that may call it. */
+const NO_FOLLOW_UP = new Map([['fileBacklogCategory', 'lib/category-ai/backfill.ts']]);
 
 /** Wrappers that change nothing about whether a value is used. */
 function passesThrough(node) {
@@ -141,7 +145,7 @@ function calleeName(call) {
 
 function writerCalled(call) {
   const name = calleeName(call);
-  if (!name || !WRITERS.has(name)) return null;
+  if (!name || !(WRITERS.has(name) || NO_FOLLOW_UP.has(name))) return null;
   if (name === 'assignConversation' && !canNameAGroup(call.arguments[1])) return null;
   return name;
 }
@@ -154,34 +158,16 @@ function exportsAWriter(source) {
   return source.statements.some(
     (statement) =>
       exported(statement) &&
-      ((ts.isFunctionDeclaration(statement) && WRITERS.has(statement.name?.text)) ||
+      ((ts.isFunctionDeclaration(statement) && isWriter(statement.name?.text)) ||
         (ts.isVariableStatement(statement) &&
           statement.declarationList.declarations.some(
-            (declaration) =>
-              ts.isIdentifier(declaration.name) && WRITERS.has(declaration.name.text),
+            (declaration) => ts.isIdentifier(declaration.name) && isWriter(declaration.name.text),
           ))),
   );
 }
 
-const WAIVER = /routing-result: no follow-up\s+(—|--)\s+\S/;
-
-/**
- * Whether the statement making the call opens with a waiver of the module
- * half — a leading comment naming why this write owes no follow-up.
- */
-function waived(call, source) {
-  let statement = call;
-  while (
-    statement.parent &&
-    !ts.isBlock(statement.parent) &&
-    !ts.isSourceFile(statement.parent) &&
-    !ts.isCaseClause(statement.parent) &&
-    !ts.isDefaultClause(statement.parent)
-  ) {
-    statement = statement.parent;
-  }
-  const comments = ts.getLeadingCommentRanges(source.text, statement.getFullStart()) ?? [];
-  return comments.some((range) => WAIVER.test(source.text.slice(range.pos, range.end)));
+function isWriter(name) {
+  return WRITERS.has(name) || NO_FOLLOW_UP.has(name);
 }
 
 /** Whether the call's value, through any wrapper, is thrown away. */
@@ -200,7 +186,7 @@ export function checkRoutingResultKept() {
     if (/\.test\.[mc]?[jt]sx?$/.test(file)) continue;
     // Only a module that names a writer is parsed.
     const text = read(file);
-    if (![...WRITERS].some((name) => text.includes(name))) continue;
+    if (![...WRITERS, ...NO_FOLLOW_UP.keys()].some((name) => text.includes(name))) continue;
 
     const source = parseSource(file);
     let firstWriter = null;
@@ -211,7 +197,15 @@ export function checkRoutingResultKept() {
         const writer = writerCalled(node);
         if (writer) {
           calls++;
-          if (!waived(node, source)) firstWriter ??= { writer, node };
+          const confinedTo = NO_FOLLOW_UP.get(writer);
+          if (confinedTo === undefined) firstWriter ??= { writer, node };
+          else if (file !== confinedTo) {
+            fail(
+              rule,
+              `${file}:${lineOfNode(source, node)}`,
+              `calls ${writer}(), which writes without the follow-up and is ${confinedTo}'s alone — write through a writer that owes afterRoutingChanged(), or argue for another no-follow-up writer in NO_FOLLOW_UP`,
+            );
+          }
           if (discarded(node) && !answersThroughCarrier(writer, node)) {
             fail(
               rule,
@@ -234,9 +228,9 @@ export function checkRoutingResultKept() {
     }
   }
 
-  // Nine calls outside tests today: the console's group and category cases,
+  // Ten calls outside tests today: the console's group and category cases,
   // the engine's set_category, assign_group and auto_assign, assignment's own
-  // move, the wrapper in lib/categories/write.ts, Jev's classifier, and the
-  // backfill's apply mode — waived from the module half, still counted here.
+  // move, the two wrappers in lib/categories/write.ts, Jev's classifier, and
+  // the backfill's apply mode through `fileBacklogCategory`.
   requireAtLeast(rule, 'lib/ and app/', calls, 4, 'calls of a routing writer');
 }

@@ -4,6 +4,7 @@ import { runAutomations } from '@/lib/automations';
 import { subcategoriseFromMessage } from '@/lib/subcategorise/apply';
 import { enqueueCategoryClassification } from '@/lib/category-ai/enqueue';
 import { enqueuePriorityClassification } from '@/lib/priority-ai/enqueue';
+import { classifierTicket } from '@/lib/tickets/classifier-ticket';
 import { linkShipmentsFromMessage } from '@/lib/shipments/links';
 import { scheduleSurvey } from '@/lib/csat';
 import { applySlaOnCreate, onCustomerReply } from '@/lib/sla';
@@ -205,8 +206,11 @@ export async function afterMessageStored(message: StoredMessage): Promise<void> 
   // Only queued here; the provider call is a job (`classify_priority`). Every
   // caller runs this after the message's insert has committed, which is what
   // lets the job treat a missing row as gone rather than not yet written.
+  // One read of the ticket between the two enqueuers, made only if one of
+  // them gets as far as needing it.
+  const ticket = classifierTicket(message.conversationId);
   try {
-    await enqueuePriorityClassification(message);
+    await enqueuePriorityClassification(message, ticket);
   } catch (error) {
     log.error(`could not queue priority classification for ${message.messageId}`, error);
   }
@@ -215,7 +219,7 @@ export async function afterMessageStored(message: StoredMessage): Promise<void> 
   // try/catch for the reason the two above have theirs: one classifier failing
   // to queue must not stop the other.
   try {
-    await enqueueCategoryClassification(message);
+    await enqueueCategoryClassification(message, ticket);
   } catch (error) {
     log.error(`could not queue category classification for ${message.messageId}`, error);
   }

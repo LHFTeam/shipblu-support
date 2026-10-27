@@ -10,7 +10,6 @@ import {
   lt,
   ne,
   notInArray,
-  sql,
   type SQL,
 } from 'drizzle-orm';
 import { db } from '@/db/client';
@@ -27,7 +26,7 @@ import {
   ticketStatuses,
 } from '@/db/schema';
 import { activeRules } from '@/lib/automations';
-import { setConversationCategoryOn, type CategoryEventDetail } from '@/lib/categories/write';
+import { fileBacklogCategory, type CategoryEventDetail } from '@/lib/categories/write';
 import { errorMessage } from '@/lib/errors';
 import { logger } from '@/lib/log';
 import { matches } from '@/lib/rules/conditions';
@@ -45,16 +44,29 @@ import { categoryBaseline } from './baseline';
 import {
   CATEGORY_AI_ACTOR,
   CLASSIFIED_MESSAGE_CAP,
+  arrivedBefore,
   categoryOwned,
   decide,
   eventsKnownAt,
+  lastCategory,
+  ownedByEvent,
   preCallOutcome,
   settlingOutcomes,
+  writtenByJev,
+  type CategoryEvent,
   type CategoryOutcome,
 } from './decide';
 import { categoryOptionsForAi } from './options';
 import { categoryQuestion, categoryRequest, questionFingerprint } from './request';
-import { askJev, categorySkipReason, classifiableColumns, insertRun, recordFailure } from './runs';
+import {
+  askJev,
+  categorySkipReason,
+  classifiableColumns,
+  insertRun,
+  queueRefusal,
+  recordFailure,
+  type Executor,
+} from './runs';
 import { readCategoryAiSettings } from './settings';
 
 /**
@@ -109,11 +121,19 @@ export type RecordRun = Scope & {
 
 export type RecordTally = {
   tickets: number;
-  /** Messages the classifier never asks about: a passer-by's, machine mail, no words. */
+  /**
+   * Messages the classifier never asks about: a passer-by's, machine mail, no
+   * words — and any after the ticket's first reply, which the live job is
+   * never queued for, so a record label covers the messages a live one would.
+   */
   skipped: number;
   /** Already answered under this label, by an earlier run of it. */
   resumed: number;
-  /** Asked of Jev — or, in a dry run, that would have been. */
+  /**
+   * Asked of Jev. In a dry run, the most that would have been: the cap is
+   * counted, but which answer would have settled the ticket is not known
+   * without asking, so a real run asks this many or fewer.
+   */
   asked: number;
   /** A transient failure, which stopped its ticket until the label is run again. */
   transient: number;
@@ -242,7 +262,8 @@ export async function recordCategoryRun(run: RecordRun): Promise<RecordResult> {
     for (const ticket of batch) {
       seen += 1;
       cursor = ticket.id;
-      await recordTicket(ticket.id, ticket.channel, context);
+      const stopped = await recordTicket(ticket.id, ticket.channel, context);
+      if (stopped) return { status: 'refused', reason: stopped.stop };
     }
   }
 
@@ -259,21 +280,23 @@ type TicketContext = {
   tallies: Map<string, RecordTally>;
 };
 
-/** Whether a message came before another: its `created_at`, then its id, as the live run orders them. */
-function arrivedBefore(
-  a: { createdAt: Date; messageId: string },
-  b: { createdAt: Date; messageId: string },
-): number {
-  const byTime = a.createdAt.getTime() - b.createdAt.getTime();
-  if (byTime !== 0) return byTime;
-  return a.messageId < b.messageId ? -1 : a.messageId > b.messageId ? 1 : 0;
-}
+/**
+ * The columns a message is judged by, without the shipment test the live job
+ * reads — a backfill reads its own as of each message (`linkedBy`) — and with
+ * the ticket's column, which says whether anything filed it without an event.
+ */
+const { hasShipment: _now, ...judgedColumns } = classifiableColumns;
+const recordColumns = { ...judgedColumns, categoryId: conversations.categoryId };
 
+/**
+ * One ticket's messages, judged in the order they arrived. Answers `stop` with
+ * the reason when a refusal says no other ticket would be answered either.
+ */
 async function recordTicket(
   conversationId: string,
   channel: string,
   context: TicketContext,
-): Promise<void> {
+): Promise<{ stop: string } | null> {
   const { run } = context;
   const tally = context.tallies.get(channel) ?? emptyTally();
   context.tallies.set(channel, tally);
@@ -283,7 +306,7 @@ async function recordTicket(
   // compares them, to the millisecond and then by id.
   const rows = (
     await db
-      .select(classifiableColumns)
+      .select(recordColumns)
       .from(messages)
       .innerJoin(conversations, eq(conversations.id, messages.conversationId))
       .where(
@@ -294,7 +317,7 @@ async function recordTicket(
         ),
       )
   ).sort(arrivedBefore);
-  if (rows.length === 0) return;
+  if (rows.length === 0) return null;
 
   const events = await db
     .select({
@@ -352,12 +375,21 @@ async function recordTicket(
         (link.detectedAt !== null && link.detectedAt <= message.createdAt),
     );
 
+  // A column no event explains — a hand-written update, a path from before
+  // the events — was somebody's choice, as the live job and apply mode both
+  // read it, and from before any message here.
+  const unexplained = rows[0]!.categoryId !== lastCategory(events);
+
   let settled = false;
   let asked = 0;
   const settles = settlingOutcomes('record');
 
   for (const row of rows) {
     if (skipReason(row) ?? categorySkipReason(row)) {
+      tally.skipped += 1;
+      continue;
+    }
+    if (row.firstRespondedAt !== null && row.firstRespondedAt <= row.createdAt) {
       tally.skipped += 1;
       continue;
     }
@@ -376,11 +408,9 @@ async function recordTicket(
     const before = eventsKnownAt(events, row.createdAt);
     const column = lastCategory(before);
     const facts = {
-      owned: categoryOwned(before, column),
+      owned: unexplained || categoryOwned(before, column),
       settled,
-      capped:
-        asked >= CLASSIFIED_MESSAGE_CAP ||
-        (row.firstRespondedAt !== null && row.firstRespondedAt <= row.createdAt),
+      capped: asked >= CLASSIFIED_MESSAGE_CAP,
     };
 
     const baseline = categoryBaseline(row.bodyText);
@@ -426,7 +456,10 @@ async function recordTicket(
       context.model,
       true,
     );
-    if (run.dryRun) continue;
+    if (run.dryRun) {
+      asked += 1;
+      continue;
+    }
 
     let answer: Awaited<ReturnType<typeof askJev>>;
     try {
@@ -440,11 +473,18 @@ async function recordTicket(
       if (error.isTransient) {
         tally.transient += 1;
         log.warn(`stopped ticket ${conversationId} at message ${row.messageId}`, error);
-        return;
+        return null;
+      }
+      // A refused key is the same refusal for every ticket after this one:
+      // the run stops rather than paying a call and writing a failed row per
+      // ticket across the archive. Nothing is written for this message, so a
+      // re-run once the key is fixed starts from it.
+      if (error.status === 401 || error.status === 403) {
+        return { stop: `TypeSafe refused the key (${error.status}): ${errorMessage(error)}` };
       }
       await recordFailure({ ...fields, error: errorMessage(error) });
       tally.outcomes.failed += 1;
-      return;
+      return null;
     }
 
     const { response, prediction } = answer;
@@ -469,16 +509,6 @@ async function recordTicket(
     tally.outcomes[outcome] += 1;
     asked += 1;
     if ((settles as readonly string[]).includes(outcome)) settled = true;
-  }
-}
-
-/** The category the last `category_changed` among `events` left, or null. */
-function lastCategory(events: readonly { type: string; data: unknown }[]): string | null {
-  for (let i = events.length - 1; i >= 0; i--) {
-    const event = events[i]!;
-    if (event.type !== 'category_changed') continue;
-    const to = (event.data as { to?: unknown } | null)?.to;
-    return typeof to === 'string' ? to : null;
   }
   return null;
 }
@@ -510,14 +540,9 @@ export type ApplyFacts = {
  * write — and the backfill would put an older answer over a live one.
  */
 export function applyRefusal(ticket: ApplyFacts): string | null {
-  if (ticket.deletedAt) return 'deleted';
-  if (ticket.isSpam) return 'spam';
-  if (ticket.mergedIntoId) return 'merged';
-  if (ticket.sourceSystem === 'import') return 'imported history';
+  const refusal = queueRefusal(ticket) ?? categorySkipReason(ticket);
+  if (refusal) return refusal;
   if (isReadOnlyChannel(ticket.channel)) return 'a read-only channel';
-  if (ticket.statusCategory !== 'open' && ticket.statusCategory !== 'pending') {
-    return 'resolved or closed';
-  }
   if (ticket.ownedByEvent) return 'owned';
   if (ticket.filedByJev) return 'filed by Jev already';
   // Filed with no event saying by whom: a hand-written update, a test. Theirs,
@@ -549,18 +574,34 @@ export type ApplyResult =
       rules: RuleReport[];
     };
 
-const ownedByEvent = sql<boolean>`exists (
-  select 1 from ${conversationEvents}
-  where ${conversationEvents.conversationId} = ${conversations.id}
-    and (${conversationEvents.type} = 'opened_by_agent'
-      or (${conversationEvents.type} = 'category_changed'
-        and ${conversationEvents.actorLabel} is distinct from ${CATEGORY_AI_ACTOR})))`;
-
-const filedByJev = sql<boolean>`exists (
-  select 1 from ${conversationEvents}
-  where ${conversationEvents.conversationId} = ${conversations.id}
-    and ${conversationEvents.type} = 'category_changed'
-    and ${conversationEvents.actorLabel} = ${CATEGORY_AI_ACTOR})`;
+/**
+ * The events ownership is read from, by ticket, for every ticket `where`
+ * names — read through `ownedByEvent` and `writtenByJev` in `decide.ts`, the
+ * same TypeScript the live job asks, so a new kind of owner added there is
+ * one this mode honours too.
+ */
+async function categoryEvents(
+  executor: Executor,
+  where: SQL,
+): Promise<Map<string, CategoryEvent[]>> {
+  const rows = await executor
+    .select({
+      conversationId: conversationEvents.conversationId,
+      type: conversationEvents.type,
+      actorLabel: conversationEvents.actorLabel,
+      data: conversationEvents.data,
+    })
+    .from(conversationEvents)
+    .where(and(inArray(conversationEvents.type, ['category_changed', 'opened_by_agent']), where))
+    .orderBy(asc(conversationEvents.createdAt), asc(conversationEvents.id));
+  const byTicket = new Map<string, CategoryEvent[]>();
+  for (const { conversationId, ...event } of rows) {
+    const list = byTicket.get(conversationId);
+    if (list) list.push(event);
+    else byTicket.set(conversationId, [event]);
+  }
+  return byTicket;
+}
 
 /**
  * Apply mode: each ticket in scope with a settling answer under `fromLabel`
@@ -569,6 +610,11 @@ const filedByJev = sql<boolean>`exists (
  * filed it.
  */
 export async function applyCategoryRun(run: ApplyRun): Promise<ApplyResult> {
+  // The live label's `would_apply` rows are shadow answers, which settled
+  // nothing anybody evaluated as a backlog; the payload refuses it too.
+  if (run.fromLabel === CATEGORY_AI_LIVE_LABEL) {
+    return { status: 'refused', reason: `"${CATEGORY_AI_LIVE_LABEL}" is the live classifier's` };
+  }
   const options = await categoryOptionsForAi();
   if (options.length === 0) return { status: 'refused', reason: 'no active categories to offer' };
 
@@ -605,8 +651,6 @@ export async function applyCategoryRun(run: ApplyRun): Promise<ApplyResult> {
       statusCategory: ticketStatuses.category,
       requesterEmail: contacts.primaryEmail,
       formSlug: ticketForms.slug,
-      ownedByEvent,
-      filedByJev,
     })
     .from(aiCategoryRuns)
     .innerJoin(conversations, eq(conversations.id, aiCategoryRuns.conversationId))
@@ -627,6 +671,22 @@ export async function applyCategoryRun(run: ApplyRun): Promise<ApplyResult> {
       asc(aiCategoryRuns.messageId),
     );
 
+  const events = await categoryEvents(
+    db,
+    inArray(
+      conversationEvents.conversationId,
+      db
+        .selectDistinct({ id: aiCategoryRuns.conversationId })
+        .from(aiCategoryRuns)
+        .where(
+          and(
+            eq(aiCategoryRuns.runLabel, run.fromLabel),
+            eq(aiCategoryRuns.outcome, 'would_apply'),
+          ),
+        ),
+    ),
+  );
+
   const rules = [
     ...(await activeRules('on_update')).map((rule) => ({ ...rule, trigger: 'on_update' as const })),
     ...(await activeRules('time_based')).map((rule) => ({
@@ -643,9 +703,14 @@ export async function applyCategoryRun(run: ApplyRun): Promise<ApplyResult> {
   let filed = 0;
   for (const answer of settling) {
     const categoryId = answer.predictedKey ? keyToId[answer.predictedKey] : undefined;
+    const history = events.get(answer.conversation.id) ?? [];
     const refusal =
-      applyRefusal({ ...answer.conversation, ...answer }) ??
-      (categoryId ? null : 'category retired since');
+      applyRefusal({
+        ...answer.conversation,
+        statusCategory: answer.statusCategory,
+        ownedByEvent: ownedByEvent(history),
+        filedByJev: writtenByJev(history),
+      }) ?? (categoryId ? null : 'category retired since');
     if (refusal || !categoryId) {
       leave(refusal ?? 'category retired since');
       continue;
@@ -654,7 +719,9 @@ export async function applyCategoryRun(run: ApplyRun): Promise<ApplyResult> {
     filed += 1;
 
     // What filing it would wake. Only the category changes between the two
-    // readings, so a rule whose answer differs is one keyed on it.
+    // readings, so a rule whose answer differs is one keyed on it. Counted
+    // once the ticket is filed — in a dry run, once it would be — so a ticket
+    // the locked re-check refuses wakes nothing in the report either.
     const source: FactSource = {
       conversation: answer.conversation,
       statusCategory: answer.statusCategory,
@@ -666,6 +733,22 @@ export async function applyCategoryRun(run: ApplyRun): Promise<ApplyResult> {
       { ...source, conversation: { ...answer.conversation, categoryId } },
       now,
     );
+
+    if (!run.dryRun) {
+      const outcome = await fileTicket(answer.conversation.id, categoryId, {
+        probability: answer.probability,
+        model: answer.model,
+        messageId: answer.messageId,
+        messageCreatedAt: answer.messageCreatedAt.toISOString(),
+        runLabel: run.fromLabel,
+      });
+      if (outcome !== 'applied') {
+        leave(outcome);
+        continue;
+      }
+    }
+    applied += 1;
+
     for (const rule of rules) {
       const was = matches(rule.conditions, without);
       const would = matches(rule.conditions, withCategory);
@@ -681,21 +764,6 @@ export async function applyCategoryRun(run: ApplyRun): Promise<ApplyResult> {
       else report.stops += 1;
       reports.set(key, report);
     }
-
-    if (run.dryRun) {
-      applied += 1;
-      continue;
-    }
-
-    const outcome = await fileTicket(answer.conversation.id, categoryId, {
-      probability: answer.probability,
-      model: answer.model,
-      messageId: answer.messageId,
-      messageCreatedAt: answer.messageCreatedAt.toISOString(),
-      runLabel: run.fromLabel,
-    });
-    if (outcome === 'applied') applied += 1;
-    else leave(outcome);
   }
 
   return {
@@ -737,21 +805,28 @@ async function fileTicket(
         deletedAt: conversations.deletedAt,
         mergedIntoId: conversations.mergedIntoId,
         categoryId: conversations.categoryId,
-        ownedByEvent,
-        filedByJev,
       })
       .from(conversations)
       .innerJoin(ticketStatuses, eq(ticketStatuses.id, conversations.statusId))
       .where(eq(conversations.id, conversationId))
       .for('update', { of: conversations });
     if (!locked) return 'gone';
-    const refusal = applyRefusal(locked);
+    const history =
+      (await categoryEvents(tx, eq(conversationEvents.conversationId, conversationId))).get(
+        conversationId,
+      ) ?? [];
+    const refusal = applyRefusal({
+      ...locked,
+      ownedByEvent: ownedByEvent(history),
+      filedByJev: writtenByJev(history),
+    });
     if (refusal) return refusal;
 
-    // routing-result: no follow-up — the backfill labels a backlog and never
-    // retargets it: no rule pass, no SLA policy chosen again, no router (plan
-    // 4.1, "It fires nothing"). Its report names the rules filing would wake.
-    const write = await setConversationCategoryOn(
+    // The backfill labels a backlog and never retargets it: no rule pass, no
+    // SLA policy chosen again, no router (plan 4.1, "It fires nothing"), so it
+    // writes through the one writer that owes no follow-up. Its report names
+    // the rules filing would wake.
+    const write = await fileBacklogCategory(
       tx,
       conversationId,
       categoryId,

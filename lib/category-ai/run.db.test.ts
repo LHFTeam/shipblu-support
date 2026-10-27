@@ -628,6 +628,133 @@ describe('classifyMessageCategory, what is asked about', () => {
   });
 });
 
+/** TypeSafe answering `choice`, once `during` has happened — what changed while it was asked. */
+function answersAfter(during: () => Promise<void>, choice = 'sales', probability = 0.9) {
+  return stubFetch(async () => {
+    await during();
+    return Response.json({
+      model: 'jev-1.13.0',
+      answers: {
+        ticket_category: {
+          type: 'choice',
+          choice,
+          probabilities: { [choice]: probability },
+          confidence: 0.8,
+        },
+      },
+    });
+  });
+}
+
+async function statusNamed(name: string): Promise<string> {
+  const [row] = await db
+    .select({ id: ticketStatuses.id })
+    .from(ticketStatuses)
+    .where(eq(ticketStatuses.name, name));
+  return row!.id;
+}
+
+describe('classifyMessageCategory, what changed while Jev was asked', () => {
+  // An admin switching the classifier off because of what it filed stops the
+  // write already waiting on its answer, and leaves no row: the switch found
+  // off.
+  it('writes nothing once the switch was turned off during the call', async () => {
+    answersAfter(() => mode('off'));
+    const { id } = await ticket();
+    const message = await inbound(id, 'بكام الشحن؟');
+
+    await expect(classifyMessageCategory(message, { baseUrl: BASE })).resolves.toEqual({
+      status: 'skipped',
+      reason: 'the category classifier was switched off',
+    });
+    expect(await carried(id)).toBeNull();
+    expect(await runsOf(id)).toEqual([]);
+  });
+
+  it('records a shadow answer once the switch went back to shadow', async () => {
+    answersAfter(() => mode('shadow'));
+    const { id } = await ticket();
+    const message = await inbound(id, 'بكام الشحن؟');
+
+    await expect(classifyMessageCategory(message, { baseUrl: BASE })).resolves.toMatchObject({
+      status: 'recorded',
+      outcome: 'would_apply',
+    });
+    expect(await carried(id)).toBeNull();
+    const [row] = await db
+      .select({ mode: aiCategoryRuns.mode })
+      .from(aiCategoryRuns)
+      .where(eq(aiCategoryRuns.conversationId, id));
+    expect(row).toEqual({ mode: 'shadow' });
+  });
+
+  it('weighs the answer against the threshold as it is once answered', async () => {
+    answersAfter(() => mode('apply', 0.95), 'sales', 0.9);
+    const { id } = await ticket();
+    const message = await inbound(id, 'بكام الشحن؟');
+
+    await expect(classifyMessageCategory(message, { baseUrl: BASE })).resolves.toMatchObject({
+      outcome: 'below_threshold',
+    });
+    expect(await runsOf(id)).toEqual([
+      expect.objectContaining({ outcome: 'below_threshold', minProbability: 0.95 }),
+    ]);
+  });
+
+  it('never asks about a resolved ticket, as the backfill never files one', async () => {
+    const calls = answers('sales');
+    const { id } = await ticket({ statusId: await statusNamed('Resolved') });
+    const message = await inbound(id, 'شكرا');
+
+    await expect(classifyMessageCategory(message, { baseUrl: BASE })).resolves.toEqual({
+      status: 'skipped',
+      reason: 'resolved or closed',
+    });
+    expect(calls).not.toHaveBeenCalled();
+    expect(await runsOf(id)).toEqual([]);
+  });
+
+  it('files nothing on a ticket resolved during the call', async () => {
+    const { id } = await ticket();
+    const resolved = await statusNamed('Resolved');
+    answersAfter(async () => {
+      await db.update(conversations).set({ statusId: resolved }).where(eq(conversations.id, id));
+    });
+    const message = await inbound(id, 'شكرا');
+
+    await expect(classifyMessageCategory(message, { baseUrl: BASE })).resolves.toEqual({
+      status: 'skipped',
+      reason: 'resolved or closed',
+    });
+    expect(await carried(id)).toBeNull();
+    expect(await runsOf(id)).toEqual([]);
+  });
+
+  // The shadow measures the classifier apply turns on: an answer apply could
+  // not write must not settle the ticket in shadow either.
+  it('records a category retired during a shadow call as the failure apply would', async () => {
+    await mode('shadow');
+    answersAfter(async () => {
+      await db
+        .update(ticketCategories)
+        .set({ isActive: false })
+        .where(eq(ticketCategories.key, 'sales'));
+    });
+    const { id } = await ticket();
+    const message = await inbound(id, 'بكام الشحن؟');
+
+    await expect(classifyMessageCategory(message, { baseUrl: BASE })).resolves.toMatchObject({
+      outcome: 'failed',
+    });
+    expect(await runsOf(id)).toEqual([
+      expect.objectContaining({
+        outcome: 'failed',
+        error: 'category sales was retired while Jev was asked',
+      }),
+    ]);
+  });
+});
+
 describe('classifyMessageCategory, again and after a failure', () => {
   it('answers a redelivered job from its row, without asking twice', async () => {
     const calls = answers('sales');

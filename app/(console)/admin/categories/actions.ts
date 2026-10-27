@@ -107,8 +107,10 @@ export async function restoreCategory(
  * not depend on a secret the admin cannot see from here, and the form says
  * nothing happens there. Each value is checked here, before the CHECKs in
  * `db/sql/003_constraints.sql` would refuse it with a sentence about a
- * constraint; a blank threshold is refused rather than read as 0, which would
- * let every answer through.
+ * constraint. A threshold of 0 is refused, and a blank one rather than read as
+ * 0: either lets every answer through, a near-even guess included. It is no use
+ * in shadow either — the lower it is, the sooner a ticket settles and the
+ * fewer of its messages are asked, so the evaluation has less to sweep.
  */
 export async function saveClassifierSettings(
   _state: SettingsState,
@@ -120,8 +122,11 @@ export async function saveClassifierSettings(
   if (!isCategoryAiMode(mode)) return { error: 'Choose off, shadow or apply' };
 
   const threshold = optionalNumber(formData, 'minProbability');
-  if (!threshold || threshold.value === null || threshold.value < 0 || threshold.value > 1) {
-    return { error: 'The threshold is a share between 0 and 1, such as 0.6' };
+  if (!threshold || threshold.value === null || threshold.value <= 0 || threshold.value > 1) {
+    return {
+      error:
+        'The threshold is a share above 0 and up to 1, such as 0.6 — at 0 every answer would file its ticket',
+    };
   }
 
   const { min, max } = ROUTING_WINDOW_MINUTES;

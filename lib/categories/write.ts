@@ -230,3 +230,25 @@ export async function setConversationCategoryOn(
 
   return { outcome: 'changed', from: ticket.categoryId, to };
 }
+
+/**
+ * `setConversationCategoryOn` for a write that owes no follow-up by design:
+ * `backfill_category_ai`'s apply mode, which files an open backlog from a
+ * record label's answers and fires nothing — no SLA policy chosen again, no
+ * rule pass, no router — and reports which rules filing would have woken
+ * instead (`plans/ticket-category-routing.md`, 4.1).
+ *
+ * A writer of its own rather than a comment at the call, so the exemption is a
+ * property of a function: `routing-result` lets only the backfill call it, and
+ * every other writer of the column still owes `afterRoutingChanged`. The answer
+ * is the writer's, and is kept like any other.
+ */
+export async function fileBacklogCategory(
+  tx: Tx,
+  conversationId: string,
+  categoryId: string,
+  actor: CategoryActor,
+  detail: CategoryEventDetail,
+): Promise<CategoryWrite> {
+  return setConversationCategoryOn(tx, conversationId, categoryId, actor, detail);
+}

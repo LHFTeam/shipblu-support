@@ -3,7 +3,8 @@ import type { SQL } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { messages } from '@/db/schema';
 import { withTestEnv } from '@/lib/testing/env';
-import { logChannelTable, scanMessagesInKeysetOrder } from './backfill';
+import { PermanentJobError } from '@/lib/queue';
+import { logChannelTable, requestedChannels, scanMessagesInKeysetOrder } from './backfill';
 import { logger } from '@/lib/log';
 
 // Building a query validates the environment but never opens a connection.
@@ -114,5 +115,21 @@ describe('logChannelTable', () => {
       '[tag] instagram_comment       9',
     ]);
     log.mockRestore();
+  });
+});
+
+describe('requestedChannels', () => {
+  it('reads a comma list of channels, and nothing as every channel', () => {
+    expect(requestedChannels(' whatsapp, email ', '[x]')).toEqual(['whatsapp', 'email']);
+    expect(requestedChannels('', '[x]')).toBeNull();
+    expect(requestedChannels(undefined, '[x]')).toBeNull();
+  });
+
+  // No retry spells the channel differently, so the job dies at once.
+  it('refuses a misspelt channel for good', () => {
+    expect(() => requestedChannels('whatsap', '[x]')).toThrow(PermanentJobError);
+    expect(() => requestedChannels('whatsap', '[x]')).toThrow(
+      '[x] "whatsap" is not a conversation channel',
+    );
   });
 });

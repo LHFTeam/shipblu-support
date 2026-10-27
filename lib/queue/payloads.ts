@@ -4,7 +4,7 @@ import { SURVEY_TRIGGERS } from '@/lib/csat/decision';
 import { dayWindow, wallClockInstant } from '@/lib/hours/wall-clock';
 import { TEAM_TIME_ZONE } from '@/lib/hours/zone';
 import { LOCALES } from '@/lib/kb/locale';
-import { RERUNNABLE_STEPS } from '@/db/schema';
+import { CATEGORY_AI_LIVE_LABEL, RERUNNABLE_STEPS } from '@/db/schema';
 import { PermanentJobError, type ClaimedJob, type JobType } from '@/lib/queue';
 
 /**
@@ -60,7 +60,10 @@ const backfillLabel = z
   .string({ error: 'a label needs a letter: npm run job reads digits as a number' })
   .transform((label) => label.trim())
   .refine((label) => label.length > 0, 'a label cannot be blank')
-  .refine((label) => label !== 'live', '"live" is the live classifier\'s label');
+  .refine(
+    (label) => label !== CATEGORY_AI_LIVE_LABEL,
+    `"${CATEGORY_AI_LIVE_LABEL}" is the live classifier's label`,
+  );
 
 // Hours 00-23, so `T24:00` is not a second spelling of the next midnight, and
 // an offset held to hours 00-23 and minutes 00-59, as `Date.parse` held it:

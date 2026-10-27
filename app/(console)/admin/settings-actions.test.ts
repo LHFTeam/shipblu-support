@@ -86,16 +86,18 @@ describe('settings actions given an id no row can have', () => {
 
 // A value the CHECKs in `db/sql/003` would refuse is refused here first, with a
 // sentence: the database answers a violated constraint with a crash, not one.
-// And a blank threshold is not 0, which would let every answer file a ticket.
+// And neither a blank threshold nor 0, either of which would let every answer
+// file a ticket.
 describe('saveClassifierSettings', () => {
   const valid = { mode: 'shadow', minProbability: '0.6', routingWindowMinutes: '5' };
 
   it.each([
     [{ ...valid, mode: 'on' }, /off, shadow or apply/],
-    [{ ...valid, minProbability: '' }, /between 0 and 1/],
-    [{ ...valid, minProbability: '1.5' }, /between 0 and 1/],
-    [{ ...valid, minProbability: '-0.1' }, /between 0 and 1/],
-    [{ ...valid, minProbability: 'high' }, /between 0 and 1/],
+    [{ ...valid, minProbability: '' }, /above 0 and up to 1/],
+    [{ ...valid, minProbability: '0' }, /at 0 every answer would file its ticket/],
+    [{ ...valid, minProbability: '1.5' }, /above 0 and up to 1/],
+    [{ ...valid, minProbability: '-0.1' }, /above 0 and up to 1/],
+    [{ ...valid, minProbability: 'high' }, /above 0 and up to 1/],
     [{ ...valid, routingWindowMinutes: '0' }, /from 1 to 30/],
     [{ ...valid, routingWindowMinutes: '31' }, /from 1 to 30/],
     [{ ...valid, routingWindowMinutes: '2.5' }, /from 1 to 30/],
