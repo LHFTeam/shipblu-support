@@ -88,6 +88,28 @@ export function queueRefusal(ticket: {
 }
 
 /**
+ * Whether the live job may still ask about the ticket's next message: in
+ * somebody's queue (`queueRefusal`), not a record the job never asks about
+ * (`categorySkipReason`), and not yet answered, which caps it
+ * (`ticketFacts`). The report's labelling list asks it rather than its own
+ * reading of the same rules, so the two cannot drift apart.
+ */
+export function jevMayStillAsk(ticket: {
+  deletedAt: Date | null;
+  isSpam: boolean;
+  mergedIntoId: string | null;
+  statusCategory: string;
+  sourceSystem: string;
+  firstRespondedAt: Date | null;
+}): boolean {
+  return (
+    queueRefusal(ticket) === null &&
+    categorySkipReason(ticket) === null &&
+    ticket.firstRespondedAt === null
+  );
+}
+
+/**
  * One question to Jev and its answer, read against the keys it was offered.
  * Throws what the client throws; the caller decides what a failure means for
  * its run.

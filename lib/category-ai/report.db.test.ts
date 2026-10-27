@@ -15,7 +15,7 @@ import {
 import { categoryChangedEvent, setConversationCategory } from '@/lib/categories/write';
 import { withCleanDatabase } from '@/lib/testing/db';
 import { CATEGORY_AI_ACTOR, type CategoryOutcome } from './decide';
-import { categoryAiReport, deadClassifyJobs, runQuestions } from './report';
+import { categoryAiReport, deadClassifyJobs, runQuestion, runQuestions } from './report';
 
 /**
  * The report's reads against Postgres: that the label and the question scope
@@ -161,7 +161,8 @@ describe('categoryAiReport', () => {
     const wrong = await ticket();
     const ruled = await ticket();
     const spam = await ticket({ isSpam: true });
-    const plain = await ticket();
+    // Answered, so the live job asks nothing more and a label cuts nothing short.
+    const plain = await ticket({ firstRespondedAt: minute(30) });
     const elsewhere = await ticket();
     const reworded = await ticket();
 
@@ -327,10 +328,111 @@ describe('categoryAiReport', () => {
     });
   });
 
+  // m1 settled at 0.65 under the live job; m2 was queued before the agent's
+  // reply and judged after it. A backfill judges as of arrival, so the same
+  // rows under a record label leave m2 unasked.
+  it('reads a message judged after the first reply as out of the window', async () => {
+    const t = await ticket({ firstRespondedAt: minute(10) });
+    const first = await message(t.id, 0);
+    const second = await message(t.id, 1);
+    await answer(t.id, 0, 'would_apply', 'sales', { probability: 0.65, messageId: first });
+    await answer(t.id, 1, 'after_settle', null, { messageId: second, createdAt: minute(20) });
+    for (const [at, messageId] of [
+      [0, first],
+      [1, second],
+    ] as const) {
+      await answer(t.id, at, at === 0 ? 'would_apply' : 'after_settle', at === 0 ? 'sales' : null, {
+        runLabel: 'archive-1',
+        mode: 'record',
+        probability: at === 0 ? 0.65 : null,
+        messageId,
+        createdAt: minute(500),
+      });
+    }
+
+    const live = await categoryAiReport('live', QUESTION, 'shadow');
+    const record = await categoryAiReport('archive-1', QUESTION, 'record');
+
+    expect(live.sweep.find((row) => row.threshold === 0.7)).toMatchObject({ unasked: 0 });
+    expect(record.sweep.find((row) => row.threshold === 0.7)).toMatchObject({ unasked: 1 });
+  });
+
+  // Jev filed from a message deleted since: its row lost the id, and the
+  // event kept the instant beside it.
+  it('keeps a filing whose message was deleted since', async () => {
+    const mona = await agent();
+    const filed = await ticket();
+    const sales = await categoryId('sales');
+    const answered = await message(filed.id, 0);
+    await answer(filed.id, 0, 'applied', 'sales', { mode: 'apply', messageId: answered });
+    await db.insert(conversationEvents).values(
+      categoryChangedEvent(
+        filed.id,
+        { from: null, to: sales, category: { id: sales, key: 'sales', labelEn: 'Sales' } },
+        { label: CATEGORY_AI_ACTOR },
+        {
+          probability: 0.9,
+          model: 'jev-1.13.0',
+          messageId: answered,
+          messageCreatedAt: minute(0).toISOString(),
+          runLabel: 'live',
+        },
+      ),
+    );
+    await db.update(conversations).set({ categoryId: sales }).where(eq(conversations.id, filed.id));
+    await setConversationCategory(filed.id, await categoryId('courier_jobs'), { agentId: mona });
+    await db.delete(messages).where(eq(messages.id, answered));
+
+    const report = await categoryAiReport('live', QUESTION, 'apply');
+
+    expect(report.filed).toEqual([
+      { key: 'sales', filed: 1, changed: 1, changedTo: [{ key: 'courier_jobs', count: 1 }] },
+    ]);
+  });
+
+  // A category retired before the question was asked was never offered: no
+  // row or column of dashes for it, unless the run's answers name it.
+  it('leaves out a retired category nothing in the run names', async () => {
+    const t = await ticket();
+    await answer(t.id, 0, 'would_apply', 'sales');
+    await db
+      .update(ticketCategories)
+      .set({ isActive: false })
+      .where(eq(ticketCategories.key, 'courier_jobs'));
+    await db
+      .update(ticketCategories)
+      .set({ isActive: false })
+      .where(eq(ticketCategories.key, 'sales'));
+
+    const report = await categoryAiReport('live', QUESTION, 'shadow');
+
+    expect(report.categories.map((each) => each.key)).toEqual([
+      'customer_support',
+      'merchant_support',
+      'sales',
+    ]);
+  });
+
   it('answers an empty report for a label nobody wrote', async () => {
     const report = await categoryAiReport('nothing', QUESTION, 'shadow');
     expect(report.total.tickets).toBe(0);
     expect(report.slices).toEqual([]);
+  });
+});
+
+describe('runQuestion', () => {
+  // The page's lookup for a link to a run the list dropped past its limit.
+  it('finds one run by its label, question and mode', async () => {
+    const t = await ticket();
+    await answer(t.id, 0, 'would_apply', 'sales', { createdAt: minute(100) });
+    expect(await runQuestion('live', QUESTION, 'shadow')).toMatchObject({
+      runLabel: 'live',
+      fingerprint: QUESTION,
+      mode: 'shadow',
+      rows: 1,
+      tickets: 1,
+    });
+    expect(await runQuestion('live', QUESTION, 'apply')).toBeNull();
   });
 });
 

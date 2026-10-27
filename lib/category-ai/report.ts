@@ -12,6 +12,7 @@ import {
   notExists,
   or,
   sql,
+  type SQL,
 } from 'drizzle-orm';
 import { db } from '@/db/client';
 import {
@@ -20,11 +21,12 @@ import {
   conversationEvents,
   conversations,
   jobs,
-  ticketStatuses,
 } from '@/db/schema';
 import { listCategories } from '@/lib/categories/queries';
+import { statusCategoryOf } from '@/lib/tickets/status-category';
 import { CATEGORY_OUTCOMES, type CategoryOutcome } from './decide';
 import { grade, type Grading, type GradingTicket } from './grade';
+import { jevMayStillAsk } from './runs';
 
 /**
  * The reads behind `/reports/category-ai`: which run labels and questions
@@ -62,6 +64,29 @@ export type RunQuestion = {
 };
 
 export async function runQuestions(): Promise<RunQuestion[]> {
+  return questionsWhere(undefined);
+}
+
+/**
+ * One run by its label, question and mode, for a link to a run the list
+ * above has dropped past its limit. Null when it holds no rows.
+ */
+export async function runQuestion(
+  runLabel: string,
+  fingerprint: string,
+  mode: string,
+): Promise<RunQuestion | null> {
+  const [question] = await questionsWhere(
+    and(
+      eq(aiCategoryRuns.runLabel, runLabel),
+      eq(aiCategoryRuns.requestFingerprint, fingerprint),
+      eq(aiCategoryRuns.mode, mode),
+    ),
+  );
+  return question ?? null;
+}
+
+async function questionsWhere(where: SQL | undefined): Promise<RunQuestion[]> {
   const rows = await db
     .select({
       runLabel: aiCategoryRuns.runLabel,
@@ -74,6 +99,7 @@ export async function runQuestions(): Promise<RunQuestion[]> {
       lastWrittenAt: max(aiCategoryRuns.createdAt),
     })
     .from(aiCategoryRuns)
+    .where(where)
     .groupBy(aiCategoryRuns.runLabel, aiCategoryRuns.requestFingerprint, aiCategoryRuns.mode)
     .orderBy(desc(max(aiCategoryRuns.createdAt)), asc(aiCategoryRuns.runLabel))
     // Every run there has been, as far as anybody will page: a label is made
@@ -121,11 +147,19 @@ export async function categoryAiReport(
       probability: aiCategoryRuns.probability,
       minProbability: aiCategoryRuns.minProbability,
       baselineKey: aiCategoryRuns.baselineCategoryKey,
+      writtenAt: aiCategoryRuns.createdAt,
     })
     .from(aiCategoryRuns)
+    .where(scope)
     // Grouped by ticket in `grade`, which orders each ticket's rows the way the
-    // live job and the backfill judge them: a tie on the second needs the id.
-    .where(scope);
+    // live job and the backfill judge them, stably: the row id settles the
+    // one tie that has no order, two deleted messages of the same instant, the
+    // same way on every load.
+    .orderBy(
+      asc(aiCategoryRuns.conversationId),
+      asc(aiCategoryRuns.messageCreatedAt),
+      asc(aiCategoryRuns.id),
+    );
 
   // The label's answers in its other views, which the live job's cap counted
   // with these: a ticket asked four times in shadow had one ask left in apply.
@@ -155,6 +189,7 @@ export async function categoryAiReport(
       key: sql<string | null>`${conversationEvents.data}->>'key'`,
       runLabel: sql<string | null>`${conversationEvents.data}->>'runLabel'`,
       messageId: sql<string | null>`${conversationEvents.data}->>'messageId'`,
+      messageCreatedAt: sql<string | null>`${conversationEvents.data}->>'messageCreatedAt'`,
     })
     .from(conversationEvents)
     .where(
@@ -175,11 +210,15 @@ export async function categoryAiReport(
     .select({
       id: conversations.id,
       number: conversations.number,
-      labellable: sql<boolean>`(${conversations.deletedAt} is null and not ${conversations.isSpam} and ${conversations.mergedIntoId} is null and ${conversations.categoryId} is null)`,
-      windowOpen: sql<boolean>`(${conversations.firstRespondedAt} is null and ${ticketStatuses.category} in ('open', 'pending'))`,
+      categoryId: conversations.categoryId,
+      deletedAt: conversations.deletedAt,
+      isSpam: conversations.isSpam,
+      mergedIntoId: conversations.mergedIntoId,
+      sourceSystem: conversations.sourceSystem,
+      firstRespondedAt: conversations.firstRespondedAt,
+      statusCategory: statusCategoryOf(),
     })
     .from(conversations)
-    .innerJoin(ticketStatuses, eq(ticketStatuses.id, conversations.statusId))
     .where(inArray(conversations.id, named));
 
   const categories = await listCategories();
@@ -187,19 +226,57 @@ export async function categoryAiReport(
   const tickets = new Map<string, GradingTicket>(
     ticketRows.map((row) => [
       row.id,
-      { number: row.number, labellable: row.labellable, windowOpen: row.windowOpen },
+      {
+        number: row.number,
+        labellable:
+          row.deletedAt === null &&
+          !row.isSpam &&
+          row.mergedIntoId === null &&
+          row.categoryId === null,
+        windowOpen: jevMayStillAsk(row),
+      },
     ]),
   );
+  const answeredAt = new Map(ticketRows.map((row) => [row.id, row.firstRespondedAt]));
+  const live = runLabel === CATEGORY_AI_LIVE_LABEL;
 
   return grade({
     runLabel,
-    runs: runs.map((row) => ({ ...row, outcome: asOutcome(row.outcome) })),
+    runs: runs.map(({ writtenAt, ...row }) => {
+      const answered = answeredAt.get(row.conversationId) ?? null;
+      // The live job judges a message when its job runs; a backfill as of
+      // when the message arrived.
+      const judgedAt = live ? writtenAt : row.messageCreatedAt;
+      return {
+        ...row,
+        outcome: asOutcome(row.outcome),
+        judgedAfterReply: answered !== null && judgedAt >= answered,
+      };
+    }),
     askedElsewhere,
-    events,
+    events: events.map((event) => ({
+      ...event,
+      messageCreatedAt: instantOf(event.messageCreatedAt),
+    })),
     tickets,
-    categoryKeys: categories.map((category) => category.key),
+    // The categories a question can offer: a retired one Jev answered or a
+    // person chose is added back by `grade`, from the rows.
+    categoryKeys: categories
+      .filter((category) => category.isActive)
+      .map((category) => category.key),
     thresholds: SWEEP_THRESHOLDS,
   });
+}
+
+/**
+ * An instant a Jev write recorded as text. Only the classifier's writers set
+ * it, always as ISO, but read in code rather than cast in SQL: one hand-edited
+ * event would otherwise refuse the whole page.
+ */
+function instantOf(text: string | null): Date | null {
+  if (text === null) return null;
+  const at = new Date(text);
+  return Number.isNaN(at.getTime()) ? null : at;
 }
 
 /**

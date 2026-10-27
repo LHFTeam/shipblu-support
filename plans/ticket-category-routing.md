@@ -3969,10 +3969,11 @@ wait for the user's go-ahead, after 4.1 is deployed.
     so the two modes' answers graded together would grade a shadow key against
     a ticket apply filed under another. A view that holds more than one
     threshold says so, and the sweep is exact only at or below the lowest.
-  - **A label is a person's latest `category_changed`, and only when nothing
-    else wrote the category before it**: not Jev, not a rule, not a form. A
-    person who agrees with a write changes nothing and leaves no event, so
-    every label after one is a disagreement. Graded, those labels would make
+  - **A label is a person's latest `category_changed` before anything else
+    wrote the category**: not Jev, not a rule, not a form. A person who agrees
+    with a write changes nothing and leaves no event, so every label after one
+    is a disagreement. One given before a rule moved the category stays the
+    label when the person sets it back, or changes it again. Graded, those labels would make
     every such answer wrong. They are counted apart, and Jev's own filings
     under "Filed by Jev": what it filed in answer to the run's messages, how
     many a person moved since, and to what. That is the figure step 3's
@@ -4022,12 +4023,35 @@ wait for the user's go-ahead, after 4.1 is deployed.
     against the 30 that step 3 wants. It does not show how many wait in each:
     beside one list, a stratum that alone has tickets waiting names every one.
   - **Only tickets with no category now are offered**, besides nobody having
-    labelled them and Jev never having written. Choosing the category a ticket
+    labelled them and nothing having written. Choosing the category a ticket
     already has writes nothing, so on a ticket a rule filed, agreeing leaves
-    no label. A never-settled ticket is offered only once Jev can no longer be
-    asked about it: answered, resolved or closed, or asked five times.
-    Labelled earlier, its next message would be owned, and the ticket a miss
-    Jev never had the chance to avoid.
+    no label. A ticket is offered only once the live job can no longer ask
+    about it — answered, resolved or closed, or asked five times under the
+    live label (`jevMayStillAsk`, which the live job's own refusals make up)
+    — whatever the view settled it on. Labelled earlier, its next live message
+    would be owned. A ticket a shadow or record view settled can still be
+    unsettled in the live run, where it would become a miss Jev never had the
+    chance to avoid.
+  - **A message judged after the first reply is out of Jev's window.** The
+    live job asks whether a ticket settled before whether it was answered, so
+    a message queued before the reply and judged after it is recorded
+    `after_settle`, where without the settle it would be `capped`. The sweep
+    and the rules' window read it as closed, not unasked. The live job judges
+    when its job runs; a backfill as of the message's arrival.
+  - **A filing is matched by the message it answered, or by its instant** once
+    the message is deleted and the row loses its id. A failure that kept its
+    prediction is no answer in any figure. Two deleted messages of one instant
+    keep the order their rows are read in, by row id.
+  - **The categories drawn are the active ones**, and any retired one the
+    run's answers or labels name. A link to a run past the list's 200 is
+    looked up on its own.
+  - **Deploying it.** Web alone, code only. The handbook's reports article
+    changed too, and production held no console handbook at 2026-10-27
+    12:50 UTC (no `handbook-` folder or article, no `seed_console_handbook`
+    job ever), so there is nothing to seed: the first seed, whenever somebody
+    runs it, writes these words. If it has been seeded since, run
+    `seed_console_handbook dryRun=true` once web is live, read the articles it
+    reports, then `overwrite=true`, which has no per-key filter.
 - **Found while building.**
   - **A ticket that fits no category cannot be labelled so.** Choosing None
     on a ticket with no category writes nothing (`setConversationCategory`

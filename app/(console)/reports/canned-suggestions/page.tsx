@@ -28,6 +28,7 @@ import { channelLabel, formatDateTime } from '@/lib/format';
 import { rangeIn, reportingContext } from '@/lib/reports/rollup';
 import { RangeNav } from '../range-nav';
 import { typesafeConfigured } from '@/lib/typesafe/client';
+import { rate } from '../report-parts';
 
 export const dynamic = 'force-dynamic';
 
@@ -374,14 +375,4 @@ export default async function CannedSuggestionsReportPage({
       )}
     </div>
   );
-}
-
-/**
- * A rate, or the two counts it is made of when there are too few for a
- * percentage to mean anything. Nothing at all is a dash, not "0%".
- */
-function rate(numerator: number, denominator: number): string {
-  if (denominator === 0) return '—';
-  if (denominator < 10) return `${numerator} of ${denominator}`;
-  return `${Math.round((100 * numerator) / denominator)}%`;
 }

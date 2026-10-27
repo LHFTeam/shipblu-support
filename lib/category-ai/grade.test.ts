@@ -45,6 +45,7 @@ function run(
     probability,
     minProbability: 0.6,
     baselineKey: null,
+    judgedAfterReply: false,
     ...extra,
   };
 }
@@ -58,6 +59,7 @@ function person(conversationId: string, at: number, key: string | null): Grading
     key,
     runLabel: null,
     messageId: null,
+    messageCreatedAt: null,
   };
 }
 
@@ -77,6 +79,7 @@ function jevWrite(
     key,
     runLabel,
     messageId,
+    messageCreatedAt: null,
   };
 }
 
@@ -89,6 +92,7 @@ function rule(conversationId: string, at: number, key: string): GradingEvent {
     key,
     runLabel: null,
     messageId: null,
+    messageCreatedAt: null,
   };
 }
 
@@ -143,9 +147,6 @@ describe('the settling answer', () => {
     expect(graded.settle).toEqual({ key: 'sales', onFirstMessage: true });
   });
 
-  // WhatsApp stamps a burst to the second; the live job and the backfill
-  // break the tie by message id, and so must the grade, whatever order the
-  // rows were read in.
   // A job that ran late and found the ticket answered sits before the message
   // Jev settled on; that message is still the first this run judged.
   it('counts a settle as on the first message past a row Jev never judged', () => {
@@ -158,6 +159,33 @@ describe('the settling answer', () => {
     ).toEqual({ key: 'sales', onFirstMessage: false });
   });
 
+  // Two messages answered under the question before an admin's edit, the
+  // third settling under the new one: not the ticket's first message.
+  it('is not on the first message after messages judged in another view', () => {
+    const settled = [run('t', 2, 'would_apply', 'sales', 0.9)];
+    expect(verdict(settled, [], [askedThere('t', 0), askedThere('t', 1)]).settle).toEqual({
+      key: 'sales',
+      onFirstMessage: false,
+    });
+    // Asked there after it: the settle was still the first.
+    expect(verdict(settled, [], [askedThere('t', 3)]).settle).toEqual({
+      key: 'sales',
+      onFirstMessage: true,
+    });
+  });
+
+  // Two deleted messages of the same instant have no order; the report reads
+  // them by row id, and a stable sort keeps that, the same on every load.
+  it('keeps the order rows were read in where messages have none', () => {
+    const sales = run('t', 0, 'would_apply', 'sales', 0.9, { messageId: null });
+    const courier = run('t', 0, 'would_apply', 'courier_jobs', 0.9, { messageId: null });
+    expect(verdict([sales, courier]).settle?.key).toBe('sales');
+    expect(verdict([courier, sales]).settle?.key).toBe('courier_jobs');
+  });
+
+  // WhatsApp stamps a burst to the second; the live job and the backfill
+  // break the tie by message id, and so must the grade, whatever order the
+  // rows were read in.
   it('orders messages of the same instant by their id, as the live job does', () => {
     const graded = verdict([
       run('t', 0, 'after_settle', null, null, { messageId: 'm-b' }),
@@ -188,6 +216,17 @@ describe('the settling answer', () => {
     expect(verdict([run('t', 0, 'capped')]).outOfPlay).toBe('capped');
     expect(verdict([run('t', 0, 'failed')]).outOfPlay).toBe('failed');
     expect(verdict([run('t', 0, 'below_threshold', 'sales', 0.3)]).outOfPlay).toBeNull();
+  });
+
+  // A category retired during the call: run.ts records the failure with what
+  // Jev said, which is no answer to the cap, the sweep or the Unknown share.
+  it('counts no failure as an answer, whatever prediction it kept', () => {
+    expect(
+      verdict([
+        run('t', 0, 'failed', 'unknown', 0.9),
+        run('t', 1, 'below_threshold', 'sales', 0.4),
+      ]),
+    ).toMatchObject({ answers: 1, unknowns: 0 });
   });
 });
 
@@ -227,6 +266,24 @@ describe('the label', () => {
     expect(graded.labelledAfterWrite).toBe(true);
   });
 
+  // A supervisor labels, an on_update rule rewrites, the supervisor puts it
+  // back: the label given before anything wrote still stands.
+  it('is the last person label before anything else wrote, whatever followed', () => {
+    const put = verdict(settled, [
+      person('t', 5, 'merchant_support'),
+      rule('t', 6, 'courier_jobs'),
+      person('t', 7, 'merchant_support'),
+    ]);
+    expect(put).toMatchObject({ label: { key: 'merchant_support' }, labelledAfterWrite: false });
+    const moved = verdict(settled, [
+      person('t', 4, 'sales'),
+      person('t', 5, 'merchant_support'),
+      rule('t', 6, 'courier_jobs'),
+      person('t', 7, 'customer_support'),
+    ]);
+    expect(moved.label).toEqual({ key: 'merchant_support' });
+  });
+
   it('counts a write under another label as Jev too, but not as this run’s filing', () => {
     // The backfill's `apply` names the record label it filed from.
     const graded = verdict(settled, [
@@ -244,6 +301,26 @@ describe('the label', () => {
     const graded = verdict(settled, [jevWrite('t', 2, 'sales', LABEL, 'another-message')]);
     expect(graded.filed).toBeNull();
     expect(graded.writtenByJev).toBe(true);
+  });
+
+  // Jev's write names the message and its instant; the message deleted since,
+  // the row keeps only the instant.
+  it('files a write against a row whose message was deleted since, by its instant', () => {
+    const graded = verdict(
+      [run('t', 0, 'applied', 'sales', 0.9, { messageId: null })],
+      [
+        { ...jevWrite('t', 0, 'sales'), messageCreatedAt: minute(0) },
+        person('t', 9, 'courier_jobs'),
+      ],
+    );
+    expect(graded.filed).toEqual({ key: 'sales', changedTo: { key: 'courier_jobs' } });
+    // Another message's instant is not this row's.
+    expect(
+      verdict(
+        [run('t', 0, 'applied', 'sales', 0.9, { messageId: null })],
+        [{ ...jevWrite('t', 0, 'sales'), messageCreatedAt: minute(3) }],
+      ).filed,
+    ).toBeNull();
   });
 
   it('can say no category, when a person cleared one', () => {
@@ -398,6 +475,29 @@ describe('settleAt, the threshold sweep', () => {
         0.8,
       ),
     ).toEqual({ kind: 'none' });
+  });
+
+  // m2 queued before the agent's first reply and run after it: recorded
+  // after_settle because the settle is checked first, capped all the same.
+  it('finds the window closed at a message judged after the first reply', () => {
+    const runs = [
+      run('t', 0, 'would_apply', 'sales', 0.65),
+      run('t', 1, 'after_settle', null, null, { judgedAfterReply: true }),
+    ];
+    expect(settleAt(runs, 0.7)).toEqual({ kind: 'none' });
+    expect(settleAt([runs[0]!, { ...runs[1]!, judgedAfterReply: false }], 0.7)).toEqual({
+      kind: 'unasked',
+    });
+    // And the rules read no further than Jev could have been asked.
+    expect(
+      verdict([
+        run('t', 0, 'would_apply', 'sales', 0.65),
+        run('t', 1, 'after_settle', null, null, {
+          judgedAfterReply: true,
+          baselineKey: 'courier_jobs',
+        }),
+      ]).baseline,
+    ).toBeNull();
   });
 
   // Jobs run in no order: one that found the ticket owned can sit before a
@@ -701,15 +801,19 @@ describe('the sample', () => {
       ['open', { number: 1, labellable: true, windowOpen: true }],
       ['asked5', { number: 2, labellable: true, windowOpen: true }],
       ['answered', { number: 3, labellable: true, windowOpen: false }],
-      // A settled ticket is graded on its settle, open or not.
+      // Settled in this view, but the live run may still ask about it — after
+      // the switch to apply, or in the live run beside a backfill's view.
       ['settled', { number: 4, labellable: true, windowOpen: true }],
     ]);
     const offered = grade(input(runs, [], { tickets })).toLabel.map((each) => each.number);
-    expect(offered.sort()).toEqual([2, 3, 4]);
+    expect(offered.sort()).toEqual([2, 3]);
     // Asked four times in the other mode, once here: its window is closed.
     const elsewhere = [1, 2, 3, 4].map((at) => askedThere('open', at));
     const now = grade(input(runs, [], { tickets, askedElsewhere: elsewhere }));
-    expect(now.toLabel.map((each) => each.number).sort()).toEqual([1, 2, 3, 4]);
+    expect(now.toLabel.map((each) => each.number).sort()).toEqual([1, 2, 3]);
+    // A backfill's five asks are its own: the live job may still ask.
+    const record = grade(input(runs, [], { tickets, runLabel: 'archive-1' }));
+    expect(record.toLabel.map((each) => each.number)).toEqual([3]);
   });
 
   it('offers at most a page of each stratum, mixed into one list that names no answer', () => {

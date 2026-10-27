@@ -1,3 +1,4 @@
+import { CATEGORY_AI_LIVE_LABEL } from '@/db/schema';
 import { UNKNOWN_CATEGORY_KEY } from '@/lib/categories/registry';
 import type { ConversationChannel } from '@/lib/tickets/channel-policy';
 import {
@@ -24,8 +25,10 @@ import {
  *   the one that would have routed it.
  * - **Ground truth is a person's `category_changed`**, one naming an agent —
  *   never the column, which rules and forms also write, and on the merchant
- *   number those would inflate merchant precision. The latest such event is
- *   the label, so a person who corrected themselves is read at their answer.
+ *   number those would inflate merchant precision. The label is the latest
+ *   such event before anything else wrote, so a person who corrected
+ *   themselves is read at their answer, and one who set the category back
+ *   after a rule moved it is still read at the label they gave first.
  * - **A label given after anything else wrote the category is not ground
  *   truth.** A person who agrees with what Jev or a rule filed changes nothing
  *   and leaves no event, so the only labels after a write are disagreements:
@@ -72,6 +75,18 @@ const SETTLING: ReadonlySet<CategoryOutcome> = new Set(['applied', 'would_apply'
 /** Where a ticket had left Jev's window when that message's job ran. */
 const LEFT_THE_WINDOW: ReadonlySet<CategoryOutcome> = new Set(['owned', 'capped']);
 
+/**
+ * A row recorded outside Jev's window: owned or capped, or a message judged
+ * after the first reply and recorded `after_settle` only because the live job
+ * asks whether the ticket settled before whether it was answered. Without
+ * the settle it would have been capped, so a higher threshold that refuses
+ * the settle finds it closed, not unasked.
+ */
+function leftTheWindow(run: GradingRun): boolean {
+  if (LEFT_THE_WINDOW.has(run.outcome)) return true;
+  return run.outcome === 'after_settle' && run.judgedAfterReply && !counted(run);
+}
+
 /** Tickets offered for labelling in each stratum, at most. */
 export const SAMPLE_SIZE = 10;
 
@@ -94,6 +109,14 @@ export type GradingRun = {
   /** The threshold the outcome was decided against. */
   minProbability: number | null;
   baselineKey: string | null;
+  /**
+   * The ticket had been answered when this message was judged — for the live
+   * job, when its job ran, which can be after a reply for a message that
+   * arrived before one. The live job caps such a message, so a row it
+   * recorded `after_settle` only because the settle is checked first is out
+   * of Jev's window all the same.
+   */
+  judgedAfterReply: boolean;
 };
 
 /** One `category_changed` event on a ticket the runs name. */
@@ -109,6 +132,8 @@ export type GradingEvent = {
   runLabel: string | null;
   /** The message a Jev write answered. */
   messageId: string | null;
+  /** When that message arrived, which a write keeps after the message is deleted. */
+  messageCreatedAt: Date | null;
 };
 
 /** What the sample needs to know of a ticket. */
@@ -121,8 +146,8 @@ export type GradingTicket = {
    */
   labellable: boolean;
   /**
-   * Open or pending and nobody has answered it: Jev may yet be asked about its
-   * next message. Labelling it would make every later message owned.
+   * The live job may yet ask about the ticket's next message
+   * (`jevMayStillAsk`). Labelling it would make every later message owned.
    */
   windowOpen: boolean;
 };
@@ -201,34 +226,44 @@ export function ticketVerdicts(
     const ticketEvents = eventsByTicket.get(conversationId) ?? [];
     const elsewhere = [...(elsewhereByTicket.get(conversationId) ?? [])].sort(inJudgedOrder);
     const judged = ticketRuns.some((run) => JUDGED.has(run.outcome));
-    const predicted = ticketRuns.filter((run) => run.predictedKey !== null);
+    // As the cap counts them: a failure that kept its prediction — a category
+    // retired during the call — is no answer anywhere else either.
+    const predicted = ticketRuns.filter(counted);
 
     const settleIndex = ticketRuns.findIndex(
       (run) => SETTLING.has(run.outcome) && run.predictedKey !== null,
     );
     const settleRun = settleIndex === -1 ? null : ticketRuns[settleIndex]!;
     // The first message this run judged, which a row passed over before it —
-    // a job that ran late and found the ticket answered — is not.
+    // a job that ran late and found the ticket answered — is not. Nor one
+    // after a message judged in another view of the label: the first after a
+    // category edit, or after the switch to apply, is not the ticket's first.
     const firstJudged = ticketRuns.findIndex((run) => JUDGED.has(run.outcome));
 
     const people = ticketEvents.filter((event) => event.agentId !== null);
     const written = ticketEvents.filter((event) => event.agentId === null);
     const jev = written.filter((event) => event.actorLabel === CATEGORY_AI_ACTOR);
     const lastPerson = people.at(-1) ?? null;
-    const independent =
-      lastPerson !== null && !written.some((write) => write.createdAt < lastPerson.createdAt);
+    const firstWrite = written[0] ?? null;
+    const label =
+      people
+        .filter((event) => firstWrite === null || event.createdAt < firstWrite.createdAt)
+        .at(-1) ?? null;
 
     // A write under another label or another question is that run's filing.
+    // Matched by the message's id, or by its instant once the message was
+    // deleted and the row's id with it.
     const answered = new Set(ticketRuns.map((run) => run.messageId).filter(Boolean));
+    const answeredDeleted = new Set(
+      ticketRuns
+        .filter((run) => run.messageId === null)
+        .map((run) => run.messageCreatedAt.getTime()),
+    );
+    const answers = (write: GradingEvent) =>
+      (write.messageId !== null && answered.has(write.messageId)) ||
+      (write.messageCreatedAt !== null && answeredDeleted.has(write.messageCreatedAt.getTime()));
     const lastJev =
-      jev
-        .filter(
-          (write) =>
-            write.runLabel === runLabel &&
-            write.messageId !== null &&
-            answered.has(write.messageId),
-        )
-        .at(-1) ?? null;
+      jev.filter((write) => write.runLabel === runLabel && answers(write)).at(-1) ?? null;
     const changedAfter = lastJev
       ? (people.filter((event) => event.createdAt > lastJev.createdAt).at(-1) ?? null)
       : null;
@@ -241,11 +276,16 @@ export function ticketVerdicts(
       answers: predicted.length,
       unknowns: predicted.filter((run) => run.predictedKey === UNKNOWN_CATEGORY_KEY).length,
       settle: settleRun
-        ? { key: settleRun.predictedKey!, onFirstMessage: settleIndex === firstJudged }
+        ? {
+            key: settleRun.predictedKey!,
+            onFirstMessage:
+              settleIndex === firstJudged &&
+              !elsewhere.some((ask) => inJudgedOrder(ask, settleRun) < 0),
+          }
         : null,
       baseline: baselineAnswer(ticketRuns, elsewhere),
-      label: independent ? { key: lastPerson.key } : null,
-      labelledAfterWrite: lastPerson !== null && !independent,
+      label: label ? { key: label.key } : null,
+      labelledAfterWrite: label === null && lastPerson !== null,
       touchedByPerson: lastPerson !== null,
       filed: lastJev
         ? { key: lastJev.key, changedTo: changedAfter ? { key: changedAfter.key } : null }
@@ -261,7 +301,11 @@ export function ticketVerdicts(
 /** A message, as the order the live job judges them in reads it. */
 type Arrival = Pick<GradingRun, 'messageCreatedAt' | 'messageId'>;
 
-/** The order the live job and the backfill judge a ticket's messages in. */
+/**
+ * The order the live job and the backfill judge a ticket's messages in. Two
+ * deleted messages of the same instant have none, and keep the order they
+ * were read in, which `report.ts` fixes by row id: a sort is stable.
+ */
 function inJudgedOrder(a: Arrival, b: Arrival): number {
   if (b.messageId === null) {
     // `arrivedBefore` wants an id on its second side; a tie of two deleted
@@ -315,7 +359,7 @@ function baselineAnswer(
   const before = askedBefore(elsewhere);
   let places = 0;
   for (const [index, run] of runs.entries()) {
-    if (LEFT_THE_WINDOW.has(run.outcome) && !runs.slice(index + 1).some(wasAsked)) return null;
+    if (leftTheWindow(run) && !runs.slice(index + 1).some(wasAsked)) return null;
     if (places + before(run) >= CLASSIFIED_MESSAGE_CAP && !JUDGED.has(run.outcome)) return null;
     if (run.baselineKey !== null) return run.baselineKey;
     if (counted(run) || run.outcome === 'after_settle') places += 1;
@@ -376,7 +420,7 @@ export function settleAt(
   let asked = 0;
   for (const run of runs) {
     const answered = counted(run);
-    if (LEFT_THE_WINDOW.has(run.outcome)) {
+    if (leftTheWindow(run)) {
       if (answered) asked += 1;
       continue;
     }
@@ -542,7 +586,7 @@ export function grade(input: GradingInput): Grading {
   for (const verdict of verdicts) {
     if (verdict.outOfPlay) outOfPlayCounts[verdict.outOfPlay] += 1;
   }
-  const strata = sample(gradable, keys, input.tickets);
+  const strata = sample(gradable, keys, input.tickets, input.runLabel === CATEGORY_AI_LIVE_LABEL);
   const settledAs = (items: readonly TicketVerdict[], key: string) =>
     items.some((verdict) => verdict.settle?.key === key);
   const inForce = [
@@ -759,10 +803,12 @@ function filed(verdicts: readonly TicketVerdict[], keys: readonly string[]): Fil
  * labels it can never have. Only tickets nobody has labelled, Jev never wrote
  * to and nothing has filed (`GradingTicket.labellable`): a person who agrees
  * with a category already on a ticket changes nothing, and leaves no label.
- * And a ticket Jev never settled
- * only once its window has closed — answered, resolved, or asked five times —
- * since labelling one Jev may still be asked about would turn its next message
- * into `owned` and the ticket into a miss it never had the chance to avoid.
+ * And a ticket only once the live job can no longer ask about it — answered,
+ * resolved, or asked five times under the live label — whatever this view
+ * settled it on: labelling one Jev may still be asked about turns its next
+ * live message into `owned`, and a ticket this view settled — in shadow, or
+ * in a backfill's record — can still be unsettled in the live run, where it
+ * would become a miss it never had the chance to avoid.
  * In id order, which for a random uuid is a fixed random order — the same
  * tickets on every load until they are labelled, and no bias to the newest or
  * the oldest.
@@ -771,6 +817,7 @@ function sample(
   gradable: readonly TicketVerdict[],
   keys: readonly string[],
   tickets: ReadonlyMap<string, GradingTicket>,
+  live: boolean,
 ): (SampleStratum & { tickets: ToLabel[] })[] {
   return [...keys, null].flatMap((key) => {
     const members = gradable.filter((verdict) => (verdict.settle?.key ?? null) === key);
@@ -779,7 +826,8 @@ function sample(
       .filter((verdict) => {
         const ticket = tickets.get(verdict.conversationId);
         if (!ticket?.labellable || verdict.touchedByPerson || verdict.writtenByJev) return false;
-        return key !== null || !ticket.windowOpen || askedOf(verdict) >= CLASSIFIED_MESSAGE_CAP;
+        // The cap is the live label's: another label's asks are not the live job's.
+        return !ticket.windowOpen || (live && askedOf(verdict) >= CLASSIFIED_MESSAGE_CAP);
       })
       .sort(byId);
     return [

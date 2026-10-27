@@ -1,6 +1,5 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import type { ReactNode } from 'react';
 import { ChannelBadge } from '@/components/channel';
 import { Stat } from '@/components/charts';
 import { InfoTip } from '@/components/tooltip';
@@ -23,6 +22,7 @@ import { LABELS_WANTED, type Estimate, type Slice } from '@/lib/category-ai/grad
 import {
   categoryAiReport,
   deadClassifyJobs,
+  runQuestion,
   runQuestions,
   type RunQuestion,
 } from '@/lib/category-ai/report';
@@ -30,6 +30,7 @@ import { readCategoryAiSettings } from '@/lib/category-ai/settings';
 import { allLimited } from '@/lib/concurrency';
 import { channelLabel, formatDateTime } from '@/lib/format';
 import { typesafeConfigured } from '@/lib/typesafe/client';
+import { Quiet, rate, Section } from '../report-parts';
 
 export const dynamic = 'force-dynamic';
 
@@ -64,10 +65,15 @@ export default async function CategoryAiReportPage({
   const keyConfigured = typesafeConfigured();
 
   const asked = label !== undefined || q !== undefined || mode !== undefined;
+  // A link names a run the list may have dropped past its limit: looked up
+  // on its own, it still opens.
   const chosen = asked
     ? (questions.find(
         (each) => each.runLabel === label && each.fingerprint === q && each.mode === mode,
-      ) ?? null)
+      ) ??
+      (label !== undefined && q !== undefined && mode !== undefined
+        ? await runQuestion(label, q, mode)
+        : null))
     : (questions[0] ?? null);
   const report = chosen
     ? await categoryAiReport(chosen.runLabel, chosen.fingerprint, chosen.mode)
@@ -124,8 +130,8 @@ export default async function CategoryAiReportPage({
         {dead.count > 0 && (chosen === null || chosen.runLabel === CATEGORY_AI_LIVE_LABEL) ? (
           <Notice tone="warning" icon>
             {dead.count === 1
-              ? `One message has no live answer because the job asking Jev about it failed for good, on ${formatDateTime(dead.first!)}.`
-              : `${dead.count} messages have no live answer because the jobs asking Jev about them failed for good, the first on ${formatDateTime(dead.first!)} and the last on ${formatDateTime(dead.last!)}.`}{' '}
+              ? `One message has no live answer, in any mode or version of the question, because the job asking Jev about it failed for good, on ${formatDateTime(dead.first!)}.`
+              : `${dead.count} messages have no live answer, in any mode or version of the question, because the jobs asking Jev about them failed for good, the first on ${formatDateTime(dead.first!)} and the last on ${formatDateTime(dead.last!)}.`}{' '}
             No figure below counts them.
           </Notice>
         ) : null}
@@ -221,7 +227,7 @@ export default async function CategoryAiReportPage({
               />
               <Stat
                 label="Settled"
-                value={share(report.total.settled, report.total.judged)}
+                value={rate(report.total.settled, report.total.judged)}
                 hint={`${report.total.settled} of ${report.total.judged} tickets judged`}
                 explain={
                   <>
@@ -233,7 +239,7 @@ export default async function CategoryAiReportPage({
               />
               <Stat
                 label="On the first message"
-                value={share(report.total.settledOnFirst, report.total.settled)}
+                value={rate(report.total.settledOnFirst, report.total.settled)}
                 hint={`${report.total.settledOnFirst} of ${report.total.settled} settled tickets`}
                 explain={
                   <>
@@ -246,7 +252,7 @@ export default async function CategoryAiReportPage({
               />
               <Stat
                 label="Unknown"
-                value={share(report.total.unknowns, report.total.answers)}
+                value={rate(report.total.unknowns, report.total.answers)}
                 hint={`${report.total.unknowns} of ${report.total.answers} answers`}
                 explain={
                   <>
@@ -373,7 +379,7 @@ export default async function CategoryAiReportPage({
                         </span>
                       ) : null}
                     </Cell>
-                    <Cell>{share(row.settled, report.total.judged)}</Cell>
+                    <Cell>{rate(row.settled, report.total.judged)}</Cell>
                     <Cell>{row.unasked}</Cell>
                     <Cell>
                       <Sampled estimate={row.jev} />
@@ -398,7 +404,7 @@ export default async function CategoryAiReportPage({
                     <Row key={row.key ?? 'none'}>
                       <Cell>{name(row.key, 'No category')}</Cell>
                       <Cell>{row.filed}</Cell>
-                      <Cell>{share(row.changed, row.filed)}</Cell>
+                      <Cell>{rate(row.changed, row.filed)}</Cell>
                       <Cell>
                         {row.changedTo.length === 0
                           ? '—'
@@ -521,9 +527,9 @@ function SliceRow({ slice }: { slice: Slice }) {
       </Cell>
       <Cell>{slice.tickets}</Cell>
       <Cell>{slice.judged}</Cell>
-      <Cell>{share(slice.settled, slice.judged)}</Cell>
-      <Cell>{share(slice.settledOnFirst, slice.settled)}</Cell>
-      <Cell>{share(slice.unknowns, slice.answers)}</Cell>
+      <Cell>{rate(slice.settled, slice.judged)}</Cell>
+      <Cell>{rate(slice.settledOnFirst, slice.settled)}</Cell>
+      <Cell>{rate(slice.unknowns, slice.answers)}</Cell>
       <Cell>{slice.labelled}</Cell>
       <Cell>
         <Sampled estimate={slice.jev} />
@@ -531,7 +537,7 @@ function SliceRow({ slice }: { slice: Slice }) {
       <Cell>
         <Sampled estimate={slice.rules} />
       </Cell>
-      <Cell>{share(slice.agree, slice.comparable)}</Cell>
+      <Cell>{rate(slice.agree, slice.comparable)}</Cell>
     </Row>
   );
 }
@@ -605,33 +611,4 @@ function percent(estimate: Estimate): string {
   if (estimate.rate === null) return '—';
   if (estimate.of < 10) return `${estimate.right} of ${estimate.of}`;
   return `${Math.round(100 * estimate.rate)}%`;
-}
-
-/**
- * A rate, or the two counts it is made of when there are too few for a
- * percentage to mean anything. Nothing at all is a dash, not "0%".
- */
-function share(numerator: number, denominator: number): string {
-  if (denominator === 0) return '—';
-  if (denominator < 10) return `${numerator} of ${denominator}`;
-  return `${Math.round((100 * numerator) / denominator)}%`;
-}
-
-function Section({ title, hint, children }: { title: string; hint: string; children: ReactNode }) {
-  return (
-    <section className="mb-8">
-      <h2 className="mb-1 text-sm font-semibold text-(--color-text-secondary)">{title}</h2>
-      <p className="mb-2 max-w-3xl text-xs text-(--color-text-tertiary)">{hint}</p>
-      {children}
-    </section>
-  );
-}
-
-/** An empty section said in words: an empty table reads as a page not finished. */
-function Quiet({ children }: { children: ReactNode }) {
-  return (
-    <Notice tone="neutral" className="max-w-2xl">
-      {children}
-    </Notice>
-  );
 }
