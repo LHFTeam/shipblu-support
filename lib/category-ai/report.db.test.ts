@@ -8,6 +8,7 @@ import {
   conversationEvents,
   conversations,
   jobs,
+  messages,
   ticketCategories,
   ticketStatuses,
 } from '@/db/schema';
@@ -79,6 +80,29 @@ async function answer(
   });
 }
 
+async function message(conversationId: string, at: number, id?: string): Promise<string> {
+  const [row] = await db
+    .insert(messages)
+    .values({
+      ...(id ? { id } : {}),
+      conversationId,
+      direction: 'inbound',
+      kind: 'reply',
+      bodyText: 'بكام الشحن؟',
+      createdAt: minute(at),
+    })
+    .returning({ id: messages.id });
+  return row!.id;
+}
+
+async function statusNamed(name: string): Promise<string> {
+  const [row] = await db
+    .select({ id: ticketStatuses.id })
+    .from(ticketStatuses)
+    .where(eq(ticketStatuses.name, name));
+  return row!.id;
+}
+
 async function agent() {
   const [row] = await db
     .insert(agents)
@@ -88,7 +112,7 @@ async function agent() {
 }
 
 describe('runQuestions', () => {
-  it('lists each label and question, newest first, with what each holds', async () => {
+  it('lists each label, question and mode, newest first, with what each holds', async () => {
     const first = await ticket();
     const second = await ticket();
     await answer(first.id, 0, 'would_apply', 'sales', { createdAt: minute(100) });
@@ -103,21 +127,25 @@ describe('runQuestions', () => {
       requestFingerprint: 'q-2',
       createdAt: minute(150),
     });
+    // The switch to apply, under the same label and question: a run of its own.
+    await answer(second.id, 3, 'applied', 'sales', { mode: 'apply', createdAt: minute(120) });
 
     expect(await runQuestions()).toEqual([
       expect.objectContaining({
         runLabel: 'archive-1',
         fingerprint: QUESTION,
+        mode: 'record',
         rows: 1,
         tickets: 1,
       }),
-      expect.objectContaining({ runLabel: 'live', fingerprint: 'q-2', modes: ['apply'] }),
+      expect.objectContaining({ runLabel: 'live', fingerprint: 'q-2', mode: 'apply' }),
+      expect.objectContaining({ runLabel: 'live', fingerprint: QUESTION, mode: 'apply', rows: 1 }),
       {
         runLabel: 'live',
         fingerprint: QUESTION,
+        mode: 'shadow',
         rows: 2,
         tickets: 2,
-        modes: ['shadow'],
         firstMessageAt: minute(0),
         lastMessageAt: minute(1),
         lastWrittenAt: minute(101),
@@ -145,6 +173,8 @@ describe('categoryAiReport', () => {
     // Another label and another question: neither reaches this report.
     await answer(elsewhere.id, 0, 'would_apply', 'sales', { runLabel: 'archive-1' });
     await answer(right.id, 1, 'would_apply', 'courier_jobs', { requestFingerprint: 'q-2' });
+    // And another mode: apply's rows are their own run.
+    await answer(right.id, 2, 'applied', 'courier_jobs', { mode: 'apply' });
     await answer(reworded.id, 0, 'would_apply', 'sales', { requestFingerprint: 'q-2' });
 
     // A person, through the writer the console uses, so the key is the one it stores.
@@ -158,17 +188,15 @@ describe('categoryAiReport', () => {
       label: 'automation:file-couriers',
     });
 
-    const report = await categoryAiReport('live', QUESTION);
+    const report = await categoryAiReport('live', QUESTION, 'shadow');
 
     expect(report.total).toMatchObject({
       tickets: 5,
       judged: 5,
       settled: 5,
       labelled: 2,
-      settledLabelled: 2,
-      right: 1,
-      rulesAnswered: 1,
-      rulesRight: 1,
+      jev: { right: 1, of: 2 },
+      rules: { right: 1, of: 1 },
     });
     expect(report.categories.map((each) => each.key)).toEqual([
       'sales',
@@ -187,18 +215,23 @@ describe('categoryAiReport', () => {
     expect(report.sample.find((stratum) => stratum.key === 'courier_jobs')).toEqual({
       key: 'courier_jobs',
       labelled: 0,
-      waiting: 1,
     });
     expect(report.toLabel).toEqual([
       { conversationId: plain.id, number: plain.number, channel: 'whatsapp' },
     ]);
+    // The apply rows are a run of their own: one ticket, filed as courier jobs.
+    expect((await categoryAiReport('live', QUESTION, 'apply')).total).toMatchObject({
+      tickets: 1,
+      settled: 1,
+    });
   });
 
   it("reads Jev's write and the person's change after it", async () => {
     const mona = await agent();
     const filed = await ticket();
     const sales = await categoryId('sales');
-    await answer(filed.id, 0, 'applied', 'sales', { mode: 'apply' });
+    const answered = await message(filed.id, 0);
+    await answer(filed.id, 0, 'applied', 'sales', { mode: 'apply', messageId: answered });
     await db.insert(conversationEvents).values(
       categoryChangedEvent(
         filed.id,
@@ -207,7 +240,7 @@ describe('categoryAiReport', () => {
         {
           probability: 0.9,
           model: 'jev-1.13.0',
-          messageId: null,
+          messageId: answered,
           messageCreatedAt: minute(0).toISOString(),
           runLabel: 'live',
         },
@@ -218,7 +251,7 @@ describe('categoryAiReport', () => {
       agentId: mona,
     });
 
-    const report = await categoryAiReport('live', QUESTION);
+    const report = await categoryAiReport('live', QUESTION, 'apply');
 
     expect(report.filed).toEqual([
       {
@@ -230,11 +263,42 @@ describe('categoryAiReport', () => {
     ]);
     // A label after Jev wrote is a correction, not ground truth.
     expect(report.total.labelled).toBe(0);
-    expect(report.labelledAfterJev).toBe(1);
+    expect(report.labelledAfterWrite).toBe(1);
+  });
+
+  // WhatsApp stamps a burst to the second: the two rows tie on the instant,
+  // and only the message ids say which came first, as the live job read them.
+  it('orders two messages of the same second by their ids', async () => {
+    const t = await ticket();
+    const first = await message(t.id, 0, '00000000-0000-4000-8000-00000000000a');
+    const second = await message(t.id, 0, '00000000-0000-4000-8000-00000000000b');
+    // Written in the other order, so neither insertion nor row id can decide.
+    await answer(t.id, 0, 'after_settle', null, { messageId: second });
+    await answer(t.id, 0, 'would_apply', 'sales', { messageId: first });
+
+    const report = await categoryAiReport('live', QUESTION, 'shadow');
+
+    expect(report.total).toMatchObject({ settled: 1, settledOnFirst: 1 });
+    expect(report.sweep.find((row) => row.inForce)).toMatchObject({ settled: 1, unasked: 0 });
+  });
+
+  it('offers a never-settled ticket only once Jev can no longer be asked about it', async () => {
+    const open = await ticket();
+    const resolved = await ticket({ statusId: await statusNamed('Resolved') });
+    const answeredTicket = await ticket({ firstRespondedAt: minute(5) });
+    for (const t of [open, resolved, answeredTicket]) {
+      await answer(t.id, 0, 'below_threshold', 'sales', { probability: 0.3 });
+    }
+
+    const report = await categoryAiReport('live', QUESTION, 'shadow');
+
+    expect(report.toLabel.map((each) => each.number).sort()).toEqual(
+      [resolved.number, answeredTicket.number].sort(),
+    );
   });
 
   it('answers an empty report for a label nobody wrote', async () => {
-    const report = await categoryAiReport('nothing', QUESTION);
+    const report = await categoryAiReport('nothing', QUESTION, 'shadow');
     expect(report.total.tickets).toBe(0);
     expect(report.slices).toEqual([]);
   });

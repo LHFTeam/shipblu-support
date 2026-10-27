@@ -16,9 +16,10 @@ import {
 } from '@/components/ui';
 import { requireAgent } from '@/lib/auth/guard';
 import { can } from '@/lib/auth/permissions';
+import { CATEGORY_AI_LIVE_LABEL } from '@/db/schema';
 import { categoryLabel } from '@/lib/categories/choices';
 import { listCategories } from '@/lib/categories/queries';
-import { LABELS_WANTED, type Slice } from '@/lib/category-ai/grade';
+import { LABELS_WANTED, type Estimate, type Slice } from '@/lib/category-ai/grade';
 import {
   categoryAiReport,
   deadClassifyJobs,
@@ -38,20 +39,21 @@ export const dynamic = 'force-dynamic';
  * classifier from `shadow` to `apply`, and for the threshold it applies at.
  *
  * Behind `report.view`, like the suggested-responses report: it is about the
- * team's tickets, read by the people who label them. One run label and one
- * question at a time, chosen at the top; what counts as right and why is in
- * `lib/category-ai/grade.ts`, and every rate prints its sample beside it,
- * because the criterion for routing is a precision on a stated number of
- * labelled tickets.
+ * team's tickets, read by the people who label them. One run label, question
+ * and mode at a time, chosen at the top; what counts as right and why is in
+ * `lib/category-ai/grade.ts`. Every rate read off labelled tickets prints the
+ * sample it was read on beside it, because the criterion for routing is a
+ * precision on a stated number of labelled tickets; the rest print theirs
+ * below ten, as the other reports do.
  */
 export default async function CategoryAiReportPage({
   searchParams,
 }: {
-  searchParams: Promise<{ label?: string; q?: string }>;
+  searchParams: Promise<{ label?: string; q?: string; mode?: string }>;
 }) {
   const agent = await requireAgent();
   if (!can(agent, 'report.view')) notFound();
-  const { label, q } = await searchParams;
+  const { label, q, mode } = await searchParams;
 
   const [questions, settings, dead, categories] = await allLimited(2, [
     () => runQuestions(),
@@ -61,11 +63,15 @@ export default async function CategoryAiReportPage({
   ]);
   const keyConfigured = typesafeConfigured();
 
-  const asked = label !== undefined || q !== undefined;
+  const asked = label !== undefined || q !== undefined || mode !== undefined;
   const chosen = asked
-    ? (questions.find((each) => each.runLabel === label && each.fingerprint === q) ?? null)
+    ? (questions.find(
+        (each) => each.runLabel === label && each.fingerprint === q && each.mode === mode,
+      ) ?? null)
     : (questions[0] ?? null);
-  const report = chosen ? await categoryAiReport(chosen.runLabel, chosen.fingerprint) : null;
+  const report = chosen
+    ? await categoryAiReport(chosen.runLabel, chosen.fingerprint, chosen.mode)
+    : null;
 
   const labels = new Map(
     categories.map((category) => [
@@ -113,21 +119,13 @@ export default async function CategoryAiReportPage({
             ? ''
             : ' This environment has no TYPESAFE_API_KEY, so it is asked nothing.'}{' '}
           A ticket counts as labelled when a person chose its category in the ticket&rsquo;s
-          Category select before Jev wrote to it &mdash; never a rule&rsquo;s or a form&rsquo;s.
+          Category select before anything else wrote it &mdash; Jev, a rule or a form.
         </Notice>
-        {dead.count > 0 ? (
-          <Notice tone="warning" icon>
-            {dead.count === 1
-              ? `One message has no live answer because the job asking Jev about it failed for good, on ${formatDateTime(dead.first!)}.`
-              : `${dead.count} messages have no live answer because the jobs asking Jev about them failed for good, the first on ${formatDateTime(dead.first!)} and the last on ${formatDateTime(dead.last!)}.`}{' '}
-            No figure below counts them.
-          </Notice>
-        ) : null}
       </div>
 
       <Section
         title="Runs"
-        hint="Each row is one run label and one version of the question. Editing a category's label or description on the Categories page asks a new question, so its answers start a row of their own and are never averaged with the old ones."
+        hint="Each row is one run label, one version of the question and one mode. Editing a category's label or description on the Categories page asks a new question, and switching from shadow to apply starts a new mode, so their answers start a row of their own and are never averaged with the old ones."
       >
         {questions.length === 0 ? (
           <Quiet>
@@ -136,11 +134,19 @@ export default async function CategoryAiReportPage({
           </Quiet>
         ) : (
           <Table
-            head={['Run', 'Question', 'Mode', 'Tickets', 'Answers', 'Messages', 'Last written']}
+            head={[
+              'Run',
+              'Question',
+              'Mode',
+              'Tickets',
+              'Rows',
+              'Messages from – to',
+              'Last written',
+            ]}
           >
             {questions.map((question) => (
               <QuestionRow
-                key={`${question.runLabel}:${question.fingerprint}`}
+                key={`${question.runLabel}:${question.fingerprint}:${question.mode}`}
                 question={question}
                 current={question === chosen}
               />
@@ -157,27 +163,53 @@ export default async function CategoryAiReportPage({
         report.total.judged === 0 ? (
           <EmptyState
             title="Nothing in this run was judged"
-            hint="Every ticket in it was owned by a person, a rule or a form before Jev was asked, or every call failed."
+            hint="Every ticket in it was owned by a person, a rule or a form before Jev was asked, settled under another version of the question, past the cap, or every call failed."
           />
         ) : (
           <>
+            <div className="mb-6 max-w-3xl space-y-2">
+              {chosen.runLabel === CATEGORY_AI_LIVE_LABEL && dead.count > 0 ? (
+                <Notice tone="warning" icon>
+                  {dead.count === 1
+                    ? `One message has no live answer because the job asking Jev about it failed for good, on ${formatDateTime(dead.first!)}.`
+                    : `${dead.count} messages have no live answer because the jobs asking Jev about them failed for good, the first on ${formatDateTime(dead.first!)} and the last on ${formatDateTime(dead.last!)}.`}{' '}
+                  No figure below counts them.
+                </Notice>
+              ) : null}
+              {report.thresholdsInForce.length > 1 ? (
+                <Notice tone="warning" icon>
+                  The threshold changed during this run: its answers were decided against{' '}
+                  {report.thresholdsInForce.map((value) => value.toFixed(2)).join(', ')}. The sweep
+                  below is exact only at or below the lowest of them.
+                </Notice>
+              ) : null}
+              {chosen.mode === 'apply' ? (
+                <Notice tone="info" icon>
+                  In apply, a ticket Jev filed is out of the sample: agreeing with it leaves no
+                  label. Its filings are graded under Filed by Jev, by how often a person moved
+                  them, and the rates here count the tickets it did not file.
+                </Notice>
+              ) : null}
+            </div>
+
             <section className="mb-8 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               <Stat
                 label="Right"
-                value={share(report.total.right, report.total.settledLabelled)}
-                hint={`${report.total.right} of ${report.total.settledLabelled} labelled · the rules ${report.total.rulesRight} of ${report.total.rulesAnswered}`}
+                value={percent(report.total.jev)}
+                hint={`${report.total.jev.right} of ${report.total.jev.of} labelled · the rules ${report.total.rules.right} of ${report.total.rules.of}`}
                 explain={
                   <>
                     Of the labelled tickets Jev settled, how many it settled on the category the
-                    person chose. The rules&rsquo; figure is over the same labelled tickets, each
-                    graded on the first message the subcategory rules mapped to a category.
+                    person chose, weighted to the whole run (By category says how). The rules&rsquo;
+                    figure is over the labelled tickets the subcategory rules mapped to a category,
+                    on the first such message in Jev&rsquo;s window.
                   </>
                 }
               />
               <Stat
                 label="Settled"
                 value={share(report.total.settled, report.total.judged)}
-                hint={`${report.total.judged} tickets judged`}
+                hint={`${report.total.settled} of ${report.total.judged} tickets judged`}
                 explain={
                   <>
                     Tickets where some answer of Jev&rsquo;s was a category at or above the
@@ -189,19 +221,20 @@ export default async function CategoryAiReportPage({
               <Stat
                 label="On the first message"
                 value={share(report.total.settledOnFirst, report.total.settled)}
-                hint="of the settled tickets"
+                hint={`${report.total.settledOnFirst} of ${report.total.settled} settled tickets`}
                 explain={
                   <>
-                    Settled on the ticket&rsquo;s first message. High is fine when first messages
-                    say what they want; read it beside <b>Right</b>, since a greeting settling a
-                    category shows here first.
+                    Settled on the first message of the ticket this run judged &mdash; for the live
+                    run, the first after the classifier was switched on. High is fine when first
+                    messages say what they want; read it beside <b>Right</b>, since a greeting
+                    settling a category shows here first.
                   </>
                 }
               />
               <Stat
                 label="Unknown"
                 value={share(report.total.unknowns, report.total.answers)}
-                hint={`of ${report.total.answers} answers`}
+                hint={`${report.total.unknowns} of ${report.total.answers} answers`}
                 explain={
                   <>
                     Answers where Jev said the message is none of the categories &mdash; a greeting,
@@ -213,7 +246,7 @@ export default async function CategoryAiReportPage({
 
             <Section
               title="By channel"
-              hint="Every figure for the run, per channel the ticket came in on. Labelled counts tickets a person chose a category on before Jev wrote; Agrees counts settled tickets where the rules found the same category."
+              hint="Every figure for the run, per channel the ticket came in on. Labelled counts tickets a person chose a category on before anything else wrote; Agrees counts settled tickets where the rules found the same category."
             >
               <Table
                 head={[
@@ -237,14 +270,24 @@ export default async function CategoryAiReportPage({
 
             <Section
               title="By category"
-              hint={`Precision is right out of the labelled tickets Jev settled as the category; recall is right out of the tickets people labelled it, settled or not. The criterion for routing is read on at least ${LABELS_WANTED} labelled tickets.`}
+              hint={`Precision is right out of the labelled tickets Jev settled as the category; recall is right out of the tickets people labelled it, settled or not. The criterion for routing is a precision read on at least ${LABELS_WANTED} labelled tickets.`}
             >
               <Table
                 head={[
                   'Category',
                   'Settled',
                   'Precision',
-                  'Recall',
+                  <span key="recall" className="flex items-center gap-1">
+                    Recall
+                    <InfoTip label="Recall">
+                      The tickets to label are drawn evenly from each of Jev&rsquo;s answers, so a
+                      rare answer&rsquo;s tickets are labelled far more often than a common
+                      one&rsquo;s. Every rate here but Jev&rsquo;s precision mixes those answers, so
+                      each labelled ticket counts for as many tickets of its answer as it stands
+                      for: the percentage estimates the whole run, and the counts beside it are the
+                      labelled tickets it was read on.
+                    </InfoTip>
+                  </span>,
                   'Rules precision',
                   'Rules recall',
                 ]}
@@ -254,11 +297,17 @@ export default async function CategoryAiReportPage({
                     <Cell>{name(category.key, '')}</Cell>
                     <Cell>{category.settled}</Cell>
                     <Cell>
-                      <Sampled right={category.right} of={category.graded} />
+                      <Sampled estimate={category.precision} />
                     </Cell>
-                    <Cell>{share(category.right, category.labelled)}</Cell>
-                    <Cell>{share(category.rulesRight, category.rulesGraded)}</Cell>
-                    <Cell>{share(category.rulesRight, category.labelled)}</Cell>
+                    <Cell>
+                      <Sampled estimate={category.recall} />
+                    </Cell>
+                    <Cell>
+                      <Sampled estimate={category.rulesPrecision} />
+                    </Cell>
+                    <Cell>
+                      <Sampled estimate={category.rulesRecall} />
+                    </Cell>
                   </Row>
                 ))}
               </Table>
@@ -266,11 +315,11 @@ export default async function CategoryAiReportPage({
 
             <Section
               title="What people chose, against what Jev settled on"
-              hint="One row per category a person chose, one column per category Jev settled on. The diagonal is right; Not settled is the tickets Jev never settled."
+              hint="One row per category a person chose, one column per category Jev settled on: the labelled tickets as drawn, unweighted. The diagonal is right; Not settled is the tickets Jev never settled."
             >
               {report.confusion.length === 0 ? (
                 <Quiet>
-                  No ticket in this run is labelled yet. Label some from the lists at the foot of
+                  No ticket in this run is labelled yet. Label some from the list at the foot of
                   this page.
                 </Quiet>
               ) : (
@@ -308,11 +357,11 @@ export default async function CategoryAiReportPage({
                     <Cell>{share(row.settled, report.total.judged)}</Cell>
                     <Cell>{row.unasked}</Cell>
                     <Cell>
-                      <Sampled right={row.right} of={row.graded} />
+                      <Sampled estimate={row.jev} />
                     </Cell>
                     {row.byCategory.map((category) => (
                       <Cell key={category.key}>
-                        <Sampled right={category.right} of={category.graded} />
+                        <Sampled estimate={category.precision} />
                       </Cell>
                     ))}
                   </Row>
@@ -323,7 +372,7 @@ export default async function CategoryAiReportPage({
             {report.filed.length > 0 ? (
               <Section
                 title="Filed by Jev"
-                hint="Tickets Jev wrote a category to under this run, and how many a person has changed since. A person who agrees changes nothing, so a ticket nobody changed may simply be one nobody looked at."
+                hint="Tickets Jev wrote a category to in answer to this run's messages, and how many a person has changed since. A person who agrees changes nothing, so a ticket nobody changed may simply be one nobody looked at."
               >
                 <Table head={['Category', 'Filed', 'Changed by a person', 'Changed to']}>
                   {report.filed.map((row) => (
@@ -346,10 +395,10 @@ export default async function CategoryAiReportPage({
 
             <Section
               title="To label"
-              hint="Tickets nobody has labelled and nothing has filed. They are chosen by what Jev settled on, so a rare category gets labels too, and from the tickets it never settled, so recall has misses to count — but the list does not say which, so each label is the person's own reading of the ticket. Open one and choose its category in the Category select: a real change, which runs the rules keyed on the category as any change does. There is no way yet to record that a ticket fits none of the categories, so leave one like that unlabelled."
+              hint="Tickets nobody has labelled and nothing has filed. They are chosen by what Jev settled on, so a rare category gets labels too, and from the tickets it never settled once Jev can no longer be asked about them, so recall has misses to count — but the list does not say which, so each label is the person's own reading of the ticket. Open one and choose its category in the Category select: a real change, which runs the rules keyed on the category and, before a first reply, chooses the SLA policy again, as any change does. There is no way yet to record that a ticket fits none of the categories, so leave one like that unlabelled."
             >
               <div className="mb-3">
-                <Table head={['Jev settled on', 'Labelled', 'Waiting']}>
+                <Table head={['Jev settled on', 'Labelled']}>
                   {report.sample.map((stratum) => (
                     <Row key={stratum.key ?? 'unsettled'}>
                       <Cell>{name(stratum.key, 'Never settled')}</Cell>
@@ -358,7 +407,6 @@ export default async function CategoryAiReportPage({
                           ? stratum.labelled
                           : `${stratum.labelled} of ${LABELS_WANTED} wanted`}
                       </Cell>
-                      <Cell>{stratum.waiting}</Cell>
                     </Row>
                   ))}
                 </Table>
@@ -385,11 +433,13 @@ export default async function CategoryAiReportPage({
             <p className="max-w-3xl text-xs text-(--color-text-tertiary)">
               Not judged, and in no figure above: {report.outOfPlay.owned} owned by a person, a rule
               or a form before Jev was asked; {report.outOfPlay.settled_elsewhere} settled under
-              another version of the question; {report.outOfPlay.capped} capped;{' '}
-              {report.outOfPlay.failed} whose every call failed. {report.labelledAfterJev} judged
-              ticket{report.labelledAfterJev === 1 ? ' was' : 's were'} labelled only after Jev
-              wrote to {report.labelledAfterJev === 1 ? 'it' : 'them'}, and{' '}
-              {report.labelledAfterJev === 1 ? 'is' : 'are'} counted under Filed by Jev instead.
+              another version of the question or by a backfill&rsquo;s filing;{' '}
+              {report.outOfPlay.capped} capped; {report.outOfPlay.failed} whose every call failed.{' '}
+              {report.labelledAfterWrite} judged ticket
+              {report.labelledAfterWrite === 1 ? ' was' : 's were'} labelled only after Jev, a rule
+              or a form had written the category, and{' '}
+              {report.labelledAfterWrite === 1 ? 'is' : 'are'} not graded: agreeing with what was
+              written leaves no label to grade.
             </p>
           </>
         )
@@ -402,6 +452,7 @@ function QuestionRow({ question, current }: { question: RunQuestion; current: bo
   const href = `/reports/category-ai?${new URLSearchParams({
     label: question.runLabel,
     q: question.fingerprint,
+    mode: question.mode,
   }).toString()}`;
   return (
     <Row>
@@ -421,7 +472,7 @@ function QuestionRow({ question, current }: { question: RunQuestion; current: bo
       <Cell>
         <code className="text-xs">{question.fingerprint.slice(0, 10)}</code>
       </Cell>
-      <Cell>{question.modes.join(', ')}</Cell>
+      <Cell>{question.mode}</Cell>
       <Cell>{question.tickets}</Cell>
       <Cell>{question.rows}</Cell>
       <Cell className="whitespace-nowrap">
@@ -452,10 +503,10 @@ function SliceRow({ slice }: { slice: Slice }) {
       <Cell>{share(slice.unknowns, slice.answers)}</Cell>
       <Cell>{slice.labelled}</Cell>
       <Cell>
-        <Sampled right={slice.right} of={slice.settledLabelled} />
+        <Sampled estimate={slice.jev} />
       </Cell>
       <Cell>
-        <Sampled right={slice.rulesRight} of={slice.rulesAnswered} />
+        <Sampled estimate={slice.rules} />
       </Cell>
       <Cell>{share(slice.agree, slice.comparable)}</Cell>
     </Row>
@@ -508,18 +559,29 @@ function Confusion({
   );
 }
 
-/** A rate with its sample always beside it: the criterion is a precision on a stated count. */
-function Sampled({ right, of }: { right: number; of: number }) {
-  if (of === 0) return <>—</>;
+/**
+ * A rate over labelled tickets with its sample always beside it: the criterion
+ * is a precision on a stated count. The percentage is the weighted estimate,
+ * so it can differ from the two counts beside it; below ten there is no
+ * percentage worth printing.
+ */
+function Sampled({ estimate }: { estimate: Estimate }) {
+  if (estimate.of === 0) return <>—</>;
   // One line, so a phone scrolls the table rather than stacking the rate.
   return (
     <span className="whitespace-nowrap">
-      {of >= 10 ? `${Math.round((100 * right) / of)}% · ` : ''}
+      {estimate.of >= 10 ? `${percent(estimate)} · ` : ''}
       <span className="text-(--color-text-secondary)">
-        {right} of {of}
+        {estimate.right} of {estimate.of}
       </span>
     </span>
   );
+}
+
+function percent(estimate: Estimate): string {
+  if (estimate.rate === null) return '—';
+  if (estimate.of < 10) return `${estimate.right} of ${estimate.of}`;
+  return `${Math.round(100 * estimate.rate)}%`;
 }
 
 /**

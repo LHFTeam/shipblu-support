@@ -3918,8 +3918,8 @@ wait for the user's go-ahead, after 4.1 is deployed.
     `grade.test.ts`. `lib/category-ai/report.ts` reads, with
     `report.db.test.ts` against Postgres.
   - `/reports/category-ai`, behind `report.view` and linked from `/reports`,
-    takes one run label and one `request_fingerprint` from a list of every pair,
-    newest first. For that pair it shows:
+    takes one run label, one `request_fingerprint` and one mode from a list of
+    every such triple, newest first. For that run it shows:
     - right, settled, settled on the first message and unknown, per channel and
       in total;
     - precision and recall per category, Jev's and the rules' side by side;
@@ -3927,39 +3927,63 @@ wait for the user's go-ahead, after 4.1 is deployed.
     - a threshold sweep;
     - what Jev filed and a person changed since;
     - the tickets to label.
-  - The count of `classify_category` jobs in `dead`, 4.1's one gap, is on the
-    page as a warning.
+  - The count of `classify_category` jobs in `dead`, 4.1's one gap, is a
+    warning on the live label's views.
   - The handbook's reports article gains the screen and how to label for it,
     and the categories admin paragraph names it.
 - **Where it departs from the spec, or adds to it.**
-  - **A label is a person's latest `category_changed`, and only when no Jev
-    write came before it.** Under `apply` a person who agrees changes nothing
-    and leaves no event, so every label after a write is a disagreement. Graded,
-    those labels would make every applied answer wrong. They are counted under
-    "Filed by Jev" instead: what it filed, how many a person moved since, and to
-    what. That is the figure step 3's merchant-support watch reads.
+  - **The mode is part of the run.** The spec chose a label and a fingerprint.
+    Under `live`, a ticket settled in shadow is asked again once `apply` is on,
+    so the two modes' answers graded together would grade a shadow key against
+    a ticket apply filed under another. A view that holds more than one
+    threshold says so, and the sweep is exact only at or below the lowest.
+  - **A label is a person's latest `category_changed`, and only when nothing
+    else wrote the category before it**: not Jev, not a rule, not a form. A
+    person who agrees with a write changes nothing and leaves no event, so
+    every label after one is a disagreement. Graded, those labels would make
+    every such answer wrong. They are counted apart, and Jev's own filings
+    under "Filed by Jev": what it filed in answer to the run's messages, how
+    many a person moved since, and to what. That is the figure step 3's
+    merchant-support watch reads, and under `apply` the page says the rates
+    count only what Jev did not file.
+  - **Rates that mix Jev's answers are weighted.** The labelling list draws
+    the same number of tickets from each answer, so a rare answer's tickets
+    are labelled at a far higher rate. Precision within one answer needs
+    nothing. Recall, the overall rate, the rules' rates and the sweep's weigh
+    each labelled ticket by its stratum's judged tickets over its labels, so
+    they estimate the run. The raw counts print beside every one of them, and
+    the confusion matrix stays unweighted counts.
   - **The rules are graded on their own terms over the same labelled tickets.**
     Their answer is the first message the detector maps to a category, inside
-    Jev's window: up to an `owned` or `capped` row, `after_settle` rows
-    included. Grading them on Jev's settling message instead would charge them
-    with Jev's choice of message.
+    Jev's window: at most five messages, and none from an `owned` or `capped`
+    row on, `after_settle` rows included. Grading them on Jev's settling
+    message instead would charge them with Jev's choice of message.
+  - **Messages are judged in the live job's order**: by instant, then message
+    id (`arrivedBefore`). WhatsApp stamps a burst to the second, and a row id
+    would order such a pair at random.
   - **The sweep re-settles each ticket from its rows.** At or below the
     threshold the run used, the answer is exact: every message up to the settle
     was asked. Above it, a ticket whose settle falls below the bar moves on to
-    messages Jev was never asked (`after_settle`), and those are counted as not
-    known, not as unsettled. That is what "the threshold set from the report"
-    reads.
+    messages Jev was never asked (`after_settle` with no answer), and those
+    count as not known, not as unsettled. An `after_settle` row that holds an
+    answer is read, the cap of five is counted, and an `owned` or `capped` row
+    out of job order is passed over. That is what "the threshold set from the
+    report" reads.
   - **The sample is chosen by Jev's answer and shown without it.** Strata are
     Jev's settling category, plus "never settled" so recall has misses. Each
     stratum's first ten go into one list in id order, a fixed random order for
     a v4 uuid, with only the ticket number and channel. A supervisor told "Jev
     said sales" before opening a ticket is being asked to agree, and the label
-    would be Jev's answer read back. The per-stratum counts stay on the page,
-    and 30 labels a class is the step 3 bar.
+    would be Jev's answer read back. The page shows each stratum's labels
+    against the 30 that step 3 wants. It does not show how many wait in each:
+    beside one list, a stratum that alone has tickets waiting names every one.
   - **Only tickets with no category now are offered**, besides nobody having
     labelled them and Jev never having written. Choosing the category a ticket
     already has writes nothing, so on a ticket a rule filed, agreeing leaves
-    no label.
+    no label. A never-settled ticket is offered only once Jev can no longer be
+    asked about it: answered, resolved or closed, or asked five times.
+    Labelled earlier, its next message would be owned, and the ticket a miss
+    Jev never had the chance to avoid.
 - **Found while building.**
   - **A ticket that fits no category cannot be labelled so.** Choosing None
     on a ticket with no category writes nothing (`setConversationCategory`
@@ -3974,6 +3998,12 @@ wait for the user's go-ahead, after 4.1 is deployed.
     SLA effects, so the page and the handbook say so. The archive's resolved
     tickets carry the fewest effects. Nothing restricts the sample to them,
     since a shadow week's open tickets are the live distribution.
+  - **An adversarial review** found the tie order, the unweighted mixing of
+    strata, the modes mixed under `live`, the rules' longer window after a
+    settle, labels after a rule's write, open windows in the sample, the
+    stratum counts naming the answer, the sweep's overcount of not known, and
+    filings counted across questions. Each is fixed with a test, seen to fail
+    without it.
 - **Left, with the reason.**
   - A label from an agent since deleted has lost its `actor_agent_id`, so it
     reads as nobody's. The spec makes the agent id the ground truth, and agents
@@ -3981,6 +4011,9 @@ wait for the user's go-ahead, after 4.1 is deployed.
   - A ticket whose messages were asked under two questions is graded under
     each with that question's rows alone, so "settled on the first message"
     means the first asked under that question.
+  - Weights treat labels given in ordinary work like the sample's: within a
+    stratum they are the evidence there is.
+  - Category names are today's labels, on an older question's view too.
   - No slice by `requester_kind` or `has_shipment` is drawn. Both columns
     are on every row, for a later cut.
 

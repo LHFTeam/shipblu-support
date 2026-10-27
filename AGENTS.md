@@ -1429,11 +1429,12 @@ offers the active categories by English label and description, with `unknown`
 added in code, and its fingerprint covers both, so an edit on `/admin/categories`
 is a new question no report averages with the old. `/reports/category-ai` grades
 one label and question at a time, and its rules are `lib/category-ai/grade.ts`'s
-tests: one settling answer per ticket; ground truth only a person's
-`category_changed` given before any Jev write, since under `apply` agreeing
-leaves no event and every label after a write is a disagreement; and a labelling
-sample that never says what Jev chose, which would make the label Jev's answer
-read back. See `plans/ticket-category-routing.md`, decision 4.
+tests: one settling answer per ticket, in the order the live job judges
+messages; ground truth only a person's `category_changed` given before Jev, a
+rule or a form wrote the category, since agreeing with a write leaves no event
+and every label after one is a disagreement; rates that mix Jev's answers
+weighted for a sample drawn evenly from each; and a labelling list that never
+says what Jev chose, which would make the label Jev's answer read back. See `plans/ticket-category-routing.md`, decision 4.
 
 The suggestion is **live**: its answer is shown to an agent, as grey text in an
 empty reply box that Tab (or Use, on a phone) puts in — Tab only once the text

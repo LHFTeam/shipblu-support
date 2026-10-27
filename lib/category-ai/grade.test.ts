@@ -13,16 +13,18 @@ import {
 
 /**
  * The grading rules, one case each: what settles a ticket, what counts as a
- * person's label, how the rules baseline is read, what a threshold would have
- * done, and which tickets are offered for labelling. Each is a way the report
- * could say Jev is better or worse than it is, and nothing on the page would
- * show it.
+ * person's label, how the rules baseline is read, how a stratified sample is
+ * weighed, what a threshold would have done, and which tickets are offered for
+ * labelling. Each is a way the report could say Jev is better or worse than it
+ * is, and nothing on the page would show it.
  */
 
 const LABEL = 'live';
 const KEYS = ['sales', 'customer_support', 'merchant_support', 'courier_jobs'];
 const START = Date.parse('2026-10-01T09:00:00Z');
 const minute = (n: number) => new Date(START + n * 60_000);
+const messageAt = (conversationId: string, at: number) =>
+  `${conversationId}:${String(at).padStart(3, '0')}`;
 
 function run(
   conversationId: string,
@@ -34,6 +36,7 @@ function run(
 ): GradingRun {
   return {
     conversationId,
+    messageId: messageAt(conversationId, at),
     channel: 'whatsapp',
     messageCreatedAt: minute(at),
     outcome,
@@ -53,10 +56,18 @@ function person(conversationId: string, at: number, key: string | null): Grading
     actorLabel: null,
     key,
     runLabel: null,
+    messageId: null,
   };
 }
 
-function jevWrite(conversationId: string, at: number, key: string, runLabel = LABEL): GradingEvent {
+/** Jev's write, answering the ticket's first message unless told another. */
+function jevWrite(
+  conversationId: string,
+  at: number,
+  key: string,
+  runLabel = LABEL,
+  messageId = messageAt(conversationId, 0),
+): GradingEvent {
   return {
     conversationId,
     createdAt: minute(at),
@@ -64,6 +75,7 @@ function jevWrite(conversationId: string, at: number, key: string, runLabel = LA
     actorLabel: 'jev:category',
     key,
     runLabel,
+    messageId,
   };
 }
 
@@ -75,6 +87,7 @@ function rule(conversationId: string, at: number, key: string): GradingEvent {
     actorLabel: 'automation:file-sales',
     key,
     runLabel: null,
+    messageId: null,
   };
 }
 
@@ -85,7 +98,7 @@ function input(
 ): GradingInput {
   const tickets = new Map<string, GradingTicket>();
   for (const [index, id] of [...new Set(runs.map((each) => each.conversationId))].entries()) {
-    tickets.set(id, { number: 100 + index, labellable: true });
+    tickets.set(id, { number: 100 + index, labellable: true, windowOpen: false });
   }
   return { runLabel: LABEL, runs, events, tickets, categoryKeys: KEYS, thresholds: [], ...extra };
 }
@@ -109,6 +122,18 @@ describe('the settling answer', () => {
   it('marks a settle on the ticket first message', () => {
     const graded = verdict([run('t', 0, 'applied', 'sales', 0.9), run('t', 1, 'after_settle')]);
     expect(graded.settle).toEqual({ key: 'sales', onFirstMessage: true });
+  });
+
+  // WhatsApp stamps a burst to the second; the live job and the backfill
+  // break the tie by message id, and so must the grade, whatever order the
+  // rows were read in.
+  it('orders messages of the same instant by their id, as the live job does', () => {
+    const graded = verdict([
+      run('t', 0, 'after_settle', null, null, { messageId: 'm-b' }),
+      run('t', 0, 'would_apply', 'sales', 0.9, { messageId: 'm-a' }),
+    ]);
+    expect(graded.settle).toEqual({ key: 'sales', onFirstMessage: true });
+    expect(settleAt(graded.runs, 0.6)).toEqual({ kind: 'settled', key: 'sales' });
   });
 
   it('is never unknown, however sure Jev was', () => {
@@ -159,18 +184,33 @@ describe('the label', () => {
       [jevWrite('t', 0, 'sales'), person('t', 9, 'customer_support')],
     );
     expect(graded.label).toBeNull();
-    expect(graded.labelledAfterJev).toBe(true);
+    expect(graded.labelledAfterWrite).toBe(true);
     expect(graded.filed).toEqual({ key: 'sales', changedTo: { key: 'customer_support' } });
   });
 
-  it('counts a write under another label as Jev too', () => {
+  // The same asymmetry as Jev's: a supervisor who agrees with the rule changes
+  // nothing, so only the disagreements would be graded.
+  it('is not ground truth once a rule has written either', () => {
+    const graded = verdict(settled, [rule('t', 5, 'sales'), person('t', 9, 'customer_support')]);
+    expect(graded.label).toBeNull();
+    expect(graded.labelledAfterWrite).toBe(true);
+  });
+
+  it('counts a write under another label as Jev too, but not as this run’s filing', () => {
     // The backfill's `apply` names the record label it filed from.
     const graded = verdict(settled, [
       jevWrite('t', 2, 'sales', 'backlog-1'),
       person('t', 9, 'customer_support'),
     ]);
     expect(graded.label).toBeNull();
-    // Filed under the other label, so not this label's filing.
+    expect(graded.filed).toBeNull();
+    expect(graded.writtenByJev).toBe(true);
+  });
+
+  // A live write in answer to a message asked under another question is that
+  // question's filing.
+  it('files a write only against the rows it answered', () => {
+    const graded = verdict(settled, [jevWrite('t', 2, 'sales', LABEL, 'another-message')]);
     expect(graded.filed).toBeNull();
     expect(graded.writtenByJev).toBe(true);
   });
@@ -205,6 +245,19 @@ describe('the rules baseline', () => {
         run('t', 1, 'capped', null, null, { baselineKey: 'sales' }),
       ]).baseline,
     ).toBeNull();
+  });
+
+  // After a settle every later message is `after_settle`, never `capped`; the
+  // rules still get only the five messages Jev could have been asked about.
+  it('reads no further than the five messages Jev had', () => {
+    const runs = (at: number) => [
+      run('t', 0, 'would_apply', 'customer_support', 0.9),
+      ...Array.from({ length: 5 }, (_, n) =>
+        run('t', n + 1, 'after_settle', null, null, n + 1 === at ? { baselineKey: 'sales' } : {}),
+      ),
+    ];
+    expect(verdict(runs(4)).baseline).toBe('sales');
+    expect(verdict(runs(5)).baseline).toBeNull();
   });
 });
 
@@ -243,10 +296,46 @@ describe('settleAt, the threshold sweep', () => {
       ),
     ).toEqual({ kind: 'none' });
   });
+
+  // Its job asked before the settle landed: an answer, not an unasked message.
+  it('reads the answer an after_settle row holds', () => {
+    expect(
+      settleAt(
+        [
+          run('t', 0, 'would_apply', 'customer_support', 0.65),
+          run('t', 1, 'after_settle', 'sales', 0.9),
+        ],
+        0.7,
+      ),
+    ).toEqual({ kind: 'settled', key: 'sales' });
+  });
+
+  // Settled on its fifth asked message: the sixth would have been capped.
+  it('counts the cap, so five answers below the bar are unsettled, not unknown', () => {
+    expect(
+      settleAt(
+        [
+          ...Array.from({ length: 4 }, (_, n) => run('t', n, 'below_threshold', 'sales', 0.5)),
+          run('t', 4, 'would_apply', 'sales', 0.7),
+          run('t', 5, 'after_settle'),
+        ],
+        0.8,
+      ),
+    ).toEqual({ kind: 'none' });
+  });
+
+  // Jobs run in no order: one that found the ticket owned can sit before a
+  // message whose job had already asked.
+  it('passes over an owned row before a message that was still asked', () => {
+    expect(settleAt([run('t', 0, 'owned'), run('t', 1, 'would_apply', 'sales', 0.9)], 0.6)).toEqual(
+      { kind: 'settled', key: 'sales' },
+    );
+  });
 });
 
 describe('grade', () => {
-  // Five tickets on WhatsApp and one on email, each in a different cell.
+  // Five tickets on WhatsApp and one on email, each in a different cell. Every
+  // stratum's labels are all its tickets, so every weight is 1.
   const runs = [
     // Settled sales on its first message, labelled sales: right.
     run('a', 0, 'would_apply', 'sales', 0.9, { baselineKey: 'sales' }),
@@ -283,10 +372,8 @@ describe('grade', () => {
       answers: 6,
       unknowns: 1,
       labelled: 4,
-      settledLabelled: 3,
-      right: 2,
-      rulesAnswered: 3,
-      rulesRight: 3,
+      jev: { right: 2, of: 3, rate: 2 / 3 },
+      rules: { right: 3, of: 3, rate: 1 },
       comparable: 2,
       agree: 1,
     });
@@ -298,23 +385,27 @@ describe('grade', () => {
     expect(byKey.sales).toEqual({
       key: 'sales',
       settled: 2,
-      graded: 2,
-      right: 1,
-      labelled: 1,
-      rulesGraded: 1,
-      rulesRight: 1,
+      precision: { right: 1, of: 2, rate: 0.5 },
+      recall: { right: 1, of: 1, rate: 1 },
+      rulesPrecision: { right: 1, of: 1, rate: 1 },
+      rulesRecall: { right: 1, of: 1, rate: 1 },
     });
-    expect(byKey.merchant_support).toMatchObject({ settled: 0, labelled: 1, right: 0 });
+    expect(byKey.merchant_support).toMatchObject({
+      settled: 0,
+      recall: { right: 0, of: 1, rate: 0 },
+    });
     expect(byKey.customer_support).toMatchObject({
-      graded: 1,
-      right: 1,
-      labelled: 2,
+      precision: { right: 1, of: 1 },
+      recall: { right: 1, of: 2 },
       // f's text mapped to nothing, so the rules graded b alone.
-      rulesGraded: 1,
-      rulesRight: 1,
+      rulesPrecision: { right: 1, of: 1 },
+      rulesRecall: { right: 1, of: 2 },
     });
     // Settled and unlabelled: in the settled count, out of the grade.
-    expect(byKey.courier_jobs).toMatchObject({ settled: 1, graded: 0, labelled: 0 });
+    expect(byKey.courier_jobs).toMatchObject({
+      settled: 1,
+      precision: { right: 0, of: 0, rate: null },
+    });
     expect(report.categories.map((each) => each.key)).toEqual(KEYS);
   });
 
@@ -331,6 +422,7 @@ describe('grade', () => {
   });
 
   it('sweeps the thresholds asked for and the one in force', () => {
+    expect(report.thresholdsInForce).toEqual([0.6]);
     expect(report.sweep.map((row) => [row.threshold, row.inForce])).toEqual([
       [0.5, false],
       [0.6, true],
@@ -338,26 +430,60 @@ describe('grade', () => {
     ]);
     const [low, real, high] = report.sweep;
     // At 0.5, c settles on merchant support and is right.
-    expect(low).toMatchObject({ settled: 5, unasked: 0, graded: 4, right: 3 });
-    expect(real).toMatchObject({ settled: 4, unasked: 0, graded: 3, right: 2 });
+    expect(low).toMatchObject({ settled: 5, unasked: 0, jev: { right: 3, of: 4 } });
+    expect(real).toMatchObject({ settled: 4, unasked: 0, jev: { right: 2, of: 3 } });
     // At 0.8, b and f fall below the bar with no message after their settle,
     // so they are unsettled rather than unasked.
-    expect(high).toMatchObject({ settled: 2, graded: 1, right: 1 });
+    expect(high).toMatchObject({ settled: 2, jev: { right: 1, of: 1 } });
     expect(low!.byCategory.find((each) => each.key === 'merchant_support')).toEqual({
       key: 'merchant_support',
-      graded: 1,
-      right: 1,
+      precision: { right: 1, of: 1, rate: 1 },
     });
   });
 
-  it('counts unlabelled tickets by Jev answer, and the ones it never settled', () => {
+  it('counts labelled tickets by Jev answer, and offers the unlabelled in one list', () => {
     expect(report.sample).toEqual([
-      { key: 'sales', labelled: 2, waiting: 0 },
-      { key: 'customer_support', labelled: 1, waiting: 0 },
-      { key: 'courier_jobs', labelled: 0, waiting: 1 },
-      { key: null, labelled: 1, waiting: 0 },
+      { key: 'sales', labelled: 2 },
+      { key: 'customer_support', labelled: 1 },
+      { key: 'courier_jobs', labelled: 0 },
+      { key: null, labelled: 1 },
     ]);
     expect(report.toLabel).toEqual([{ conversationId: 'd', number: 103, channel: 'whatsapp' }]);
+  });
+});
+
+describe('the weights', () => {
+  // Jev settled ten tickets as sales and two as customer support; two of each
+  // are labelled, as the sample draws them. One of the two customer-support
+  // ones is really sales. Unweighted, sales recall is 2 of 3; the ten sales
+  // tickets the two labels stand for make it 10 of 11.
+  const runs = [
+    ...Array.from({ length: 10 }, (_, n) => run(`s${n}`, 0, 'would_apply', 'sales', 0.9)),
+    run('c0', 0, 'would_apply', 'customer_support', 0.9),
+    run('c1', 0, 'would_apply', 'customer_support', 0.9),
+  ];
+  const events = [
+    person('s0', 30, 'sales'),
+    person('s1', 30, 'sales'),
+    person('c0', 30, 'customer_support'),
+    person('c1', 30, 'sales'),
+  ];
+  const report = grade(input(runs, events));
+  const sales = report.categories.find((each) => each.key === 'sales')!;
+
+  it('estimates the run from a stratified sample', () => {
+    expect(sales.recall).toEqual({ right: 2, of: 3, rate: 10 / 11 });
+    // Overall: 10 right of 10 sales, 1 of 2 customer support.
+    expect(report.total.jev).toEqual({ right: 3, of: 4, rate: 11 / 12 });
+  });
+
+  it('leaves precision within one answer as it was sampled', () => {
+    expect(sales.precision).toEqual({ right: 2, of: 2, rate: 1 });
+    expect(report.categories.find((each) => each.key === 'customer_support')!.precision).toEqual({
+      right: 1,
+      of: 2,
+      rate: 0.5,
+    });
   });
 });
 
@@ -371,14 +497,35 @@ describe('the sample', () => {
       jevWrite('q', 0, 'sales'),
     ];
     const tickets = new Map<string, GradingTicket>([
-      ['p', { number: 1, labellable: true }],
-      ['q', { number: 2, labellable: true }],
-      ['r', { number: 3, labellable: false }],
-      ['s', { number: 4, labellable: true }],
+      ['p', { number: 1, labellable: true, windowOpen: false }],
+      ['q', { number: 2, labellable: true, windowOpen: false }],
+      ['r', { number: 3, labellable: false, windowOpen: false }],
+      ['s', { number: 4, labellable: true, windowOpen: false }],
     ]);
     const report = grade(input(runs, events, { tickets }));
-    expect(report.sample).toEqual([{ key: 'sales', labelled: 0, waiting: 1 }]);
+    expect(report.sample).toEqual([{ key: 'sales', labelled: 0 }]);
     expect(report.toLabel).toEqual([{ conversationId: 's', number: 4, channel: 'whatsapp' }]);
+  });
+
+  // Labelled while Jev may still be asked, its next message would be owned,
+  // and the ticket a miss it never had the chance to avoid.
+  it('offers a ticket Jev never settled only once its window has closed', () => {
+    const runs = [
+      run('open', 0, 'below_threshold', 'sales', 0.3),
+      run('asked5', 0, 'below_threshold', 'sales', 0.3),
+      ...Array.from({ length: 4 }, (_, n) => run('asked5', n + 1, 'unknown', 'unknown', 0.9)),
+      run('answered', 0, 'below_threshold', 'sales', 0.3),
+      run('settled', 0, 'would_apply', 'sales', 0.9),
+    ];
+    const tickets = new Map<string, GradingTicket>([
+      ['open', { number: 1, labellable: true, windowOpen: true }],
+      ['asked5', { number: 2, labellable: true, windowOpen: true }],
+      ['answered', { number: 3, labellable: true, windowOpen: false }],
+      // A settled ticket is graded on its settle, open or not.
+      ['settled', { number: 4, labellable: true, windowOpen: true }],
+    ]);
+    const offered = grade(input(runs, [], { tickets })).toLabel.map((each) => each.number);
+    expect(offered.sort()).toEqual([2, 3, 4]);
   });
 
   it('offers at most a page of each stratum, mixed into one list that names no answer', () => {
@@ -391,8 +538,8 @@ describe('the sample', () => {
     ];
     const report = grade(input(runs));
     expect(report.sample).toEqual([
-      { key: 'sales', labelled: 0, waiting: 3 },
-      { key: null, labelled: 0, waiting: SAMPLE_SIZE + 5 },
+      { key: 'sales', labelled: 0 },
+      { key: null, labelled: 0 },
     ]);
     // The first page of each, interleaved by id: nothing in the list or its
     // order says which stratum a ticket came from.
@@ -437,5 +584,13 @@ describe('the keys', () => {
       'alpha_retired',
       'zeta_retired',
     ]);
+  });
+
+  it('report every threshold a run was decided against', () => {
+    const runs = [
+      run('a', 0, 'would_apply', 'sales', 0.9, { minProbability: 0.7 }),
+      run('b', 0, 'would_apply', 'sales', 0.9),
+    ];
+    expect(grade(input(runs)).thresholdsInForce).toEqual([0.6, 0.7]);
   });
 });

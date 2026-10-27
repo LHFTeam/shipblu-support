@@ -1,6 +1,12 @@
 import { and, asc, count, desc, eq, inArray, max, min, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
-import { aiCategoryRuns, conversationEvents, conversations, jobs } from '@/db/schema';
+import {
+  aiCategoryRuns,
+  conversationEvents,
+  conversations,
+  jobs,
+  ticketStatuses,
+} from '@/db/schema';
 import { listCategories } from '@/lib/categories/queries';
 import { CATEGORY_OUTCOMES, type CategoryOutcome } from './decide';
 import { grade, type Grading, type GradingTicket } from './grade';
@@ -11,10 +17,13 @@ import { grade, type Grading, type GradingTicket } from './grade';
  * `category_changed` on the tickets they name, and those tickets' numbers.
  * `grade.ts` does the judging, so nothing here decides what counts.
  *
- * One label and one question at a time (`plans/ticket-category-routing.md`,
- * 4.2): a label holds the answers one run gave, and a question edited on
- * `/admin/categories` is a different question, which no figure may average with
- * the one before it.
+ * One label, one question and one mode at a time
+ * (`plans/ticket-category-routing.md`, 4.2): a label holds the answers one run
+ * gave, and a question edited on `/admin/categories` is a different question,
+ * which no figure may average with the one before it. The mode splits the live
+ * label at the switch to `apply`: a shadow answer settles a ticket that apply
+ * then asks about again, and graded together the shadow's key would be graded
+ * against a ticket apply filed under another.
  *
  * Read whole rather than counted in SQL. A label is at most every customer
  * message since the archive starts — tens of thousands of narrow rows — and the
@@ -25,13 +34,13 @@ import { grade, type Grading, type GradingTicket } from './grade';
 /** Thresholds every sweep shows; the ones in force are added to them. */
 const SWEEP_THRESHOLDS = [0.4, 0.5, 0.6, 0.7, 0.8, 0.9] as const;
 
-/** One label and question to choose from, newest first. */
+/** One label, question and mode to choose from, newest first. */
 export type RunQuestion = {
   runLabel: string;
   fingerprint: string;
+  mode: string;
   rows: number;
   tickets: number;
-  modes: string[];
   firstMessageAt: Date;
   lastMessageAt: Date;
   lastWrittenAt: Date;
@@ -43,18 +52,18 @@ export async function runQuestions(): Promise<RunQuestion[]> {
       runLabel: aiCategoryRuns.runLabel,
       fingerprint: aiCategoryRuns.requestFingerprint,
       rows: count(),
+      mode: aiCategoryRuns.mode,
       tickets: sql<number>`count(distinct ${aiCategoryRuns.conversationId})::int`,
-      modes: sql<
-        string[]
-      >`array_agg(distinct ${aiCategoryRuns.mode} order by ${aiCategoryRuns.mode})`,
       firstMessageAt: min(aiCategoryRuns.messageCreatedAt),
       lastMessageAt: max(aiCategoryRuns.messageCreatedAt),
       lastWrittenAt: max(aiCategoryRuns.createdAt),
     })
     .from(aiCategoryRuns)
-    .groupBy(aiCategoryRuns.runLabel, aiCategoryRuns.requestFingerprint)
+    .groupBy(aiCategoryRuns.runLabel, aiCategoryRuns.requestFingerprint, aiCategoryRuns.mode)
     .orderBy(desc(max(aiCategoryRuns.createdAt)), asc(aiCategoryRuns.runLabel))
-    .limit(50);
+    // Every run there has been, as far as anybody will page: a label is made
+    // by hand, a question by an admin's edit, a mode by the switch.
+    .limit(200);
 
   return rows.map((row) => ({
     ...row,
@@ -66,15 +75,20 @@ export async function runQuestions(): Promise<RunQuestion[]> {
 }
 
 /**
- * Every figure the page draws for one label and question.
+ * Every figure the page draws for one label, question and mode.
  *
  * Read one after another, not at once: each is one statement, and the page
  * that calls this has its own reads beside it (`allLimited`, §6.91).
  */
-export async function categoryAiReport(runLabel: string, fingerprint: string): Promise<Grading> {
+export async function categoryAiReport(
+  runLabel: string,
+  fingerprint: string,
+  mode: string,
+): Promise<Grading> {
   const scope = and(
     eq(aiCategoryRuns.runLabel, runLabel),
     eq(aiCategoryRuns.requestFingerprint, fingerprint),
+    eq(aiCategoryRuns.mode, mode),
   );
   const named = db
     .selectDistinct({ id: aiCategoryRuns.conversationId })
@@ -84,6 +98,7 @@ export async function categoryAiReport(runLabel: string, fingerprint: string): P
   const runs = await db
     .select({
       conversationId: aiCategoryRuns.conversationId,
+      messageId: aiCategoryRuns.messageId,
       channel: aiCategoryRuns.channel,
       messageCreatedAt: aiCategoryRuns.messageCreatedAt,
       outcome: aiCategoryRuns.outcome,
@@ -93,12 +108,9 @@ export async function categoryAiReport(runLabel: string, fingerprint: string): P
       baselineKey: aiCategoryRuns.baselineCategoryKey,
     })
     .from(aiCategoryRuns)
-    .where(scope)
-    .orderBy(
-      asc(aiCategoryRuns.conversationId),
-      asc(aiCategoryRuns.messageCreatedAt),
-      asc(aiCategoryRuns.id),
-    );
+    // Grouped by ticket in `grade`, which orders each ticket's rows the way the
+    // live job and the backfill judge them: a tie on the second needs the id.
+    .where(scope);
 
   const events = await db
     .select({
@@ -108,6 +120,7 @@ export async function categoryAiReport(runLabel: string, fingerprint: string): P
       actorLabel: conversationEvents.actorLabel,
       key: sql<string | null>`${conversationEvents.data}->>'key'`,
       runLabel: sql<string | null>`${conversationEvents.data}->>'runLabel'`,
+      messageId: sql<string | null>`${conversationEvents.data}->>'messageId'`,
     })
     .from(conversationEvents)
     .where(
@@ -129,14 +142,19 @@ export async function categoryAiReport(runLabel: string, fingerprint: string): P
       id: conversations.id,
       number: conversations.number,
       labellable: sql<boolean>`(${conversations.deletedAt} is null and not ${conversations.isSpam} and ${conversations.mergedIntoId} is null and ${conversations.categoryId} is null)`,
+      windowOpen: sql<boolean>`(${conversations.firstRespondedAt} is null and ${ticketStatuses.category} in ('open', 'pending'))`,
     })
     .from(conversations)
+    .innerJoin(ticketStatuses, eq(ticketStatuses.id, conversations.statusId))
     .where(inArray(conversations.id, named));
 
   const categories = await listCategories();
 
   const tickets = new Map<string, GradingTicket>(
-    ticketRows.map((row) => [row.id, { number: row.number, labellable: row.labellable }]),
+    ticketRows.map((row) => [
+      row.id,
+      { number: row.number, labellable: row.labellable, windowOpen: row.windowOpen },
+    ]),
   );
 
   return grade({
