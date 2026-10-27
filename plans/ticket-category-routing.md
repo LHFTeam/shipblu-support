@@ -63,7 +63,7 @@ records the answers, and the plan below already reflects them.
 
 ## Status and handoff
 
-As of 2026-10-26, 08:45 UTC. A session picking this plan up starts here.
+As of 2026-10-27, 07:50 UTC. A session picking this plan up starts here.
 Everything after this section is the design as it was reasoned and as each stage
 was built. This section says where the work stands, what comes next and how, and
 what has already bitten. Whoever moves any of it updates this section in the
@@ -84,9 +84,30 @@ update.
 | 2.B   | Merged: #403 (`1d21cdc`), then `dev` → `main` in #413 (`516c8ff`) and #415 (`48cb284`). As built below                                      | **Done.** All six services live on `48cb284` by 06:01 UTC on 2026-10-25, web first, with nothing suspended. Its checks read clean, and a new message was subcategorised; one read left (below)                            |
 | 3.1   | Merged: #419 (`ff3bbfd`), then `dev` → `main` in #420 (`b9a4743`), which also carried #411, #416, #417 and #418. As built below             | **Done.** Web live on `b9a4743` at 19:44 UTC on 2026-10-25, the worker and the four crons by 08:05 UTC on 2026-10-26, and the four categories seeded at 08:13. Its checks read clean (below); the signed-in ones are left |
 | 3.2   | Merged: #424 (`07a5527`), then `dev` → `main` in #426 (`f761e5e`), which also carried #421, #422 and #423. As built below                   | **Done.** All six services live on `f761e5e` by 23:32 UTC on 2026-10-26, web first. Its checks read clean (below); the signed-in ones are left                                                                            |
-| 4.0   | In review: #425 (`claude/jolly-noether-hxhez1-stage-4-0`), with `dev` merged in after 3.2: [4.0, as built](#40-as-built)                    | —                                                                                                                                                                                                                         |
-| 4.1   | In review: #427 (`claude/jolly-noether-hxhez1-stage-4-1`), stacked on #425: [4.1, as built](#41-as-built)                                   | —                                                                                                                                                                                                                         |
-| 4.2–6 | Not started                                                                                                                                 | —                                                                                                                                                                                                                         |
+| 4.0   | Merged: #425 (`1c733c2`), then `dev` → `main` in #428 (`156004d`). As built below                                                           | **Done.** All six services live on `156004d` by 07:45:42 UTC on 2026-10-27, web first. Its checks read clean (below)                                                                                                      |
+| 4.1   | In review: #427 (`claude/jolly-noether-hxhez1-stage-4-1`), on `dev` since #425 merged: [4.1, as built](#41-as-built)                        | —                                                                                                                                                                                                                         |
+| 4.2–6 | 4.2's report in progress, stacked on #427. 5 and 6 not started                                                                              | —                                                                                                                                                                                                                         |
+
+**4.0's deploy and checks, read on Render and production on 2026-10-27.**
+
+- **Before** (read 07:31–07:41 UTC): all six services ran `f761e5e`;
+  `origin/main..origin/dev` held `1c733c2` alone; nothing pending or running in
+  `jobs`, and the same one dead job, `subscribe_meta_webhooks` of 2026-09-21.
+  4.0 is code only, with no migration, `db/sql` change or variable.
+- **The release.** #425 was squashed into `dev` as `1c733c2`, its tree
+  identical to the reviewed head `4a41a24`. #428 merged `dev` into `main` as
+  `156004d` once its nine checks were green. Web was deployed on it through
+  Render's API at 07:41:11, replayed the nine `db/sql` files by 07:42:50 with
+  nothing to migrate, and was live at 07:43:42. The four crons followed at
+  07:43:51–56 and were live by 07:44:34, and the worker was live at 07:45:42.
+- **The checks** (read 07:43–07:47 UTC):
+  - every job created since the deploy completed;
+  - neither web nor the worker logged a warning or an error, and web served no
+    5xx;
+  - the worker started and processed webhooks, and `sla-sweep` and
+    `time-automations` started their first runs at 07:46;
+  - `/api/health` reports `156004d`, with nothing pending or processing and
+    the same one dead job.
 
 **3.2's deploy and checks, read on Render and production on 2026-10-26.**
 
@@ -409,11 +430,14 @@ Every production write needs the user's go-ahead for that step, and the
    (`f761e5e`) took it to `main` on 2026-10-26 with #421, #422 and #423, the
    user having left the review's two races as they are. All six services were
    live on it by 23:32 UTC, web first, and its checks read clean (above); the
-   signed-in ones are left. **Stage 4.0**, `afterRoutingChanged`, is in review
-   as #425, with `dev` merged in: [4.0, as built](#40-as-built). **Stage
-   4.1**, Jev's category classifier, is in review as #427, stacked on #425,
-   and ships off: [4.1, as built](#41-as-built).
-6. **Before Stage 5**, a person does 0.2's reorder and 0.6's staffing, and the
+   signed-in ones are left.
+6. **4.0 is deployed.** #425 was squashed into `dev` as `1c733c2`, and #428
+   (`156004d`) took it to `main` on 2026-10-27. All six services were live on
+   it by 07:45:42 UTC, web first, and its checks read clean (above). **Stage
+   4.1**, Jev's category classifier, is in review as #427, on `dev` since #425
+   merged, and ships off: [4.1, as built](#41-as-built). 4.2's report is
+   built beside it, stacked on #427.
+7. **Before Stage 5**, a person does 0.2's reorder and 0.6's staffing, and the
    support lead answers the questions still open (below).
 
 ### 1.3, as built
