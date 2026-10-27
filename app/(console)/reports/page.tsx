@@ -120,6 +120,17 @@ export default async function ReportsPage({
               Suggested responses
             </Link>
             {/*
+              `report.view` as well: whether Jev files tickets on the right team is
+              read by the supervisors who label the sample it is graded on. It
+              chooses a run rather than a date range, so it takes no `days`.
+            */}
+            <Link
+              href="/reports/category-ai"
+              className={buttonClass({ variant: 'secondary', size: 'sm' })}
+            >
+              Category classifier
+            </Link>
+            {/*
               `report.view` too: what customers said of the work is this page's
               CSAT tile, cut every way it can be and with the words beside it.
             */}

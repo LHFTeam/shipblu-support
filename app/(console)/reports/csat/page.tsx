@@ -49,6 +49,7 @@ import {
 } from '@/lib/reports/queries';
 import { rangeIn, reportingContext } from '@/lib/reports/rollup';
 import { RangeNav } from '../range-nav';
+import { Quiet, Section } from '../report-parts';
 import { daysFrom, RANGES } from './ranges';
 
 export const dynamic = 'force-dynamic';
@@ -487,25 +488,6 @@ function fromDays(things: number, days: string[]): string {
         ? `${named.slice(0, -1).join(', ')} and ${named.at(-1)}`
         : named[0];
   return `${things === 1 ? 'It is' : 'They are'} from ${list}, ${days.length === 1 ? 'a day' : 'days'}`;
-}
-
-function Section({ title, hint, children }: { title: string; hint: string; children: ReactNode }) {
-  return (
-    <section className="mb-8">
-      <h2 className="mb-1 text-sm font-semibold text-(--color-text-secondary)">{title}</h2>
-      <p className="mb-2 max-w-3xl text-xs text-(--color-text-tertiary)">{hint}</p>
-      {children}
-    </section>
-  );
-}
-
-/** An empty section said in words: an empty table reads as a page not finished. */
-function Quiet({ children }: { children: ReactNode }) {
-  return (
-    <Notice tone="neutral" className="max-w-2xl">
-      {children}
-    </Notice>
-  );
 }
 
 /** The same figures per channel, group or agent, each row with its denominators. */

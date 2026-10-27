@@ -1577,8 +1577,12 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
   second, by analogy with the 647 shadow subcategorisation calls (p50 234 ms) — and
   every row stores both.
 
-- **Jev's category classifier is built and switched off** (Stage 4.1 of
-  `plans/ticket-category-routing.md`; `lib/category-ai/`). Once on, it asks
+- **Jev's category classifier is deployed and switched off** (Stage 4.1 of
+  `plans/ticket-category-routing.md`; `lib/category-ai/`): live on `dbf4376`
+  since 2026-10-27 12:07 UTC, with `0050`'s two tables in production, no
+  settings row and no answers. Leave it off until #429 is deployed, worker
+  included: `dbf4376`'s locked ticket read loses a ticket whose status changes
+  under the lock, and the job goes to `dead`. Once on, it asks
   which team's work each of the first five customer messages on an unanswered
   ticket is, and under `apply` files the ticket — never over a category a
   person, a rule, a form's default or an agent opening the ticket chose. Its
@@ -1586,7 +1590,8 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
   the key, which production already holds; the threshold beside it defaults to
   0.6 and every answer records the one it met. Turning it on is 4.2's sequence:
   `backfill_category_ai mode=record runLabel=<label>` over the archive, then
-  `shadow` for at least two weeks while a supervisor labels a sample, then
+  `shadow` for at least two weeks while a supervisor labels a sample from
+  `/reports/category-ai` (4.2), whose figures decide the switch, then
   `apply`, then `backfill_category_ai mode=record` again under a fresh label with
   no `since=` — it has no status scope, and must reach the oldest open ticket —
   and `mode=apply fromLabel=<that label>`, which files only the open ones. Read
