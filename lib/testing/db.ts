@@ -4,6 +4,7 @@ import { afterAll, beforeAll, beforeEach } from 'vitest';
 import { seedBaseline } from '@/db/baseline';
 import { closeDb, db } from '@/db/client';
 import { forgetSuggestionSettings } from '@/lib/canned-suggest/settings';
+import { forgetCategoryAiSettings } from '@/lib/category-ai/settings';
 import { forgetCsatSettings } from '@/lib/csat/settings';
 import { forgetSubcategoryIds } from '@/lib/subcategorise/apply';
 import { forgetHoursCatalog } from '@/lib/hours/catalog';
@@ -166,6 +167,7 @@ function forgetDatabaseCaches(): void {
   forgetHoursCatalog();
   forgetPresencePolicy();
   forgetSuggestionSettings();
+  forgetCategoryAiSettings();
   forgetCsatSettings();
 }
 

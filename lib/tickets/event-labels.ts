@@ -59,7 +59,7 @@ export function describeEvent(type: string, data: Record<string, unknown>): stri
         ? `set priority to ${String(data.to ?? '')} (${Math.round(data.probability * 100)}% likely)`
         : `set priority to ${String(data.to ?? '')}`;
     // Named by the label stored with the change, so a category renamed since
-    // still reads as what was chosen. Jev's answers (Stage 4) carry how sure it
+    // still reads as what was chosen. Jev's answers carry how sure it
     // was, for the reason the priority case above gives.
     case 'category_changed': {
       if (!data.to) return 'cleared the category';

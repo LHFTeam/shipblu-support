@@ -58,8 +58,8 @@ export type Requester =
        * action: `undefined` when the agent left it on the form's default or was
        * not offered it, `null` when they chose none, or the category they
        * picked. Only this variant carries one, so a help-centre submission
-       * cannot name a category however its POST is written — from Stage 4 a
-       * category somebody chose is one Jev may not change.
+       * cannot name a category however its POST is written — a category
+       * somebody chose is one Jev may not change (`categoryOwned`).
        */
       categoryId?: string | null;
     };
@@ -361,8 +361,8 @@ export async function submitForm(input: {
  *
  * An agent's pick is the agent's. Otherwise the form's default, credited to the
  * form whoever submitted it — an agent who left the chooser alone made no
- * judgement, and from Stage 4 only a person's `category_changed` counts as
- * ground truth for Jev. "None" over a default writes nothing at all: an event
+ * judgement, and only a person's `category_changed` counts as ground truth
+ * when Jev's answers are graded (Stage 4.2). "None" over a default writes nothing at all: an event
  * with `to: null` would read "cleared the category" on a ticket that never had
  * one. The form is read as it is now, at submission, and never again.
  */

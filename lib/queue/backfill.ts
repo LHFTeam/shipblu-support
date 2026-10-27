@@ -1,6 +1,8 @@
 import { gt, type SQL } from 'drizzle-orm';
 import { messages } from '@/db/schema';
 import type { Logger } from '@/lib/log';
+import { PermanentJobError } from '@/lib/queue';
+import { CONVERSATION_CHANNELS, type ConversationChannel } from '@/lib/tickets/channel-policy';
 
 /**
  * Visit every message a backfill selects, a batch at a time.
@@ -89,4 +91,35 @@ export function logChannelTable<T>(
       ].join(''),
     );
   }
+}
+
+/**
+ * A typo in `channels=` is an error, not an empty run — and a permanent one,
+ * since no retry spells the channel differently: the job dies on its first
+ * attempt with the sentence rather than after every backoff.
+ *
+ * Checked against the channel list rather than passed through, because
+ * `inArray` on a value the enum does not contain returns nothing at all — and a
+ * run that measured zero messages and a run whose filter was misspelt print the
+ * same thing.
+ */
+export function requestedChannels(
+  raw: string | undefined,
+  tag: string,
+): ConversationChannel[] | null {
+  if (typeof raw !== 'string' || !raw.trim()) return null;
+
+  const names = raw
+    .split(',')
+    .map((name) => name.trim())
+    .filter(Boolean);
+
+  const channels: ConversationChannel[] = [];
+  for (const name of names) {
+    const match = CONVERSATION_CHANNELS.find((channel) => channel === name);
+    if (!match) throw new PermanentJobError(`${tag} "${name}" is not a conversation channel`);
+    channels.push(match);
+  }
+
+  return channels.length > 0 ? channels : null;
 }

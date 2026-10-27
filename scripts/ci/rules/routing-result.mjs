@@ -9,8 +9,10 @@ import { fail, lineOfNode, parseSource, read, requireAtLeast, scannableSource } 
 // clocks re-timed on the new group's hours — `afterRoutingChanged` in
 // `lib/sla`, called once by whoever made the change
 // (`plans/ticket-category-routing.md`, Stage 4.0). Whether anything changed is
-// in the writer's answer and nowhere else: `setConversationCategory` writes
-// nothing for a category the ticket already carries or one retired since,
+// in the writer's answer and nowhere else: `setConversationCategory` — and
+// `setConversationCategoryOn`, its body for a caller already holding the
+// ticket's lock, as Jev's classifier does — writes nothing for a category the
+// ticket already carries or one retired since,
 // `moveToGroupIfElsewhere` nothing for the group the ticket is in, and
 // `assignConversation` handed a `groupId` answers `movedGroup`, false when the
 // ticket was already there or held by somebody it may not take from. A caller
@@ -18,9 +20,10 @@ import { fail, lineOfNode, parseSource, read, requireAtLeast, scannableSource } 
 // it either skips it, and a policy keyed on the category or group is never
 // reached, or calls it on every write, and a rule naming the group a ticket is
 // in re-selects on every pass. The router (Stage 5) moves the group through
-// `moveToGroupIfElsewhere`, so it is held now rather than remembered then. Jev
-// (4.1) decides under its own row lock; a writer of its own that updates the
-// column itself adds itself to WRITERS in the PR that lands it.
+// `moveToGroupIfElsewhere`, and Jev (4.1) writes through
+// `setConversationCategoryOn` under its own row lock, so both are held here. A
+// writer that updates the column itself adds itself to WRITERS in the PR that
+// lands it.
 //
 // So, outside tests, two halves:
 //
@@ -39,6 +42,13 @@ import { fail, lineOfNode, parseSource, read, requireAtLeast, scannableSource } 
 //     writer. That is what catches a new caller — Jev, the router — that keeps
 //     the answer and never owes anything for it.
 //
+// A write that by design owes nothing is a writer of its own, named in
+// NO_FOLLOW_UP with the one module that may call it, so the exemption is a
+// property of a function a reviewer can read rather than of a comment any call
+// site could carry. `fileBacklogCategory` is the one so far:
+// `backfill_category_ai`'s apply mode files a backlog and fires nothing (plan
+// 4.1). Its answer is still kept, and a call from any other module fails.
+//
 // What it cannot see: an answer kept and then ignored in a module that does
 // call `afterRoutingChanged` somewhere, which only reading the caller can judge
 // — returned from a callback or put in an array (a `db.transaction`, a
@@ -54,9 +64,13 @@ import { fail, lineOfNode, parseSource, read, requireAtLeast, scannableSource } 
 
 const WRITERS = new Set([
   'setConversationCategory',
+  'setConversationCategoryOn',
   'moveToGroupIfElsewhere',
   'assignConversation',
 ]);
+
+/** Writers that owe no follow-up by design, each with the one module that may call it. */
+const NO_FOLLOW_UP = new Map([['fileBacklogCategory', 'lib/category-ai/backfill.ts']]);
 
 /** Wrappers that change nothing about whether a value is used. */
 function passesThrough(node) {
@@ -131,7 +145,7 @@ function calleeName(call) {
 
 function writerCalled(call) {
   const name = calleeName(call);
-  if (!name || !WRITERS.has(name)) return null;
+  if (!name || !(WRITERS.has(name) || NO_FOLLOW_UP.has(name))) return null;
   if (name === 'assignConversation' && !canNameAGroup(call.arguments[1])) return null;
   return name;
 }
@@ -144,13 +158,16 @@ function exportsAWriter(source) {
   return source.statements.some(
     (statement) =>
       exported(statement) &&
-      ((ts.isFunctionDeclaration(statement) && WRITERS.has(statement.name?.text)) ||
+      ((ts.isFunctionDeclaration(statement) && isWriter(statement.name?.text)) ||
         (ts.isVariableStatement(statement) &&
           statement.declarationList.declarations.some(
-            (declaration) =>
-              ts.isIdentifier(declaration.name) && WRITERS.has(declaration.name.text),
+            (declaration) => ts.isIdentifier(declaration.name) && isWriter(declaration.name.text),
           ))),
   );
+}
+
+function isWriter(name) {
+  return WRITERS.has(name) || NO_FOLLOW_UP.has(name);
 }
 
 /** Whether the call's value, through any wrapper, is thrown away. */
@@ -169,7 +186,7 @@ export function checkRoutingResultKept() {
     if (/\.test\.[mc]?[jt]sx?$/.test(file)) continue;
     // Only a module that names a writer is parsed.
     const text = read(file);
-    if (![...WRITERS].some((name) => text.includes(name))) continue;
+    if (![...WRITERS, ...NO_FOLLOW_UP.keys()].some((name) => text.includes(name))) continue;
 
     const source = parseSource(file);
     let firstWriter = null;
@@ -180,7 +197,15 @@ export function checkRoutingResultKept() {
         const writer = writerCalled(node);
         if (writer) {
           calls++;
-          firstWriter ??= { writer, node };
+          const confinedTo = NO_FOLLOW_UP.get(writer);
+          if (confinedTo === undefined) firstWriter ??= { writer, node };
+          else if (file !== confinedTo) {
+            fail(
+              rule,
+              `${file}:${lineOfNode(source, node)}`,
+              `calls ${writer}(), which writes without the follow-up and is ${confinedTo}'s alone — write through a writer that owes afterRoutingChanged(), or argue for another no-follow-up writer in NO_FOLLOW_UP`,
+            );
+          }
           if (discarded(node) && !answersThroughCarrier(writer, node)) {
             fail(
               rule,
@@ -203,8 +228,9 @@ export function checkRoutingResultKept() {
     }
   }
 
-  // Six calls outside tests today: the console's group and category cases,
-  // the engine's set_category, assign_group and auto_assign, and assignment's
-  // own move.
+  // Ten calls outside tests today: the console's group and category cases,
+  // the engine's set_category, assign_group and auto_assign, assignment's own
+  // move, the two wrappers in lib/categories/write.ts, Jev's classifier, and
+  // the backfill's apply mode through `fileBacklogCategory`.
   requireAtLeast(rule, 'lib/ and app/', calls, 4, 'calls of a routing writer');
 }

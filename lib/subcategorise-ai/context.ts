@@ -6,8 +6,9 @@ import { notReaction } from '@/lib/tickets/not-reaction';
 /**
  * The earlier messages a question about one customer message carries.
  *
- * One query for both questions asked of TypeSafe — which subcategory, and how
- * urgent — so the two are answered about the same text. A second copy that
+ * One query for every question asked of TypeSafe about a customer message —
+ * which subcategory, how urgent, and which team's work it is — so they are
+ * answered about the same text. A second copy that
  * drifted (a different count, notes included) would make every disagreement
  * between them partly a disagreement about what they were shown.
  */

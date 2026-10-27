@@ -17,10 +17,10 @@ import { isTimeout } from '@/lib/http/deadline';
  * Shaped after `lib/shipments/platform.ts`, which is the house template for an
  * outbound provider: the round trip owns the timeout and the error taxonomy, the
  * response is validated with zod rather than cast, and **nothing here retries**.
- * Whether to ask again is the caller's. The two jobs ask again later — the
- * priority classifier through the queue's backoff (`lib/queue/index.ts`), the
- * shadow subcategoriser on its next run over the corpus — where a failure stays
- * visible; the reply box's suggestion records the failure on its row and never
+ * Whether to ask again is the caller's. The jobs ask again later — the priority
+ * and category classifiers through the queue's backoff (`lib/queue/index.ts`),
+ * the shadow subcategoriser and the category backfill on their next run over
+ * the corpus — where a failure stays visible; the reply box's suggestion records the failure on its row and never
  * asks again. A retry loop in here would hide any of those answers inside a
  * slot instead.
  *
@@ -152,7 +152,10 @@ function issuesOf(error: z.ZodError): string {
  * For the reply box's suggestions it is only half of one — `suggestionsLive()`
  * in `lib/canned-suggest/settings.ts` also needs the admin switch, because
  * production holds this key for the shadow run and a key-as-flag would have
- * turned suggestions on for every agent the day they deployed.
+ * turned suggestions on for every agent the day they deployed. The category
+ * classifier is the same: its switch is `category_ai_settings`, set on
+ * `/admin/categories`, and the key alone sends nothing — except through its
+ * backfill, which, like the shadow run, a person starts by hand.
  */
 export function typesafeConfigured(): boolean {
   return Boolean(env().TYPESAFE_API_KEY);
@@ -172,10 +175,10 @@ export type FetchOptions = {
 /**
  * One request, with the error taxonomy its callers read.
  *
- * The split between transient and permanent is the whole contract with the two
+ * The split between transient and permanent is the whole contract with the
  * jobs: transient means the same call could answer differently later, so they
- * ask again — the classifier by throwing back to the queue, the subcategoriser
- * by recording the gap for its next run. Permanent means it could not — a wrong
+ * ask again — the classifiers by throwing back to the queue, the backfills by
+ * leaving the gap for their next run. Permanent means it could not — a wrong
  * key, a malformed question — and a job that keeps asking only delays somebody
  * noticing. The suggestion route reads neither half: it writes every failure to
  * `canned_suggestions.error` and that message gets no suggestion, because an

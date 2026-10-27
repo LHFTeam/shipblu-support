@@ -35,6 +35,7 @@ run: backfill_subcategorise_ai dryRun=true limit=1
 run: send_csat conversationId=00000000-0000-0000-0000-000000000000
 run: seed_canned_responses dryRun=true
 run: seed_ticket_categories
+run: backfill_category_ai mode=record runLabel=ci dryRun=true limit=1
 run: rotate_whatsapp_credentials dryRun=true
 
 skip: seed_console_handbook — its own step runs it twice and asserts on what the second run wrote
@@ -50,6 +51,7 @@ skip: download_media — needs a message with media, and downloads it from Meta
 skip: fetch_meta_profile — needs a contact and a Meta user id, and calls Graph
 skip: sync_shipment — needs a tracking number, and calls api.shipblu.com
 skip: classify_priority — needs an inbound message, and calls TypeSafe; lib/priority-ai/run.db.test.ts runs its SQL
+skip: classify_category — needs an inbound message, and calls TypeSafe; lib/category-ai/run.db.test.ts runs its SQL
 skip: notify_low_rating — needs a low answer, and fails a survey id that names no row (`subjectGone`); lib/csat/low-rating.db.test.ts runs its SQL
 skip: subscribe_meta_webhooks — has no SQL; it only calls Graph, with the app credential
 skip: complete_coexistence_onboarding — needs an onboarding attempt and a credential for its account, and calls Graph; its SQL is planned by lib/whatsapp/onboarding.db.test.ts

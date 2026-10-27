@@ -61,4 +61,47 @@ describe('priorityRequest', () => {
     const state = priorityRequest(long, 'jev-latest', false).state as { message: string };
     expect(state.message).toHaveLength(MAX_TEXT_LENGTH);
   });
+
+  // Pinned as bytes, typed out rather than built by calling the code, because
+  // priority is live in apply mode and nothing else measures whether its
+  // answers move: a second classifier now asks about the same messages through
+  // the same shared state, and a field added for that one, or a key order
+  // changed while extracting, would change what this one is asked without any
+  // other test noticing. `toEqual` ignores key order; `JSON.stringify` does not.
+  // A comment channel goes out as its platform, as it did before comments had
+  // channels of their own.
+  it('sends exactly the bytes it sent before the category classifier existed', () => {
+    const request = priorityRequest(
+      { channel: 'facebook_comment', bodyText: message.bodyText, earlier: message.earlier },
+      'jev-latest',
+      true,
+    );
+
+    expect(JSON.stringify(request)).toBe(
+      JSON.stringify({
+        state: {
+          channel: 'facebook',
+          message: 'هرفع قضية لو الفلوس موصلتش',
+          earlier_messages_from_the_same_customer: ['فين فلوس التحصيل', 'بقالي اسبوع'],
+        },
+        model: 'jev-latest',
+        questions: {
+          priority: {
+            type: 'choice',
+            instructions:
+              'This is a message a customer sent to the support team of ShipBlu, a parcel delivery company in Egypt. The sender is either a merchant who ships parcels or a recipient expecting one. How urgently does the support team need to act on it? Judge the customer’s situation, not their tone: an angry message about an ordinary request is still ordinary. Messages are usually in Egyptian Arabic, sometimes in English, and sometimes in Franco-Arabic — Arabic written in Latin letters and digits. Choose low when the message is too short, too vague or too incomplete to judge; that is a real answer, not a last resort.',
+            criteria: {
+              low: 'A general question not about a specific parcel, a greeting, thanks or an acknowledgement — or a message too short, vague or incomplete to tell what the customer needs.',
+              medium:
+                'An ordinary request about a specific parcel, order or account: where a parcel is, rescheduling a delivery, changing an address or phone number, a question about a fee or a pickup.',
+              high: 'Something has clearly gone wrong and the customer is waiting on us to fix it: a delivery that is overdue or has failed more than once, a return that is stuck, a damaged or wrong item, a merchant whose shipments are blocked, or a customer who is angry about having already contacted us before.',
+              urgent:
+                'Someone is losing money or is at risk right now: the customer threatens legal action, the police or a complaint to a regulator; reports fraud, theft or a parcel opened or tampered with; says cash-on-delivery money collected for them is missing; or threatens to go public about the company.',
+            },
+          },
+        },
+      }),
+    );
+    expect(request.state).not.toHaveProperty('is_public_comment');
+  });
 });

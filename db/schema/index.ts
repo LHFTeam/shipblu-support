@@ -12,4 +12,5 @@ export * from './kb';
 export * from './metrics';
 export * from './subcategorise-ai';
 export * from './priority-ai';
+export * from './category-ai';
 export * from './canned-suggestions';
