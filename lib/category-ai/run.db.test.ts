@@ -765,6 +765,45 @@ describe('classifyMessageCategory, what changed while Jev was asked', () => {
     expect(await carried(id)).toBe(await categoryId('sales'));
   });
 
+  // The same wait, onto a status an admin added while it waited: the locked
+  // read's snapshot predates the status, so its subquery finds none, and the
+  // status is read again in a snapshot that holds it — not taken for one
+  // outside every queue.
+  it('finds a ticket moved to a status added while the answer waited for it', async () => {
+    const { id } = await ticket();
+    let added = '';
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    let writer: Promise<void> = Promise.resolve();
+    answersAfter(
+      () =>
+        new Promise<void>((locked) => {
+          writer = db.transaction(async (tx) => {
+            await tx
+              .update(conversations)
+              .set({ priority: 'high' })
+              .where(eq(conversations.id, id));
+            locked();
+            await held;
+            await tx.update(conversations).set({ statusId: added }).where(eq(conversations.id, id));
+          });
+        }),
+    );
+    const message = await inbound(id, 'بكام الشحن؟');
+
+    const classifying = classifyMessageCategory(message, { baseUrl: BASE });
+    await untilWaitingOnALock(db);
+    const [status] = await db
+      .insert(ticketStatuses)
+      .values({ name: 'Waiting on the warehouse', category: 'pending' })
+      .returning({ id: ticketStatuses.id });
+    added = status!.id;
+    release();
+    await writer;
+
+    await expect(classifying).resolves.toMatchObject({ outcome: 'applied', predicted: 'sales' });
+  });
+
   // The shadow measures the classifier apply turns on: an answer apply could
   // not write must not settle the ticket in shadow either.
   it('records a category retired during a shadow call as the failure apply would', async () => {

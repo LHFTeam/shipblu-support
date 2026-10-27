@@ -19,7 +19,7 @@ import { logger } from '@/lib/log';
 import { afterRoutingChanged } from '@/lib/sla';
 import { isCommentTicket } from '@/lib/tickets/channel-policy';
 import { skipReason } from '@/lib/tickets/classifiable';
-import { statusCategoryOf } from '@/lib/tickets/status-category';
+import { lockedStatusCategory, statusCategoryOf } from '@/lib/tickets/status-category';
 import { afterTicketUpdate } from '@/lib/tickets/lifecycle';
 import { CHANGE_STAMP } from '@/lib/tickets/change-stamp';
 import { TypeSafeApiError, typesafeConfigured, typesafeModel } from '@/lib/typesafe/client';
@@ -363,13 +363,15 @@ async function readTicket(
       deletedAt: conversations.deletedAt,
       isSpam: conversations.isSpam,
       mergedIntoId: conversations.mergedIntoId,
+      statusId: conversations.statusId,
       statusCategory: statusCategoryOf(),
     })
     .from(conversations)
     .where(eq(conversations.id, conversationId))
     .limit(1);
-  const [ticket] = lock ? await query.for('update') : await query;
-  if (!ticket) return null;
+  const [read] = lock ? await query.for('update') : await query;
+  if (!read) return null;
+  const ticket = { ...read, statusCategory: await lockedStatusCategory(executor, read) };
 
   let categoryKey: string | null = null;
   if (ticket.categoryId) {

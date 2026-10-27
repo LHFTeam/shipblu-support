@@ -39,7 +39,7 @@ import {
   type ConversationChannel,
 } from '@/lib/tickets/channel-policy';
 import { skipReason } from '@/lib/tickets/classifiable';
-import { statusCategoryOf } from '@/lib/tickets/status-category';
+import { lockedStatusCategory, statusCategoryOf } from '@/lib/tickets/status-category';
 import { TypeSafeApiError, typesafeModel } from '@/lib/typesafe/client';
 import { categoryBaseline } from './baseline';
 import {
@@ -799,8 +799,9 @@ async function fileTicket(
   return db.transaction(async (tx) => {
     // The status through `statusCategoryOf`, not a join: an agent resolving
     // the ticket while this waits for the lock would otherwise read as gone.
-    const [locked] = await tx
+    const [read] = await tx
       .select({
+        statusId: conversations.statusId,
         statusCategory: statusCategoryOf(),
         channel: conversations.channel,
         sourceSystem: conversations.sourceSystem,
@@ -812,7 +813,8 @@ async function fileTicket(
       .from(conversations)
       .where(eq(conversations.id, conversationId))
       .for('update');
-    if (!locked) return 'gone';
+    if (!read) return 'gone';
+    const locked = { ...read, statusCategory: await lockedStatusCategory(tx, read) };
     const history =
       (await categoryEvents(tx, eq(conversationEvents.conversationId, conversationId))).get(
         conversationId,

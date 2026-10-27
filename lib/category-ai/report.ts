@@ -23,9 +23,9 @@ import {
   conversations,
   jobs,
   messages,
+  ticketStatuses,
 } from '@/db/schema';
 import { listCategories } from '@/lib/categories/queries';
-import { statusCategoryOf } from '@/lib/tickets/status-category';
 import { CATEGORY_OUTCOMES, type CategoryOutcome } from './decide';
 import { grade, type Grading, type GradingTicket } from './grade';
 import { jevMayStillAsk } from './runs';
@@ -218,9 +218,11 @@ export async function categoryAiReport(
       mergedIntoId: conversations.mergedIntoId,
       sourceSystem: conversations.sourceSystem,
       firstRespondedAt: conversations.firstRespondedAt,
-      statusCategory: statusCategoryOf(),
+      // A plain join: this read takes no lock, so nothing re-checks it.
+      statusCategory: ticketStatuses.category,
     })
     .from(conversations)
+    .innerJoin(ticketStatuses, eq(ticketStatuses.id, conversations.statusId))
     .where(inArray(conversations.id, named));
 
   const categories = await listCategories();
