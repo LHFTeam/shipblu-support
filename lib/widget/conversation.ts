@@ -22,6 +22,7 @@ import type { VisitorDetails } from './contact';
 import type { Message, WidgetSurvey } from './types';
 import { recordIdentityOnConversation } from './identify';
 import { findLiveConversation, webchatChannel } from './session';
+import { planRouting, startRouting } from '@/lib/routing/start';
 
 /**
  * Reading and appending to a visitor's chat.
@@ -206,6 +207,8 @@ export async function appendVisitorMessage(
   const existing = await findLiveConversation(contactId);
   const channel = await webchatChannel();
   const now = new Date();
+  // Before the transaction, which must read nothing on the pool (`lib/routing/start.ts`).
+  const routing = existing ? null : await planRouting(channel);
 
   const result = await db.transaction(async (tx) => {
     let conversationId = existing;
@@ -250,6 +253,19 @@ export async function appendVisitorMessage(
         createdAt: now,
       })
       .returning({ id: messages.id });
+
+    if (createdConversation) {
+      await startRouting(
+        tx,
+        routing,
+        {
+          conversationId,
+          messageId: inserted[0]!.id,
+          groupId: channel?.defaultGroupId ?? null,
+        },
+        now,
+      );
+    }
 
     await tx
       .update(conversations)

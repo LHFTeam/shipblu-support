@@ -23,6 +23,7 @@ import { afterInboundMessage, afterMessageStored } from './lifecycle';
 import { findLiveConversation } from './live-conversation';
 import { reopenResolved } from './reopen';
 import { requireDefaultOpenStatusId } from './statuses';
+import { planRouting, startRouting } from '@/lib/routing/start';
 
 /**
  * Inbound Facebook and Instagram → conversations.
@@ -72,6 +73,8 @@ export async function ingestMetaMessage(
 
   const channel = await channelFor(message.platform);
   const existing = await findLiveConversation(contactId, { channel: message.platform });
+  // Before the transaction, which must read nothing on the pool (`lib/routing/start.ts`).
+  const routing = existing ? null : await planRouting(channel);
 
   const result = await db.transaction(async (tx) => {
     let conversationId: string;
@@ -150,6 +153,14 @@ export async function ingestMetaMessage(
 
     const messageId = insertedMessage[0]!.id;
 
+    if (createdConversation) {
+      await startRouting(tx, routing, {
+        conversationId,
+        messageId,
+        groupId: channel?.defaultGroupId ?? null,
+      });
+    }
+
     // With the message, not after it: once the message has committed, a retry
     // finds it by its mid and stops, so a download that failed to queue after
     // the commit would never be queued at all. Everything left to run after
@@ -207,6 +218,9 @@ export async function ingestMetaComment(comment: NormalisedComment): Promise<Met
   // Read only for a thread that opens a ticket: a reply joining one keeps the
   // ticket's row and group, and on a busy post that is most comments.
   const channel = existing ? null : await channelFor(commentChannel);
+  // Until a comment row exists the ticket is filed under the platform's direct
+  // message row, and routes by that row's mode.
+  const routing = existing ? null : await planRouting(channel);
   const subject = subjectFrom(comment.text, UNNAMED_SUBJECT[`${comment.platform}Comment`]);
 
   const result = await db.transaction(async (tx) => {
@@ -304,6 +318,14 @@ export async function ingestMetaComment(comment: NormalisedComment): Promise<Met
         createdAt: comment.createdAt,
       })
       .returning({ id: messages.id });
+
+    if (createdConversation) {
+      await startRouting(tx, routing, {
+        conversationId,
+        messageId: insertedMessage[0]!.id,
+        groupId: channel?.defaultGroupId ?? null,
+      });
+    }
 
     // A reply processed before the comment it answers is the newer of the two.
     await tx
@@ -705,14 +727,20 @@ async function channelFor(type: MetaChannel) {
   // back either — so which group a new ticket starts in would depend on the
   // plan Postgres happened to pick. Oldest wins, the row that has been routing.
   const rows = await db
-    .select({ id: channels.id, type: channels.type, defaultGroupId: channels.defaultGroupId })
+    .select({
+      id: channels.id,
+      type: channels.type,
+      config: channels.config,
+      routingMode: channels.routingMode,
+      defaultGroupId: channels.defaultGroupId,
+    })
     .from(channels)
     .where(and(inArray(channels.type, candidates), eq(channels.isActive, true)))
     .orderBy(asc(channels.createdAt), asc(channels.id));
 
   for (const candidate of candidates) {
     const row = rows.find((found) => found.type === candidate);
-    if (row) return { id: row.id, defaultGroupId: row.defaultGroupId };
+    if (row) return row;
   }
   return null;
 }

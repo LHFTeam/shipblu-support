@@ -21,6 +21,7 @@ import { afterInboundMessage, afterMessageStored } from './lifecycle';
 import { reopenResolved } from './reopen';
 import { requireDefaultOpenStatusId } from './statuses';
 import { logger } from '@/lib/log';
+import { planRouting, startRouting } from '@/lib/routing/start';
 
 const log = logger('ingest');
 
@@ -132,6 +133,9 @@ export async function ingestInboundEmail(
   const body = readEmailBody(email);
 
   const emailChannel = await defaultEmailChannel();
+  // Before the transaction: it reads the classifier's switch, and the insert
+  // transaction must read nothing on the pool (`lib/routing/start.ts`).
+  const routing = existingConversation ? null : await planRouting(emailChannel);
 
   const result = await db.transaction(async (tx) => {
     let conversationId: string;
@@ -219,6 +223,18 @@ export async function ingestInboundEmail(
       .returning({ id: messages.id });
 
     const messageId = insertedMessage[0]!.id;
+
+    // A new ticket on a channel that routes by category is held from here,
+    // with the mail that opened it. Not one filed as spam: nobody routes a
+    // bounce.
+    if (createdConversation) {
+      await startRouting(tx, routing, {
+        conversationId,
+        messageId,
+        groupId: emailChannel?.defaultGroupId ?? null,
+        isSpam: automation.isBounce || automation.isAutoReply,
+      });
+    }
 
     // An autoresponder is not the customer writing, so on a ticket that already
     // exists it does not move the time the customer last wrote — only the time
@@ -336,7 +352,13 @@ async function defaultEmailChannel() {
   // back either — so which group a new ticket starts in would depend on the
   // plan Postgres happened to pick. Oldest wins, the row that has been routing.
   const rows = await db
-    .select({ id: channels.id, defaultGroupId: channels.defaultGroupId })
+    .select({
+      id: channels.id,
+      type: channels.type,
+      config: channels.config,
+      routingMode: channels.routingMode,
+      defaultGroupId: channels.defaultGroupId,
+    })
     .from(channels)
     .where(and(eq(channels.type, 'email'), eq(channels.isActive, true)))
     .orderBy(asc(channels.createdAt), asc(channels.id))
