@@ -3992,7 +3992,10 @@ wait for the user's go-ahead, after 4.1 is deployed.
     the page says how many were left out, and a category none of whose
     settled tickets is labelled reads "Not measurable" rather than 0%: its
     stratum holds every hit, unread — in shadow, until somebody labels one;
-    in apply, for good. Under `apply`, Filed by Jev is the grade.
+    in apply, for good. So does every category while none of the tickets Jev
+    never settled is labelled, which hold most of the misses: recall read
+    high there, at 100% where no other stratum had a label either. Under
+    `apply`, Filed by Jev is the grade.
   - **Rates that mix Jev's answers are weighted.** The labelling list draws
     the same number of tickets from each answer, so a rare answer's tickets
     are labelled at a far higher rate. Precision within one answer needs

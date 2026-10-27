@@ -318,7 +318,9 @@ export default async function CategoryAiReportPage({
                       the counts beside it are the labelled tickets it was read on. Not measurable
                       is a category none of whose tickets Jev settled as it is labelled: they hold
                       every hit, and none has been read &mdash; yet, in shadow; ever, in apply,
-                      where each was Jev&rsquo;s filing.
+                      where each was Jev&rsquo;s filing. And every category, while none of the
+                      tickets Jev never settled is labelled: they hold most of the misses. An answer
+                      with no labelled ticket yet is in no rate.
                     </InfoTip>
                   </span>,
                   'Rules precision',

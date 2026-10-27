@@ -42,9 +42,13 @@ import {
  *   settled, which is every one a label can reach there; spam, which Jev
  *   answers `unknown`, by the never-settled tickets people label. The graded
  *   rates describe the tickets a label could reach, and the page says how
- *   many were left out. A category none of whose settled tickets is labelled
- *   has no recall at all rather than a recall of nothing: its stratum holds
- *   every hit, and none of it has been read.
+ *   many were left out. Recall needs two strata read: a category none of
+ *   whose settled tickets is labelled has no recall at all rather than a
+ *   recall of nothing, since its stratum holds every hit; and while none of
+ *   the tickets Jev never settled is labelled, no category has one, since
+ *   that stratum holds most of the misses and recall would read high, at
+ *   100% where the labels reach no other stratum either. A stratum with no
+ *   label yet is in no rate; the page shows each stratum's labels.
  * - **The sample is stratified, so its rates are weighted.** The labelling list
  *   draws the same number of tickets from each of Jev's answers, so the rare
  *   one is labelled at a far higher rate than the common one. Precision within
@@ -604,6 +608,9 @@ export function grade(input: GradingInput): Grading {
   const strata = sample(gradable, keys, input.tickets, input.runLabel === CATEGORY_AI_LIVE_LABEL);
   const settledAs = (items: readonly TicketVerdict[], key: string) =>
     items.some((verdict) => verdict.settle?.key === key);
+  const missesUnread =
+    gradable.some((verdict) => verdict.settle === null) &&
+    !labelled.some((verdict) => verdict.settle === null);
   const inForce = [
     ...new Set(
       input.runs
@@ -625,7 +632,7 @@ export function grade(input: GradingInput): Grading {
           (verdict) => verdict.label!.key === key,
         ),
         recall:
-          settledAs(judged, key) && !settledAs(labelled, key)
+          missesUnread || (settledAs(judged, key) && !settledAs(labelled, key))
             ? null
             : estimate(labelledThis, (verdict) => verdict.settle?.key === key),
         rulesPrecision: estimate(

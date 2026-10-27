@@ -798,6 +798,25 @@ describe('what a label can grade', () => {
     expect(graded.settlesUnlabellable).toBe(false);
   });
 
+  // Early in shadow: sales tickets labelled, none of the never-settled ones
+  // yet. Every labelled sales ticket is a hit, and the misses are unread.
+  it('has no recall while none of the tickets Jev never settled is labelled', () => {
+    const runs = [
+      ...Array.from({ length: 10 }, (_, n) => run(`s${n}`, 0, 'would_apply', 'sales', 0.9)),
+      ...Array.from({ length: 30 }, (_, n) => run(`u${n}`, 0, 'below_threshold', 'sales', 0.3)),
+    ];
+    const events = [0, 1, 2].map((n) => person(`s${n}`, 30, 'sales'));
+    const unread = grade(input(runs, events));
+    expect(unread.categories.find((each) => each.key === 'sales')!.recall).toBeNull();
+    // One never-settled label, and recall is read.
+    const read = grade(input(runs, [...events, person('u0', 30, 'sales')]));
+    expect(read.categories.find((each) => each.key === 'sales')!.recall).toEqual({
+      right: 3,
+      of: 4,
+      rate: 10 / 40,
+    });
+  });
+
   // Spam Jev answered unknown, deleted and merged tickets: in no state a
   // supervisor can label, so not stood for by the tickets people label.
   it('leaves out of the weights the tickets that can no longer be labelled', () => {
