@@ -85,7 +85,7 @@ update.
 | 3.1   | Merged: #419 (`ff3bbfd`), then `dev` → `main` in #420 (`b9a4743`), which also carried #411, #416, #417 and #418. As built below             | **Done.** Web live on `b9a4743` at 19:44 UTC on 2026-10-25, the worker and the four crons by 08:05 UTC on 2026-10-26, and the four categories seeded at 08:13. Its checks read clean (below); the signed-in ones are left |
 | 3.2   | Merged: #424 (`07a5527`), then `dev` → `main` in #426 (`f761e5e`), which also carried #421, #422 and #423. As built below                   | **Done.** All six services live on `f761e5e` by 23:32 UTC on 2026-10-26, web first. Its checks read clean (below); the signed-in ones are left                                                                            |
 | 4.0   | In review: #425 (`claude/jolly-noether-hxhez1-stage-4-0`), with `dev` merged in after 3.2: [4.0, as built](#40-as-built)                    | —                                                                                                                                                                                                                         |
-| 4.1   | Built, stacked on 4.0: [4.1, as built](#41-as-built)                                                                                        | —                                                                                                                                                                                                                         |
+| 4.1   | In review: #427 (`claude/jolly-noether-hxhez1-stage-4-1`), stacked on #425: [4.1, as built](#41-as-built)                                   | —                                                                                                                                                                                                                         |
 | 4.2–6 | Not started                                                                                                                                 | —                                                                                                                                                                                                                         |
 
 **3.2's deploy and checks, read on Render and production on 2026-10-26.**
@@ -411,8 +411,8 @@ Every production write needs the user's go-ahead for that step, and the
    live on it by 23:32 UTC, web first, and its checks read clean (above); the
    signed-in ones are left. **Stage 4.0**, `afterRoutingChanged`, is in review
    as #425, with `dev` merged in: [4.0, as built](#40-as-built). **Stage
-   4.1**, Jev's category classifier, is built on top of it and ships off:
-   [4.1, as built](#41-as-built).
+   4.1**, Jev's category classifier, is in review as #427, stacked on #425,
+   and ships off: [4.1, as built](#41-as-built).
 6. **Before Stage 5**, a person does 0.2's reorder and 0.6's staffing, and the
    support lead answers the questions still open (below).
 
