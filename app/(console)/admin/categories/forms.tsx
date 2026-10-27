@@ -121,9 +121,8 @@ export function CategoriesTable({
             Key{' '}
             <InfoTip label="Key">
               How the category is named where no person reads it: every change of a ticket&rsquo;s
-              category records it, and Jev, once it chooses categories, answers with one. Fixed once
-              the category exists — a renamed key would leave both naming something that no longer
-              answers to it.
+              category records it, and Jev answers with one when it chooses. Fixed once the category
+              exists — a renamed key would leave both naming something that no longer answers to it.
             </InfoTip>
           </>,
           'Arabic',
@@ -186,6 +185,10 @@ export function CategoriesTable({
                   <>
                     {group.name}
                     <span className="block text-xs">{STRATEGY_LABELS[group.strategy]}</span>
+                    <span className="block text-xs">
+                      {group.acceptingNow} of {group.members} accepting now
+                    </span>
+                    <RouteGroupWarning group={group} />
                   </>
                 ) : (
                   <span className="text-xs">Channel&rsquo;s default</span>
@@ -264,7 +267,7 @@ function CategoryFields({
       </div>
       <Field
         label="Description"
-        hint="What belongs here and where its edges are. Once Jev chooses categories it reads this beside the option, so say what does not belong as well as what does."
+        hint="What belongs here and where its edges are. Jev reads this beside the option when it chooses a category, so say what does not belong as well as what does."
       >
         <Textarea name="description" rows={3} defaultValue={category?.description ?? ''} />
       </Field>
@@ -327,6 +330,7 @@ function RouteGroupField({
  */
 function RouteGroupFacts({ group }: { group: RouteGroupSummary }) {
   const members = group.members === 1 ? 'member' : 'members';
+  const warning = routeGroupWarning(group);
 
   return (
     <>
@@ -348,17 +352,53 @@ function RouteGroupFacts({ group }: { group: RouteGroupSummary }) {
           </span>
         )}
       </p>
-      {group.strategy === 'manual' ? (
+      {warning ? (
         <Notice tone="warning" icon>
-          Manual: nobody is assigned automatically, so routed tickets wait unassigned in this group.
-        </Notice>
-      ) : group.members === 0 ? (
-        <Notice tone="warning" icon>
-          No active members: nobody can be assigned, so routed tickets wait unassigned in this
-          group.
+          {ROUTE_GROUP_WARNINGS[warning].sentence}
         </Notice>
       ) : null}
     </>
+  );
+}
+
+type RouteGroupWarningKind = 'manual' | 'unstaffed';
+
+/**
+ * Whether a route group would leave its tickets unassigned, and why — decided
+ * once, so the editor's notice and the list's badge cannot disagree about a
+ * group's readiness.
+ */
+function routeGroupWarning(group: RouteGroupSummary): RouteGroupWarningKind | null {
+  if (group.strategy === 'manual') return 'manual';
+  if (group.members === 0) return 'unstaffed';
+  return null;
+}
+
+const ROUTE_GROUP_WARNINGS: Record<RouteGroupWarningKind, { badge: string; sentence: string }> = {
+  manual: {
+    badge: 'Nobody assigned automatically',
+    sentence:
+      'Manual: nobody is assigned automatically, so routed tickets wait unassigned in this group.',
+  },
+  unstaffed: {
+    badge: 'No active members',
+    sentence:
+      'No active members: nobody can be assigned, so routed tickets wait unassigned in this group.',
+  },
+};
+
+/**
+ * The editor's two warnings, short enough for the table's cell: the list is
+ * where an admin scans every category's readiness at once, and a route group
+ * that would leave tickets unassigned should not need an editor opened to see.
+ */
+function RouteGroupWarning({ group }: { group: RouteGroupSummary }) {
+  const warning = routeGroupWarning(group);
+  if (!warning) return null;
+  return (
+    <span className="mt-1 block">
+      <Badge tone="warning">{ROUTE_GROUP_WARNINGS[warning].badge}</Badge>
+    </span>
   );
 }
 

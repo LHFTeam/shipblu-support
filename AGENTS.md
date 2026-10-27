@@ -1254,8 +1254,8 @@ ticket. Five rules hold:
   transaction**, the ticket's row locked first where it already exists and the
   event stamped with `CHANGE_STAMP` (`lib/tickets/change-stamp.ts`, priority's
   stamp generalised), so the timeline orders two writers the way the column was
-  written — which Jev's ownership rule (Stage 4) reads to decide whether a
-  person has answered for a ticket. The console and the `set_category` action
+  written — which Jev's ownership rule (`categoryOwned`, below) reads to decide
+  whether a person has answered for a ticket. The console and the `set_category` action
   go through `setConversationCategory` (`lib/categories/write.ts`), which writes
   nothing when the value is unchanged, refuses a retired category, and stores
   the key and label at the change so a renamed category still reads as what was
@@ -1292,7 +1292,7 @@ ticket. Five rules hold:
   whether the group moved — and is called once the whole change is over: by the
   console's group and category cases, by the engine once its pass is over (so a
   rule that files a ticket and another that moves it choose one policy between
-  them), and by Jev from 4.1 and the router from Stage 5. Never from inside a
+  them), by Jev (`lib/category-ai/run.ts`) and by the router from Stage 5. Never from inside a
   writer, which would choose once per action. The `routing-result` repo rule
   refuses a `setConversationCategory` or `moveToGroupIfElsewhere` call, or an
   `assignConversation` handed a group, whose answer is dropped, since that
@@ -1326,22 +1326,23 @@ The same permission gates the Category chooser on the console's New form: drawn
 only for an agent who holds it, and refused by the action from anybody else.
 The chooser is never seeded with the form's default. Left alone it posts an
 empty value, and `submitForm` applies the default as it reads the form at submit,
-credited to the form — an untouched default is no person's judgement, and from
-Stage 4 only a person's `category_changed` is ground truth for Jev. Seeded, it
+credited to the form — an untouched default is no person's judgement, and only
+a person's `category_changed` is ground truth when Jev is graded (Stage 4.2). Seeded, it
 would post the default back as the agent's choice, and a stale one if an admin
 changed it in between. An agent's pick is credited to the agent, and `none`
 over a default writes no column and no event, since `to: null` would read
 "cleared the category" on a ticket that never had one. Only the agent variant
 of `Requester` carries a choice, so a help-centre POST cannot name a category
-however it is written: from Stage 4 a chosen category is one Jev leaves alone.
+however it is written: a chosen category is one Jev leaves alone.
 
-**The one AI provider, and the three things it is allowed to touch.**
-`lib/typesafe/` calls TypeSafe's System One endpoint, and three modules ask it a
+**The one AI provider, and the four things it is allowed to touch.**
+`lib/typesafe/` calls TypeSafe's System One endpoint, and four modules ask it a
 question: `lib/subcategorise-ai/` asks which subcategory a message belongs to,
-`lib/priority-ai/` how urgent it is, and `lib/canned-suggest/` which canned
-response an agent would send next. Jev answers a `choice` over options the
-request offered, so none of them can be handed a word of free text — the
-subcategoriser gets a key, the classifier a level, the composer an id.
+`lib/priority-ai/` how urgent it is, `lib/category-ai/` which team's work it is,
+and `lib/canned-suggest/` which canned response an agent would send next. Jev
+answers a `choice` over options the request offered, so none of them can be
+handed a word of free text — the subcategoriser gets a key, the priority
+classifier a level, the category classifier a key, the composer an id.
 
 The subcategoriser is a **shadow**: every answer lands in `ai_subcategory_runs`
 and nothing else, so no rollup, no review queue and no primary ladder can see
@@ -1353,8 +1354,8 @@ Anything wanting to promote a result argues for it in its own change.
 
 Four rules hold there, and the job is inert until somebody starts it — presence of
 `TYPESAFE_API_KEY` is its flag, the `instagramLoginConfigured()` device, and the
-key lives in the environment groups rather than the shared one because all three
-uses send real customer text to a third party:
+key lives in the environment groups rather than the shared one because every
+use sends real customer text to a third party:
 
 - **The option list comes from `ticket_subcategories`, never from
   `TAXONOMY`.** A retired subcategory leaves the rules path at once; if it did
@@ -1397,6 +1398,37 @@ commits — as the console, the `set_priority` automation and the classifier do.
 The policies price their targets per priority, and the classifier decides whose
 priority a ticket carries from the column and those events read together. See
 `plans/priority-through-typesafe.md`.
+
+`lib/category-ai/` asks which team's work a customer message is, and it may
+write too: under `apply`, set on `/admin/categories` (`category_ai_settings`,
+one row — read through a 30-second memo where a message is stored, uncached by
+the job and the page), a confident answer sets `conversations.category_id`
+through `setConversationCategoryOn` as `jev:category`, then calls
+`afterRoutingChanged` and `afterTicketUpdate`, so an unanswered ticket's SLA
+policy is chosen again and `on_update` rules keyed on the category run. What it
+may not do is decided in `lib/category-ai/decide.ts`, whose rules are tests. It
+asks about the first five customer messages on a ticket nobody has answered; the
+earliest message with a confident answer settles the ticket, and the rest are
+recorded `after_settle` without a call; `unknown` never settles however sure;
+and a category a person, a rule, a form's default or an agent opening the ticket
+chose is owned and never touched, read off the `category_changed` events and the
+column together, under the ticket's row lock once the call is over (before it,
+the events alone decide, since the column read apart from them can straddle a
+Jev write). Every message the job decides about is one row in
+`ai_category_runs` under the `live` label, those known beforehand to be owned,
+settled or capped included. A message that reaches no decision has none, by
+design — the skips, the switch found off when the job runs (jobs still queued
+at a rollback among them), a question that cannot be built, an unset key, a
+message never queued — so the one gap is a `classify_category` job in `dead`. A
+backfill writes under a label of its own (`backfill_category_ai mode=record`),
+judging each message as of when it arrived; its `apply` mode files open tickets
+from a record label's answers and fires nothing — the one category writer that
+owes no follow-up, through `fileBacklogCategory`, which `routing-result` lets
+only the backfill call. The question
+offers the active categories by English label and description, with `unknown`
+added in code, and its fingerprint covers both, so an edit on `/admin/categories`
+is a new question no report averages with the old. See
+`plans/ticket-category-routing.md`, decision 4.
 
 The suggestion is **live**: its answer is shown to an agent, as grey text in an
 empty reply box that Tab (or Use, on a phone) puts in — Tab only once the text

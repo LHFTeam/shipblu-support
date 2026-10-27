@@ -69,6 +69,7 @@ export async function purgeJobs(
       'moderate_meta_comment',
       'download_media',
       'classify_priority',
+      'classify_category',
     ] satisfies JobType[];
 
     scopes.push(

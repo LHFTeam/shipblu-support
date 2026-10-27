@@ -4,7 +4,7 @@ import { SURVEY_TRIGGERS } from '@/lib/csat/decision';
 import { dayWindow, wallClockInstant } from '@/lib/hours/wall-clock';
 import { TEAM_TIME_ZONE } from '@/lib/hours/zone';
 import { LOCALES } from '@/lib/kb/locale';
-import { RERUNNABLE_STEPS } from '@/db/schema';
+import { CATEGORY_AI_LIVE_LABEL, RERUNNABLE_STEPS } from '@/db/schema';
 import { PermanentJobError, type ClaimedJob, type JobType } from '@/lib/queue';
 
 /**
@@ -46,6 +46,24 @@ function scanBound(side: 'since' | 'until') {
 
 const scanSince = scanBound('since');
 const scanUntil = scanBound('until');
+
+/**
+ * A backfill's run label, which must carry a letter. `npm run job` reads
+ * anything numeric as a number, and a number does not give back the text it
+ * was typed as: `2026.10` comes back `2026.1` and `007` comes back `7`, so two
+ * labels typed apart would be one, and a run meant to start a fresh label
+ * would fill the gaps of an older one. Never `live`, the label the live
+ * classifier writes and the only one settling and ownership read: a backfill
+ * writing under it would decide live tickets.
+ */
+const backfillLabel = z
+  .string({ error: 'a label needs a letter: npm run job reads digits as a number' })
+  .transform((label) => label.trim())
+  .refine((label) => label.length > 0, 'a label cannot be blank')
+  .refine(
+    (label) => label !== CATEGORY_AI_LIVE_LABEL,
+    `"${CATEGORY_AI_LIVE_LABEL}" is the live classifier's label`,
+  );
 
 // Hours 00-23, so `T24:00` is not a second spelling of the next midnight, and
 // an offset held to hours 00-23 and minutes 00-59, as `Date.parse` held it:
@@ -134,6 +152,10 @@ export const JOB_PAYLOADS = {
   // dropped into a run that writes. A uuid because the id goes straight into a
   // query, where a malformed one is 22P02.
   classify_priority: z.strictObject({ messageId: z.uuid() }),
+  // The category classifier's twin of the line above, for the same reasons:
+  // enqueued by `enqueueCategoryClassification`, re-run by hand after a
+  // `failed` run whose dedupe key is spent.
+  classify_category: z.strictObject({ messageId: z.uuid() }),
   // `trigger` says who asked — an agent, a rule, or the sidebar's "Send now" —
   // because the admin may switch off surveys for rule-resolved tickets, and the
   // job cannot tell a rule's resolve from an agent's off the row.
@@ -279,6 +301,40 @@ export const JOB_PAYLOADS = {
     /** Skip the run; print the report for `runLabel` as it stands. */
     reportOnly: z.boolean().optional(),
   }),
+  backfill_category_ai: z
+    .strictObject({
+      /**
+       * `record` asks Jev about the archive and writes only `ai_category_runs`;
+       * `apply` files open tickets from a record label's answers. No default:
+       * the two write different things, and the one an operator meant is not
+       * a guess this file should make.
+       */
+      mode: z.enum(['record', 'apply']),
+      /** The label `record` writes under. Re-running one fills its gaps only. */
+      runLabel: backfillLabel.optional(),
+      /** The record label `apply` files from. */
+      fromLabel: backfillLabel.optional(),
+      /** Which tickets, by when they were opened: see `scanBound`. */
+      since: scanSince.optional(),
+      until: scanUntil.optional(),
+      /** Comma-separated channels, replacing the default "everything but the bot". */
+      channels: z.string().optional(),
+      /** Stop after this many tickets. */
+      limit: z.number().int().positive().optional(),
+      /** Select and build every request or write, call nothing, write nothing. */
+      dryRun: z.boolean().optional(),
+    })
+    .superRefine((payload, context) => {
+      const wrong = (message: string) => context.addIssue({ code: 'custom', message });
+      if (payload.mode === 'record' && !payload.runLabel) wrong('mode=record needs runLabel=');
+      if (payload.mode === 'record' && payload.fromLabel) wrong('fromLabel= is for mode=apply');
+      if (payload.mode === 'apply' && !payload.fromLabel) {
+        wrong('mode=apply needs fromLabel=, the record label to file from');
+      }
+      if (payload.mode === 'apply' && payload.runLabel) {
+        wrong('runLabel= is for mode=record: apply writes no run rows');
+      }
+    }),
   normalise_kb_formatting: z.strictObject({
     /** Count and report what would change, write nothing. */
     dryRun: z.boolean().optional(),

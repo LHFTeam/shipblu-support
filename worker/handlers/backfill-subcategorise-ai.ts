@@ -10,9 +10,8 @@ import { subcategorisationRequest } from '@/lib/subcategorise-ai/request';
 import { UNCLASSIFIED_KEY } from '@/lib/subcategorise/taxonomy';
 import type { ClaimedJob } from '@/lib/queue';
 import { parseJobPayload } from '@/lib/queue/payloads';
-import { scanMessagesInKeysetOrder } from '@/lib/queue/backfill';
-import { CONVERSATION_CHANNELS, readOnlyChannels } from '@/lib/tickets/channel-policy';
-import type { ConversationChannel } from '@/lib/tickets/channel-policy';
+import { requestedChannels, scanMessagesInKeysetOrder } from '@/lib/queue/backfill';
+import { readOnlyChannels } from '@/lib/tickets/channel-policy';
 import { notReaction } from '@/lib/tickets/not-reaction';
 import { typesafeConfigured, typesafeModel } from '@/lib/typesafe/client';
 import { logger } from '@/lib/log';
@@ -174,7 +173,7 @@ async function candidateFilter(payload: Payload, runLabel: string): Promise<SQL[
     notReaction(),
   ];
 
-  const channels = requestedChannels(payload.channels);
+  const channels = requestedChannels(payload.channels, TAG);
   if (channels) where.push(inArray(conversations.channel, channels));
   else where.push(notInArray(conversations.channel, readOnlyChannels()));
 
@@ -216,30 +215,4 @@ async function candidateFilter(payload: Payload, runLabel: string): Promise<SQL[
   );
 
   return where;
-}
-
-/**
- * A typo in `channels=` is an error, not an empty run.
- *
- * Checked against the channel list rather than passed through, because
- * `inArray` on a value the enum does not contain returns nothing at all — and a
- * run that measured zero messages and a run whose filter was misspelt print the
- * same thing.
- */
-function requestedChannels(raw: string | undefined): ConversationChannel[] | null {
-  if (typeof raw !== 'string' || !raw.trim()) return null;
-
-  const names = raw
-    .split(',')
-    .map((name) => name.trim())
-    .filter(Boolean);
-
-  const channels: ConversationChannel[] = [];
-  for (const name of names) {
-    const match = CONVERSATION_CHANNELS.find((channel) => channel === name);
-    if (!match) throw new Error(`${TAG} "${name}" is not a conversation channel`);
-    channels.push(match);
-  }
-
-  return channels.length > 0 ? channels : null;
 }

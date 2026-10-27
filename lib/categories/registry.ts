@@ -13,8 +13,8 @@
  * message asks for, and none of them says "a merchant" where it means "a
  * message about a merchant's account".
  *
- * The descriptions are written for Jev (Stage 4 shows each one beside its
- * option) as much as for the admin page, which is why each says where its
+ * The descriptions are written for Jev (`lib/category-ai/request.ts` shows
+ * each one beside its option) as much as for the admin page, which is why each says where its
  * edges are: a model given four labels and no edges files a greeting under
  * whichever sounds friendliest. A message that is only a greeting, or names
  * nothing a team could act on, belongs to none of them — Jev answers
@@ -24,6 +24,15 @@
  * on (`plans/ticket-category-routing.md`, Q5), and `courier_jobs` has none even
  * then: it stays in its channel's default group.
  */
+/**
+ * Jev's answer for "none of these" — a greeting, thanks, a lone image, anything
+ * not about ShipBlu — which no category may be called. Reserved three times:
+ * by `ticket_categories_key_format`, by the admin action, and by the request
+ * builder, which refuses a registry row named it. Here, in a module that
+ * imports nothing, so the admin page and the classifier name one constant.
+ */
+export const UNKNOWN_CATEGORY_KEY = 'unknown';
+
 export type StarterCategory = {
   /** Lowercase words joined by underscores; never `unknown`. Immutable once seeded. */
   key: string;

@@ -1,10 +1,6 @@
-import { eq } from 'drizzle-orm';
-import { db } from '@/db/client';
-import { conversations } from '@/db/schema';
-import { isSubcategorisableMessage } from '@/lib/subcategorise/apply';
 import { enqueue } from '@/lib/queue';
-import { isReadOnlyChannel } from '@/lib/tickets/channel-policy';
-import { hasCustomerText } from '@/lib/tickets/customer-text';
+import { queueableMessage } from '@/lib/tickets/classifiable';
+import { classifierTicket, type ClassifierTicket } from '@/lib/tickets/classifier-ticket';
 import { priorityAiMode } from './settings';
 
 /**
@@ -24,23 +20,19 @@ import { priorityAiMode } from './settings';
  * The key's presence is left to the job, which reports it, because `env()`
  * validates the whole schema and this runs on every path that stores a message.
  */
-export async function enqueuePriorityClassification(message: {
-  conversationId: string;
-  messageId: string;
-  bodyText: string;
-  kind: string;
-  direction: string;
-}): Promise<void> {
+export async function enqueuePriorityClassification(
+  message: {
+    conversationId: string;
+    messageId: string;
+    bodyText: string;
+    kind: string;
+    direction: string;
+  },
+  ticket: () => Promise<ClassifierTicket | null> = classifierTicket(message.conversationId),
+): Promise<void> {
   if (priorityAiMode() === 'off') return;
-  if (!isSubcategorisableMessage(message.kind, message.direction)) return;
-  if (!hasCustomerText(message.bodyText)) return;
-
-  const [conversation] = await db
-    .select({ channel: conversations.channel })
-    .from(conversations)
-    .where(eq(conversations.id, message.conversationId))
-    .limit(1);
-  if (!conversation || isReadOnlyChannel(conversation.channel)) return;
+  if (!queueableMessage(message)) return;
+  if (!(await ticket())) return;
 
   // Keyed on the message, which is once-ever work: one answer per message is
   // what `ai_priority_runs` holds, so a spent key is the right answer to a

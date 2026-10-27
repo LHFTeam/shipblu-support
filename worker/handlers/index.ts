@@ -1,10 +1,12 @@
 import type { ClaimedJob, JobType } from '@/lib/queue';
 import { assignSweep } from './assign-sweep';
+import { backfillCategoryAi } from './backfill-category-ai';
 import { backfillSubcategoriseAi } from './backfill-subcategorise-ai';
 import { backfillMessageLocations } from './backfill-message-locations';
 import { backfillMetaProfiles } from './backfill-meta-profiles';
 import { backfillShipmentLinks } from './backfill-shipment-links';
 import { checkMetaPermissions } from './check-meta-permissions';
+import { classifyCategory } from './classify-category';
 import { classifyPriority } from './classify-priority';
 import { completeCoexistenceOnboarding } from './complete-coexistence-onboarding';
 import { cleanup } from './cleanup';
@@ -50,12 +52,14 @@ export type JobHandler = (job: ClaimedJob) => Promise<void>;
  */
 export const handlers: Partial<Record<JobType, JobHandler>> = {
   assign_sweep: () => assignSweep(),
+  backfill_category_ai: (job) => backfillCategoryAi(job),
   backfill_subcategorise_ai: (job) => backfillSubcategoriseAi(job),
   backfill_message_locations: (job) => backfillMessageLocations(job),
   backfill_meta_profiles: (job) => backfillMetaProfiles(job),
   backfill_shipment_links: (job) => backfillShipmentLinks(job),
   check_meta_permissions: () => checkMetaPermissions(),
   classify_priority: (job) => classifyPriority(job),
+  classify_category: (job) => classifyCategory(job),
   test_comment_permission: (job) => testCommentPermission(job),
   cleanup,
   complete_coexistence_onboarding: completeCoexistenceOnboarding,

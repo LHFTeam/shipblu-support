@@ -56,12 +56,13 @@ describe('routing-result', () => {
         '  (await moveToGroupIfElsewhere(id, groupId));',
         "  categories.setConversationCategory(id, null, { label: 'x' });",
         "  categories['setConversationCategory'](id, null, { label: 'x' });",
+        "  await setConversationCategoryOn(tx, id, null, { label: 'x' });",
         '  await afterRoutingChanged(id, { category: true, group: true });',
         '}',
       ),
     });
 
-    expect(found).toEqual([at(2), at(3), at(4), at(5), at(6)]);
+    expect(found).toEqual([at(2), at(3), at(4), at(5), at(6), at(7)]);
     expect(found[0].message).toMatch(
       /drops setConversationCategory\(\)'s answer.*afterRoutingChanged/,
     );
@@ -135,6 +136,62 @@ describe('routing-result', () => {
     expect(found[0].message).toMatch(
       /calls moveToGroupIfElsewhere\(\) and never afterRoutingChanged\(\)/,
     );
+  });
+
+  // A write that owes nothing by design is a writer of its own, which only its
+  // named module may call, and whose answer is still kept.
+  it('lets only the backfill file without a follow-up, and still keeps the answer', async () => {
+    const found = await run({
+      'lib/category-ai/backfill.ts': body(
+        'export async function a(id: string) {',
+        "  const write = await fileBacklogCategory(tx, id, 'c', detail);",
+        '  return write;',
+        '}',
+      ),
+      'lib/writer.ts': body(
+        'export async function b(id: string) {',
+        "  const write = await fileBacklogCategory(tx, id, 'c', detail);",
+        '  return write;',
+        '}',
+      ),
+      'lib/dropped.ts': body(
+        'export async function c(id: string) {',
+        "  await fileBacklogCategory(tx, id, 'c', detail);",
+        '}',
+      ),
+      // Its home exports it, and hands the answer on like any writer.
+      'lib/categories/write.ts': body(
+        'export async function fileBacklogCategory(tx: Tx, id: string, c: string, d: Detail) {',
+        "  return setConversationCategoryOn(tx, id, c, { label: 'jev' }, d);",
+        '}',
+      ),
+    });
+
+    expect(found).toEqual([
+      expect.objectContaining({ rule: 'routing-result', where: 'lib/dropped.ts:2' }),
+      expect.objectContaining({ rule: 'routing-result', where: 'lib/dropped.ts:2' }),
+      at(2),
+    ]);
+    expect(found.map((each) => each.message)).toEqual([
+      expect.stringMatching(/is lib\/category-ai\/backfill\.ts's alone/),
+      expect.stringMatching(/drops fileBacklogCategory\(\)'s answer/),
+      expect.stringMatching(/is lib\/category-ai\/backfill\.ts's alone/),
+    ]);
+  });
+
+  it('no longer reads a comment as a waiver', async () => {
+    const found = await run({
+      'lib/writer.ts': body(
+        'export async function a(id: string) {',
+        '  // routing-result: no follow-up — files a backlog and fires nothing',
+        "  const write = await setConversationCategoryOn(tx, id, null, { label: 'x' });",
+        '  return write;',
+        '}',
+      ),
+    });
+
+    expect(found).toEqual([at(3)]);
+    expect(found[0].message).toMatch(/never afterRoutingChanged/);
   });
 
   it('fails loudly when it finds too few writer calls to be checking anything', async () => {

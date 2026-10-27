@@ -351,7 +351,7 @@ export const ticketCategories = pgTable(
 
     /**
      * What belongs here, in one or two sentences — the text Jev is shown beside
-     * the option, from Stage 4, and what an agent reads on the admin page. The
+     * the option, and what an agent reads on the admin page. The
      * seeded wording is in `lib/categories/registry.ts`, so it goes through
      * review.
      */

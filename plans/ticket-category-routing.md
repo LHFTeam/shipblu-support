@@ -63,7 +63,7 @@ records the answers, and the plan below already reflects them.
 
 ## Status and handoff
 
-As of 2026-10-26, 08:45 UTC. A session picking this plan up starts here.
+As of 2026-10-27, 07:50 UTC. A session picking this plan up starts here.
 Everything after this section is the design as it was reasoned and as each stage
 was built. This section says where the work stands, what comes next and how, and
 what has already bitten. Whoever moves any of it updates this section in the
@@ -84,8 +84,30 @@ update.
 | 2.B   | Merged: #403 (`1d21cdc`), then `dev` → `main` in #413 (`516c8ff`) and #415 (`48cb284`). As built below                                      | **Done.** All six services live on `48cb284` by 06:01 UTC on 2026-10-25, web first, with nothing suspended. Its checks read clean, and a new message was subcategorised; one read left (below)                            |
 | 3.1   | Merged: #419 (`ff3bbfd`), then `dev` → `main` in #420 (`b9a4743`), which also carried #411, #416, #417 and #418. As built below             | **Done.** Web live on `b9a4743` at 19:44 UTC on 2026-10-25, the worker and the four crons by 08:05 UTC on 2026-10-26, and the four categories seeded at 08:13. Its checks read clean (below); the signed-in ones are left |
 | 3.2   | Merged: #424 (`07a5527`), then `dev` → `main` in #426 (`f761e5e`), which also carried #421, #422 and #423. As built below                   | **Done.** All six services live on `f761e5e` by 23:32 UTC on 2026-10-26, web first. Its checks read clean (below); the signed-in ones are left                                                                            |
-| 4.0   | In review: #425 (`claude/jolly-noether-hxhez1-stage-4-0`), with `dev` merged in after 3.2: [4.0, as built](#40-as-built)                    | —                                                                                                                                                                                                                         |
-| 4.1–6 | Not started. 4.1 comes once 4.0 is merged                                                                                                   | —                                                                                                                                                                                                                         |
+| 4.0   | Merged: #425 (`1c733c2`), then `dev` → `main` in #428 (`156004d`). As built below                                                           | **Done.** All six services live on `156004d` by 07:45:42 UTC on 2026-10-27, web first. Its checks read clean (below)                                                                                                      |
+| 4.1   | In review: #427 (`claude/jolly-noether-hxhez1-stage-4-1`), on `dev` since #425 merged: [4.1, as built](#41-as-built)                        | —                                                                                                                                                                                                                         |
+| 4.2–6 | 4.2's report in progress, stacked on #427. 5 and 6 not started                                                                              | —                                                                                                                                                                                                                         |
+
+**4.0's deploy and checks, read on Render and production on 2026-10-27.**
+
+- **Before** (read 07:31–07:41 UTC): all six services ran `f761e5e`;
+  `origin/main..origin/dev` held `1c733c2` alone; nothing pending or running in
+  `jobs`, and the same one dead job, `subscribe_meta_webhooks` of 2026-09-21.
+  4.0 is code only, with no migration, `db/sql` change or variable.
+- **The release.** #425 was squashed into `dev` as `1c733c2`, its tree
+  identical to the reviewed head `4a41a24`. #428 merged `dev` into `main` as
+  `156004d` once its nine checks were green. Web was deployed on it through
+  Render's API at 07:41:11, replayed the nine `db/sql` files by 07:42:50 with
+  nothing to migrate, and was live at 07:43:42. The four crons followed at
+  07:43:51–56 and were live by 07:44:34, and the worker was live at 07:45:42.
+- **The checks** (read 07:43–07:47 UTC):
+  - every job created since the deploy completed;
+  - neither web nor the worker logged a warning or an error, and web served no
+    5xx;
+  - the worker started and processed webhooks, and `sla-sweep` and
+    `time-automations` started their first runs at 07:46;
+  - `/api/health` reports `156004d`, with nothing pending or processing and
+    the same one dead job.
 
 **3.2's deploy and checks, read on Render and production on 2026-10-26.**
 
@@ -408,10 +430,14 @@ Every production write needs the user's go-ahead for that step, and the
    (`f761e5e`) took it to `main` on 2026-10-26 with #421, #422 and #423, the
    user having left the review's two races as they are. All six services were
    live on it by 23:32 UTC, web first, and its checks read clean (above); the
-   signed-in ones are left. **Stage 4.0**, `afterRoutingChanged`, is in review
-   as #425, with `dev` merged in: [4.0, as built](#40-as-built). Jev (4.1)
-   becomes a writer once 4.0 is merged.
-6. **Before Stage 5**, a person does 0.2's reorder and 0.6's staffing, and the
+   signed-in ones are left.
+6. **4.0 is deployed.** #425 was squashed into `dev` as `1c733c2`, and #428
+   (`156004d`) took it to `main` on 2026-10-27. All six services were live on
+   it by 07:45:42 UTC, web first, and its checks read clean (above). **Stage
+   4.1**, Jev's category classifier, is in review as #427, on `dev` since #425
+   merged, and ships off: [4.1, as built](#41-as-built). 4.2's report is
+   built beside it, stacked on #427.
+7. **Before Stage 5**, a person does 0.2's reorder and 0.6's staffing, and the
    support lead answers the questions still open (below).
 
 ### 1.3, as built
@@ -1287,8 +1313,8 @@ and should be read as a guide:
   "Nayera Mohamed" coexistence number defaults to Merchant Care.
 - **Jev is fast and reliable on the priority path.** 1,423 runs with 0 errors.
   Provider latency is p50 238 ms; from message to answer it is p50 2.2 s.
-  Priority has been in `apply` since 2026-10-13, despite
-  `docs/PROJECT-STATE.md` §1 still saying it "ships off".
+  Priority has been in `apply` since 2026-10-13, which
+  `docs/PROJECT-STATE.md` §5.2 called "ships off" until 4.1 corrected it.
 - **Assignment today happens almost entirely in the sweep, and nobody is free
   to be assigned.** Only 9 of 532 tickets were assigned on arrival. The other
   253 assignments came from `assign_sweep`, at a median of 40 hours. Nothing has
@@ -2010,9 +2036,10 @@ rules follow:
    so the value would be used in the transaction that adds it (55P04).
    Anything naming one — a default, a partial index, a CHECK — goes in
    `db/sql`, which runs after the commit. The rule does not cover a new enum
-   _type_. `routing_mode`, the routing outcome and the classifier mode are
-   created with `CREATE TYPE`, whose values may be used and defaulted in the
-   migration that creates them.
+   _type_. `routing_mode` and the routing outcome are created with
+   `CREATE TYPE`, whose values may be used and defaulted in the migration that
+   creates them. The classifier mode was built as text with a CHECK instead
+   ([4.1, as built](#41-as-built)).
 6. **Every PR follows `AGENTS.md`:**
    - It runs `typecheck`, `lint`, `lint:strict`, `format:check`, `test`, `knip`,
      `build` and `repo-rules` (with new files staged) before pushing, and
@@ -3671,6 +3698,164 @@ enqueued, so no job type is ever unknown.
   which corrects "priority ships off"; and `AGENTS.md`'s AI-provider section,
   which says what this one may touch.
 
+#### 4.1, as built
+
+Built on 2026-10-27 on top of 4.0 (#425 at `4a41a24`), because 4.1 is a writer
+of the category and `afterRoutingChanged` is what it calls; it is rebased onto
+`dev` once #425 merges. `0050_category_ai` is the newest migration, so if `dev`
+gains another first, 0050 is regenerated rather than renumbered.
+
+- **What landed, by the spec's bullets.**
+  - `lib/category-ai/`: `modes`, `settings`, `options`, `request`, `decide`,
+    `baseline`, `run`, `enqueue`, `backfill`, and `runs` — the message
+    selection, the call and the run row, shared by the live job and the
+    backfill so their rows differ only in what each judged as of when.
+  - `lib/tickets/classifiable.ts` holds `skipReason` and `isMachineMail`, moved
+    from priority unchanged, reason strings word for word; priority's request is
+    pinned byte for byte (`lib/priority-ai/request.test.ts`).
+  - `classify_category {messageId}`: a strict payload taking a uuid, the dedupe
+    key `classify_category:<id>`, queue priority 30, a place in `purge-jobs`'
+    list and a `skip:` line in `db-jobs.txt`.
+  - `ai_category_runs` and `category_ai_settings`, with guarded CHECKs in
+    `db/sql/003`: one settings row, three modes, a threshold from 0 to 1, a
+    window from 1 to 30 minutes, and a `failed` run carrying its error.
+  - `/admin/categories`: the classifier's form (mode, threshold, routing
+    window, whether the key is set), saved by `saveClassifierSettings` under
+    `admin.categories`; and readiness in the table itself — strategy, "N of M
+    accepting now", and a badge for a manual group or one with nobody active.
+  - `afterMessageStored` enqueues in its own `try/catch`, after priority's.
+- **Where it departs from the spec.**
+  - **The unique index is (`message_id`, `run_label`)**, not the reverse: the
+    same uniqueness, and the leading column serves the `set null` foreign key
+    and every per-message lookup.
+  - **The mode is text with a CHECK**, not an enum as deploy rule 5 had it.
+    Priority's mode columns are text, and `ai_category_runs.mode` carries a
+    fourth value, `record`, that the switch never takes. Rule 5 is amended.
+  - **Only the message selection moved to `lib/tickets/`.** `stateFor` and
+    `earlierMessages` already were the one shared copy, in
+    `lib/subcategorise-ai/`; moving them would have moved two byte pins for
+    nothing.
+  - **The baseline is `detectSubcategories`** through an explicit map of all
+    55 subcategories, held to the taxonomy by a test; `detectCategories` does
+    not exist. Of the 23 whose audience is `any`, the 13 outside `service.*`,
+    `other.*` and `meta.*` go to customer support. Two
+    choices are for the support lead: `commercial.claim` to merchant support,
+    since a claim is about a parcel an account sent, not a price; and
+    `other.partnership_offer` to courier jobs, without which that category has
+    no baseline at all. The baseline routes nothing; it is the report's
+    comparison.
+  - **The primary-key trap was already closed** by 0047, which frees
+    `ai_category_runs_pkey`; `run.db.test.ts` asserts both tables' key names.
+  - **The apply backfill asks nobody.** It files from a record label
+    (`fromLabel=`) and refuses one whose fingerprint is not today's question,
+    so it applies exactly what 4.2 evaluated, and its dry run calls nothing.
+    4.2's step 5 is amended to record a fresh label first, from the archive's
+    start, so it reaches the oldest open ticket: record mode has no status
+    scope, and apply files only the open ones.
+- **Decisions taken while building.**
+  - An outcome known before asking — owned, after a settle, capped — is
+    written without a call, so every message the job decides about has exactly
+    one live row. A message on a ticket somebody has already answered never
+    reaches the job: the enqueue side stops there, since most
+    customer messages come after a first reply and each would only be recorded
+    `capped`. Before the call, ownership is decided by the events alone
+    (`ownedByEvent`): the column is read in a statement apart from them, and a
+    Jev write committing in between would read as somebody else's, final and
+    wrong. The look under the lock reads both halves together.
+  - Settling depends on the mode: `apply` on `applied`, `shadow` on `applied`
+    and `would_apply`, `record` on `would_apply`. Settled in shadow and then
+    switched to apply, a ticket is asked again, since nothing was written:
+    otherwise every ticket that settled in the shadow weeks would stay
+    uncategorised for good.
+  - An earlier message answered late takes the settle over, when the ticket is
+    unowned: "earliest" means by arrival. Nothing runs one ticket's jobs one at
+    a time, so it happens whenever a later message's job finishes first — a
+    retry, or two messages of one burst whose calls come back out of order —
+    and when the two answers differ the ticket has two `category_changed`
+    events, each followed by its own re-selection and rule pass. When they
+    agree, the earlier message's row records `applied`, nothing is written,
+    and the one event names the later message.
+  - The cap counts live rows with a prediction that are not `failed` —
+    deleted messages included, through `is distinct from` — and
+    `first_responded_at` is read under the lock.
+  - A question that cannot be built (no active category, one keyed `unknown`,
+    more than 254) is logged and skipped with no row: it is a configuration
+    state, the same for every message.
+  - A ticket deleted, marked spam, merged, resolved or closed — before the
+    call or during it — is skipped with no row and no rule pass
+    (`queueRefusal`, which apply mode asks too). Imported histories and merged
+    tickets are skipped by this classifier only, so priority asks about exactly
+    what it did.
+  - **The switch and the threshold are read again under the lock** once Jev
+    has answered: a classifier switched off during the call writes nothing and
+    leaves no row, and one moved back to shadow, or to another threshold,
+    decides by that. A category retired during the call fails the row in
+    shadow as in apply, so the shadow never settles on an answer apply could
+    not write.
+  - **Record mode judges each message as of its arrival**: ownership from the
+    events the live job would have read for it (`eventsKnownAt`), the settle
+    and the cap from the label's own earlier rows. A message after the
+    ticket's first reply gets no row, since the live job is never queued for
+    one, so a record label covers the messages a live label would; and a
+    column no event explains is owned from the first message, as the live job
+    and apply mode read it. Those events are not simply the ones stamped by then:
+    `createTicket` stamps its message before its transaction opens, so an
+    agent's opening and a form's default carry later instants, and a rule runs
+    once the message's ingest has committed. So an agent's opening and a
+    form's default always count, a rule's write within five minutes of the
+    message, and anything else within ten seconds. Judged as the ticket is now,
+    every ticket a supervisor labelled later would read as owned, and 4.2's
+    evaluation would lose exactly the tickets it is graded on. A failure stops
+    that ticket for the run, and a re-run resumes it from the gap; a refused
+    key (401 or 403) stops the whole run, since it is every ticket's refusal.
+    A dry run counts the calls it would make up to the cap, so its figure is
+    the most a real run would ask.
+  - **Apply mode files** only open or pending live tickets with no category, no
+    person's, rule's or form's event, no agent opening, and no Jev event: Jev's
+    own live write is free by `categoryOwned`, and the backfill would otherwise
+    put an older answer over it. Ownership is read through `ownedByEvent` and
+    `writtenByJev`, the TypeScript the live job asks, not a SQL copy of it. Its
+    event names the label and the message, so the live classifier reads the
+    write as that message's settle. It fires nothing, and its report names
+    every `on_update` and `time_based` rule whose answer filing would change,
+    each way — counted only for the tickets it actually filed.
+  - That one writer owes no follow-up, so it writes through a writer of its
+    own, `fileBacklogCategory` in `lib/categories/write.ts`, which
+    `routing-result` lets only `lib/category-ai/backfill.ts` call. Its answer
+    is still kept. (Built first as a comment waiver at the call; #427's review
+    pointed out that a comment any call site can carry is the exemption list
+    `AGENTS.md` forbids.)
+- **Found while building, fixed with a test.** A run replacing a `failed` row
+  merged into it: an answer known before asking kept the failure's error, which
+  the table refuses beside any other outcome, so a hand re-run threw; and kept
+  the prediction a retired category had refused, which the cap would count.
+  `insertRun` now replaces the row whole. The cap also counted `failed` rows
+  and dropped deleted messages' rows, and the locked read did not look again at
+  spam, deletion or a merge; each has its test, seen to fail without the fix.
+- **Left, with the reason.**
+  - A worker that dies between the commit and the follow-up leaves the
+    category written and the follow-up unrun, and the redelivered job finds its
+    row and stops — priority's gap too.
+  - A dead job leaves no row, and is the one gap: 4.2's report counts
+    `classify_category` jobs in `dead`, which are never cleaned up. Every other
+    message without a live row was left by design — a skip (no words of the
+    customer's, a passer-by's, machine mail, the bot channel, a ticket
+    resolved or closed), the switch found off when the job ran or once Jev had
+    answered (jobs still queued at a rollback among them), a
+    question that could not be built, an unset key, or a message never queued
+    (a ticket already answered, or the switch read as off through the enqueue
+    side's memo). The one-row settings table keeps no history, so a report
+    cannot ask when the switch was on, and should not try.
+  - On Messenger, answered in Freshchat, nothing here sets
+    `first_responded_at`, so only the five-message cap stops the classifier;
+    on the coexistence number the phone's first reply does. Both are labelled
+    like any channel, which is evaluation data; whether they route is Q10's.
+  - `render.yaml` still lists `PRIORITY_AI` under "set nowhere today", though
+    production has run it since 2026-10-13. Moving it needs a read of the
+    production env group, which no tool in this session gives.
+  - Ownership through a form's default is tested as a rule (`decide.test.ts`)
+    and its event's shape by `lib/forms/submit.db.test.ts`, not end to end.
+
 **4.2 — Shadow, then evaluate, then apply.** Operations, plus the report.
 
 1. Run `backfill_category_ai mode=record` over the archive, then switch the
@@ -3704,10 +3889,18 @@ enqueued, so no job type is ever unknown.
      it proves wrong too often, emptying its route group stops it routing
      without stopping it labelling (see Risks).
 4. Switch the classifier to `apply`.
-5. **Back-classify the open backlog (Q12).** Preconditions:
+5. **Back-classify the open backlog (Q12).** It files from a record label, so
+   first run `backfill_category_ai mode=record runLabel=<new label>` with no
+   `since=`: step 1's archive label predates the tickets opened since, and
+   their live `would_apply` rows from the shadow weeks no longer settle under
+   `apply` ([4.1, as built](#41-as-built)). Record mode has no status scope,
+   so the label covers the whole archive from 2026-08-18 — the oldest open
+   ticket included — and apply files only the open ones. A `since=` later
+   than the oldest open ticket leaves the tickets before it out of both modes'
+   counts, silently. Preconditions:
    - the classifier has been in `apply` for a week;
-   - `backfill_category_ai mode=apply dryRun=true` has been read, including
-     which rules it would wake.
+   - `backfill_category_ai mode=apply fromLabel=<that label> dryRun=true` has
+     been read, including which rules it would wake.
 
    Then run it without `dryRun`.
 
