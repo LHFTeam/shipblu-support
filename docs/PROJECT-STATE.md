@@ -1586,7 +1586,8 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
   the key, which production already holds; the threshold beside it defaults to
   0.6 and every answer records the one it met. Turning it on is 4.2's sequence:
   `backfill_category_ai mode=record runLabel=<label>` over the archive, then
-  `shadow` for at least two weeks while a supervisor labels a sample, then
+  `shadow` for at least two weeks while a supervisor labels a sample from
+  `/reports/category-ai` (4.2), whose figures decide the switch, then
   `apply`, then `backfill_category_ai mode=record` again under a fresh label with
   no `since=` — it has no status scope, and must reach the oldest open ticket —
   and `mode=apply fromLabel=<that label>`, which files only the open ones. Read

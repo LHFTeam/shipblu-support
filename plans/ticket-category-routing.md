@@ -86,7 +86,7 @@ update.
 | 3.2   | Merged: #424 (`07a5527`), then `dev` → `main` in #426 (`f761e5e`), which also carried #421, #422 and #423. As built below                   | **Done.** All six services live on `f761e5e` by 23:32 UTC on 2026-10-26, web first. Its checks read clean (below); the signed-in ones are left                                                                            |
 | 4.0   | Merged: #425 (`1c733c2`), then `dev` → `main` in #428 (`156004d`). As built below                                                           | **Done.** All six services live on `156004d` by 07:45:42 UTC on 2026-10-27, web first. Its checks read clean (below)                                                                                                      |
 | 4.1   | In review: #427 (`claude/jolly-noether-hxhez1-stage-4-1`), on `dev` since #425 merged: [4.1, as built](#41-as-built)                        | —                                                                                                                                                                                                                         |
-| 4.2–6 | 4.2's report in progress, stacked on #427. 5 and 6 not started                                                                              | —                                                                                                                                                                                                                         |
+| 4.2–6 | 4.2's report in progress, stacked on #427: [4.2's report, as built](#42s-report-as-built). 5 and 6 not started                              | —                                                                                                                                                                                                                         |
 
 **4.0's deploy and checks, read on Render and production on 2026-10-27.**
 
@@ -435,8 +435,10 @@ Every production write needs the user's go-ahead for that step, and the
    (`156004d`) took it to `main` on 2026-10-27. All six services were live on
    it by 07:45:42 UTC, web first, and its checks read clean (above). **Stage
    4.1**, Jev's category classifier, is in review as #427, on `dev` since #425
-   merged, and ships off: [4.1, as built](#41-as-built). 4.2's report is
-   built beside it, stacked on #427.
+   merged, and ships off: [4.1, as built](#41-as-built). 4.2's report,
+   `/reports/category-ai`, is built beside it, stacked on #427: [4.2's report,
+   as built](#42s-report-as-built). 4.2's operations wait for 4.1 to be
+   deployed and the user's go-ahead for each.
 7. **Before Stage 5**, a person does 0.2's reorder and 0.6's staffing, and the
    support lead answers the questions still open (below).
 
@@ -3884,6 +3886,84 @@ gains another first, 0050 is regenerated rather than renumbered.
 
    Then run it without `dryRun`.
 
+#### 4.2's report, as built
+
+Built on 2026-10-27, stacked on 4.1 (#427), since it reads `ai_category_runs`.
+Code only: no migration, no `db/sql`, no job, no variable, so it deploys with
+web alone. The operations in steps 1 and 3–5 are each a production write and
+wait for the user's go-ahead, after 4.1 is deployed.
+
+- **What landed.**
+  - `lib/category-ai/grade.ts` judges, purely, and its rules are
+    `grade.test.ts`. `lib/category-ai/report.ts` reads, with
+    `report.db.test.ts` against Postgres.
+  - `/reports/category-ai`, behind `report.view` and linked from `/reports`,
+    takes one run label and one `request_fingerprint` from a list of every pair,
+    newest first. For that pair it shows:
+    - right, settled, settled on the first message and unknown, per channel and
+      in total;
+    - precision and recall per category, Jev's and the rules' side by side;
+    - the confusion matrix;
+    - a threshold sweep;
+    - what Jev filed and a person changed since;
+    - the tickets to label.
+  - The count of `classify_category` jobs in `dead`, 4.1's one gap, is on the
+    page as a warning.
+  - The handbook's reports article gains the screen and how to label for it,
+    and the categories admin paragraph names it.
+- **Where it departs from the spec, or adds to it.**
+  - **A label is a person's latest `category_changed`, and only when no Jev
+    write came before it.** Under `apply` a person who agrees changes nothing
+    and leaves no event, so every label after a write is a disagreement. Graded,
+    those labels would make every applied answer wrong. They are counted under
+    "Filed by Jev" instead: what it filed, how many a person moved since, and to
+    what. That is the figure step 3's merchant-support watch reads.
+  - **The rules are graded on their own terms over the same labelled tickets.**
+    Their answer is the first message the detector maps to a category, inside
+    Jev's window: up to an `owned` or `capped` row, `after_settle` rows
+    included. Grading them on Jev's settling message instead would charge them
+    with Jev's choice of message.
+  - **The sweep re-settles each ticket from its rows.** At or below the
+    threshold the run used, the answer is exact: every message up to the settle
+    was asked. Above it, a ticket whose settle falls below the bar moves on to
+    messages Jev was never asked (`after_settle`), and those are counted as not
+    known, not as unsettled. That is what "the threshold set from the report"
+    reads.
+  - **The sample is chosen by Jev's answer and shown without it.** Strata are
+    Jev's settling category, plus "never settled" so recall has misses. Each
+    stratum's first ten go into one list in id order, a fixed random order for
+    a v4 uuid, with only the ticket number and channel. A supervisor told "Jev
+    said sales" before opening a ticket is being asked to agree, and the label
+    would be Jev's answer read back. The per-stratum counts stay on the page,
+    and 30 labels a class is the step 3 bar.
+  - **Only tickets with no category now are offered**, besides nobody having
+    labelled them and Jev never having written. Choosing the category a ticket
+    already has writes nothing, so on a ticket a rule filed, agreeing leaves
+    no label.
+- **Found while building.**
+  - **A ticket that fits no category cannot be labelled so.** Choosing None
+    on a ticket with no category writes nothing (`setConversationCategory`
+    answers `unchanged`). So a greeting Jev settled as sales stays unlabelled,
+    and that false positive never reaches precision. Choosing a category and
+    then None would record it, but each choice is a real change, which runs the
+    category's rules and, before a first reply, re-chooses the SLA policy. The
+    page and the handbook tell a supervisor to leave such a ticket unlabelled.
+    Recording "none fits" needs a writer of its own, for example a review
+    event, so it is the support lead's call (Still open).
+  - **Labelling an open ticket is a real change**, with the same rules and
+    SLA effects, so the page and the handbook say so. The archive's resolved
+    tickets carry the fewest effects. Nothing restricts the sample to them,
+    since a shadow week's open tickets are the live distribution.
+- **Left, with the reason.**
+  - A label from an agent since deleted has lost its `actor_agent_id`, so it
+    reads as nobody's. The spec makes the agent id the ground truth, and agents
+    are deactivated rather than deleted.
+  - A ticket whose messages were asked under two questions is graded under
+    each with that question's rows alone, so "settled on the first message"
+    means the first asked under that question.
+  - No slice by `requester_kind` or `has_shipment` is drawn. Both columns
+    are on every row, for a later cut.
+
 ### Stage 5 — routing by category
 
 **5.1 — The router.** Web first (it migrates), then the worker, then all four
@@ -4212,3 +4292,11 @@ None blocks Stage 1. The first two are needed before Stage 5 turns on.
   `sendCannedReply` refuses every `send_reply` on a comment ticket. Allowing one
   needs a trigger that names the comment that set the rule off, which the
   engine does not have, and it is a change of its own. The default is never.
+- **How a supervisor says a ticket fits no category.** Found building 4.2's
+  report: choosing None on a ticket with no category writes nothing, so a
+  greeting Jev settled as a category cannot be labelled as one, and that false
+  positive never reaches precision. Recording it needs a writer of its own — a
+  review event beside the select, say, which the grading reads as "no category"
+  — and whether the evaluation needs it before `apply` is the support lead's
+  call. Without it, step 3's precision counts only tickets a person put a
+  category on.
