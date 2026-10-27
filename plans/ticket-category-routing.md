@@ -3781,13 +3781,24 @@ gains another first, 0050 is regenerated rather than renumbered.
   - A question that cannot be built (no active category, one keyed `unknown`,
     more than 254) is logged and skipped with no row: it is a configuration
     state, the same for every message.
-  - A ticket deleted, marked spam or merged during the call is skipped with no
-    row and no rule pass. Imported histories and merged tickets are skipped by
-    this classifier only, so priority asks about exactly what it did.
+  - A ticket deleted, marked spam, merged, resolved or closed — before the
+    call or during it — is skipped with no row and no rule pass
+    (`queueRefusal`, which apply mode asks too). Imported histories and merged
+    tickets are skipped by this classifier only, so priority asks about exactly
+    what it did.
+  - **The switch and the threshold are read again under the lock** once Jev
+    has answered: a classifier switched off during the call writes nothing and
+    leaves no row, and one moved back to shadow, or to another threshold,
+    decides by that. A category retired during the call fails the row in
+    shadow as in apply, so the shadow never settles on an answer apply could
+    not write.
   - **Record mode judges each message as of its arrival**: ownership from the
     events the live job would have read for it (`eventsKnownAt`), the settle
-    and the cap from the label's own earlier rows and a first response before
-    the message. Those events are not simply the ones stamped by then:
+    and the cap from the label's own earlier rows. A message after the
+    ticket's first reply gets no row, since the live job is never queued for
+    one, so a record label covers the messages a live label would; and a
+    column no event explains is owned from the first message, as the live job
+    and apply mode read it. Those events are not simply the ones stamped by then:
     `createTicket` stamps its message before its transaction opens, so an
     agent's opening and a form's default carry later instants, and a rule runs
     once the message's ingest has committed. So an agent's opening and a
@@ -3795,17 +3806,25 @@ gains another first, 0050 is regenerated rather than renumbered.
     message, and anything else within ten seconds. Judged as the ticket is now,
     every ticket a supervisor labelled later would read as owned, and 4.2's
     evaluation would lose exactly the tickets it is graded on. A failure stops
-    that ticket for the run, and a re-run resumes it from the gap.
+    that ticket for the run, and a re-run resumes it from the gap; a refused
+    key (401 or 403) stops the whole run, since it is every ticket's refusal.
+    A dry run counts the calls it would make up to the cap, so its figure is
+    the most a real run would ask.
   - **Apply mode files** only open or pending live tickets with no category, no
     person's, rule's or form's event, no agent opening, and no Jev event: Jev's
     own live write is free by `categoryOwned`, and the backfill would otherwise
-    put an older answer over it. Its event names the label and the message, so
-    the live classifier reads the write as that message's settle. It fires
-    nothing, and its report names every `on_update` and `time_based` rule whose
-    answer filing would change, each way.
-  - `routing-result` gains a waiver for that one writer: a comment opening
-    `routing-result: no follow-up — <why>` on the call, honoured by the module
-    half only, so its answer must still be kept.
+    put an older answer over it. Ownership is read through `ownedByEvent` and
+    `writtenByJev`, the TypeScript the live job asks, not a SQL copy of it. Its
+    event names the label and the message, so the live classifier reads the
+    write as that message's settle. It fires nothing, and its report names
+    every `on_update` and `time_based` rule whose answer filing would change,
+    each way — counted only for the tickets it actually filed.
+  - That one writer owes no follow-up, so it writes through a writer of its
+    own, `fileBacklogCategory` in `lib/categories/write.ts`, which
+    `routing-result` lets only `lib/category-ai/backfill.ts` call. Its answer
+    is still kept. (Built first as a comment waiver at the call; #427's review
+    pointed out that a comment any call site can carry is the exemption list
+    `AGENTS.md` forbids.)
 - **Found while building, fixed with a test.** A run replacing a `failed` row
   merged into it: an answer known before asking kept the failure's error, which
   the table refuses beside any other outcome, so a hand re-run threw; and kept
@@ -3820,8 +3839,9 @@ gains another first, 0050 is regenerated rather than renumbered.
   - A dead job leaves no row, and is the one gap: 4.2's report counts
     `classify_category` jobs in `dead`, which are never cleaned up. Every other
     message without a live row was left by design — a skip (no words of the
-    customer's, a passer-by's, machine mail, the bot channel), the switch found
-    off when the job ran (jobs still queued at a rollback among them), a
+    customer's, a passer-by's, machine mail, the bot channel, a ticket
+    resolved or closed), the switch found off when the job ran or once Jev had
+    answered (jobs still queued at a rollback among them), a
     question that could not be built, an unset key, or a message never queued
     (a ticket already answered, or the switch read as off through the enqueue
     side's memo). The one-row settings table keeps no history, so a report

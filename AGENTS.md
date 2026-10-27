@@ -1423,7 +1423,8 @@ message never queued — so the one gap is a `classify_category` job in `dead`. 
 backfill writes under a label of its own (`backfill_category_ai mode=record`),
 judging each message as of when it arrived; its `apply` mode files open tickets
 from a record label's answers and fires nothing — the one category writer that
-owes no follow-up, which says so at the call for `routing-result`. The question
+owes no follow-up, through `fileBacklogCategory`, which `routing-result` lets
+only the backfill call. The question
 offers the active categories by English label and description, with `unknown`
 added in code, and its fingerprint covers both, so an edit on `/admin/categories`
 is a new question no report averages with the old. See

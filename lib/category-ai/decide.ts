@@ -127,13 +127,48 @@ export function ownedByEvent(events: readonly CategoryEvent[]): boolean {
  */
 export function categoryOwned(events: readonly CategoryEvent[], column: string | null): boolean {
   if (ownedByEvent(events)) return true;
-  let lastWritten: string | null = null;
-  for (const event of events) {
+  return column !== lastCategory(events);
+}
+
+/**
+ * The category the last `category_changed` among `events` left, or null — what
+ * the column holds when every write to it came with its event. The live job
+ * compares the column with it, and a backfill judging the archive reads it as
+ * the column of the moment.
+ */
+export function lastCategory(events: readonly CategoryEvent[]): string | null {
+  for (let i = events.length - 1; i >= 0; i--) {
+    const event = events[i]!;
     if (event.type !== 'category_changed') continue;
     const to = (event.data as Record<string, unknown> | null)?.to;
-    lastWritten = typeof to === 'string' ? to : null;
+    return typeof to === 'string' ? to : null;
   }
-  return column !== lastWritten;
+  return null;
+}
+
+/** Whether Jev has written the ticket's category: the live classifier, or a backfill's apply. */
+export function writtenByJev(events: readonly CategoryEvent[]): boolean {
+  return events.some(
+    (event) => event.type === 'category_changed' && event.actorLabel === CATEGORY_AI_ACTOR,
+  );
+}
+
+/**
+ * The order messages are judged in: by `created_at`, then by id, since
+ * WhatsApp stamps a burst to the same second and the id makes exactly one of
+ * them the first. A message deleted since has no id, and on a tie of the
+ * instant it is never the earlier. Negative when `a` came first. The live job
+ * and the backfill both order by this, so the two agree on which message
+ * settled a ticket.
+ */
+export function arrivedBefore(
+  a: { createdAt: Date; messageId: string | null },
+  b: { createdAt: Date; messageId: string },
+): number {
+  const byTime = a.createdAt.getTime() - b.createdAt.getTime();
+  if (byTime !== 0) return byTime;
+  if (a.messageId === null) return 1;
+  return a.messageId < b.messageId ? -1 : a.messageId > b.messageId ? 1 : 0;
 }
 
 /**

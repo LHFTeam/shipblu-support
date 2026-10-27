@@ -3,12 +3,15 @@ import {
   CATEGORY_AI_ACTOR,
   RULE_PASS_GRACE_MS,
   SAME_WRITE_GRACE_MS,
+  arrivedBefore,
   categoryOwned,
   decide,
   eventsKnownAt,
+  lastCategory,
   ownedByEvent,
   preCallOutcome,
   settlingOutcomes,
+  writtenByJev,
   type DecisionInput,
 } from './decide';
 
@@ -185,5 +188,58 @@ describe('decide', () => {
     expect(decide(input({ probability: 0.59 }))).toBe('below_threshold');
     expect(decide(input({ probability: 0.6 }))).toBe('applied');
     expect(decide(input({ probability: null }))).toBe('below_threshold');
+  });
+});
+
+describe('lastCategory and writtenByJev', () => {
+  const event = (actorLabel: string | null, to: string | null) => ({
+    type: 'category_changed',
+    actorLabel,
+    data: { to },
+  });
+
+  it('reads the category the last change left, a clearing included', () => {
+    expect(lastCategory([])).toBeNull();
+    expect(lastCategory([event(CATEGORY_AI_ACTOR, SALES), event(null, SUPPORT)])).toBe(SUPPORT);
+    expect(lastCategory([event(null, SUPPORT), event(null, null)])).toBeNull();
+    // Other events say nothing about the column.
+    expect(
+      lastCategory([event(null, SALES), { type: 'opened_by_agent', actorLabel: null, data: {} }]),
+    ).toBe(SALES);
+  });
+
+  it('knows Jev only by its own label', () => {
+    expect(writtenByJev([event('automation:x', SALES), event(null, SALES)])).toBe(false);
+    expect(writtenByJev([event(null, SALES), event(CATEGORY_AI_ACTOR, SALES)])).toBe(true);
+  });
+});
+
+describe('arrivedBefore', () => {
+  const at = new Date('2026-10-20T09:00:00Z');
+  const later = new Date('2026-10-20T09:00:01Z');
+
+  it('orders by the instant, then by id on a tie', () => {
+    expect(
+      arrivedBefore({ createdAt: at, messageId: 'b' }, { createdAt: later, messageId: 'a' }),
+    ).toBeLessThan(0);
+    expect(
+      arrivedBefore({ createdAt: at, messageId: 'a' }, { createdAt: at, messageId: 'b' }),
+    ).toBeLessThan(0);
+    expect(
+      arrivedBefore({ createdAt: at, messageId: 'b' }, { createdAt: at, messageId: 'a' }),
+    ).toBeGreaterThan(0);
+    expect(
+      arrivedBefore({ createdAt: at, messageId: 'a' }, { createdAt: at, messageId: 'a' }),
+    ).toBe(0);
+  });
+
+  // A deleted message has no id: on a tie it is never the one before.
+  it('never puts a deleted message first on a tie', () => {
+    expect(
+      arrivedBefore({ createdAt: at, messageId: null }, { createdAt: at, messageId: 'a' }),
+    ).toBeGreaterThan(0);
+    expect(
+      arrivedBefore({ createdAt: at, messageId: null }, { createdAt: later, messageId: 'a' }),
+    ).toBeLessThan(0);
   });
 });

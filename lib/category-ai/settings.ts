@@ -1,5 +1,6 @@
 import { eq } from 'drizzle-orm';
 import { db } from '@/db/client';
+import type { Executor } from './runs';
 import { agents, categoryAiSettings } from '@/db/schema';
 import { logger } from '@/lib/log';
 import {
@@ -58,9 +59,14 @@ const UNSET: CategoryAiSettings = {
 
 let cached: { at: number; value: CategoryAiSettings } | null = null;
 
-/** Uncached, and a failed read throws. For the job, the backfill and the admin page. */
-export async function readCategoryAiSettings(): Promise<CategoryAiSettings> {
-  const [row] = await db
+/**
+ * Uncached, and a failed read throws. For the job, the backfill and the admin
+ * page — and inside the job's own transaction, where the switch is read again
+ * once Jev has answered, so a classifier switched off during the call writes
+ * nothing.
+ */
+export async function readCategoryAiSettings(executor: Executor = db): Promise<CategoryAiSettings> {
+  const [row] = await executor
     .select({
       mode: categoryAiSettings.mode,
       minProbability: categoryAiSettings.minProbability,

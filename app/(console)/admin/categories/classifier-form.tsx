@@ -61,9 +61,9 @@ export function ClassifierForm({
           TypeSafe&rsquo;s Jev model reads a customer&rsquo;s message and chooses which of the
           categories below it belongs to &mdash; or none, for a greeting or a message too short to
           tell. It is asked about the first five customer messages on a ticket nobody has answered
-          yet, and the first answer at or above the threshold settles the ticket. It never changes a
-          category a person, a rule or a form chose, and a category it chose is changed like any
-          other.
+          yet, and the first answer that names a category at or above the threshold settles the
+          ticket; &ldquo;none of these&rdquo; never does, however sure. It never changes a category
+          a person, a rule or a form chose, and a category it chose is changed like any other.
         </InfoTip>
       </div>
 
@@ -85,13 +85,13 @@ export function ClassifierForm({
         </Field>
         <Field
           label="Threshold"
-          hint="The share of Jev's answer below which it never files a ticket, from 0 to 1. Every answer is recorded with the threshold it met."
+          hint="The share of Jev's answer below which it never files a ticket, above 0 and up to 1. Every answer is recorded with the threshold it met."
         >
           <Input
             name="minProbability"
             type="number"
             inputMode="decimal"
-            min={0}
+            min={0.01}
             max={1}
             step={0.01}
             required

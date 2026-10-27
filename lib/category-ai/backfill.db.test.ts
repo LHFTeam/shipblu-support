@@ -311,16 +311,65 @@ describe('recordCategoryRun', () => {
     expect(calls).toHaveBeenCalledTimes(2);
   });
 
-  it('caps from the first reply on, and not before it', async () => {
+  // The live job is never queued once somebody has answered, so a record
+  // label covering those messages would hold rows no live label can.
+  it('passes over the messages after the first reply, as the live job is never queued for them', async () => {
     const calls = answersInTurn('unknown');
     const t = await ticket({ firstRespondedAt: at(15) });
     await inbound(t, 'عايز اعرف', at(20));
     await inbound(t, 'تمام شكرا', at(10));
 
+    const result = await record();
+
+    expect((await runsOf(t.id)).map((run) => run.outcome)).toEqual(['unknown']);
+    expect(result.status === 'ran' && result.tallies.get('whatsapp')?.skipped).toBe(1);
+    expect(calls).toHaveBeenCalledTimes(1);
+  });
+
+  it('caps at five messages asked', async () => {
+    const calls = answersInTurn('unknown');
+    const t = await ticket();
+    for (let n = 0; n < 7; n++) await inbound(t, `رسالة رقم ${n + 1}`, at(30 - n));
+
     await record();
 
-    expect((await runsOf(t.id)).map((run) => run.outcome)).toEqual(['unknown', 'capped']);
+    expect((await runsOf(t.id)).map((run) => run.outcome)).toEqual([
+      ...Array.from({ length: 5 }, () => 'unknown'),
+      'capped',
+      'capped',
+    ]);
+    expect(calls).toHaveBeenCalledTimes(5);
+  });
+
+  // Written straight to the column, with no event saying by whom: the live job
+  // and apply mode both read that as somebody's choice.
+  it('reads a category no event explains as owned from the first message', async () => {
+    const calls = answersInTurn('sales');
+    const t = await ticket({ categoryId: await categoryId('courier_jobs') });
+    await inbound(t, 'بكام الشحن؟', at(10));
+
+    await record();
+
+    expect((await runsOf(t.id)).map((run) => run.outcome)).toEqual(['owned']);
+    expect(calls).not.toHaveBeenCalled();
+  });
+
+  // One refusal of the key is every ticket's: the run stops rather than paying
+  // a call and writing a failed row per ticket.
+  it('stops the whole run when TypeSafe refuses the key', async () => {
+    const calls = stubFetch(() => new Response('{"error":"unauthorized"}', { status: 401 }));
+    const first = await ticket();
+    const second = await ticket();
+    await inbound(first, 'بكام الشحن؟', at(20));
+    await inbound(second, 'فين الشحنه؟', at(10));
+
+    expect(await record()).toEqual({
+      status: 'refused',
+      reason: expect.stringMatching(/TypeSafe refused the key \(401\)/),
+    });
     expect(calls).toHaveBeenCalledTimes(1);
+    expect(await runsOf(first.id)).toEqual([]);
+    expect(await runsOf(second.id)).toEqual([]);
   });
 
   // Recorded past a gap, the settle and the cap would be read off a history
@@ -380,6 +429,21 @@ describe('recordCategoryRun', () => {
     expect(result.status === 'ran' && result.tallies.get('whatsapp')?.asked).toBe(1);
     expect(calls).not.toHaveBeenCalled();
     expect(await runsOf(t.id)).toEqual([]);
+  });
+
+  // Which answer would settle a ticket is not known without asking, but the
+  // cap is: a dry run's count is the most a real run would ask.
+  it('counts a dry run up to the cap', async () => {
+    answersInTurn('sales');
+    const t = await ticket();
+    for (let n = 0; n < 7; n++) await inbound(t, `رسالة رقم ${n + 1}`, at(30 - n));
+
+    const result = await record({ dryRun: true });
+
+    expect(result.status === 'ran' && result.tallies.get('whatsapp')).toMatchObject({
+      asked: 5,
+      outcomes: { capped: 2 },
+    });
   });
 
   // A category added since changes the question; answers to two questions
@@ -516,6 +580,64 @@ describe('applyCategoryRun', () => {
 
     expect(await apply(true)).toMatchObject({ status: 'ran', applied: 1 });
     expect((await carried(t.id)).categoryId).toBeNull();
+  });
+
+  it('refuses to file from the live label', async () => {
+    expect(
+      await applyCategoryRun({ fromLabel: CATEGORY_AI_LIVE_LABEL, channels: null, dryRun: false }),
+    ).toEqual({ status: 'refused', reason: '"live" is the live classifier\'s' });
+  });
+
+  // A person files a ticket between the candidate read and its locked
+  // re-check — simulated by a trigger that fires as Jev files the first one.
+  // The report says which rules filing woke, so it counts what was filed.
+  it('reports the rules woken only by tickets it filed', async () => {
+    answersInTurn('sales');
+    const sales = await categoryId('sales');
+    await db.insert(automationRules).values({
+      name: 'Sales get a tag',
+      trigger: 'on_update',
+      conditions: { field: 'category.id', op: 'eq', value: sales },
+      actions: [{ type: 'add_tags', tags: ['sales'] }],
+    });
+    const [mona] = await db
+      .insert(agents)
+      .values({ name: 'Mona', email: 'mona@shipblu.test' })
+      .returning({ id: agents.id });
+    const [first, second] = [await ticket(), await ticket()].sort((a, b) => (a.id < b.id ? -1 : 1));
+    await inbound(first!, 'بكام الشحن؟', at(20));
+    await inbound(second!, 'بكام الشحن للصعيد؟', at(10));
+    await record();
+
+    await db.execute(
+      sql.raw(`
+        create function test_person_files() returns trigger language plpgsql as $$
+        begin
+          if new.actor_label = '${CATEGORY_AI_ACTOR}' and new.conversation_id = '${first!.id}' then
+            insert into conversation_events (conversation_id, type, actor_agent_id, data)
+            values ('${second!.id}', 'category_changed', '${mona!.id}', '{"to": null, "key": null}');
+          end if;
+          return new;
+        end $$;
+        create trigger test_person_files after insert on conversation_events
+          for each row execute function test_person_files();`),
+    );
+    try {
+      const result = await apply();
+
+      expect(result).toMatchObject({
+        status: 'ran',
+        candidates: 2,
+        applied: 1,
+        rules: [{ trigger: 'on_update', name: 'Sales get a tag', newly: 1, stops: 0 }],
+      });
+      expect(result.status === 'ran' && Object.fromEntries(result.left)).toEqual({ owned: 1 });
+    } finally {
+      await db.execute(
+        sql.raw(`drop trigger test_person_files on conversation_events;
+          drop function test_person_files();`),
+      );
+    }
   });
 
   it('refuses a label with no rows, or answered under another question than today’s', async () => {

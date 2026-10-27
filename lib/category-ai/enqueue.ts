@@ -1,10 +1,6 @@
-import { eq } from 'drizzle-orm';
-import { db } from '@/db/client';
-import { conversations } from '@/db/schema';
-import { isSubcategorisableMessage } from '@/lib/subcategorise/apply';
 import { enqueue } from '@/lib/queue';
-import { isReadOnlyChannel } from '@/lib/tickets/channel-policy';
-import { hasCustomerText } from '@/lib/tickets/customer-text';
+import { queueableMessage } from '@/lib/tickets/classifiable';
+import { classifierTicket, type ClassifierTicket } from '@/lib/tickets/classifier-ticket';
 import { loadCategoryAiSettings } from './settings';
 
 /**
@@ -19,36 +15,30 @@ import { loadCategoryAiSettings } from './settings';
  * `afterMessageStored` too — never reads the settings at all. Then the switch,
  * through the 30-second memo, which answers off when it cannot be read, so the
  * classifier misses a message rather than breaking the ingest that stored it.
- * Then one read of the ticket: the bot channel, which nobody on the team works
- * and which is nearly all of the volume, and a ticket somebody has already
- * answered — classification stops at the first human reply, and most customer
- * messages come after one, so without this nearly every job would be queued
- * only to be recorded as capped.
+ * Then the ticket, read once for both classifiers (`classifierTicket`): the
+ * bot channel, and a ticket somebody has already answered — classification
+ * stops at the first human reply, and most customer messages come after one,
+ * so without this nearly every job would be queued only to be recorded as
+ * capped. The message checks are priority's too (`queueableMessage`).
  *
  * Must not import `run.ts`: `lib/tickets/lifecycle.ts` imports this, and the
  * job imports `lifecycle`.
  */
-export async function enqueueCategoryClassification(message: {
-  conversationId: string;
-  messageId: string;
-  bodyText: string;
-  kind: string;
-  direction: string;
-}): Promise<void> {
-  if (!isSubcategorisableMessage(message.kind, message.direction)) return;
-  if (!hasCustomerText(message.bodyText)) return;
+export async function enqueueCategoryClassification(
+  message: {
+    conversationId: string;
+    messageId: string;
+    bodyText: string;
+    kind: string;
+    direction: string;
+  },
+  ticket: () => Promise<ClassifierTicket | null> = classifierTicket(message.conversationId),
+): Promise<void> {
+  if (!queueableMessage(message)) return;
   if ((await loadCategoryAiSettings()).mode === 'off') return;
 
-  const [conversation] = await db
-    .select({
-      channel: conversations.channel,
-      firstRespondedAt: conversations.firstRespondedAt,
-    })
-    .from(conversations)
-    .where(eq(conversations.id, message.conversationId))
-    .limit(1);
-  if (!conversation || isReadOnlyChannel(conversation.channel)) return;
-  if (conversation.firstRespondedAt) return;
+  const read = await ticket();
+  if (!read || read.firstRespondedAt) return;
 
   // Keyed on the message, once-ever work: one live answer per message is what
   // `ai_category_runs` holds. 30, priority's reason: behind every send a
