@@ -121,6 +121,14 @@ export default async function CategoryAiReportPage({
           A ticket counts as labelled when a person chose its category in the ticket&rsquo;s
           Category select before anything else wrote it &mdash; Jev, a rule or a form.
         </Notice>
+        {dead.count > 0 && (chosen === null || chosen.runLabel === CATEGORY_AI_LIVE_LABEL) ? (
+          <Notice tone="warning" icon>
+            {dead.count === 1
+              ? `One message has no live answer because the job asking Jev about it failed for good, on ${formatDateTime(dead.first!)}.`
+              : `${dead.count} messages have no live answer because the jobs asking Jev about them failed for good, the first on ${formatDateTime(dead.first!)} and the last on ${formatDateTime(dead.last!)}.`}{' '}
+            No figure below counts them.
+          </Notice>
+        ) : null}
       </div>
 
       <Section
@@ -163,19 +171,11 @@ export default async function CategoryAiReportPage({
         report.total.judged === 0 ? (
           <EmptyState
             title="Nothing in this run was judged"
-            hint="Every ticket in it was owned by a person, a rule or a form before Jev was asked, settled under another version of the question, past the cap, or every call failed."
+            hint="Every ticket in it was owned by a person, a rule or a form before Jev was asked, settled outside this run — under another version of the question, in the other mode or by a backfill's filing — past the cap, or every call failed."
           />
         ) : (
           <>
             <div className="mb-6 max-w-3xl space-y-2">
-              {chosen.runLabel === CATEGORY_AI_LIVE_LABEL && dead.count > 0 ? (
-                <Notice tone="warning" icon>
-                  {dead.count === 1
-                    ? `One message has no live answer because the job asking Jev about it failed for good, on ${formatDateTime(dead.first!)}.`
-                    : `${dead.count} messages have no live answer because the jobs asking Jev about them failed for good, the first on ${formatDateTime(dead.first!)} and the last on ${formatDateTime(dead.last!)}.`}{' '}
-                  No figure below counts them.
-                </Notice>
-              ) : null}
               {report.thresholdsInForce.length > 1 ? (
                 <Notice tone="warning" icon>
                   The threshold changed during this run: its answers were decided against{' '}
@@ -183,11 +183,24 @@ export default async function CategoryAiReportPage({
                   below is exact only at or below the lowest of them.
                 </Notice>
               ) : null}
-              {chosen.mode === 'apply' ? (
+              {report.settlesUnlabellable ? (
                 <Notice tone="info" icon>
-                  In apply, a ticket Jev filed is out of the sample: agreeing with it leaves no
-                  label. Its filings are graded under Filed by Jev, by how often a person moved
-                  them, and the rates here count the tickets it did not file.
+                  Every ticket Jev settled in this run was written to before anybody could label it
+                  {chosen.mode === 'apply' ? <> &mdash; by Jev, filing it</> : null}, and agreeing
+                  with a filing leaves no label. So no rate here grades what Jev settled: Right and
+                  precision are empty and recall is not measurable. Filed by Jev is the grade, by
+                  how often a person moved a filing; the labels here are of tickets Jev never
+                  settled, which is what it missed.
+                </Notice>
+              ) : report.writtenFirst > 0 ? (
+                <Notice tone="info" icon>
+                  {report.writtenFirst === 1
+                    ? 'One judged ticket was'
+                    : `${report.writtenFirst} judged tickets were`}{' '}
+                  written to by Jev, a rule or a form before anybody labelled{' '}
+                  {report.writtenFirst === 1 ? 'it' : 'them'}, and agreeing with what was written
+                  leaves no label. Every rate here describes the other{' '}
+                  {report.total.judged - report.writtenFirst}.
                 </Notice>
               ) : null}
             </div>
@@ -200,9 +213,9 @@ export default async function CategoryAiReportPage({
                 explain={
                   <>
                     Of the labelled tickets Jev settled, how many it settled on the category the
-                    person chose, weighted to the whole run (By category says how). The rules&rsquo;
-                    figure is over the labelled tickets the subcategory rules mapped to a category,
-                    on the first such message in Jev&rsquo;s window.
+                    person chose, weighted to every ticket a label could reach (By category says
+                    how). The rules&rsquo; figure is over the labelled tickets the subcategory rules
+                    mapped to a category, on the first such message in Jev&rsquo;s window.
                   </>
                 }
               />
@@ -284,8 +297,10 @@ export default async function CategoryAiReportPage({
                       rare answer&rsquo;s tickets are labelled far more often than a common
                       one&rsquo;s. Every rate here but Jev&rsquo;s precision mixes those answers, so
                       each labelled ticket counts for as many tickets of its answer as it stands
-                      for: the percentage estimates the whole run, and the counts beside it are the
-                      labelled tickets it was read on.
+                      for: the percentage estimates every ticket in the run a label could reach, and
+                      the counts beside it are the labelled tickets it was read on. Not measurable
+                      is a category every ticket Jev settled as which was written to first: its hits
+                      are the tickets nobody can label.
                     </InfoTip>
                   </span>,
                   'Rules precision',
@@ -300,7 +315,11 @@ export default async function CategoryAiReportPage({
                       <Sampled estimate={category.precision} />
                     </Cell>
                     <Cell>
-                      <Sampled estimate={category.recall} />
+                      {category.recall === null ? (
+                        <span className="text-(--color-text-tertiary)">Not measurable</span>
+                      ) : (
+                        <Sampled estimate={category.recall} />
+                      )}
                     </Cell>
                     <Cell>
                       <Sampled estimate={category.rulesPrecision} />
@@ -397,20 +416,24 @@ export default async function CategoryAiReportPage({
               title="To label"
               hint="Tickets nobody has labelled and nothing has filed. They are chosen by what Jev settled on, so a rare category gets labels too, and from the tickets it never settled once Jev can no longer be asked about them, so recall has misses to count — but the list does not say which, so each label is the person's own reading of the ticket. Open one and choose its category in the Category select: a real change, which runs the rules keyed on the category and, before a first reply, chooses the SLA policy again, as any change does. There is no way yet to record that a ticket fits none of the categories, so leave one like that unlabelled."
             >
-              <div className="mb-3">
-                <Table head={['Jev settled on', 'Labelled']}>
-                  {report.sample.map((stratum) => (
-                    <Row key={stratum.key ?? 'unsettled'}>
-                      <Cell>{name(stratum.key, 'Never settled')}</Cell>
-                      <Cell>
-                        {stratum.key === null
-                          ? stratum.labelled
-                          : `${stratum.labelled} of ${LABELS_WANTED} wanted`}
-                      </Cell>
-                    </Row>
-                  ))}
-                </Table>
-              </div>
+              {/* Empty when every ticket was written to first, as in apply
+                  before Jev has missed anything: no stratum can take a label. */}
+              {report.sample.length > 0 ? (
+                <div className="mb-3">
+                  <Table head={['Jev settled on', 'Labelled']}>
+                    {report.sample.map((stratum) => (
+                      <Row key={stratum.key ?? 'unsettled'}>
+                        <Cell>{name(stratum.key, 'Never settled')}</Cell>
+                        <Cell>
+                          {stratum.key === null
+                            ? stratum.labelled
+                            : `${stratum.labelled} of ${LABELS_WANTED} wanted`}
+                        </Cell>
+                      </Row>
+                    ))}
+                  </Table>
+                </div>
+              ) : null}
               {report.toLabel.length === 0 ? (
                 <Quiet>Nothing in this run is waiting for a label.</Quiet>
               ) : (
@@ -432,14 +455,14 @@ export default async function CategoryAiReportPage({
 
             <p className="max-w-3xl text-xs text-(--color-text-tertiary)">
               Not judged, and in no figure above: {report.outOfPlay.owned} owned by a person, a rule
-              or a form before Jev was asked; {report.outOfPlay.settled_elsewhere} settled under
-              another version of the question or by a backfill&rsquo;s filing;{' '}
-              {report.outOfPlay.capped} capped; {report.outOfPlay.failed} whose every call failed.{' '}
-              {report.labelledAfterWrite} judged ticket
-              {report.labelledAfterWrite === 1 ? ' was' : 's were'} labelled only after Jev, a rule
-              or a form had written the category, and{' '}
-              {report.labelledAfterWrite === 1 ? 'is' : 'are'} not graded: agreeing with what was
-              written leaves no label to grade.
+              or a form before Jev was asked; {report.outOfPlay.settled_elsewhere} settled outside
+              this run, under another version of the question, in the other mode or by a
+              backfill&rsquo;s filing; {report.outOfPlay.capped} capped; {report.outOfPlay.failed}{' '}
+              whose every call failed. {report.writtenFirst} judged ticket
+              {report.writtenFirst === 1 ? ' was' : 's were'} written to by Jev, a rule or a form
+              before anybody labelled {report.writtenFirst === 1 ? 'it' : 'them'}, and{' '}
+              {report.writtenFirst === 1 ? 'is' : 'are'} in no rate, {report.labelledAfterWrite}{' '}
+              labelled since: agreeing with what was written leaves no label to grade.
             </p>
           </>
         )

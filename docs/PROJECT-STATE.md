@@ -1577,8 +1577,10 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
   second, by analogy with the 647 shadow subcategorisation calls (p50 234 ms) — and
   every row stores both.
 
-- **Jev's category classifier is built and switched off** (Stage 4.1 of
-  `plans/ticket-category-routing.md`; `lib/category-ai/`). Once on, it asks
+- **Jev's category classifier is deployed and switched off** (Stage 4.1 of
+  `plans/ticket-category-routing.md`; `lib/category-ai/`): live on `dbf4376`
+  since 2026-10-27 12:07 UTC, with `0050`'s two tables in production, no
+  settings row and no answers. Once on, it asks
   which team's work each of the first five customer messages on an unanswered
   ticket is, and under `apply` files the ticket — never over a category a
   person, a rule, a form's default or an agent opening the ticket chose. Its

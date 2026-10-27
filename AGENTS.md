@@ -1428,13 +1428,16 @@ only the backfill call. The question
 offers the active categories by English label and description, with `unknown`
 added in code, and its fingerprint covers both, so an edit on `/admin/categories`
 is a new question no report averages with the old. `/reports/category-ai` grades
-one label and question at a time, and its rules are `lib/category-ai/grade.ts`'s
-tests: one settling answer per ticket, in the order the live job judges
-messages; ground truth only a person's `category_changed` given before Jev, a
-rule or a form wrote the category, since agreeing with a write leaves no event
-and every label after one is a disagreement; rates that mix Jev's answers
-weighted for a sample drawn evenly from each; and a labelling list that never
-says what Jev chose, which would make the label Jev's answer read back. See `plans/ticket-category-routing.md`, decision 4.
+one label, question and mode at a time, and its rules are
+`lib/category-ai/grade.ts`'s tests: one settling answer per ticket, in the order
+the live job judges messages; ground truth only a person's `category_changed`
+given before Jev, a rule or a form wrote the category, since agreeing with a
+write leaves no event and every label after one is a disagreement — so a ticket
+written to first is in no rate, and in `apply`, where every settle is Jev's
+filing, Filed by Jev is the grade; rates that mix Jev's answers weighted for a
+sample drawn evenly from each; the cap counted as the live job counts it, across
+the label's other views; and a labelling list that never says what Jev chose,
+which would make the label Jev's answer read back. See `plans/ticket-category-routing.md`, decision 4.
 
 The suggestion is **live**: its answer is shown to an agent, as grey text in an
 empty reply box that Tab (or Use, on a phone) puts in — Tab only once the text

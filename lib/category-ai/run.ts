@@ -7,7 +7,6 @@ import {
   conversations,
   messages,
   ticketCategories,
-  ticketStatuses,
 } from '@/db/schema';
 import {
   holdCategory,
@@ -20,6 +19,7 @@ import { logger } from '@/lib/log';
 import { afterRoutingChanged } from '@/lib/sla';
 import { isCommentTicket } from '@/lib/tickets/channel-policy';
 import { skipReason } from '@/lib/tickets/classifiable';
+import { statusCategoryOf } from '@/lib/tickets/status-category';
 import { afterTicketUpdate } from '@/lib/tickets/lifecycle';
 import { CHANGE_STAMP } from '@/lib/tickets/change-stamp';
 import { TypeSafeApiError, typesafeConfigured, typesafeModel } from '@/lib/typesafe/client';
@@ -347,6 +347,9 @@ type TicketState = {
  * The ticket's category and whether anybody has answered it, and the key of
  * the category it carries; null when the ticket is gone. Locked when the
  * answer is about to be acted on.
+ * The status through `statusCategoryOf`, never a join: a writer moving the
+ * ticket to another status while this waits for the lock would otherwise
+ * make the ticket read as gone, and the job go to `dead`.
  */
 async function readTicket(
   executor: Executor,
@@ -360,13 +363,12 @@ async function readTicket(
       deletedAt: conversations.deletedAt,
       isSpam: conversations.isSpam,
       mergedIntoId: conversations.mergedIntoId,
-      statusCategory: ticketStatuses.category,
+      statusCategory: statusCategoryOf(),
     })
     .from(conversations)
-    .innerJoin(ticketStatuses, eq(ticketStatuses.id, conversations.statusId))
     .where(eq(conversations.id, conversationId))
     .limit(1);
-  const [ticket] = lock ? await query.for('update', { of: conversations }) : await query;
+  const [ticket] = lock ? await query.for('update') : await query;
   if (!ticket) return null;
 
   let categoryKey: string | null = null;

@@ -297,6 +297,36 @@ describe('categoryAiReport', () => {
     );
   });
 
+  // Four asked in shadow, then the switch to apply: the live job capped the
+  // sixth message on the asks the shadow view holds, and so does the sweep.
+  it('counts the asks the label holds in its other views towards the cap', async () => {
+    const t = await ticket();
+    for (const at of [0, 1, 2, 3]) {
+      await answer(t.id, at, 'unknown', 'unknown', { messageId: await message(t.id, at) });
+    }
+    await answer(t.id, 4, 'applied', 'sales', {
+      mode: 'apply',
+      probability: 0.65,
+      messageId: await message(t.id, 4),
+    });
+    await answer(t.id, 5, 'after_settle', null, {
+      mode: 'apply',
+      messageId: await message(t.id, 5),
+    });
+    // Another label's answers are another cap's.
+    await answer(t.id, 6, 'unknown', 'unknown', {
+      runLabel: 'archive-1',
+      messageId: await message(t.id, 6),
+    });
+
+    const report = await categoryAiReport('live', QUESTION, 'apply');
+
+    expect(report.sweep.find((row) => row.threshold === 0.7)).toMatchObject({
+      settled: 0,
+      unasked: 0,
+    });
+  });
+
   it('answers an empty report for a label nobody wrote', async () => {
     const report = await categoryAiReport('nothing', QUESTION, 'shadow');
     expect(report.total.tickets).toBe(0);
@@ -313,5 +343,35 @@ describe('deadClassifyJobs', () => {
       { type: 'classify_priority', status: 'dead', createdAt: minute(2) },
     ]);
     expect(await deadClassifyJobs()).toEqual({ count: 2, first: minute(5), last: minute(9) });
+  });
+
+  // A run by hand after the outage: the message has its live row now, so it
+  // is in the report's figures and not missing from them.
+  it('leaves out a message a later live row answered, or recorded failing', async () => {
+    const t = await ticket();
+    const answered = await message(t.id, 0);
+    const failed = await message(t.id, 1);
+    const missing = await message(t.id, 2);
+    const backfilled = await message(t.id, 3);
+    await answer(t.id, 0, 'would_apply', 'sales', { messageId: answered });
+    await answer(t.id, 1, 'failed', null, { messageId: failed, error: 'refused' });
+    // A backfill's row is another label's: the live answer is still missing.
+    await answer(t.id, 3, 'would_apply', 'sales', { messageId: backfilled, runLabel: 'archive-1' });
+    await db.insert(jobs).values([
+      ...[answered, failed, missing, backfilled].map((messageId, n) => ({
+        type: 'classify_category' as const,
+        status: 'dead' as const,
+        payload: { messageId },
+        createdAt: minute(10 + n),
+      })),
+      // Died on its schema: whatever it holds must not refuse the page.
+      {
+        type: 'classify_category',
+        status: 'dead',
+        payload: { messageId: 'nope' },
+        createdAt: minute(20),
+      },
+    ]);
+    expect(await deadClassifyJobs()).toEqual({ count: 3, first: minute(12), last: minute(20) });
   });
 });

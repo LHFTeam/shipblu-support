@@ -20,6 +20,7 @@ import { createTicket } from '@/lib/portal/tickets';
 import { resetEnvCache } from '@/lib/env';
 import { stubFetch } from '@/lib/testing/fetch';
 import { withCleanDatabase } from '@/lib/testing/db';
+import { untilWaitingOnALock } from '@/lib/testing/hold-transaction';
 import { applyCategoryRun, recordCategoryRun, type RecordRun } from './backfill';
 import { CATEGORY_AI_ACTOR } from './decide';
 import { classifyMessageCategory } from './run';
@@ -570,6 +571,36 @@ describe('applyCategoryRun', () => {
       spam: 1,
     });
     expect((await carried(tickets.jev.id)).categoryId).toBe(await categoryId('customer_support'));
+  });
+
+  // An agent setting the ticket pending as the backfill reaches it: the filing
+  // waits for the agent's write, and must find the ticket at its new status
+  // rather than read it as gone.
+  it('files a ticket a writer moved to another status while the filing waited for it', async () => {
+    answersInTurn('sales');
+    const t = await ticket();
+    await inbound(t, 'بكام الشحن؟', at(10));
+    await record();
+
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    let moved!: () => void;
+    const holding = new Promise<void>((resolve) => (moved = resolve));
+    const pending = await statusId('Pending');
+    const writer = db.transaction(async (tx) => {
+      await tx.update(conversations).set({ statusId: pending }).where(eq(conversations.id, t.id));
+      moved();
+      await held;
+    });
+    await holding;
+
+    const applying = apply();
+    await untilWaitingOnALock(db);
+    release();
+    await writer;
+
+    await expect(applying).resolves.toMatchObject({ status: 'ran', candidates: 1, applied: 1 });
+    expect((await carried(t.id)).categoryId).toBe(await categoryId('sales'));
   });
 
   it('writes nothing in a dry run', async () => {

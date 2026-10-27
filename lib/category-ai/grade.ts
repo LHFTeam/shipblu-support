@@ -32,6 +32,13 @@ import {
  *   graded, they would make every such answer wrong. They are counted apart,
  *   and Jev's own filings under "filed", where what they measure — how often a
  *   person moves what Jev filed — is the question.
+ * - **So a ticket something wrote first is out of every rate.** No label can
+ *   reach it, and kept in the weights it would be stood for by tickets that
+ *   are not like it — in `apply`, by the tickets Jev never settled, which is
+ *   every one a label can reach there. The rates describe the tickets a label
+ *   could grade, and say how many were left out. A category every ticket of
+ *   whose settles was written to has no recall at all rather than a recall of
+ *   nothing: its hits are exactly the tickets nobody can label.
  * - **The sample is stratified, so its rates are weighted.** The labelling list
  *   draws the same number of tickets from each of Jev's answers, so the rare
  *   one is labelled at a far higher rate than the common one. Precision within
@@ -43,9 +50,11 @@ import {
  *   the evidence there is.
  * - **The rules baseline is graded on its own terms, on the same tickets.** Its
  *   answer for a ticket is the first message whose text the detector maps to a
- *   category, inside the window Jev had: at most five messages, and no further
- *   than one the ticket was owned or capped at — so neither is charged with the
- *   other's window.
+ *   category, inside the window Jev had, bounded the way `settleAt` bounds
+ *   Jev's — so neither is charged with the other's window.
+ * - **The cap is the live job's.** It counts every answer the label holds, in
+ *   any mode and to any version of the question, so the asks another view
+ *   holds (`askedElsewhere`) count towards it here too.
  * - **Unknown never settles**, so it is a share of answers, not a class.
  */
 
@@ -118,9 +127,22 @@ export type GradingTicket = {
   windowOpen: boolean;
 };
 
+/**
+ * A message of a ticket this view grades that Jev answered under the same
+ * label in another view — another mode, or another version of the question.
+ * The live job's cap counts it, so the walks here count it too.
+ */
+export type AskedElsewhere = {
+  conversationId: string;
+  messageId: string | null;
+  messageCreatedAt: Date;
+};
+
 export type GradingInput = {
   runLabel: string;
   runs: readonly GradingRun[];
+  /** Answered, and not failed, in the label's other views. */
+  askedElsewhere: readonly AskedElsewhere[];
   /** In the order they were written within each ticket. */
   events: readonly GradingEvent[];
   tickets: ReadonlyMap<string, GradingTicket>;
@@ -156,21 +178,28 @@ export type TicketVerdict = {
   filed: { key: string | null; changedTo: { key: string | null } | null } | null;
   /** Jev wrote to the ticket under any label. */
   writtenByJev: boolean;
+  /** Jev, a rule or a form wrote to the ticket: anything but a person. */
+  written: boolean;
   /** The ticket's rows in the order they are judged, for the threshold sweep. */
   runs: readonly GradingRun[];
+  /** Its answers in the label's other views, in the same order. */
+  elsewhere: readonly AskedElsewhere[];
 };
 
 export function ticketVerdicts(
   runLabel: string,
   runs: readonly GradingRun[],
   events: readonly GradingEvent[],
+  askedElsewhere: readonly AskedElsewhere[],
 ): TicketVerdict[] {
   const runsByTicket = groupBy(runs, (run) => run.conversationId);
   const eventsByTicket = groupBy(events, (event) => event.conversationId);
+  const elsewhereByTicket = groupBy(askedElsewhere, (ask) => ask.conversationId);
 
   return [...runsByTicket].map(([conversationId, unordered]) => {
     const ticketRuns = [...unordered].sort(inJudgedOrder);
     const ticketEvents = eventsByTicket.get(conversationId) ?? [];
+    const elsewhere = [...(elsewhereByTicket.get(conversationId) ?? [])].sort(inJudgedOrder);
     const judged = ticketRuns.some((run) => JUDGED.has(run.outcome));
     const predicted = ticketRuns.filter((run) => run.predictedKey !== null);
 
@@ -178,6 +207,9 @@ export function ticketVerdicts(
       (run) => SETTLING.has(run.outcome) && run.predictedKey !== null,
     );
     const settleRun = settleIndex === -1 ? null : ticketRuns[settleIndex]!;
+    // The first message this run judged, which a row passed over before it —
+    // a job that ran late and found the ticket answered — is not.
+    const firstJudged = ticketRuns.findIndex((run) => JUDGED.has(run.outcome));
 
     const people = ticketEvents.filter((event) => event.agentId !== null);
     const written = ticketEvents.filter((event) => event.agentId === null);
@@ -209,9 +241,9 @@ export function ticketVerdicts(
       answers: predicted.length,
       unknowns: predicted.filter((run) => run.predictedKey === UNKNOWN_CATEGORY_KEY).length,
       settle: settleRun
-        ? { key: settleRun.predictedKey!, onFirstMessage: settleIndex === 0 }
+        ? { key: settleRun.predictedKey!, onFirstMessage: settleIndex === firstJudged }
         : null,
-      baseline: baselineAnswer(ticketRuns),
+      baseline: baselineAnswer(ticketRuns, elsewhere),
       label: independent ? { key: lastPerson.key } : null,
       labelledAfterWrite: lastPerson !== null && !independent,
       touchedByPerson: lastPerson !== null,
@@ -219,13 +251,18 @@ export function ticketVerdicts(
         ? { key: lastJev.key, changedTo: changedAfter ? { key: changedAfter.key } : null }
         : null,
       writtenByJev: jev.length > 0,
+      written: written.length > 0,
       runs: ticketRuns,
+      elsewhere,
     };
   });
 }
 
+/** A message, as the order the live job judges them in reads it. */
+type Arrival = Pick<GradingRun, 'messageCreatedAt' | 'messageId'>;
+
 /** The order the live job and the backfill judge a ticket's messages in. */
-function inJudgedOrder(a: GradingRun, b: GradingRun): number {
+function inJudgedOrder(a: Arrival, b: Arrival): number {
   if (b.messageId === null) {
     // `arrivedBefore` wants an id on its second side; a tie of two deleted
     // messages is no order at all.
@@ -240,8 +277,9 @@ function inJudgedOrder(a: GradingRun, b: GradingRun): number {
 
 /**
  * Why a ticket was never judged, most decisive first: owned is about the
- * ticket; settled-elsewhere means an earlier message settled it under another
- * question, or a backfill's filing did; a failure is about one call.
+ * ticket; settled-elsewhere means an earlier message settled it outside this
+ * view — under another version of the question, in the other mode — or a
+ * backfill's filing did; a failure is about one call.
  */
 function outOfPlay(runs: readonly GradingRun[]): OutOfPlay {
   const outcomes = new Set(runs.map((run) => run.outcome));
@@ -253,19 +291,58 @@ function outOfPlay(runs: readonly GradingRun[]): OutOfPlay {
 
 /**
  * The rules' answer: the first message the detector mapped to a category,
- * inside the window Jev had — at most the five messages Jev could have been
- * asked about, and none from the one the ticket was owned or capped at.
- * `after_settle` messages count within that: Jev stopped asking because it
- * had an answer, and the rules, still without one, would have kept reading.
+ * inside the window Jev had, which this walk bounds as `settleAt` bounds
+ * Jev's.
+ *
+ * - **Five places.** A message Jev answered takes one, and so does an
+ *   `after_settle` one it was not asked about: Jev stopped because it had an
+ *   answer, and the rules, still without one, would have kept reading — to
+ *   the five Jev could have been asked about. A failure takes none, as the
+ *   live cap counts none. Answers in the label's other views take theirs.
+ * - **A message Jev judged is always inside**, whatever the count says: the
+ *   live job decided it was, and the rules are never stopped short of the
+ *   message Jev settled on.
+ * - **An `owned` or `capped` row ends the window only when it is in order** —
+ *   nothing after it was asked. Jobs run in no order, so one that ran late
+ *   and found the ticket answered can sit before a message Jev was still asked
+ *   about; its message arrived inside the window, and its row holds what the
+ *   detector said.
  */
-function baselineAnswer(runs: readonly GradingRun[]): string | null {
-  let read = 0;
-  for (const run of runs) {
-    if (LEFT_THE_WINDOW.has(run.outcome) || read >= CLASSIFIED_MESSAGE_CAP) return null;
-    read += 1;
+function baselineAnswer(
+  runs: readonly GradingRun[],
+  elsewhere: readonly AskedElsewhere[],
+): string | null {
+  const before = askedBefore(elsewhere);
+  let places = 0;
+  for (const [index, run] of runs.entries()) {
+    if (LEFT_THE_WINDOW.has(run.outcome) && !runs.slice(index + 1).some(wasAsked)) return null;
+    if (places + before(run) >= CLASSIFIED_MESSAGE_CAP && !JUDGED.has(run.outcome)) return null;
     if (run.baselineKey !== null) return run.baselineKey;
+    if (counted(run) || run.outcome === 'after_settle') places += 1;
   }
   return null;
+}
+
+/** An answer the live job's cap counts. */
+function counted(run: GradingRun): boolean {
+  return run.predictedKey !== null && run.outcome !== 'failed';
+}
+
+/** A message whose job reached Jev: the window was still open when it ran. */
+function wasAsked(run: GradingRun): boolean {
+  return run.predictedKey !== null || run.outcome === 'failed';
+}
+
+/**
+ * Counts the asks in other views that arrived before each row a walk reaches,
+ * the rows reached in order — a pointer, since both lists are sorted alike.
+ */
+function askedBefore(elsewhere: readonly AskedElsewhere[]): (run: GradingRun) => number {
+  let at = 0;
+  return (run) => {
+    while (at < elsewhere.length && inJudgedOrder(elsewhere[at]!, run) < 0) at += 1;
+    return at;
+  };
 }
 
 /**
@@ -280,23 +357,33 @@ function baselineAnswer(runs: readonly GradingRun[]): string | null {
  *
  * Any row with an answer is read, whatever its outcome: an `after_settle` row
  * can hold one when its job asked before the settle landed. The cap is counted
- * as the live job counts it, every answered row. An `owned` or `capped` row is
- * passed over rather than taken as the end: jobs run in no order, so one can
- * sit before a message that was still asked.
+ * as the live job counts it, every answered row — the label's other views'
+ * included (`elsewhere`). An `owned` or `capped` row is passed over rather
+ * than taken as the end: jobs run in no order, so one can sit before a message
+ * that was still asked.
+ *
+ * And a row Jev judged is never capped here. The live job counts the cap in
+ * the order answers commit, not the order messages arrived, so in a burst a
+ * slow early message can be capped after a later one was asked: the later
+ * one was inside the cap, and it is what settled the ticket.
  */
 export function settleAt(
   runs: readonly GradingRun[],
   threshold: number,
+  elsewhere: readonly AskedElsewhere[] = [],
 ): { kind: 'settled'; key: string } | { kind: 'unasked' } | { kind: 'none' } {
+  const before = askedBefore(elsewhere);
   let asked = 0;
   for (const run of runs) {
-    const answered = run.predictedKey !== null && run.outcome !== 'failed';
+    const answered = counted(run);
     if (LEFT_THE_WINDOW.has(run.outcome)) {
       if (answered) asked += 1;
       continue;
     }
     // Five asked: the next message would have been capped, not asked.
-    if (asked >= CLASSIFIED_MESSAGE_CAP) return { kind: 'none' };
+    if (asked + before(run) >= CLASSIFIED_MESSAGE_CAP && !JUDGED.has(run.outcome)) {
+      return { kind: 'none' };
+    }
     if (!answered) {
       if (run.outcome === 'after_settle') return { kind: 'unasked' };
       continue;
@@ -346,8 +433,12 @@ export type CategoryGrade = {
   settled: number;
   /** Of the labelled tickets Jev settled as this, labelled this. One stratum: unweighted. */
   precision: Estimate;
-  /** Of the labelled tickets labelled this, settled as this. */
-  recall: Estimate;
+  /**
+   * Of the labelled tickets labelled this, settled as this. Null when Jev
+   * settled tickets as this and something wrote to every one of them before a
+   * label could: its hits are the tickets no label reaches.
+   */
+  recall: Estimate | null;
   rulesPrecision: Estimate;
   rulesRecall: Estimate;
 };
@@ -407,14 +498,27 @@ export type Grading = {
   toLabel: ToLabel[];
   outOfPlay: Record<OutOfPlay, number>;
   labelledAfterWrite: number;
+  /**
+   * Judged tickets Jev, a rule or a form wrote to before a person labelled
+   * them: out of every rate, since no label can reach them.
+   */
+  writtenFirst: number;
+  /**
+   * Jev settled tickets, and every one was written to before a label could
+   * be — in `apply`, where each settle is a filing. No rate here grades a
+   * settle then; Filed by Jev does.
+   */
+  settlesUnlabellable: boolean;
 };
 
 export function grade(input: GradingInput): Grading {
-  const verdicts = ticketVerdicts(input.runLabel, input.runs, input.events);
+  const verdicts = ticketVerdicts(input.runLabel, input.runs, input.events, input.askedElsewhere);
   const keys = orderedKeys(input.categoryKeys, verdicts);
   const judged = verdicts.filter((verdict) => verdict.judged);
-  const labelled = judged.filter((verdict) => verdict.label !== null);
-  const weigh = weights(judged);
+  // What a label can grade: labelled already, or nothing has written to it.
+  const gradable = judged.filter((verdict) => verdict.label !== null || !verdict.written);
+  const labelled = gradable.filter((verdict) => verdict.label !== null);
+  const weigh = weights(gradable);
   const estimate = (items: readonly TicketVerdict[], hit: (verdict: TicketVerdict) => boolean) =>
     estimated(items, hit, weigh);
 
@@ -438,7 +542,9 @@ export function grade(input: GradingInput): Grading {
   for (const verdict of verdicts) {
     if (verdict.outOfPlay) outOfPlayCounts[verdict.outOfPlay] += 1;
   }
-  const strata = sample(judged, keys, input.tickets);
+  const strata = sample(gradable, keys, input.tickets);
+  const settledAs = (items: readonly TicketVerdict[], key: string) =>
+    items.some((verdict) => verdict.settle?.key === key);
   const inForce = [
     ...new Set(
       input.runs
@@ -459,7 +565,10 @@ export function grade(input: GradingInput): Grading {
           labelled.filter((verdict) => verdict.settle?.key === key),
           (verdict) => verdict.label!.key === key,
         ),
-        recall: estimate(labelledThis, (verdict) => verdict.settle?.key === key),
+        recall:
+          settledAs(judged, key) && !settledAs(gradable, key)
+            ? null
+            : estimate(labelledThis, (verdict) => verdict.settle?.key === key),
         rulesPrecision: estimate(
           labelled.filter((verdict) => verdict.baseline === key),
           (verdict) => verdict.label!.key === key,
@@ -475,18 +584,22 @@ export function grade(input: GradingInput): Grading {
     toLabel: strata.flatMap((stratum) => stratum.tickets).sort(byId),
     outOfPlay: outOfPlayCounts,
     labelledAfterWrite: judged.filter((verdict) => verdict.labelledAfterWrite).length,
+    writtenFirst: judged.length - gradable.length,
+    settlesUnlabellable:
+      judged.some((verdict) => verdict.settle !== null) &&
+      !gradable.some((verdict) => verdict.settle !== null),
   };
 }
 
 /**
- * How many judged tickets each labelled one stands for: its stratum's size
+ * How many gradable tickets each labelled one stands for: its stratum's size
  * over the labels the stratum has, the stratum being Jev's settling answer at
  * the threshold in force, or none.
  */
-function weights(judged: readonly TicketVerdict[]): (verdict: TicketVerdict) => number {
+function weights(gradable: readonly TicketVerdict[]): (verdict: TicketVerdict) => number {
   const size = new Map<string | null, number>();
   const labels = new Map<string | null, number>();
-  for (const verdict of judged) {
+  for (const verdict of gradable) {
     const stratum = verdict.settle?.key ?? null;
     size.set(stratum, (size.get(stratum) ?? 0) + 1);
     if (verdict.label) labels.set(stratum, (labels.get(stratum) ?? 0) + 1);
@@ -583,7 +696,7 @@ function sweep(
     let settled = 0;
     let unasked = 0;
     for (const verdict of judged) {
-      const answer = settleAt(verdict.runs, threshold);
+      const answer = settleAt(verdict.runs, threshold, verdict.elsewhere);
       if (answer.kind === 'unasked') unasked += 1;
       if (answer.kind !== 'settled') continue;
       settled += 1;
@@ -641,9 +754,12 @@ function filed(verdicts: readonly TicketVerdict[], keys: readonly string[]): Fil
  * opening a ticket is being asked to agree, and the label is then Jev's answer
  * read back.
  *
- * Only tickets nobody has labelled, Jev never wrote to and nothing has filed
- * (`GradingTicket.labellable`): a person who agrees with a category already on
- * a ticket changes nothing, and leaves no label. And a ticket Jev never settled
+ * Drawn from the gradable tickets, so a stratum every ticket of which was
+ * written to — in `apply`, each one Jev settled — is not listed waiting for
+ * labels it can never have. Only tickets nobody has labelled, Jev never wrote
+ * to and nothing has filed (`GradingTicket.labellable`): a person who agrees
+ * with a category already on a ticket changes nothing, and leaves no label.
+ * And a ticket Jev never settled
  * only once its window has closed — answered, resolved, or asked five times —
  * since labelling one Jev may still be asked about would turn its next message
  * into `owned` and the ticket into a miss it never had the chance to avoid.
@@ -652,12 +768,12 @@ function filed(verdicts: readonly TicketVerdict[], keys: readonly string[]): Fil
  * the oldest.
  */
 function sample(
-  judged: readonly TicketVerdict[],
+  gradable: readonly TicketVerdict[],
   keys: readonly string[],
   tickets: ReadonlyMap<string, GradingTicket>,
 ): (SampleStratum & { tickets: ToLabel[] })[] {
   return [...keys, null].flatMap((key) => {
-    const members = judged.filter((verdict) => (verdict.settle?.key ?? null) === key);
+    const members = gradable.filter((verdict) => (verdict.settle?.key ?? null) === key);
     if (members.length === 0) return [];
     const waiting = members
       .filter((verdict) => {
@@ -680,9 +796,9 @@ function sample(
   });
 }
 
-/** Messages on the ticket Jev answered, as the cap counts them. */
+/** Messages on the ticket Jev answered, as the cap counts them: in any view of the label. */
 function askedOf(verdict: TicketVerdict): number {
-  return verdict.runs.filter((run) => run.predictedKey !== null && run.outcome !== 'failed').length;
+  return verdict.runs.filter(counted).length + verdict.elsewhere.length;
 }
 
 function byId(a: { conversationId: string }, b: { conversationId: string }): number {

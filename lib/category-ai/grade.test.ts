@@ -5,6 +5,7 @@ import {
   grade,
   settleAt,
   ticketVerdicts,
+  type AskedElsewhere,
   type GradingEvent,
   type GradingInput,
   type GradingRun,
@@ -91,6 +92,11 @@ function rule(conversationId: string, at: number, key: string): GradingEvent {
   };
 }
 
+/** An answer to the ticket's message `at` held in another view of the label. */
+function askedThere(conversationId: string, at: number): AskedElsewhere {
+  return { conversationId, messageId: messageAt(conversationId, at), messageCreatedAt: minute(at) };
+}
+
 function input(
   runs: GradingRun[],
   events: GradingEvent[] = [],
@@ -100,11 +106,24 @@ function input(
   for (const [index, id] of [...new Set(runs.map((each) => each.conversationId))].entries()) {
     tickets.set(id, { number: 100 + index, labellable: true, windowOpen: false });
   }
-  return { runLabel: LABEL, runs, events, tickets, categoryKeys: KEYS, thresholds: [], ...extra };
+  return {
+    runLabel: LABEL,
+    runs,
+    askedElsewhere: [],
+    events,
+    tickets,
+    categoryKeys: KEYS,
+    thresholds: [],
+    ...extra,
+  };
 }
 
-function verdict(runs: GradingRun[], events: GradingEvent[] = []) {
-  const [only] = ticketVerdicts(LABEL, runs, events);
+function verdict(
+  runs: GradingRun[],
+  events: GradingEvent[] = [],
+  askedElsewhere: AskedElsewhere[] = [],
+) {
+  const [only] = ticketVerdicts(LABEL, runs, events, askedElsewhere);
   return only!;
 }
 
@@ -127,6 +146,18 @@ describe('the settling answer', () => {
   // WhatsApp stamps a burst to the second; the live job and the backfill
   // break the tie by message id, and so must the grade, whatever order the
   // rows were read in.
+  // A job that ran late and found the ticket answered sits before the message
+  // Jev settled on; that message is still the first this run judged.
+  it('counts a settle as on the first message past a row Jev never judged', () => {
+    expect(
+      verdict([run('t', 0, 'capped'), run('t', 1, 'would_apply', 'sales', 0.9)]).settle,
+    ).toEqual({ key: 'sales', onFirstMessage: true });
+    expect(
+      verdict([run('t', 0, 'unknown', 'unknown', 0.9), run('t', 1, 'would_apply', 'sales', 0.9)])
+        .settle,
+    ).toEqual({ key: 'sales', onFirstMessage: false });
+  });
+
   it('orders messages of the same instant by their id, as the live job does', () => {
     const graded = verdict([
       run('t', 0, 'after_settle', null, null, { messageId: 'm-b' }),
@@ -259,6 +290,51 @@ describe('the rules baseline', () => {
     expect(verdict(runs(4)).baseline).toBe('sales');
     expect(verdict(runs(5)).baseline).toBeNull();
   });
+
+  // Message 0's job failed transiently, retried after the first reply and was
+  // capped; message 1's had already settled. Message 0 arrived inside Jev's
+  // window, and the rules read it.
+  it('reads past an owned or capped row that a later asked message shows was out of order', () => {
+    expect(
+      verdict([
+        run('t', 0, 'capped', null, null, { baselineKey: 'sales' }),
+        run('t', 1, 'would_apply', 'sales', 0.9),
+      ]).baseline,
+    ).toBe('sales');
+  });
+
+  // The burst `settleAt` settles on: the rules reach the message Jev settled on.
+  it('never stops short of the message Jev settled on', () => {
+    expect(
+      verdict([
+        ...Array.from({ length: 4 }, (_, n) => run('t', n, 'unknown', 'unknown', 0.9)),
+        run('t', 4, 'capped', 'unknown', 0.9),
+        run('t', 5, 'would_apply', 'sales', 0.9, { baselineKey: 'sales' }),
+      ]).baseline,
+    ).toBe('sales');
+  });
+
+  // The live cap counts no failure, so Jev was asked about a sixth message.
+  it('gives a failure no place of the five', () => {
+    const runs = [
+      run('t', 0, 'failed', null, null),
+      run('t', 1, 'would_apply', 'customer_support', 0.9),
+      ...Array.from({ length: 5 }, (_, n) =>
+        run('t', n + 2, 'after_settle', null, null, n + 2 === 5 ? { baselineKey: 'sales' } : {}),
+      ),
+    ];
+    expect(verdict(runs).baseline).toBe('sales');
+  });
+
+  it('counts the asks the label holds in its other views', () => {
+    const runs = [
+      run('t', 4, 'would_apply', 'customer_support', 0.9),
+      run('t', 5, 'after_settle', null, null, { baselineKey: 'sales' }),
+    ];
+    const shadow = [0, 1, 2, 3].map((at) => askedThere('t', at));
+    expect(verdict(runs, [], shadow).baseline).toBeNull();
+    expect(verdict(runs, [], shadow.slice(1)).baseline).toBe('sales');
+  });
 });
 
 describe('settleAt, the threshold sweep', () => {
@@ -330,6 +406,43 @@ describe('settleAt, the threshold sweep', () => {
     expect(settleAt([run('t', 0, 'owned'), run('t', 1, 'would_apply', 'sales', 0.9)], 0.6)).toEqual(
       { kind: 'settled', key: 'sales' },
     );
+  });
+
+  // Six messages in a burst, five workers: message 5 starts once message 0
+  // commits, is asked while four answers are in, and commits before the slow
+  // message 4, which then finds five and is capped with its answer. In arrival
+  // order message 5 is the sixth asked; the live job asked it inside its cap.
+  it('never caps a message Jev judged, which the live job asked inside its cap', () => {
+    const burst = [
+      ...Array.from({ length: 4 }, (_, n) => run('t', n, 'unknown', 'unknown', 0.9)),
+      run('t', 4, 'capped', 'unknown', 0.9),
+      run('t', 5, 'would_apply', 'sales', 0.9),
+    ];
+    expect(verdict(burst).settle).toEqual({ key: 'sales', onFirstMessage: false });
+    expect(settleAt(burst, 0.6)).toEqual({ kind: 'settled', key: 'sales' });
+    expect(settleAt(burst, 0.5)).toEqual({ kind: 'settled', key: 'sales' });
+  });
+
+  // Four messages asked in shadow, then the switch to apply: the apply view
+  // holds the fifth and the sixth, and the live job capped the sixth.
+  it('counts the asks the label holds in its other views towards the cap', () => {
+    const apply = [run('t', 4, 'applied', 'sales', 0.65), run('t', 5, 'after_settle')];
+    const shadow = [0, 1, 2, 3].map((at) => askedThere('t', at));
+    expect(settleAt(apply, 0.7, shadow)).toEqual({ kind: 'none' });
+    expect(settleAt(apply, 0.7)).toEqual({ kind: 'unasked' });
+    // Only the asks that came first: a later one is not counted before a row.
+    expect(settleAt(apply, 0.7, [...shadow.slice(1), askedThere('t', 9)])).toEqual({
+      kind: 'unasked',
+    });
+  });
+
+  it('sweeps with the asks the other views hold', () => {
+    const apply = [run('t', 4, 'applied', 'sales', 0.65), run('t', 5, 'after_settle')];
+    const askedElsewhere = [0, 1, 2, 3].map((at) => askedThere('t', at));
+    const high = grade(input(apply, [], { thresholds: [0.7], askedElsewhere })).sweep.find(
+      (row) => row.threshold === 0.7,
+    );
+    expect(high).toMatchObject({ settled: 0, unasked: 0 });
   });
 });
 
@@ -487,6 +600,73 @@ describe('the weights', () => {
   });
 });
 
+describe('what a label can grade', () => {
+  // In apply every settle is Jev's filing, and agreeing with one leaves no
+  // label: only the tickets it never settled can carry one.
+  const runs = [
+    ...Array.from({ length: 20 }, (_, n) => run(`f${n}`, 0, 'applied', 'sales', 0.9)),
+    ...Array.from({ length: 10 }, (_, n) => run(`u${n}`, 0, 'below_threshold', 'sales', 0.4)),
+  ];
+  const events = [
+    ...Array.from({ length: 20 }, (_, n) => jevWrite(`f${n}`, 0, 'sales')),
+    person('f0', 5, 'courier_jobs'),
+    person('f1', 5, 'courier_jobs'),
+    ...Array.from({ length: 10 }, (_, n) => person(`u${n}`, 30, 'sales')),
+  ];
+  const report = grade(input(runs, events));
+  const sales = report.categories.find((each) => each.key === 'sales')!;
+
+  it('leaves a ticket something wrote first out of every rate', () => {
+    expect(report.writtenFirst).toBe(20);
+    expect(report.settlesUnlabellable).toBe(true);
+    expect(report.total.jev).toEqual({ right: 0, of: 0, rate: null });
+    expect(sales.precision).toEqual({ right: 0, of: 0, rate: null });
+  });
+
+  // Not 0 of 10: the hits are the tickets Jev filed, which no label reaches.
+  it('has no recall for a category whose every settle was written to', () => {
+    expect(sales.recall).toBeNull();
+    // A category Jev never settled has a recall, and it is nothing.
+    expect(
+      grade(input(runs, [...events, person('u0', 40, 'customer_support')])).categories.find(
+        (each) => each.key === 'customer_support',
+      )!.recall,
+    ).toEqual({ right: 0, of: 1, rate: 0 });
+  });
+
+  it('does not list a stratum no label can reach as wanting labels', () => {
+    expect(report.sample).toEqual([{ key: null, labelled: 10 }]);
+    expect(report.filed).toEqual([
+      { key: 'sales', filed: 20, changed: 2, changedTo: [{ key: 'courier_jobs', count: 2 }] },
+    ]);
+  });
+
+  // A rule filing tickets Jev settled as sales: the two labels stand for the
+  // two tickets a label could reach, not for the ten.
+  it('weighs a stratum by the tickets a label could reach', () => {
+    const shadow = [
+      ...Array.from({ length: 10 }, (_, n) => run(`s${n}`, 0, 'would_apply', 'sales', 0.9)),
+      run('c0', 0, 'would_apply', 'customer_support', 0.9),
+      run('c1', 0, 'would_apply', 'customer_support', 0.9),
+    ];
+    const labels = [
+      person('s0', 30, 'sales'),
+      person('s1', 30, 'sales'),
+      ...Array.from({ length: 8 }, (_, n) => rule(`s${n + 2}`, 10, 'courier_jobs')),
+      person('c0', 30, 'customer_support'),
+      person('c1', 30, 'sales'),
+    ];
+    const graded = grade(input(shadow, labels));
+    expect(graded.writtenFirst).toBe(8);
+    expect(graded.settlesUnlabellable).toBe(false);
+    expect(graded.categories.find((each) => each.key === 'sales')!.recall).toEqual({
+      right: 2,
+      of: 3,
+      rate: 2 / 3,
+    });
+  });
+});
+
 describe('the sample', () => {
   it('leaves out what a person touched, what Jev wrote to and what cannot be labelled', () => {
     const runs = ['p', 'q', 'r', 's'].map((id) => run(id, 0, 'would_apply', 'sales', 0.9));
@@ -526,6 +706,10 @@ describe('the sample', () => {
     ]);
     const offered = grade(input(runs, [], { tickets })).toLabel.map((each) => each.number);
     expect(offered.sort()).toEqual([2, 3, 4]);
+    // Asked four times in the other mode, once here: its window is closed.
+    const elsewhere = [1, 2, 3, 4].map((at) => askedThere('open', at));
+    const now = grade(input(runs, [], { tickets, askedElsewhere: elsewhere }));
+    expect(now.toLabel.map((each) => each.number).sort()).toEqual([1, 2, 3, 4]);
   });
 
   it('offers at most a page of each stratum, mixed into one list that names no answer', () => {

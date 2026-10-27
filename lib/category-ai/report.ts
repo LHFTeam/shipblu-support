@@ -1,6 +1,21 @@
-import { and, asc, count, desc, eq, inArray, max, min, sql } from 'drizzle-orm';
+import {
+  and,
+  asc,
+  count,
+  desc,
+  eq,
+  inArray,
+  isNotNull,
+  max,
+  min,
+  ne,
+  notExists,
+  or,
+  sql,
+} from 'drizzle-orm';
 import { db } from '@/db/client';
 import {
+  CATEGORY_AI_LIVE_LABEL,
   aiCategoryRuns,
   conversationEvents,
   conversations,
@@ -112,6 +127,25 @@ export async function categoryAiReport(
     // live job and the backfill judge them: a tie on the second needs the id.
     .where(scope);
 
+  // The label's answers in its other views, which the live job's cap counted
+  // with these: a ticket asked four times in shadow had one ask left in apply.
+  const askedElsewhere = await db
+    .select({
+      conversationId: aiCategoryRuns.conversationId,
+      messageId: aiCategoryRuns.messageId,
+      messageCreatedAt: aiCategoryRuns.messageCreatedAt,
+    })
+    .from(aiCategoryRuns)
+    .where(
+      and(
+        eq(aiCategoryRuns.runLabel, runLabel),
+        or(ne(aiCategoryRuns.requestFingerprint, fingerprint), ne(aiCategoryRuns.mode, mode)),
+        isNotNull(aiCategoryRuns.predictedKey),
+        ne(aiCategoryRuns.outcome, 'failed'),
+        inArray(aiCategoryRuns.conversationId, named),
+      ),
+    );
+
   const events = await db
     .select({
       conversationId: conversationEvents.conversationId,
@@ -160,6 +194,7 @@ export async function categoryAiReport(
   return grade({
     runLabel,
     runs: runs.map((row) => ({ ...row, outcome: asOutcome(row.outcome) })),
+    askedElsewhere,
     events,
     tickets,
     categoryKeys: categories.map((category) => category.key),
@@ -180,19 +215,43 @@ function asOutcome(value: string): CategoryOutcome {
 }
 
 /**
- * `classify_category` jobs in `dead`: the one way a message the live
- * classifier was meant to decide about ends with no row, which no other figure
- * on the page can see (`plans/ticket-category-routing.md`, 4.1, as built).
- * Never cleaned up, so the count is every one there has been.
+ * `classify_category` jobs in `dead` whose message still has no live row: the
+ * one way a message the live classifier was meant to decide about ends with
+ * none, which no other figure on the page can see
+ * (`plans/ticket-category-routing.md`, 4.1, as built). Never cleaned up, so
+ * the count would be every one there has been; a message a run by hand has
+ * since answered — or recorded failing, which the page counts — has its row,
+ * and leaves it.
+ *
+ * The payload's id is compared only once it reads as a uuid: a job that died
+ * because its payload failed its schema holds whatever was written, and a
+ * cast of that would refuse the whole page.
  */
 export async function deadClassifyJobs(): Promise<{
   count: number;
   first: Date | null;
   last: Date | null;
 }> {
+  const messageId = sql`case when ${jobs.payload}->>'messageId' ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then (${jobs.payload}->>'messageId')::uuid end`;
   const [row] = await db
     .select({ count: count(), first: min(jobs.createdAt), last: max(jobs.createdAt) })
     .from(jobs)
-    .where(and(eq(jobs.type, 'classify_category'), eq(jobs.status, 'dead')));
+    .where(
+      and(
+        eq(jobs.type, 'classify_category'),
+        eq(jobs.status, 'dead'),
+        notExists(
+          db
+            .select({ one: sql`1` })
+            .from(aiCategoryRuns)
+            .where(
+              and(
+                eq(aiCategoryRuns.messageId, messageId),
+                eq(aiCategoryRuns.runLabel, CATEGORY_AI_LIVE_LABEL),
+              ),
+            ),
+        ),
+      ),
+    );
   return { count: row?.count ?? 0, first: row?.first ?? null, last: row?.last ?? null };
 }

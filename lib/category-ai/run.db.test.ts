@@ -730,6 +730,41 @@ describe('classifyMessageCategory, what changed while Jev was asked', () => {
     expect(await runsOf(id)).toEqual([]);
   });
 
+  // An agent's reply that sets the ticket pending, not yet committed when the
+  // answer comes back: the look under the lock waits for it, and must find the
+  // ticket at its new status. Joined to the status instead, the wait re-checked
+  // the ticket against the status read before it, found none, and the job went
+  // to `dead` as though the message were gone.
+  it('finds a ticket a writer moved to another status while the answer waited for it', async () => {
+    const { id } = await ticket();
+    const pending = await statusNamed('Pending');
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    let writer: Promise<void> = Promise.resolve();
+    answersAfter(
+      () =>
+        new Promise<void>((moved) => {
+          writer = db.transaction(async (tx) => {
+            await tx
+              .update(conversations)
+              .set({ statusId: pending })
+              .where(eq(conversations.id, id));
+            moved();
+            await held;
+          });
+        }),
+    );
+    const message = await inbound(id, 'بكام الشحن؟');
+
+    const classifying = classifyMessageCategory(message, { baseUrl: BASE });
+    await untilWaitingOnALock(db);
+    release();
+    await writer;
+
+    await expect(classifying).resolves.toMatchObject({ outcome: 'applied', predicted: 'sales' });
+    expect(await carried(id)).toBe(await categoryId('sales'));
+  });
+
   // The shadow measures the classifier apply turns on: an answer apply could
   // not write must not settle the ticket in shadow either.
   it('records a category retired during a shadow call as the failure apply would', async () => {

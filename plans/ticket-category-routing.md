@@ -85,8 +85,35 @@ update.
 | 3.1   | Merged: #419 (`ff3bbfd`), then `dev` → `main` in #420 (`b9a4743`), which also carried #411, #416, #417 and #418. As built below             | **Done.** Web live on `b9a4743` at 19:44 UTC on 2026-10-25, the worker and the four crons by 08:05 UTC on 2026-10-26, and the four categories seeded at 08:13. Its checks read clean (below); the signed-in ones are left |
 | 3.2   | Merged: #424 (`07a5527`), then `dev` → `main` in #426 (`f761e5e`), which also carried #421, #422 and #423. As built below                   | **Done.** All six services live on `f761e5e` by 23:32 UTC on 2026-10-26, web first. Its checks read clean (below); the signed-in ones are left                                                                            |
 | 4.0   | Merged: #425 (`1c733c2`), then `dev` → `main` in #428 (`156004d`). As built below                                                           | **Done.** All six services live on `156004d` by 07:45:42 UTC on 2026-10-27, web first. Its checks read clean (below)                                                                                                      |
-| 4.1   | In review: #427 (`claude/jolly-noether-hxhez1-stage-4-1`), on `dev` since #425 merged: [4.1, as built](#41-as-built)                        | —                                                                                                                                                                                                                         |
-| 4.2–6 | 4.2's report in progress, stacked on #427: [4.2's report, as built](#42s-report-as-built). 5 and 6 not started                              | —                                                                                                                                                                                                                         |
+| 4.1   | Merged: #427 (`959404a`), then `dev` → `main` in #430 (`dbf4376`). As built below                                                           | **Done.** All six services live on `dbf4376` by 12:07:54 UTC on 2026-10-27, web first, with `0050` applied. Shipped off: no settings row. Its checks read clean (below)                                                   |
+| 4.2–6 | 4.2's report in review as #429, on `dev`: [4.2's report, as built](#42s-report-as-built). 4.2's operations, 5 and 6 not started             | —                                                                                                                                                                                                                         |
+
+**4.1's deploy and checks, read on Render and production on 2026-10-27.**
+
+- **Before** (read 12:02 UTC): 50 migrations, the newest `1793037218791`
+  (`0049`); neither `ai_category_runs` nor `category_ai_settings` existed; no
+  transaction older than a minute and no strong lock held; nothing pending or
+  running in `jobs`, and the same one dead job. Web and the worker ran
+  `156004d`, and `origin/main` was `dbf4376`.
+- **The release and web.** #427 was squashed into `dev` as `959404a`, its tree
+  identical to the reviewed head `080a5a4`. #430 merged `dev` into `main` as
+  `dbf4376` once its checks were green. Web was deployed on it through Render's
+  API at 12:02:29. Its preDeploy logged `Applying drizzle migrations...` at
+  12:04:23.6 and was applying `001` by 12:04:23.9, so `0050` took under 0.31 s;
+  all nine `db/sql` files were done at 12:04:24.7. Web was live at 12:05:10.
+  The worker followed at 12:05:41 and the four crons at 12:05:43–50. The crons
+  were live by 12:06:29 and the worker at 12:07:54.
+- **The checks** (read 12:04–12:32 UTC):
+  - 51 migrations, the newest `1793058419292`;
+  - both tables exist with RLS on, and carry their five CHECKs
+    (`ai_category_runs_failed_has_error` and the four on the settings row);
+  - no settings row, so the classifier is off and nothing is queued for it;
+    `ai_category_runs` is empty;
+  - all 1,531 jobs created since the deploy completed;
+  - none of the six services logged a warning or an error, and web served no
+    5xx;
+  - `/api/health` reports `dbf4376`, with nothing pending or processing and
+    the same one dead job.
 
 **4.0's deploy and checks, read on Render and production on 2026-10-27.**
 
@@ -433,13 +460,17 @@ Every production write needs the user's go-ahead for that step, and the
    signed-in ones are left.
 6. **4.0 is deployed.** #425 was squashed into `dev` as `1c733c2`, and #428
    (`156004d`) took it to `main` on 2026-10-27. All six services were live on
-   it by 07:45:42 UTC, web first, and its checks read clean (above). **Stage
-   4.1**, Jev's category classifier, is in review as #427, on `dev` since #425
-   merged, and ships off: [4.1, as built](#41-as-built). 4.2's report,
-   `/reports/category-ai`, is built beside it, stacked on #427: [4.2's report,
-   as built](#42s-report-as-built). 4.2's operations wait for 4.1 to be
-   deployed and the user's go-ahead for each.
-7. **Before Stage 5**, a person does 0.2's reorder and 0.6's staffing, and the
+   it by 07:45:42 UTC, web first, and its checks read clean (above).
+7. **4.1 is deployed, and off.** #427 was squashed into `dev` as `959404a`, and
+   #430 (`dbf4376`) took it to `main` on 2026-10-27. All six services were live
+   on it by 12:07:54 UTC, web first, and its checks read clean (above). The
+   classifier stays off until an admin switches it on at `/admin/categories`.
+   The way back is to redeploy `156004d`; the tables stay, since nothing
+   reads them there. 4.2's report, `/reports/category-ai`, is in review as
+   #429: [4.2's report, as built](#42s-report-as-built). 4.2's operations
+   (the archive record run, shadow, labelling, apply, the backlog) each wait
+   for the user's go-ahead.
+8. **Before Stage 5**, a person does 0.2's reorder and 0.6's staffing, and the
    support lead answers the questions still open (below).
 
 ### 1.3, as built
@@ -3927,8 +3958,9 @@ wait for the user's go-ahead, after 4.1 is deployed.
     - a threshold sweep;
     - what Jev filed and a person changed since;
     - the tickets to label.
-  - The count of `classify_category` jobs in `dead`, 4.1's one gap, is a
-    warning on the live label's views.
+  - The count of `classify_category` jobs in `dead` whose message has no live
+    row yet, 4.1's one gap, is a warning on the live label's views and when no
+    run is chosen. A message answered by hand since leaves it.
   - The handbook's reports article gains the screen and how to label for it,
     and the categories admin paragraph names it.
 - **Where it departs from the spec, or adds to it.**
@@ -3944,20 +3976,29 @@ wait for the user's go-ahead, after 4.1 is deployed.
     every such answer wrong. They are counted apart, and Jev's own filings
     under "Filed by Jev": what it filed in answer to the run's messages, how
     many a person moved since, and to what. That is the figure step 3's
-    merchant-support watch reads, and under `apply` the page says the rates
-    count only what Jev did not file.
+    merchant-support watch reads.
+  - **So a ticket written to first is in no rate.** No label can reach it,
+    and kept in the weights it would be stood for by tickets unlike it. In
+    `apply` every settle is Jev's filing, so the labelled tickets are all ones
+    Jev never settled: recall read there was 0% by construction. The rates
+    describe the tickets a label could reach, the page says how many were
+    left out, and a category every settle of which was written to reads
+    "Not measurable" rather than 0%. Under `apply`, Filed by Jev is the grade.
   - **Rates that mix Jev's answers are weighted.** The labelling list draws
     the same number of tickets from each answer, so a rare answer's tickets
     are labelled at a far higher rate. Precision within one answer needs
     nothing. Recall, the overall rate, the rules' rates and the sweep's weigh
-    each labelled ticket by its stratum's judged tickets over its labels, so
-    they estimate the run. The raw counts print beside every one of them, and
+    each labelled ticket by its stratum's gradable tickets over its labels, so
+    they estimate every ticket in the run a label could reach. The raw counts print beside every one of them, and
     the confusion matrix stays unweighted counts.
   - **The rules are graded on their own terms over the same labelled tickets.**
     Their answer is the first message the detector maps to a category, inside
-    Jev's window: at most five messages, and none from an `owned` or `capped`
-    row on, `after_settle` rows included. Grading them on Jev's settling
-    message instead would charge them with Jev's choice of message.
+    Jev's window, which is bounded as the sweep bounds Jev's. Five places, one
+    for each message Jev answered or stopped asking about once settled
+    (`after_settle`), none for a failure. A message Jev judged is always
+    inside. An `owned` or `capped` row ends the window only when nothing after
+    it was asked. Grading them on Jev's settling message instead would charge
+    them with Jev's choice of message.
   - **Messages are judged in the live job's order**: by instant, then message
     id (`arrivedBefore`). WhatsApp stamps a burst to the second, and a row id
     would order such a pair at random.
@@ -3966,9 +4007,12 @@ wait for the user's go-ahead, after 4.1 is deployed.
     was asked. Above it, a ticket whose settle falls below the bar moves on to
     messages Jev was never asked (`after_settle` with no answer), and those
     count as not known, not as unsettled. An `after_settle` row that holds an
-    answer is read, the cap of five is counted, and an `owned` or `capped` row
-    out of job order is passed over. That is what "the threshold set from the
-    report" reads.
+    answer is read, and an `owned` or `capped` row out of job order is passed
+    over. The cap of five is counted as the live job counts it, every answer
+    the label holds in any mode and to any version of the question. A row Jev
+    judged is never capped, since the live job counts in commit order and asked
+    it inside its cap. That is what "the threshold set from the report"
+    reads.
   - **The sample is chosen by Jev's answer and shown without it.** Strata are
     Jev's settling category, plus "never settled" so recall has misses. Each
     stratum's first ten go into one list in id order, a fixed random order for
