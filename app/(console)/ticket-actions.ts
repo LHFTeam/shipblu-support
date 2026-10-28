@@ -18,6 +18,10 @@ import { afterRoutingChanged, onPriorityChanged } from '@/lib/sla';
 import { afterTicketUpdate } from '@/lib/tickets/lifecycle';
 import { CHANGE_STAMP } from '@/lib/tickets/change-stamp';
 import { moveToGroupIfElsewhere } from '@/lib/tickets/move-group';
+import { routeNow } from '@/lib/routing/apply';
+import { afterHoldEnded } from '@/lib/routing/after-hold';
+import { endHold } from '@/lib/routing/end-hold';
+import { undecidedRouting } from '@/lib/routing/state';
 import { isBlank } from '@/lib/tickets/custom-fields';
 import { parseFieldValue } from '@/lib/tickets/custom-fields-parse';
 import { getTicketField } from '@/lib/tickets/lookups';
@@ -44,6 +48,8 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
   const field = String(formData.get('field') ?? '');
   const value = String(formData.get('value') ?? '');
 
+  // Set by the category case when the edit routed a held ticket.
+  let routedByCategory = false;
   switch (field) {
     case 'status': {
       if (!isUuid(value)) return { error: 'Unknown status' };
@@ -105,7 +111,7 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
         if (!assignee.isActive) return { error: 'That agent is deactivated' };
       }
 
-      await db.transaction(async (tx) => {
+      const endedHold = await db.transaction(async (tx) => {
         await tx
           .update(conversations)
           .set({ assigneeAgentId, assignedAt: assigneeAgentId ? new Date() : null })
@@ -117,7 +123,12 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
           actorAgentId: agent.id,
           data: { to: assigneeAgentId },
         });
+
+        // A person deciding who answers a ticket held for the router has
+        // decided for it (`endHold`).
+        return endHold(tx, conversationId, 'manual', { agentId: agent.id });
       });
+      if (endedHold) await afterHoldEnded(conversationId);
       break;
     }
 
@@ -136,11 +147,11 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
         if (!group) return { error: 'Unknown group' };
       }
 
-      const moved = await db.transaction(async (tx) => {
+      const move = await db.transaction(async (tx) => {
         // Only a move: a page drawn before somebody else moved the ticket can
         // post the group it is already in (`moveToGroupIfElsewhere`).
         if (!(await moveToGroupIfElsewhere(conversationId, groupId, { executor: tx })))
-          return false;
+          return null;
 
         // Recorded, where it was not before. Moving a ticket between teams is
         // the same weight of decision as reassigning it and the case above has
@@ -152,9 +163,11 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
           actorAgentId: agent.id,
           data: { to: groupId },
         });
-        return true;
+        // A person moving a ticket held for the router has decided where it
+        // goes (`endHold`).
+        return { endedHold: await endHold(tx, conversationId, 'manual', { agentId: agent.id }) };
       });
-      if (!moved) break;
+      if (!move) break;
 
       // Before anybody has answered, the policy itself may follow the new team
       // (a policy can be keyed on the group); after, it holds. Either way the
@@ -163,8 +176,10 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
       await afterRoutingChanged(conversationId, { category: false, group: true });
 
       // The new team may route automatically where the old one did not. A no-op
-      // if somebody already holds the ticket, which is the usual case.
-      await assignConversation(conversationId, { actorLabel: 'auto_assign' });
+      // if somebody already holds the ticket, which is the usual case. A hold
+      // the move ended owes its out-of-hours reply too.
+      if (move.endedHold) await afterHoldEnded(conversationId);
+      else await assignConversation(conversationId, { actorLabel: 'auto_assign' });
       break;
     }
 
@@ -211,6 +226,24 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
         return { error: CATEGORY_REFUSALS[write.outcome] };
       }
       if (write.outcome === 'no_ticket') return { error: 'Ticket not found' };
+
+      // During a routing hold a person saying what the ticket is about is the
+      // best signal there is, so it routes now, as Jev's answer would: the
+      // router runs the rules and chooses the policy itself, and the update
+      // pass below would assign before it had. A shadow ticket records where it
+      // would have gone and carries on. Clearing the category settles nothing,
+      // and the window runs on.
+      const routing =
+        write.outcome === 'changed' && categoryId
+          ? await undecidedRouting(db, conversationId)
+          : null;
+      if (routing) {
+        const routed = await routeNow(conversationId, { agentId: agent.id, label: 'agent' });
+        if (!routing.shadow && routed !== 'none') {
+          routedByCategory = true;
+          break;
+        }
+      }
 
       // Before the first response, the policy follows the category (it may be
       // keyed on it). A no-op once somebody has answered, when the same policy
@@ -302,8 +335,9 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
 
   // Observer rules see the ticket as the agent has just left it. Actions taken
   // by a rule write to the ticket directly and do not come back through here,
-  // so a rule cannot trigger itself.
-  await afterTicketUpdate(conversationId);
+  // so a rule cannot trigger itself. Not after a category edit that routed a
+  // held ticket, whose router ran them already.
+  if (!routedByCategory) await afterTicketUpdate(conversationId);
 
   refresh(row.conversation.number);
 
