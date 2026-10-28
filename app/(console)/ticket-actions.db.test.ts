@@ -945,3 +945,40 @@ describe('updateTicket on a ticket held for routing', () => {
     });
   });
 });
+
+// A held ticket resolved in its window meets a person's category edit as any
+// resolved ticket does. The router decides it `not_open` and runs no pass, so
+// that is not the edit's pass having run, and the edit runs its own.
+describe('a category edit on a ticket resolved in its window', () => {
+  beforeEach(async () => {
+    await classifierApplies();
+  });
+
+  it.each([
+    ['held', true],
+    ['never routed', false],
+  ] as const)('runs the update rules, held or never routed (%s)', async (_, routed) => {
+    const lina = await agent('Lina Care');
+    const omar = await agent('Omar Sales');
+    const care = await group('Customer Care', [lina]);
+    const sales = await group('Sales', [omar]);
+    const salesKey = await routeTo('sales', sales);
+    await onUpdate('Tag sales', { field: 'category.id', op: 'eq', value: salesKey }, [
+      { type: 'add_tags', tags: ['sales'] },
+    ]);
+    const id = routed
+      ? await heldTicket(await mailbox(care, 'category'), care)
+      : (await ticket(care)).id;
+    const [resolved] = await db
+      .select({ id: ticketStatuses.id })
+      .from(ticketStatuses)
+      .where(eq(ticketStatuses.name, 'Resolved'));
+    await db
+      .update(conversations)
+      .set({ statusId: resolved!.id, resolvedAt: new Date() })
+      .where(eq(conversations.id, id));
+
+    expect(await edit(id, 'category', salesKey)).toMatchObject({ error: null });
+    expect(await tagsOf(id)).toEqual(['sales']);
+  });
+});

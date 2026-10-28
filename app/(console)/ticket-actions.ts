@@ -4,14 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { eq, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
-import {
-  agents,
-  conversationEvents,
-  conversations,
-  groups,
-  routingDecisions,
-  ticketStatuses,
-} from '@/db/schema';
+import { agents, conversationEvents, conversations, groups, ticketStatuses } from '@/db/schema';
 import { purgeConversation, type PurgeRefusal } from '@/lib/admin/purge';
 import { hiddenScopeRefusal } from '@/lib/admin/purge-visibility';
 import { requireAgent } from '@/lib/auth/guard';
@@ -29,7 +22,7 @@ import { routeNow } from '@/lib/routing/apply';
 import { afterHoldEnded } from '@/lib/routing/after-hold';
 import { endHold } from '@/lib/routing/end-hold';
 import { handToRouteGroup, type HandToResult } from '@/lib/routing/hand-to';
-import { undecidedRouting } from '@/lib/routing/state';
+import { routerDecidedOn, undecidedRouting } from '@/lib/routing/state';
 import { isBlank } from '@/lib/tickets/custom-fields';
 import { parseFieldValue } from '@/lib/tickets/custom-fields-parse';
 import { getTicketField } from '@/lib/tickets/lookups';
@@ -278,8 +271,9 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
       //   ran them itself, and `failed` left the hold for `settle_routing`,
       //   which runs them at the window's end. Otherwise somebody decided in
       //   the moment between this commit and the router's lock — `none`, or
-      //   `in_flight` for a decision part-way through — and who it was, and on
-      //   what, says whether the pass is owed (`routerDecidedOn`).
+      //   `in_flight` for a decision part-way through — and who it was, on
+      //   what, and whether before this write or after it, says whether the
+      //   pass is owed (`routerDecidedOn`, which Jev asks of its own write).
       // - **Shadow** — the rest as though routing did not exist, after the
       //   would-be decision is recorded once the creation pass has begun
       //   routing; while it is `pending`, `beginRouting` records it after the
@@ -293,7 +287,10 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
         if (
           routed === 'decided' ||
           routed === 'failed' ||
-          (await routerDecidedOn(conversationId, routing.settled))
+          (await routerDecidedOn(conversationId, {
+            categoryId: routing.settled,
+            phaseOneWritten: routing.phaseOneWritten,
+          }))
         ) {
           routingRunsRules = true;
           break;
@@ -411,37 +408,6 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
   // the rejection it causes on the client as the navigation it is.
   if (!(await seesTicket(agent, conversationId))) redirect('/inbox');
   return ok();
-}
-
-/**
- * Whether the decision a console category edit found made, once it had
- * committed on a held ticket, was the router's on exactly the category the
- * edit wrote — asked once `routeNow` has answered `none` or `in_flight`:
- * somebody decided in the moment between the edit's commit and the router's
- * lock, or is part-way through deciding.
- *
- * The router — Jev's answer, the window's end, the creation pass — decided
- * under the ticket's lock after this edit's commit, then, and read this
- * category; its pass over the rules ran, or is running, on it
- * (`lib/routing/apply.ts`), or it found the ticket in nobody's queue and owed
- * none (`not_open`). The edit's own pass after it is a second, and every rule
- * keyed on the category fires twice: a canned reply sent twice, a note
- * written twice. A router whose phase one names the category this edit
- * replaced decided before the edit did, and its pass may already have read the
- * old one; nothing runs the rules again once it ends the hold, so the edit's
- * own pass is the only one sure to see the new category — and the ticket is
- * still held, so that pass assigns nobody, and a rule's move in it ends
- * nothing. `manual` and `rule` are `endHold`'s: a person or a rule decided
- * without looking at the category at all, and the pass is owed. Jev asks the
- * same of its own write (`decidedByHold` in `lib/category-ai/run.ts`).
- */
-async function routerDecidedOn(conversationId: string, categoryId: string): Promise<boolean> {
-  const [row] = await db
-    .select({ outcome: routingDecisions.outcome, categoryId: routingDecisions.categoryId })
-    .from(routingDecisions)
-    .where(eq(routingDecisions.conversationId, conversationId));
-  if (!row?.outcome || row.outcome === 'manual' || row.outcome === 'rule') return false;
-  return row.categoryId === categoryId;
 }
 
 // --- Hand to <group> ----------------------------------------------------------

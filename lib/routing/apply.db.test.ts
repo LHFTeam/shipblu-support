@@ -1,4 +1,4 @@
-import { and, asc, eq, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import { PgDatabase } from 'drizzle-orm/pg-core';
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 import { db } from '@/db/client';
@@ -24,6 +24,7 @@ import { maybeSendAutoResponse } from '@/lib/auto-response';
 import { setConversationCategory } from '@/lib/categories/write';
 import { forgetCategoryAiSettings } from '@/lib/category-ai/settings';
 import { forgetHoursCatalog } from '@/lib/hours/catalog';
+import { afterRoutingChanged } from '@/lib/sla';
 import { withCleanDatabase } from '@/lib/testing/db';
 import { holdNextTransaction, untilWaitingOnALock } from '@/lib/testing/hold-transaction';
 import { cairo } from '@/lib/testing/time';
@@ -344,6 +345,23 @@ async function tagged(id: string): Promise<number> {
   return (await events(id, 'tagged')).length;
 }
 
+/**
+ * The ticket's lines of these types in the order the page draws them, by
+ * `created_at`: whether the rules ran before anybody was assigned, and the
+ * decision after what it decided on.
+ */
+async function timeline(
+  id: string,
+  types: string[] = ['routed', 'group_changed', 'tagged', 'assigned'],
+): Promise<string[]> {
+  const rows = await db
+    .select({ type: conversationEvents.type })
+    .from(conversationEvents)
+    .where(and(eq(conversationEvents.conversationId, id), inArray(conversationEvents.type, types)))
+    .orderBy(asc(conversationEvents.createdAt), asc(conversationEvents.id));
+  return rows.map((row) => row.type);
+}
+
 async function tags(id: string): Promise<string[]> {
   const [row] = await db
     .select({ tags: conversations.tags })
@@ -494,6 +512,34 @@ describe('routeNow, a held ticket Jev has filed', () => {
 
     expect(await routeNow(id, { label: 'jev:category' })).toBe('none');
   });
+
+  // The window's job begins its transaction, and a person's category edit
+  // takes the ticket's lock and commits before phase one reaches it. Stamped
+  // with the transaction's start, the `routed` line sorted before the
+  // `category_changed` it decided on, and the page told it backwards.
+  it('records its decision after the category it decided on, though its transaction began first', async () => {
+    const t = await teams();
+    const lead = await agent('Laila');
+    const sales = await routeTo('sales', t.sales.group);
+    const { id } = await heldTicket(t.channel, t.home.group);
+
+    const held = holdNextTransaction('before');
+    const settling = settleRouting(id);
+    await held.atHold;
+    expect((await setConversationCategory(id, sales, { agentId: lead })).outcome).toBe('changed');
+    held.release();
+    expect(await settling).toBe('decided');
+
+    expect(await timeline(id, ['category_changed', 'routed', 'assigned'])).toEqual([
+      'category_changed',
+      'routed',
+      'assigned',
+    ]);
+    expect(await expectDecided(id, 'category')).toMatchObject({
+      categoryId: sales,
+      decidedByLabel: 'settle_routing',
+    });
+  });
 });
 
 describe('the two-phase order', () => {
@@ -640,6 +686,37 @@ describe('the two-phase order', () => {
     expect(await tags(id)).toEqual([]);
     expect(await ticketRow(id)).toMatchObject({ groupId: t.home.group, assigneeAgentId: null });
     await expectDecided(id, 'not_open');
+  });
+
+  it('gives its pass up on a ticket resolved since its phase one, and only ends the hold', async () => {
+    // Resolved in the moment between phase one's commit and the claim, with
+    // no window's job in between to find it: the rules would run on a ticket
+    // nobody may work, and a category's `send_reply` reach its customer.
+    await closedEverywhere();
+    await outOfHoursReply();
+    const t = await teams();
+    const sales = await routeTo('sales', t.sales.group);
+    await rule('on_update', 'Tag everything', always, [{ type: 'add_tags', tags: ['ran'] }]);
+    const { id } = await heldTicket(t.channel, t.home.group);
+    await jevFiles(id, sales);
+
+    expect(
+      await routeBetweenPhases(id, async () => {
+        await db
+          .update(conversations)
+          .set({ statusId: await status('Resolved'), resolvedAt: new Date() })
+          .where(eq(conversations.id, id));
+      }),
+    ).toBe('decided');
+
+    // No rule ran on it, nobody was given it, and nothing was said.
+    expect(await tags(id)).toEqual([]);
+    expect(await ticketRow(id)).toMatchObject({ groupId: t.sales.group, assigneeAgentId: null });
+    expect(await acknowledgements(id)).toEqual([]);
+    // The decision stands and its hold is over; the pass claimed, never run.
+    const row = await expectDecided(id, 'category');
+    expect(row.rulesClaimedAt).toBeInstanceOf(Date);
+    expect(row.rulesDoneAt).toBeInstanceOf(Date);
   });
 
   it('assigns nobody between phases one and three', async () => {
@@ -891,7 +968,7 @@ describe('what ends a hold early', () => {
     expect((await ticketRow(id)).assigneeAgentId).toBe(t.home.agent);
   });
 
-  it('a person decides nothing by ending the hold after phase one wrote the router’s', async () => {
+  it('a person’s write after phase one ends nothing: the decision is the router’s to finish', async () => {
     errorsExpected = true;
     const t = await teams();
     const lead = await agent('Laila');
@@ -900,23 +977,41 @@ describe('what ends a hold early', () => {
     await jevFiles(id, sales);
     await interruptedAfterPhaseOne(id);
 
-    await db.transaction(async (tx) => {
+    const ended = await db.transaction(async (tx) => {
       await tx.update(conversations).set({ assigneeAgentId: lead }).where(eq(conversations.id, id));
       return endHold(tx, id, 'manual', { agentId: lead });
     });
 
-    // The router's decision keeps its name; the person's assignment stands.
+    // The person's assignment stands. The decision, its record and the hold
+    // are left as phase one wrote them, for the router to finish.
+    expect(ended).toBe(false);
+    expect(await decision(id)).toMatchObject({
+      stage: 'holding',
+      outcome: 'category',
+      decidedByLabel: 'jev:category',
+      decidedByAgentId: null,
+      decidedAt: null,
+    });
+    expect(await ticketRow(id)).toMatchObject({ assigneeAgentId: lead, routingDecidedAt: null });
+    expect(await events(id, 'routed')).toHaveLength(1);
+
+    // Its phase three failed, so the window's job finishes it once the minute
+    // is up, and leaves the person's assignment where it is.
+    await db
+      .update(routingDecisions)
+      .set({ phaseOneAt: new Date(Date.now() - 2 * MINUTE) })
+      .where(eq(routingDecisions.conversationId, id));
+    expect(await settleRouting(id)).toBe('decided');
     expect(await expectDecided(id, 'category')).toMatchObject({ decidedByLabel: 'jev:category' });
     expect((await ticketRow(id)).assigneeAgentId).toBe(lead);
   });
 
-  // A person deciding in the moment after phase one commits and before the
-  // router claims the rules' pass. Their `endHold` decides the row and keeps
-  // the router's outcome, and pays none of what phase one owed: the pass the
-  // category's writer gave up to the router, and the policy's second look.
-  // Refused for a decided row, the claim lost both for good, and the router
-  // still answered `decided`, so Jev ran no pass of its own either.
-  it('a person ending it before the router claims its rules leaves them, and the policy, to the router', async () => {
+  // A person writing in the moment after phase one commits and before the
+  // router claims the rules' pass. Their write stands and ends nothing
+  // (`endHold`), so everything phase one owed is still the router's to pay:
+  // the pass the category's writer gave up to it, the policy's second look,
+  // and the hold's end.
+  it('a person assigning it before the router claims its rules leaves them, and the policy, to the router', async () => {
     const t = await teams();
     const lead = await agent('Laila');
     const sales = await routeTo('sales', t.sales.group);
@@ -937,7 +1032,8 @@ describe('what ends a hold early', () => {
     await jevFiles(id, sales);
 
     // The lib half of the console's assignee case, which runs a pass of its
-    // own after it; the router's is the one owed for the category.
+    // own after it; the router's is the one owed for the category. It ended
+    // nothing, so it owes no `afterHoldEnded`.
     expect(
       await routeBetweenPhases(id, async () => {
         const ended = await db.transaction(async (tx) => {
@@ -947,8 +1043,7 @@ describe('what ends a hold early', () => {
             .where(eq(conversations.id, id));
           return endHold(tx, id, 'manual', { agentId: lead });
         });
-        expect(ended).toBe(true);
-        await afterHoldEnded(id);
+        expect(ended).toBe(false);
       }),
     ).toBe('decided');
 
@@ -963,14 +1058,28 @@ describe('what ends a hold early', () => {
     expect(row.rulesDoneAt).toBeInstanceOf(Date);
   });
 
-  it('an agent’s reply ending it before the router claims its rules leaves them to the router', async () => {
+  it('an agent’s reply before the router claims its rules leaves them, and the assignment, to the router', async () => {
     // The reply runs no update pass of its own, so the router's is the only
-    // one the category is given.
+    // one the category is given; and it ends no hold, so nobody is assigned
+    // until that pass has sent the ticket where it goes. Ended by the reply,
+    // the hold let the rota give the ticket to Samir in Sales, and the rule
+    // then moved it to Merchant Care with Samir still holding it.
     const t = await teams();
     const sales = await routeTo('sales', t.sales.group);
-    await rule('on_update', 'Tag sales', inCategory(sales), [
-      { type: 'add_tags', tags: ['sales'] },
-    ]);
+    await rule(
+      'on_update',
+      'Tag sales',
+      inCategory(sales),
+      [{ type: 'add_tags', tags: ['sales'] }],
+      0,
+    );
+    await rule(
+      'on_update',
+      'Merchant sales to Merchant Care',
+      inCategory(sales),
+      [{ type: 'assign_group', groupId: t.care.group }],
+      1,
+    );
     const { id } = await heldTicket(t.channel, t.home.group);
     await jevFiles(id, sales);
 
@@ -981,11 +1090,189 @@ describe('what ends a hold early', () => {
           bodyText: 'Looking into it now.',
           bodyHtml: '<p>Looking into it now.</p>',
         });
+        // Stored, and nothing else: still held, and still the router's.
+        expect(await decision(id)).toMatchObject({
+          stage: 'holding',
+          outcome: 'category',
+          rulesClaimedAt: null,
+        });
+        expect(await ticketRow(id)).toMatchObject({
+          assigneeAgentId: null,
+          routingDecidedAt: null,
+        });
       }),
     ).toBe('decided');
 
     expect(await tagged(id)).toBe(1);
-    expect(await expectDecided(id, 'category')).toMatchObject({ decidedByLabel: 'jev:category' });
+    expect(await ticketRow(id)).toMatchObject({
+      groupId: t.care.group,
+      assigneeAgentId: t.care.agent,
+    });
+    expect(await timeline(id)).toEqual(['routed', 'tagged', 'group_changed', 'assigned']);
+    expect(await expectDecided(id, 'category')).toMatchObject({
+      decidedByLabel: 'jev:category',
+      decidedByAgentId: null,
+    });
+  });
+
+  it('an agent’s reply during the router’s pass leaves the assignment until the pass is over', async () => {
+    const t = await teams();
+    const sales = await routeTo('sales', t.sales.group);
+    await rule(
+      'on_update',
+      'Tag sales',
+      inCategory(sales),
+      [{ type: 'add_tags', tags: ['sales'] }],
+      0,
+    );
+    await rule(
+      'on_update',
+      'Merchant sales to Merchant Care',
+      inCategory(sales),
+      [{ type: 'assign_group', groupId: t.care.group }],
+      1,
+    );
+    const { id } = await heldTicket(t.channel, t.home.group);
+    await jevFiles(id, sales);
+
+    // Phase one's transaction runs; `add_tags` opens none, so the next is the
+    // second rule's move, and the agent replies just before it — the pass
+    // claimed, and one rule of it run.
+    const transaction = PgDatabase.prototype.transaction;
+    let claimedAtReply: Date | null | undefined;
+    vi.spyOn(PgDatabase.prototype, 'transaction')
+      .mockImplementationOnce(function (this: PgDatabase<never>, run, config) {
+        return transaction.call(this, run, config) as never;
+      })
+      .mockImplementationOnce(async function (this: PgDatabase<never>, run, config) {
+        claimedAtReply = (await decision(id)).rulesClaimedAt;
+        await storeAgentReply(id, 'email', {
+          authorAgentId: t.home.agent,
+          bodyText: 'Looking into it now.',
+          bodyHtml: '<p>Looking into it now.</p>',
+        });
+        return transaction.call(this, run, config) as never;
+      });
+    expect(await routeNow(id, { label: 'jev:category' })).toBe('decided');
+
+    expect(claimedAtReply).toBeInstanceOf(Date);
+    expect(await tagged(id)).toBe(1);
+    expect(await ticketRow(id)).toMatchObject({
+      groupId: t.care.group,
+      assigneeAgentId: t.care.agent,
+    });
+    expect(await timeline(id)).toEqual(['routed', 'tagged', 'group_changed', 'assigned']);
+    await expectDecided(id, 'category');
+  });
+
+  it('a person moving it before the router claims its rules: a pass for each change, both before the assignment', async () => {
+    // The console's group case in the moment after phase one commits. The
+    // move stands and ends nothing, and the console runs the observer pass
+    // every edit owes; the router's pass for the category still follows, and
+    // only then does its end of the hold assign — in the group the person
+    // chose. Two passes, as for any two changes a moment apart: what the hold
+    // keeps is their order, not their number. Ended by the move, the hold
+    // assigned before the router's pass, which then ran on a ticket somebody
+    // already held.
+    const t = await teams();
+    const lead = await agent('Laila');
+    const billing = { agent: await agent('Bilal') };
+    const billingGroup = await group('Billing', [billing.agent]);
+    const sales = await routeTo('sales', t.sales.group);
+    await rule('on_update', 'Count passes', always, [{ type: 'add_tags', tags: ['seen'] }]);
+    const { id } = await heldTicket(t.channel, t.home.group);
+    await jevFiles(id, sales);
+
+    expect(
+      await routeBetweenPhases(id, async () => {
+        // The lib half of the console's group case: the move, its line and
+        // `endHold` in one transaction, then the policy and the observer pass.
+        const ended = await db.transaction(async (tx) => {
+          await tx
+            .update(conversations)
+            .set({ groupId: billingGroup })
+            .where(eq(conversations.id, id));
+          await tx.insert(conversationEvents).values({
+            conversationId: id,
+            type: 'group_changed',
+            actorAgentId: lead,
+            data: { to: billingGroup },
+          });
+          return endHold(tx, id, 'manual', { agentId: lead });
+        });
+        expect(ended).toBe(false);
+        await afterRoutingChanged(id, { category: false, group: true });
+        await afterTicketUpdate(id);
+        // Still held, so the console's pass assigned nobody.
+        expect((await ticketRow(id)).assigneeAgentId).toBeNull();
+      }),
+    ).toBe('decided');
+
+    expect(await tagged(id)).toBe(2);
+    expect(await ticketRow(id)).toMatchObject({
+      groupId: billingGroup,
+      assigneeAgentId: billing.agent,
+    });
+    expect(await timeline(id)).toEqual(['routed', 'group_changed', 'tagged', 'tagged', 'assigned']);
+    expect(await expectDecided(id, 'category')).toMatchObject({
+      decidedByLabel: 'jev:category',
+      toGroupId: t.sales.group,
+    });
+  });
+
+  it('a person’s category edit after phase one runs its own rules once, and the router gives its pass up', async () => {
+    // The console's category case, its lib half, in the moment after Jev's
+    // phase one commits: the edit finds the decision in flight on another
+    // category and runs its own pass (`routerDecidedOn`). The router's pass is
+    // for the category it decided on, which the ticket no longer carries; run
+    // on the ticket as it now is, it ran the person's rules a second time.
+    const t = await teams();
+    const lead = await agent('Laila');
+    const sales = await routeTo('sales', t.sales.group);
+    const support = await routeTo('customer_support', null);
+    await rule(
+      'on_update',
+      'Tag sales',
+      inCategory(sales),
+      [{ type: 'add_tags', tags: ['sales'] }],
+      0,
+    );
+    await rule(
+      'on_update',
+      'Tag customer support',
+      inCategory(support),
+      [{ type: 'add_tags', tags: ['support'] }],
+      1,
+    );
+    const { id } = await heldTicket(t.channel, t.home.group);
+    await jevFiles(id, sales);
+
+    expect(
+      await routeBetweenPhases(id, async () => {
+        expect((await setConversationCategory(id, support, { agentId: lead })).outcome).toBe(
+          'changed',
+        );
+        expect(await routeNow(id, { agentId: lead, label: 'agent' })).toBe('in_flight');
+        expect((await decision(id)).categoryId).toBe(sales);
+        await afterRoutingChanged(id, { category: true, group: false });
+        await afterTicketUpdate(id);
+      }),
+    ).toBe('decided');
+
+    // The category the ticket carries, once; the one it no longer does, never.
+    expect(await tagged(id)).toBe(1);
+    expect(await tags(id)).toEqual(['support']);
+    // Where phase one sent it, and assigned there once the passes were over.
+    expect(await ticketRow(id)).toMatchObject({
+      groupId: t.sales.group,
+      assigneeAgentId: t.sales.agent,
+      categoryId: support,
+    });
+    expect(await timeline(id)).toEqual(['routed', 'tagged', 'assigned']);
+    const row = await expectDecided(id, 'category');
+    expect(row).toMatchObject({ categoryId: sales, decidedByLabel: 'jev:category' });
+    expect(row.rulesClaimedAt).toBeInstanceOf(Date);
+    expect(row.rulesDoneAt).toBeInstanceOf(Date);
   });
 });
 

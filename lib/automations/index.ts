@@ -10,7 +10,7 @@ import {
   ticketForms,
   ticketStatuses,
 } from '@/db/schema';
-import { assignConversation } from '@/lib/assignment';
+import { assignConversation, recordLineIn } from '@/lib/assignment';
 import { afterHoldEnded } from '@/lib/routing/after-hold';
 import { endHold } from '@/lib/routing/end-hold';
 import { textToHtml } from '@/lib/html/sanitize';
@@ -246,25 +246,20 @@ async function applyAction(
    * ahead of `endHold`: the hold's `routed` line is stamped when it is written
    * (`CHANGE_STAMP`), so a line recorded after the commit — as these were —
    * sorted after the decision it was the reason for, where the console writes
-   * the move or the assignment first. In a savepoint of its own, whose failure
-   * is logged and rolled back to, because the line records the write and is
-   * not the write: refused, it must not take the move or the assignment, the
-   * hold's end or the follow-up they owe down with it, which it did not when it
-   * was written after the commit.
+   * the move or the assignment first. Stamped the same way, once the write
+   * holds the ticket's lock, and in a savepoint of its own whose refusal is
+   * logged and rolled back to, because the line records the write and is not
+   * the write; but a statement that got no answer fails the write with it
+   * (`recordLineIn`, which `assignConversation`'s move shares).
    */
   const recordIn = async (tx: Tx, type: string, data: Record<string, unknown>) => {
-    try {
-      await tx.transaction(async (savepoint) => {
-        await savepoint.insert(conversationEvents).values({
-          conversationId,
-          type,
-          actorLabel: `automation:${ruleName}`,
-          data,
-        });
-      });
-    } catch (error) {
-      log.error(`"${ruleName}" could not record ${type} on ${conversationId}`, error);
-    }
+    const refused = await recordLineIn(tx, {
+      conversationId,
+      type,
+      actorLabel: `automation:${ruleName}`,
+      data,
+    });
+    if (refused) log.error(`"${ruleName}" could not record ${type} on ${conversationId}`, refused);
   };
 
   switch (action.type) {

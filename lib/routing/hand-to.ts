@@ -163,17 +163,19 @@ export type HandToResult =
        * somebody was given it, and whenever the rota's answer was not that
        * nobody there could take it: a rule resolved the ticket
        * (`not_assignable`), somebody moved it meanwhile (`moved`), it is in no
-       * group (`no_group`). Saying it waits in the route group's queue then
-       * would be false, and the page re-drawn with the answer shows where it
-       * went.
+       * group (`no_group`), or the router is finishing a decision on it
+       * (`awaiting_route`) and its end of the hold assigns it. Saying it waits
+       * in the route group's queue then would be false, and the page re-drawn
+       * with the answer shows where it went.
        */
       waitsIn: { groupName: string; movedOn: boolean } | null;
       /**
        * The assignment after the hand-over threw, so who the rota picked is
        * not known: `assignedTo`, `skipped` and `waitsIn` are then null. Not
-       * that nobody holds the ticket — the hold's end, when the hand-over
-       * ended one, assigns again on its own (`afterHoldEnded`) — so the agent
-       * is told to look, rather than told where it waits.
+       * that nobody holds the ticket — the hold's end assigns again on its
+       * own (`afterHoldEnded`), the hand-over's when it ended one and the
+       * router's on a decision in flight — so the agent is told to look,
+       * rather than told where it waits.
        */
       assignmentFailed?: true;
     };
@@ -210,9 +212,16 @@ const WAITING: ReadonlySet<SkipReason> = new Set<SkipReason>([
  * In one transaction, the ticket's row first as every routing writer takes
  * it: the move (`moveToGroupIfElsewhere`, so a ticket already there writes
  * nothing), `group_changed`, the assignee cleared with `unassigned` when there
- * was one, and `endHold` as `manual` — a no-op on a ticket that never routed
- * or has been decided, which is every ticket `handToTarget` offers but the one
- * whose hold lapsed on a stuck job, and that one the agent has now decided.
+ * was one, and `endHold` as `manual`. That is a no-op on a ticket that never
+ * routed or has been decided, which is nearly every ticket `handToTarget`
+ * offers. It decides one whose hold lapsed on a stuck job before the router
+ * wrote anything: the agent has decided that one now. And it leaves alone one
+ * whose decision is in flight — phase one written, which only the router
+ * finishes (`endHold`) — offered because somebody holds it, or because its
+ * grace ran out on a router that stalled. Taking it off its holder within the
+ * grace puts it back in the hold, so the hand-over's own assignment answers
+ * `awaiting_route`, and the router's end of the hold assigns it, after its
+ * rules, in the group this moved it to or wherever they then sent it.
  * The two events are stamped as they are written (`CHANGE_STAMP`), because
  * both are in one transaction and `now()` would tie them.
  *

@@ -18,7 +18,7 @@ import { earlierMessages } from '@/lib/subcategorise-ai/context';
 import { errorMessage } from '@/lib/errors';
 import { logger } from '@/lib/log';
 import { routeNow } from '@/lib/routing/apply';
-import { undecidedRouting } from '@/lib/routing/state';
+import { routerDecidedOn, undecidedRouting, type UndecidedRouting } from '@/lib/routing/state';
 import { afterRoutingChanged } from '@/lib/sla';
 import { isCommentTicket } from '@/lib/tickets/channel-policy';
 import { skipReason } from '@/lib/tickets/classifiable';
@@ -326,9 +326,13 @@ export async function classifyMessageCategory(
  *   pass below: the router runs that pass itself, between its decision and the
  *   assignment, and a second would assign before the first had finished. If
  *   somebody decided in the moment between this commit and the router's lock,
- *   the router answers `none`, and who it was says what is owed
- *   (`decidedByHold`): a person or a rule, and this is a relabel after all; the
- *   router itself, and nothing is.
+ *   the router answers `none`, or `in_flight` for a decision part-way through,
+ *   and who it was, on what, and whether before this write or after it, says
+ *   what is owed (`routerDecidedOn`, the console's question too): a person or
+ *   a rule, or a router whose phase one decided on the category this write
+ *   replaced, and this is a relabel after all; a router that read this write,
+ *   and nothing is. Nor after a router that found the ticket in nobody's
+ *   queue, where Jev's answer parts from the console's (`decidedNotOpen`).
  * - **Undecided shadow** — the rest as though routing did not exist, after
  *   recording the would-be decision once the creation pass has begun routing
  *   (`holding`); while it is `pending`, `beginRouting` records it after the
@@ -349,50 +353,62 @@ export async function classifyMessageCategory(
  */
 async function afterCategoryApplied(
   conversationId: string,
-  write: CategoryWrite,
-  routing: Awaited<ReturnType<typeof undecidedRouting>>,
+  write: Extract<CategoryWrite, { outcome: 'changed' }>,
+  routing: UndecidedRouting | null,
 ): Promise<void> {
   if (routing && !routing.shadow) {
     if (routing.stage === 'pending') return;
     const routed = await routeNow(conversationId, { label: CATEGORY_AI_ACTOR });
-    if (routed !== 'none') return;
-    if (!(await decidedByHold(conversationId))) return;
+    // `decided` ran the pass itself, and `failed` left the hold, and the pass,
+    // to `settle_routing`.
+    if (routed !== 'none' && routed !== 'in_flight') return;
+    // A router whose phase one came before this write decided on the category
+    // it replaced: its pass ran on that one, or gives up on finding this one,
+    // so nothing runs this category's rules but the relabel below. A late
+    // answer to an earlier message, taking the settle over from a later one
+    // the router is still finishing, met that decision `in_flight` and once
+    // returned here, and no rule keyed on what it wrote ever ran.
+    if (
+      write.to &&
+      (await routerDecidedOn(conversationId, {
+        categoryId: write.to,
+        phaseOneWritten: routing.phaseOneWritten,
+      }))
+    ) {
+      return;
+    }
+    if (await decidedNotOpen(conversationId)) return;
   } else if (routing?.stage === 'holding') {
     await routeNow(conversationId, { label: CATEGORY_AI_ACTOR });
   }
-  await afterRoutingChanged(conversationId, {
-    category: write.outcome === 'changed',
-    group: false,
-  });
+  await afterRoutingChanged(conversationId, { category: true, group: false });
   await afterTicketUpdate(conversationId);
 }
 
 /**
- * Whether the decision on a ticket this write found held was made since by
- * `endHold` — a person or a rule deciding where the ticket goes — rather than
- * by the router. Asked only once `routeNow` has answered `none` there: somebody
- * decided in the moment between this write's commit and the router's lock.
+ * Whether the ticket this write found held was then decided `not_open` —
+ * resolved, deleted, merged or marked spam in the moment between this write's
+ * commit and the router's lock, which finds it in nobody's queue and owes it
+ * nothing — or is gone, purged with its routing row in that moment. The one
+ * answer where Jev's question parts from the console's (`routerDecidedOn`),
+ * and `decidedByHold`'s, which this replaces, is kept: a person's edit on a
+ * ticket resolved in its window meets its rules as an edit on any resolved
+ * ticket does, but Jev never files a resolved ticket, and a relabel here would
+ * be a first pass on work that ended after Jev looked.
  *
- * The router — the window's end, a person's category edit, this answer racing
- * another message's — decided under the ticket's lock after the commit, so on
- * the ticket carrying this category, and ran the update pass that decision
- * owed (`lib/routing/apply.ts`), or found the ticket in nobody's queue and
- * owed none. A relabel after it is a second pass, and every rule keyed on the
- * category fires twice: a canned reply sent twice, a note written twice — or
- * a first, on a ticket resolved in that moment. `endHold` decides without
- * looking at the category at all, so after a person or a rule the relabel is
- * still owed. A person ending a hold whose phase one the router had already
- * written keeps the router's outcome, and the router still runs the pass: it
- * claims it on `rules_claimed_at` alone, so a hold a person ended under it
- * costs nothing phase one owed (`finish` in `lib/routing/apply.ts`), and a
- * relabel here would be a second pass.
+ * On `none` the rest of `decidedByHold`'s answer is `routerDecidedOn`'s, which
+ * is strictly better there: the two agree on `endHold`'s outcomes and on a
+ * router that read this write, and part only on a router whose phase one came
+ * before it — the late answer whose phase three ended the hold in the moment
+ * after this write committed, which `decidedByHold` took for the router having
+ * run this category's rules, when it had run the old one's.
  */
-async function decidedByHold(conversationId: string): Promise<boolean> {
+async function decidedNotOpen(conversationId: string): Promise<boolean> {
   const [row] = await db
     .select({ outcome: routingDecisions.outcome })
     .from(routingDecisions)
     .where(eq(routingDecisions.conversationId, conversationId));
-  return row?.outcome === 'manual' || row?.outcome === 'rule';
+  return !row || row.outcome === 'not_open';
 }
 
 type TicketState = {

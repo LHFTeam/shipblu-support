@@ -43,7 +43,9 @@ export async function storeAgentReply(
   const messageId = inserted[0]!.id;
 
   // A person answering a ticket held for the router has decided for it: the
-  // hold ends with the reply, in its transaction (`endHold`).
+  // hold ends with the reply, in its transaction (`endHold`). Not once the
+  // router has written its decision (phase one): that decision is the
+  // router's to finish, and the reply ends nothing.
   const endedHold = await db.transaction(async (tx) => {
     await tx
       .update(conversations)
@@ -61,7 +63,10 @@ export async function storeAgentReply(
   await onAgentReply(conversationId);
 
   // What the hold kept back: the assignment, and an out-of-hours reply that
-  // the agent's answer has made moot, which its guard then skips.
+  // the agent's answer has made moot, which its guard then skips. Owed here
+  // only when the reply ended the hold; on a decision in flight the router's
+  // own end of it pays both, after the category's rules, so the assignment
+  // lands in whichever group they leave the ticket.
   if (endedHold) await afterHoldEnded(conversationId);
 
   // Web chat has no outbound provider: writing the row *is* delivery, because

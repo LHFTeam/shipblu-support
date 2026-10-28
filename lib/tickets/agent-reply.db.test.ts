@@ -1,4 +1,5 @@
 import { and, eq, sql } from 'drizzle-orm';
+import { PgDatabase } from 'drizzle-orm/pg-core';
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 import { db } from '@/db/client';
 import {
@@ -14,12 +15,14 @@ import {
   jobs,
   messages,
   routingDecisions,
+  ticketCategories,
   ticketStatuses,
 } from '@/db/schema';
 import { assignConversation } from '@/lib/assignment';
+import { setConversationCategory } from '@/lib/categories/write';
 import { forgetCategoryAiSettings } from '@/lib/category-ai/settings';
 import { forgetHoursCatalog } from '@/lib/hours/catalog';
-import { settleRouting } from '@/lib/routing/apply';
+import { routeNow, settleRouting } from '@/lib/routing/apply';
 import { beginRouting } from '@/lib/routing/begin';
 import { isHeld } from '@/lib/routing/hold';
 import { routingWindowValues, startRouting } from '@/lib/routing/start';
@@ -151,7 +154,8 @@ describe('storeAgentReply', () => {
  * group's rota, and the held out-of-hours reply, which the agent's answer has
  * made moot. On a ticket that never entered routing, the reply does what it
  * always did and assigns nobody; on one a shadow channel only watches, it
- * decides nothing (`decidesShadow`).
+ * decides nothing (`decidesShadow`); and on one whose decision the router has
+ * already written, it ends nothing, and the router finishes it.
  *
  * The seeded calendar is shut for good, so the held acknowledgement would go
  * the moment anything paid it without its answered guard. The group assigns
@@ -378,6 +382,74 @@ describe('storeAgentReply on a ticket held for routing', () => {
 
     expect(await decisionOf(t.id)).toEqual(decided);
     expect(await routedEvents(t.id)).toMatchObject([{ data: { outcome: 'fallback' } }]);
+  });
+
+  // Once the router has written its decision (phase one), the decision is the
+  // router's to finish: the reply is stored and ends nothing, and the router's
+  // own end of the hold assigns the ticket after the category's rules, in the
+  // group they leave it. Ended by the reply, the hold let the rota assign
+  // before those rules had run, and a rule moving the ticket on left the
+  // holder behind.
+  it('on a ticket whose decision is in flight, ends nothing, and leaves the router to assign it', async () => {
+    const t = await heldMail();
+    const [samir] = await db
+      .insert(agents)
+      .values({
+        name: 'Samir',
+        email: 'samir@shipblu.test',
+        presence: 'online',
+        lastSeenAt: new Date(),
+      })
+      .returning({ id: agents.id });
+    const [sales] = await db
+      .insert(groups)
+      .values({ name: 'Sales', assignmentStrategy: 'round_robin', assignWithinHoursOnly: false })
+      .returning({ id: groups.id });
+    await db.insert(groupMembers).values({ groupId: sales!.id, agentId: samir!.id });
+    const [category] = await db
+      .update(ticketCategories)
+      .set({ routeGroupId: sales!.id })
+      .where(eq(ticketCategories.key, 'sales'))
+      .returning({ id: ticketCategories.id });
+    expect(
+      (await setConversationCategory(t.id, category!.id, { label: 'jev:category' })).outcome,
+    ).toBe('changed');
+
+    // The reply lands the moment Jev's phase one commits.
+    const transaction = PgDatabase.prototype.transaction;
+    let meanwhile: unknown;
+    vi.spyOn(PgDatabase.prototype, 'transaction').mockImplementationOnce(async function (
+      this: PgDatabase<never>,
+      run,
+      config,
+    ) {
+      const result: unknown = await transaction.call(this, run, config);
+      await reply(t.id, t.omar);
+      meanwhile = { decision: await decisionOf(t.id), ticket: await ticketRow(t.id) };
+      return result as never;
+    });
+    expect(await routeNow(t.id, { label: 'jev:category' })).toBe('decided');
+
+    // Stored, and nothing else: the decision still the router's, the ticket
+    // still held.
+    expect(meanwhile).toMatchObject({
+      decision: { stage: 'holding', outcome: 'category', decidedByAgentId: null },
+      ticket: { groupId: sales!.id, assigneeAgentId: null, routingDecidedAt: null },
+    });
+    // Then the router finished it, under its own name, and assigned it.
+    expect(await decisionOf(t.id)).toMatchObject({
+      stage: 'decided',
+      outcome: 'category',
+      decidedByLabel: 'jev:category',
+      decidedByAgentId: null,
+    });
+    expect(await routedEvents(t.id)).toMatchObject([
+      { actorAgentId: null, actorLabel: 'routing', data: { outcome: 'category' } },
+    ]);
+    expect(await ticketRow(t.id)).toMatchObject({ groupId: sales!.id, assigneeAgentId: samir!.id });
+    expect((await ticketRow(t.id)).routingDecidedAt).toBeInstanceOf(Date);
+    // Answered, so the held acknowledgement is not sent.
+    expect(await acknowledgements(t.id)).toEqual([]);
   });
 
   // Nothing holds a shadow ticket, so the rota assigned it on arrival — which a

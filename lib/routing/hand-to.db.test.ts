@@ -1,4 +1,5 @@
 import { and, asc, eq, inArray, sql } from 'drizzle-orm';
+import { PgDatabase } from 'drizzle-orm/pg-core';
 import { describe, expect, it, vi } from 'vitest';
 import { db } from '@/db/client';
 import {
@@ -19,8 +20,8 @@ import { assignConversation } from '@/lib/assignment';
 import { setConversationCategory } from '@/lib/categories/write';
 import { withCleanDatabase } from '@/lib/testing/db';
 import { holdNextTransaction } from '@/lib/testing/hold-transaction';
-import { settleRouting } from './apply';
-import { handToRouteGroup } from './hand-to';
+import { routeNow, settleRouting } from './apply';
+import { handToRouteGroup, type HandToResult } from './hand-to';
 import { ROUTING_GRACE_MS } from './hold';
 
 /**
@@ -508,6 +509,69 @@ describe('handToRouteGroup', () => {
       { type: 'unassigned', afterPrevious: true },
       { type: 'routed', afterPrevious: true },
       { type: 'assigned', afterPrevious: true },
+    ]);
+  });
+
+  // A ticket somebody holds is offered the hand-over even while the router is
+  // finishing a decision on it — phase one written, its rules still to run —
+  // here one the router found `taken`. The move and the unassignment stand
+  // and end nothing (`endHold`): taken off its holder, the ticket is held
+  // again, so the hand-over's own assignment waits, and its answer names no
+  // queue. The router's end of the hold, after its rules, assigns it in the
+  // group it was handed to. Ending the hold itself, the hand-over assigned
+  // before the router's pass, which then ran on a ticket somebody held.
+  it('on a decision in flight, moves and unassigns, and leaves the assignment to the router', async () => {
+    const lina = await agent('Lina Care');
+    const omar = await agent('Omar Sales');
+    const mona = await agent('Mona Supervisor', { role: 'supervisor' });
+    const care = await group('Customer Care', [lina]);
+    const sales = await group('Inbound Sales Team', [omar]);
+    const salesCategory = await category('sales', sales);
+    const id = await heldTicket(await instagram(), care, new Date(Date.now() + 3 * MINUTE), {
+      assigneeAgentId: lina,
+    });
+    expect(
+      (await setConversationCategory(id, salesCategory, { label: 'jev:category' })).outcome,
+    ).toBe('changed');
+
+    // The hand-over lands the moment Jev's phase one commits.
+    let handed: HandToResult | undefined;
+    const transaction = PgDatabase.prototype.transaction;
+    vi.spyOn(PgDatabase.prototype, 'transaction').mockImplementationOnce(async function (
+      this: PgDatabase<never>,
+      run,
+      config,
+    ) {
+      const result: unknown = await transaction.call(this, run, config);
+      handed = await handToRouteGroup(
+        id,
+        { agentId: mona },
+        { expectedGroupId: sales, expectedAssigneeId: lina },
+      );
+      return result as never;
+    });
+    expect(await routeNow(id, { label: 'jev:category' })).toBe('decided');
+    vi.restoreAllMocks();
+
+    expect(handed).toEqual({
+      ok: true,
+      groupName: 'Inbound Sales Team',
+      assignedTo: null,
+      skipped: 'awaiting_route',
+      waitsIn: null,
+    });
+    expect(await row(id)).toMatchObject({ groupId: sales, assignee: omar });
+    expect((await row(id)).decidedAt).not.toBeNull();
+    const [decision] = await db
+      .select({ stage: routingDecisions.stage, outcome: routingDecisions.outcome })
+      .from(routingDecisions)
+      .where(eq(routingDecisions.conversationId, id));
+    expect(decision).toEqual({ stage: 'decided', outcome: 'taken' });
+    expect(await eventsOf(id)).toMatchObject([
+      { type: 'routed', actorLabel: 'routing', data: { outcome: 'taken', moved: false } },
+      { type: 'group_changed', actorAgentId: mona, data: { to: sales, from: care } },
+      { type: 'unassigned', actorAgentId: mona, data: { from: lina } },
+      { type: 'assigned', data: { to: omar } },
     ]);
   });
 

@@ -1452,6 +1452,104 @@ describe('classifyMessageCategory, on a ticket routing by category', () => {
     expect(await where(id)).toMatchObject({ groupId: r.home.group, assigneeAgentId: r.home.agent });
   });
 
+  // Two messages, two answers, and the later message's answered first: its
+  // decision is on sales, and the earlier one's answer, customer support, lands
+  // while that decision is still in flight. The router's pass ran on sales, so
+  // customer support's rules are this answer's to run; returning on `in_flight`
+  // left a category written and not one rule keyed on it run.
+  it('runs the rules of a category answered late, while the router finishes a decision on another', async () => {
+    const r = await routing();
+    const { id, message: first } = await mailTicket(r);
+    const later = await inbound(id, 'فين الشحنه', { createdAt: new Date(Date.now() + 1_000) });
+    const cs = await categoryId('customer_support');
+    await db.insert(automationRules).values({
+      name: 'Tag customer support',
+      trigger: 'on_update',
+      conditions: { field: 'category.id', op: 'eq', value: cs },
+      actions: [{ type: 'add_tags', tags: ['cs'] }],
+    });
+
+    // The later message answered first: sales, routed, and its phase three lost
+    // (the transaction ending the hold fails), so the row stays holding with
+    // phase one written and the pass done.
+    answers('sales');
+    const real = PgDatabase.prototype.transaction;
+    const spy = vi
+      .spyOn(PgDatabase.prototype, 'transaction')
+      .mockImplementationOnce(function (this: PgDatabase<never>, run, config) {
+        return real.call(this, run, config) as never;
+      })
+      .mockImplementationOnce(function (this: PgDatabase<never>, run, config) {
+        return real.call(this, run, config) as never;
+      })
+      .mockImplementationOnce(() => Promise.reject(new Error('the connection was lost')));
+    await classifyMessageCategory(later, { baseUrl: BASE });
+    spy.mockRestore();
+    errors.mockClear();
+    expect(await decisionOf(id)).toMatchObject({
+      stage: 'holding',
+      categoryId: await categoryId('sales'),
+    });
+
+    // The earlier message answered late takes the settle over.
+    answers('customer_support');
+    await expect(classifyMessageCategory(first, { baseUrl: BASE })).resolves.toMatchObject({
+      outcome: 'applied',
+    });
+    expect(await carried(id)).toBe(cs);
+
+    // The window's job completes the decision, phase one a couple of minutes old.
+    await db
+      .update(routingDecisions)
+      .set({ phaseOneAt: new Date(Date.now() - 2 * 60_000) })
+      .where(eq(routingDecisions.conversationId, id));
+    expect(await settleRouting(id)).toBe('decided');
+
+    const tags = (await eventsOf(id, 'tagged')).map((e) => JSON.stringify(e.data));
+    expect(tags.filter((t) => t.includes('"cs"')).length).toBe(1);
+  });
+
+  it('runs them too when the late answer lands between the router’s pass and its end of the hold', async () => {
+    const r = await routing();
+    const { id, message: first } = await mailTicket(r);
+    const later = await inbound(id, 'فين الشحنه', { createdAt: new Date(Date.now() + 1_000) });
+    const cs = await categoryId('customer_support');
+    await db.insert(automationRules).values({
+      name: 'Tag customer support',
+      trigger: 'on_update',
+      conditions: { field: 'category.id', op: 'eq', value: cs },
+      actions: [{ type: 'add_tags', tags: ['cs'] }],
+    });
+
+    answers('sales');
+    const real = PgDatabase.prototype.transaction;
+    let tookOver: unknown = null;
+    vi.spyOn(PgDatabase.prototype, 'transaction')
+      .mockImplementationOnce(function (this: PgDatabase<never>, run, config) {
+        return real.call(this, run, config) as never;
+      })
+      .mockImplementationOnce(function (this: PgDatabase<never>, run, config) {
+        return real.call(this, run, config) as never;
+      })
+      .mockImplementationOnce(async function (this: PgDatabase<never>, run, config) {
+        // The router's pass has run on sales; its phase three is about to open.
+        answers('customer_support');
+        tookOver = await classifyMessageCategory(first, { baseUrl: BASE });
+        return real.call(this, run, config) as never;
+      });
+    await classifyMessageCategory(later, { baseUrl: BASE });
+    vi.mocked(PgDatabase.prototype.transaction).mockRestore?.();
+
+    expect(tookOver).toMatchObject({ outcome: 'applied' });
+    expect(await carried(id)).toBe(cs);
+    expect(await decisionOf(id)).toMatchObject({
+      stage: 'decided',
+      categoryId: await categoryId('sales'),
+    });
+    const tags = (await eventsOf(id, 'tagged')).map((e) => JSON.stringify(e.data));
+    expect(tags.filter((t) => t.includes('"cs"')).length).toBe(1);
+  });
+
   it('relabels a ticket that never entered routing, as before Stage 5', async () => {
     answers('sales');
     const r = await routing();

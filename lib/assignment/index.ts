@@ -23,6 +23,7 @@ import { isHeld } from '@/lib/routing/hold';
 import { conversationFacts } from '@/lib/rules/facts';
 import { isReadOnlyChannel } from '@/lib/tickets/channel-policy';
 import { openBacklog } from '@/lib/tickets/backlog';
+import { CHANGE_STAMP } from '@/lib/tickets/change-stamp';
 import { moveToGroupIfElsewhere } from '@/lib/tickets/move-group';
 import { lockedStatusCategory, statusCategoryOf } from '@/lib/tickets/status-category';
 import { recordOwnerAssigned } from '@/lib/whatsapp/number-owner';
@@ -432,6 +433,10 @@ async function routeAndPick(
       // this mine?" answerable — it names the mechanism, and the rule when a
       // rule asked.
       actorLabel: options.actorLabel ?? 'auto_assign',
+      // Stamped under the lock this transaction may have waited for, never at
+      // its start: an edit committed while the pick waited would otherwise
+      // sort after the assignment that followed it (`CHANGE_STAMP`).
+      createdAt: CHANGE_STAMP,
       data: {
         to: agentId,
         strategy,
@@ -544,11 +549,9 @@ async function moveToGroup(
 
 /**
  * The `group_changed` line for a move this call made, in the move's
- * transaction, inside a savepoint (`tx.transaction`) whose failure is rolled
- * back to and logged. The line records the move and is not the move: refused,
- * it must not take the move, the hold's end or the follow-up they owe down with
- * it, which it never did while it was written after the commit. The engine's
- * `assign_group` writes its line the same way (`recordIn`).
+ * transaction and ahead of the hold's end, logged when refused
+ * (`recordLineIn`). The engine's `assign_group` writes its line the same way
+ * (`recordIn`).
  */
 async function recordGroupChanged(
   tx: Tx,
@@ -556,26 +559,99 @@ async function recordGroupChanged(
   groupId: string,
   actorLabel: string,
 ): Promise<void> {
+  const refused = await recordLineIn(tx, {
+    conversationId,
+    type: 'group_changed',
+    actorLabel,
+    data: { to: groupId },
+  });
+  if (refused) {
+    log.error(`could not record the move of ${conversationId} to group ${groupId}`, refused);
+  }
+}
+
+/**
+ * A timeline line written inside the transaction of the write it records — a
+ * rule's move or assignment, or this module's move for one — in a savepoint of
+ * its own (`tx.transaction`). Answers the refusal, for the caller to log in its
+ * own words, or null once the line is written.
+ *
+ * In the write's transaction, ahead of `endHold`, so the timeline reads the
+ * write before the `routed` line it caused; and stamped once the write holds
+ * the ticket's lock (`CHANGE_STAMP`), never at the transaction's start, which
+ * after a wait on that lock sorts the line before an event committed while it
+ * waited.
+ *
+ * In a savepoint because the line records the write and is not the write:
+ * refused by Postgres — a trigger, a constraint — it is rolled back to and
+ * answered, and the write, the hold's end and the follow-up they owe all
+ * stand, as they did while the line was written after the commit. Only a
+ * refusal. A statement that got no answer — the admission gate giving it up as
+ * lost, or a cancel, either way `57014` — is thrown on, so the body fails and
+ * its transaction rolls back, which is what `db/client.ts` relies on once it
+ * has told the caller the transaction failed: swallowed here, the body went on
+ * queueing `endHold` behind the stuck statement, and a connection that
+ * answered after all committed a move and a hold's end the caller had been
+ * told had failed, with nothing owed for either ever run.
+ */
+export async function recordLineIn(
+  tx: Tx,
+  line: Omit<typeof conversationEvents.$inferInsert, 'createdAt'>,
+): Promise<unknown> {
   try {
     await tx.transaction(async (savepoint) => {
-      await savepoint.insert(conversationEvents).values({
-        conversationId,
-        type: 'group_changed',
-        actorLabel,
-        data: { to: groupId },
-      });
+      await savepoint.insert(conversationEvents).values({ ...line, createdAt: CHANGE_STAMP });
     });
+    return null;
   } catch (error) {
-    log.error(`could not record the move of ${conversationId} to group ${groupId}`, error);
+    if (refusedByPostgres(error)) return error;
+    throw error;
   }
+}
+
+/** `query_canceled`: a statement cancelled, or given up on by the admission gate. */
+const QUERY_CANCELED = '57014';
+
+/**
+ * Whether Postgres itself answered a statement with an error, other than a
+ * cancel: postgres.js's `PostgresError`, which drizzle hands on as the `cause`
+ * of its own error for a statement it issued, and postgres.js throws bare for
+ * the savepoint statements it writes itself. Known by its name, because
+ * postgres.js is loaded as a value by `db/client.ts` alone
+ * (`pool-confinement`); the name is the class's own, and survives because
+ * neither the worker (`tsx`) nor Next (`serverExternalPackages`) bundles the
+ * package. The admission gate's own errors are plain ones carrying `57014`,
+ * and Postgres's answer to a cancel is a `PostgresError` carrying it too.
+ */
+function refusedByPostgres(error: unknown): boolean {
+  const cause = error instanceof Error ? error.cause : undefined;
+  return [error, cause].some(
+    (candidate) =>
+      candidate instanceof Error &&
+      candidate.name === 'PostgresError' &&
+      (candidate as Error & { code?: unknown }).code !== QUERY_CANCELED,
+  );
 }
 
 /**
  * Give an unassigned owned ticket back to its number's owner.
  *
- * Guarded on `assignee_agent_id IS NULL` in the write itself, like every other
- * entry point here: an agent may have picked the ticket up since it was read,
- * and they keep it. No group lock, because no cursor or roster is read.
+ * The ticket's row is locked and read again first, as the rota's pick reads it
+ * (`routeAndPick`), and for the same reason: the owner was chosen off a
+ * snapshot, and an agent resolving the ticket, a merge, a delete or a spam
+ * mark landing since left a finished ticket handed to the owner, with an
+ * `assigned` line after the resolve — the guarded write alone asks only
+ * whether somebody holds it. So is the owner it was chosen for: a handover
+ * since makes the ticket somebody else's to answer for, and deactivating the
+ * owner makes the number a team number (`effectiveOwnerId`). Either way this
+ * answers `not_assignable`, and the next pass reads the ticket as it now is.
+ * No join under the lock, so the status and the owner's activity are
+ * subqueries (`statusCategoryOf`, `lib/tickets/status-category.ts`); NO KEY
+ * UPDATE, as every lock on a ticket's row is.
+ *
+ * Still guarded on `assignee_agent_id IS NULL` in the write itself, like every
+ * other entry point here: an agent who picked the ticket up keeps it. No group
+ * lock, because no cursor or roster is read.
  */
 async function handBackToOwner(
   conversationId: string,
@@ -584,6 +660,35 @@ async function handBackToOwner(
   { actorLabel, now }: { actorLabel: string | undefined; now: Date },
 ): Promise<Picked> {
   return db.transaction(async (tx) => {
+    const [current] = await tx
+      .select({
+        assigneeAgentId: conversations.assigneeAgentId,
+        accountableAgentId: conversations.accountableAgentId,
+        accountableActive: sql<
+          boolean | null
+        >`(select ${agents.isActive} from ${agents} where ${agents.id} = ${conversations.accountableAgentId})`,
+        channel: conversations.channel,
+        statusId: conversations.statusId,
+        statusCategory: statusCategoryOf(),
+        deletedAt: conversations.deletedAt,
+        isSpam: conversations.isSpam,
+        mergedIntoId: conversations.mergedIntoId,
+      })
+      .from(conversations)
+      .where(eq(conversations.id, conversationId))
+      .for('no key update');
+    if (!current) return { assignedTo: null, reason: 'not_assignable' as SkipReason };
+    if (current.assigneeAgentId) {
+      return { assignedTo: null, reason: 'already_assigned' as SkipReason };
+    }
+    const statusCategory = await lockedStatusCategory(tx, current);
+    if (!isWorkToHandOut({ ...current, statusCategory })) {
+      return { assignedTo: null, reason: 'not_assignable' as SkipReason };
+    }
+    if (current.accountableAgentId !== ownerId || current.accountableActive !== true) {
+      return { assignedTo: null, reason: 'not_assignable' as SkipReason };
+    }
+
     const updated = await tx
       .update(conversations)
       .set({ assigneeAgentId: ownerId, assignedAt: now })

@@ -1,4 +1,5 @@
 import { and, asc, eq, inArray, sql } from 'drizzle-orm';
+import postgres from 'postgres';
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 import { db } from '@/db/client';
 import {
@@ -17,6 +18,7 @@ import {
 import { beginRouting } from '@/lib/routing/begin';
 import { routingWindowValues, startRouting } from '@/lib/routing/start';
 import { withCleanDatabase } from '@/lib/testing/db';
+import { untilWaitingOnALock } from '@/lib/testing/hold-transaction';
 import { runAutomations } from './index';
 
 /**
@@ -292,6 +294,70 @@ describe('a rule ending a routing hold', () => {
         expect.stringContaining('could not record'),
       ]);
       errors.mockClear();
+    },
+  );
+});
+
+// A rule's line is written in the transaction that makes its move, and that
+// transaction can begin while another writer holds the ticket. Stamped with
+// the transaction's start, the line sorted before a change committed while it
+// waited — though the move could not happen until then. `CHANGE_STAMP`
+// stamps it when it is written, under the lock, as `endHold` and Hand to do.
+describe('a rule line written after a wait on the ticket', () => {
+  it.each(['assign_group', 'auto_assign'] as const)(
+    '%s: sorts after the change it waited for',
+    async (kind) => {
+      const { care, sales, channelId } = await teams();
+      await onUpdate('Sales mail goes to Sales', [
+        kind === 'assign_group'
+          ? { type: 'assign_group', groupId: sales }
+          : { type: 'auto_assign', groupId: sales, strategy: 'group_default' },
+      ]);
+      const id = await heldTicket(channelId, care);
+
+      // Another writer — as the console's priority case does — holds the row as
+      // the rule's transaction begins, then stamps its own line once it writes.
+      const other = postgres(process.env.TEST_DATABASE_URL!, {
+        max: 1,
+        prepare: false,
+        onnotice: () => {},
+      });
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => (release = resolve));
+      let locked!: () => void;
+      const isLocked = new Promise<void>((resolve) => (locked = resolve));
+      try {
+        const writer = other.begin(async (tx) => {
+          await tx`select id from conversations where id = ${id} for no key update`;
+          locked();
+          await gate;
+          await tx`update conversations set priority = 'urgent' where id = ${id}`;
+          await tx`insert into conversation_events (conversation_id, type, actor_label, data, created_at)
+                   values (${id}, 'priority_changed', 'agent', '{"to":"urgent"}', clock_timestamp())`;
+        });
+        await isLocked;
+        const pass = runAutomations('on_update', id);
+        await untilWaitingOnALock(db);
+        release();
+        await writer;
+        await pass;
+      } finally {
+        await other.end();
+      }
+
+      const order = (
+        await db
+          .select({ type: conversationEvents.type })
+          .from(conversationEvents)
+          .where(
+            and(
+              eq(conversationEvents.conversationId, id),
+              inArray(conversationEvents.type, ['group_changed', 'priority_changed']),
+            ),
+          )
+          .orderBy(asc(conversationEvents.createdAt), asc(conversationEvents.id))
+      ).map((line) => line.type);
+      expect(order).toEqual(['priority_changed', 'group_changed']);
     },
   );
 });

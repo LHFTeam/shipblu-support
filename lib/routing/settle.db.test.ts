@@ -31,6 +31,7 @@ import { PermanentJobError, type ClaimedJob } from '@/lib/queue';
 import { applySlaOnCreate } from '@/lib/sla';
 import { withCleanDatabase } from '@/lib/testing/db';
 import { stubFetch } from '@/lib/testing/fetch';
+import { storeAgentReply } from '@/lib/tickets/agent-reply';
 import { afterTicketUpdate } from '@/lib/tickets/lifecycle';
 import { settleRoutingJob } from '@/worker/handlers/settle-routing';
 import { PHASE_ONE_RESUME_MS, RULES_RUNNING_MS, routeNow, settleRouting } from './apply';
@@ -990,8 +991,8 @@ describe('a decision interrupted between its phases', () => {
     // The minute that makes a caller "gone" is silence, not proof. The window's
     // job finishes this decision without the rules on a ticket resolved since;
     // the caller that wrote phase one then wakes and asks the claim alone
-    // whether its pass is still to run — a person deciding the row meanwhile
-    // leaves the pass owed — so the job's answer has to be in the claim.
+    // whether its pass is still to run, so the job's answer has to be in the
+    // claim.
     await closedEverywhere();
     await outOfHoursReply();
     const t = await teams();
@@ -1029,6 +1030,129 @@ describe('a decision interrupted between its phases', () => {
     const decided = await expectDecided(id, 'category');
     expect(decided.rulesClaimedAt).toBeInstanceOf(Date);
     expect(decided.rulesDoneAt).toBeNull();
+  });
+
+  // An agent's reply in the gap ends nothing and decides nothing (`endHold`),
+  // so the window's job resumes the decision as it would for any caller that
+  // stalled, finds the ticket resolved, and gives the pass up; the caller,
+  // waking, finds the pass claimed. Decided by the reply instead, the row was
+  // one the job never resumes, and the woken caller ran its rules on the
+  // resolved ticket.
+  it('runs nothing on a ticket resolved since, though an agent answered it in between', async () => {
+    await closedEverywhere();
+    await outOfHoursReply();
+    const t = await teams();
+    const sales = await routeTo('sales', t.sales.group);
+    await rule('on_update', 'Tag everything', always, [{ type: 'add_tags', tags: ['ran'] }]);
+    const { id } = await heldTicket(t.channel, t.home.group);
+    await jevFiles(id, sales);
+
+    const transaction = PgDatabase.prototype.transaction;
+    vi.spyOn(PgDatabase.prototype, 'transaction').mockImplementationOnce(async function (
+      this: PgDatabase<never>,
+      run,
+      config,
+    ) {
+      const result: unknown = await transaction.call(this, run, config);
+      await storeAgentReply(id, 'email', {
+        authorAgentId: t.home.agent,
+        bodyText: 'Sorted, closing this.',
+        bodyHtml: '<p>Sorted, closing this.</p>',
+      });
+      await db
+        .update(conversations)
+        .set({ statusId: await status('Resolved'), resolvedAt: new Date() })
+        .where(eq(conversations.id, id));
+      expect(await settleRouting(id, new Date(Date.now() + 2 * MINUTE))).toBe('none');
+      return result as never;
+    });
+    expect(await routeNow(id, { label: 'jev:category' })).toBe('decided');
+
+    const [row] = await db
+      .select({ tags: conversations.tags, assigneeAgentId: conversations.assigneeAgentId })
+      .from(conversations)
+      .where(eq(conversations.id, id));
+    expect(row).toEqual({ tags: [], assigneeAgentId: null });
+    expect(await acknowledgements(id)).toEqual([]);
+    // The router's decision, ended by the window's job with the pass given up.
+    const decided = await expectDecided(id, 'category');
+    expect(decided).toMatchObject({ decidedByLabel: 'jev:category', decidedByAgentId: null });
+    expect(decided.rulesClaimedAt).toBeInstanceOf(Date);
+    expect(decided.rulesDoneAt).toBeNull();
+  });
+
+  // The router's claim on its pass fails — a connection lost, a deploy's
+  // shutdown — after an agent answered in the gap. The reply took nothing
+  // over (`endHold`), so the row is still undecided with its pass unclaimed,
+  // and the window's job completes both once phase one is a minute old.
+  // Decided by the reply, the row was one the job never resumes: the
+  // category's rules and the policy's second look were lost for good.
+  it('completes the pass a failed claim left owed, though an agent answered in between', async () => {
+    errorsExpected = true;
+    const t = await teams();
+    const sales = await routeTo('sales', t.sales.group);
+    await rule('on_update', 'Merchant sales to Merchant Care', inCategory(sales), [
+      { type: 'assign_group', groupId: t.care.group },
+    ]);
+    const { id } = await heldTicket(t.channel, t.home.group);
+    await jevFiles(id, sales);
+
+    await db.execute(sql`
+      create function refuse_claim() returns trigger language plpgsql
+      as $$ begin raise exception 'the connection was lost'; end $$`);
+    let result: Awaited<ReturnType<typeof routeNow>> | undefined;
+    try {
+      const transaction = PgDatabase.prototype.transaction;
+      vi.spyOn(PgDatabase.prototype, 'transaction').mockImplementationOnce(async function (
+        this: PgDatabase<never>,
+        run,
+        config,
+      ) {
+        const written: unknown = await transaction.call(this, run, config);
+        await storeAgentReply(id, 'email', {
+          authorAgentId: t.home.agent,
+          bodyText: 'Looking into it now.',
+          bodyHtml: '<p>Looking into it now.</p>',
+        });
+        await db.execute(sql`
+          create trigger refuse_claim before update on routing_decisions
+          for each row when (old.rules_claimed_at is null and new.rules_claimed_at is not null)
+          execute function refuse_claim()`);
+        return written as never;
+      });
+      result = await routeNow(id, { label: 'jev:category' });
+    } finally {
+      await db.execute(sql`drop trigger if exists refuse_claim on routing_decisions`);
+      await db.execute(sql`drop function refuse_claim()`);
+    }
+    expect(result).toBe('failed');
+    expect(await decision(id)).toMatchObject({
+      stage: 'holding',
+      outcome: 'category',
+      rulesClaimedAt: null,
+    });
+    expect(await ticketRow(id)).toMatchObject({
+      groupId: t.sales.group,
+      assigneeAgentId: null,
+      routingDecidedAt: null,
+    });
+
+    await phaseOneWritten(id, 2 * MINUTE);
+    expect(await settleRouting(id)).toBe('decided');
+
+    // The rule ran, before anybody was assigned, and the ticket is with
+    // Merchant Care's agent.
+    expect(await ticketRow(id)).toMatchObject({
+      groupId: t.care.group,
+      assigneeAgentId: t.care.agent,
+    });
+    expect((await events(id, 'group_changed')).map((event) => event.data.to)).toEqual([
+      t.care.group,
+    ]);
+    const row = await expectDecided(id, 'category');
+    expect(row).toMatchObject({ decidedByLabel: 'jev:category', decidedByAgentId: null });
+    expect(row.rulesClaimedAt).toBeInstanceOf(Date);
+    expect(row.rulesDoneAt).toBeInstanceOf(Date);
   });
 
   it('keeps the creation pass from assigning a ticket the router has taken', async () => {

@@ -4430,10 +4430,13 @@ gains another first, 0051 is regenerated rather than renumbered.
     the router's decision a rule ends nothing — its move is part of the pass
     the router waits for, and ending the hold there would let the next rule's
     group-less `auto_assign` hand the ticket out before a later rule moved it
-    — and a person ends the hold but keeps the router's outcome.
+    — and neither does a person: the decision is the router's to finish
+    (after the PR review, below).
   - **The classifier's `holding` case checks who decided when the router
-    answers `none`** (`decidedByHold`): after a person or a rule the relabel is
-    still owed, after the router it would fire every category rule twice.
+    answers `none` or `in_flight`** (`routerDecidedOn`, shared with the
+    console's edit): after a person, a rule or a `not_open` the relabel is still
+    owed, and after the router on another category too; after the router on
+    this one it would fire every category rule twice.
   - **`saveChannel` decides a WhatsApp row's mode inside its UPDATE**, a
     `case` on the coexistence object, and `complete_coexistence_onboarding`
     resets the column in the statement that takes the row's lock. Either alone
@@ -4615,6 +4618,49 @@ gains another first, 0051 is regenerated rather than renumbered.
     that finds the ticket no longer work gives the pass up by marking it
     claimed as it decides the row, so a caller that only stalled runs nothing
     when it wakes (`apply.db.test.ts`, `settle.db.test.ts`).
+  - **That let assignment beat the rules, and a stalled router run them on a
+    resolved ticket** (found by an adversarial review of the fixes; `end-hold.ts`,
+    `apply.ts`). A person deciding the row after phase one ran their
+    `afterHoldEnded` before the router's rules, so a rule's `assign_group` left
+    a Sales agent holding a Merchant Care ticket; the row they decided was one
+    the window's job never resumes, so a router that stalled ran its rules on a
+    ticket resolved since, and one whose claim failed lost the pass for good.
+    Once phase one has written, nothing but the router finishes the decision:
+    `endHold` ends nothing for a person either, their write stands, and the
+    router's phase three and `afterHoldEnded` follow its rules
+    (`apply.db.test.ts`, `settle.db.test.ts`, `agent-reply.db.test.ts`,
+    `hand-to.db.test.ts`).
+  - **The router's pass ran on a ticket nobody may work, or on a category it
+    never decided on** (the same review; `apply.ts`): the caller that wins the
+    claim gives the pass up on a ticket resolved, deleted, merged or marked spam
+    since phase one, and on one whose category changed since — whose writer
+    runs that category's pass itself, so each category's rules run once in
+    every order of two writers (`claimRules`; `apply.db.test.ts`).
+  - **Phase one's `routed` line sorted before the `category_changed` it decided
+    on** when phase one waited for that writer's lock (the same review;
+    `apply.ts`): stamped `CHANGE_STAMP`, as `endHold`'s is (`apply.db.test.ts`).
+  - **Jev's late answer on `in_flight` ran no rule for the category it wrote**
+    (the same review; `lib/category-ai/run.ts`): an earlier message answered
+    while a decision on another category was in flight returned without a
+    relabel. It asks `routerDecidedOn` (`lib/routing/state.ts`), shared with
+    the console (`run.db.test.ts`).
+  - **A console category edit on a ticket resolved in its window ran no
+    update rules** (the same review; `routerDecidedOn`): `not_open` counted as
+    the router's pass; it answers false, as the router owed that ticket nothing
+    (`ticket-actions.db.test.ts`).
+  - **A rule's lines inside the move's transaction were stamped with its
+    start** (the same review; the engine, `lib/assignment/index.ts`), so after a
+    wait on the ticket's lock they sorted before a change committed meanwhile:
+    `recordLineIn`, shared by both, stamps `CHANGE_STAMP`
+    (`routing-events.db.test.ts`).
+  - **A refusal swallowed in that savepoint could hide a statement that
+    committed later** (the same review, unconfirmed): `recordLineIn` answers
+    only an error Postgres returned, and throws anything else on — the admission
+    gate's "lost", a cancel — so the transaction rolls back
+    (`lib/assignment/index.db.test.ts`).
+  - **The owner's path handed out a ticket resolved since its snapshot** (the
+    same review; `lib/assignment/index.ts`): the hand-back to a number's owner
+    takes the rota's locked re-read too (`lib/assignment/index.db.test.ts`).
   - **A console category edit meeting `none` or `in_flight` ran a second pass
     on the category the router had read** (`ticket-actions.ts`): it reads the
     routing stage in the write's own transaction, and skips its pass when the

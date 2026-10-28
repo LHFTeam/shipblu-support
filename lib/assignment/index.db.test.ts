@@ -1,5 +1,6 @@
 import { and, asc, eq, inArray, sql } from 'drizzle-orm';
-import { describe, expect, it } from 'vitest';
+import { PgDatabase } from 'drizzle-orm/pg-core';
+import { describe, expect, it, vi } from 'vitest';
 import { db } from '@/db/client';
 import {
   agentSkills,
@@ -22,7 +23,7 @@ import { ROUTING_GRACE_MS } from '@/lib/routing/hold';
 import { withCleanDatabase } from '@/lib/testing/db';
 import { holdNextTransaction } from '@/lib/testing/hold-transaction';
 import { afterTicketUpdate } from '@/lib/tickets/lifecycle';
-import { assignConversation } from './index';
+import { assignConversation, recordLineIn } from './index';
 
 /**
  * The owner's path through `assignConversation`, against Postgres: an
@@ -102,6 +103,14 @@ async function ticketRow(id: string) {
     .from(conversations)
     .where(eq(conversations.id, id));
   return row!;
+}
+
+async function statusId(name: string) {
+  const [row] = await db
+    .select({ id: ticketStatuses.id })
+    .from(ticketStatuses)
+    .where(eq(ticketStatuses.name, name));
+  return row!.id;
 }
 
 async function eventsOf(id: string, types: string[]) {
@@ -306,6 +315,35 @@ describe('assignConversation on a ticket whose WhatsApp number has an owner', ()
 
     expect(await ticketRow(ticket.id)).toMatchObject({ assignee: nayera, accountable: nayera });
   });
+
+  // The owner's path takes the same locked re-read the rota's does. Guarded
+  // only on the assignee, its UPDATE handed a ticket resolved, deleted or
+  // marked spam between the snapshot and the write straight to the owner, with
+  // an `assigned` line after the resolve.
+  it.each([
+    ['resolved', async () => ({ statusId: await statusId('Resolved') })],
+    ['deleted', async () => ({ deletedAt: new Date() })],
+    ['marked spam', async () => ({ isSpam: true })],
+  ] as const)(
+    'does not hand it back once it is %s between the read and the write',
+    async (_, change) => {
+      const nayera = await agent('Nayera Mohamed');
+      const ticket = await ownedTicket(nayera);
+
+      const hold = holdNextTransaction('before');
+      const assigning = assignConversation(ticket.id);
+      await hold.atHold;
+      await db
+        .update(conversations)
+        .set(await change())
+        .where(eq(conversations.id, ticket.id));
+      hold.release();
+
+      expect(await assigning).toMatchObject({ assignedTo: null, reason: 'not_assignable' });
+      expect((await ticketRow(ticket.id)).assignee).toBeNull();
+      expect(await eventsOf(ticket.id, ['assigned'])).toEqual([]);
+    },
+  );
 });
 
 // `createTicket`'s own `afterInboundMessage` assigns the ticket before it
@@ -856,5 +894,67 @@ describe('assignConversation on a ticket held for the router', () => {
         data: { to: merchants.agentId, strategy: 'round_robin' },
       },
     ]);
+  });
+});
+
+/**
+ * The line a write records inside its own transaction, in a savepoint: a
+ * refusal Postgres returned is answered and the write stands; anything else —
+ * the admission gate giving a statement up as lost, a cancel — is thrown on,
+ * so the transaction rolls back rather than queue the rest behind a statement
+ * that may yet commit.
+ */
+describe('recordLineIn', () => {
+  async function ticketOnPhone() {
+    const nayera = await agent('Nayera Mohamed');
+    return (await ownedTicket(nayera, { subject: 'Before' })).id;
+  }
+
+  async function subjectOf(id: string) {
+    const [row] = await db
+      .select({ subject: conversations.subject })
+      .from(conversations)
+      .where(eq(conversations.id, id));
+    return row!.subject;
+  }
+
+  it('answers a refusal Postgres returned, and the write it records still commits', async () => {
+    const id = await ticketOnPhone();
+    await db.execute(sql`
+      create function refuse_line() returns trigger language plpgsql
+      as $$ begin raise exception 'refused for the test'; end $$`);
+    await db.execute(sql`
+      create trigger refuse_line before insert on conversation_events
+      for each row when (new.type = 'group_changed') execute function refuse_line()`);
+    try {
+      const refused = await db.transaction(async (tx) => {
+        await tx.update(conversations).set({ subject: 'After' }).where(eq(conversations.id, id));
+        return recordLineIn(tx, { conversationId: id, type: 'group_changed', data: {} });
+      });
+      expect(refused).toBeInstanceOf(Error);
+    } finally {
+      await db.execute(sql`drop trigger refuse_line on conversation_events`);
+      await db.execute(sql`drop function refuse_line()`);
+    }
+    expect(await subjectOf(id)).toBe('After');
+  });
+
+  it('throws anything else on, and the whole transaction rolls back', async () => {
+    const id = await ticketOnPhone();
+    const lost = new Error('treated as lost');
+    const insert = vi.spyOn(PgDatabase.prototype, 'insert').mockImplementationOnce(() => {
+      throw lost;
+    });
+    try {
+      await expect(
+        db.transaction(async (tx) => {
+          await tx.update(conversations).set({ subject: 'After' }).where(eq(conversations.id, id));
+          await recordLineIn(tx, { conversationId: id, type: 'group_changed', data: {} });
+        }),
+      ).rejects.toBe(lost);
+    } finally {
+      insert.mockRestore();
+    }
+    expect(await subjectOf(id)).toBe('Before');
   });
 });
