@@ -89,7 +89,7 @@ update.
 | 4.2   | Merged: #429 (`c6eb1ac`), then `dev` → `main` in #431 (`ad6a062`). As built below                                                           | **Done.** All six services live on `ad6a062` by 21:49:08 UTC on 2026-10-27, web first; code only. Its checks read clean (below). Its operations wait for the user's go-ahead                                              |
 | 5.1   | In review as #432, branch `claude/jolly-noether-hxhez1-stage-5-1`. As built below                                                           | —                                                                                                                                                                                                                         |
 | 5.2   | Not started (operations: turning routing on)                                                                                                | —                                                                                                                                                                                                                         |
-| 6     | Branch `claude/jolly-noether-hxhez1-stage-6`, pushed unreviewed. As built so far below                                                      | —                                                                                                                                                                                                                         |
+| 6     | Draft #433, stacked on #432; unreviewed. As built so far below                                                                              | —                                                                                                                                                                                                                         |
 
 **4.2's deploy and checks, read on Render and production on 2026-10-27.**
 
@@ -4858,8 +4858,9 @@ Web first (it migrates `metrics_daily`), then the worker and crons, with
 
 #### 6, as built so far — pushed for safekeeping, not yet reviewed
 
-On `claude/jolly-noether-hxhez1-stage-6`, stacked on 5.1 at `ff6d262` (#432,
-in review) and not yet a pull request. Four builders worked from one written
+On `claude/jolly-noether-hxhez1-stage-6`, a draft pull request (#433) stacked
+on 5.1 at `ff6d262` (#432, in review), whose base moves to `dev` once #432
+merges. Four builders worked from one written
 design, each piece with its own tests. The screenshot pass, the docs, the full
 check and the adversarial review did not run: the organisation's spend limit
 stopped them on 2026-10-28, and the branch was pushed as it stood so the work
