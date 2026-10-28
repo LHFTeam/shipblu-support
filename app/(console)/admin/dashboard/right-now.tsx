@@ -56,8 +56,12 @@ export function RightNow({
         <Stat
           label="Unassigned"
           value={queue.unassigned.toLocaleString('en-GB')}
-          hint={queue.unassigned > 0 ? 'Nobody has picked these up' : 'Everything has an owner'}
-          tone={queue.unassigned > 0 ? 'caution' : undefined}
+          explain="Open tickets nobody holds. On a channel that routes by category, a new ticket is held — assigned to nobody — until its category settles or its routing window ends, and then goes to its category’s group. Those are counted here as being routed, the ones the inbox marks “Routing…”: nobody is meant to have picked them up yet."
+          hint={unassignedHint(queue)}
+          // Amber for the work nobody has picked up, not for the tickets held
+          // so that nobody does: a queue of nothing but held tickets is the
+          // router doing its job.
+          tone={queue.unassigned - queue.routing > 0 ? 'caution' : undefined}
         />
         <Stat
           label="SLA breached"
@@ -94,4 +98,17 @@ export function RightNow({
       </div>
     </Section>
   );
+}
+
+/**
+ * What the unassigned are. The held ones named apart, because "nobody has
+ * picked these up" is false of a ticket being routed — it is unassigned by
+ * design until the router sends it to a group — and an admin reading the tile
+ * would otherwise go and assign the tickets the router is about to move.
+ */
+function unassignedHint({ unassigned, routing }: { unassigned: number; routing: number }): string {
+  if (unassigned === 0) return 'Everything has an owner';
+  if (routing === 0) return 'Nobody has picked these up';
+  if (routing === unassigned) return 'Being routed — held until their category settles';
+  return `${routing.toLocaleString('en-GB')} being routed · ${(unassigned - routing).toLocaleString('en-GB')} nobody has picked up`;
 }

@@ -21,8 +21,18 @@ import { rangeIn } from '@/lib/reports/rollup';
  * message history in front of the database.
  */
 
-/** The per-agent totals slice: group and channel both null, agent set. */
-const AGENT_SLICE = and(isNull(metricsDaily.groupId), isNull(metricsDaily.channel));
+/**
+ * The per-agent totals slice: agent set, every other dimension null. The join
+ * on `agent_id` already keeps out every slice but the agent's, since a row
+ * names one dimension (`metrics_daily_one_dimension`); the nulls are named
+ * anyway, as `TOTALS_SLICE` names its own, so this line is the whole
+ * definition rather than half of one that holds only while that CHECK does.
+ */
+const AGENT_SLICE = and(
+  isNull(metricsDaily.groupId),
+  isNull(metricsDaily.channel),
+  isNull(metricsDaily.categoryId),
+);
 
 const SUMS = {
   onlineSeconds: sql<number>`coalesce(sum(${agentMetricsDaily.onlineSeconds}), 0)::bigint`,

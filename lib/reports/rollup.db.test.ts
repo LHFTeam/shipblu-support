@@ -9,10 +9,21 @@ import {
   conversations,
   csatSurveys,
   groups,
+  ticketCategories,
   ticketStatuses,
 } from '@/db/schema';
+import { setConversationCategory } from '@/lib/categories/write';
 import { withCleanDatabase } from '@/lib/testing/db';
-import { computeDay, reconciles, reportingContext, totalsOf, type Slice } from './rollup';
+import { cairo } from '@/lib/testing/time';
+import {
+  computeDay,
+  emptyBucket,
+  reconciles,
+  reportingContext,
+  totalsOf,
+  type Bucket,
+  type Slice,
+} from './rollup';
 
 /**
  * The survey half of `computeDay`, against real Postgres, on fixtures whose
@@ -440,5 +451,254 @@ describe('computeDay, for a ticket on a WhatsApp number with an owner', () => {
     );
     expect(agent(ali!.id)).toBeUndefined();
     expect(reconciles(thirteenth)).toBe(true);
+  });
+});
+
+/**
+ * The fifth slice. A category is single-valued, so its slices are a partition
+ * of the categorised tickets: each figure of a filed ticket counts in the
+ * totals and in its one category's slice, an unfiled ticket's in the totals
+ * alone, and "no category" is the difference. Filed by the ticket's category
+ * as it stands when the day is computed, every figure alike (`rollup.ts`'s
+ * header says why), so a relabel moves a day's figures when the day is
+ * computed again.
+ */
+describe('computeDay, by category', () => {
+  const COLUMNS = Object.keys(emptyBucket()) as (keyof Bucket)[];
+
+  async function categoryId(key: string): Promise<string> {
+    const [row] = await db
+      .select({ id: ticketCategories.id })
+      .from(ticketCategories)
+      .where(eq(ticketCategories.key, key));
+    return row!.id;
+  }
+
+  async function resolvedStatus(): Promise<string> {
+    const [row] = await db
+      .select({ id: ticketStatuses.id })
+      .from(ticketStatuses)
+      .where(eq(ticketStatuses.name, 'Resolved'));
+    return row!.id;
+  }
+
+  type Fixture = Partial<typeof conversations.$inferInsert> & { channel: Channel };
+
+  async function file(row: Fixture): Promise<string> {
+    const [contact] = await db.insert(contacts).values({ name: 'Amira' }).returning();
+    const [ticket] = await db
+      .insert(conversations)
+      .values({ statusId: await resolvedStatus(), requesterContactId: contact!.id, ...row })
+      .returning({ id: conversations.id });
+    return ticket!.id;
+  }
+
+  /**
+   * The 13th: two sales tickets, one customer-support one and one nothing has
+   * filed, between them created, answered (inside a target and past one),
+   * resolved, reopened and surveyed on the day.
+   */
+  async function thirteenth() {
+    const sales = await categoryId('sales');
+    const support = await categoryId('customer_support');
+    const [deliveries] = await db
+      .insert(groups)
+      .values({ name: 'Deliveries' })
+      .returning({ id: groups.id });
+
+    // Sales, by email: answered inside its target, resolved past its,
+    // reopened in between, and surveyed — a four.
+    const salesEmail = await file({
+      channel: 'email',
+      categoryId: sales,
+      groupId: deliveries!.id,
+      createdAt: cairo('2026-10-13T09:00'),
+      firstRespondedAt: cairo('2026-10-13T09:20'),
+      firstResponseDueAt: cairo('2026-10-13T10:00'),
+      resolvedAt: cairo('2026-10-13T15:00'),
+      resolutionDueAt: cairo('2026-10-13T12:00'),
+    });
+    await db.insert(conversationEvents).values({
+      conversationId: salesEmail,
+      type: 'reopened',
+      createdAt: cairo('2026-10-13T13:00'),
+    });
+    await db.insert(csatSurveys).values({
+      conversationId: salesEmail,
+      status: 'answered',
+      channel: 'email',
+      groupId: deliveries!.id,
+      sentAt: cairo('2026-10-13T15:30'),
+      createdAt: cairo('2026-10-13T15:30'),
+      respondedAt: cairo('2026-10-13T16:00'),
+      rating: 4,
+    });
+    // Sales, on WhatsApp: answered past its target, still open.
+    await file({
+      channel: 'whatsapp',
+      categoryId: sales,
+      createdAt: cairo('2026-10-13T10:00'),
+      firstRespondedAt: cairo('2026-10-13T11:30'),
+      firstResponseDueAt: cairo('2026-10-13T11:00'),
+    });
+    // Customer support, by web chat: resolved on the day with no target.
+    await file({
+      channel: 'webchat',
+      categoryId: support,
+      createdAt: cairo('2026-10-13T11:00'),
+      resolvedAt: cairo('2026-10-13T16:00'),
+    });
+    // Nothing has filed this one: answered, reopened, resolved, and its
+    // survey skipped — in the totals and in no category.
+    const unfiled = await file({
+      channel: 'email',
+      createdAt: cairo('2026-10-13T12:00'),
+      firstRespondedAt: cairo('2026-10-13T12:10'),
+      firstResponseDueAt: cairo('2026-10-13T13:00'),
+      resolvedAt: cairo('2026-10-13T14:00'),
+    });
+    await db.insert(conversationEvents).values({
+      conversationId: unfiled,
+      type: 'reopened',
+      createdAt: cairo('2026-10-13T13:30'),
+    });
+    await db.insert(csatSurveys).values({
+      conversationId: unfiled,
+      status: 'skipped',
+      skipReason: 'reopened',
+      channel: 'email',
+      createdAt: cairo('2026-10-13T14:30'),
+    });
+
+    return { sales, support, salesEmail };
+  }
+
+  const byCategory = (slices: Slice[], id: string) =>
+    slices.find((slice) => slice.categoryId === id);
+
+  /** The named columns of a bucket, every other one zero. */
+  const figures = (given: Partial<Bucket>): Bucket => ({ ...emptyBucket(), ...given });
+
+  /** A bucket's figures, the seconds sums aside: those are measured in working time. */
+  const counted = (bucket: Bucket | undefined) =>
+    bucket && { ...bucket, firstResponseSecondsSum: 0, resolutionSecondsSum: 0 };
+
+  it("files each figure under its ticket's category, and an unfiled ticket under none", async () => {
+    const { sales, support } = await thirteenth();
+    const slices = await computeDay('2026-10-13', await reportingContext());
+
+    expect(counted(byCategory(slices, sales)?.bucket)).toEqual(
+      figures({
+        ticketsCreated: 2,
+        firstResponseCount: 2,
+        slaFirstResponseMet: 1,
+        slaFirstResponseBreached: 1,
+        ticketsResolved: 1,
+        resolutionCount: 1,
+        slaResolutionBreached: 1,
+        ticketsReopened: 1,
+        csatSentCount: 1,
+        csatResponseCount: 1,
+        csatRating4: 1,
+        csatRatingSum: 4,
+      }),
+    );
+    expect(counted(byCategory(slices, support)?.bucket)).toEqual(
+      figures({ ticketsCreated: 1, ticketsResolved: 1, resolutionCount: 1 }),
+    );
+
+    // Two category slices and no third for "none", each naming its category
+    // alone — the CHECK would refuse a row naming a channel beside it.
+    const categorySlices = slices.filter((slice) => slice.categoryId !== null);
+    expect(categorySlices).toHaveLength(2);
+    for (const slice of categorySlices) {
+      expect([slice.groupId, slice.agentId, slice.channel]).toEqual([null, null, null]);
+    }
+    expect(reconciles(slices)).toBe(true);
+
+    // "No category" is the totals less the category slices, column by column:
+    // the unfiled ticket's figures exactly, its working-time seconds included.
+    const totals = totalsOf(slices);
+    const unfiled = Object.fromEntries(
+      COLUMNS.map((column) => [
+        column,
+        totals[column] - categorySlices.reduce((sum, slice) => sum + slice.bucket[column], 0),
+      ]),
+    ) as Bucket;
+    expect(counted(unfiled)).toEqual(
+      figures({
+        ticketsCreated: 1,
+        firstResponseCount: 1,
+        slaFirstResponseMet: 1,
+        ticketsResolved: 1,
+        resolutionCount: 1,
+        ticketsReopened: 1,
+        csatSkippedCount: 1,
+      }),
+    );
+    expect(unfiled.firstResponseSecondsSum).toBeGreaterThan(0);
+    expect(unfiled.resolutionSecondsSum).toBeGreaterThan(0);
+  });
+
+  it('leaves the totals and every other slice as they were before anything was filed', async () => {
+    await thirteenth();
+    const context = await reportingContext();
+    const filed = await computeDay('2026-10-13', context);
+
+    await db.update(conversations).set({ categoryId: null });
+    const unfiled = await computeDay('2026-10-13', context);
+
+    // Every figure in every column, the seconds sums too. In no particular
+    // order: the reads have none, and the update moved every row.
+    expect(totalsOf(filed)).toEqual(totalsOf(unfiled));
+    expect(unfiled.some((slice) => slice.categoryId !== null)).toBe(false);
+    const others = filed.filter((slice) => slice.categoryId === null);
+    expect(others).toHaveLength(unfiled.length);
+    expect(others).toEqual(expect.arrayContaining(unfiled));
+  });
+
+  // The attribution `rollup.ts` chose, pinned: the ticket's category as it
+  // stands, not as of each figure's instant. A person's correction a day
+  // later is the ground truth, so computing the 13th again files the 13th's
+  // figures under the category the ticket carries now.
+  it("moves a day's figures to the category a later relabel gave the ticket", async () => {
+    const { sales, support, salesEmail } = await thirteenth();
+    const [mona] = await db
+      .insert(agents)
+      .values({ name: 'Mona', email: 'mona@shipblu.test', role: 'agent' })
+      .returning({ id: agents.id });
+    const context = await reportingContext();
+    const before = await computeDay('2026-10-13', context);
+
+    // Re-filed after the day, through the writer the console uses — which
+    // stamps its `category_changed` now, well after the 13th.
+    expect(await setConversationCategory(salesEmail, support, { agentId: mona!.id })).toEqual({
+      outcome: 'changed',
+      from: sales,
+      to: support,
+    });
+    const after = await computeDay('2026-10-13', context);
+
+    expect(counted(byCategory(after, sales)?.bucket)).toEqual(
+      figures({ ticketsCreated: 1, firstResponseCount: 1, slaFirstResponseBreached: 1 }),
+    );
+    expect(counted(byCategory(after, support)?.bucket)).toEqual(
+      figures({
+        ticketsCreated: 2,
+        firstResponseCount: 1,
+        slaFirstResponseMet: 1,
+        ticketsResolved: 2,
+        resolutionCount: 2,
+        slaResolutionBreached: 1,
+        ticketsReopened: 1,
+        csatSentCount: 1,
+        csatResponseCount: 1,
+        csatRating4: 1,
+        csatRatingSum: 4,
+      }),
+    );
+    // Moved between categories, never lost: the totals are the day's still.
+    expect(totalsOf(after)).toEqual(totalsOf(before));
+    expect(reconciles(after)).toBe(true);
   });
 });

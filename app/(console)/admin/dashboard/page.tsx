@@ -2,8 +2,10 @@ import { DateTime } from 'luxon';
 import { PageHeader } from '@/components/ui';
 import { requirePermission } from '@/lib/auth/guard';
 import { can } from '@/lib/auth/permissions';
+import { allLimited } from '@/lib/concurrency';
 import {
   agentLoad,
+  categoryLoad,
   channelLoad,
   queueSnapshot,
   systemHealth,
@@ -14,6 +16,7 @@ import { reportingContext } from '@/lib/reports/rollup';
 import { averageSeconds, daily, metPercentage, perDay, totals } from '@/lib/reports/queries';
 import { LiveTicker } from './live';
 import { AgentLoad } from './agents';
+import { CategoryLoad } from './categories';
 import { ChannelLoad } from './channels';
 import { Health } from './health';
 import { History, RANGES } from './history';
@@ -34,7 +37,8 @@ export const dynamic = 'force-dynamic';
  * So the page is in three registers, and says which is which rather than
  * blending them into one wall of numbers:
  *
- *  - **Right now** — the live backlog, one scan over open tickets.
+ *  - **Right now** — the live backlog: one scan over open tickets, and the
+ *    tables below that cut the same backlog by agent, channel and category.
  *  - **Today so far** — computed by the same code the nightly rollup runs, so
  *    the figure here today and the row in `metrics_daily` tomorrow agree.
  *  - **The last N days** — the stored rollups Reports reads, over the last N
@@ -75,16 +79,26 @@ export default async function DashboardPage({
     to: midnight.minus({ days: 1 }).toISODate()!,
   };
 
-  const [queue, today, agentRows, channels, health, hourly, series, window] = await Promise.all([
-    queueSnapshot(now),
-    todaySoFar(context, now),
-    agentLoad(),
-    channelLoad(),
-    systemHealth(),
-    todayByHour(context.zone, now),
-    daily(history),
-    totals(history),
-  ]);
+  // Three at a time, not all at once. Every read here holds one statement at
+  // a time but `systemHealth`, which runs three together, so `Promise.all` put
+  // ten on the pool at once against the eight places the admission gate
+  // allows — every twenty seconds per open tab, taking every place from every
+  // other request for the length of the render (§6.91). `todaySoFar` goes
+  // first because it is the long pole, five statements one after another and
+  // so the render's floor whatever the others do: started first, the rest fit
+  // in beside it.
+  const [today, queue, agentRows, channels, categories, health, hourly, series, window] =
+    await allLimited(3, [
+      () => todaySoFar(context, now),
+      () => queueSnapshot(now),
+      () => agentLoad(),
+      () => channelLoad(),
+      () => categoryLoad(),
+      () => systemHealth(),
+      () => todayByHour(context.zone, now),
+      () => daily(history),
+      () => totals(history),
+    ]);
 
   const online = agentRows.filter((agent) => agent.presence === 'online').length;
   const trend: Point[] = perDay(history, series).map(({ day, label, row }) => ({
@@ -150,6 +164,9 @@ export default async function DashboardPage({
 
       {/* ------------------------------------------------------------- Channels */}
       <ChannelLoad channels={channels} />
+
+      {/* ----------------------------------------------------------- Categories */}
+      <CategoryLoad categories={categories} />
 
       {/* --------------------------------------------------------------- Health */}
       <Health health={health} now={now} />

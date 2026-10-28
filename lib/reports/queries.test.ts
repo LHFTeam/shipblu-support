@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { emptyBucket } from './rollup';
 import {
+  categoryCoverage,
   ratingCounts,
   ratingShares,
   responseRate,
   responsesHint,
   surveyedRate,
+  uncategorised,
   unsplitAnswers,
   windowDays,
   type Totals,
@@ -160,5 +162,58 @@ describe('windowDays', () => {
 
   it('has no days in a window that ends before it starts', () => {
     expect(windowDays({ from: '2026-10-13', to: '2026-10-12' })).toEqual([]);
+  });
+});
+
+describe('uncategorised', () => {
+  // Every column set, each to a different value, so a column subtracted from
+  // the wrong one, or left out, cannot pass.
+  const total = Object.fromEntries(
+    Object.keys(emptyBucket()).map((key, index) => [key, 1000 + 10 * index]),
+  ) as Totals;
+  const each = (value: number) =>
+    Object.fromEntries(Object.keys(emptyBucket()).map((key) => [key, value])) as Totals;
+
+  it('is the totals less every category, column by column', () => {
+    const rest = uncategorised(total, [each(3), each(4)]);
+    for (const key of Object.keys(emptyBucket()) as (keyof Totals)[]) {
+      expect(rest[key], key).toBe(total[key] - 7);
+    }
+  });
+
+  it('is the whole of the totals when nothing has a category', () => {
+    expect(uncategorised(total, [])).toEqual(total);
+  });
+
+  it('leaves a figure past the totals negative, rather than hiding it as nothing', () => {
+    // `reconciles()` refuses a day whose categories sum past its totals, so this
+    // is a bug if it is ever seen — and seen is the point.
+    expect(
+      uncategorised(row({ ticketsCreated: 2, csatRating5: 1 }), [
+        row({ ticketsCreated: 3, csatRating5: 1 }),
+      ]),
+    ).toMatchObject({ ticketsCreated: -1, csatRating5: 0 });
+  });
+});
+
+describe('categoryCoverage', () => {
+  it('says nothing has a category when no category slice reaches the window', () => {
+    expect(categoryCoverage(0, null, '2026-10-01')).toEqual({ kind: 'never' });
+  });
+
+  it('says the window has none when the category slices are all before it', () => {
+    expect(categoryCoverage(0, '2026-09-01', '2026-10-01')).toEqual({ kind: 'none-here' });
+  });
+
+  it('names the day the category slices start when that is inside the window', () => {
+    expect(categoryCoverage(2, '2026-10-12', '2026-10-01')).toEqual({
+      kind: 'starts',
+      on: '2026-10-12',
+    });
+  });
+
+  it('has nothing to say when they cover the window from its first day', () => {
+    expect(categoryCoverage(2, '2026-10-01', '2026-10-01')).toEqual({ kind: 'whole' });
+    expect(categoryCoverage(2, '2026-09-01', '2026-10-01')).toEqual({ kind: 'whole' });
   });
 });
