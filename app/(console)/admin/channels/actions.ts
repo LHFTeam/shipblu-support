@@ -1,6 +1,6 @@
 'use server';
 
-import { and, eq, ne, sql, asc, type SQL } from 'drizzle-orm';
+import { and, eq, ne, sql, asc } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { channels, whatsappAccounts, groups } from '@/db/schema';
 import { requirePermission } from '@/lib/auth/guard';
@@ -412,18 +412,20 @@ export async function saveChannel(_state: AdminState, formData: FormData): Promi
     // a rename used to wipe the connection, and copying it from the read above
     // wrote back a snapshot over every update that landed since.
     // `whatsappEditColumns` keeps both as the row holds them when the UPDATE
-    // runs, and writes the form's for any other number.
+    // runs, and writes the form's for any other number — and keeps a number
+    // connected since this read on its default group whatever mode the form
+    // sent. Absent, the mode is left as it is.
     const columns =
       type === 'whatsapp'
-        ? whatsappEditColumns({ phoneNumberId, whatsappAccountId: account })
-        : { config, whatsappAccountId: account };
-    const mode =
-      routingMode === undefined
-        ? {}
-        : { routingMode: type === 'whatsapp' ? whatsappRoutingMode(routingMode) : routingMode };
+        ? whatsappEditColumns({ phoneNumberId, whatsappAccountId: account, routingMode })
+        : {
+            config,
+            whatsappAccountId: account,
+            ...(routingMode === undefined ? {} : { routingMode }),
+          };
     await db
       .update(channels)
-      .set({ name, defaultGroupId, ...columns, ...mode, updatedAt: new Date() })
+      .set({ name, defaultGroupId, ...columns, updatedAt: new Date() })
       .where(eq(channels.id, id));
   } else {
     await db.insert(channels).values({
@@ -446,27 +448,6 @@ export async function saveChannel(_state: AdminState, formData: FormData): Promi
     }),
   );
   return notice ? { ...ok(), notice } : ok();
-}
-
-/**
- * A `whatsapp` row's routing mode, decided by Postgres inside the UPDATE, for
- * `whatsappEditColumns`' reason: the action's read is stale by the time it
- * writes. `complete_coexistence_onboarding` adopting the number in between
- * resets the column and writes the coexistence object in one transaction, and
- * an UPDATE that waited on it evaluates this again against the row it then
- * locks — so a number connected meanwhile keeps `default_group` whatever the
- * form said, where a value written as given would put back the mode the job
- * had just cleared. The reset and this are both needed: either alone loses to
- * the other's order.
- *
- * Any object under `coexistence` counts here, where `parseCoexistence` also
- * wants its ids; a malformed one therefore reads as connected and keeps
- * `default_group`, which is the side a mistake should fall on.
- */
-function whatsappRoutingMode(mode: RoutingMode): SQL {
-  return sql`case when jsonb_typeof(${channels.config} -> 'coexistence') = 'object'
-                  then 'default_group'::routing_mode
-                  else ${mode}::routing_mode end`;
 }
 
 /**

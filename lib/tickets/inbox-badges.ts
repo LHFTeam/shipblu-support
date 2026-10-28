@@ -1,5 +1,6 @@
 import { formatTime } from '@/lib/format';
 import { metaWindowState } from '@/lib/meta/window';
+import { isWorkable } from '@/lib/routing/decide';
 import { isHeld, type HoldColumns } from '@/lib/routing/hold';
 import { formatRemaining, windowState } from '@/lib/whatsapp/window';
 import { answeredFromConsole, isMetaChannel } from './channel-policy';
@@ -102,8 +103,9 @@ export type HoldTicket = HoldColumns & {
  * cannot disagree about whether a ticket is held, which is the rule
  * `windowBadge` states for the window. Null when it is not held.
  *
- * Only on work: open or pending, and not spam or merged — `decide`'s
- * `not_open` the other way round (a deleted ticket reaches no reader). No
+ * Only on work, asked of the router's own `isWorkable` — open or pending, and
+ * not spam or merged — so the badge and `not_open` cannot come apart; a
+ * deleted ticket reaches no reader, so nothing here carries its stamp. No
  * status, spam or merge writer ends a hold, so a held ticket resolved in its
  * window keeps the window on its row until `settle_routing` records
  * `not_open`, and nothing routes it meanwhile: a category chosen then decides
@@ -124,11 +126,7 @@ export type HoldTicket = HoldColumns & {
  * would throw in `isHeld`.
  */
 export function routingHold(ticket: HoldTicket, now: Date | null): { until: Date | null } | null {
-  const work =
-    (ticket.statusCategory === 'open' || ticket.statusCategory === 'pending') &&
-    !ticket.isSpam &&
-    !ticket.mergedIntoId;
-  if (!work) return null;
+  if (!isWorkable({ ...ticket, deletedAt: null })) return null;
   const endsAt = ticket.routingWindowEndsAt ? new Date(ticket.routingWindowEndsAt) : null;
   if (!endsAt || ticket.routingDecidedAt || ticket.assigneeAgentId) return null;
   if (now && !isHeld({ ...ticket, routingWindowEndsAt: endsAt }, now)) return null;

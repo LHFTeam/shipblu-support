@@ -27,6 +27,8 @@ export async function undecidedRouting(
         ne(routingDecisions.stage, 'decided'),
       ),
     );
-  if (!row || row.stage === 'decided') return null;
-  return { shadow: row.shadow, stage: row.stage };
+  if (!row) return null;
+  // The WHERE has left `decided` out, so the row is one of the other two; the
+  // column's type still carries all three, and the answer names only these.
+  return { shadow: row.shadow, stage: row.stage === 'pending' ? 'pending' : 'holding' };
 }

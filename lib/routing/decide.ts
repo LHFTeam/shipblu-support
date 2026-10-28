@@ -90,10 +90,12 @@ export function decide(input: DecideInput): Decision {
 /**
  * Whether anybody may still work the ticket: open or pending, and not spam,
  * deleted or merged — what `not_open` answers the absence of. Its own function
- * because the router asks it twice: here, and again when it completes a
+ * because the router asks it twice — here, and again when it completes a
  * decision whose caller died between its phases (`lib/routing/apply.ts`),
  * where the ticket may have been resolved or deleted since the decision was
- * written, and is then owed nothing.
+ * written, and is then owed nothing — and the console asks it too, so that
+ * "Routing…" and Hand to are drawn on exactly the tickets the router would
+ * still move (`routingHold`, `handToTarget`). Pure, and client-safe for that.
  */
 export function isWorkable(
   ticket: Pick<DecideInput, 'statusCategory' | 'deletedAt' | 'isSpam' | 'mergedIntoId'>,
