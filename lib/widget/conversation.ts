@@ -22,7 +22,7 @@ import type { VisitorDetails } from './contact';
 import type { Message, WidgetSurvey } from './types';
 import { recordIdentityOnConversation } from './identify';
 import { findLiveConversation, webchatChannel } from './session';
-import { planRouting, startRouting } from '@/lib/routing/start';
+import { planRouting, routingWindowValues, startRouting } from '@/lib/routing/start';
 
 /**
  * Reading and appending to a visitor's chat.
@@ -230,6 +230,8 @@ export async function appendVisitorMessage(
           groupId: channel?.defaultGroupId ?? null,
           lastMessageAt: now,
           lastCustomerMessageAt: now,
+          // Held for the router from the insert (`lib/routing/start.ts`).
+          ...routingWindowValues(routing, {}, now),
         })
         .returning({ id: conversations.id });
 

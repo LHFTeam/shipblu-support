@@ -88,6 +88,20 @@ export const routingDecisions = pgTable(
      * one to the caller still running it.
      */
     phaseOneAt: timestamp('phase_one_at', { withTimezone: true }),
+
+    /**
+     * The decision's `on_update` pass — phase two — claimed by whoever runs
+     * it, and marked once it is over, so it runs at most once however many
+     * callers finish the decision (`lib/routing/apply.ts`). A caller whose
+     * claim fails leaves the rest to the claimant. `settle_routing` resuming a
+     * decision skips a pass that is done, waits out a claim younger than
+     * `RULES_RUNNING_MS`, and takes an older one for a claimant that died
+     * part-way, ending the hold without running the rules again. Null on a
+     * decision with no rules owed, whose hold ends in phase one, and on a
+     * shadow row.
+     */
+    rulesClaimedAt: timestamp('rules_claimed_at', { withTimezone: true }),
+    rulesDoneAt: timestamp('rules_done_at', { withTimezone: true }),
     decidedAt: timestamp('decided_at', { withTimezone: true }),
 
     /**
@@ -97,10 +111,13 @@ export const routingDecisions = pgTable(
      * rule over a group set to `manual` — the way a rule turns assignment on
      * for a ticket without moving it — leaves every held ticket unassigned.
      * Written by `assignConversation` when it answers `awaiting_route`;
-     * cleared by the router's phase one when its own rules follow, so only a
-     * rule matching the ticket as the decision left it is replayed, and by
-     * `endHold`, whose person or rule has decided instead. Both null, or both
-     * set.
+     * cleared by the router's phase one when its decision moves the ticket,
+     * since the rule spoke about the group the ticket has left (phase two
+     * records again a rule matching it where it now is), and by `endHold`,
+     * whose person or rule has decided instead. A decision that leaves the
+     * ticket where it was keeps it: the rule still speaks about that group,
+     * and an `on_create` rule has no later pass to say it again. Both null, or
+     * both set.
      */
     heldStrategy: assignmentStrategyEnum('held_strategy'),
     heldActorLabel: text('held_actor_label'),

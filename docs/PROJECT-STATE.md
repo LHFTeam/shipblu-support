@@ -24,10 +24,10 @@ only) by 07:45:42 UTC. The plan's status section has each deploy's reads.
 deployed** (this file's §5.1, beside the category classifier). Deployed, it
 routes nothing until an admin moves a channel off `default_group` _and_ the
 classifier is in `apply`, but four things change on every ticket at once (§5.1):
-the out-of-hours acknowledgement's guards, assignment's locks and its checked
-update, a console group move running the rules before it assigns, and the
-transactions an agent's reply and a rule's assignment or move are now written
-in.
+the out-of-hours acknowledgement's guards, assignment's locks, what it re-reads
+under them and its checked update, a console group move running the rules
+before it assigns, and the transactions an agent's reply and a rule's assignment
+or move are now written in, with the rule's own timeline line inside them.
 
 The release before those, `f761e5e`, was deployed by hand on 2026-10-26, all
 six services by 23:32 UTC: release #426, which carries Stage 3.2 (#424) — a
@@ -1651,8 +1651,11 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
   too, since no category has a route group and no ticket carries a category
   (read 10:31 UTC on 2026-10-28). Four things do change on every ticket:
   - **Assignment** locks the ticket (`FOR NO KEY UPDATE`) before the group,
-    re-reads its assignee, group and hold there, and checks its guarded
-    update's result (§6.105).
+    re-reads there its assignee, group and hold and whether the ticket is still
+    work — open or pending, not deleted, merged or spam — and checks its guarded
+    update's result (§6.105). Read off the snapshot, as production's still is,
+    a resolve landing while the pick read its roster left the ticket resolved
+    in somebody's name.
   - **The out-of-hours acknowledgement** goes only to an open or pending ticket,
     and not to a customer writing again after an agent answered in the same
     closed stretch, who could be told "we are closed" after the answer before.
@@ -1665,11 +1668,16 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
     shows yet.
   - **An agent's reply, and a rule's `assign_agent` or `assign_group`, are
     written in a transaction with `endHold`**, as the console's assignee and
-    group writes already were. On a ticket that never routed `endHold` is one
-    read of `routing_decisions` and takes no lock. The first version locked the
-    ticket `FOR UPDATE` there, after the write, and deadlocked against a
-    customer's message on any ticket; the review found it and it never shipped
-    (§6.106).
+    group writes already were. The rule's own `assigned` or `group_changed`
+    line is written in it too, and so is a grouped `auto_assign`'s
+    `group_changed`, where each used to follow the commit: ahead of the
+    `routed` line it causes, in a savepoint, so a refused line is logged and
+    takes neither the write nor its follow-up with it. On a ticket that never
+    routed `endHold` is one read of `routing_decisions` and takes no lock, and
+    the creation pass's `beginRouting` is the same one read, with no
+    transaction. The first version locked the ticket `FOR UPDATE` there, after
+    the write, and deadlocked against a customer's message on any ticket; the
+    review found it and it never shipped (§6.106).
 
   Every lock the router and assignment take on a ticket's row is
   `FOR NO KEY UPDATE`, so none of them holds a customer's message back. Deploy
@@ -6927,6 +6935,13 @@ dryRun=true`, then without, gives those two theirs back from their
       re-reads the assignee, the group and the routing hold under it
       (`already_assigned`, `moved`, `awaiting_route`), and checks the update's
       result: a write that matched nothing moves no cursor and records nothing.
+      The PR review found the same unlocked read one step earlier: whether the
+      ticket was still work came off the snapshot, so a resolve, a merge, a
+      delete or a spam mark landing while the pick read its roster left the
+      ticket assigned — a resolved ticket in somebody's name, the cursor moved
+      past them, an `assigned` line after the resolve. That is re-read under
+      the lock too now (`not_assignable`, the status through a subquery, since
+      a join under the lock can answer no row).
       The general lesson: a guarded `UPDATE` that matches no row is not an
       error, so whatever follows one has to ask how many rows it wrote.
 

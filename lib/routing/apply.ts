@@ -1,4 +1,4 @@
-import { and, desc, eq, sql } from 'drizzle-orm';
+import { and, desc, eq, isNull, ne, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import {
   channels,
@@ -17,6 +17,7 @@ import { lockedStatusCategory, statusCategoryOf } from '@/lib/tickets/status-cat
 import { afterHoldEnded } from './after-hold';
 import { decide, isWorkable, type DecidedOutcome } from './decide';
 import { endHoldOnRow } from './end-hold';
+import { ROUTING_GRACE_MS } from './hold';
 import { routingModeOf } from './mode';
 import { SETTLE_ROUTING_PRIORITY } from './start';
 
@@ -31,11 +32,11 @@ type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
  * 1. **Under the row lock**, `decide` answers and this writes it: the group
  *    move if there is one, the decision row and the `routed` event. The
  *    ticket's `routing_decided_at` stays null, so it is still held.
- * 2. **The `on_update` rules run**, after every decision on a ticket that
- *    carries a category, wherever the decision left it (`rulesOwed`). Nothing
- *    can assign in between, because the ticket is still held — a rule's move
- *    in this pass does not end the hold, as one before phase one would
- *    (`endHold`) — so "sales on the merchant number goes to Merchant Care",
+ * 2. **The `on_update` rules run, once**, after every decision on a ticket
+ *    that carries a category, wherever the decision left it (`PhaseOne.rules`).
+ *    Nothing can assign in between, because the ticket is still held — a
+ *    rule's move in this pass does not end the hold, as one before phase one
+ *    would (`endHold`) — so "sales on the merchant number goes to Merchant Care",
  *    and any rule keyed on the category, decide before anybody is handed the
  *    ticket. It is the pass the category's writer gave up on a held ticket
  *    (Jev, a person), so a ticket released or found taken owes it too; one
@@ -61,6 +62,21 @@ type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
  * the decision: the window's own job, when the caller was anything else, and
  * the job retrying itself when it was the caller (`settleRouting`).
  *
+ * Phase two runs at most once, however many callers finish one decision. Its
+ * pass is claimed before it starts (`rules_claimed_at`, one conditional
+ * statement) and marked once it is over (`rules_done_at`, before phase three,
+ * so a phase three that fails does not unmark it). A caller whose claim fails
+ * stops there: another caller is running the rules and ends the hold after
+ * them, and ending it now would let assignment beat a rule still to come. A
+ * resumed decision skips a pass that is done, waits out a claim that may still
+ * be running (`RULES_RUNNING_MS`), and takes an older claim for a claimant that
+ * died — and then ends the hold without the rules, because a pass
+ * half-applied once is a smaller harm than one applied twice: a second
+ * `send_reply` reaches the customer twice, and every other action writes its
+ * event again. Without the claim, every retry of a failed phase three re-ran
+ * the whole pass, and a slow pass met a second one started beside it once its
+ * phase one was a minute old.
+ *
  * Every lock this takes on the ticket's row is NO KEY UPDATE, never UPDATE:
  * it serialises against every other writer of the row just the same, and FOR
  * UPDATE would also stop every message inserted on the ticket — whose foreign
@@ -74,6 +90,25 @@ export type RoutingActor = { agentId?: string | null; label: string };
 /** How long a phase one belongs to the caller still running it. */
 export const PHASE_ONE_RESUME_MS = 60_000;
 
+/**
+ * How long a claim on phase two's pass belongs to the caller that made it.
+ * The hold's own grace (`ROUTING_GRACE_MS`), and for its reason: the time the
+ * hold gives a job that never came before it stops protecting the order it
+ * exists for. A real pass is a handful of statements whose every outbound call
+ * carries a deadline, so a claim older than that is one whose process has
+ * gone, and ending the hold then is the same valve the grace is. Shorter, a
+ * pass that is merely slow would have its hold ended under it, and assignment
+ * would beat its last rule.
+ */
+export const RULES_RUNNING_MS = ROUTING_GRACE_MS;
+
+/**
+ * What phase two owes: `not_owed` on a ticket with no category, whose hold
+ * ended in phase one; `owed`, the pass to claim and run; `spent`, the hold's
+ * end alone — the pass is done, or a claimant died part-way through it.
+ */
+type Rules = 'not_owed' | 'owed' | 'spent';
+
 type PhaseOne = {
   outcome: DecidedOutcome;
   /** Whether phase one moved the ticket to its category's route group. */
@@ -81,13 +116,14 @@ type PhaseOne = {
   /** Whether the ticket carries a category, which re-selects the SLA policy. */
   categorySettled: boolean;
   /** Whether the `on_update` rules run before the hold ends — phase two. */
-  rulesOwed: boolean;
+  rules: Rules;
 };
 
 type Step =
   | { kind: 'none' }
   | { kind: 'shadow'; outcome: DecidedOutcome }
-  | { kind: 'in_flight'; phaseOneAt: Date }
+  /** Another caller is finishing the decision; `settleRouting` looks again then. */
+  | { kind: 'in_flight'; lookAgainAt: Date }
   | ({ kind: 'decided' } & PhaseOne);
 
 /** What `routeNow` and `settleRouting` did, for the caller and its tests. */
@@ -114,6 +150,10 @@ export type RouteResult = Step['kind'] | 'requeued' | 'failed';
  * logged and answers `decided` — the decision is written — and the window's
  * job completes it: while the row is undecided one is always still to come,
  * the first, or the one it queued again on finding this decision in flight.
+ * So does a caller that finds phase two claimed by somebody else — the
+ * window's job, taking over a caller that stalled a minute after its phase
+ * one: its pass reads the ticket after this caller's write, so to the caller
+ * the rules are run on what it wrote, and the claimant ends the hold.
  */
 export async function routeNow(
   conversationId: string,
@@ -122,8 +162,8 @@ export async function routeNow(
 ): Promise<RouteResult> {
   try {
     const step = await db.transaction((tx) => phaseOne(tx, conversationId, actor, now, false));
-    // Whether it ended the hold is the window's job's business, not this
-    // caller's: see above.
+    // How it finished is the window's job's business, not this caller's: see
+    // above.
     if (step.kind === 'decided') await finish(conversationId, step, now);
     return step.kind;
   } catch (error) {
@@ -137,14 +177,22 @@ export async function routeNow(
  * or not (`fallback`), live or shadow. Also completes a decision another caller
  * wrote and then died on — one whose phase one is more than a minute old. A
  * younger one belongs to a caller still running, so this looks again once the
- * minute is up rather than racing it.
+ * minute is up rather than racing it; so does a phase two somebody claimed
+ * less than `RULES_RUNNING_MS` ago, once that is up.
  *
  * Throws when its own phase three fails, so the job is retried. It is the one
  * caller nothing comes after: the job's key is spent once it completes, and
  * answering `decided` there left the ticket held, unassigned and unanswered
  * until the grace let the sweep take it, with the row undecided for good. The
  * retry finds phase one written and completes it once the minute is up —
- * or, retried sooner, finds it young and looks again without a key.
+ * or, retried sooner, finds it young and looks again without a key — and
+ * finds the rules' pass done, so it runs them no second time.
+ *
+ * For that reason too it looks again when its own claim on phase two fails:
+ * the claimant may be a `routeNow` that stalled past the minute, and this job
+ * may be the window's own, whose key nothing else can spend again. If the
+ * claimant finishes, the next look finds the row decided; if it died, the
+ * claim has aged by then and the decision is completed without the rules.
  */
 export async function settleRouting(
   conversationId: string,
@@ -161,22 +209,29 @@ export async function settleRouting(
   if (step === 'gone') return 'gone';
 
   if (step.kind === 'in_flight') {
-    // Without a key: the first job's key is spent for good, and this is the
-    // same work legitimately asked for again (AGENTS.md, Background work).
-    await enqueue(
-      'settle_routing',
-      { conversationId },
-      {
-        runAt: new Date(step.phaseOneAt.getTime() + PHASE_ONE_RESUME_MS + 1_000),
-        priority: SETTLE_ROUTING_PRIORITY,
-      },
-    );
+    await lookAgain(conversationId, step.lookAgainAt);
     return 'requeued';
   }
-  if (step.kind === 'decided' && !(await finish(conversationId, step, now))) {
-    throw new Error(`the hold on ${conversationId} did not end; settle_routing retries`);
+  if (step.kind === 'decided') {
+    const finished = await finish(conversationId, step, now);
+    if (finished === 'held') {
+      throw new Error(`the hold on ${conversationId} did not end; settle_routing retries`);
+    }
+    if (finished === 'claimed_elsewhere') {
+      await lookAgain(conversationId, new Date(now.getTime() + RULES_RUNNING_MS + 1_000));
+      return 'requeued';
+    }
   }
   return step.kind;
+}
+
+/**
+ * Another `settle_routing` for the ticket, at `runAt`. Without a key: the
+ * first job's key is spent for good, and this is the same work legitimately
+ * asked for again (AGENTS.md, Background work).
+ */
+async function lookAgain(conversationId: string, runAt: Date): Promise<void> {
+  await enqueue('settle_routing', { conversationId }, { runAt, priority: SETTLE_ROUTING_PRIORITY });
 }
 
 /** The label a decision made at the window's end carries. */
@@ -222,7 +277,25 @@ async function phaseOne(
 
   if (row.phaseOneAt) {
     if (!resume || now.getTime() - row.phaseOneAt.getTime() < PHASE_ONE_RESUME_MS) {
-      return { kind: 'in_flight', phaseOneAt: row.phaseOneAt };
+      return {
+        kind: 'in_flight',
+        lookAgainAt: new Date(row.phaseOneAt.getTime() + PHASE_ONE_RESUME_MS + 1_000),
+      };
+    }
+    // A pass claimed and not done, recently enough that its claimant may still
+    // be running it. It owns phase three too, so nothing here may end the hold
+    // — not even on a ticket since resolved, which a rule in that pass may
+    // have resolved and a later one act on — and this looks again once the
+    // claim has aged.
+    if (
+      row.rulesClaimedAt &&
+      !row.rulesDoneAt &&
+      now.getTime() - row.rulesClaimedAt.getTime() < RULES_RUNNING_MS
+    ) {
+      return {
+        kind: 'in_flight',
+        lookAgainAt: new Date(row.rulesClaimedAt.getTime() + RULES_RUNNING_MS + 1_000),
+      };
     }
     // The caller that wrote it is gone. Its decision stands; what it owed is
     // finished from what it wrote — on the ticket as it is now, which may have
@@ -245,6 +318,15 @@ async function phaseOne(
       await endHoldOnRow(tx, conversationId, now);
       return { kind: 'none' };
     }
+    // At most once: a pass that is done is not run again, and neither is one
+    // whose claimant died part-way through it. Which of its rules ran is not
+    // recorded anywhere, and a pass half-applied once is a smaller harm than
+    // one applied twice (the module's header).
+    if (row.rulesClaimedAt && !row.rulesDoneAt) {
+      log.warn(
+        `ending the hold without the rules' pass, claimed and never finished conversation=${conversationId} claimed_at=${row.rulesClaimedAt.toISOString()}`,
+      );
+    }
     const outcome = (row.outcome ?? 'fallback') as DecidedOutcome;
     return {
       kind: 'decided',
@@ -253,7 +335,7 @@ async function phaseOne(
       categorySettled: row.categoryId !== null,
       // A row phase one left holding always had a category: one without has
       // its hold ended in phase one.
-      rulesOwed: row.categoryId !== null,
+      rules: row.categoryId === null ? 'not_owed' : row.rulesClaimedAt ? 'spent' : 'owed',
     };
   }
 
@@ -319,12 +401,16 @@ async function phaseOne(
   // the decision, in this transaction.
   //
   // An `auto_assign` rule's strategy kept while the ticket was held
-  // (`recordHeldAssignment`) is dropped when the rules follow: it was matched
-  // against the ticket before this decision, perhaps in the group it is about
-  // to leave or with no category yet, and phase two's own pass records it
-  // again if the rule still matches the ticket as the decision leaves it. With
-  // no rules owed nothing about the ticket has changed but its hold, and the
-  // rule's pick stands — the one the hold made it wait for.
+  // (`recordHeldAssignment`) is dropped only when this decision moves the
+  // ticket. The rule said "assign here, with this strategy" about the group
+  // the ticket was in: a move takes it out of that group, the override does
+  // not carry to the new one, and phase two's `on_update` pass records again
+  // any rule that matches the ticket where it now is. Left where it was, the
+  // ticket is still in the group the rule spoke about, and the pick stands —
+  // it has to, because an `on_create` rule has no later pass to ask again:
+  // phase two runs `on_update` rules only, and dropping it there left every
+  // held ticket on a group set to `manual` unassigned once its category
+  // settled.
   const endsNow = !rulesOwed;
   await tx
     .update(routingDecisions)
@@ -332,7 +418,8 @@ async function phaseOne(
       ...recorded,
       phaseOneAt: now,
       stage: endsNow ? 'decided' : 'holding',
-      ...(endsNow ? { decidedAt: now } : { heldStrategy: null, heldActorLabel: null }),
+      ...(endsNow ? { decidedAt: now } : {}),
+      ...(moved ? { heldStrategy: null, heldActorLabel: null } : {}),
     })
     .where(eq(routingDecisions.id, row.id));
   if (endsNow) await endHoldOnRow(tx, conversationId, now);
@@ -374,7 +461,7 @@ async function phaseOne(
     outcome: decision.outcome,
     moved,
     categorySettled,
-    rulesOwed,
+    rules: rulesOwed ? 'owed' : 'not_owed',
   };
 }
 
@@ -383,14 +470,51 @@ async function phaseOne(
  * every lifecycle step: the decision is written, and a throw would only fail
  * the job or the ingest that called this and run everything again.
  *
- * Answers whether the hold ended, which is false only when phase three failed
- * — and then nothing after it has run, so the caller decides who completes
- * it (`settleRouting`).
+ * Answers `ended` once the hold is over and its follow-ups have run; `held`
+ * when phase three failed, and then nothing after it has run; and
+ * `claimed_elsewhere` when another caller holds the claim on phase two, which
+ * leaves it all to that caller, or the decision was finished meanwhile. On
+ * the last two the caller decides who completes the decision
+ * (`settleRouting`).
  */
-async function finish(conversationId: string, step: PhaseOne, now: Date): Promise<boolean> {
-  if (step.rulesOwed) {
-    await runAutomations('on_update', conversationId);
+async function finish(
+  conversationId: string,
+  step: PhaseOne,
+  now: Date,
+): Promise<'ended' | 'held' | 'claimed_elsewhere'> {
+  if (step.rules !== 'not_owed') {
+    if (step.rules === 'owed') {
+      // One conditional statement on the pool, which no transaction holds: the
+      // routing row's lock is the only one it takes, so it cannot close a
+      // cycle with a writer holding the ticket's. Losing it means another
+      // caller is running the pass and ends the hold after it — ended here as
+      // well, the hold would let assignment beat a rule still to come — or
+      // that the decision was finished without one, on a ticket that resolved
+      // or was deleted while this caller stalled, which owes no pass at all.
+      const claimed = await db
+        .update(routingDecisions)
+        .set({ rulesClaimedAt: now })
+        .where(
+          and(
+            eq(routingDecisions.conversationId, conversationId),
+            isNull(routingDecisions.rulesClaimedAt),
+            ne(routingDecisions.stage, 'decided'),
+          ),
+        )
+        .returning({ id: routingDecisions.id });
+      if (claimed.length === 0) return 'claimed_elsewhere';
+      await runAutomations('on_update', conversationId);
+    }
     try {
+      // Marked done before phase three and apart from it, so a phase three
+      // that fails, or a process that dies before it, leaves the retry with
+      // the hold's end alone to do.
+      if (step.rules === 'owed') {
+        await db
+          .update(routingDecisions)
+          .set({ rulesDoneAt: now })
+          .where(eq(routingDecisions.conversationId, conversationId));
+      }
       await db.transaction(async (tx) => {
         await tx
           .select({ id: conversations.id })
@@ -409,9 +533,10 @@ async function finish(conversationId: string, step: PhaseOne, now: Date): Promis
     } catch (error) {
       // The hold stays, and `settle_routing` completes the decision: the
       // window's job still to come, when the caller was anything else
-      // (`routeNow`); the same job retried, when it was the caller.
+      // (`routeNow`); the same job retried, when it was the caller. Either
+      // way without the rules, which have run, or whose claim it finds.
       log.error(`could not end the hold on ${conversationId}`, error);
-      return false;
+      return 'held';
     }
   }
 
@@ -420,7 +545,7 @@ async function finish(conversationId: string, step: PhaseOne, now: Date): Promis
     group: step.moved,
   });
   await afterHoldEnded(conversationId, now);
-  return true;
+  return 'ended';
 }
 
 /** Jev's probability, when the category on the ticket is Jev's answer. */

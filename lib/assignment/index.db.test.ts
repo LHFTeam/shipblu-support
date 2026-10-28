@@ -622,6 +622,51 @@ describe('assignConversation on a ticket held for the router', () => {
     expect(await cursorOf(care.groupId)).toBeNull();
   });
 
+  // The re-read under the lock asks whether the ticket is still work too: an
+  // agent resolving it, a merge, a delete or a spam mark landing while the
+  // pick waited left the ticket handed to somebody — the cursor moved past
+  // them, and an `assigned` line after the resolve — for work nobody may do.
+  // The status read beside the lock as a subquery, never a join, which would
+  // have answered no row at all for the resolved one.
+  const resolvedStatus = async () => {
+    const [row] = await db
+      .select({ id: ticketStatuses.id })
+      .from(ticketStatuses)
+      .where(eq(ticketStatuses.name, 'Resolved'));
+    return row!.id;
+  };
+  it.each([
+    ['resolved', async () => ({ statusId: await resolvedStatus() })],
+    ['merged', async (groupId: string) => ({ mergedIntoId: await ticketIn(groupId, null) })],
+    ['deleted', async () => ({ deletedAt: new Date() })],
+    ['marked spam', async () => ({ isSpam: true })],
+  ] as const)(
+    'gives up when the ticket was %s between the read and the lock',
+    async (_, change) => {
+      const now = new Date();
+      const care = await desk('Customer Care', 'Omar Care', now);
+      const id = await ticketIn(care.groupId, null);
+
+      const hold = holdNextTransaction('before');
+      const assigning = assignConversation(id, { now });
+      await hold.atHold;
+      await db
+        .update(conversations)
+        .set(await change(care.groupId))
+        .where(eq(conversations.id, id));
+      hold.release();
+
+      expect(await assigning).toEqual({
+        assignedTo: null,
+        reason: 'not_assignable',
+        movedGroup: false,
+      });
+      expect(await held(id)).toMatchObject({ assignee: null });
+      expect(await eventsOf(id, ASSIGNMENT_EVENTS)).toEqual([]);
+      expect(await cursorOf(care.groupId)).toBeNull();
+    },
+  );
+
   // The latent bug the lock fixed beside it: the guarded write's result was
   // never read, so a write that matched nothing still advanced the cursor and
   // recorded `assigned` to somebody who never got the ticket. A trigger that

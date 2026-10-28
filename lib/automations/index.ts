@@ -32,6 +32,8 @@ import { logger } from '@/lib/log';
 
 const log = logger('automations');
 
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
 /**
  * Automation rules — Freshdesk's Dispatch'r, Observer and Supervisor in one
  * table, distinguished by their trigger.
@@ -239,6 +241,32 @@ async function applyAction(
       data,
     });
 
+  /*
+   * `record`, inside the transaction of a write that may end a routing hold,
+   * ahead of `endHold`: the hold's `routed` line is stamped when it is written
+   * (`CHANGE_STAMP`), so a line recorded after the commit — as these were —
+   * sorted after the decision it was the reason for, where the console writes
+   * the move or the assignment first. In a savepoint of its own, whose failure
+   * is logged and rolled back to, because the line records the write and is
+   * not the write: refused, it must not take the move or the assignment, the
+   * hold's end or the follow-up they owe down with it, which it did not when it
+   * was written after the commit.
+   */
+  const recordIn = async (tx: Tx, type: string, data: Record<string, unknown>) => {
+    try {
+      await tx.transaction(async (savepoint) => {
+        await savepoint.insert(conversationEvents).values({
+          conversationId,
+          type,
+          actorLabel: `automation:${ruleName}`,
+          data,
+        });
+      });
+    } catch (error) {
+      log.error(`"${ruleName}" could not record ${type} on ${conversationId}`, error);
+    }
+  };
+
   switch (action.type) {
     case 'set_priority':
       // The column and its event in one transaction, as the console writes
@@ -334,19 +362,21 @@ async function applyAction(
 
     case 'assign_agent': {
       // A rule naming somebody has decided who answers a ticket held for the
-      // router, so the hold ends with the assignment, in its transaction.
+      // router, so the hold ends with the assignment, in its transaction —
+      // after the assignment's own line, written there too, so the timeline
+      // reads it before the `routed` line naming it (`recordIn`).
       const agentId = action.agentId;
       const ended = await db.transaction(async (tx) => {
         await tx
           .update(conversations)
           .set({ assigneeAgentId: agentId, assignedAt: agentId ? new Date() : null })
           .where(eq(conversations.id, conversationId));
+        await recordIn(tx, agentId ? 'assigned' : 'unassigned', { to: agentId });
         return agentId
           ? endHold(tx, conversationId, 'rule', { label: `automation:${ruleName}` })
           : false;
       });
       if (ended) pass.endedHold = true;
-      await record(agentId ? 'assigned' : 'unassigned', { to: agentId });
       return;
     }
 
@@ -354,11 +384,13 @@ async function applyAction(
       // Only when it moves the ticket: a rule naming the group the ticket is
       // already in matches on every pass (`moveToGroupIfElsewhere`), and must
       // not end every routing hold on its channel. Compared against the row as
-      // the move's own update finds it, and the hold ended in that transaction.
+      // the move's own update finds it, and the hold ended in that transaction
+      // — after the move's line, written there too (`recordIn`).
       const move = await db.transaction(async (tx) => {
         if (!(await moveToGroupIfElsewhere(conversationId, action.groupId, { executor: tx }))) {
           return null;
         }
+        await recordIn(tx, 'group_changed', { to: action.groupId });
         return {
           endedHold: await endHold(tx, conversationId, 'rule', {
             label: `automation:${ruleName}`,
@@ -370,11 +402,8 @@ async function applyAction(
 
       // The new group may work different hours, in which case the clocks move,
       // once the pass is over (`Pass.groupMoved`). Nothing to move on a brand
-      // new ticket, whose SLA has not been applied yet. Noted before the event
-      // is written: the move has committed, so a failure recording it must not
-      // also lose the follow-up it owes.
+      // new ticket, whose SLA has not been applied yet.
       pass.groupMoved = true;
-      await record('group_changed', { to: action.groupId });
       return;
     }
 
@@ -388,9 +417,9 @@ async function applyAction(
       // ticket as the pass found it: a ticket held by somebody other than its
       // number's owner, or routed to a group deleted since, stays where it was
       // and owes nothing (`moveToGroupIfElsewhere`, for why that matters).
-      // Through `routed` rather than the answer, and in a `finally`, for
-      // `assign_group`'s reason: the move commits before the pick, so a pick
-      // that throws must not also lose the follow-up the move owes.
+      // Through `routed` rather than the answer, and in a `finally`: the move
+      // commits before the pick, so a pick that throws must not also lose the
+      // follow-up the move owes.
       // Naming another group ends a routing hold, in the move's transaction
       // (`endsHoldAs`); naming the group the ticket is in, or none, is held
       // like any other assignment, and the rule's strategy waits with it for

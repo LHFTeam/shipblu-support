@@ -8,8 +8,9 @@ import {
   groups,
   ticketCategories,
 } from '@/db/schema';
-import { assignConversation, type SkipReason } from '@/lib/assignment';
+import { assignConversation, type AssignmentOutcome, type SkipReason } from '@/lib/assignment';
 import { runAutomations } from '@/lib/automations';
+import { logger } from '@/lib/log';
 import { afterRoutingChanged } from '@/lib/sla';
 import { CHANGE_STAMP } from '@/lib/tickets/change-stamp';
 import { isReadOnlyChannel } from '@/lib/tickets/channel-policy';
@@ -20,6 +21,8 @@ import { parseCoexistence } from '@/lib/whatsapp/coexistence';
 import { afterHoldEnded } from './after-hold';
 import { endHold } from './end-hold';
 import { isHeld, type HoldColumns } from './hold';
+
+const log = logger('routing');
 
 /**
  * "Hand to <group>": after the hold, a category edit only relabels the ticket,
@@ -169,6 +172,14 @@ export type HandToResult =
        * went.
        */
       waitsIn: { groupName: string; movedOn: boolean } | null;
+      /**
+       * The assignment after the hand-over threw, so who the rota picked is
+       * not known: `assignedTo`, `skipped` and `waitsIn` are then null. Not
+       * that nobody holds the ticket — the hold's end, when the hand-over
+       * ended one, assigns again on its own (`afterHoldEnded`) — so the agent
+       * is told to look, rather than told where it waits.
+       */
+      assignmentFailed?: true;
     };
 
 /**
@@ -219,8 +230,9 @@ const WAITING: ReadonlySet<SkipReason> = new Set<SkipReason>([
  * group it ends in rather than leaving the new group's agent holding it. Then
  * the assignment, whose `assigned` event is the third line the plan asks for.
  * Last, a hold this ended owes its out-of-hours reply (`afterHoldEnded`, whose
- * assignment is then a no-op), told the hours of the group the rules left the
- * ticket in.
+ * assignment is then a no-op, or a second try at one that threw), told the
+ * hours of the group the rules left the ticket in. Each is best-effort: the
+ * hand-over has committed by then, and is answered as done.
  */
 export async function handToRouteGroup(
   conversationId: string,
@@ -353,11 +365,31 @@ export async function handToRouteGroup(
   });
   if (!write.ok) return write;
 
+  // Best-effort from here, as every lifecycle step is: the hand-over has
+  // committed, so a throw would answer the agent with a failure for a move and
+  // an unassignment that stand, and skip the page's refresh that shows them.
+  // `afterRoutingChanged`, the rules and `afterHoldEnded` log their own
+  // failures; the assignment and the queue's name are caught here.
   await afterRoutingChanged(conversationId, { category: false, group: write.moved });
   await runAutomations('on_update', conversationId);
-  const outcome = await assignConversation(conversationId, { actorLabel: 'auto_assign' });
+  let outcome: AssignmentOutcome | null = null;
+  try {
+    outcome = await assignConversation(conversationId, { actorLabel: 'auto_assign' });
+  } catch (error) {
+    log.error(`could not assign ${conversationId} after handing it over`, error);
+  }
   if (write.endedHold) await afterHoldEnded(conversationId);
 
+  if (!outcome) {
+    return {
+      ok: true,
+      groupName: write.groupName,
+      assignedTo: null,
+      skipped: null,
+      waitsIn: null,
+      assignmentFailed: true,
+    };
+  }
   return {
     ok: true,
     groupName: write.groupName,
@@ -380,11 +412,18 @@ async function queueOf(
   conversationId: string,
   handedTo: string,
 ): Promise<{ groupName: string; movedOn: boolean } | null> {
-  const [current] = await db
-    .select({ groupId: conversations.groupId, groupName: groups.name })
-    .from(conversations)
-    .leftJoin(groups, eq(groups.id, conversations.groupId))
-    .where(eq(conversations.id, conversationId));
-  if (!current?.groupId || !current.groupName) return null;
-  return { groupName: current.groupName, movedOn: current.groupId !== handedTo };
+  try {
+    const [current] = await db
+      .select({ groupId: conversations.groupId, groupName: groups.name })
+      .from(conversations)
+      .leftJoin(groups, eq(groups.id, conversations.groupId))
+      .where(eq(conversations.id, conversationId));
+    if (!current?.groupId || !current.groupName) return null;
+    return { groupName: current.groupName, movedOn: current.groupId !== handedTo };
+  } catch (error) {
+    // Only the sentence it names the queue in is lost; the page drawn with the
+    // answer shows where the ticket is.
+    log.error(`could not read which queue ${conversationId} waits in`, error);
+    return null;
+  }
 }

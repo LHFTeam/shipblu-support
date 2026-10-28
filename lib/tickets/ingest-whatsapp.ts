@@ -36,7 +36,7 @@ import {
 import { reopenResolved } from './reopen';
 import { requireDefaultOpenStatusId, requireResolvedStatusId } from './statuses';
 import { routingModeOf, type RoutingMode } from '@/lib/routing/mode';
-import { planRouting, startRouting } from '@/lib/routing/start';
+import { planRouting, routingWindowValues, startRouting } from '@/lib/routing/start';
 
 /**
  * Inbound WhatsApp → conversation.
@@ -105,6 +105,10 @@ export async function ingestWhatsAppMessage(
     // delivery for this customer and number waits for this one to commit and
     // continues its ticket instead of opening another (`lockThread`).
     await lockThread(tx, contactId, thread);
+    // When the message was processed, behind the thread's lock: a new
+    // ticket's owner stamp and routing window count from it, never from
+    // Meta's `sentAt`, which is hours old for a delivery processed late.
+    const now = new Date();
     const existing = await findOrAdoptLive(tx, contactId, thread, message.phoneNumberId);
 
     if (existing) {
@@ -143,7 +147,11 @@ export async function ingestWhatsAppMessage(
           lastCustomerMessageAt: message.sentAt,
           // The number's owner's from the start, in the insert rather than by
           // the assignment that runs after it (`ownerStamp` says why).
-          ...ownerStamp(ownerId, new Date()),
+          ...ownerStamp(ownerId, now),
+          // Held for the router from the insert, unless the owner's stamp
+          // beside it already gives the ticket to somebody: the owner is
+          // outside the rota (`lib/routing/start.ts`).
+          ...routingWindowValues(routing, { assigneeAgentId: ownerId }, now),
         })
         .returning({ id: conversations.id, number: conversations.number });
 
@@ -165,12 +173,17 @@ export async function ingestWhatsAppMessage(
     const messageId = insertedMessage[0]!.id;
 
     if (createdConversation) {
-      await startRouting(tx, routing, {
-        conversationId,
-        messageId,
-        groupId: channel.defaultGroupId,
-        assigneeAgentId: ownerAtInsert,
-      });
+      await startRouting(
+        tx,
+        routing,
+        {
+          conversationId,
+          messageId,
+          groupId: channel.defaultGroupId,
+          assigneeAgentId: ownerAtInsert,
+        },
+        now,
+      );
     }
 
     // lastCustomerMessageAt is what opens the 24-hour window, so it must be the

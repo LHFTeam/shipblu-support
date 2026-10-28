@@ -1,5 +1,5 @@
 import { and, asc, eq, inArray, sql } from 'drizzle-orm';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { db } from '@/db/client';
 import {
   agents,
@@ -372,6 +372,59 @@ describe('handToRouteGroup', () => {
       held.release();
     }
     expect(await handing).toMatchObject({ ok: true });
+  });
+
+  // The move and the unassignment have committed when the rota runs, so a
+  // throw there is not the hand-over failing: it is logged, and the answer
+  // says the hand-over is done and that who holds the ticket is not known —
+  // thrown on instead, it told the agent the hand-over had failed while the
+  // ticket sat in the new group with nobody, and skipped the page's refresh.
+  // A trigger refusing the `assigned` line stands in for whatever throws.
+  it('answers the hand-over as done when the assignment after it throws', async () => {
+    const lina = await agent('Lina Care');
+    const mona = await agent('Mona Supervisor');
+    const care = await group('Customer Care', [lina]);
+    const sales = await group('Inbound Sales Team', [await agent('Omar Sales')]);
+    const id = await ticket({
+      groupId: care,
+      assigneeAgentId: lina,
+      categoryId: await category('sales', sales),
+    });
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    await db.execute(sql`
+      create function refuse_assigned() returns trigger language plpgsql
+      as $$ begin raise exception 'refused for the test'; end $$`);
+    await db.execute(sql`
+      create trigger refuse_assigned before insert on conversation_events
+      for each row when (new.type = 'assigned') execute function refuse_assigned()`);
+    let answer;
+    let logged: string[] = [];
+    try {
+      answer = await handToRouteGroup(id, { agentId: mona });
+    } finally {
+      await db.execute(sql`drop trigger refuse_assigned on conversation_events`);
+      await db.execute(sql`drop function refuse_assigned()`);
+      logged = errors.mock.calls.map((call) => String(call[0]));
+      errors.mockRestore();
+    }
+
+    expect(answer).toEqual({
+      ok: true,
+      groupName: 'Inbound Sales Team',
+      assignedTo: null,
+      skipped: null,
+      waitsIn: null,
+      assignmentFailed: true,
+    });
+    expect(await row(id)).toMatchObject({ groupId: sales, assignee: null });
+    expect((await eventsOf(id)).map((event) => event.type)).toEqual([
+      'group_changed',
+      'unassigned',
+    ]);
+    expect(logged).toEqual([
+      expect.stringContaining(`could not assign ${id} after handing it over`),
+    ]);
   });
 
   // The one ticket the hand-over meets undecided: its window passed and the

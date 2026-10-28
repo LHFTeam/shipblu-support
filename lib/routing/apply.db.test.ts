@@ -32,7 +32,7 @@ import { afterHoldEnded } from './after-hold';
 import { routeNow, settleRouting } from './apply';
 import { beginRouting } from './begin';
 import { endHold } from './end-hold';
-import { startRouting } from './start';
+import { routingWindowValues, startRouting } from './start';
 
 /**
  * The router's decision against Postgres (`plans/ticket-category-routing.md`,
@@ -42,9 +42,10 @@ import { startRouting } from './start';
  * recovery of a decision that died between its phases, the SLA policy a
  * decision leaves, and a shadow row.
  *
- * A ticket here is built from rows and started through `startRouting` itself,
- * then begun through `beginRouting`, so it is in exactly the state the creation
- * pass leaves a held ticket in — on the real clock, because the automation
+ * A ticket here is built from rows — its window on the insert, through
+ * `routingWindowValues` — started through `startRouting` itself, then begun
+ * through `beginRouting`, so it is in exactly the state the creation pass
+ * leaves a held ticket in — on the real clock, because the automation
  * engine and the classifier assign on it and a window opened on another day
  * would have lapsed for them. The groups keep no hours for assignment
  * (`assignWithinHoursOnly: false`), so who is picked never depends on the hour
@@ -229,6 +230,7 @@ async function heldTicket(
   } = {},
 ): Promise<Held> {
   people += 1;
+  const plan = { start: shadow ? 'shadow' : 'live', channelId, windowMinutes: 5 } as const;
   const [contact] = await db
     .insert(contacts)
     .values({ name: 'Amira', primaryEmail: `amira${people}@customer.example` })
@@ -245,6 +247,7 @@ async function heldTicket(
       createdAt,
       lastMessageAt: opened,
       lastCustomerMessageAt: opened,
+      ...routingWindowValues(plan, {}, opened),
     })
     .returning({ id: conversations.id });
   const id = ticket!.id;
@@ -259,12 +262,7 @@ async function heldTicket(
     })
     .returning({ id: messages.id });
   await db.transaction((tx) =>
-    startRouting(
-      tx,
-      { start: shadow ? 'shadow' : 'live', channelId, windowMinutes: 5 },
-      { conversationId: id, messageId: message!.id, groupId },
-      opened,
-    ),
+    startRouting(tx, plan, { conversationId: id, messageId: message!.id, groupId }, opened),
   );
   if (stage === 'holding') expect(await beginRouting(id)).toBe('continue');
   return { id, messageId: message!.id };
@@ -338,6 +336,11 @@ async function expectDecided(id: string, outcome: string) {
     expect((await ticketRow(id)).routingDecidedAt).toBeInstanceOf(Date);
   }
   return row;
+}
+
+/** How many times a rule's `add_tags` has run on the ticket: one event each. */
+async function tagged(id: string): Promise<number> {
+  return (await events(id, 'tagged')).length;
 }
 
 async function tags(id: string): Promise<string[]> {
@@ -670,6 +673,84 @@ describe('the two-phase order', () => {
     expect(await routeNow(id, { label: 'agent' })).toBe('in_flight');
     expect(await events(id, 'routed')).toHaveLength(1);
   });
+
+  it('runs the rules once when phase three fails, and the window’s job only ends the hold', async () => {
+    errorsExpected = true;
+    const t = await teams();
+    const sales = await routeTo('sales', t.sales.group);
+    await rule('on_update', 'Tag sales', inCategory(sales), [
+      { type: 'add_tags', tags: ['sales'] },
+    ]);
+    const { id } = await heldTicket(t.channel, t.home.group);
+    await jevFiles(id, sales);
+
+    // `add_tags` opens no transaction, so the second is phase three's.
+    await interruptedAfterPhaseOne(id);
+    expect(await tagged(id)).toBe(1);
+    const row = await decision(id);
+    expect(row.rulesClaimedAt).toBeInstanceOf(Date);
+    expect(row.rulesDoneAt).toBeInstanceOf(Date);
+
+    // The window's job, once the minute is up: the pass is done, so it ends
+    // the hold and pays what the hold owed, and runs no rule again.
+    await db
+      .update(routingDecisions)
+      .set({ phaseOneAt: new Date(Date.now() - 2 * MINUTE) })
+      .where(eq(routingDecisions.conversationId, id));
+    expect(await settleRouting(id)).toBe('decided');
+
+    expect(await tagged(id)).toBe(1);
+    expect(await ticketRow(id)).toMatchObject({
+      groupId: t.sales.group,
+      assigneeAgentId: t.sales.agent,
+    });
+    await expectDecided(id, 'category');
+  });
+
+  it('ends no hold, and runs nothing, for a caller whose claim on the rules is lost', async () => {
+    // A caller that stalled a minute after its phase one, and the window's job
+    // that took the decision over meanwhile and claimed the pass: ending the
+    // hold here would let assignment beat a rule the claimant has still to run.
+    await closedEverywhere();
+    await outOfHoursReply();
+    const t = await teams();
+    const sales = await routeTo('sales', t.sales.group);
+    await rule('on_update', 'Tag sales', inCategory(sales), [
+      { type: 'add_tags', tags: ['sales'] },
+    ]);
+    const { id } = await heldTicket(t.channel, t.home.group);
+    await jevFiles(id, sales);
+
+    const transaction = PgDatabase.prototype.transaction;
+    vi.spyOn(PgDatabase.prototype, 'transaction').mockImplementationOnce(async function (
+      this: PgDatabase<never>,
+      run,
+      config,
+    ) {
+      const result: unknown = await transaction.call(this, run, config);
+      await db
+        .update(routingDecisions)
+        .set({ rulesClaimedAt: new Date() })
+        .where(eq(routingDecisions.conversationId, id));
+      return result as never;
+    });
+    // Decided: the decision is written, and the claimant runs the rules on it.
+    expect(await routeNow(id, { label: 'jev:category' })).toBe('decided');
+
+    expect(await tagged(id)).toBe(0);
+    expect(await decision(id)).toMatchObject({
+      stage: 'holding',
+      outcome: 'category',
+      decidedAt: null,
+      rulesDoneAt: null,
+    });
+    expect(await ticketRow(id)).toMatchObject({
+      groupId: t.sales.group,
+      assigneeAgentId: null,
+      routingDecidedAt: null,
+    });
+    expect(await acknowledgements(id)).toEqual([]);
+  });
 });
 
 // --- What ends a hold early -------------------------------------------------
@@ -837,8 +918,9 @@ describe('what ends a hold early', () => {
 
 /**
  * Route the ticket, and lose the connection before phase three commits: phase
- * one's transaction runs, and the one that ends the hold fails. With no rules
- * owed in between, those are `routeNow`'s first two.
+ * one's transaction runs, and the one that ends the hold fails. In between,
+ * the rules' pass is claimed, run and marked done in statements of their own;
+ * with no rule that opens a transaction, phase three is `routeNow`'s second.
  */
 async function interruptedAfterPhaseOne(id: string): Promise<void> {
   const transaction = PgDatabase.prototype.transaction;

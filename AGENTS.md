@@ -1009,7 +1009,7 @@ previous owner for good. Six rules hold:
   from the phone with the console closed, and every one of those gates
   measures the console. A ticket held for the router is handed to nobody, its
   owner included — but an owned number's new ticket is stamped with its owner
-  in the insert and so is never held (`startRouting`).
+  in the insert and so is never held (`lib/routing/start.ts`).
 - **A deactivated owner stays on the number and counts as nobody**
   (`effectiveOwnerId`): new tickets and reopens treat it as a team number — the
   group's rota assigns, and a breach counts against whoever holds the ticket —
@@ -1371,18 +1371,25 @@ README says why it is a setting and not a rule. The rules:
   conversation the business wrote first; nor spam, a ticket with an assignee at
   its insert (an owned number's, its owner's from the first moment), or a
   WhatsApp number no row names, which has no mode to re-read when it decides.
-- **The hold starts in the insert transaction, which reads nothing on the
+- **The hold starts in the insert, whose transaction reads nothing on the
   pool.** `planRouting(channel)` reads the mode and the classifier's memo before
-  it; `startRouting(tx, plan, ticket)` writes the window, a `pending`
-  `routing_decisions` row and the `settle_routing` job `on: tx` inside it, so
-  all three commit with the ticket or not at all. In the insert, because the
-  priority classifier's update pass, a group-less `on_create` `auto_assign`, a
-  sweep and a second message can each assign a ticket in its first second; in
-  two halves, because a pooled read inside a held connection is §6.91's
-  self-deadlock, and on WhatsApp a throw there loses the message. The window
-  counts from processing, so a late email still gets all of it, and its length
-  is copied from `category_ai_settings.routing_window_minutes`, so a change
-  never moves one already running.
+  it. Inside it, `routingWindowValues(plan, ticket, now)` is spread into the
+  conversation's own insert, so the window is a value of the row the statement
+  creates rather than a second version of it written a statement later, and
+  `startRouting(tx, plan, ticket, now)` writes the `pending` `routing_decisions`
+  row and the `settle_routing` job `on: tx` once the opening message is stored,
+  so all three commit with the ticket or not at all. Both ask one predicate
+  (`starts`, in `lib/routing/start.ts`), so a ticket the insert holds always has
+  the row and the job that end its hold, and each path takes one `now` for both,
+  so the window, the row's copy of it and the job's `run_at` are one instant. In
+  the insert, because the priority classifier's update pass, a group-less
+  `on_create` `auto_assign`, a sweep and a second message can each assign a
+  ticket in its first second; in two halves, because a pooled read inside a held
+  connection is §6.91's self-deadlock, and on WhatsApp a throw there loses the
+  message. The window counts from processing, so a late email still gets all of
+  it, and its length is copied from
+  `category_ai_settings.routing_window_minutes`, so a change never moves one
+  already running.
 - **Held is `isHeld()` over the ticket's own columns** (`lib/routing/hold.ts`):
   a window, no decision, no assignee, and under `ROUTING_GRACE_MS` (ten minutes)
   past the window's end. Assignment answers `awaiting_route`, never recorded;
@@ -1417,29 +1424,44 @@ README says why it is a setting and not a rule. The rules:
   ticket until it commits, which is why these writers take NO KEY UPDATE there
   too; the older ones that lock first and write a non-key column (the category
   writer, Jev, the priority classifier) still say UPDATE, which costs a message
-  a wait and nothing more. `endHold` also reads the routing row before it locks
-  anything, so a ticket that never routed takes no lock there at all.
-  `assignConversation` re-reads the assignee, the group and the hold under its
-  lock, and answers `moved` for a ticket that left the group since its snapshot,
-  which a re-read under the group's lock alone could not see.
+  a wait and nothing more. `endHold` and `beginRouting` read the routing row
+  before they lock anything, so a ticket that never routed takes no lock there
+  at all — and in the creation pass, which every new ticket on every channel
+  runs, no transaction either. The unlocked answer cannot go stale: the row is
+  born in the insert's transaction, which has committed before anything reads
+  it, and a decided row is never undecided again. `assignConversation` re-reads
+  under its lock the assignee, the group, the hold and whether the ticket is
+  still work — open or pending, not deleted, merged or spam (`not_assignable`),
+  the status through `statusCategoryOf`, since no join may sit under the lock —
+  and answers `moved` for a ticket that left the group since its snapshot, which
+  a re-read under the group's lock alone could not see. Taken off the snapshot,
+  a resolve landing while the pick read its roster left the ticket resolved in
+  somebody's name, and the cursor moved past them for work they never got.
 - **A person or a rule deciding first ends the hold, through `endHold()` after
   the write and in its transaction** — after, so the group it records is the one
-  the write left; in it, so neither commits without the other. `manual` is the
-  console's group change, an assignee change naming somebody, an agent's reply
-  and Hand to; `rule` is `assign_group` to another group, `auto_assign` naming
-  another group (`endsHoldAs`, in the move's own transaction) and `assign_agent`
-  naming somebody. Only an action that changes something, judged against the
-  locked row: a rule naming the ticket's own group matches on every pass and
-  would end every hold on its channel, and "Unassigned" or a group-less
-  `auto_assign` decides nothing about where the ticket goes. A no-op on a ticket
-  with no undecided row — one read, and no lock — so a caller need not ask
-  first. Once phase one has written the router's decision, a rule ends nothing —
-  it is part of the pass the router waits for — and a person ends the hold but
-  keeps the router's outcome. What the hold owed (`afterHoldEnded`) follows the
-  caller's own `on_update` pass, never precedes it: the console's group and
-  assignee cases call it after `afterTicketUpdate`, so the rules decide the
-  group before anybody is assigned and before the held reply chooses its
-  calendar.
+  the write left; in it, so neither commits without the other. The write's own
+  line — `group_changed`, `assigned` — goes in that transaction too, ahead of
+  `endHold`, so the timeline reads the move before the `routed` line it caused
+  whoever made it: `endHold` stamps its line `CHANGE_STAMP`, and a rule's line
+  written after the commit, as it was, sorted after the decision it was the
+  reason for. In a savepoint, logged when refused (`recordIn` in the engine,
+  `recordGroupChanged` in `assignConversation`), because the line records the
+  write and is not it: refused, it must take neither the write, the hold's end
+  nor their follow-up down with it. `manual` is the console's group change, an
+  assignee change naming somebody, an agent's reply and Hand to; `rule` is
+  `assign_group` to another group, `auto_assign` naming another group
+  (`endsHoldAs`, in the move's own transaction) and `assign_agent` naming
+  somebody. Only an action that changes something, judged against the locked
+  row: a rule naming the ticket's own group matches on every pass and would end
+  every hold on its channel, and "Unassigned" or a group-less `auto_assign`
+  decides nothing about where the ticket goes. A no-op on a ticket with no
+  undecided row — one read, and no lock — so a caller need not ask first. Once
+  phase one has written the router's decision, a rule ends nothing — it is part
+  of the pass the router waits for — and a person ends the hold but keeps the
+  router's outcome. What the hold owed (`afterHoldEnded`) follows the caller's
+  own `on_update` pass, never precedes it: the console's group and assignee
+  cases call it after `afterTicketUpdate`, so the rules decide the group before
+  anybody is assigned and before the held reply chooses its calendar.
 - **A rule's pick waits with the ticket, strategy and all.** A group-less
   `auto_assign`, or one naming the group the ticket is in, is answered
   `awaiting_route` like any assignment on a held ticket, and when it names a
@@ -1450,37 +1472,55 @@ README says why it is a setting and not a rule. The rules:
   them, so the `assigned` event names the rule and a round-robin rule over a
   group left on `manual` — how a rule turns assignment on without moving a
   ticket — still assigns, where the hold's end used to pick with the group's own
-  strategy and assign nobody. Phase one drops them when its own rules follow,
-  since the rule was matched against the ticket before the decision moved or
-  filed it, and phase two's pass keeps them again only if the rule still
-  matches; `endHold` drops them, since whoever ended the hold decided instead,
-  and a grouped `auto_assign` that ended it picks with its own strategy at once.
-  With no rules owed nothing has changed but the hold, and the pick stands. So
-  an `on_create` rule's strategy does not survive a decision that owes rules:
-  phase two runs `on_update` rules only.
+  strategy and assign nobody. Phase one drops them only when its decision moves
+  the ticket, since the rule spoke about the group the ticket has left, and
+  phase two's pass keeps them again if an `on_update` rule matches it where it
+  now is. A decision that leaves the ticket where it was keeps them, rules owed
+  or not: the rule still speaks about that group, and an `on_create` rule has no
+  later pass to ask again — phase two runs `on_update` rules only, and dropping
+  the pick there left every held ticket on a manual group unassigned once its
+  category settled. `endHold` drops them, since whoever ended the hold decided
+  instead, and a grouped `auto_assign` that ended it picks with its own strategy
+  at once.
 - **A category is not a stamp.** A person's category edit during the hold routes
-  the ticket now (`routeNow`), in place of the update pass the edit would have
-  run — when the router answers `decided`, which ran the rules on this category,
-  or `failed`, which leaves them to `settle_routing`. On `in_flight` the edit
-  runs its own pass: another caller's decision is part-way through, its pass
-  read the category this edit replaced, and nothing runs the rules once it ends
-  the hold; the ticket is still held, so that pass assigns nobody and a rule's
-  move in it ends nothing. Clearing a category leaves the window running. A
-  rule's `set_category` after the creation pass is routed by `settle_routing`,
-  since an action never re-enters the engine. After the hold an edit only
-  relabels, and `Hand to <group>` (`ticket.assign`, `lib/routing/hand-to.ts`)
-  moves the ticket, clears its assignee with an `unassigned` naming `from`, and
-  assigns it in the new group — without the clearing the holder stays, since the
-  Group field and `assign_group` both keep an assignee. It is not offered on a
-  number whose active owner the rota would hand the ticket straight back to, nor
-  on a coexistence number. The button posts the group it named and the assignee
-  the page was drawn with, and the action compares both under the lock, refusing
+  the ticket in place of the update pass the edit would have run, and what is
+  owed is read off the routing row in the write's own transaction — the stage
+  moves only under the ticket's lock, which the write holds, so the answer is
+  the one the write met, as the classifier reads it. Live `pending`: nothing,
+  not even the policy, because the creation pass's `beginRouting` routes on the
+  category after the `on_create` rules (or `settle_routing` does, at the
+  window's end); routed at once, the ticket was decided before a rule had its
+  word, and a rule's `assign_group` then ended nothing. Live `holding`:
+  `routeNow`, and the edit's pass is skipped when the router answers `decided`,
+  which ran the rules on this category, or `failed`, which leaves them to
+  `settle_routing`. On `none` or `in_flight` somebody decided between the edit's
+  commit and the router's lock, and `routerDecidedOn` asks who: the router on
+  this very category ran, or is running, the pass, and a second would fire every
+  category rule twice; the router on the category the edit replaced, or a person
+  or a rule through `endHold`, never read it, so the edit runs its own pass —
+  and on a ticket still held that pass assigns nobody, and a rule's move in it
+  ends nothing. In shadow the edit records the would-be decision once
+  `beginRouting` has begun, then carries on as though nothing routed. Clearing a
+  category leaves the window running. A rule's `set_category` after the creation
+  pass is routed by `settle_routing`, since an action never re-enters the
+  engine. After the hold an edit only relabels, and `Hand to <group>`
+  (`ticket.assign`, `lib/routing/hand-to.ts`) moves the ticket, clears its
+  assignee with an `unassigned` naming `from`, and assigns it in the new group —
+  without the clearing the holder stays, since the Group field and
+  `assign_group` both keep an assignee. It is not offered on a number whose
+  active owner the rota would hand the ticket straight back to, nor on a
+  coexistence number. The button posts the group it named and the assignee the
+  page was drawn with, and the action compares both under the lock, refusing
   `changed` or `reassigned`: the assignee decided whether the button asked
   twice, so a page drawn before a colleague took the ticket must not unassign
   them in one click. It says the ticket waits in a queue only when the rota
   answered that nobody there could take it (`waitsIn`), naming the group a rule
   moved it on to; after a rule resolved it or somebody moved it, the redrawn
-  page says where it went.
+  page says where it went. Everything after the hand-over's transaction is
+  best-effort, since the move and the unassignment stand: an assignment that
+  throws is answered as done, with a sentence sending the agent to look who
+  holds the ticket (`assignmentFailed`), where a throw failed the action and
+  left a page showing the old group and assignee.
 - **A decision is two phases with the rules between, each its own transaction**
   (`routeNow`, `settleRouting` in `lib/routing/apply.ts`). Phase one, under the
   ticket's lock, runs `decide()` and writes the move, the decision row and one
@@ -1495,18 +1535,35 @@ README says why it is a setting and not a rule. The rules:
   `already_assigned` before it moves, and tells the customer the wrong team's
   hours. Never one transaction across phases: the rules, the SLA and assignment
   lock the ticket on connections of their own and would wait until the pooler
-  killed it (§6.91). A process dying between phases leaves the hold, and
-  `settle_routing` completes a phase one older than `PHASE_ONE_RESUME_MS`. So
-  does a phase three that fails, whoever the caller: after `routeNow` the
-  window's job is always still to come while the row is undecided — the first,
-  or the one requeued on meeting this decision in flight — and `settleRouting`,
-  which nothing comes after once its key is spent, throws so the queue retries
-  it (sooner than the minute, the retry requeues itself without a key).
-  Completing a decision reads the ticket again under the lock, and one resolved,
-  closed, deleted, merged or marked spam since is owed nothing (`isWorkable` in
-  `decide.ts`, `not_open`'s own test): its hold ends with the outcome phase one
-  wrote, no rule runs, nobody is assigned and no reply goes, where finishing
-  from the stored row ran a category's rules on a deleted ticket.
+  killed it (§6.91). **Phase two runs at most once**, however many callers
+  finish one decision: `finish()` claims it with one conditional statement on
+  the routing row (`rules_claimed_at`, refused once the row is decided) and
+  marks it done (`rules_done_at`) in a statement of its own before phase three,
+  so a phase three that fails keeps the mark. A caller whose claim fails ends
+  nothing — the claimant ends the hold after its last rule, and ending it sooner
+  lets assignment beat a rule still to come — and `settleRouting` then looks
+  again, without a key, once `RULES_RUNNING_MS` is up. A process dying between
+  phases leaves the hold, and `settle_routing` completes a phase one older than
+  `PHASE_ONE_RESUME_MS`: a pass nobody claimed it claims and runs; a pass done
+  it skips; a claim younger than `RULES_RUNNING_MS` — the hold's ten-minute
+  grace, for the grace's own reason — it leaves to its claimant, looking again
+  then, before it asks whether the ticket is still work, since the claimant owns
+  phase three; and an older claim, whose claimant died part-way, it answers by
+  ending the hold without the rules, with a warning, because which of them ran
+  is recorded nowhere, and a pass half-applied once is a smaller harm than a
+  `send_reply` sent twice. So does a phase three that fails, whoever the caller:
+  after `routeNow` the window's job is always still to come while the row is
+  undecided — the first, or the one requeued on meeting this decision in flight
+  — and `settleRouting`, which nothing comes after once its key is spent, throws
+  so the queue retries it, which runs no rule a second time (sooner than the
+  minute, the retry requeues itself without a key). Without the claim every
+  retry ran the whole pass again, and a slow pass met a second one started
+  beside it once its phase one was a minute old. Completing a decision reads the
+  ticket again under the lock, and one resolved, closed, deleted, merged or
+  marked spam since is owed nothing (`isWorkable` in `decide.ts`, `not_open`'s
+  own test): its hold ends with the outcome phase one wrote, no rule runs,
+  nobody is assigned and no reply goes, where finishing from the stored row ran
+  a category's rules on a deleted ticket.
 - **The creation pass is `on_create` rules, `applySlaOnCreate`, then
   `beginRouting`, and it stops on `routed`.** After the rules, so a rule gets
   the first word: its stamp has ended the hold, or its `set_category` is routed
@@ -1528,12 +1585,19 @@ README says why it is a setting and not a rule. The rules:
   live hold — the router, `settle_routing` whatever it decides but `not_open`,
   which assigns and sends nothing (`routeNow` answers `none` for it), a caller
   that `endHold` answered `true` — calls `afterHoldEnded` once its transaction
-  commits. It reads what is owed off the routing row itself: assignment, with
-  the strategy a rule asked for meanwhile, then the out-of-hours reply to the
-  message that opened the ticket (`routing_decisions.message_id`), the one the
-  creation pass would have answered, never the newest inbound row. The engine
-  calls it after a pass whose rule ended a hold, from where the whole pass left
-  the ticket, which is not re-entry. One reply, by the claim on
+  commits. It reads what is owed off the routing row itself (`heldFollowUp`):
+  assignment, with the strategy a rule asked for meanwhile, then the
+  out-of-hours reply to the message the hold kept from being acknowledged. That
+  is the one that opened the ticket (`routing_decisions.message_id`), which the
+  creation pass would have answered, while its author is still the requester;
+  otherwise the requester's earliest inbound reply that is not a reaction. A
+  comment thread a passer-by's reply opened makes the root comment's author the
+  requester during the hold (`adoptRootAuthor`), the reply refuses the
+  passer-by's message (`answersRequester`), and the customer's own comment, held
+  unanswered like everything else, was never acknowledged. Never the newest
+  inbound row, which after a batch retried whole is as often somebody else's.
+  The engine calls it after a pass whose rule ended a hold, from where the whole
+  pass left the ticket, which is not re-entry. One reply, by the claim on
   `auto_responded_at`; and since a job can now send it minutes after the
   message, it skips a ticket not open or pending and one a person answered in
   this closed stretch (`answeredInThisStretch`), so an agent's 23:02 reply that
@@ -1547,7 +1611,8 @@ README says why it is a setting and not a rule. The rules:
   `settle_routing:<id>`, is spent for good, right only because a ticket routes
   once, and is enqueued on the insert transaction, so a duplicate delivery
   rolled back with its ticket spends nothing. Meeting a phase one younger than a
-  minute, it enqueues itself again **without** a key: the first is spent, and
+  minute or a claim on its rules younger than `RULES_RUNNING_MS`, or losing its
+  own claim, it enqueues itself again **without** a key: the first is spent, and
   this is the same work legitimately asked for again (**Background work**).
   Failing its own phase three, it throws rather than answering `decided`, since
   a job that completes is the last one the ticket gets, and the queue's retry
@@ -1579,13 +1644,14 @@ README says why it is a setting and not a rule. The rules:
 
 `routing_decisions` holds one row per ticket that entered routing, written only
 by `lib/routing/` and under the ticket's lock — but for the held strategy, which
-`recordHeldAssignment` sets on an undecided live row in one statement of its
-own, holding no other lock to close a cycle with — and
-`routing_decisions_decided_complete` (`db/sql/003`) refuses a decided row
-without its outcome or `decided_at`, which would leave the routing report short
-without a word. The timeline gets one `routed` event per live decision, one that
-moved nothing included, naming the category, the group, Jev's probability and
-the outcome, and one when `endHold` writes `manual` or `rule`.
+`recordHeldAssignment` sets on an undecided live row, and phase two's claim and
+mark, which `finish()` writes, each in one statement of its own holding no other
+lock to close a cycle with — and `routing_decisions_decided_complete`
+(`db/sql/003`) refuses a decided row without its outcome or `decided_at`, which
+would leave the routing report short without a word. The timeline gets one
+`routed` event per live decision, one that moved nothing included, naming the
+category, the group, Jev's probability and the outcome, and one when `endHold`
+writes `manual` or `rule`.
 
 **The one AI provider, and the four things it is allowed to touch.**
 `lib/typesafe/` calls TypeSafe's System One endpoint, and four modules ask it a

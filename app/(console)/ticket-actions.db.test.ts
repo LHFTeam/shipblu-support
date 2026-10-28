@@ -14,6 +14,7 @@ import {
   groups,
   messages,
   routingDecisions,
+  slaPolicies,
   ticketCategories,
   ticketStatuses,
 } from '@/db/schema';
@@ -21,10 +22,12 @@ import { assignConversation } from '@/lib/assignment';
 import { setConversationCategory } from '@/lib/categories/write';
 import { forgetCategoryAiSettings } from '@/lib/category-ai/settings';
 import { forgetHoursCatalog } from '@/lib/hours/catalog';
-import { routeNow } from '@/lib/routing/apply';
+import { routeNow, settleRouting } from '@/lib/routing/apply';
 import { beginRouting } from '@/lib/routing/begin';
-import { startRouting } from '@/lib/routing/start';
+import { endHold } from '@/lib/routing/end-hold';
+import { routingWindowValues, startRouting } from '@/lib/routing/start';
 import { withCleanDatabase } from '@/lib/testing/db';
+import { holdNextTransaction } from '@/lib/testing/hold-transaction';
 
 /**
  * The console's ticket edits against Postgres, where the order of what follows
@@ -130,6 +133,12 @@ const week = (day: { start: string; end: string }[]) => ({
   sat: day,
 });
 const OPEN = week([{ start: '00:00', end: '24:00' }]);
+
+/** An SLA policy's targets, the same at every priority. */
+const target = (firstResponseMins: number, resolutionMins: number) => {
+  const row = { firstResponseMins, nextResponseMins: firstResponseMins, resolutionMins };
+  return { low: row, medium: row, high: row, urgent: row };
+};
 const SHUT = week([]);
 
 /** A calendar of the group's own, which the held reply then reads. */
@@ -234,21 +243,24 @@ async function ticket(groupId: string, values: Partial<typeof conversations.$inf
 }
 
 /**
- * A ticket on `channelId`'s mail, started as the insert starts one and begun
- * as the creation pass begins it: `holding`, with no category. Live, the
- * window is on the ticket and nothing assigns it; in shadow nothing is held.
+ * A ticket on `channelId`'s mail, started as the insert starts one — the
+ * window on the insert (`routingWindowValues`), the row and the job beside it
+ * — and, unless `stage` stops it there, begun as the creation pass begins it:
+ * `holding`, with no category. Live, the window is on the ticket and nothing
+ * assigns it; in shadow nothing is held.
  */
-async function heldTicket(channelId: string, groupId: string, { shadow = false } = {}) {
-  const t = await ticket(groupId, { channelId });
+async function heldTicket(
+  channelId: string,
+  groupId: string,
+  { shadow = false, stage = 'holding' }: { shadow?: boolean; stage?: 'pending' | 'holding' } = {},
+) {
+  const plan = { start: shadow ? 'shadow' : 'live', channelId, windowMinutes: 5 } as const;
+  const now = new Date();
+  const t = await ticket(groupId, { channelId, ...routingWindowValues(plan, {}, now) });
   await db.transaction((tx) =>
-    startRouting(
-      tx,
-      { start: shadow ? 'shadow' : 'live', channelId, windowMinutes: 5 },
-      { conversationId: t.id, messageId: t.messageId, groupId },
-      t.opened,
-    ),
+    startRouting(tx, plan, { conversationId: t.id, messageId: t.messageId, groupId }, now),
   );
-  expect(await beginRouting(t.id)).toBe('continue');
+  if (stage === 'holding') expect(await beginRouting(t.id)).toBe('continue');
   return t.id;
 }
 
@@ -306,6 +318,21 @@ async function holdRule(ruleId: string) {
       release();
       await holding;
     },
+  };
+}
+
+/** Refuses every `type` line on the timeline until the answer is called. */
+async function refuseLine(type: string) {
+  await db.execute(sql`
+    create function refuse_line() returns trigger language plpgsql
+    as $$ begin raise exception 'refused for the test'; end $$`);
+  await db.execute(
+    sql.raw(`create trigger refuse_line before insert on conversation_events
+      for each row when (new.type = '${type}') execute function refuse_line()`),
+  );
+  return async () => {
+    await db.execute(sql`drop trigger refuse_line on conversation_events`);
+    await db.execute(sql`drop function refuse_line()`);
   };
 }
 
@@ -435,6 +462,33 @@ describe('handToGroup', () => {
     const answer = await handTo(id, sales, lina);
     expect(answer).toMatchObject({ error: null });
     expect(answer).not.toHaveProperty('message');
+  });
+
+  // The move and the unassignment have committed when the rota throws, so the
+  // answer is a success that says who holds the ticket is not known — not a
+  // failure for a hand-over that stands. A trigger refusing the `assigned`
+  // line stands in for whatever throws.
+  it('says so when assigning in the new group failed after the hand-over', async () => {
+    const { lina, care, sales, salesCategory } = await desk();
+    const { id } = await ticket(care, { categoryId: salesCategory, assigneeAgentId: lina });
+    const drop = await refuseLine('assigned');
+    let answer;
+    try {
+      answer = await handTo(id, sales, lina);
+    } finally {
+      await drop();
+    }
+
+    expect(answer).toMatchObject({
+      error: null,
+      message:
+        'Handed to Inbound Sales Team, but assigning it there failed. Check who holds it now.',
+    });
+    expect(await ticketRow(id)).toMatchObject({ groupId: sales, assigneeAgentId: null });
+    expect(errors.mock.calls.map((call) => String(call[0]))).toEqual([
+      expect.stringContaining('after handing it over'),
+    ]);
+    errors.mockClear();
   });
 });
 
@@ -659,6 +713,175 @@ describe('updateTicket on a ticket held for routing', () => {
           data: { to: 'urgent' },
         },
       ]);
+    });
+
+    // The creation pass has not reached `beginRouting` yet. Routed now, the
+    // ticket was decided before its `on_create` rules had run — a rule's
+    // `assign_group` then ended nothing — so the edit writes the category and
+    // nothing else: no decision, no pass over the rules, no policy chosen.
+    // `beginRouting` routes on it once the rules have had the first word.
+    it('on a ticket not yet begun, writes the category and leaves the routing to beginRouting', async () => {
+      const lina = await agent('Lina Care');
+      const omar = await agent('Omar Sales');
+      const care = await group('Customer Care', [lina]);
+      const sales = await group('Inbound Sales Team', [omar]);
+      const salesCategory = await routeTo('sales', sales);
+      await db.insert(slaPolicies).values({
+        name: 'Sales',
+        hoursSource: 'round_the_clock',
+        targets: target(30, 240),
+        position: 0,
+        conditions: { field: 'category.id', op: 'eq', value: salesCategory },
+      });
+      await onUpdate('Every update is urgent', { all: [] }, [
+        { type: 'set_priority', value: 'urgent' },
+      ]);
+      const id = await heldTicket(await mailbox(care, 'category'), care, { stage: 'pending' });
+
+      expect(await edit(id, 'category', salesCategory)).toMatchObject({ error: null });
+
+      expect(await decisionOf(id)).toMatchObject({ stage: 'pending', outcome: null });
+      expect(await eventsOf(id, 'routed')).toEqual([]);
+      expect(await eventsOf(id, 'priority_changed')).toEqual([]);
+      expect(await eventsOf(id, 'sla_recalculated')).toEqual([]);
+      expect(await ticketRow(id)).toMatchObject({
+        groupId: care,
+        assigneeAgentId: null,
+        routingDecidedAt: null,
+      });
+
+      // The creation pass's routing step, then: on the person's category.
+      expect(await beginRouting(id)).toBe('routed');
+      expect(await decisionOf(id)).toMatchObject({
+        stage: 'decided',
+        outcome: 'category',
+        categoryId: salesCategory,
+        toGroupId: sales,
+        decidedByLabel: 'creation',
+      });
+      expect(await ticketRow(id)).toMatchObject({ groupId: sales, assigneeAgentId: omar });
+      expect(await eventsOf(id, 'priority_changed')).toHaveLength(1);
+    });
+
+    // In shadow too a rule gets the first word: the would-be decision waits
+    // for `beginRouting`, after the `on_create` rules, and the edit is the
+    // relabel it would be without routing — its own pass included, since
+    // nothing is held and the router runs no rules on a shadow row.
+    it('on a shadow ticket not yet begun, records nothing and relabels', async () => {
+      const lina = await agent('Lina Care');
+      const omar = await agent('Omar Sales');
+      const care = await group('Customer Care', [lina]);
+      const sales = await group('Inbound Sales Team', [omar]);
+      const salesCategory = await routeTo('sales', sales);
+      await onUpdate('Every update is urgent', { all: [] }, [
+        { type: 'set_priority', value: 'urgent' },
+      ]);
+      const id = await heldTicket(await mailbox(care, 'category_shadow'), care, {
+        shadow: true,
+        stage: 'pending',
+      });
+
+      expect(await edit(id, 'category', salesCategory)).toMatchObject({ error: null });
+
+      expect(await decisionOf(id)).toMatchObject({ stage: 'pending', outcome: null });
+      expect(await eventsOf(id, 'priority_changed')).toHaveLength(1);
+      // Nothing holds a shadow ticket, so the edit's own pass assigned it.
+      expect(await ticketRow(id)).toMatchObject({ groupId: care, assigneeAgentId: lina });
+
+      // The creation pass then records where it would have gone, as `creation`.
+      expect(await beginRouting(id)).toBe('continue');
+      expect(await decisionOf(id)).toMatchObject({
+        shadow: true,
+        stage: 'decided',
+        outcome: 'category',
+        toGroupId: sales,
+        decidedByLabel: 'creation',
+      });
+      expect(await ticketRow(id)).toMatchObject({ groupId: care, assigneeAgentId: lina });
+    });
+
+    // The window closes in the moment between the edit's commit and its own
+    // call into the router: `settle_routing`, waiting on the edit's lock,
+    // decides on the category the edit wrote and runs the rules on it. The
+    // edit meets that decision made (`none`) or finishing (`in_flight`), and
+    // a pass of its own would be a second over the same category — every
+    // rule keyed on it fires twice. The edit's write is held open from
+    // inside it, so the settle is queued on the ticket's lock first.
+    it('runs no pass of its own when the router decided on the category it wrote', async () => {
+      const lina = await agent('Lina Care');
+      const omar = await agent('Omar Sales');
+      const care = await group('Customer Care', [lina]);
+      const sales = await group('Inbound Sales Team', [omar]);
+      const salesCategory = await routeTo('sales', sales);
+      await onUpdate('Every update is urgent', { all: [] }, [
+        { type: 'set_priority', value: 'urgent' },
+      ]);
+      const id = await heldTicket(await mailbox(care, 'category'), care);
+
+      const write = holdNextTransaction('after');
+      const editing = edit(id, 'category', salesCategory);
+      await write.atHold;
+      const settling = settleRouting(id);
+      await untilWaitingOnLocks(1, () => false);
+      write.release();
+
+      expect(await settling).toBe('decided');
+      expect(await editing).toMatchObject({ error: null });
+      expect(await decisionOf(id)).toMatchObject({
+        stage: 'decided',
+        outcome: 'category',
+        categoryId: salesCategory,
+        toGroupId: sales,
+        decidedByLabel: 'settle_routing',
+      });
+      expect(await ticketRow(id)).toMatchObject({ groupId: sales, assigneeAgentId: omar });
+      expect(await eventsOf(id, 'priority_changed')).toHaveLength(1);
+    });
+
+    // Between the edit's commit and its call into the router an agent takes
+    // the ticket, which `endHold` decides without looking at the category:
+    // nothing has run the rules on what the edit wrote, so the edit does.
+    it('runs its own pass when a person decided in that moment', async () => {
+      const lina = await agent('Lina Care');
+      const omar = await agent('Omar Sales');
+      const care = await group('Customer Care', [lina]);
+      const sales = await group('Inbound Sales Team', [omar]);
+      const salesCategory = await routeTo('sales', sales);
+      await onUpdate('Every update is urgent', { all: [] }, [
+        { type: 'set_priority', value: 'urgent' },
+      ]);
+      await onUpdate(
+        'Sales is seen',
+        { field: 'category.id', op: 'eq', value: salesCategory },
+        [{ type: 'add_tags', tags: ['sales-seen'] }],
+        1,
+      );
+      const id = await heldTicket(await mailbox(care, 'category'), care);
+
+      const write = holdNextTransaction('after');
+      const editing = edit(id, 'category', salesCategory);
+      await write.atHold;
+      const taking = db.transaction(async (tx) => {
+        await tx
+          .update(conversations)
+          .set({ assigneeAgentId: lina, assignedAt: new Date() })
+          .where(eq(conversations.id, id));
+        return endHold(tx, id, 'manual', { agentId: lina });
+      });
+      await untilWaitingOnLocks(1, () => false);
+      write.release();
+
+      expect(await taking).toBe(true);
+      expect(await editing).toMatchObject({ error: null });
+      expect(await decisionOf(id)).toMatchObject({
+        stage: 'decided',
+        outcome: 'manual',
+        toGroupId: care,
+        decidedByAgentId: lina,
+      });
+      expect(await ticketRow(id)).toMatchObject({ groupId: care, assigneeAgentId: lina });
+      expect(await tagsOf(id)).toEqual(['sales-seen']);
+      expect(await eventsOf(id, 'priority_changed')).toHaveLength(1);
     });
 
     // Jev's answer routed the ticket a moment ago, and its pass over the rules

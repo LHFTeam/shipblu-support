@@ -26,7 +26,7 @@ import { storeAgentReply } from '@/lib/tickets/agent-reply';
 import { appendVisitorMessage } from '@/lib/widget/conversation';
 import { routeNow } from './apply';
 import { beginRouting } from './begin';
-import { startRouting } from './start';
+import { routingWindowValues, startRouting, type RoutingPlan } from './start';
 
 /**
  * The locks a routing writer takes on a ticket's row, raced against the one
@@ -55,6 +55,10 @@ import { startRouting } from './start';
  * with the message on a connection of its own, or through the real ingest.
  * Without NO KEY UPDATE every one of them fails: `deadlock detected` (40P01),
  * or the message's insert timing out on the lock (55P03).
+ *
+ * Last, the writer that should take no lock at all: `beginRouting` on a
+ * ticket that never routed, which is nearly every ticket the creation pass
+ * sees.
  */
 
 const gate = vi.hoisted(() => ({
@@ -171,6 +175,7 @@ async function chat(channelId: string, groupId: string, held: boolean): Promise<
     .select({ id: ticketStatuses.id })
     .from(ticketStatuses)
     .where(eq(ticketStatuses.name, 'Open'));
+  const plan: RoutingPlan | null = held ? { start: 'live', channelId, windowMinutes: 5 } : null;
   const [ticket] = await db
     .insert(conversations)
     .values({
@@ -182,6 +187,7 @@ async function chat(channelId: string, groupId: string, held: boolean): Promise<
       subject: 'Where is my parcel?',
       lastMessageAt: now,
       lastCustomerMessageAt: now,
+      ...routingWindowValues(plan, {}, now),
     })
     .returning({ id: conversations.id });
   const id = ticket!.id;
@@ -198,12 +204,7 @@ async function chat(channelId: string, groupId: string, held: boolean): Promise<
     .returning({ id: messages.id });
   if (held) {
     await db.transaction((tx) =>
-      startRouting(
-        tx,
-        { start: 'live', channelId, windowMinutes: 5 },
-        { conversationId: id, messageId: message!.id, groupId },
-        now,
-      ),
+      startRouting(tx, plan, { conversationId: id, messageId: message!.id, groupId }, now),
     );
     expect(await beginRouting(id)).toBe('continue');
   }
@@ -510,5 +511,47 @@ describe('a customer’s message, while a routing writer holds the ticket', () =
     await expectInsertGoesThrough(ticket.id, () => assignConversation(ticket.id));
 
     expect((await ticketRow(ticket.id)).assigneeAgentId).toBe(hana);
+  });
+});
+
+// --- No lock at all: a ticket that never routed -----------------------------
+
+describe('beginRouting, on a ticket that never routed', () => {
+  /**
+   * Every new ticket on every channel goes through `beginRouting`, and nearly
+   * none of them routed. It looks for the undecided routing row before it
+   * locks anything, so a ticket with none takes no transaction and no lock:
+   * here another writer holds the ticket's row, as an agent's reply or a
+   * console move does, and `beginRouting` must answer without waiting for
+   * it. Locking first, it waited behind that writer to learn that nothing
+   * routes — and held back every writer queued behind itself.
+   */
+  it('answers continue without waiting on a writer that holds the ticket', async () => {
+    const hana = await agent('Hana');
+    const care = await group('Customer Care', [hana]);
+    const ticket = await chat(await webchat(care, false), care, false);
+
+    let locked!: () => void;
+    const holding = new Promise<void>((resolve) => (locked = resolve));
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => (release = resolve));
+    const writer = side.begin(async (tx) => {
+      await tx`select id from conversations where id = ${ticket.id} for no key update`;
+      locked();
+      await released;
+    });
+    await holding;
+
+    const begun = beginRouting(ticket.id);
+    const first = await Promise.race([
+      begun,
+      untilWaitingOnALock(db).then(() => 'waited on the ticket’s lock' as const),
+    ]);
+    release();
+    await writer;
+
+    expect(first).toBe('continue');
+    expect(await begun).toBe('continue');
+    expect(await stage(ticket.id)).toBeNull();
   });
 });

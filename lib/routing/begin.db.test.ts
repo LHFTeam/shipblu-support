@@ -33,7 +33,15 @@ import { ingestInboundEmail } from '@/lib/tickets/ingest';
 import { afterTicketUpdate } from '@/lib/tickets/lifecycle';
 import { settleRouting } from './apply';
 import { beginRouting } from './begin';
-import { SETTLE_ROUTING_PRIORITY, planRouting, startRouting } from './start';
+import { heldFollowUp } from './held-assignment';
+import { windowEndsAt } from './hold';
+import {
+  SETTLE_ROUTING_PRIORITY,
+  planRouting,
+  routingWindowValues,
+  startRouting,
+  type RoutingPlan,
+} from './start';
 
 /**
  * Where routing starts, against Postgres (`plans/ticket-category-routing.md`,
@@ -193,9 +201,10 @@ async function outOfHoursReply(): Promise<void> {
 type Held = { id: string; messageId: string };
 
 /**
- * A ticket on `channelId`'s mail, started as the insert starts one and begun as
- * the creation pass begins it — `holding`, with no category — unless `stage`
- * says to stop at the insert.
+ * A ticket on `channelId`'s mail, started as the insert starts one — the window
+ * on the insert, then the row and the job — and begun as the creation pass
+ * begins it, `holding` with no category, unless `stage` says to stop at the
+ * insert.
  */
 async function heldTicket(
   channelId: string,
@@ -213,6 +222,7 @@ async function heldTicket(
   } = {},
 ): Promise<Held> {
   people += 1;
+  const plan: RoutingPlan = { start: shadow ? 'shadow' : 'live', channelId, windowMinutes: 5 };
   const [contact] = await db
     .insert(contacts)
     .values({ name: 'Amira', primaryEmail: `amira${people}@customer.example` })
@@ -229,6 +239,7 @@ async function heldTicket(
       createdAt,
       lastMessageAt: opened,
       lastCustomerMessageAt: opened,
+      ...routingWindowValues(plan, {}, opened),
     })
     .returning({ id: conversations.id });
   const id = ticket!.id;
@@ -243,12 +254,7 @@ async function heldTicket(
     })
     .returning({ id: messages.id });
   await db.transaction((tx) =>
-    startRouting(
-      tx,
-      { start: shadow ? 'shadow' : 'live', channelId, windowMinutes: 5 },
-      { conversationId: id, messageId: message!.id, groupId },
-      opened,
-    ),
+    startRouting(tx, plan, { conversationId: id, messageId: message!.id, groupId }, opened),
   );
   if (stage === 'holding') expect(await beginRouting(id)).toBe('continue');
   return { id, messageId: message!.id };
@@ -585,6 +591,7 @@ describe('the insert', () => {
 
     // A duplicate delivery's insert, rolled back by the unique index after the
     // hold was written: neither the row nor the job — nor the job's key — survives.
+    const now = new Date();
     await expect(
       db.transaction(async (tx) => {
         const [ticket] = await tx
@@ -595,6 +602,7 @@ describe('the insert', () => {
             groupId: t.home.group,
             statusId: await status('Open'),
             requesterContactId: contact!.id,
+            ...routingWindowValues(plan, {}, now),
           })
           .returning({ id: conversations.id });
         const [message] = await tx
@@ -606,11 +614,12 @@ describe('the insert', () => {
             bodyText: 'Hi',
           })
           .returning({ id: messages.id });
-        await startRouting(tx, plan, {
-          conversationId: ticket!.id,
-          messageId: message!.id,
-          groupId: t.home.group,
-        });
+        await startRouting(
+          tx,
+          plan,
+          { conversationId: ticket!.id, messageId: message!.id, groupId: t.home.group },
+          now,
+        );
         throw new Error('duplicate key value violates unique constraint');
       }),
     ).rejects.toThrow('duplicate key');
@@ -618,6 +627,74 @@ describe('the insert', () => {
     expect(await db.select().from(routingDecisions)).toEqual([]);
     expect(await db.select().from(jobs).where(eq(jobs.type, 'settle_routing'))).toEqual([]);
   });
+
+  // The window is a value on the insert, and the row and the job are all
+  // `startRouting` writes: an UPDATE of the ticket there was a second version
+  // of a row the transaction had only just created. Every UPDATE writes a new
+  // version of the row, even one setting what is already there, so the
+  // version's address — `ctid` — moves on any; here it must not.
+  it.each([
+    ['live', true],
+    ['shadow', false],
+  ] as const)(
+    'writes a %s ticket’s window on its insert, and startRouting leaves the ticket’s row alone',
+    async (start, held) => {
+      const t = await teams();
+      const plan: RoutingPlan = { start, channelId: t.channel, windowMinutes: 5 };
+      const [contact] = await db
+        .insert(contacts)
+        .values({ name: 'Amira' })
+        .returning({ id: contacts.id });
+      const now = new Date(Date.now() - 2 * MINUTE);
+      const version = async (tx: Pick<typeof db, 'execute'>, id: string) =>
+        tx.execute(sql`select ctid::text as ctid from conversations where id = ${id}`);
+
+      const id = await db.transaction(async (tx) => {
+        const [ticket] = await tx
+          .insert(conversations)
+          .values({
+            channel: 'email',
+            channelId: t.channel,
+            groupId: t.home.group,
+            statusId: await status('Open'),
+            requesterContactId: contact!.id,
+            ...routingWindowValues(plan, {}, now),
+          })
+          .returning({ id: conversations.id });
+        const [message] = await tx
+          .insert(messages)
+          .values({
+            conversationId: ticket!.id,
+            direction: 'inbound',
+            kind: 'reply',
+            bodyText: 'Hi',
+          })
+          .returning({ id: messages.id });
+        const inserted = await version(tx, ticket!.id);
+
+        await startRouting(
+          tx,
+          plan,
+          { conversationId: ticket!.id, messageId: message!.id, groupId: t.home.group },
+          now,
+        );
+
+        expect(await version(tx, ticket!.id)).toEqual(inserted);
+        return ticket!.id;
+      });
+
+      // One instant for the three: the ticket's window, the row's, the job's.
+      const endsAt = windowEndsAt(now, 5);
+      expect((await ticketRow(id)).routingWindowEndsAt).toEqual(held ? endsAt : null);
+      expect(await decision(id)).toMatchObject({
+        shadow: !held,
+        stage: 'pending',
+        windowEndsAt: endsAt,
+        startedAt: now,
+      });
+      expect((await settleJobs(id)).map((job) => job.runAt)).toEqual([endsAt]);
+    },
+  );
 });
 
 describe('planRouting', () => {
@@ -667,19 +744,41 @@ describe('planRouting', () => {
     await db.delete(routingDecisions);
     await db.delete(jobs);
 
+    const now = new Date();
+
+    // The insert's window and the row and job beside it ask one question, so
+    // a ticket is never held with nothing to decide it, nor recorded as held
+    // with no window.
+    expect(routingWindowValues(plan, { assigneeAgentId: t.home.agent }, now)).toEqual({});
+    expect(routingWindowValues(plan, { isSpam: true }, now)).toEqual({});
+    expect(routingWindowValues(plan, { assigneeAgentId: null, isSpam: false }, now)).toEqual({
+      routingWindowEndsAt: windowEndsAt(now, 5),
+    });
+    expect(routingWindowValues(null, {}, now)).toEqual({});
+
     await db.transaction(async (tx) => {
-      await startRouting(tx, plan, {
-        conversationId: owned.id,
-        messageId: owned.messageId,
-        groupId: t.home.group,
-        assigneeAgentId: t.home.agent,
-      });
-      await startRouting(tx, plan, {
-        conversationId: owned.id,
-        messageId: owned.messageId,
-        groupId: t.home.group,
-        isSpam: true,
-      });
+      await startRouting(
+        tx,
+        plan,
+        {
+          conversationId: owned.id,
+          messageId: owned.messageId,
+          groupId: t.home.group,
+          assigneeAgentId: t.home.agent,
+        },
+        now,
+      );
+      await startRouting(
+        tx,
+        plan,
+        {
+          conversationId: owned.id,
+          messageId: owned.messageId,
+          groupId: t.home.group,
+          isSpam: true,
+        },
+        now,
+      );
     });
 
     expect(await db.select().from(routingDecisions)).toEqual([]);
@@ -966,6 +1065,85 @@ describe('a customer writing again during the hold', () => {
     expect((await ticketRow(id)).assigneeAgentId).toBe(t.home.agent);
     expect(await acknowledgements(id)).toHaveLength(1);
     expect(await decision(id)).toMatchObject({ messageId: first.messageId });
+  });
+});
+
+describe('what the held reply answers', () => {
+  /** A message on the ticket, from `authorContactId`, at `createdAt`. */
+  async function written(
+    conversationId: string,
+    authorContactId: string | null,
+    createdAt: Date,
+    values: Partial<typeof messages.$inferInsert> = {},
+  ): Promise<string> {
+    const [row] = await db
+      .insert(messages)
+      .values({
+        conversationId,
+        direction: 'inbound',
+        kind: 'reply',
+        authorContactId,
+        bodyText: 'Any news?',
+        createdAt,
+        ...values,
+      })
+      .returning({ id: messages.id });
+    return row!.id;
+  }
+
+  async function requesterOf(id: string): Promise<string> {
+    const [row] = await db
+      .select({ contactId: conversations.requesterContactId })
+      .from(conversations)
+      .where(eq(conversations.id, id));
+    return row!.contactId;
+  }
+
+  async function asAuthor(messageId: string, contactId: string): Promise<void> {
+    await db.update(messages).set({ authorContactId: contactId }).where(eq(messages.id, messageId));
+  }
+
+  it('is the opening message while the requester wrote it, even beside an earlier one of theirs', async () => {
+    const t = await teams();
+    const opened = new Date(Date.now() - 10 * MINUTE);
+    const { id, messageId } = await heldTicket(t.channel, t.home.group, { opened });
+    const requester = await requesterOf(id);
+    await asAuthor(messageId, requester);
+    await written(id, requester, new Date(Date.now() - 20 * MINUTE));
+
+    expect(await heldFollowUp(id)).toMatchObject({ messageId });
+  });
+
+  // The ticket's requester is somebody else than whoever opened it — on a
+  // comment thread, the customer whose own comment arrived after a passer-by's
+  // reply had opened it. Their first message is the one the hold kept from
+  // being answered: not a reaction, not a note, not what we sent, and not the
+  // newest, which is a passer-by's again.
+  it('is the requester’s earliest message when somebody else opened the ticket', async () => {
+    const t = await teams();
+    const opened = new Date(Date.now() - 10 * MINUTE);
+    const { id } = await heldTicket(t.channel, t.home.group, { opened });
+    const requester = await requesterOf(id);
+    const at = (minutes: number) => new Date(opened.getTime() + minutes * MINUTE);
+
+    await written(id, requester, at(-5), {
+      bodyText: '🙏',
+      meta: { whatsappType: 'reaction' },
+    });
+    await written(id, requester, at(-4), { kind: 'note' });
+    await written(id, requester, at(-3), { direction: 'outbound' });
+    const theirs = await written(id, requester, at(1));
+    await written(id, requester, at(2));
+    await written(id, null, at(3));
+
+    expect(await heldFollowUp(id)).toMatchObject({ messageId: theirs });
+  });
+
+  it('stays the opening message when the requester has written nothing', async () => {
+    const t = await teams();
+    const { id, messageId } = await heldTicket(t.channel, t.home.group);
+
+    expect(await heldFollowUp(id)).toMatchObject({ messageId });
   });
 });
 

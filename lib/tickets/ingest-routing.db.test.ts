@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } fr
 import { db } from '@/db/client';
 import {
   agents,
+  autoResponses,
+  businessHours,
   channels,
   contacts,
   conversationEvents,
@@ -10,12 +12,15 @@ import {
   groupMembers,
   groups,
   jobs,
+  messages,
   routingDecisions,
   ticketStatuses,
 } from '@/db/schema';
 import { forgetCategoryAiSettings } from '@/lib/category-ai/settings';
 import type { InboundDelivery, ParsedInboundEmail } from '@/lib/email/types';
+import { forgetHoursCatalog } from '@/lib/hours/catalog';
 import type { NormalisedComment, NormalisedDirectMessage } from '@/lib/meta/types';
+import { settleRouting } from '@/lib/routing/apply';
 import type { RoutingMode } from '@/lib/routing/mode';
 import { SETTLE_ROUTING_PRIORITY } from '@/lib/routing/start';
 import { withCleanDatabase } from '@/lib/testing/db';
@@ -818,6 +823,92 @@ function phoneEcho(overrides: Partial<NormalisedEcho> = {}): NormalisedEcho {
     raw: { id: 'wamid.phone-1' },
     ...overrides,
   };
+}
+
+// --- The held reply on a comment thread -------------------------------------
+
+describe('the out-of-hours reply a hold kept back, on a comment thread', () => {
+  /**
+   * A passer-by's reply under the customer's comment, processed before the
+   * comment itself — a batch retried whole, or a delivery late — opens the
+   * ticket out of hours under the passer-by, and the hold keeps its reply
+   * back. The customer's comment arrives during the hold, makes its author
+   * the requester (`adoptRootAuthor`), and is held unanswered like everything
+   * else. When the hold ends, the acknowledgement answers the customer's
+   * comment, posted under it. Answering the message that opened the ticket
+   * instead, the reply refused the passer-by's (`answersRequester`), and the
+   * customer was never told anything.
+   */
+  it('answers the customer’s comment, under it, once the hold ends', async () => {
+    await db.update(businessHours).set({ schedule: SHUT }).where(eq(businessHours.isDefault, true));
+    forgetHoursCatalog();
+    // A rule naming the comment channel: one with no channel never answers in
+    // public (`pickRule`).
+    await db.insert(autoResponses).values({
+      channel: 'facebook_comment',
+      bodyEn: 'Thanks — we are closed, and will reply when we open.',
+    });
+    const group = await staffedGroup();
+    await channel({ type: 'facebook', name: 'Facebook', defaultGroupId: group.id });
+    await channel({
+      type: 'facebook_comment',
+      name: 'Facebook comments',
+      defaultGroupId: group.id,
+      routingMode: 'category',
+    });
+
+    const passerBy = await ingestMetaComment(
+      comment({
+        commentId: 'post-1_c2',
+        parentCommentId: 'post-1_c1',
+        from: '5566778899',
+        fromName: 'Karim',
+        text: 'Same here, mine is a week late',
+        createdAt: LATER,
+        raw: { comment_id: 'post-1_c2' },
+      }),
+    );
+    expect(passerBy.createdConversation).toBe(true);
+    const id = passerBy.conversationId;
+    const customer = await ingestMetaComment(comment());
+    expect(customer).toMatchObject({ conversationId: id, createdConversation: false });
+
+    // Held, both of them: nothing has gone out yet, and the routing row still
+    // names the message that opened the ticket.
+    expect(await acknowledgements(id)).toEqual([]);
+    expect(await decisions()).toMatchObject([{ messageId: passerBy.messageId }]);
+    expect(await events(id, 'requester_changed')).toHaveLength(1);
+
+    expect(await settleRouting(id)).toBe('decided');
+
+    expect(await acknowledgements(id)).toEqual([
+      {
+        bodyText: 'Thanks — we are closed, and will reply when we open.',
+        meta: expect.objectContaining({
+          autoResponse: 'out_of_hours',
+          isPublic: true,
+          commentId: 'post-1_c1',
+        }),
+      },
+    ]);
+  });
+});
+
+/** Every day the same and never open: every group without its own calendar is closed. */
+const SHUT = { sun: [], mon: [], tue: [], wed: [], thu: [], fri: [], sat: [] };
+
+/** The out-of-hours acknowledgements sent on the ticket. */
+async function acknowledgements(id: string) {
+  return db
+    .select({ bodyText: messages.bodyText, meta: messages.meta })
+    .from(messages)
+    .where(
+      and(
+        eq(messages.conversationId, id),
+        eq(messages.direction, 'outbound'),
+        sql`${messages.meta}->>'autoResponse' is not null`,
+      ),
+    );
 }
 
 // --- A duplicate delivery ---------------------------------------------------

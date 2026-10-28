@@ -1,5 +1,5 @@
 {
-  "id": "bc96d4d1-e708-423e-b99f-df82636ed1e7",
+  "id": "bfdac1f1-04ab-43f8-93c0-563f00d1a9b2",
   "prevId": "e5a72833-1c6c-45bc-b725-bf0b896f267f",
   "version": "7",
   "dialect": "postgresql",
@@ -12208,6 +12208,18 @@
         },
         "phase_one_at": {
           "name": "phase_one_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "rules_claimed_at": {
+          "name": "rules_claimed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "rules_done_at": {
+          "name": "rules_done_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false

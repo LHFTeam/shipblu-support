@@ -4,7 +4,14 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { eq, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
-import { agents, conversationEvents, conversations, groups, ticketStatuses } from '@/db/schema';
+import {
+  agents,
+  conversationEvents,
+  conversations,
+  groups,
+  routingDecisions,
+  ticketStatuses,
+} from '@/db/schema';
 import { purgeConversation, type PurgeRefusal } from '@/lib/admin/purge';
 import { hiddenScopeRefusal } from '@/lib/admin/purge-visibility';
 import { requireAgent } from '@/lib/auth/guard';
@@ -13,7 +20,7 @@ import { uuidField } from '@/lib/http/form-data';
 import { isUuid } from '@/lib/http/uuid';
 import { can } from '@/lib/auth/permissions';
 import { isPriority } from '@/lib/tickets/vocabulary';
-import { CATEGORY_REFUSALS, setConversationCategory } from '@/lib/categories/write';
+import { CATEGORY_REFUSALS, setConversationCategoryOn } from '@/lib/categories/write';
 import { afterRoutingChanged, onPriorityChanged } from '@/lib/sla';
 import { afterTicketUpdate } from '@/lib/tickets/lifecycle';
 import { CHANGE_STAMP } from '@/lib/tickets/change-stamp';
@@ -49,9 +56,10 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
   const field = String(formData.get('field') ?? '');
   const value = String(formData.get('value') ?? '');
 
-  // Set by the category case when the edit routed a held ticket, whose router
-  // runs the update pass itself.
-  let routedByCategory = false;
+  // Set by the category case when routing owns the update pass this edit
+  // would have run: the router ran it, or is running it, on the category the
+  // edit wrote, or the creation pass's `beginRouting` routes on it.
+  let routingRunsRules = false;
   // Set when the edit ended a routing hold, whose assignment and held reply
   // are owed once the observer rules below have run (`afterHoldEnded`).
   let endedHold = false;
@@ -230,8 +238,22 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
       const categoryId = value || null;
       if (categoryId && !isUuid(categoryId)) return { error: CATEGORY_REFUSALS.unknown_category };
 
-      const write = await setConversationCategory(conversationId, categoryId, {
-        agentId: agent.id,
+      // The write and where the ticket's routing stands, in one transaction:
+      // the stage moves only under the ticket's lock, which the write holds
+      // from its first statement, so the answer is the one this write met —
+      // the classifier reads it the same way (`lib/category-ai/run.ts`). Read
+      // after the commit, a router deciding in between on this category read
+      // as a ticket routing had finished with, and the relabel below ran the
+      // rules a second time after the router's pass.
+      const { write, routing } = await db.transaction(async (tx) => {
+        const written = await setConversationCategoryOn(tx, conversationId, categoryId, {
+          agentId: agent.id,
+        });
+        // Only for a category set: clearing one settles nothing, and the
+        // window runs on.
+        const settled = written.outcome === 'changed' ? written.to : null;
+        const stage = settled ? await undecidedRouting(tx, conversationId) : null;
+        return { write: written, routing: stage && settled ? { ...stage, settled } : null };
       });
       if (write.outcome === 'unknown_category' || write.outcome === 'retired_category') {
         return { error: CATEGORY_REFUSALS[write.outcome] };
@@ -239,32 +261,45 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
       if (write.outcome === 'no_ticket') return { error: 'Ticket not found' };
 
       // During a routing hold a person saying what the ticket is about is the
-      // best signal there is, so it routes now, as Jev's answer would: the
+      // best signal there is, so it routes on it, as Jev's answer would: the
       // router runs the rules and chooses the policy itself, and the update
-      // pass below would assign before it had. A shadow ticket records where it
-      // would have gone and carries on. Clearing the category settles nothing,
-      // and the window runs on.
+      // pass below would assign before it had. Where the routing stands says
+      // what is owed, as it does for Jev:
       //
-      // The pass below is skipped only where the router owns the rules on the
-      // category this edit wrote: `decided` ran them itself, and `failed`
-      // left the hold for `settle_routing`, which runs them at the window's
-      // end. `in_flight` is another caller's decision part-way through — Jev's
-      // answer a moment before this edit — whose pass read the category the
-      // edit replaced, and nothing runs the rules again once it ends the hold,
-      // so a rule keyed on the new category would never fire. That caller
-      // still owns the hold, so the pass is safe to run here: the ticket is
-      // held, so its assignment answers `awaiting_route`, and a rule's move
-      // ends nothing once phase one is written (`endHold`).
-      const routing =
-        write.outcome === 'changed' && categoryId
-          ? await undecidedRouting(db, conversationId)
-          : null;
-      if (routing) {
-        const routed = await routeNow(conversationId, { agentId: agent.id, label: 'agent' });
-        if (!routing.shadow && (routed === 'decided' || routed === 'failed')) {
-          routedByCategory = true;
+      // - **Live and `pending`** — the creation pass has not reached
+      //   `beginRouting`, which routes on this category after the `on_create`
+      //   rules, so a rule still gets the first word; or the pass never will,
+      //   and `settle_routing` decides on it at the window's end. Nothing more
+      //   here, not even the policy, which both of those choose again: routed
+      //   now, the ticket would be decided before its `on_create` rules ran,
+      //   and a rule's `assign_group` there would end nothing.
+      // - **Live and `holding`** — routed now. The pass below is skipped where
+      //   the router owns the rules on the category this edit wrote: `decided`
+      //   ran them itself, and `failed` left the hold for `settle_routing`,
+      //   which runs them at the window's end. Otherwise somebody decided in
+      //   the moment between this commit and the router's lock — `none`, or
+      //   `in_flight` for a decision part-way through — and who it was, and on
+      //   what, says whether the pass is owed (`routerDecidedOn`).
+      // - **Shadow** — the rest as though routing did not exist, after the
+      //   would-be decision is recorded once the creation pass has begun
+      //   routing; while it is `pending`, `beginRouting` records it after the
+      //   `on_create` rules, so in shadow too a rule gets the first word.
+      if (routing && !routing.shadow) {
+        if (routing.stage === 'pending') {
+          routingRunsRules = true;
           break;
         }
+        const routed = await routeNow(conversationId, { agentId: agent.id, label: 'agent' });
+        if (
+          routed === 'decided' ||
+          routed === 'failed' ||
+          (await routerDecidedOn(conversationId, routing.settled))
+        ) {
+          routingRunsRules = true;
+          break;
+        }
+      } else if (routing?.stage === 'holding') {
+        await routeNow(conversationId, { agentId: agent.id, label: 'agent' });
       }
 
       // Before the first response, the policy follows the category (it may be
@@ -357,9 +392,9 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
 
   // Observer rules see the ticket as the agent has just left it. Actions taken
   // by a rule write to the ticket directly and do not come back through here,
-  // so a rule cannot trigger itself. Not after a category edit that routed a
-  // held ticket, whose router runs them on the category it wrote.
-  if (!routedByCategory) await afterTicketUpdate(conversationId);
+  // so a rule cannot trigger itself. Not after a category edit whose routing
+  // runs them on the category it wrote.
+  if (!routingRunsRules) await afterTicketUpdate(conversationId);
   // After the rules, so the held reply is told the hours of the group they
   // left the ticket in.
   if (endedHold) await afterHoldEnded(conversationId);
@@ -376,6 +411,37 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
   // the rejection it causes on the client as the navigation it is.
   if (!(await seesTicket(agent, conversationId))) redirect('/inbox');
   return ok();
+}
+
+/**
+ * Whether the decision a console category edit found made, once it had
+ * committed on a held ticket, was the router's on exactly the category the
+ * edit wrote — asked once `routeNow` has answered `none` or `in_flight`:
+ * somebody decided in the moment between the edit's commit and the router's
+ * lock, or is part-way through deciding.
+ *
+ * The router — Jev's answer, the window's end, the creation pass — decided
+ * under the ticket's lock after this edit's commit, then, and read this
+ * category; its pass over the rules ran, or is running, on it
+ * (`lib/routing/apply.ts`), or it found the ticket in nobody's queue and owed
+ * none (`not_open`). The edit's own pass after it is a second, and every rule
+ * keyed on the category fires twice: a canned reply sent twice, a note
+ * written twice. A router whose phase one names the category this edit
+ * replaced decided before the edit did, and its pass may already have read the
+ * old one; nothing runs the rules again once it ends the hold, so the edit's
+ * own pass is the only one sure to see the new category — and the ticket is
+ * still held, so that pass assigns nobody, and a rule's move in it ends
+ * nothing. `manual` and `rule` are `endHold`'s: a person or a rule decided
+ * without looking at the category at all, and the pass is owed. Jev asks the
+ * same of its own write (`decidedByHold` in `lib/category-ai/run.ts`).
+ */
+async function routerDecidedOn(conversationId: string, categoryId: string): Promise<boolean> {
+  const [row] = await db
+    .select({ outcome: routingDecisions.outcome, categoryId: routingDecisions.categoryId })
+    .from(routingDecisions)
+    .where(eq(routingDecisions.conversationId, conversationId));
+  if (!row?.outcome || row.outcome === 'manual' || row.outcome === 'rule') return false;
+  return row.categoryId === categoryId;
 }
 
 // --- Hand to <group> ----------------------------------------------------------
@@ -421,7 +487,9 @@ const HAND_TO_REFUSALS: Record<Exclude<HandToResult, { ok: true }>['reason'], st
  * rule moved on before the rota ran is named by where the rule took it, and
  * one a rule resolved, or somebody moved meanwhile, is said nothing of — the
  * route group's queue is not where it waits, and the page drawn with the
- * answer shows where it went.
+ * answer shows where it went. An assignment that threw is a success for the
+ * same reason — the move and the unassignment have committed — and is said,
+ * since nobody knows then who holds the ticket.
  */
 export async function handToGroup(_state: ActionState, formData: FormData): Promise<ActionState> {
   const agent = await requireAgent();
@@ -451,6 +519,16 @@ export async function handToGroup(_state: ActionState, formData: FormData): Prom
   // in `updateTicket` answers it.
   if (!(await seesTicket(agent, conversationId))) redirect('/inbox');
 
+  // The hand-over stands and the page drawn with this answer shows it, but who
+  // the rota picked is not known — the end of a hold the hand-over ended tries
+  // again on its own — so the agent is sent to look rather than told where the
+  // ticket waits.
+  if (handed.assignmentFailed) {
+    return {
+      ...ok(),
+      message: `Handed to ${handed.groupName}, but assigning it there failed. Check who holds it now.`,
+    };
+  }
   if (!handed.waitsIn) return ok();
   return {
     ...ok(),

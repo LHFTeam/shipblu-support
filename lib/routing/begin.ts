@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { and, eq, ne } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { conversations, routingDecisions } from '@/db/schema';
 import { logger } from '@/lib/log';
@@ -22,9 +22,11 @@ const log = logger('routing');
  * `sla_recalculated` described a change nothing made. Here the ticket has its
  * clocks, and the router's re-selection is the ordinary one.
  *
- * Under the row lock, one of three things:
+ * Nearly every ticket never routed, so the undecided routing row is looked for
+ * first, with no transaction and no lock, and a ticket without one carries on
+ * at once. Then, under the row lock, one of three things:
  *
- * - **Nothing to do** — no routing row, or one a rule already decided. The
+ * - **Nothing to do** — a row a rule or a person decided since that look. The
  *   pass carries on as it would without routing.
  * - **A category is settled** — by a rule, or by Jev answering before the pass
  *   got here, which wrote only the category and left the rest to this. A live
@@ -43,12 +45,30 @@ export async function beginRouting(
   now: Date = new Date(),
 ): Promise<'routed' | 'continue'> {
   try {
+    // Unlocked, as `endHold` reads it, and for the same reason an answer of
+    // none cannot go stale: the row is born in the ticket's own insert
+    // transaction, committed before the creation pass runs, and once decided
+    // is never undecided again. With the lock taken first, every new ticket
+    // on every channel paid a transaction, and every other writer of it a
+    // wait behind that, to learn that nothing routes.
+    const [undecided] = await db
+      .select({ id: routingDecisions.id })
+      .from(routingDecisions)
+      .where(
+        and(
+          eq(routingDecisions.conversationId, conversationId),
+          ne(routingDecisions.stage, 'decided'),
+        ),
+      );
+    if (!undecided) return 'continue';
+
     const found = await db.transaction(async (tx) => {
       // The ticket first, then its routing row, as every routing writer takes
-      // them. NO KEY UPDATE: it serialises against every other writer just the
-      // same, where FOR UPDATE would also stop the customer's next message —
-      // whose foreign key takes KEY SHARE on the ticket — until this commits
-      // (`lib/routing/apply.ts`).
+      // them, and the row read again under them: a rule or a person may have
+      // decided it since the look above. NO KEY UPDATE: it serialises against
+      // every other writer just the same, where FOR UPDATE would also stop the
+      // customer's next message — whose foreign key takes KEY SHARE on the
+      // ticket — until this commits (`lib/routing/apply.ts`).
       const [ticket] = await tx
         .select({ categoryId: conversations.categoryId })
         .from(conversations)

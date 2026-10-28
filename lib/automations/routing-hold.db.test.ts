@@ -24,7 +24,7 @@ import { afterHoldEnded } from '@/lib/routing/after-hold';
 import { routeNow, settleRouting } from '@/lib/routing/apply';
 import { beginRouting } from '@/lib/routing/begin';
 import { endHold } from '@/lib/routing/end-hold';
-import { startRouting } from '@/lib/routing/start';
+import { routingWindowValues, startRouting } from '@/lib/routing/start';
 import { withCleanDatabase } from '@/lib/testing/db';
 import { holdNextTransaction } from '@/lib/testing/hold-transaction';
 import { runTimeAutomations } from '@/worker/handlers/run-time-automations';
@@ -48,8 +48,9 @@ import { runAutomations } from './index';
  * acknowledgement to the opening message goes exactly when the hold ends. The
  * groups assign at any hour, so who is picked never depends on the clock.
  *
- * A ticket is started through `startRouting` and begun through `beginRouting`,
- * exactly as the creation pass leaves a held ticket, on the real clock.
+ * A ticket is inserted with its window (`routingWindowValues`), started through
+ * `startRouting` and begun through `beginRouting`, exactly as the creation pass
+ * leaves a held ticket, on the real clock.
  * Every best-effort step logs instead of throwing: a test fails on any error
  * logged it did not ask for.
  */
@@ -158,6 +159,7 @@ async function heldTicket(
 ): Promise<string> {
   people += 1;
   const now = new Date();
+  const plan = { start: shadow ? 'shadow' : 'live', channelId, windowMinutes: 5 } as const;
   const [contact] = await db
     .insert(contacts)
     .values({ name: 'Amira', primaryEmail: `amira${people}@customer.example` })
@@ -173,6 +175,7 @@ async function heldTicket(
       subject: 'Where is my parcel?',
       lastMessageAt: now,
       lastCustomerMessageAt: now,
+      ...routingWindowValues(plan, {}, now),
     })
     .returning({ id: conversations.id });
   const id = ticket!.id;
@@ -187,12 +190,7 @@ async function heldTicket(
     })
     .returning({ id: messages.id });
   await db.transaction((tx) =>
-    startRouting(
-      tx,
-      { start: shadow ? 'shadow' : 'live', channelId, windowMinutes: 5 },
-      { conversationId: id, messageId: message!.id, groupId },
-      now,
-    ),
+    startRouting(tx, plan, { conversationId: id, messageId: message!.id, groupId }, now),
   );
   if (stage === 'holding') expect(await beginRouting(id)).toBe('continue');
   return id;
@@ -214,8 +212,11 @@ async function manual(groupId: string): Promise<void> {
 
 const inGroup = (groupId: string) => ({ field: 'group.id', op: 'eq', value: groupId });
 
-/** Jev filing the ticket as sales, routed to `groupId`, and the router deciding on it. */
-async function jevRoutes(id: string, groupId: string): Promise<void> {
+/**
+ * Jev filing the ticket as sales, routed to `groupId` — or to no group, which
+ * leaves it where it is (`no_route_for_category`) — and the router deciding on it.
+ */
+async function jevRoutes(id: string, groupId: string | null): Promise<void> {
   const [sales] = await db
     .update(ticketCategories)
     .set({ routeGroupId: groupId })
@@ -562,6 +563,63 @@ describe('an auto_assign rule’s strategy on a held ticket', () => {
     expect(await events(id, 'assigned')).toMatchObject([
       { actorLabel: 'automation:Sales round robin', data: { strategy: 'round_robin' } },
     ]);
+  });
+
+  // The rule spoke about the group the ticket is in, and a decision that leaves
+  // it there changes nothing it spoke about. An `on_create` rule has no later
+  // pass to ask again — phase two runs `on_update` rules only — so dropping
+  // its pick there left every such ticket unassigned once its category settled.
+  it('is kept through a decision that leaves the ticket where it was, from an on_create rule', async () => {
+    const t = await teams();
+    await manual(t.home.group);
+    const id = await heldTicket(t.channel, t.home.group, { stage: 'pending' });
+    await rule('on_create', 'Round robin', [
+      { type: 'auto_assign', groupId: null, strategy: 'round_robin' },
+    ]);
+    await runAutomations('on_create', id);
+    expect(await beginRouting(id)).toBe('continue');
+    expect(await kept(id)).toEqual({
+      heldStrategy: 'round_robin',
+      heldActorLabel: 'automation:Round robin',
+    });
+
+    await jevRoutes(id, null);
+
+    expect(await decision(id)).toMatchObject({
+      stage: 'decided',
+      outcome: 'no_route_for_category',
+    });
+    expect(await ticketRow(id)).toMatchObject({
+      groupId: t.home.group,
+      assigneeAgentId: t.home.agent,
+    });
+    expect(await events(id, 'assigned')).toMatchObject([
+      { actorLabel: 'automation:Round robin', data: { to: t.home.agent, strategy: 'round_robin' } },
+    ]);
+  });
+
+  it('is not carried to the group a decision moves the ticket to, from an on_create rule', async () => {
+    const t = await teams();
+    await manual(t.home.group);
+    await manual(t.sales.group);
+    const id = await heldTicket(t.channel, t.home.group, { stage: 'pending' });
+    await rule('on_create', 'Round robin', [
+      { type: 'auto_assign', groupId: null, strategy: 'round_robin' },
+    ]);
+    await runAutomations('on_create', id);
+    expect(await beginRouting(id)).toBe('continue');
+    expect((await kept(id)).heldStrategy).toBe('round_robin');
+
+    await jevRoutes(id, t.sales.group);
+
+    // Sales hands nothing out on its own, and the rule never spoke about it.
+    expect(await ticketRow(id)).toMatchObject({
+      groupId: t.sales.group,
+      assigneeAgentId: null,
+    });
+    expect((await ticketRow(id)).routingDecidedAt).toBeInstanceOf(Date);
+    expect(await kept(id)).toEqual({ heldStrategy: null, heldActorLabel: null });
+    expect(await events(id, 'assigned')).toEqual([]);
   });
 
   it('is dropped by a person deciding where the ticket goes instead', async () => {

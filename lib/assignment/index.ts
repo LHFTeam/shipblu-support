@@ -23,12 +23,16 @@ import { conversationFacts } from '@/lib/rules/facts';
 import { isReadOnlyChannel } from '@/lib/tickets/channel-policy';
 import { openBacklog } from '@/lib/tickets/backlog';
 import { moveToGroupIfElsewhere } from '@/lib/tickets/move-group';
+import { lockedStatusCategory, statusCategoryOf } from '@/lib/tickets/status-category';
+import type { StatusCategory } from '@/lib/tickets/vocabulary';
 import { recordOwnerAssigned } from '@/lib/whatsapp/number-owner';
 import { filterCandidates, type CandidateRow } from './eligibility';
 import { pickLoadBalanced, pickRoundRobin } from './strategies';
 import { activeSkills, matchingSkills } from './skills';
 
 const log = logger('assignment');
+
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 /**
  * Handing a ticket to a person.
@@ -198,15 +202,7 @@ async function routeAndPick(
 
   const conversation = ticket.conversation;
 
-  // A bot transcript is not work to hand out, and neither is a deleted, merged,
-  // spam or finished ticket. Same population the dashboard calls the backlog.
-  const assignable = !(
-    conversation.deletedAt ||
-    conversation.mergedIntoId ||
-    conversation.isSpam ||
-    isReadOnlyChannel(conversation.channel) ||
-    !['open', 'pending'].includes(ticket.statusCategory)
-  );
+  const assignable = isWorkToHandOut({ ...conversation, statusCategory: ticket.statusCategory });
 
   /*
    * The group a caller is routing the ticket to, decided once for every branch
@@ -331,9 +327,15 @@ async function routeAndPick(
      * console and every other writer that moves a ticket take them in, so an
      * assignment never waits on a move that waits on it. And the re-read under
      * it is the answer, not a guess: a ticket moved out of this group, picked
-     * up by hand or put on hold since the snapshot cannot be assigned here.
-     * No join under the lock — under READ COMMITTED a locked read that waited
-     * re-checks the joined rows and can answer no row at all.
+     * up by hand, put on hold, resolved, merged, deleted or marked spam since
+     * the snapshot cannot be assigned here. Without the last four, an agent's
+     * resolve landing while the pick read its roster left the ticket resolved
+     * in somebody's name, the cursor moved past them for work they never got,
+     * and an `assigned` line after the resolve on the timeline. No join under
+     * the lock — under READ COMMITTED a locked read that waited re-checks the
+     * joined rows and can answer no row at all — so the status is a subquery
+     * (`statusCategoryOf`), the same rule `lib/tickets/status-category.ts`
+     * gives every locked read.
      *
      * NO KEY UPDATE, as every lock on a ticket's row is (`endHold` says why in
      * full): it waits on every other writer of the row just the same, where
@@ -346,6 +348,12 @@ async function routeAndPick(
         groupId: conversations.groupId,
         routingWindowEndsAt: conversations.routingWindowEndsAt,
         routingDecidedAt: conversations.routingDecidedAt,
+        channel: conversations.channel,
+        statusId: conversations.statusId,
+        statusCategory: statusCategoryOf(),
+        deletedAt: conversations.deletedAt,
+        isSpam: conversations.isSpam,
+        mergedIntoId: conversations.mergedIntoId,
       })
       .from(conversations)
       .where(eq(conversations.id, conversationId))
@@ -354,6 +362,10 @@ async function routeAndPick(
     // An agent may have picked the ticket up by hand since the check above.
     if (current.assigneeAgentId) {
       return { assignedTo: null, reason: 'already_assigned' as SkipReason };
+    }
+    const statusCategory = await lockedStatusCategory(tx, current);
+    if (!isWorkToHandOut({ ...current, statusCategory })) {
+      return { assignedTo: null, reason: 'not_assignable' as SkipReason };
     }
     if (current.groupId !== groupId) return { assignedTo: null, reason: 'moved' as SkipReason };
     if (isHeld(current, now)) return { assignedTo: null, reason: 'awaiting_route' as SkipReason };
@@ -439,6 +451,29 @@ async function routeAndPick(
 }
 
 /**
+ * Whether a ticket is work to hand out at all. A bot transcript is not, and
+ * neither is a deleted, merged, spam or finished ticket — the population the
+ * dashboard calls the backlog. Asked of the snapshot before anything is
+ * written, and again of the row under the pick's lock, so the two cannot come
+ * to disagree about what qualifies.
+ */
+function isWorkToHandOut(ticket: {
+  deletedAt: Date | null;
+  mergedIntoId: string | null;
+  isSpam: boolean;
+  channel: string;
+  statusCategory: StatusCategory;
+}): boolean {
+  return !(
+    ticket.deletedAt ||
+    ticket.mergedIntoId ||
+    ticket.isSpam ||
+    isReadOnlyChannel(ticket.channel) ||
+    !(ticket.statusCategory === 'open' || ticket.statusCategory === 'pending')
+  );
+}
+
+/**
  * A strategy the caller asked for, kept for the end of the hold that made it
  * wait: an `auto_assign` rule's, the only caller that names one. Without it
  * the hold's end picks with the group's own, and a round-robin rule over a
@@ -482,6 +517,7 @@ async function moveToGroup(
   { actorLabel, endsHoldAs }: Pick<AssignOptions, 'actorLabel' | 'endsHoldAs'>,
   routed: { moved: boolean; endedHold?: boolean },
 ): Promise<boolean> {
+  const label = actorLabel ?? 'auto_assign';
   // The hold ends in the move's own transaction, so neither commits without
   // the other: stamped first, the sweep could assign the ticket in the group it
   // is about to leave; stamped after, a crash between would leave it in the
@@ -495,25 +531,48 @@ async function moveToGroup(
     ) {
       return { moved: false, endedHold: false };
     }
-    const endedHold = endsHoldAs
-      ? await endHold(tx, conversationId, endsHoldAs, { label: actorLabel ?? 'auto_assign' })
-      : false;
+    // In the move's transaction and ahead of the hold's end, so the timeline
+    // reads the move before the `routed` line naming it, as the console's
+    // group case writes them: `endHold` stamps its line when it is written
+    // (`CHANGE_STAMP`), and this one, inserted after the commit as it was,
+    // sorted after the decision it was the reason for.
+    await recordGroupChanged(tx, conversationId, groupId, label);
+    const endedHold = endsHoldAs ? await endHold(tx, conversationId, endsHoldAs, { label }) : false;
     return { moved: true, endedHold };
   });
   if (!result.moved) return false;
 
-  // Reported before the event is written: the move has committed, so a
-  // failure recording it must not also lose the follow-up it owes. Outside the
-  // move's transaction for the same reason.
   routed.moved = true;
   if (result.endedHold) routed.endedHold = true;
-  await db.insert(conversationEvents).values({
-    conversationId,
-    type: 'group_changed',
-    actorLabel: actorLabel ?? 'auto_assign',
-    data: { to: groupId },
-  });
   return result.endedHold;
+}
+
+/**
+ * The `group_changed` line for a move this call made, in the move's
+ * transaction, inside a savepoint (`tx.transaction`) whose failure is rolled
+ * back to and logged. The line records the move and is not the move: refused,
+ * it must not take the move, the hold's end or the follow-up they owe down with
+ * it, which it never did while it was written after the commit. The engine's
+ * `assign_group` writes its line the same way (`recordIn`).
+ */
+async function recordGroupChanged(
+  tx: Tx,
+  conversationId: string,
+  groupId: string,
+  actorLabel: string,
+): Promise<void> {
+  try {
+    await tx.transaction(async (savepoint) => {
+      await savepoint.insert(conversationEvents).values({
+        conversationId,
+        type: 'group_changed',
+        actorLabel,
+        data: { to: groupId },
+      });
+    });
+  } catch (error) {
+    log.error(`could not record the move of ${conversationId} to group ${groupId}`, error);
+  }
 }
 
 /**

@@ -8,13 +8,16 @@ const log = logger('routing');
 /**
  * What a hold owed once it is over, whatever ended it — the router's decision,
  * `settle_routing`, or a person or rule through `endHold`: the assignment the
- * creation pass held back, and its out-of-hours reply, to the message that
- * opened the ticket — the one it would have answered had nothing been held.
+ * creation pass held back, and its out-of-hours reply, to the message the hold
+ * kept from being acknowledged: the one that opened the ticket, which the
+ * creation pass would have answered had nothing been held — or, on a comment
+ * thread a passer-by's reply opened, the customer's own comment, which arrived
+ * during the hold and made them the requester (`heldFollowUp`).
  *
  * Owed by state rather than by one caller, so every way a hold ends calls this
  * once its own transaction has committed, and it reads what is owed off the
- * routing row itself: the opening message, and the pick an `auto_assign` rule
- * asked for while the ticket was held. The reply's claim on
+ * routing row itself: the message to answer, and the pick an `auto_assign`
+ * rule asked for while the ticket was held. The reply's claim on
  * `auto_responded_at` keeps it to one, and its guards to a ticket still open
  * that nobody has answered — so an agent's reply that ended the hold at 23:00
  * is not followed by "we are closed".
