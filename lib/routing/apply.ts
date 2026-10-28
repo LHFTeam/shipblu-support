@@ -15,7 +15,7 @@ import { afterRoutingChanged } from '@/lib/sla';
 import { moveToGroupIfElsewhere } from '@/lib/tickets/move-group';
 import { lockedStatusCategory, statusCategoryOf } from '@/lib/tickets/status-category';
 import { afterHoldEnded } from './after-hold';
-import { decide, runsRules, type DecidedOutcome } from './decide';
+import { decide, type DecidedOutcome } from './decide';
 import { endHoldOnRow } from './end-hold';
 import { routingModeOf } from './mode';
 
@@ -30,11 +30,14 @@ type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
  * 1. **Under the row lock**, `decide` answers and this writes it: the group
  *    move if there is one, the decision row and the `routed` event. The
  *    ticket's `routing_decided_at` stays null, so it is still held.
- * 2. **The `on_update` rules run**, after every decision that settled a
- *    category (`runsRules`). Nothing can assign in between, because the ticket
- *    is still held — so "sales on the merchant number goes to Merchant Care",
- *    and any rule keyed on the category, decide before anybody is handed the
- *    ticket.
+ * 2. **The `on_update` rules run**, after every decision on a ticket that
+ *    carries a category, wherever the decision left it (`rulesOwed`). Nothing
+ *    can assign in between, because the ticket is still held — so "sales on
+ *    the merchant number goes to Merchant Care", and any rule keyed on the
+ *    category, decide before anybody is handed the ticket. It is the pass the
+ *    category's writer gave up on a held ticket (Jev, a person), so a ticket
+ *    released or found taken owes it too; one with no category has nothing
+ *    for it to react to, and its hold ends in phase one.
  * 3. **Under the lock again**, the hold ends; once that commits, the SLA policy
  *    is chosen again (`afterRoutingChanged`) with whether this decision moved
  *    the group, so a move the policy survives is still re-timed on the new
@@ -64,8 +67,10 @@ type PhaseOne = {
   outcome: DecidedOutcome;
   /** Whether phase one moved the ticket to its category's route group. */
   moved: boolean;
-  /** Whether a settled category stood behind it, which re-selects the SLA policy. */
+  /** Whether the ticket carries a category, which re-selects the SLA policy. */
   categorySettled: boolean;
+  /** Whether the `on_update` rules run before the hold ends — phase two. */
+  rulesOwed: boolean;
   messageId: string | null;
 };
 
@@ -194,6 +199,7 @@ async function phaseOne(
       outcome,
       moved: outcome === 'category',
       categorySettled: row.categoryId !== null,
+      rulesOwed: row.categoryId !== null && outcome !== 'not_open',
       messageId: row.messageId,
     };
   }
@@ -229,12 +235,14 @@ async function phaseOne(
     routeGroupId: category?.routeGroupId ?? null,
   });
 
-  const categorySettled = decision.outcome === 'category' || decision.outcome === 'no_route_for_category';
+  const categorySettled = ticket.categoryId !== null;
+  // Nothing is owed a ticket nobody may work, and its hold simply ends.
+  const rulesOwed = categorySettled && decision.outcome !== 'not_open';
   const probability = categorySettled ? await categoryProbability(tx, conversationId) : null;
   const recorded = {
     outcome: decision.outcome,
     toGroupId: decision.toGroupId,
-    categoryId: categorySettled ? ticket.categoryId : null,
+    categoryId: ticket.categoryId,
     probability,
     decidedByAgentId: actor.agentId ?? null,
     decidedByLabel: actor.label,
@@ -255,9 +263,9 @@ async function phaseOne(
       groupMustExist: true,
     }));
 
-  // A decision that settled no category has no rules to wait for, so the hold
-  // ends with it, in this transaction.
-  const endsNow = !runsRules(decision.outcome);
+  // A ticket with no category has no rules to wait for, so the hold ends with
+  // the decision, in this transaction.
+  const endsNow = !rulesOwed;
   await tx
     .update(routingDecisions)
     .set({
@@ -306,6 +314,7 @@ async function phaseOne(
     outcome: decision.outcome,
     moved,
     categorySettled,
+    rulesOwed,
     messageId: row.messageId,
   };
 }
@@ -316,7 +325,7 @@ async function phaseOne(
  * the job or the ingest that called this and run everything again.
  */
 async function finish(conversationId: string, step: PhaseOne, now: Date): Promise<void> {
-  if (runsRules(step.outcome)) {
+  if (step.rulesOwed) {
     await runAutomations('on_update', conversationId);
     try {
       await db.transaction(async (tx) => {

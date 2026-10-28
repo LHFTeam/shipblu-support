@@ -93,14 +93,3 @@ export function decide(input: DecideInput): Decision {
 
   return stay('fallback');
 }
-
-/**
- * Whether a live decision runs the `on_update` rules before anybody is
- * assigned: every one that settled a category, moved the group or not, so a
- * rule keyed on the category — "sales on the merchant number goes to Merchant
- * Care" — has its say first. The classifier no longer runs its own pass on a
- * held ticket, so this is the pass that rule would otherwise have had.
- */
-export function runsRules(outcome: RoutingOutcome): boolean {
-  return outcome === 'category' || outcome === 'no_route_for_category';
-}

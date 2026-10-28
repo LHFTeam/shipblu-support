@@ -323,9 +323,13 @@ export async function classifyMessageCategory(
  *   the first word.
  * - **Live and `holding`** — routed now (`routeNow`), *instead of* the update
  *   pass below: the router runs that pass itself, between its decision and the
- *   assignment, and a second would assign before the first had finished.
- * - **Undecided shadow** — the would-be decision recorded, then the rest as
- *   though routing did not exist.
+ *   assignment, and a second would assign before the first had finished. If a
+ *   person or a rule decided in the moment between this commit and the router's
+ *   lock, the router answers `none` and this is a relabel after all.
+ * - **Undecided shadow** — the rest as though routing did not exist, after
+ *   recording the would-be decision once the creation pass has begun routing
+ *   (`holding`); while it is `pending`, `beginRouting` records it after the
+ *   `on_create` rules, so in shadow too a rule gets the first word.
  * - **Anything else** — never routed, or decided already, and so a relabel
  *   only: the SLA policy chosen again before the first reply, then the
  *   observer rules and auto-assignment, exactly as after a console edit — so a
@@ -346,10 +350,12 @@ async function afterCategoryApplied(
   routing: Awaited<ReturnType<typeof undecidedRouting>>,
 ): Promise<void> {
   if (routing && !routing.shadow) {
-    if (routing.stage === 'holding') await routeNow(conversationId, { label: CATEGORY_AI_ACTOR });
-    return;
+    if (routing.stage === 'pending') return;
+    const routed = await routeNow(conversationId, { label: CATEGORY_AI_ACTOR });
+    if (routed !== 'none') return;
+  } else if (routing?.stage === 'holding') {
+    await routeNow(conversationId, { label: CATEGORY_AI_ACTOR });
   }
-  if (routing) await routeNow(conversationId, { label: CATEGORY_AI_ACTOR });
   await afterRoutingChanged(conversationId, {
     category: write.outcome === 'changed',
     group: false,
