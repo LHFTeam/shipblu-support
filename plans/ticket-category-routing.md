@@ -63,7 +63,7 @@ records the answers, and the plan below already reflects them.
 
 ## Status and handoff
 
-As of 2026-10-27, 07:50 UTC. A session picking this plan up starts here.
+As of 2026-10-28, 10:06 UTC. A session picking this plan up starts here.
 Everything after this section is the design as it was reasoned and as each stage
 was built. This section says where the work stands, what comes next and how, and
 what has already bitten. Whoever moves any of it updates this section in the
@@ -86,7 +86,34 @@ update.
 | 3.2   | Merged: #424 (`07a5527`), then `dev` → `main` in #426 (`f761e5e`), which also carried #421, #422 and #423. As built below                   | **Done.** All six services live on `f761e5e` by 23:32 UTC on 2026-10-26, web first. Its checks read clean (below); the signed-in ones are left                                                                            |
 | 4.0   | Merged: #425 (`1c733c2`), then `dev` → `main` in #428 (`156004d`). As built below                                                           | **Done.** All six services live on `156004d` by 07:45:42 UTC on 2026-10-27, web first. Its checks read clean (below)                                                                                                      |
 | 4.1   | Merged: #427 (`959404a`), then `dev` → `main` in #430 (`dbf4376`). As built below                                                           | **Done.** All six services live on `dbf4376` by 12:07:54 UTC on 2026-10-27, web first, with `0050` applied. Shipped off: no settings row. Its checks read clean (below)                                                   |
-| 4.2–6 | 4.2's report in review as #429, on `dev`: [4.2's report, as built](#42s-report-as-built). 4.2's operations, 5 and 6 not started             | —                                                                                                                                                                                                                         |
+| 4.2   | Merged: #429 (`c6eb1ac`), then `dev` → `main` in #431 (`ad6a062`). As built below                                                           | **Done.** All six services live on `ad6a062` by 21:49:08 UTC on 2026-10-27, web first; code only. Its checks read clean (below). Its operations wait for the user's go-ahead                                              |
+| 5.1   | In review, branch `claude/jolly-noether-hxhez1-stage-5-1`, PR pending. As built below                                                       | —                                                                                                                                                                                                                         |
+| 5.2–6 | Not started                                                                                                                                 | —                                                                                                                                                                                                                         |
+
+**4.2's deploy and checks, read on Render and production on 2026-10-27.**
+
+- **Before**: 51 migrations; nothing pending or processing in `jobs`, and the
+  same one dead job. All six services ran `dbf4376`, and
+  `origin/main..origin/dev` held `c6eb1ac` alone. 4.2 is code only, with no
+  migration, `db/sql` change or variable.
+- **The release and web.** #429 was squashed into `dev` as `c6eb1ac`, and #431
+  merged `dev` into `main` as `ad6a062`. Web was deployed on it through
+  Render's API at 21:43:12. Its preDeploy ran `db:migrate` at 21:45:22 with
+  nothing to migrate, and all nine `db/sql` files were done at 21:45:24. Web was
+  live at 21:46:42.
+- **Then the rest, on the same commit.** The worker and the four crons were
+  triggered at 21:47:20–28. The crons were live at 21:48:02–21:48:09, and the
+  worker at 21:49:08.
+- **The checks** (read 21:49–21:52 UTC):
+  - every job created since the deploy completed, 25 `process_webhook`;
+  - none of the six services logged a warning or an error, and web served no
+    5xx;
+  - `shipblu-sla-sweep`'s first run on `ad6a062`, at 21:50, finished, its
+    `assign_sweep` logging `reclaimed=0 assigned=0 escalated=0`;
+  - `/api/health` reports `ad6a062`, with nothing pending or processing and
+    the same one dead job;
+  - no `category_ai_settings` row, so the classifier is still off. Still none
+    at 10:06 UTC on 2026-10-28.
 
 **4.1's deploy and checks, read on Render and production on 2026-10-27.**
 
@@ -461,19 +488,31 @@ Every production write needs the user's go-ahead for that step, and the
 6. **4.0 is deployed.** #425 was squashed into `dev` as `1c733c2`, and #428
    (`156004d`) took it to `main` on 2026-10-27. All six services were live on
    it by 07:45:42 UTC, web first, and its checks read clean (above).
-7. **4.1 is deployed, and off.** #427 was squashed into `dev` as `959404a`, and
-   #430 (`dbf4376`) took it to `main` on 2026-10-27. All six services were live
-   on it by 12:07:54 UTC, web first, and its checks read clean (above). The
-   classifier stays off until an admin switches it on at `/admin/categories`.
-   The way back is to redeploy `156004d`; the tables stay, since nothing
-   reads them there. 4.2's report, `/reports/category-ai`, is in review as
-   #429: [4.2's report, as built](#42s-report-as-built), which also fixes the
-   live job's locked ticket read, so the switch stays off until #429 is
-   deployed to the worker too. 4.2's operations
-   (the archive record run, shadow, labelling, apply, the backlog) each wait
-   for the user's go-ahead.
-8. **Before Stage 5**, a person does 0.2's reorder and 0.6's staffing, and the
-   support lead answers the questions still open (below).
+7. **4.1 and 4.2 are deployed, and the classifier is off.** #427 was squashed
+   into `dev` as `959404a`, and #430 (`dbf4376`) took it to `main` on
+   2026-10-27; all six services were live on it by 12:07:54 UTC, web first.
+   #429, 4.2's report with the fixes to the live job's locked ticket read, was
+   squashed into `dev` as `c6eb1ac`, and #431 (`ad6a062`) took it to `main` the
+   same day; all six were live on it by 21:49:08 UTC, web first. Both sets of
+   checks read clean (above). Nothing in the code holds the switch off any more,
+   so the classifier may now be switched on at `/admin/categories`, at the
+   user's go-ahead. 4.2's operations (the archive record run, shadow,
+   labelling, apply, the backlog) each wait for it in turn. The way back from
+   4.2 is to redeploy `dbf4376`, which is safe only while the classifier is
+   off; from 4.1, `156004d`, and the tables stay, since nothing reads them
+   there.
+8. **5.1 is built, and in review** on `claude/jolly-noether-hxhez1-stage-5-1`,
+   PR pending: [5.1, as built](#51-as-built). Deploy web first, since it
+   migrates `0051_routing`; then the worker and **all four** crons, before any
+   channel leaves `default_group`. Two of the crons assign: an old
+   `shipblu-sla-sweep` runs an `assign_sweep` that assigns held tickets, and an
+   old `shipblu-time-automations` runs rules whose `auto_assign` assigns them
+   and whose `assign_group` moves one without ending its hold. Deployed, it
+   changes nothing: every channel reads `default_group`, and nothing is held or
+   enqueued until an admin moves one while the classifier is in `apply`.
+9. **Before Stage 5.2 turns routing on**, a person does 0.2's reorder and 0.6's
+   staffing, the support lead answers the questions still open (below), and the
+   classifier reaches `apply` by 4.2's sequence.
 
 ### 1.3, as built
 
@@ -2032,8 +2071,9 @@ what tunes it. For context, today's median time to _assignment_ is 40 hours.
 Without this, a shadow week on a staffed group would record nearly every
 ticket as kept, and report a routing rate the live mode would not have.
 
-The settled design in `README.md:352-357` ("The routing rules are the automation
-rules") is amended in the same PR, with the reasons at the top of this file. The
+The settled design in the README's "Ticket assignment" ("The routing rules are
+the automation rules") is amended in the same PR, with the reasons at the top
+of this file. The
 routing table is a lookup like `default_group_id` and holds no conditions, so
 it is not a second engine. Rules still decide every exception, and they run
 before assignment.
@@ -4202,7 +4242,8 @@ enqueues `settle_routing` until an admin changes a channel's mode.
     - the grace lapsing on a stuck job, followed by a settle that records
       `taken`.
 - **Docs.**
-  - `README.md:352-357` is amended, with the reasons at the top of this file.
+  - The README's "The routing rules are the automation rules" is amended, with
+    the reasons at the top of this file.
   - `AGENTS.md` gets a "Routing by category" section with decision 5's rules.
   - The handbook gets an article on routing, the hold, the "Routing…" badge
     and "Hand to <group>".

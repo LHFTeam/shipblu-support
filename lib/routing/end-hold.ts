@@ -24,9 +24,11 @@ type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
  *
  * On a live row it ends the hold (`routing_decided_at`, set once) and records
  * the outcome only if phase one has not already — a person assigning between
- * the router's two phases does not rename the router's decision. On a shadow
- * row it records the would-be outcome: a person or a rule moving a ticket the
- * router was only watching is what the shadow period exists to measure.
+ * the router's two phases does not rename the router's decision. A rule
+ * between them ends nothing at all: the router is running the rules it owes
+ * and ends the hold once the whole pass is over. On a shadow row it records
+ * the would-be outcome: a person or a rule moving a ticket the router was only
+ * watching is what the shadow period exists to measure.
  *
  * Answers whether it ended a live hold, which is what owes the held reply and
  * the assignment (`afterHoldEnded`) once the caller's transaction commits.
@@ -53,13 +55,28 @@ export async function endHold(
       shadow: routingDecisions.shadow,
       outcome: routingDecisions.outcome,
       fromGroupId: routingDecisions.fromGroupId,
+      phaseOneAt: routingDecisions.phaseOneAt,
     })
     .from(routingDecisions)
     .where(
-      and(eq(routingDecisions.conversationId, conversationId), ne(routingDecisions.stage, 'decided')),
+      and(
+        eq(routingDecisions.conversationId, conversationId),
+        ne(routingDecisions.stage, 'decided'),
+      ),
     )
     .for('update');
   if (!row) return false;
+
+  // Phase one has written the router's decision, and the rules now running are
+  // the ones it waits for before it ends the hold itself (`lib/routing/apply.ts`)
+  // — this pass, or one racing it. A rule's move there is part of that wait,
+  // not a decision of its own. Ended here, the hold would let the next rule in
+  // the same pass, a group-less `auto_assign`, hand the ticket to somebody in a
+  // group a later rule then moves it out of — the cross-team holder the two
+  // phases exist to prevent — and send the held reply before the pass had
+  // chosen whose calendar it speaks for. A router that died there leaves the
+  // hold to `settle_routing`, which completes the decision either way.
+  if (outcome === 'rule' && row.phaseOneAt) return false;
 
   const first = row.outcome === null;
   await tx

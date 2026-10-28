@@ -10,6 +10,7 @@ import { hiddenScopeRefusal } from '@/lib/admin/purge-visibility';
 import { assignConversation } from '@/lib/assignment';
 import { requireAgent } from '@/lib/auth/guard';
 import { ok } from '@/lib/http/action-state';
+import { uuidField } from '@/lib/http/form-data';
 import { isUuid } from '@/lib/http/uuid';
 import { can } from '@/lib/auth/permissions';
 import { isPriority } from '@/lib/tickets/vocabulary';
@@ -21,6 +22,7 @@ import { moveToGroupIfElsewhere } from '@/lib/tickets/move-group';
 import { routeNow } from '@/lib/routing/apply';
 import { afterHoldEnded } from '@/lib/routing/after-hold';
 import { endHold } from '@/lib/routing/end-hold';
+import { handToRouteGroup, type HandToResult } from '@/lib/routing/hand-to';
 import { undecidedRouting } from '@/lib/routing/state';
 import { isBlank } from '@/lib/tickets/custom-fields';
 import { parseFieldValue } from '@/lib/tickets/custom-fields-parse';
@@ -125,8 +127,15 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
         });
 
         // A person deciding who answers a ticket held for the router has
-        // decided for it (`endHold`).
-        return endHold(tx, conversationId, 'manual', { agentId: agent.id });
+        // decided for it (`endHold`). Only by naming somebody, as a rule's
+        // `assign_agent` ends one only with an agent: "Unassigned" decides
+        // nothing about where the ticket goes — on a held ticket, which has no
+        // assignee, it is a no-op write — and ending the hold for it would
+        // assign the ticket in its default group, the outcome the hold exists
+        // to prevent.
+        return assigneeAgentId
+          ? endHold(tx, conversationId, 'manual', { agentId: agent.id })
+          : false;
       });
       if (endedHold) await afterHoldEnded(conversationId);
       break;
@@ -150,8 +159,7 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
       const move = await db.transaction(async (tx) => {
         // Only a move: a page drawn before somebody else moved the ticket can
         // post the group it is already in (`moveToGroupIfElsewhere`).
-        if (!(await moveToGroupIfElsewhere(conversationId, groupId, { executor: tx })))
-          return null;
+        if (!(await moveToGroupIfElsewhere(conversationId, groupId, { executor: tx }))) return null;
 
         // Recorded, where it was not before. Moving a ticket between teams is
         // the same weight of decision as reassigning it and the case above has
@@ -351,6 +359,69 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
   // the rejection it causes on the client as the navigation it is.
   if (!(await seesTicket(agent, conversationId))) redirect('/inbox');
   return ok();
+}
+
+// --- Hand to <group> ----------------------------------------------------------
+
+const HAND_TO_REFUSALS: Record<Exclude<HandToResult, { ok: true }>['reason'], string> = {
+  not_permitted: 'You cannot reassign tickets',
+  not_found: 'Ticket not found',
+  not_open: 'Only an open or pending ticket can be handed to another group',
+  held: 'This ticket is still being routed. Choose its category to route it now.',
+  owned_number:
+    "This ticket's WhatsApp number has an owner, who answers it whatever its group. Use the Group field to move it.",
+  coexistence:
+    'Replies on this number are typed on the phone, so handing the ticket to a group changes nothing',
+  no_route: "This ticket's category does not route to a group",
+  already_there: "This ticket is already in its category's group",
+  changed: "This ticket's category has changed since the page loaded. Check where it routes now.",
+};
+
+/**
+ * "Hand to <group>": moves the ticket to its category's route group, clears
+ * whoever holds it and assigns it in the new group (`lib/routing/hand-to.ts`).
+ *
+ * Gated by `ticket.assign`, because it unassigns a colleague and picks
+ * somebody else, which is the assignee case's capability. The group comes from
+ * the ticket's own category, read under its lock; the form's `groupId` is the
+ * group the button named, and is only compared, so a category changed since
+ * the page loaded is refused rather than followed somewhere the agent never
+ * saw named.
+ *
+ * Nobody to assign — outside the group's hours, a manual strategy, nobody
+ * accepting — is still a success, since the ticket is in the group's queue
+ * where somebody will look for it; but the agent is told, because the page
+ * otherwise shows a ticket the button just unassigned sitting with nobody.
+ */
+export async function handToGroup(_state: ActionState, formData: FormData): Promise<ActionState> {
+  const agent = await requireAgent();
+  if (!can(agent, 'ticket.assign')) return { error: HAND_TO_REFUSALS.not_permitted };
+
+  const conversationId = String(formData.get('conversationId') ?? '');
+  const row = await loadConversation(agent, conversationId);
+  if (!row) return { error: HAND_TO_REFUSALS.not_found };
+
+  // Malformed reads as "not said": it is a staleness check, never the target.
+  const expectedGroupId = uuidField(formData, 'groupId') ?? null;
+
+  const handed = await handToRouteGroup(conversationId, { agentId: agent.id }, { expectedGroupId });
+  if (!handed.ok) return { error: HAND_TO_REFUSALS[handed.reason] };
+
+  refresh(row.conversation.number);
+
+  // The ticket is in another group now, and for an agent who sees only their
+  // own and their groups' tickets that can be out of sight — as the group case
+  // in `updateTicket` answers it.
+  if (!(await seesTicket(agent, conversationId))) redirect('/inbox');
+
+  // `already_assigned`: an `on_update` rule gave the ticket to somebody first.
+  if (handed.assignedTo || handed.skipped === 'already_assigned') return ok();
+  return {
+    ...ok(),
+    // Worded for a manual group as well as a busy or closed one; the Activity
+    // list names the hours and the capacity cases (`assignment_skipped`).
+    message: `Handed to ${handed.groupName}. Nobody there was given it, so it waits in the group's queue.`,
+  };
 }
 
 const PURGE_ERRORS: Record<PurgeRefusal, string> = {

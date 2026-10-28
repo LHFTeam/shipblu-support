@@ -6,6 +6,7 @@ import {
   conversationEvents,
   conversations,
   messages,
+  routingDecisions,
   ticketCategories,
 } from '@/db/schema';
 import {
@@ -323,9 +324,11 @@ export async function classifyMessageCategory(
  *   the first word.
  * - **Live and `holding`** — routed now (`routeNow`), *instead of* the update
  *   pass below: the router runs that pass itself, between its decision and the
- *   assignment, and a second would assign before the first had finished. If a
- *   person or a rule decided in the moment between this commit and the router's
- *   lock, the router answers `none` and this is a relabel after all.
+ *   assignment, and a second would assign before the first had finished. If
+ *   somebody decided in the moment between this commit and the router's lock,
+ *   the router answers `none`, and who it was says what is owed
+ *   (`decidedByHold`): a person or a rule, and this is a relabel after all; the
+ *   router itself, and nothing is.
  * - **Undecided shadow** — the rest as though routing did not exist, after
  *   recording the would-be decision once the creation pass has begun routing
  *   (`holding`); while it is `pending`, `beginRouting` records it after the
@@ -353,6 +356,7 @@ async function afterCategoryApplied(
     if (routing.stage === 'pending') return;
     const routed = await routeNow(conversationId, { label: CATEGORY_AI_ACTOR });
     if (routed !== 'none') return;
+    if (!(await decidedByHold(conversationId))) return;
   } else if (routing?.stage === 'holding') {
     await routeNow(conversationId, { label: CATEGORY_AI_ACTOR });
   }
@@ -361,6 +365,31 @@ async function afterCategoryApplied(
     group: false,
   });
   await afterTicketUpdate(conversationId);
+}
+
+/**
+ * Whether the decision on a ticket this write found held was made since by
+ * `endHold` — a person or a rule deciding where the ticket goes — rather than
+ * by the router. Asked only once `routeNow` has answered `none` there: somebody
+ * decided in the moment between this write's commit and the router's lock.
+ *
+ * The router — the window's end, a person's category edit, this answer racing
+ * another message's — decided under the ticket's lock after the commit, so on
+ * the ticket carrying this category, and ran the update pass that decision
+ * owed (`lib/routing/apply.ts`), or found the ticket in nobody's queue and
+ * owed none. A relabel after it is a second pass, and every rule keyed on the
+ * category fires twice: a canned reply sent twice, a note written twice — or
+ * a first, on a ticket resolved in that moment. `endHold` decides without
+ * looking at the category at all, so after a person or a rule the relabel is
+ * still owed. A person ending a hold whose phase one the router had already
+ * written keeps the router's outcome, and that router is running the pass.
+ */
+async function decidedByHold(conversationId: string): Promise<boolean> {
+  const [row] = await db
+    .select({ outcome: routingDecisions.outcome })
+    .from(routingDecisions)
+    .where(eq(routingDecisions.conversationId, conversationId));
+  return row?.outcome === 'manual' || row?.outcome === 'rule';
 }
 
 type TicketState = {

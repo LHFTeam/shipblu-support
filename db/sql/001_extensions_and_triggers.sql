@@ -390,7 +390,13 @@ BEGIN
         OLD.last_message_at IS DISTINCT FROM NEW.last_message_at OR
         OLD.last_customer_message_at IS DISTINCT FROM NEW.last_customer_message_at OR
         OLD.merged_into_id IS DISTINCT FROM NEW.merged_into_id OR
-        OLD.deleted_at IS DISTINCT FROM NEW.deleted_at;
+        OLD.deleted_at IS DISTINCT FROM NEW.deleted_at OR
+        -- The inbox's "Routing…" badge is drawn from the routing hold's two
+        -- columns. Only the insert writes the window, so this is for symmetry.
+        OLD.routing_window_ends_at IS DISTINCT FROM NEW.routing_window_ends_at OR
+        -- The hold ending is often the only change: a decision that moved
+        -- nothing and assigned nobody touches no other column listed here.
+        OLD.routing_decided_at IS DISTINCT FROM NEW.routing_decided_at;
     END IF;
   END IF;
 

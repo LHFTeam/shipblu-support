@@ -307,6 +307,120 @@ describe('describeEvent', () => {
     );
   });
 
+  // The router writes one per live decision, including one that moved
+  // nothing, so every outcome needs a sentence: the default would print
+  // "routed" and drop the groups and the category, the whole of the answer.
+  it('says what routing decided, for every outcome', () => {
+    const groups = {
+      from: 'care',
+      fromName: 'Customer Care',
+      to: 'sales',
+      toName: 'Inbound Sales Team',
+    };
+    const filed = { key: 'sales', label: 'Sales', probability: 0.92 };
+    expect(describeEvent('routed', { outcome: 'category', ...groups, moved: true, ...filed })).toBe(
+      'moved the ticket from Customer Care to Inbound Sales Team, where its category, Sales (92% likely), routes',
+    );
+    // A category a person or a rule set carries no probability.
+    expect(
+      describeEvent('routed', {
+        outcome: 'category',
+        ...groups,
+        moved: true,
+        key: 'sales',
+        label: 'Sales',
+      }),
+    ).toBe(
+      'moved the ticket from Customer Care to Inbound Sales Team, where its category, Sales, routes',
+    );
+    expect(
+      describeEvent('routed', { outcome: 'category', ...groups, moved: false, ...filed }),
+    ).toBe(
+      'could not move the ticket to Inbound Sales Team, where its category, Sales (92% likely), routes, so it stays in Customer Care',
+    );
+
+    const stayed = {
+      from: 'care',
+      fromName: 'Customer Care',
+      to: 'care',
+      toName: 'Customer Care',
+      moved: false,
+    };
+    expect(
+      describeEvent('routed', {
+        outcome: 'no_route_for_category',
+        ...stayed,
+        key: 'courier_jobs',
+        label: 'Courier jobs',
+      }),
+    ).toBe(
+      'kept the ticket in Customer Care: its category, Courier jobs, routes to no other group',
+    );
+    expect(describeEvent('routed', { outcome: 'fallback', ...stayed })).toBe(
+      'kept the ticket in Customer Care: nothing had said what it is about by the end of the routing window',
+    );
+    expect(describeEvent('routed', { outcome: 'taken', ...stayed })).toBe(
+      'kept the ticket in Customer Care: somebody had already taken it',
+    );
+    expect(describeEvent('routed', { outcome: 'not_open', ...stayed })).toBe(
+      'stopped routing the ticket: it was no longer open',
+    );
+    expect(describeEvent('routed', { outcome: 'released', ...stayed })).toBe(
+      'stopped routing the ticket: its channel no longer routes by category, so it stays in Customer Care',
+    );
+  });
+
+  // `endHold` writes these with the person or the rule as the actor, and no
+  // category or `fromName`.
+  it('says how a person or a rule ended routing, moving the ticket or not', () => {
+    for (const outcome of ['manual', 'rule']) {
+      expect(
+        describeEvent('routed', {
+          outcome,
+          from: 'care',
+          to: 'sales',
+          toName: 'Inbound Sales Team',
+          moved: true,
+        }),
+      ).toBe('ended routing by moving the ticket to Inbound Sales Team');
+      expect(
+        describeEvent('routed', {
+          outcome,
+          from: 'care',
+          to: 'care',
+          toName: 'Customer Care',
+          moved: false,
+        }),
+      ).toBe('ended routing before it had decided, so the ticket stays in Customer Care');
+    }
+  });
+
+  it('names a group it no longer knows, and a ticket in none', () => {
+    expect(
+      describeEvent('routed', {
+        outcome: 'fallback',
+        from: null,
+        fromName: null,
+        to: null,
+        toName: null,
+      }),
+    ).toBe(
+      'kept the ticket in no group: nothing had said what it is about by the end of the routing window',
+    );
+    expect(
+      describeEvent('routed', {
+        outcome: 'category',
+        from: 'care',
+        fromName: null,
+        to: 'sales',
+        toName: null,
+        moved: true,
+      }),
+    ).toBe('moved the ticket from another group to another group, where its category routes');
+    // An outcome written by a later version still makes a sentence.
+    expect(describeEvent('routed', { outcome: 'rerouted' })).toBe('routed the ticket');
+  });
+
   it('prints an unknown type with its underscores as spaces', () => {
     expect(describeEvent('something_new_happened', { anything: 1 })).toBe('something new happened');
   });

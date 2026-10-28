@@ -3,10 +3,18 @@
 import { useState } from 'react';
 import { unstable_rethrow, useRouter } from 'next/navigation';
 
+/**
+ * What a control's action answers: a refusal, or, on a success that would
+ * otherwise leave the agent guessing, a `message` — the console's
+ * `ActionState` (`app/(console)/action-state.ts`), which "Hand to <group>"
+ * answers with when nobody in the new group could be given the ticket.
+ */
+type FieldResult = { error: string | null; message?: string };
+
 export type LinkAction = (
   state: { error: string | null },
   formData: FormData,
-) => Promise<{ error: string | null }>;
+) => Promise<FieldResult>;
 
 /**
  * One sidebar control's write: build the form, call the action, show what it
@@ -65,7 +73,7 @@ export function useFieldAction(
       else formData.set(key, value);
     }
 
-    let result: { error: string | null };
+    let result: FieldResult;
     try {
       result = await action({ error: null }, formData);
     } catch (error) {

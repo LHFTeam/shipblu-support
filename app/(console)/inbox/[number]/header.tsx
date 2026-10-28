@@ -7,9 +7,11 @@ import { ChannelBadge } from '@/components/channel';
 import { ChevronLeftIcon } from '@/components/icons';
 import { RelativeTime } from '@/components/relative-time';
 import { Badge } from '@/components/ui';
+import { useNow } from '@/components/use-now';
 import { ago } from '@/lib/format';
 import { answeredFromConsole, isCommentTicket, isMetaChannel } from '@/lib/tickets/channel-policy';
 import { categoryLabel } from '@/lib/categories/choices';
+import { routingHold, routingLabel } from '@/lib/tickets/inbox-badges';
 import type { ConversationDetail } from '@/lib/tickets/conversation';
 import { ProfileRefresh } from './profile-refresh';
 import { MetaWindowIndicator, WindowIndicator } from './window-indicator';
@@ -133,6 +135,12 @@ export function Header({
             <Badge tone="warning">Reopened ×{conversation.reopenCount}</Badge>
           ) : null}
           {/*
+              Held for the router: here as on the list row, because below
+              `lg` this is the only place it shows, and an agent about to
+              take the ticket should know they are ending its route.
+            */}
+          <RoutingBadge conversation={conversation} />
+          {/*
               Which team's work it is. Here and not only in the sidebar's
               select, because the sidebar is desktop-only and the category is
               the first thing that says whose ticket this is. Spelled out, so
@@ -169,6 +177,23 @@ export function Header({
         </div>
       </div>
     </header>
+  );
+}
+
+/**
+ * The routing hold, read by the list row's own rule (`routingHold`) on the same
+ * half-minute clock, so the open ticket and its row cannot disagree. Its own
+ * component so the clock re-renders the badge and not the header.
+ */
+function RoutingBadge({ conversation }: { conversation: ConversationDetail }) {
+  const now = useNow();
+  const hold = routingHold(conversation, now);
+  if (!hold) return null;
+  return (
+    <Badge tone="automated">
+      {routingLabel(hold)}
+      <span className="sr-only">, assigning it now ends the route</span>
+    </Badge>
   );
 }
 

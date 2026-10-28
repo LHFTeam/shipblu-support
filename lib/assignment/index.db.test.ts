@@ -1,21 +1,26 @@
-import { and, asc, eq, inArray } from 'drizzle-orm';
+import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { db } from '@/db/client';
 import {
   agentSkills,
   agents,
+  automationRules,
   channels,
   contacts,
   conversationEvents,
   conversations,
   groupMembers,
   groups,
+  routingDecisions,
   skills,
   ticketCategories,
   ticketStatuses,
 } from '@/db/schema';
+import { runAutomations } from '@/lib/automations';
 import { createTicket } from '@/lib/portal/tickets';
+import { ROUTING_GRACE_MS } from '@/lib/routing/hold';
 import { withCleanDatabase } from '@/lib/testing/db';
+import { holdNextTransaction } from '@/lib/testing/hold-transaction';
 import { afterTicketUpdate } from '@/lib/tickets/lifecycle';
 import { assignConversation } from './index';
 
@@ -23,8 +28,9 @@ import { assignConversation } from './index';
  * The owner's path through `assignConversation`, against Postgres: an
  * unassigned ticket on a WhatsApp number that belongs to somebody goes back to
  * them, past every gate the rota would ask about, and a deactivated owner is
- * nobody. And the skill match, reading a category `createTicket` filed in the
- * ticket's insert.
+ * nobody. The skill match, reading a category `createTicket` filed in the
+ * ticket's insert. And the router's hold, with the re-read under the ticket's
+ * lock that keeps a pick from landing on a ticket that moved or was taken.
  */
 
 withCleanDatabase();
@@ -385,5 +391,391 @@ describe('a skill keyed on the category a ticket is created with', () => {
     ]);
 
     expect(await ticketRow(await opened(desk))).toMatchObject({ assignee: amr });
+  });
+});
+
+/**
+ * The router's hold (`plans/ticket-category-routing.md`, decision 5): while a
+ * ticket's group is not settled nothing assigns it, and nothing says so on the
+ * timeline — a timeline entry per skip once produced 1,432 rows for 137
+ * tickets. Each test passes `now`, and its agents were last seen then.
+ */
+describe('assignConversation on a ticket held for the router', () => {
+  const MINUTE = 60_000;
+  const at = (now: Date, minutes: number) => new Date(now.getTime() + minutes * MINUTE);
+
+  /** A team that takes tickets at `now`: round robin, any hour, one member online. */
+  async function desk(name: string, member: string, now: Date) {
+    const groupId = await group(name, { assignWithinHoursOnly: false });
+    const agentId = await agent(member, { presence: 'online', lastSeenAt: now });
+    await db.insert(groupMembers).values({ groupId, agentId });
+    return { groupId, agentId };
+  }
+
+  /**
+   * An unassigned email ticket in `groupId`, its window closing at
+   * `windowEndsAt` (none when null), with the routing row the ingest path
+   * writes beside it — `holding`, as `beginRouting` leaves it.
+   */
+  async function ticketIn(
+    groupId: string,
+    windowEndsAt: Date | null,
+    values: Partial<typeof conversations.$inferInsert> = {},
+  ) {
+    const [status] = await db
+      .select({ id: ticketStatuses.id })
+      .from(ticketStatuses)
+      .where(eq(ticketStatuses.name, 'Open'));
+    const [contact] = await db
+      .insert(contacts)
+      .values({ name: 'Amira' })
+      .returning({ id: contacts.id });
+    const [row] = await db
+      .insert(conversations)
+      .values({
+        channel: 'email',
+        groupId,
+        statusId: status!.id,
+        requesterContactId: contact!.id,
+        routingWindowEndsAt: windowEndsAt,
+        ...values,
+      })
+      .returning({ id: conversations.id });
+    if (windowEndsAt) {
+      await db.insert(routingDecisions).values({
+        conversationId: row!.id,
+        shadow: false,
+        stage: 'holding',
+        fromGroupId: groupId,
+        windowEndsAt,
+      });
+    }
+    return row!.id;
+  }
+
+  async function held(id: string) {
+    const [row] = await db
+      .select({
+        assignee: conversations.assigneeAgentId,
+        groupId: conversations.groupId,
+        decidedAt: conversations.routingDecidedAt,
+      })
+      .from(conversations)
+      .where(eq(conversations.id, id));
+    return row!;
+  }
+
+  async function routingOf(id: string) {
+    const [row] = await db
+      .select({
+        stage: routingDecisions.stage,
+        outcome: routingDecisions.outcome,
+        toGroupId: routingDecisions.toGroupId,
+        decidedByLabel: routingDecisions.decidedByLabel,
+      })
+      .from(routingDecisions)
+      .where(eq(routingDecisions.conversationId, id));
+    return row!;
+  }
+
+  async function cursorOf(groupId: string) {
+    const [row] = await db
+      .select({ cursor: groups.lastAssignedAgentId })
+      .from(groups)
+      .where(eq(groups.id, groupId));
+    return row!.cursor;
+  }
+
+  const ASSIGNMENT_EVENTS = ['assigned', 'unassigned', 'assignment_skipped'];
+
+  it('answers awaiting_route while the window runs, and writes nothing at all', async () => {
+    const now = new Date();
+    const care = await desk('Customer Care', 'Omar Care', now);
+    const id = await ticketIn(care.groupId, at(now, 5));
+
+    expect(await assignConversation(id, { now, actorLabel: 'assign_sweep' })).toEqual({
+      assignedTo: null,
+      reason: 'awaiting_route',
+      movedGroup: false,
+    });
+    expect(await held(id)).toEqual({ assignee: null, groupId: care.groupId, decidedAt: null });
+    // Not on the timeline: the badge says "Routing…", and the sweep asks
+    // every five minutes.
+    expect(await eventsOf(id, ASSIGNMENT_EVENTS)).toEqual([]);
+    expect(await cursorOf(care.groupId)).toBeNull();
+    expect(await routingOf(id)).toMatchObject({ stage: 'holding', outcome: null });
+  });
+
+  // The grace is a valve for a settle that never came, and it is exclusive:
+  // the instant it runs out the hold is over, a millisecond before it is not.
+  it('holds through the grace and assigns the instant it runs out', async () => {
+    const now = new Date();
+    const care = await desk('Customer Care', 'Omar Care', now);
+    const within = await ticketIn(care.groupId, new Date(now.getTime() - ROUTING_GRACE_MS + 1));
+    const over = await ticketIn(care.groupId, new Date(now.getTime() - ROUTING_GRACE_MS));
+
+    expect((await assignConversation(within, { now })).reason).toBe('awaiting_route');
+    expect(await assignConversation(over, { now })).toEqual({
+      assignedTo: care.agentId,
+      reason: null,
+      movedGroup: false,
+    });
+    expect(await held(over)).toMatchObject({ assignee: care.agentId });
+    // Nothing decided the late one: the settle, when it comes, finds it taken.
+    expect(await routingOf(over)).toMatchObject({ stage: 'holding', outcome: null });
+  });
+
+  it('assigns a ticket whose hold was decided, with its window still running', async () => {
+    const now = new Date();
+    const care = await desk('Customer Care', 'Omar Care', now);
+    const id = await ticketIn(care.groupId, at(now, 5), { routingDecidedAt: now });
+
+    expect(await assignConversation(id, { now })).toEqual({
+      assignedTo: care.agentId,
+      reason: null,
+      movedGroup: false,
+    });
+  });
+
+  // The re-read under the ticket's lock. The group's lock alone does not stop
+  // a move out of the group — a move takes the foreign key's lock on the group
+  // it goes to — so before it, a ticket the router or a person moved between
+  // the read and the write was handed to an agent of the team it had left.
+  it('gives up when the ticket left the group between the read and the lock', async () => {
+    const now = new Date();
+    const care = await desk('Customer Care', 'Omar Care', now);
+    const merchants = await desk('Merchant Care', 'Mona Merchant', now);
+    const id = await ticketIn(care.groupId, null);
+
+    const hold = holdNextTransaction('before');
+    const assigning = assignConversation(id, { now, actorLabel: 'assign_sweep' });
+    await hold.atHold;
+    await db
+      .update(conversations)
+      .set({ groupId: merchants.groupId })
+      .where(eq(conversations.id, id));
+    hold.release();
+
+    expect(await assigning).toEqual({ assignedTo: null, reason: 'moved', movedGroup: false });
+    expect(await held(id)).toMatchObject({ assignee: null, groupId: merchants.groupId });
+    // Whoever moved it assigns it; this writes nothing, and records nothing.
+    expect(await eventsOf(id, ASSIGNMENT_EVENTS)).toEqual([]);
+    expect(await cursorOf(care.groupId)).toBeNull();
+  });
+
+  it('gives up when somebody picked the ticket up between the read and the lock', async () => {
+    const now = new Date();
+    const care = await desk('Customer Care', 'Omar Care', now);
+    const bob = await agent('Bob Supervisor');
+    const id = await ticketIn(care.groupId, null);
+
+    const hold = holdNextTransaction('before');
+    const assigning = assignConversation(id, { now });
+    await hold.atHold;
+    await db
+      .update(conversations)
+      .set({ assigneeAgentId: bob, assignedAt: now })
+      .where(eq(conversations.id, id));
+    hold.release();
+
+    expect(await assigning).toEqual({
+      assignedTo: null,
+      reason: 'already_assigned',
+      movedGroup: false,
+    });
+    expect(await held(id)).toMatchObject({ assignee: bob });
+    expect(await eventsOf(id, ['assigned'])).toEqual([]);
+    expect(await cursorOf(care.groupId)).toBeNull();
+  });
+
+  // The latent bug the lock fixed beside it: the guarded write's result was
+  // never read, so a write that matched nothing still advanced the cursor and
+  // recorded `assigned` to somebody who never got the ticket. A trigger that
+  // swallows the write stands in for whatever makes it match nothing.
+  it('advances no cursor and records no assignment when the write matches nothing', async () => {
+    const now = new Date();
+    const care = await desk('Customer Care', 'Omar Care', now);
+    const id = await ticketIn(care.groupId, null);
+
+    await db.execute(sql`
+      create function swallow_assignment() returns trigger language plpgsql
+      as $$ begin return null; end $$`);
+    await db.execute(sql`
+      create trigger swallow_assignment before update on conversations
+      for each row when (old.assignee_agent_id is null and new.assignee_agent_id is not null)
+      execute function swallow_assignment()`);
+    let outcome;
+    try {
+      outcome = await assignConversation(id, { now });
+    } finally {
+      await db.execute(sql`drop trigger swallow_assignment on conversations`);
+      await db.execute(sql`drop function swallow_assignment()`);
+    }
+
+    expect(outcome).toEqual({ assignedTo: null, reason: 'already_assigned', movedGroup: false });
+    expect(await held(id)).toMatchObject({ assignee: null });
+    expect(await eventsOf(id, ['assigned'])).toEqual([]);
+    expect(await cursorOf(care.groupId)).toBeNull();
+  });
+
+  // A rule's `auto_assign` naming another team has decided where the ticket
+  // goes: the hold ends with the move, and the pick in that team goes ahead.
+  it('ends the hold with a grouped auto_assign’s move to another group, and picks there', async () => {
+    const now = new Date();
+    const care = await desk('Customer Care', 'Omar Care', now);
+    const merchants = await desk('Merchant Care', 'Mona Merchant', now);
+    const id = await ticketIn(care.groupId, at(now, 5));
+    const routed: { moved: boolean; endedHold?: boolean } = { moved: false };
+
+    const outcome = await assignConversation(id, {
+      groupId: merchants.groupId,
+      actorLabel: 'automation:Route merchants',
+      endsHoldAs: 'rule',
+      routed,
+      now,
+    });
+
+    expect(outcome).toEqual({ assignedTo: merchants.agentId, reason: null, movedGroup: true });
+    expect(routed).toEqual({ moved: true, endedHold: true });
+    expect(await held(id)).toEqual({
+      assignee: merchants.agentId,
+      groupId: merchants.groupId,
+      decidedAt: expect.any(Date),
+    });
+    expect(await routingOf(id)).toEqual({
+      stage: 'decided',
+      outcome: 'rule',
+      toGroupId: merchants.groupId,
+      decidedByLabel: 'automation:Route merchants',
+    });
+    expect(await eventsOf(id, ['routed'])).toEqual([
+      {
+        type: 'routed',
+        actorAgentId: null,
+        actorLabel: 'automation:Route merchants',
+        data: {
+          outcome: 'rule',
+          from: care.groupId,
+          to: merchants.groupId,
+          toName: 'Merchant Care',
+          moved: true,
+        },
+      },
+    ]);
+    expect((await eventsOf(id, ['assigned'])).map((event) => event.data)).toEqual([
+      { to: merchants.agentId, strategy: 'round_robin' },
+    ]);
+    expect(await cursorOf(care.groupId)).toBeNull();
+  });
+
+  // In the move's own transaction: stamped apart from it, a crash between the
+  // two left the ticket in the rule's group still held, for the router to move
+  // away from the rule — or ended the hold in the group it was about to leave.
+  it('moves nothing when the hold cannot end with the move', async () => {
+    const now = new Date();
+    const care = await desk('Customer Care', 'Omar Care', now);
+    const merchants = await desk('Merchant Care', 'Mona Merchant', now);
+    const id = await ticketIn(care.groupId, at(now, 5));
+
+    await db.execute(sql`
+      create function refuse_routing_write() returns trigger language plpgsql
+      as $$ begin raise exception 'refused for the test'; end $$`);
+    await db.execute(sql`
+      create trigger refuse_routing_write before update on routing_decisions
+      for each row execute function refuse_routing_write()`);
+    try {
+      await expect(
+        assignConversation(id, {
+          groupId: merchants.groupId,
+          actorLabel: 'automation:Route merchants',
+          endsHoldAs: 'rule',
+          now,
+        }),
+      ).rejects.toThrow();
+    } finally {
+      await db.execute(sql`drop trigger refuse_routing_write on routing_decisions`);
+      await db.execute(sql`drop function refuse_routing_write()`);
+    }
+
+    expect(await held(id)).toEqual({ assignee: null, groupId: care.groupId, decidedAt: null });
+    expect(await routingOf(id)).toMatchObject({ stage: 'holding', outcome: null });
+    expect(await eventsOf(id, ['group_changed', 'routed', 'assigned'])).toEqual([]);
+  });
+
+  // A rule naming the team the ticket is already in matches on every pass,
+  // and has decided nothing; nor has one naming no team at all, which means
+  // "assign within the current group". Both are held like any assignment.
+  it('keeps the hold for an auto_assign naming the group the ticket is in, or none', async () => {
+    const now = new Date();
+    const care = await desk('Customer Care', 'Omar Care', now);
+    const id = await ticketIn(care.groupId, at(now, 5));
+    const routed: { moved: boolean; endedHold?: boolean } = { moved: false };
+
+    for (const groupId of [care.groupId, undefined]) {
+      expect(
+        await assignConversation(id, {
+          groupId,
+          actorLabel: 'automation:Route care',
+          endsHoldAs: 'rule',
+          routed,
+          now,
+        }),
+      ).toEqual({ assignedTo: null, reason: 'awaiting_route', movedGroup: false });
+    }
+
+    expect(routed).toEqual({ moved: false });
+    expect(await held(id)).toEqual({ assignee: null, groupId: care.groupId, decidedAt: null });
+    expect(await routingOf(id)).toMatchObject({ stage: 'holding', outcome: null });
+    expect(await eventsOf(id, ['group_changed', 'routed', ...ASSIGNMENT_EVENTS])).toEqual([]);
+  });
+
+  // The same two, through the engine that asks them: a pass whose rule ended
+  // the hold owes what the hold kept back, once the pass is over.
+  it('routes a held ticket by an on_update rule’s auto_assign, and only one naming another group', async () => {
+    const now = new Date();
+    const care = await desk('Customer Care', 'Omar Care', now);
+    const merchants = await desk('Merchant Care', 'Mona Merchant', now);
+    const id = await ticketIn(care.groupId, at(now, 30));
+    await db.insert(automationRules).values({
+      name: 'Keep it in care',
+      trigger: 'on_update',
+      conditions: {},
+      actions: [{ type: 'auto_assign', groupId: care.groupId, strategy: 'group_default' }],
+    });
+
+    await runAutomations('on_update', id);
+
+    expect(await held(id)).toEqual({ assignee: null, groupId: care.groupId, decidedAt: null });
+    expect(await routingOf(id)).toMatchObject({ stage: 'holding', outcome: null });
+
+    await db.insert(automationRules).values({
+      name: 'Route merchants',
+      trigger: 'on_update',
+      position: 1,
+      conditions: {},
+      actions: [{ type: 'auto_assign', groupId: merchants.groupId, strategy: 'group_default' }],
+    });
+
+    await runAutomations('on_update', id);
+
+    expect(await held(id)).toMatchObject({
+      assignee: merchants.agentId,
+      groupId: merchants.groupId,
+      decidedAt: expect.any(Date),
+    });
+    expect(await routingOf(id)).toEqual({
+      stage: 'decided',
+      outcome: 'rule',
+      toGroupId: merchants.groupId,
+      decidedByLabel: 'automation:Route merchants',
+    });
+    expect(await eventsOf(id, ['assigned'])).toEqual([
+      {
+        type: 'assigned',
+        actorAgentId: null,
+        actorLabel: 'automation:Route merchants',
+        data: { to: merchants.agentId, strategy: 'round_robin' },
+      },
+    ]);
   });
 });

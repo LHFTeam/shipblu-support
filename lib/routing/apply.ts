@@ -32,12 +32,14 @@ type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
  *    ticket's `routing_decided_at` stays null, so it is still held.
  * 2. **The `on_update` rules run**, after every decision on a ticket that
  *    carries a category, wherever the decision left it (`rulesOwed`). Nothing
- *    can assign in between, because the ticket is still held — so "sales on
- *    the merchant number goes to Merchant Care", and any rule keyed on the
- *    category, decide before anybody is handed the ticket. It is the pass the
- *    category's writer gave up on a held ticket (Jev, a person), so a ticket
- *    released or found taken owes it too; one with no category has nothing
- *    for it to react to, and its hold ends in phase one.
+ *    can assign in between, because the ticket is still held — a rule's move
+ *    in this pass does not end the hold, as one before phase one would
+ *    (`endHold`) — so "sales on the merchant number goes to Merchant Care",
+ *    and any rule keyed on the category, decide before anybody is handed the
+ *    ticket. It is the pass the category's writer gave up on a held ticket
+ *    (Jev, a person), so a ticket released or found taken owes it too; one
+ *    with no category has nothing for it to react to, and its hold ends in
+ *    phase one.
  * 3. **Under the lock again**, the hold ends; once that commits, the SLA policy
  *    is chosen again (`afterRoutingChanged`) with whether this decision moved
  *    the group, so a move the policy survives is still re-timed on the new
@@ -336,7 +338,10 @@ async function finish(conversationId: string, step: PhaseOne, now: Date): Promis
           .for('update');
         await tx
           .update(routingDecisions)
-          .set({ stage: 'decided', decidedAt: sql`coalesce(${routingDecisions.decidedAt}, ${now.toISOString()}::timestamptz)` })
+          .set({
+            stage: 'decided',
+            decidedAt: sql`coalesce(${routingDecisions.decidedAt}, ${now.toISOString()}::timestamptz)`,
+          })
           .where(eq(routingDecisions.conversationId, conversationId));
         await endHoldOnRow(tx, conversationId, now);
       });

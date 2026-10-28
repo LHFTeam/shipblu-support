@@ -255,7 +255,10 @@ function answeredInThisStretch(
 ): boolean {
   const answered = ticket.lastAgentMessageAt;
   if (!answered) return false;
-  if (ticket.lastCustomerMessageAt && answered.getTime() >= ticket.lastCustomerMessageAt.getTime()) {
+  if (
+    ticket.lastCustomerMessageAt &&
+    answered.getTime() >= ticket.lastCustomerMessageAt.getTime()
+  ) {
     return true;
   }
   return !isWithinBusinessHours(hours, answered) && !hasOpenedSince(hours, answered, at);

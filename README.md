@@ -370,13 +370,37 @@ either the SQL that loads those rows or the strategy that picks between them.
   self-assigning queue has to answer, so a skipped assignment writes `assignment_skipped`
   with a reason — out of hours, everybody at capacity, nobody holds the skill — onto the
   timeline. It is written once per reason rather than once per attempt, or a ticket that
-  arrives on a Friday evening carries two hundred identical entries by Monday.
-- **The routing rules are the automation rules.** One new action, `auto_assign`, rather
-  than a second engine with its own conditions, ordering and bugs. A rule says "urgent
-  shipping tickets go to the shipping team, whoever is free", which stays correct when
-  somebody leaves in a way `assign_agent` does not. Naming a group **moves** the ticket
-  whether or not anybody turns out to be free to take it — otherwise the rule quietly means
-  "…unless they are busy, in which case leave it where it was".
+  arrives on a Friday evening carries two hundred identical entries by Monday. The one
+  reason never written is `awaiting_route`, a ticket held for the router (below): every
+  pass skips it until the hold ends, and a line per skip once came to 1,432 rows for 137
+  tickets.
+- **The routing rules are the automation rules, and routing by category is a lookup.** One
+  new action, `auto_assign`, rather than a second engine with its own conditions, ordering
+  and bugs. A rule says "urgent shipping tickets go to the shipping team, whoever is free",
+  which stays correct when somebody leaves in a way `assign_agent` does not. Naming a group
+  **moves** the ticket whether or not anybody turns out to be free to take it — otherwise
+  the rule quietly means "…unless they are busy, in which case leave it where it was". The
+  one route a rule cannot make is a fresh ticket's first, to the team its category names,
+  so that is a channel setting (`channels.routing_mode`) decided once by `lib/routing/`.
+  Four facts about the code say why: the category comes from a queued classifier, after
+  the `on_create` pass has run; the first message is often a greeting with the informative
+  one minutes behind it, so something has to wait without assigning, and the engine cannot
+  hold anything; `on_update` fires on every touch and remembers nothing, so "sales goes to
+  Sales" would pull a ticket back every time the customer wrote after an agent had moved
+  it; and three categories on five channels is fifteen rules, any of which can leave
+  tickets where they arrived without a word. Teaching the engine to do it means a hold, a
+  fire-once trigger, a fallback timer and SLA re-selection inside it, which is the routing
+  feature built in the engine. What the router reads instead,
+  `ticket_categories.route_group_id`, is a lookup as `default_group_id` is one: it holds
+  no conditions, so it is not a second engine. Rules still decide every exception. A rule
+  that assigns or moves a waiting ticket decides instead of the router, and the router
+  runs the `on_update` pass before anybody is assigned, so "sales on the merchant number
+  goes to Merchant Care" is still a rule. A rule's `set_category` after the creation pass
+  is routed at the window's end rather than at once, because an action never re-enters the
+  engine to call the router. While it waits the ticket is _held_: assigned to nobody, its
+  out-of-hours reply kept back. The alternative, assigning it in its default group and
+  taking it back once classified, breaks "never overwrites an existing assignee" above and
+  shows the ticket in one agent's queue just before it vanishes.
 - **Assignment is serialised per group** by a `SELECT … FOR UPDATE` on the group row. Two
   tickets arriving in the same second would otherwise read the same round-robin cursor and
   land on the same agent, and two load-balanced picks would both see the counts from before
@@ -384,7 +408,10 @@ either the SQL that loads those rows or the strategy that picks between them.
 - **The sweep re-asks the question every five minutes**, chained onto the SLA cron, because
   most of the reasons a ticket goes unassigned resolve themselves later and none of them
   announce it. It also runs on demand when an agent comes online, so the overnight queue
-  drains as the shift starts instead of up to five minutes later.
+  drains as the shift starts instead of up to five minutes later. It leaves a ticket held
+  for the router alone, escalation included: such a ticket is unassigned by design, in a
+  group it may be about to leave, and its group's lead would be made a watcher on another
+  team's work.
 - **Reclaiming is opt-in and narrow.** A group with `reclaim_after_mins` set takes a ticket
   back off somebody who has gone offline — but only one still awaiting its first agent
   reply, and only in an `open` status. Once an agent has answered, the thread is theirs:
@@ -395,7 +422,10 @@ either the SQL that loads those rows or the strategy that picks between them.
   group, strategy, hours, presence, cap or skill is asked, and no cursor moves — and
   reclaiming never takes their own number's ticket from them. Every one of those gates
   measures the console, and the owner answers from the phone with it closed. A rule
-  naming a group still moves the ticket there.
+  naming a group still moves the ticket there. Nor does such a ticket wait for the router:
+  it is its owner's from the insert, so routing by category starts nothing for it. A
+  deactivated owner counts as nobody, and that number's tickets route like a team
+  number's.
 - **Escalation finally reads `groups.escalate_to_agent_id`**, which has been in the schema
   since the first migration with a comment describing exactly this and no code behind it.
   It means what it means in the SLA sweep — the named agent becomes a watcher and the

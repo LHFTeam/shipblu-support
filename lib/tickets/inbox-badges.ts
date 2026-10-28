@@ -1,4 +1,6 @@
+import { formatTime } from '@/lib/format';
 import { metaWindowState } from '@/lib/meta/window';
+import { isHeld, type HoldColumns } from '@/lib/routing/hold';
 import { formatRemaining, windowState } from '@/lib/whatsapp/window';
 import { answeredFromConsole, isMetaChannel } from './channel-policy';
 import type { InboxRow } from './inbox';
@@ -11,10 +13,11 @@ import type { InboxRow } from './inbox';
  * anything, and the order is the point — what is about to go wrong first, then
  * what somebody has to act on, then what the ticket merely is.
  *
- * Client-safe, like `inbox-lines`: the row type is erased and the two window
- * modules are pure. The tones are spelled out rather than imported from the
- * Badge, so `lib/` does not reach into `components/`; each is one of its
- * tones, which the row checks when it hands them over.
+ * Client-safe, like `inbox-lines`: the row type is erased, and the two window
+ * modules, the hold and `lib/format.ts` are pure. The tones are spelled out
+ * rather than imported from the Badge, so `lib/` does not reach into
+ * `components/`; each is one of its tones, which the row checks when it hands
+ * them over.
  */
 
 type RowBadgeTone =
@@ -27,6 +30,7 @@ type RowBadgeTone =
   | 'hub-waiting'
   | 'hub-replied'
   | 'public'
+  | 'automated'
   | 'neutral';
 
 export type RowBadge = { key: string; tone: RowBadgeTone; label: string };
@@ -42,6 +46,8 @@ type BadgeRow = Pick<
   | 'priority'
   | 'sideState'
   | 'categoryLabel'
+  | 'assigneeId'
+  | 'routingUntil'
 >;
 
 /** Under two hours is when a WhatsApp window starts mattering; above that it is noise. */
@@ -79,8 +85,44 @@ function windowBadge(row: BadgeRow, now: Date | null): RowBadge | null {
 }
 
 /**
+ * The routing hold, as everything that draws it reads it — the list row, the
+ * ticket header and the sidebar's hints — so the list and the open ticket
+ * cannot disagree about whether a ticket is held, which is the rule
+ * `windowBadge` states for the window. Null when it is not held.
+ *
+ * Drawn before the list has a clock, unlike the window: with `now` null it
+ * reads the columns alone — a window opened, nothing decided, nobody holding
+ * the ticket — which the server and the browser agree on, and "do not take
+ * this yet" is worth having on the first paint. The clock adds the two things
+ * only it can know: the grace running out on a stuck job, which writes nothing
+ * and so is never read off a column, and whether the window is still ahead,
+ * which `until` carries.
+ *
+ * `routingWindowEndsAt` is read through `new Date()`, because an inbox row
+ * from `/api/inbox` crossed JSON, and a string the type still calls a `Date`
+ * would throw in `isHeld`.
+ */
+export function routingHold(ticket: HoldColumns, now: Date | null): { until: Date | null } | null {
+  const endsAt = ticket.routingWindowEndsAt ? new Date(ticket.routingWindowEndsAt) : null;
+  if (!endsAt || ticket.routingDecidedAt || ticket.assigneeAgentId) return null;
+  if (now && !isHeld({ ...ticket, routingWindowEndsAt: endsAt }, now)) return null;
+  return { until: now && now.getTime() < endsAt.getTime() ? endsAt : null };
+}
+
+/**
+ * The hold in words: when the window ends while it is still ahead, and the
+ * bare word after it — the settle is due, and its time has passed — or before
+ * there is a clock to say which. `formatTime` is the Cairo wall clock, the same
+ * on the server and in the browser.
+ */
+export function routingLabel(hold: { until: Date | null }): string {
+  return hold.until ? `Routing until ${formatTime(hold.until)}` : 'Routing…';
+}
+
+/**
  * `ticket` is the three-line row and keeps the order it always had — status,
- * window, priority, hub — with the comment marker and then the category last.
+ * window, priority, hub — with the routing hold after the status, and the
+ * comment marker and then the category last.
  *
  * `avatar` is ordered by urgency instead, and leaves out the default open
  * status, which most rows carry (a status an admin added to the open category,
@@ -89,6 +131,11 @@ function windowBadge(row: BadgeRow, now: Date | null): RowBadge | null {
  * being waited on, then any other status. It is not capped at two as the design
  * system's row is: each of these is something an agent triages by, and a row
  * that wraps is cheaper than one that hides why the ticket is waiting.
+ *
+ * The routing hold follows those two in the avatar row: "do not take this
+ * yet" is triage, since an agent who takes a held ticket ends its route, but
+ * it is not an alarm — dashed, the console's sign for a machine at work, and
+ * never coral. Its words carry it, as colour alone never may.
  *
  * Only the answered hub state is loud. A ticket blocked on a hub looks
  * identical to one nobody has picked up, and "the hub answered an hour ago and
@@ -133,13 +180,25 @@ export function rowBadges(
   const category: RowBadge | null = row.categoryLabel
     ? { key: 'category', tone: 'neutral', label: row.categoryLabel }
     : null;
+  const hold = routingHold(
+    {
+      routingWindowEndsAt: row.routingUntil,
+      routingDecidedAt: null,
+      assigneeAgentId: row.assigneeId,
+    },
+    now,
+  );
+  const routing: RowBadge | null = hold
+    ? { key: 'routing', tone: 'automated', label: routingLabel(hold) }
+    : null;
 
   const ordered =
     layout === 'ticket'
-      ? [status, window, priority, hub, comment, category]
+      ? [status, routing, window, priority, hub, comment, category]
       : [
           window?.tone === 'window-closing' ? window : null,
           hub?.tone === 'hub-replied' ? hub : null,
+          routing,
           window?.tone === 'window-closing' ? null : window,
           priority,
           hub?.tone === 'hub-replied' ? null : hub,
