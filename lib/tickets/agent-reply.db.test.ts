@@ -16,6 +16,7 @@ import {
   routingDecisions,
   ticketStatuses,
 } from '@/db/schema';
+import { assignConversation } from '@/lib/assignment';
 import { forgetCategoryAiSettings } from '@/lib/category-ai/settings';
 import { forgetHoursCatalog } from '@/lib/hours/catalog';
 import { settleRouting } from '@/lib/routing/apply';
@@ -148,7 +149,8 @@ describe('storeAgentReply', () => {
  * answered, and what the hold kept back follows — the assignment, through the
  * group's rota, and the held out-of-hours reply, which the agent's answer has
  * made moot. On a ticket that never entered routing, the reply does what it
- * always did and assigns nobody.
+ * always did and assigns nobody; on one a shadow channel only watches, it
+ * decides nothing (`decidesShadow`).
  *
  * The seeded calendar is shut for good, so the held acknowledgement would go
  * the moment anything paid it without its answered guard. The group assigns
@@ -357,18 +359,44 @@ describe('storeAgentReply on a ticket held for routing', () => {
     expect(await routedEvents(t.id)).toMatchObject([{ data: { outcome: 'fallback' } }]);
   });
 
-  it('on a ticket a shadow channel only watches, records the would-be manual and assigns nobody', async () => {
+  // Nothing holds a shadow ticket, so the rota assigned it on arrival — which a
+  // live hold would have prevented — and its agent answering it is no decision
+  // the live mode would ever have seen. Counted as `manual`, the reply would
+  // decide nearly every shadow ticket before the router's answer was recorded,
+  // and inflate exactly the figure the shadow week is read for. The router's
+  // own answer is what the window's end then records.
+  it('on a ticket a shadow channel only watches, decides nothing and leaves the router its answer', async () => {
     const t = await heldMail({ shadow: true });
+    expect((await assignConversation(t.id)).assignedTo).toBe(t.hana);
 
-    await reply(t.id, t.omar);
+    await reply(t.id, t.hana);
 
     expect(await decisionOf(t.id)).toMatchObject({
       shadow: true,
-      stage: 'decided',
-      outcome: 'manual',
-      decidedByAgentId: t.omar,
+      stage: 'holding',
+      outcome: null,
+      decidedByAgentId: null,
+      decidedAt: null,
     });
     expect(await routedEvents(t.id)).toEqual([]);
-    expect(await ticketRow(t.id)).toMatchObject({ assigneeAgentId: null, routingDecidedAt: null });
+    expect(await ticketRow(t.id)).toMatchObject({
+      assigneeAgentId: t.hana,
+      routingDecidedAt: null,
+    });
+
+    // Still undecided, so the window's end records what the router would have
+    // done: nothing filed it, so it would have stayed where it arrived.
+    expect(await settleRouting(t.id)).toBe('shadow');
+    expect(await decisionOf(t.id)).toMatchObject({
+      stage: 'decided',
+      outcome: 'fallback',
+      decidedByAgentId: null,
+      decidedByLabel: 'settle_routing',
+    });
+    expect(await routedEvents(t.id)).toEqual([]);
+    expect(await ticketRow(t.id)).toMatchObject({
+      assigneeAgentId: t.hana,
+      routingDecidedAt: null,
+    });
   });
 });

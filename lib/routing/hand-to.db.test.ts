@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray } from 'drizzle-orm';
+import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { db } from '@/db/client';
 import {
@@ -13,6 +13,7 @@ import {
   ticketCategories,
   ticketStatuses,
 } from '@/db/schema';
+import { assignConversation } from '@/lib/assignment';
 import { setConversationCategory } from '@/lib/categories/write';
 import { withCleanDatabase } from '@/lib/testing/db';
 import { settleRouting } from './apply';
@@ -162,6 +163,26 @@ async function eventsOf(id: string, types = HAND_OVER) {
     .orderBy(asc(conversationEvents.createdAt));
 }
 
+/**
+ * The hand-over's events in the order the ticket page draws them — by
+ * `created_at` — each with whether it sorts strictly after the one before.
+ * Asked of Postgres, because the stamps are microseconds apart inside one
+ * transaction and a JavaScript `Date` keeps milliseconds, so a tie read back
+ * there would hide exactly the misordering this looks for.
+ */
+async function timelineOf(id: string) {
+  return db
+    .select({
+      type: conversationEvents.type,
+      afterPrevious: sql<boolean>`coalesce(${conversationEvents.createdAt} > lag(${conversationEvents.createdAt}) over (order by ${conversationEvents.createdAt}, ${conversationEvents.id}), true)`,
+    })
+    .from(conversationEvents)
+    .where(
+      and(eq(conversationEvents.conversationId, id), inArray(conversationEvents.type, HAND_OVER)),
+    )
+    .orderBy(asc(conversationEvents.createdAt), asc(conversationEvents.id));
+}
+
 describe('handToRouteGroup', () => {
   it('lands a ticket relabelled after its hold with a member of the new group', async () => {
     const lina = await agent('Lina Care');
@@ -293,6 +314,51 @@ describe('handToRouteGroup', () => {
           moved: true,
         },
       },
+    ]);
+    // The route ends after the move that decided it, as the page reads it.
+    expect(await timelineOf(id)).toEqual([
+      { type: 'group_changed', afterPrevious: true },
+      { type: 'routed', afterPrevious: true },
+      { type: 'assigned', afterPrevious: true },
+    ]);
+  });
+
+  // `endHold` writes its `routed` in the transaction of the write that ended
+  // the hold, after it. Stamped with the column default — the instant that
+  // transaction began — it sorted before the move and the unassignment it
+  // came after, and the page told the story backwards: routed to Sales, then
+  // moved there, then taken off Lina. Stamped as it is written, it follows
+  // them. Here the rota gave the ticket to Lina once the grace ran out, as the
+  // sweep would, so the hand-over has somebody to take it off.
+  it('records the end of a lapsed route after the move and the unassignment', async () => {
+    const lina = await agent('Lina Care');
+    const omar = await agent('Omar Sales');
+    const mona = await agent('Mona Supervisor');
+    const care = await group('Customer Care', [lina]);
+    const sales = await group('Inbound Sales Team', [omar]);
+    const stuck = new Date(Date.now() - ROUTING_GRACE_MS - 5 * MINUTE);
+    const id = await heldTicket(await instagram(), care, stuck, {
+      categoryId: await category('sales', sales),
+    });
+    expect((await assignConversation(id)).assignedTo).toBe(lina);
+    const before = await eventsOf(id);
+
+    expect(await handToRouteGroup(id, { agentId: mona })).toMatchObject({
+      ok: true,
+      assignedTo: omar,
+    });
+
+    expect((await eventsOf(id)).slice(before.length)).toMatchObject([
+      { type: 'group_changed', actorAgentId: mona },
+      { type: 'unassigned', actorAgentId: mona, data: { from: lina } },
+      { type: 'routed', actorAgentId: mona, data: { outcome: 'manual', to: sales } },
+      { type: 'assigned', data: { to: omar } },
+    ]);
+    expect((await timelineOf(id)).slice(before.length)).toEqual([
+      { type: 'group_changed', afterPrevious: true },
+      { type: 'unassigned', afterPrevious: true },
+      { type: 'routed', afterPrevious: true },
+      { type: 'assigned', afterPrevious: true },
     ]);
   });
 
