@@ -16,6 +16,7 @@ import { loadHoursCatalog } from '@/lib/hours/catalog';
 import { isWithinBusinessHours } from '@/lib/hours';
 import { groupHours } from '@/lib/hours/resolve';
 import { logger } from '@/lib/log';
+import { isWorkable } from '@/lib/routing/decide';
 import { endHold } from '@/lib/routing/end-hold';
 import { recordHeldAssignment } from '@/lib/routing/held-assignment';
 import { isHeld } from '@/lib/routing/hold';
@@ -24,7 +25,6 @@ import { isReadOnlyChannel } from '@/lib/tickets/channel-policy';
 import { openBacklog } from '@/lib/tickets/backlog';
 import { moveToGroupIfElsewhere } from '@/lib/tickets/move-group';
 import { lockedStatusCategory, statusCategoryOf } from '@/lib/tickets/status-category';
-import type { StatusCategory } from '@/lib/tickets/vocabulary';
 import { recordOwnerAssigned } from '@/lib/whatsapp/number-owner';
 import { filterCandidates, type CandidateRow } from './eligibility';
 import { pickLoadBalanced, pickRoundRobin } from './strategies';
@@ -456,21 +456,16 @@ async function routeAndPick(
  * dashboard calls the backlog. Asked of the snapshot before anything is
  * written, and again of the row under the pick's lock, so the two cannot come
  * to disagree about what qualifies.
+ *
+ * All but the bot is the router's `isWorkable`, not a copy of it, so this,
+ * the router's `not_open`, the inbox's "Routing…" (`routingHold`) and the Hand
+ * to offer (`handToTarget`, which adds the same read-only check) read one rule
+ * of what work is, and a status category added later changes all four at
+ * once. The bot is this module's own question: the router never meets a bot
+ * ticket, since `routingModeOf` never routes one.
  */
-function isWorkToHandOut(ticket: {
-  deletedAt: Date | null;
-  mergedIntoId: string | null;
-  isSpam: boolean;
-  channel: string;
-  statusCategory: StatusCategory;
-}): boolean {
-  return !(
-    ticket.deletedAt ||
-    ticket.mergedIntoId ||
-    ticket.isSpam ||
-    isReadOnlyChannel(ticket.channel) ||
-    !(ticket.statusCategory === 'open' || ticket.statusCategory === 'pending')
-  );
+function isWorkToHandOut(ticket: Parameters<typeof isWorkable>[0] & { channel: string }): boolean {
+  return isWorkable(ticket) && !isReadOnlyChannel(ticket.channel);
 }
 
 /**

@@ -382,7 +382,10 @@ async function afterCategoryApplied(
  * a first, on a ticket resolved in that moment. `endHold` decides without
  * looking at the category at all, so after a person or a rule the relabel is
  * still owed. A person ending a hold whose phase one the router had already
- * written keeps the router's outcome, and that router is running the pass.
+ * written keeps the router's outcome, and the router still runs the pass: it
+ * claims it on `rules_claimed_at` alone, so a hold a person ended under it
+ * costs nothing phase one owed (`finish` in `lib/routing/apply.ts`), and a
+ * relabel here would be a second pass.
  */
 async function decidedByHold(conversationId: string): Promise<boolean> {
   const [row] = await db

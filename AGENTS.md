@@ -1431,8 +1431,9 @@ README says why it is a setting and not a rule. The rules:
   born in the insert's transaction, which has committed before anything reads
   it, and a decided row is never undecided again. `assignConversation` re-reads
   under its lock the assignee, the group, the hold and whether the ticket is
-  still work — open or pending, not deleted, merged or spam (`not_assignable`),
-  the status through `statusCategoryOf`, since no join may sit under the lock —
+  still work — open or pending, not deleted, merged or spam, the router's own
+  `isWorkable`, which Hand to's offer asks too (`not_assignable`), the status
+  through `statusCategoryOf`, since no join may sit under the lock —
   and answers `moved` for a ticket that left the group since its snapshot, which
   a re-read under the group's lock alone could not see. Taken off the snapshot,
   a resolve landing while the pick read its roster left the ticket resolved in
@@ -1537,12 +1538,21 @@ README says why it is a setting and not a rule. The rules:
   lock the ticket on connections of their own and would wait until the pooler
   killed it (§6.91). **Phase two runs at most once**, however many callers
   finish one decision: `finish()` claims it with one conditional statement on
-  the routing row (`rules_claimed_at`, refused once the row is decided) and
-  marks it done (`rules_done_at`) in a statement of its own before phase three,
-  so a phase three that fails keeps the mark. A caller whose claim fails ends
-  nothing — the claimant ends the hold after its last rule, and ending it sooner
-  lets assignment beat a rule still to come — and `settleRouting` then looks
-  again, without a key, once `RULES_RUNNING_MS` is up. A process dying between
+  the routing row (`rules_claimed_at`) and marks it done (`rules_done_at`) in a
+  statement of its own before phase three, so a phase three that fails keeps
+  the mark. The claim is the only thing that says whether the pass is still to
+  run, never the row's stage: a person ending the hold in the moment after phase
+  one — an agent's reply, the console's assignee or group case, through
+  `endHold` — decides the row and keeps the router's outcome, and the ticket is
+  still owed the category's pass and the policy's second look, which then run
+  after the person's decision while phase three finds the hold over and moves
+  nothing. Refused for a decided row, as the claim was first written, it lost
+  both for good while `routeNow` still answered `decided`, so neither Jev nor
+  the console's category edit ran a pass of its own. A caller whose claim fails
+  ends nothing — the claimant ends the hold after its last rule, and ending it
+  sooner lets assignment beat a rule still to come; or the window's job gave
+  the pass up and ended it (below) — and `settleRouting` then looks again,
+  without a key, once `RULES_RUNNING_MS` is up. A process dying between
   phases leaves the hold, and `settle_routing` completes a phase one older than
   `PHASE_ONE_RESUME_MS`: a pass nobody claimed it claims and runs; a pass done
   it skips; a claim younger than `RULES_RUNNING_MS` — the hold's ten-minute
@@ -1561,9 +1571,11 @@ README says why it is a setting and not a rule. The rules:
   beside it once its phase one was a minute old. Completing a decision reads the
   ticket again under the lock, and one resolved, closed, deleted, merged or
   marked spam since is owed nothing (`isWorkable` in `decide.ts`, `not_open`'s
-  own test): its hold ends with the outcome phase one wrote, no rule runs,
-  nobody is assigned and no reply goes, where finishing from the stored row ran
-  a category's rules on a deleted ticket.
+  own test): its hold ends with the outcome phase one wrote and its pass is
+  given up, marked claimed in the statement that decides the row — the caller
+  the job took over may only have stalled, and on waking asks the claim alone —
+  so no rule runs, nobody is assigned and no reply goes, where finishing from
+  the stored row ran a category's rules on a deleted ticket.
 - **The creation pass is `on_create` rules, `applySlaOnCreate`, then
   `beginRouting`, and it stops on `routed`.** After the rules, so a rule gets
   the first word: its stamp has ended the hold, or its `set_category` is routed

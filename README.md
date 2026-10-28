@@ -410,10 +410,12 @@ either the SQL that loads those rows or the strategy that picks between them.
   tickets arriving in the same second would otherwise read the same round-robin cursor and
   land on the same agent, and two load-balanced picks would both see the counts from before
   either wrote. The ticket's own row is locked before it, the order every writer that moves
-  a ticket takes, and its assignee, group and routing hold are re-read there, so a ticket
-  somebody took by hand or moved out of the group since the pass read it is left alone. That
-  lock is `FOR NO KEY UPDATE`: it waits on every other writer of the row, and lets the
-  customer's next message, whose foreign key needs only a key-share lock, land meanwhile.
+  a ticket takes, and its assignee, group and routing hold are re-read there, with whether
+  it is still work at all — open or pending, and not deleted, merged or marked spam, the
+  router's own test — so a ticket somebody took by hand, moved out of the group, resolved
+  or merged since the pass read it is left alone. That lock is `FOR NO KEY UPDATE`: it
+  waits on every other writer of the row, and lets the customer's next message, whose
+  foreign key needs only a key-share lock, land meanwhile.
 - **The sweep re-asks the question every five minutes**, chained onto the SLA cron, because
   most of the reasons a ticket goes unassigned resolve themselves later and none of them
   announce it. It also runs on demand when an agent comes online, so the overnight queue

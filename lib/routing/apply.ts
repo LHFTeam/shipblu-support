@@ -1,4 +1,4 @@
-import { and, desc, eq, isNull, ne, sql } from 'drizzle-orm';
+import { and, desc, eq, isNull, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import {
   channels,
@@ -77,6 +77,14 @@ type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
  * the whole pass, and a slow pass met a second one started beside it once its
  * phase one was a minute old.
  *
+ * The claim is the only thing that says whether the pass is still to run. A
+ * resumed decision that finds the ticket no longer work gives the pass up by
+ * marking it claimed as it decides the row, so a caller that only stalled
+ * runs nothing on a resolved or deleted ticket when it wakes. A person ending
+ * the hold in the moment after phase one (`endHold`) decides the row without
+ * touching the claim, and the pass phase one owed still runs — after their
+ * decision rather than before it.
+ *
  * Every lock this takes on the ticket's row is NO KEY UPDATE, never UPDATE:
  * it serialises against every other writer of the row just the same, and FOR
  * UPDATE would also stop every message inserted on the ticket — whose foreign
@@ -153,7 +161,9 @@ export type RouteResult = Step['kind'] | 'requeued' | 'failed';
  * So does a caller that finds phase two claimed by somebody else — the
  * window's job, taking over a caller that stalled a minute after its phase
  * one: its pass reads the ticket after this caller's write, so to the caller
- * the rules are run on what it wrote, and the claimant ends the hold.
+ * the rules are run on what it wrote, and the claimant ends the hold. Or that
+ * job gave the pass up, on a ticket resolved or deleted while this caller
+ * stalled, which is owed no rules at all.
  */
 export async function routeNow(
   conversationId: string,
@@ -191,8 +201,10 @@ export async function routeNow(
  * For that reason too it looks again when its own claim on phase two fails:
  * the claimant may be a `routeNow` that stalled past the minute, and this job
  * may be the window's own, whose key nothing else can spend again. If the
- * claimant finishes, the next look finds the row decided; if it died, the
- * claim has aged by then and the decision is completed without the rules.
+ * claimant finishes, the next look finds the row decided, as it does when
+ * another run gave the pass up on a ticket nobody may work; if the claimant
+ * died, the claim has aged by then and the decision is completed without the
+ * rules.
  */
 export async function settleRouting(
   conversationId: string,
@@ -308,11 +320,20 @@ async function phaseOne(
       `completing an interrupted decision conversation=${conversationId} outcome=${row.outcome ?? 'none'}`,
     );
     if (!isWorkable({ ...ticket, statusCategory })) {
+      // The pass is given up as well, marked claimed in the statement that
+      // decides the row. "Gone" is a minute's silence, not a death: the caller
+      // may only have stalled, and when it wakes the claim is all it asks
+      // (`finish`) — never whether the row is still undecided, because a
+      // person ending the hold in the moment after phase one (`endHold`)
+      // decides the row too, and that ticket is still owed the pass. Left
+      // unclaimed here, the woken caller would run the rules on the ticket
+      // this has just found nobody may work.
       await tx
         .update(routingDecisions)
         .set({
           stage: 'decided',
           decidedAt: sql`coalesce(${routingDecisions.decidedAt}, ${now.toISOString()}::timestamptz)`,
+          rulesClaimedAt: sql`coalesce(${routingDecisions.rulesClaimedAt}, ${now.toISOString()}::timestamptz)`,
         })
         .where(eq(routingDecisions.id, row.id));
       await endHoldOnRow(tx, conversationId, now);
@@ -473,9 +494,11 @@ async function phaseOne(
  * Answers `ended` once the hold is over and its follow-ups have run; `held`
  * when phase three failed, and then nothing after it has run; and
  * `claimed_elsewhere` when another caller holds the claim on phase two, which
- * leaves it all to that caller, or the decision was finished meanwhile. On
- * the last two the caller decides who completes the decision
- * (`settleRouting`).
+ * leaves it all to that caller, or the window's job gave the pass up on a
+ * ticket nobody may work and decided the row without it. On the last two the
+ * caller decides who completes the decision (`settleRouting`). A row a person
+ * decided meanwhile (`endHold`) is no reason to stop: the pass is still owed,
+ * and this claims and runs it.
  */
 async function finish(
   conversationId: string,
@@ -489,8 +512,20 @@ async function finish(
       // cycle with a writer holding the ticket's. Losing it means another
       // caller is running the pass and ends the hold after it — ended here as
       // well, the hold would let assignment beat a rule still to come — or
-      // that the decision was finished without one, on a ticket that resolved
-      // or was deleted while this caller stalled, which owes no pass at all.
+      // that the window's job gave the pass up as it finished the decision,
+      // on a ticket that resolved or was deleted while this caller stalled,
+      // which owes no pass at all (`phaseOne`'s resume marks it claimed).
+      //
+      // On the claim alone, never on the row being undecided. A person
+      // deciding in the moment since phase one committed — an agent's reply,
+      // the console's assignee or group case, through `endHold` — ends the
+      // hold and keeps the router's outcome, and pays nothing phase one owed.
+      // Refused for a decided row, the claim lost the category's pass and the
+      // policy's second look for good, while this caller still answered
+      // `decided`, so Jev and the console ran no pass of their own; an
+      // agent's reply runs none at all. Claimed, the pass runs after the
+      // person's decision rather than before it, and phase three finds the
+      // row decided and the hold over and moves neither.
       const claimed = await db
         .update(routingDecisions)
         .set({ rulesClaimedAt: now })
@@ -498,7 +533,6 @@ async function finish(
           and(
             eq(routingDecisions.conversationId, conversationId),
             isNull(routingDecisions.rulesClaimedAt),
-            ne(routingDecisions.stage, 'decided'),
           ),
         )
         .returning({ id: routingDecisions.id });

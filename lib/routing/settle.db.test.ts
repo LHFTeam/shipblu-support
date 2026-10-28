@@ -986,6 +986,51 @@ describe('a decision interrupted between its phases', () => {
     expect(result).toBe('none');
   });
 
+  it('gives the pass up with the decision, so a caller that only stalled runs nothing when it wakes', async () => {
+    // The minute that makes a caller "gone" is silence, not proof. The window's
+    // job finishes this decision without the rules on a ticket resolved since;
+    // the caller that wrote phase one then wakes and asks the claim alone
+    // whether its pass is still to run — a person deciding the row meanwhile
+    // leaves the pass owed — so the job's answer has to be in the claim.
+    await closedEverywhere();
+    await outOfHoursReply();
+    const t = await teams();
+    const sales = await routeTo('sales', t.sales.group);
+    await rule('on_update', 'Tag everything', always, [{ type: 'add_tags', tags: ['ran'] }]);
+    const { id } = await heldTicket(t.channel, t.home.group);
+    await jevFiles(id, sales);
+
+    // Between the caller's phase one and its claim: the ticket resolved, and
+    // the window's job a minute on.
+    const transaction = PgDatabase.prototype.transaction;
+    vi.spyOn(PgDatabase.prototype, 'transaction').mockImplementationOnce(async function (
+      this: PgDatabase<never>,
+      run,
+      config,
+    ) {
+      const result: unknown = await transaction.call(this, run, config);
+      await db
+        .update(conversations)
+        .set({ statusId: await status('Resolved') })
+        .where(eq(conversations.id, id));
+      expect(await settleRouting(id, new Date(Date.now() + PHASE_ONE_RESUME_MS))).toBe('none');
+      return result as never;
+    });
+    expect(await routeNow(id, { label: 'jev:category' })).toBe('decided');
+
+    // No rule ran on it, nobody was given it, and nothing was said.
+    const [row] = await db
+      .select({ tags: conversations.tags, assigneeAgentId: conversations.assigneeAgentId })
+      .from(conversations)
+      .where(eq(conversations.id, id));
+    expect(row).toEqual({ tags: [], assigneeAgentId: null });
+    expect(await acknowledgements(id)).toEqual([]);
+    // The pass given up, never run: claimed with the decision, and not done.
+    const decided = await expectDecided(id, 'category');
+    expect(decided.rulesClaimedAt).toBeInstanceOf(Date);
+    expect(decided.rulesDoneAt).toBeNull();
+  });
+
   it('keeps the creation pass from assigning a ticket the router has taken', async () => {
     errorsExpected = true;
     const t = await teams();

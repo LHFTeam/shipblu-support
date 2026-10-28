@@ -21,7 +21,8 @@ import { forgetCategoryAiSettings } from '@/lib/category-ai/settings';
 import { forgetHoursCatalog } from '@/lib/hours/catalog';
 import { settleRouting } from '@/lib/routing/apply';
 import { beginRouting } from '@/lib/routing/begin';
-import { startRouting } from '@/lib/routing/start';
+import { isHeld } from '@/lib/routing/hold';
+import { routingWindowValues, startRouting } from '@/lib/routing/start';
 import { withCleanDatabase } from '@/lib/testing/db';
 import { storeAgentReply } from './agent-reply';
 
@@ -190,7 +191,11 @@ describe('storeAgentReply on a ticket held for routing', () => {
   /**
    * A mailbox that routes by category, its team of one, the supervisor who
    * replies — in no group — and a ticket on it. Started as the insert starts
-   * one and begun as the creation pass begins it, unless `routed` is false.
+   * one — a live one's window on the ticket's own insert
+   * (`routingWindowValues`), then the row and the job (`startRouting`), from
+   * one instant — and begun as the creation pass begins it, unless `routed` is
+   * false. A shadow ticket carries no window, as ingest gives it none, and
+   * neither does one that never routed.
    */
   async function heldMail({
     shadow = false,
@@ -231,6 +236,9 @@ describe('storeAgentReply on a ticket held for routing', () => {
       .from(ticketStatuses)
       .where(eq(ticketStatuses.name, 'Open'));
     const opened = new Date();
+    const plan = routed
+      ? ({ start: shadow ? 'shadow' : 'live', channelId: mailbox!.id, windowMinutes: 5 } as const)
+      : null;
     const [ticket] = await db
       .insert(conversations)
       .values({
@@ -241,6 +249,7 @@ describe('storeAgentReply on a ticket held for routing', () => {
         requesterContactId: contact!.id,
         lastMessageAt: opened,
         lastCustomerMessageAt: opened,
+        ...routingWindowValues(plan, {}, opened),
       })
       .returning({ id: conversations.id });
     const id = ticket!.id;
@@ -248,17 +257,29 @@ describe('storeAgentReply on a ticket held for routing', () => {
       .insert(messages)
       .values({ conversationId: id, direction: 'inbound', kind: 'reply', bodyText: 'Hello?' })
       .returning({ id: messages.id });
-    if (routed) {
+    if (plan) {
       await db.transaction((tx) =>
         startRouting(
           tx,
-          { start: shadow ? 'shadow' : 'live', channelId: mailbox!.id, windowMinutes: 5 },
+          plan,
           { conversationId: id, messageId: message!.id, groupId: care!.id },
           opened,
         ),
       );
       expect(await beginRouting(id)).toBe('continue');
     }
+    // The fixture holds what it says, by the ticket's own columns as every
+    // reader of the hold reads them: a live ticket held, a shadow one or one
+    // never routed not.
+    const [columns] = await db
+      .select({
+        routingWindowEndsAt: conversations.routingWindowEndsAt,
+        routingDecidedAt: conversations.routingDecidedAt,
+        assigneeAgentId: conversations.assigneeAgentId,
+      })
+      .from(conversations)
+      .where(eq(conversations.id, id));
+    expect(isHeld(columns!, opened)).toBe(plan?.start === 'live');
     return { id, hana: hana!.id, omar: omar!.id, care: care!.id };
   }
 

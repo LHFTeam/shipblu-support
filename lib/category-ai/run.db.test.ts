@@ -26,7 +26,8 @@ import { resetEnvCache } from '@/lib/env';
 import { settleRouting } from '@/lib/routing/apply';
 import { beginRouting } from '@/lib/routing/begin';
 import { endHold } from '@/lib/routing/end-hold';
-import { startRouting } from '@/lib/routing/start';
+import { isHeld } from '@/lib/routing/hold';
+import { routingWindowValues, startRouting } from '@/lib/routing/start';
 import { stubFetch } from '@/lib/testing/fetch';
 import { withCleanDatabase } from '@/lib/testing/db';
 import { holdNextTransaction, untilWaitingOnALock } from '@/lib/testing/hold-transaction';
@@ -1114,9 +1115,12 @@ describe('classifyMessageCategory, on a ticket routing by category', () => {
 
   /**
    * A new mail on the mailbox, its opening message the one Jev is asked
-   * about: started as the insert starts it, and begun as the creation pass
-   * begins it unless `stage` stops it at the insert. With `routed: false`, a
-   * ticket on the same mailbox that never entered routing.
+   * about: started as the insert starts it — a live one's window on the
+   * ticket's own insert (`routingWindowValues`), then the row and the job
+   * (`startRouting`), from one `now` — and begun as the creation pass begins
+   * it unless `stage` stops it at the insert. A shadow one carries no window,
+   * as ingest gives it none. With `routed: false`, a ticket on the same
+   * mailbox that never entered routing, and carries no window either.
    */
   async function mailTicket(
     r: Awaited<ReturnType<typeof routing>>,
@@ -1127,25 +1131,41 @@ describe('classifyMessageCategory, on a ticket routing by category', () => {
     }: { stage?: 'pending' | 'holding'; shadow?: boolean; routed?: boolean } = {},
   ) {
     const now = new Date();
+    const plan = routed
+      ? ({ start: shadow ? 'shadow' : 'live', channelId: r.channel, windowMinutes: 5 } as const)
+      : null;
     const { id } = await ticket({
       channel: 'email',
       channelId: r.channel,
       groupId: r.home.group,
       lastMessageAt: now,
       lastCustomerMessageAt: now,
+      ...routingWindowValues(plan, {}, now),
     });
     const message = await inbound(id, 'عايز اعرف اسعار الشحن للشركات', { createdAt: now });
-    if (routed) {
+    if (plan) {
       await db.transaction((tx) =>
         startRouting(
           tx,
-          { start: shadow ? 'shadow' : 'live', channelId: r.channel, windowMinutes: 5 },
+          plan,
           { conversationId: id, messageId: message, groupId: r.home.group },
           now,
         ),
       );
       if (stage === 'holding') expect(await beginRouting(id)).toBe('continue');
     }
+    // The fixture holds what it says, by the ticket's own columns as every
+    // reader of the hold reads them: a live ticket held, a shadow one or one
+    // never routed not.
+    const [columns] = await db
+      .select({
+        routingWindowEndsAt: conversations.routingWindowEndsAt,
+        routingDecidedAt: conversations.routingDecidedAt,
+        assigneeAgentId: conversations.assigneeAgentId,
+      })
+      .from(conversations)
+      .where(eq(conversations.id, id));
+    expect(isHeld(columns!, now)).toBe(plan?.start === 'live');
     return { id, message };
   }
 

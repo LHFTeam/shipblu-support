@@ -15,6 +15,7 @@ import {
   groups,
   messages,
   routingDecisions,
+  slaPolicies,
   ticketCategories,
   ticketStatuses,
 } from '@/db/schema';
@@ -29,7 +30,7 @@ import { cairo } from '@/lib/testing/time';
 import { storeAgentReply } from '@/lib/tickets/agent-reply';
 import { afterTicketUpdate } from '@/lib/tickets/lifecycle';
 import { afterHoldEnded } from './after-hold';
-import { routeNow, settleRouting } from './apply';
+import { routeNow, settleRouting, type RouteResult } from './apply';
 import { beginRouting } from './begin';
 import { endHold } from './end-hold';
 import { routingWindowValues, startRouting } from './start';
@@ -721,21 +722,15 @@ describe('the two-phase order', () => {
     const { id } = await heldTicket(t.channel, t.home.group);
     await jevFiles(id, sales);
 
-    const transaction = PgDatabase.prototype.transaction;
-    vi.spyOn(PgDatabase.prototype, 'transaction').mockImplementationOnce(async function (
-      this: PgDatabase<never>,
-      run,
-      config,
-    ) {
-      const result: unknown = await transaction.call(this, run, config);
-      await db
-        .update(routingDecisions)
-        .set({ rulesClaimedAt: new Date() })
-        .where(eq(routingDecisions.conversationId, id));
-      return result as never;
-    });
     // Decided: the decision is written, and the claimant runs the rules on it.
-    expect(await routeNow(id, { label: 'jev:category' })).toBe('decided');
+    expect(
+      await routeBetweenPhases(id, async () => {
+        await db
+          .update(routingDecisions)
+          .set({ rulesClaimedAt: new Date() })
+          .where(eq(routingDecisions.conversationId, id));
+      }),
+    ).toBe('decided');
 
     expect(await tagged(id)).toBe(0);
     expect(await decision(id)).toMatchObject({
@@ -914,6 +909,84 @@ describe('what ends a hold early', () => {
     expect(await expectDecided(id, 'category')).toMatchObject({ decidedByLabel: 'jev:category' });
     expect((await ticketRow(id)).assigneeAgentId).toBe(lead);
   });
+
+  // A person deciding in the moment after phase one commits and before the
+  // router claims the rules' pass. Their `endHold` decides the row and keeps
+  // the router's outcome, and pays none of what phase one owed: the pass the
+  // category's writer gave up to the router, and the policy's second look.
+  // Refused for a decided row, the claim lost both for good, and the router
+  // still answered `decided`, so Jev ran no pass of its own either.
+  it('a person ending it before the router claims its rules leaves them, and the policy, to the router', async () => {
+    const t = await teams();
+    const lead = await agent('Laila');
+    const sales = await routeTo('sales', t.sales.group);
+    const round = { firstResponseMins: 30, nextResponseMins: 30, resolutionMins: 240 };
+    const [salesPolicy] = await db
+      .insert(slaPolicies)
+      .values({
+        name: 'Sales',
+        hoursSource: 'round_the_clock',
+        targets: { low: round, medium: round, high: round, urgent: round },
+        conditions: inCategory(sales),
+      })
+      .returning({ id: slaPolicies.id });
+    await rule('on_update', 'Tag sales', inCategory(sales), [
+      { type: 'add_tags', tags: ['sales'] },
+    ]);
+    const { id } = await heldTicket(t.channel, t.home.group);
+    await jevFiles(id, sales);
+
+    // The lib half of the console's assignee case, which runs a pass of its
+    // own after it; the router's is the one owed for the category.
+    expect(
+      await routeBetweenPhases(id, async () => {
+        const ended = await db.transaction(async (tx) => {
+          await tx
+            .update(conversations)
+            .set({ assigneeAgentId: lead })
+            .where(eq(conversations.id, id));
+          return endHold(tx, id, 'manual', { agentId: lead });
+        });
+        expect(ended).toBe(true);
+        await afterHoldEnded(id);
+      }),
+    ).toBe('decided');
+
+    expect(await tagged(id)).toBe(1);
+    expect(await ticketRow(id)).toMatchObject({
+      groupId: t.sales.group,
+      assigneeAgentId: lead,
+      slaPolicyId: salesPolicy!.id,
+    });
+    const row = await expectDecided(id, 'category');
+    expect(row).toMatchObject({ decidedByLabel: 'jev:category', decidedByAgentId: null });
+    expect(row.rulesDoneAt).toBeInstanceOf(Date);
+  });
+
+  it('an agent’s reply ending it before the router claims its rules leaves them to the router', async () => {
+    // The reply runs no update pass of its own, so the router's is the only
+    // one the category is given.
+    const t = await teams();
+    const sales = await routeTo('sales', t.sales.group);
+    await rule('on_update', 'Tag sales', inCategory(sales), [
+      { type: 'add_tags', tags: ['sales'] },
+    ]);
+    const { id } = await heldTicket(t.channel, t.home.group);
+    await jevFiles(id, sales);
+
+    expect(
+      await routeBetweenPhases(id, async () => {
+        await storeAgentReply(id, 'email', {
+          authorAgentId: t.home.agent,
+          bodyText: 'Looking into it now.',
+          bodyHtml: '<p>Looking into it now.</p>',
+        });
+      }),
+    ).toBe('decided');
+
+    expect(await tagged(id)).toBe(1);
+    expect(await expectDecided(id, 'category')).toMatchObject({ decidedByLabel: 'jev:category' });
+  });
 });
 
 /**
@@ -933,6 +1006,29 @@ async function interruptedAfterPhaseOne(id: string): Promise<void> {
   expect(await routeNow(id, { label: 'jev:category' })).toBe('decided');
   spy.mockRestore();
   expect(await decision(id)).toMatchObject({ stage: 'holding' });
+}
+
+/**
+ * Route the ticket as Jev's answer does, and run `meanwhile` the moment phase
+ * one commits — the decision written, the rules' pass not yet claimed — which
+ * is where another caller's claim, or a person deciding at the same time,
+ * lands. Transactions opened inside `meanwhile` run as they always do.
+ */
+async function routeBetweenPhases(
+  id: string,
+  meanwhile: () => Promise<void>,
+): Promise<RouteResult> {
+  const transaction = PgDatabase.prototype.transaction;
+  vi.spyOn(PgDatabase.prototype, 'transaction').mockImplementationOnce(async function (
+    this: PgDatabase<never>,
+    run,
+    config,
+  ) {
+    const result: unknown = await transaction.call(this, run, config);
+    await meanwhile();
+    return result as never;
+  });
+  return routeNow(id, { label: 'jev:category' });
 }
 
 // --- The held reply ---------------------------------------------------------

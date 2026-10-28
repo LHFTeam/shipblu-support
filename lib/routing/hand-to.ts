@@ -19,6 +19,7 @@ import { lockedStatusCategory, statusCategoryOf } from '@/lib/tickets/status-cat
 import type { StatusCategory } from '@/lib/tickets/vocabulary';
 import { parseCoexistence } from '@/lib/whatsapp/coexistence';
 import { afterHoldEnded } from './after-hold';
+import { isWorkable } from './decide';
 import { endHold } from './end-hold';
 import { isHeld, type HoldColumns } from './hold';
 
@@ -88,8 +89,11 @@ export type HandToTarget = Extract<HandTo, { offered: true }>;
  *
  * - the agent may reassign tickets (`ticket.assign`) — the action clears an
  *   assignee and picks another;
- * - the ticket is work: open or pending, not spam, merged or deleted, and not
- *   on a read-only channel, none of which `assignConversation` would assign;
+ * - the ticket is work, by the router's own `isWorkable` — open or pending,
+ *   not spam, merged or deleted — and not on a read-only channel: the two
+ *   questions `assignConversation` asks before it hands a ticket out
+ *   (`isWorkToHandOut`), so the button never clears the assignee off a ticket
+ *   the assignment after it would answer `not_assignable`;
  * - it is not held. During the hold a category edit routes the ticket itself
  *   (`routeNow`), and a hand-over then would end the route as `manual` with
  *   the answer about to arrive;
@@ -119,15 +123,7 @@ export function handToTarget(
   const refuse = (reason: HandToRefusal): HandTo => ({ offered: false, reason });
 
   if (!canAssign) return refuse('not_permitted');
-  if (
-    ticket.deletedAt ||
-    ticket.isSpam ||
-    ticket.mergedIntoId ||
-    isReadOnlyChannel(ticket.channel) ||
-    !(ticket.statusCategory === 'open' || ticket.statusCategory === 'pending')
-  ) {
-    return refuse('not_open');
-  }
+  if (!isWorkable(ticket) || isReadOnlyChannel(ticket.channel)) return refuse('not_open');
   if (isHeld(ticket, now)) return refuse('held');
   if (ticket.ownerAnswers) return refuse('owned_number');
   if (ticket.coexistence) return refuse('coexistence');

@@ -4395,9 +4395,11 @@ gains another first, 0051 is regenerated rather than renumbered.
      left outside that transaction, as 4.0 placed it, so a failed event insert
      could not take the follow-up with it; since the PR review it is written
      inside, ahead of the stamp, in a savepoint that is rolled back to and
-     logged when the insert is refused — the follow-up is still owed
-     (`lib/sla/reselect-policy.db.test.ts`), and the timeline reads the move
-     before the `routed` line.
+     logged when the insert is refused, so the move, the hold's end and the
+     assignment they owe all stand
+     (`lib/automations/routing-events.db.test.ts`), and the timeline reads the
+     move before the `routed` line. The clocks follow a move that committed
+     even when the pick after it throws (`lib/sla/reselect-policy.db.test.ts`).
   9. **The sweep's escalation skips held tickets.** Unassigned by design, in a
      group it may be leaving, a held ticket would make that group's lead a
      watcher on another team's work.
@@ -4589,7 +4591,8 @@ gains another first, 0051 is regenerated rather than renumbered.
     agent-reply test still expecting what that commit removed. The rewritten
     case is in `a5ceeb8`.
 - **Fixed after the PR review** (#432, 2026-10-28; one line each, in the
-  review's order, each behaviour fix with a test that fails without it).
+  review's order, each behaviour fix with a test that fails without it; what a
+  fix broke or left stale, found while making the next round, follows it).
   - **An `on_create` rule's kept strategy was dropped whenever rules followed**
     (`apply.ts`): phase one drops it only when its decision moves the ticket
     (`routing-hold.db.test.ts`).
@@ -4603,6 +4606,15 @@ gains another first, 0051 is regenerated rather than renumbered.
     grace) to its claimant, looking again without a key, and ends an older
     one's hold without the rules, with a warning (`settle.db.test.ts`,
     `apply.db.test.ts`).
+  - **That claim lost the category's pass when a person ended the hold between
+    phase one and the claim** (`apply.ts`): it was refused once the row was
+    decided, so an agent's reply or a console assignee or group change in that
+    moment cost the ticket the `on_update` pass and the policy's second look
+    for good, while `routeNow` still answered `decided` and neither Jev nor the
+    console ran its own. The claim is on `rules_claimed_at` alone, and a resume
+    that finds the ticket no longer work gives the pass up by marking it
+    claimed as it decides the row, so a caller that only stalled runs nothing
+    when it wakes (`apply.db.test.ts`, `settle.db.test.ts`).
   - **A console category edit meeting `none` or `in_flight` ran a second pass
     on the category the router had read** (`ticket-actions.ts`): it reads the
     routing stage in the write's own transaction, and skips its pass when the
@@ -4633,6 +4645,13 @@ gains another first, 0051 is regenerated rather than renumbered.
     by** (`lib/assignment/index.ts`, the engine): `group_changed` and `assigned`
     are written in the write's transaction ahead of `endHold`, in a savepoint,
     in the order the console writes them (`routing-events.db.test.ts`).
+  - **That left `reselect-policy.db.test.ts`'s re-time after a failed
+    `auto_assign` passing for nothing**: it refused `group_changed`, whose
+    savepoint now logs a refusal instead of throwing. It refuses the pick's
+    `assigned` line, over a group with somebody to pick, and asserts the
+    engine logged the failed action, so the call really throws and only the
+    `routed` carrier says the move committed; it fails with a carrier set only
+    once the call returns.
   - **`beginRouting` took a transaction and a row lock on every new ticket**
     (`begin.ts`): it looks for an undecided routing row unlocked first, as
     `endHold` does (`locks.db.test.ts`).
@@ -4640,13 +4659,21 @@ gains another first, 0051 is regenerated rather than renumbered.
     firing `notify_conversation_change` again: it is a value on each ingest
     path's insert (`routingWindowValues`), with one `now` for the window, the
     row and the job (`begin.db.test.ts`).
+  - **Two test fixtures still held a ticket by its routing row alone**
+    (`run.db.test.ts`'s `mailTicket`, `agent-reply.db.test.ts`'s `heldMail`):
+    they put the window on the insert as ingest does, with the plan and the
+    `now` they pass `startRouting`, and assert the ticket is held by its own
+    columns exactly when the plan is live. Every test in both passed with or
+    without the window, so none read the hold off the ticket; without it, ten
+    now fail.
   - **`whatsappRoutingMode` lived in the action file**: it moved into
     `whatsappEditColumns` in `7c657ff` (`coexistence-state.db.test.ts`).
   - **Three copies of "is this ticket work"** (`hand-to.ts`): `routingHold`
-    asks `isWorkable` since `7c657ff`; `handToTarget`, and assignment's
-    `isWorkToHandOut` beside the fix above, still spell it out, each adding the
-    read-only channel that `isWorkable` never needs, since a bot ticket never
-    routes.
+    asks `isWorkable` since `7c657ff`, and `handToTarget` and assignment's
+    `isWorkToHandOut` now ask it too, each adding the read-only channel, which
+    is assignment's question rather than the router's, since a bot ticket never
+    routes. Nothing answers differently, so the Hand to, assignment and sweep
+    tests already there are its test.
   - **A dead `decided` branch in `undecidedRouting`**: removed in `7c657ff`.
   - **Why the handover was answered rather than changed.** A handover that
     assigns a held ticket is what `decide()`'s `taken` outcome exists for: an

@@ -89,13 +89,24 @@ export function decide(input: DecideInput): Decision {
 
 /**
  * Whether anybody may still work the ticket: open or pending, and not spam,
- * deleted or merged — what `not_open` answers the absence of. Its own function
- * because the router asks it twice — here, and again when it completes a
- * decision whose caller died between its phases (`lib/routing/apply.ts`),
- * where the ticket may have been resolved or deleted since the decision was
- * written, and is then owed nothing — and the console asks it too, so that
- * "Routing…" and Hand to are drawn on exactly the tickets the router would
- * still move (`routingHold`, `handToTarget`). Pure, and client-safe for that.
+ * deleted or merged — what `not_open` answers the absence of. The one copy of
+ * that rule, asked in five places so that none of them can come to read it
+ * differently:
+ *
+ * - the router, twice: here, and again in `phaseOne` (`lib/routing/apply.ts`)
+ *   when it completes a decision whose caller died between its phases, where
+ *   the ticket may have been resolved or deleted since the decision was
+ *   written, and is then owed nothing;
+ * - the inbox's "Routing…" (`routingHold`, `lib/tickets/inbox-badges.ts`), so
+ *   the badge is drawn on exactly the tickets the router would still move;
+ * - assignment (`isWorkToHandOut`, `lib/assignment/index.ts`), of the snapshot
+ *   and again under the pick's lock, and Hand to (`handToTarget`,
+ *   `lib/routing/hand-to.ts`), offered only on a ticket assignment counts as
+ *   work to hand out. Both add that the ticket is not on a read-only channel,
+ *   which is assignment's question rather than the router's: no bot ticket
+ *   ever routes (`routingModeOf`).
+ *
+ * Pure, and client-safe for the badge.
  */
 export function isWorkable(
   ticket: Pick<DecideInput, 'statusCategory' | 'deletedAt' | 'isSpam' | 'mergedIntoId'>,
