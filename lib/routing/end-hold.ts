@@ -21,7 +21,8 @@ type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
  * Called in the transaction of the write that ends the hold, after that write
  * — the group it records is the one the write left — and before anything that
  * assigns. Safe on any ticket: one with no undecided routing row is left
- * alone, so the console can call it unconditionally.
+ * alone, without so much as a lock, so the console can call it
+ * unconditionally.
  *
  * On a live row it ends the hold (`routing_decided_at`, set once) and records
  * the outcome only if phase one has not already — a person assigning between
@@ -48,13 +49,40 @@ export async function endHold(
   actor: { agentId?: string | null; label?: string | null; decidesShadow?: boolean },
   now: Date = new Date(),
 ): Promise<boolean> {
-  // The ticket's row first, as every routing writer takes them, whether or not
-  // the caller has already locked it by writing to it.
+  // The routing row first, read without a lock, so a ticket that never routed
+  // — nearly every ticket — takes no lock here at all. An answer of none cannot
+  // go stale: the row is born in the ticket's own insert transaction, which has
+  // committed by the time anybody can write to the ticket, and once decided it
+  // is never undecided again.
+  const [undecided] = await tx
+    .select({ id: routingDecisions.id })
+    .from(routingDecisions)
+    .where(
+      and(
+        eq(routingDecisions.conversationId, conversationId),
+        ne(routingDecisions.stage, 'decided'),
+      ),
+    );
+  if (!undecided) return false;
+
+  // Then the ticket's row and its routing row, in the order every routing
+  // writer takes them, and the routing row read again under them: somebody may
+  // have decided it since the read above.
+  //
+  // NO KEY UPDATE, never UPDATE. The caller has already written to the row,
+  // which holds NO KEY UPDATE, and this asks for nothing more. FOR UPDATE would
+  // upgrade it, and FOR UPDATE conflicts with the KEY SHARE that a customer's
+  // message holds on its ticket through the foreign key from the moment it is
+  // inserted. Every ingest path inserts the message and then updates the
+  // ticket, in one transaction: waiting here on its KEY SHARE while it waits on
+  // the caller's write is a deadlock, and Postgres aborts one of the two — an
+  // agent's reply stored and never sent, or the customer's message lost. NO
+  // KEY UPDATE still serialises against every other writer of the row.
   const [ticket] = await tx
     .select({ groupId: conversations.groupId })
     .from(conversations)
     .where(eq(conversations.id, conversationId))
-    .for('update');
+    .for('no key update');
   if (!ticket) return false;
 
   const [row] = await tx
@@ -82,8 +110,10 @@ export async function endHold(
   // the same pass, a group-less `auto_assign`, hand the ticket to somebody in a
   // group a later rule then moves it out of — the cross-team holder the two
   // phases exist to prevent — and send the held reply before the pass had
-  // chosen whose calendar it speaks for. A router that died there leaves the
-  // hold to `settle_routing`, which completes the decision either way.
+  // chosen whose calendar it speaks for. A router that died there, or whose
+  // last step failed, leaves the hold to `settle_routing`, which completes the
+  // decision: the window's job, still to come, when the router was anything
+  // else, and the job retrying itself when it was the router (`settleRouting`).
   if (outcome === 'rule' && row.phaseOneAt) return false;
   if (row.shadow && actor.decidesShadow === false) return false;
 
@@ -93,6 +123,11 @@ export async function endHold(
     .set({
       stage: 'decided',
       decidedAt: sql`coalesce(${routingDecisions.decidedAt}, ${now.toISOString()}::timestamptz)`,
+      // A rule's strategy waiting for the hold is superseded: whoever ended it
+      // has decided how the ticket goes on, and a grouped `auto_assign` that
+      // ended it picks with its own strategy straight away (`assignConversation`).
+      heldStrategy: null,
+      heldActorLabel: null,
       ...(first
         ? {
             outcome,

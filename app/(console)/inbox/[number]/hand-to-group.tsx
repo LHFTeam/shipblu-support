@@ -7,8 +7,7 @@ import { Button } from '@/components/ui';
 import { useNow } from '@/components/use-now';
 import { formatTime } from '@/lib/format';
 import type { HandToTarget } from '@/lib/routing/hand-to';
-import type { HoldColumns } from '@/lib/routing/hold';
-import { routingHold } from '@/lib/tickets/inbox-badges';
+import { routingHold, type HoldTicket } from '@/lib/tickets/inbox-badges';
 import { handToGroup } from '../../ticket-actions';
 import { FieldError } from './ticket-fields';
 import { useFieldAction } from './use-field-action';
@@ -24,7 +23,10 @@ import { useFieldAction } from './use-field-action';
  * One click, as the plan has it, unless it would take the ticket off a
  * colleague: then two, through `useConfirmClick`, because the click ends work
  * somebody else is part-way through. One `type="button"` throughout, whose
- * handler and words change when armed.
+ * handler and words change when armed. Which of the two this page offers was
+ * decided from the assignee it was drawn with, so that assignee goes with the
+ * click and the action refuses when somebody else holds the ticket now — a
+ * page drawn before a colleague took it must not unassign them in one click.
  *
  * Mounted while there is nothing to offer too, keyed on the ticket by the
  * sidebar: a success moves the ticket into the group, which withdraws the
@@ -34,10 +36,13 @@ import { useFieldAction } from './use-field-action';
 export function HandToGroup({
   conversationId,
   target,
+  assigneeAgentId,
   clears,
 }: {
   conversationId: string;
   target: HandToTarget | null;
+  /** Who holds the ticket as this page was drawn, or null for nobody. */
+  assigneeAgentId: string | null;
   /** The colleague the hand-over would unassign, by name; null when it takes nobody else's ticket. */
   clears: string | null;
 }) {
@@ -47,7 +52,11 @@ export function HandToGroup({
   async function hand() {
     if (!target) return;
     setMessage(null);
-    const result = await run({ conversationId, groupId: target.groupId });
+    const result = await run({
+      conversationId,
+      groupId: target.groupId,
+      assigneeAgentId: assigneeAgentId ?? '',
+    });
     setMessage(result.message ?? null);
   }
   const confirm = useConfirmClick(hand);
@@ -91,7 +100,7 @@ export function HandToGroup({
  * its clock, so the field and the row cannot disagree. Its own component, so
  * the clock re-renders the line and not the sidebar.
  */
-export function RoutingHint({ hold, does }: { hold: HoldColumns; does: string }) {
+export function RoutingHint({ hold, does }: { hold: HoldTicket; does: string }) {
   const now = useNow();
   const held = routingHold(hold, now);
   if (!held) return null;

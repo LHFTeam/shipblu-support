@@ -144,8 +144,12 @@ export function handToTarget(
 export type HandToResult =
   | {
       ok: false;
-      /** `changed`: the category routes somewhere other than the button said. */
-      reason: HandToRefusal | 'not_found' | 'changed';
+      /**
+       * `changed`: the category routes somewhere other than the button said.
+       * `reassigned`: somebody other than the assignee the page showed holds
+       * the ticket now.
+       */
+      reason: HandToRefusal | 'not_found' | 'changed' | 'reassigned';
     }
   | {
       ok: true;
@@ -153,7 +157,33 @@ export type HandToResult =
       /** Who the new group's rota picked, or null with the reason it picked nobody. */
       assignedTo: string | null;
       skipped: SkipReason | null;
+      /**
+       * Whose queue the ticket waits in when nobody could be given it: the
+       * route group, or — `movedOn` — the group an `on_update` rule moved it
+       * on to before the rota ran, which the rota then answered for. Null when
+       * somebody was given it, and whenever the rota's answer was not that
+       * nobody there could take it: a rule resolved the ticket
+       * (`not_assignable`), somebody moved it meanwhile (`moved`), it is in no
+       * group (`no_group`). Saying it waits in the route group's queue then
+       * would be false, and the page re-drawn with the answer shows where it
+       * went.
+       */
+      waitsIn: { groupName: string; movedOn: boolean } | null;
     };
+
+/**
+ * The rota's answers that leave the ticket in its group's queue for somebody
+ * there to take: the reasons `assignment_skipped` records, and a manual group,
+ * which never assigns.
+ */
+const WAITING: ReadonlySet<SkipReason> = new Set<SkipReason>([
+  'strategy_manual',
+  'outside_hours',
+  'no_group_members',
+  'none_available',
+  'all_at_capacity',
+  'no_skill_match',
+]);
 
 /**
  * The hand-over, server-side: nothing about where the ticket goes is taken
@@ -163,7 +193,12 @@ export type HandToResult =
  * authority on whether the ticket is still open, still unheld, or still filed
  * where it was. `expectedGroupId`, the group the button named, is only
  * compared: a category changed since the page loaded is refused rather than
- * handed to a group the agent never saw named.
+ * handed to a group the agent never saw named. `expectedAssigneeId`, the
+ * assignee the page drew the button from (null for nobody), is compared the
+ * same way, because it is what decided whether the button asked twice: a
+ * page drawn before a colleague took the ticket offers one click, and that
+ * click must not take it off somebody the agent was never shown. Omitted, it
+ * is not compared.
  *
  * In one transaction, the ticket's row first as every routing writer takes
  * it: the move (`moveToGroupIfElsewhere`, so a ticket already there writes
@@ -174,24 +209,42 @@ export type HandToResult =
  * The two events are stamped as they are written (`CHANGE_STAMP`), because
  * both are in one transaction and `now()` would tie them.
  *
- * After it commits, the follow-ups in the router's own order: the SLA policy
- * chosen again for the move (`afterRoutingChanged`), then the `on_update`
- * rules — the observer pass every console edit owes, run before anybody is
- * assigned so that a rule moving the ticket on hands it to the group it ends
- * in rather than leaving the new group's agent holding it — then the
- * assignment, whose `assigned` event is the third line the plan asks for.
- * A hold this ended owes its out-of-hours reply as well (`afterHoldEnded`,
- * whose assignment is then a no-op).
+ * After it commits, the follow-ups in the order the console's group case
+ * takes them, which is not the router's (rules, then the SLA, then the
+ * assignment and the reply). First the SLA policy chosen again for the move
+ * (`afterRoutingChanged`): the move is this action's, and the rules' pass
+ * re-times only what its own rules change, so nothing after would. Then the
+ * `on_update` rules — the observer pass every console edit owes, run before
+ * anybody is assigned so that a rule moving the ticket on hands it to the
+ * group it ends in rather than leaving the new group's agent holding it. Then
+ * the assignment, whose `assigned` event is the third line the plan asks for.
+ * Last, a hold this ended owes its out-of-hours reply (`afterHoldEnded`, whose
+ * assignment is then a no-op), told the hours of the group the rules left the
+ * ticket in.
  */
 export async function handToRouteGroup(
   conversationId: string,
   actor: { agentId: string },
-  { expectedGroupId, now = new Date() }: { expectedGroupId?: string | null; now?: Date } = {},
+  {
+    expectedGroupId,
+    expectedAssigneeId,
+    now = new Date(),
+  }: { expectedGroupId?: string | null; expectedAssigneeId?: string | null; now?: Date } = {},
 ): Promise<HandToResult> {
   const write = await db.transaction(async (tx) => {
     // No join under the lock: a locked read that waited re-checks joined rows
     // against the newest version and can answer no row at all
     // (`lib/tickets/status-category.ts`). Everything else is read after it.
+    //
+    // `no key update`, the lock the UPDATEs below take anyway, rather than
+    // `update`. It still conflicts with every other routing writer's lock and
+    // with any UPDATE of the row, which is what serialises them; what it
+    // leaves alone is the key-share lock a message or an event inserted for
+    // the ticket takes through its foreign key, so a customer's message
+    // arriving mid-hand-over lands without waiting for it. `endHold`, called
+    // below, takes the same lock for a sharper reason: there, after the
+    // caller's write, `update` upgraded past an inserted message's key-share
+    // lock and deadlocked against the ingest that then updates the ticket.
     const [ticket] = await tx
       .select({
         channel: conversations.channel,
@@ -210,7 +263,7 @@ export async function handToRouteGroup(
       })
       .from(conversations)
       .where(eq(conversations.id, conversationId))
-      .for('update');
+      .for('no key update');
     if (!ticket) return { ok: false as const, reason: 'not_found' as const };
 
     const statusCategory = await lockedStatusCategory(tx, ticket);
@@ -253,6 +306,9 @@ export async function handToRouteGroup(
     if (expectedGroupId && expectedGroupId !== decision.groupId) {
       return { ok: false as const, reason: 'changed' as const };
     }
+    if (expectedAssigneeId !== undefined && expectedAssigneeId !== ticket.assigneeAgentId) {
+      return { ok: false as const, reason: 'reassigned' as const };
+    }
 
     const moved = await moveToGroupIfElsewhere(conversationId, decision.groupId, {
       executor: tx,
@@ -287,7 +343,13 @@ export async function handToRouteGroup(
     }
 
     const endedHold = await endHold(tx, conversationId, 'manual', { agentId: actor.agentId }, now);
-    return { ok: true as const, groupName: decision.groupName, moved, endedHold };
+    return {
+      ok: true as const,
+      groupId: decision.groupId,
+      groupName: decision.groupName,
+      moved,
+      endedHold,
+    };
   });
   if (!write.ok) return write;
 
@@ -301,5 +363,28 @@ export async function handToRouteGroup(
     groupName: write.groupName,
     assignedTo: outcome.assignedTo,
     skipped: outcome.reason,
+    waitsIn:
+      !outcome.assignedTo && outcome.reason && WAITING.has(outcome.reason)
+        ? await queueOf(conversationId, write.groupId)
+        : null,
   };
+}
+
+/**
+ * The group the ticket is in now, by name, and whether that is somewhere other
+ * than the group it was handed to. Read after the follow-ups and without a
+ * lock: the rota has answered for whatever group the rules left the ticket
+ * in, and this only names it.
+ */
+async function queueOf(
+  conversationId: string,
+  handedTo: string,
+): Promise<{ groupName: string; movedOn: boolean } | null> {
+  const [current] = await db
+    .select({ groupId: conversations.groupId, groupName: groups.name })
+    .from(conversations)
+    .leftJoin(groups, eq(groups.id, conversations.groupId))
+    .where(eq(conversations.id, conversationId));
+  if (!current?.groupId || !current.groupName) return null;
+  return { groupName: current.groupName, movedOn: current.groupId !== handedTo };
 }

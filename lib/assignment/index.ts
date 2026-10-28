@@ -15,7 +15,9 @@ import {
 import { loadHoursCatalog } from '@/lib/hours/catalog';
 import { isWithinBusinessHours } from '@/lib/hours';
 import { groupHours } from '@/lib/hours/resolve';
+import { logger } from '@/lib/log';
 import { endHold } from '@/lib/routing/end-hold';
+import { recordHeldAssignment } from '@/lib/routing/held-assignment';
 import { isHeld } from '@/lib/routing/hold';
 import { conversationFacts } from '@/lib/rules/facts';
 import { isReadOnlyChannel } from '@/lib/tickets/channel-policy';
@@ -25,6 +27,8 @@ import { recordOwnerAssigned } from '@/lib/whatsapp/number-owner';
 import { filterCandidates, type CandidateRow } from './eligibility';
 import { pickLoadBalanced, pickRoundRobin } from './strategies';
 import { activeSkills, matchingSkills } from './skills';
+
+const log = logger('assignment');
 
 /**
  * Handing a ticket to a person.
@@ -63,7 +67,9 @@ import { activeSkills, matchingSkills } from './skills';
  * settled yet. Assigning it in the group it arrived in and then taking it back
  * when it moved would break the first rule above, and show the ticket in one
  * agent's queue before it vanished; so every path answers `awaiting_route`
- * until the hold ends, and whatever ends it assigns it then.
+ * until the hold ends, and whatever ends it assigns it then — with the
+ * strategy a rule asked for meanwhile, which the hold keeps
+ * (`recordHeldAssignment`).
  */
 
 export type AssignmentStrategy = (typeof groups.$inferSelect)['assignmentStrategy'];
@@ -246,6 +252,7 @@ async function routeAndPick(
    * lock below all the same. A move this call made for a rule has ended it.
    */
   if (!endedHold && isHeld(conversation, now)) {
+    await keepForHold(conversationId, options);
     return { assignedTo: null, reason: 'awaiting_route' };
   }
 
@@ -327,6 +334,11 @@ async function routeAndPick(
      * up by hand or put on hold since the snapshot cannot be assigned here.
      * No join under the lock — under READ COMMITTED a locked read that waited
      * re-checks the joined rows and can answer no row at all.
+     *
+     * NO KEY UPDATE, as every lock on a ticket's row is (`endHold` says why in
+     * full): it waits on every other writer of the row just the same, where
+     * FOR UPDATE would also stop every message inserted on the ticket — whose
+     * foreign key takes KEY SHARE — until the pick below had committed.
      */
     const [current] = await tx
       .select({
@@ -337,7 +349,7 @@ async function routeAndPick(
       })
       .from(conversations)
       .where(eq(conversations.id, conversationId))
-      .for('update');
+      .for('no key update');
     if (!current) return { assignedTo: null, reason: 'not_assignable' as SkipReason };
     // An agent may have picked the ticket up by hand since the check above.
     if (current.assigneeAgentId) {
@@ -418,11 +430,34 @@ async function routeAndPick(
     return { assignedTo: agentId, reason: null };
   });
 
+  if (outcome.reason === 'awaiting_route') await keepForHold(conversationId, options);
   if (!outcome.assignedTo && outcome.reason) {
     await recordSkip(conversationId, outcome.reason, options.actorLabel);
   }
 
   return outcome;
+}
+
+/**
+ * A strategy the caller asked for, kept for the end of the hold that made it
+ * wait: an `auto_assign` rule's, the only caller that names one. Without it
+ * the hold's end picks with the group's own, and a round-robin rule over a
+ * group left on `manual` assigns nobody (`recordHeldAssignment`).
+ *
+ * After the transaction, never in it, and best-effort: the skip is the
+ * answer either way, and a failure here costs the rule its strategy, not the
+ * caller its pass.
+ */
+async function keepForHold(
+  conversationId: string,
+  { strategy, actorLabel }: Pick<AssignOptions, 'strategy' | 'actorLabel'>,
+): Promise<void> {
+  if (!strategy) return;
+  try {
+    await recordHeldAssignment(conversationId, strategy, actorLabel ?? 'auto_assign');
+  } catch (error) {
+    log.error(`could not keep the held strategy on ${conversationId}`, error);
+  }
 }
 
 /**

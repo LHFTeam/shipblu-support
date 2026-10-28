@@ -18,8 +18,10 @@ import {
   ticketStatuses,
 } from '@/db/schema';
 import { assignConversation } from '@/lib/assignment';
+import { setConversationCategory } from '@/lib/categories/write';
 import { forgetCategoryAiSettings } from '@/lib/category-ai/settings';
 import { forgetHoursCatalog } from '@/lib/hours/catalog';
+import { routeNow } from '@/lib/routing/apply';
 import { beginRouting } from '@/lib/routing/begin';
 import { startRouting } from '@/lib/routing/start';
 import { withCleanDatabase } from '@/lib/testing/db';
@@ -63,7 +65,7 @@ vi.mock('next/navigation', () => ({
   },
 }));
 
-const { updateTicket } = await import('./ticket-actions');
+const { handToGroup, updateTicket } = await import('./ticket-actions');
 
 withCleanDatabase();
 
@@ -102,10 +104,14 @@ async function agent(name: string, values: Partial<typeof agents.$inferInsert> =
 }
 
 /** A group that assigns round robin at any hour, with these members. */
-async function group(name: string, members: string[]) {
+async function group(
+  name: string,
+  members: string[],
+  values: Partial<typeof groups.$inferInsert> = {},
+) {
   const [row] = await db
     .insert(groups)
-    .values({ name, assignmentStrategy: 'round_robin', assignWithinHoursOnly: false })
+    .values({ name, assignmentStrategy: 'round_robin', assignWithinHoursOnly: false, ...values })
     .returning({ id: groups.id });
   if (members.length) {
     await db.insert(groupMembers).values(members.map((agentId) => ({ groupId: row!.id, agentId })));
@@ -149,8 +155,12 @@ async function outOfHoursReply() {
     .values({ bodyEn: 'Thanks — we are closed, and will reply when we open.' });
 }
 
-async function onUpdate(name: string, conditions: unknown, actions: unknown[]) {
-  await db.insert(automationRules).values({ name, trigger: 'on_update', conditions, actions });
+async function onUpdate(name: string, conditions: unknown, actions: unknown[], position = 0) {
+  const [row] = await db
+    .insert(automationRules)
+    .values({ name, trigger: 'on_update', conditions, actions, position })
+    .returning({ id: automationRules.id });
+  return row!.id;
 }
 
 const inGroup = (groupId: string) => ({ field: 'group.id', op: 'eq', value: groupId });
@@ -250,6 +260,63 @@ function edit(conversationId: string, field: string, value: string) {
   return updateTicket({ error: null }, data);
 }
 
+/** "Hand to <group>" as the button posts it: the group it named, and who the page showed holding the ticket. */
+function handTo(conversationId: string, groupId: string, shownAssignee: string | null) {
+  const data = new FormData();
+  data.set('conversationId', conversationId);
+  data.set('groupId', groupId);
+  data.set('assigneeAgentId', shownAssignee ?? '');
+  return handToGroup({ error: null }, data);
+}
+
+/** Resolves once `count` sessions wait on a lock, or once `stop()` says nobody will. */
+async function untilWaitingOnLocks(count: number, stop: () => boolean): Promise<void> {
+  for (let i = 0; i < 250 && !stop(); i++) {
+    const [{ waiting }] = (await db.execute(
+      sql`select count(*)::int as waiting from pg_stat_activity
+          where datname = current_database() and wait_event_type = 'Lock'`,
+    )) as unknown as [{ waiting: number }];
+    if (waiting >= count) return;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+}
+
+/**
+ * Holds rule `ruleId`'s row from another transaction until released, so a
+ * pass over the rules stops at that rule's `last_run_at` — after its actions,
+ * before the next rule.
+ */
+async function holdRule(ruleId: string) {
+  let release!: () => void;
+  const released = new Promise<void>((resolve) => (release = resolve));
+  let locked!: () => void;
+  const isLocked = new Promise<void>((resolve) => (locked = resolve));
+  const holding = db.transaction(async (tx) => {
+    await tx
+      .select({ id: automationRules.id })
+      .from(automationRules)
+      .where(eq(automationRules.id, ruleId))
+      .for('update');
+    locked();
+    await released;
+  });
+  await isLocked;
+  return {
+    release: async () => {
+      release();
+      await holding;
+    },
+  };
+}
+
+async function tagsOf(id: string) {
+  const [row] = await db
+    .select({ tags: conversations.tags })
+    .from(conversations)
+    .where(eq(conversations.id, id));
+  return row!.tags;
+}
+
 async function ticketRow(id: string) {
   const [row] = await db
     .select({
@@ -296,6 +363,80 @@ async function acknowledgements(id: string) {
 }
 
 // --- Tests ------------------------------------------------------------------
+
+describe('handToGroup', () => {
+  async function desk() {
+    const lina = await agent('Lina Care');
+    const omar = await agent('Omar Sales');
+    const care = await group('Customer Care', [lina]);
+    const sales = await group('Inbound Sales Team', [omar]);
+    return { lina, omar, care, sales, salesCategory: await routeTo('sales', sales) };
+  }
+
+  // The page offered one click because it showed nobody holding the ticket;
+  // Lina took it since. That click must not take it off her: it is refused,
+  // and the page drawn again asks twice.
+  it('refuses when somebody other than the assignee the page showed holds the ticket', async () => {
+    const { lina, omar, care, sales, salesCategory } = await desk();
+    const { id } = await ticket(care, { categoryId: salesCategory, assigneeAgentId: lina });
+
+    expect(await handTo(id, sales, null)).toEqual({
+      error:
+        'Who holds this ticket has changed since the page loaded. Check who it is before handing it over.',
+    });
+    expect(await ticketRow(id)).toMatchObject({ groupId: care, assigneeAgentId: lina });
+
+    expect(await handTo(id, sales, lina)).toMatchObject({ error: null });
+    expect(await ticketRow(id)).toMatchObject({ groupId: sales, assigneeAgentId: omar });
+  });
+
+  it('says the ticket waits in the group’s queue when nobody there could be given it', async () => {
+    const { lina, care } = await desk();
+    const couriers = await group('Courier Jobs', [], { assignmentStrategy: 'manual' });
+    const { id } = await ticket(care, {
+      categoryId: await routeTo('courier_jobs', couriers),
+      assigneeAgentId: lina,
+    });
+
+    expect(await handTo(id, couriers, lina)).toMatchObject({
+      error: null,
+      message:
+        "Handed to Courier Jobs. Nobody there was given it, so it waits in the group's queue.",
+    });
+  });
+
+  // The rota answers for the group the rules left the ticket in, so the
+  // route group's queue is not where it waits.
+  it('names the group a rule moved the ticket on to, as the queue it waits in', async () => {
+    const { lina, care, sales, salesCategory } = await desk();
+    const merchants = await group('Merchant Care', [], { assignmentStrategy: 'manual' });
+    await onUpdate('Sales goes to Merchant Care', inGroup(sales), [
+      { type: 'assign_group', groupId: merchants },
+    ]);
+    const { id } = await ticket(care, { categoryId: salesCategory, assigneeAgentId: lina });
+
+    expect(await handTo(id, sales, lina)).toMatchObject({
+      error: null,
+      message:
+        "Handed to Inbound Sales Team and then moved on to Merchant Care. Nobody there was given it, so it waits in that group's queue.",
+    });
+    expect(await ticketRow(id)).toMatchObject({ groupId: merchants, assigneeAgentId: null });
+  });
+
+  // A ticket a rule resolved is in nobody's queue; the page drawn with the
+  // answer shows its status.
+  it('says nothing of a queue when a rule resolved the ticket', async () => {
+    const { lina, care, sales, salesCategory } = await desk();
+    await onUpdate('Sales is resolved on sight', inGroup(sales), [
+      { type: 'set_status', category: 'resolved' },
+    ]);
+    const { id } = await ticket(care, { categoryId: salesCategory, assigneeAgentId: lina });
+
+    const answer = await handTo(id, sales, lina);
+    expect(answer).toMatchObject({ error: null });
+    expect(answer).not.toHaveProperty('message');
+  });
+});
 
 describe('updateTicket: a group move', () => {
   // The bug this pins: the group case assigned in the group the person chose,
@@ -518,6 +659,66 @@ describe('updateTicket on a ticket held for routing', () => {
           data: { to: 'urgent' },
         },
       ]);
+    });
+
+    // Jev's answer routed the ticket a moment ago, and its pass over the rules
+    // read the ticket filed as Sales; the agent files it as merchant work
+    // while that pass is still going. The router is part-way through
+    // (`in_flight`), its pass will never see the new category, and nothing
+    // runs the rules again once it ends the hold — so the edit runs its own
+    // pass, or the rule keyed on merchant work never fires. The first rule's
+    // row is held from outside to stop the router's pass between its two
+    // rules.
+    it('runs its own pass when it meets a decision part-way through, whose rules read the old category', async () => {
+      const lina = await agent('Lina Care');
+      const omar = await agent('Omar Sales');
+      const care = await group('Customer Care', [lina]);
+      const sales = await group('Inbound Sales Team', [omar]);
+      const salesCategory = await routeTo('sales', sales);
+      const [merchantWork] = await db
+        .select({ id: ticketCategories.id })
+        .from(ticketCategories)
+        .where(eq(ticketCategories.key, 'merchant_support'));
+      const first = await onUpdate('Seen', { all: [] }, [{ type: 'add_tags', tags: ['seen'] }], 0);
+      await onUpdate(
+        'Merchant work',
+        { field: 'category.id', op: 'eq', value: merchantWork!.id },
+        [{ type: 'add_tags', tags: ['merchant-work'] }],
+        1,
+      );
+      const id = await heldTicket(await mailbox(care, 'category'), care);
+      expect(
+        (await setConversationCategory(id, salesCategory, { label: 'jev:category' })).outcome,
+      ).toBe('changed');
+
+      const rule = await holdRule(first);
+      let routing: Promise<unknown> = Promise.resolve();
+      let editing: Promise<unknown> = Promise.resolve();
+      try {
+        routing = routeNow(id, { label: 'jev:category' });
+        await untilWaitingOnLocks(1, () => false);
+        // Phase one has decided and committed; the pass is held on the first rule.
+        expect(await decisionOf(id)).toMatchObject({ stage: 'holding', outcome: 'category' });
+
+        let edited = false;
+        editing = edit(id, 'category', merchantWork!.id).finally(() => (edited = true));
+        // The edit's own pass stops at the same rule; one that ran no pass returns.
+        await untilWaitingOnLocks(2, () => edited);
+      } finally {
+        await rule.release();
+      }
+      expect(await routing).toBe('decided');
+      expect(await editing).toMatchObject({ error: null });
+
+      expect(await tagsOf(id)).toEqual(expect.arrayContaining(['seen', 'merchant-work']));
+      // The router's decision stands: the agent relabelled a routed ticket.
+      expect(await decisionOf(id)).toMatchObject({
+        stage: 'decided',
+        outcome: 'category',
+        toGroupId: sales,
+        decidedByLabel: 'jev:category',
+      });
+      expect(await ticketRow(id)).toMatchObject({ groupId: sales, assigneeAgentId: omar });
     });
   });
 });

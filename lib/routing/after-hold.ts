@@ -1,9 +1,7 @@
-import { eq } from 'drizzle-orm';
-import { db } from '@/db/client';
-import { routingDecisions } from '@/db/schema';
 import { assignConversation } from '@/lib/assignment';
 import { maybeSendAutoResponse } from '@/lib/auto-response';
 import { logger } from '@/lib/log';
+import { heldFollowUp } from './held-assignment';
 
 const log = logger('routing');
 
@@ -14,7 +12,9 @@ const log = logger('routing');
  * opened the ticket — the one it would have answered had nothing been held.
  *
  * Owed by state rather than by one caller, so every way a hold ends calls this
- * once its own transaction has committed. The reply's claim on
+ * once its own transaction has committed, and it reads what is owed off the
+ * routing row itself: the opening message, and the pick an `auto_assign` rule
+ * asked for while the ticket was held. The reply's claim on
  * `auto_responded_at` keeps it to one, and its guards to a ticket still open
  * that nobody has answered — so an agent's reply that ended the hold at 23:00
  * is not followed by "we are closed".
@@ -27,27 +27,34 @@ const log = logger('routing');
  */
 export async function afterHoldEnded(
   conversationId: string,
-  messageId?: string | null,
   now: Date = new Date(),
 ): Promise<void> {
+  let held: Awaited<ReturnType<typeof heldFollowUp>> = null;
   try {
-    await assignConversation(conversationId, { now });
+    held = await heldFollowUp(conversationId);
+  } catch (error) {
+    log.error(`could not read what the hold on ${conversationId} owed`, error);
+  }
+
+  try {
+    // With the strategy and the label of the rule that asked while the ticket
+    // was held (`recordHeldAssignment`), so the pick is the one the rule meant
+    // and the timeline names the rule; otherwise the group's own, as the
+    // creation pass would have.
+    await assignConversation(conversationId, {
+      now,
+      strategy: held?.strategy ?? undefined,
+      actorLabel: held?.actorLabel ?? undefined,
+    });
   } catch (error) {
     log.error(`auto-assignment failed for conversation ${conversationId}`, error);
   }
 
   try {
-    const opening = messageId === undefined ? await openingMessage(conversationId) : messageId;
-    if (opening) await maybeSendAutoResponse({ conversationId, messageId: opening }, now);
+    if (held?.messageId) {
+      await maybeSendAutoResponse({ conversationId, messageId: held.messageId }, now);
+    }
   } catch (error) {
     log.error(`could not send the held reply on ${conversationId}`, error);
   }
-}
-
-async function openingMessage(conversationId: string): Promise<string | null> {
-  const [row] = await db
-    .select({ messageId: routingDecisions.messageId })
-    .from(routingDecisions)
-    .where(eq(routingDecisions.conversationId, conversationId));
-  return row?.messageId ?? null;
 }

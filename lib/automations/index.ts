@@ -393,7 +393,9 @@ async function applyAction(
       // that throws must not also lose the follow-up the move owes.
       // Naming another group ends a routing hold, in the move's transaction
       // (`endsHoldAs`); naming the group the ticket is in, or none, is held
-      // like any other assignment.
+      // like any other assignment, and the rule's strategy waits with it for
+      // whatever ends the hold (`recordHeldAssignment`) — a round-robin rule
+      // over a group left on `manual` would otherwise assign nobody.
       const routed: { moved: boolean; endedHold?: boolean } = { moved: false };
       try {
         await assignConversation(conversationId, {

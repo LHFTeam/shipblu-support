@@ -370,10 +370,13 @@ either the SQL that loads those rows or the strategy that picks between them.
   self-assigning queue has to answer, so a skipped assignment writes `assignment_skipped`
   with a reason — out of hours, everybody at capacity, nobody holds the skill — onto the
   timeline. It is written once per reason rather than once per attempt, or a ticket that
-  arrives on a Friday evening carries two hundred identical entries by Monday. The one
-  reason never written is `awaiting_route`, a ticket held for the router (below): every
-  pass skips it until the hold ends, and a line per skip once came to 1,432 rows for 137
-  tickets.
+  arrives on a Friday evening carries two hundred identical entries by Monday. Only those
+  refusals are written: a ticket already assigned, one nobody may work any more and a group
+  on manual are answers, not refusals. Nor are the two reasons routing by category added:
+  `awaiting_route`, a ticket held for the router (below), which every pass skips until the
+  hold ends — a line per skip once came to 1,432 rows for 137 tickets — and `moved`, a
+  ticket that left its group between the pass's read and its lock, which whoever moved it
+  assigns.
 - **The routing rules are the automation rules, and routing by category is a lookup.** One
   new action, `auto_assign`, rather than a second engine with its own conditions, ordering
   and bugs. A rule says "urgent shipping tickets go to the shipping team, whoever is free",
@@ -393,18 +396,24 @@ either the SQL that loads those rows or the strategy that picks between them.
   feature built in the engine. What the router reads instead,
   `ticket_categories.route_group_id`, is a lookup as `default_group_id` is one: it holds
   no conditions, so it is not a second engine. Rules still decide every exception. A rule
-  that assigns or moves a waiting ticket decides instead of the router, and the router
-  runs the `on_update` pass before anybody is assigned, so "sales on the merchant number
-  goes to Merchant Care" is still a rule. A rule's `set_category` after the creation pass
-  is routed at the window's end rather than at once, because an action never re-enters the
-  engine to call the router. While it waits the ticket is _held_: assigned to nobody, its
-  out-of-hours reply kept back. The alternative, assigning it in its default group and
-  taking it back once classified, breaks "never overwrites an existing assignee" above and
-  shows the ticket in one agent's queue just before it vanishes.
+  that assigns or moves a waiting ticket decides instead of the router; one that only asks
+  for a pick in the group the ticket is in waits with it, and the pick is made with that
+  rule's strategy once the hold ends, or a round-robin rule over a manual group would assign
+  nobody. The router runs the `on_update` pass before anybody is assigned, so "sales on the
+  merchant number goes to Merchant Care" is still a rule. A rule's `set_category` after the
+  creation pass is routed at the window's end rather than at once, because an action never
+  re-enters the engine to call the router. While it waits the ticket is _held_: assigned to
+  nobody, its out-of-hours reply kept back. The alternative, assigning it in its default
+  group and taking it back once classified, breaks "never overwrites an existing assignee"
+  above and shows the ticket in one agent's queue just before it vanishes.
 - **Assignment is serialised per group** by a `SELECT … FOR UPDATE` on the group row. Two
   tickets arriving in the same second would otherwise read the same round-robin cursor and
   land on the same agent, and two load-balanced picks would both see the counts from before
-  either wrote.
+  either wrote. The ticket's own row is locked before it, the order every writer that moves
+  a ticket takes, and its assignee, group and routing hold are re-read there, so a ticket
+  somebody took by hand or moved out of the group since the pass read it is left alone. That
+  lock is `FOR NO KEY UPDATE`: it waits on every other writer of the row, and lets the
+  customer's next message, whose foreign key needs only a key-share lock, land meanwhile.
 - **The sweep re-asks the question every five minutes**, chained onto the SLA cron, because
   most of the reasons a ticket goes unassigned resolve themselves later and none of them
   announce it. It also runs on demand when an agent comes online, so the overnight queue

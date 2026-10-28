@@ -71,14 +71,7 @@ export function decide(input: DecideInput): Decision {
 
   if (!input.shadow && input.assigneeAgentId) return stay('taken');
 
-  if (
-    input.deletedAt ||
-    input.isSpam ||
-    input.mergedIntoId ||
-    !(input.statusCategory === 'open' || input.statusCategory === 'pending')
-  ) {
-    return stay('not_open');
-  }
+  if (!isWorkable(input)) return stay('not_open');
 
   if (input.shadow ? input.mode === 'default_group' : input.mode !== 'category') {
     return stay('released');
@@ -92,4 +85,23 @@ export function decide(input: DecideInput): Decision {
   }
 
   return stay('fallback');
+}
+
+/**
+ * Whether anybody may still work the ticket: open or pending, and not spam,
+ * deleted or merged — what `not_open` answers the absence of. Its own function
+ * because the router asks it twice: here, and again when it completes a
+ * decision whose caller died between its phases (`lib/routing/apply.ts`),
+ * where the ticket may have been resolved or deleted since the decision was
+ * written, and is then owed nothing.
+ */
+export function isWorkable(
+  ticket: Pick<DecideInput, 'statusCategory' | 'deletedAt' | 'isSpam' | 'mergedIntoId'>,
+): boolean {
+  return (
+    !ticket.deletedAt &&
+    !ticket.isSpam &&
+    !ticket.mergedIntoId &&
+    (ticket.statusCategory === 'open' || ticket.statusCategory === 'pending')
+  );
 }

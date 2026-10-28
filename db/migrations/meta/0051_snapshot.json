@@ -1,5 +1,5 @@
 {
-  "id": "ed0e1d63-c9f9-437a-8c95-1867d55f4c1c",
+  "id": "bc96d4d1-e708-423e-b99f-df82636ed1e7",
   "prevId": "e5a72833-1c6c-45bc-b725-bf0b896f267f",
   "version": "7",
   "dialect": "postgresql",
@@ -12215,6 +12215,19 @@
         "decided_at": {
           "name": "decided_at",
           "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "held_strategy": {
+          "name": "held_strategy",
+          "type": "assignment_strategy",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "held_actor_label": {
+          "name": "held_actor_label",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         }

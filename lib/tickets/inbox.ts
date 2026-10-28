@@ -118,6 +118,12 @@ export type InboxRow = {
    * the assignee and the clock: `routingHold` in `inbox-badges.ts`.
    */
   routingUntil: Date | null;
+  /**
+   * Marked as spam. Read only by the routing badge, which a spam ticket never
+   * carries however its window reads (`routingHold`); the list does not hide
+   * spam, so a held ticket marked as spam stays on it.
+   */
+  isSpam: boolean;
 };
 
 /**
@@ -150,6 +156,7 @@ function selectInboxRows(where: SQL | undefined) {
       lastCustomerMessageAt: conversations.lastCustomerMessageAt,
       routingWindowEndsAt: conversations.routingWindowEndsAt,
       routingDecidedAt: conversations.routingDecidedAt,
+      isSpam: conversations.isSpam,
       externalId: conversations.externalId,
       // The cursor's timestamp, at the precision Postgres stores it. See
       // `InboxCursor` for why the mapped `Date` above cannot serve.
@@ -399,6 +406,7 @@ export async function listInbox(
           ? null
           : categoryLabel(row.categoryLabel, row.categoryActive ?? true),
       routingUntil: row.routingDecidedAt ? null : row.routingWindowEndsAt,
+      isSpam: row.isSpam,
     })),
   };
 }

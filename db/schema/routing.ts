@@ -11,7 +11,7 @@ import {
 import { agents, groups } from './agents';
 import { channels, ticketCategories } from './config';
 import { conversations, messages } from './conversations';
-import { routingOutcomeEnum, routingStageEnum } from './enums';
+import { assignmentStrategyEnum, routingOutcomeEnum, routingStageEnum } from './enums';
 
 /**
  * One row per ticket that entered routing by category, live or shadow
@@ -89,6 +89,21 @@ export const routingDecisions = pgTable(
      */
     phaseOneAt: timestamp('phase_one_at', { withTimezone: true }),
     decidedAt: timestamp('decided_at', { withTimezone: true }),
+
+    /**
+     * An `auto_assign` rule's strategy, and the rule's label, met on a held
+     * ticket: the pick it asked for waits for the hold, and whatever ends the
+     * hold makes it with these (`afterHoldEnded`). Without them a round-robin
+     * rule over a group set to `manual` — the way a rule turns assignment on
+     * for a ticket without moving it — leaves every held ticket unassigned.
+     * Written by `assignConversation` when it answers `awaiting_route`;
+     * cleared by the router's phase one when its own rules follow, so only a
+     * rule matching the ticket as the decision left it is replayed, and by
+     * `endHold`, whose person or rule has decided instead. Both null, or both
+     * set.
+     */
+    heldStrategy: assignmentStrategyEnum('held_strategy'),
+    heldActorLabel: text('held_actor_label'),
   },
   (t) => [
     // Routing happens once per ticket, and every reader finds the row by it.

@@ -15,7 +15,7 @@ import { afterRoutingChanged } from '@/lib/sla';
 import { moveToGroupIfElsewhere } from '@/lib/tickets/move-group';
 import { lockedStatusCategory, statusCategoryOf } from '@/lib/tickets/status-category';
 import { afterHoldEnded } from './after-hold';
-import { decide, type DecidedOutcome } from './decide';
+import { decide, isWorkable, type DecidedOutcome } from './decide';
 import { endHoldOnRow } from './end-hold';
 import { routingModeOf } from './mode';
 import { SETTLE_ROUTING_PRIORITY } from './start';
@@ -56,8 +56,16 @@ type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
  * Each phase is its own transaction, never one holding the row across the
  * next: the rules, the SLA and assignment take the row's lock themselves, on
  * connections of their own, and would wait on this one until Supavisor killed
- * it (§6.91). A process that dies between phases one and three leaves the hold
- * in place, and `settle_routing` completes the decision.
+ * it (§6.91). A process that dies between phases one and three, or a phase
+ * three that fails, leaves the hold in place, and `settle_routing` completes
+ * the decision: the window's own job, when the caller was anything else, and
+ * the job retrying itself when it was the caller (`settleRouting`).
+ *
+ * Every lock this takes on the ticket's row is NO KEY UPDATE, never UPDATE:
+ * it serialises against every other writer of the row just the same, and FOR
+ * UPDATE would also stop every message inserted on the ticket — whose foreign
+ * key takes KEY SHARE — for as long as it is held (`endHold` has the deadlock
+ * that taught it).
  */
 
 /** Who or what is deciding — a person, Jev, a rule's pass, or the window's end. */
@@ -74,7 +82,6 @@ type PhaseOne = {
   categorySettled: boolean;
   /** Whether the `on_update` rules run before the hold ends — phase two. */
   rulesOwed: boolean;
-  messageId: string | null;
 };
 
 type Step =
@@ -94,12 +101,19 @@ export type RouteResult = Step['kind'] | 'requeued' | 'failed';
  * the window's end settled and leaves it where it is — and `in_flight` where
  * another caller's phase one already wrote the decision and is finishing it.
  *
+ * A decision of `not_open` answers `none` too: it is written, and the hold
+ * ended, but nothing is owed a ticket nobody may work, so to the caller there
+ * was nothing to route.
+ *
  * On a shadow row it records the would-be decision and nothing else, and the
  * caller carries on as though routing did not exist.
  *
  * Best-effort, like the lifecycle steps that call it: a failure is logged and
  * answers `failed`, the hold stays, and `settle_routing` decides at the
- * window's end.
+ * window's end. A phase three that fails once phase one has committed is
+ * logged and answers `decided` — the decision is written — and the window's
+ * job completes it: while the row is undecided one is always still to come,
+ * the first, or the one it queued again on finding this decision in flight.
  */
 export async function routeNow(
   conversationId: string,
@@ -108,6 +122,8 @@ export async function routeNow(
 ): Promise<RouteResult> {
   try {
     const step = await db.transaction((tx) => phaseOne(tx, conversationId, actor, now, false));
+    // Whether it ended the hold is the window's job's business, not this
+    // caller's: see above.
     if (step.kind === 'decided') await finish(conversationId, step, now);
     return step.kind;
   } catch (error) {
@@ -122,6 +138,13 @@ export async function routeNow(
  * wrote and then died on — one whose phase one is more than a minute old. A
  * younger one belongs to a caller still running, so this looks again once the
  * minute is up rather than racing it.
+ *
+ * Throws when its own phase three fails, so the job is retried. It is the one
+ * caller nothing comes after: the job's key is spent once it completes, and
+ * answering `decided` there left the ticket held, unassigned and unanswered
+ * until the grace let the sweep take it, with the row undecided for good. The
+ * retry finds phase one written and completes it once the minute is up —
+ * or, retried sooner, finds it young and looks again without a key.
  */
 export async function settleRouting(
   conversationId: string,
@@ -150,7 +173,9 @@ export async function settleRouting(
     );
     return 'requeued';
   }
-  if (step.kind === 'decided') await finish(conversationId, step, now);
+  if (step.kind === 'decided' && !(await finish(conversationId, step, now))) {
+    throw new Error(`the hold on ${conversationId} did not end; settle_routing retries`);
+  }
   return step.kind;
 }
 
@@ -165,7 +190,8 @@ async function phaseOne(
   resume: boolean,
 ): Promise<Step> {
   // The ticket first, then its routing row: the order every writer here and
-  // `endHold` take them in, so two of them never wait on each other.
+  // `endHold` take them in, so two of them never wait on each other. NO KEY
+  // UPDATE, for the reason in the header.
   // The status through a subquery and never a join, which under this lock
   // drops the row when a writer changes the status meanwhile (§ status-category).
   const [ticket] = await tx
@@ -182,7 +208,7 @@ async function phaseOne(
     })
     .from(conversations)
     .where(eq(conversations.id, conversationId))
-    .for('update');
+    .for('no key update');
   if (!ticket) return { kind: 'none' };
 
   const [row] = await tx
@@ -192,27 +218,45 @@ async function phaseOne(
     .for('update');
   if (!row || row.stage === 'decided') return { kind: 'none' };
 
+  const statusCategory = await lockedStatusCategory(tx, ticket);
+
   if (row.phaseOneAt) {
     if (!resume || now.getTime() - row.phaseOneAt.getTime() < PHASE_ONE_RESUME_MS) {
       return { kind: 'in_flight', phaseOneAt: row.phaseOneAt };
     }
     // The caller that wrote it is gone. Its decision stands; what it owed is
-    // finished from what it wrote.
+    // finished from what it wrote — on the ticket as it is now, which may have
+    // been resolved, deleted, merged or marked spam since. Such a ticket is
+    // owed nothing, as a fresh decision would have found it `not_open`: its
+    // `on_update` rules would otherwise run on it, and a category-keyed
+    // `send_reply` reach the customer of a ticket nobody may work. The hold
+    // simply ends, and the outcome phase one wrote stands.
     log.warn(
       `completing an interrupted decision conversation=${conversationId} outcome=${row.outcome ?? 'none'}`,
     );
+    if (!isWorkable({ ...ticket, statusCategory })) {
+      await tx
+        .update(routingDecisions)
+        .set({
+          stage: 'decided',
+          decidedAt: sql`coalesce(${routingDecisions.decidedAt}, ${now.toISOString()}::timestamptz)`,
+        })
+        .where(eq(routingDecisions.id, row.id));
+      await endHoldOnRow(tx, conversationId, now);
+      return { kind: 'none' };
+    }
     const outcome = (row.outcome ?? 'fallback') as DecidedOutcome;
     return {
       kind: 'decided',
       outcome,
       moved: outcome === 'category',
       categorySettled: row.categoryId !== null,
-      rulesOwed: row.categoryId !== null && outcome !== 'not_open',
-      messageId: row.messageId,
+      // A row phase one left holding always had a category: one without has
+      // its hold ended in phase one.
+      rulesOwed: row.categoryId !== null,
     };
   }
 
-  const statusCategory = await lockedStatusCategory(tx, ticket);
   const [channel] = ticket.channelId
     ? await tx
         .select({ type: channels.type, config: channels.config, routingMode: channels.routingMode })
@@ -273,6 +317,14 @@ async function phaseOne(
 
   // A ticket with no category has no rules to wait for, so the hold ends with
   // the decision, in this transaction.
+  //
+  // An `auto_assign` rule's strategy kept while the ticket was held
+  // (`recordHeldAssignment`) is dropped when the rules follow: it was matched
+  // against the ticket before this decision, perhaps in the group it is about
+  // to leave or with no category yet, and phase two's own pass records it
+  // again if the rule still matches the ticket as the decision leaves it. With
+  // no rules owed nothing about the ticket has changed but its hold, and the
+  // rule's pick stands — the one the hold made it wait for.
   const endsNow = !rulesOwed;
   await tx
     .update(routingDecisions)
@@ -280,7 +332,7 @@ async function phaseOne(
       ...recorded,
       phaseOneAt: now,
       stage: endsNow ? 'decided' : 'holding',
-      ...(endsNow ? { decidedAt: now } : {}),
+      ...(endsNow ? { decidedAt: now } : { heldStrategy: null, heldActorLabel: null }),
     })
     .where(eq(routingDecisions.id, row.id));
   if (endsNow) await endHoldOnRow(tx, conversationId, now);
@@ -323,7 +375,6 @@ async function phaseOne(
     moved,
     categorySettled,
     rulesOwed,
-    messageId: row.messageId,
   };
 }
 
@@ -331,8 +382,12 @@ async function phaseOne(
  * Phases two to four, after phase one committed. Best-effort from here, like
  * every lifecycle step: the decision is written, and a throw would only fail
  * the job or the ingest that called this and run everything again.
+ *
+ * Answers whether the hold ended, which is false only when phase three failed
+ * — and then nothing after it has run, so the caller decides who completes
+ * it (`settleRouting`).
  */
-async function finish(conversationId: string, step: PhaseOne, now: Date): Promise<void> {
+async function finish(conversationId: string, step: PhaseOne, now: Date): Promise<boolean> {
   if (step.rulesOwed) {
     await runAutomations('on_update', conversationId);
     try {
@@ -341,7 +396,7 @@ async function finish(conversationId: string, step: PhaseOne, now: Date): Promis
           .select({ id: conversations.id })
           .from(conversations)
           .where(eq(conversations.id, conversationId))
-          .for('update');
+          .for('no key update');
         await tx
           .update(routingDecisions)
           .set({
@@ -352,10 +407,11 @@ async function finish(conversationId: string, step: PhaseOne, now: Date): Promis
         await endHoldOnRow(tx, conversationId, now);
       });
     } catch (error) {
-      // The hold stays until the grace runs out, and settle_routing completes
-      // the decision before then.
+      // The hold stays, and `settle_routing` completes the decision: the
+      // window's job still to come, when the caller was anything else
+      // (`routeNow`); the same job retried, when it was the caller.
       log.error(`could not end the hold on ${conversationId}`, error);
-      return;
+      return false;
     }
   }
 
@@ -363,7 +419,8 @@ async function finish(conversationId: string, step: PhaseOne, now: Date): Promis
     category: step.categorySettled,
     group: step.moved,
   });
-  await afterHoldEnded(conversationId, step.messageId, now);
+  await afterHoldEnded(conversationId, now);
+  return true;
 }
 
 /** Jev's probability, when the category on the ticket is Jev's answer. */

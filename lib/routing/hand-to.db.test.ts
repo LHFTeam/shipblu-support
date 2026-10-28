@@ -3,12 +3,14 @@ import { describe, expect, it } from 'vitest';
 import { db } from '@/db/client';
 import {
   agents,
+  automationRules,
   channels,
   contacts,
   conversationEvents,
   conversations,
   groupMembers,
   groups,
+  messages,
   routingDecisions,
   ticketCategories,
   ticketStatuses,
@@ -16,6 +18,7 @@ import {
 import { assignConversation } from '@/lib/assignment';
 import { setConversationCategory } from '@/lib/categories/write';
 import { withCleanDatabase } from '@/lib/testing/db';
+import { holdNextTransaction } from '@/lib/testing/hold-transaction';
 import { settleRouting } from './apply';
 import { handToRouteGroup } from './hand-to';
 import { ROUTING_GRACE_MS } from './hold';
@@ -206,11 +209,18 @@ describe('handToRouteGroup', () => {
     expect(await row(id)).toMatchObject({ groupId: care, assignee: lina });
     const before = (await eventsOf(id)).length;
 
-    expect(await handToRouteGroup(id, { agentId: mona }, { expectedGroupId: sales })).toEqual({
+    expect(
+      await handToRouteGroup(
+        id,
+        { agentId: mona },
+        { expectedGroupId: sales, expectedAssigneeId: lina },
+      ),
+    ).toEqual({
       ok: true,
       groupName: 'Inbound Sales Team',
       assignedTo: omar,
       skipped: null,
+      waitsIn: null,
     });
     expect(await row(id)).toMatchObject({ groupId: sales, assignee: omar });
 
@@ -270,12 +280,98 @@ describe('handToRouteGroup', () => {
       groupName: 'Inbound Sales Team',
       assignedTo: null,
       skipped: 'strategy_manual',
+      waitsIn: { groupName: 'Inbound Sales Team', movedOn: false },
     });
     expect(await row(id)).toMatchObject({ groupId: sales, assignee: null });
     expect((await eventsOf(id)).map((event) => event.type)).toEqual([
       'group_changed',
       'unassigned',
     ]);
+  });
+
+  // The rota answers for the group the rules left the ticket in, so the
+  // queue it waits in is that group's — and a ticket a rule resolved waits in
+  // nobody's. "It waits in the group's queue" said of the route group was
+  // false in both.
+  describe('says whose queue the ticket waits in only when it waits in one', () => {
+    async function onUpdate(name: string, groupId: string, actions: unknown[]) {
+      await db.insert(automationRules).values({
+        name,
+        trigger: 'on_update',
+        conditions: { field: 'group.id', op: 'eq', value: groupId },
+        actions,
+      });
+    }
+
+    it('names the group a rule moved it on to, whose rota found nobody', async () => {
+      const mona = await agent('Mona Supervisor');
+      const care = await group('Customer Care', []);
+      const sales = await group('Inbound Sales Team', [await agent('Omar Sales')]);
+      const merchants = await group('Merchant Care', [], { assignmentStrategy: 'manual' });
+      await onUpdate('Sales goes to Merchant Care', sales, [
+        { type: 'assign_group', groupId: merchants },
+      ]);
+      const id = await ticket({ groupId: care, categoryId: await category('sales', sales) });
+
+      expect(await handToRouteGroup(id, { agentId: mona })).toEqual({
+        ok: true,
+        groupName: 'Inbound Sales Team',
+        assignedTo: null,
+        skipped: 'strategy_manual',
+        waitsIn: { groupName: 'Merchant Care', movedOn: true },
+      });
+      expect(await row(id)).toMatchObject({ groupId: merchants, assignee: null });
+    });
+
+    it('names none when a rule resolved the ticket', async () => {
+      const mona = await agent('Mona Supervisor');
+      const care = await group('Customer Care', []);
+      const sales = await group('Inbound Sales Team', [await agent('Omar Sales')]);
+      await onUpdate('Sales is resolved on sight', sales, [
+        { type: 'set_status', category: 'resolved' },
+      ]);
+      const id = await ticket({ groupId: care, categoryId: await category('sales', sales) });
+
+      expect(await handToRouteGroup(id, { agentId: mona })).toEqual({
+        ok: true,
+        groupName: 'Inbound Sales Team',
+        assignedTo: null,
+        skipped: 'not_assignable',
+        waitsIn: null,
+      });
+    });
+  });
+
+  // The ticket's row is locked as its own UPDATEs lock it, never `for update`,
+  // which waits for — and makes wait — the key-share lock a message takes on
+  // its ticket through the foreign key: a customer writing while an agent
+  // hands the ticket over would stand behind the whole of it.
+  it('lets a customer’s message land on the ticket while the hand-over holds it', async () => {
+    const lina = await agent('Lina Care');
+    const mona = await agent('Mona Supervisor');
+    const care = await group('Customer Care', [lina]);
+    const sales = await group('Inbound Sales Team', [await agent('Omar Sales')]);
+    const id = await ticket({
+      groupId: care,
+      assigneeAgentId: lina,
+      categoryId: await category('sales', sales),
+    });
+
+    // Every lock the hand-over takes is held, and nothing has committed.
+    const held = holdNextTransaction('after');
+    const handing = handToRouteGroup(id, { agentId: mona });
+    await held.atHold;
+    try {
+      const landing = db
+        .insert(messages)
+        .values({ conversationId: id, direction: 'inbound', kind: 'reply', bodyText: 'Any news?' })
+        .then(() => 'landed' as const);
+      const waited = new Promise<'waited'>((resolve) => setTimeout(() => resolve('waited'), 1_000));
+      expect(await Promise.race([landing, waited])).toBe('landed');
+    } finally {
+      held.release();
+    }
+    expect(await handing).toMatchObject({ ok: true });
   });
 
   // The one ticket the hand-over meets undecided: its window passed and the
@@ -438,6 +534,33 @@ describe('handToRouteGroup', () => {
         ok: false,
         reason: 'not_open',
       });
+    });
+
+    // The page drew one click from the assignee it was drawn with, so a ticket
+    // somebody took since — or somebody other than the colleague it named —
+    // is refused, not taken off them by a click that asked once.
+    it('when somebody other than the assignee the page showed holds it', async () => {
+      const { lina, mona, care, sales, salesCategory } = await desk();
+      const hana = await agent('Hana Care');
+      const id = await ticket({ groupId: care, categoryId: salesCategory, assigneeAgentId: lina });
+
+      for (const shown of [null, hana]) {
+        expect(
+          await handToRouteGroup(
+            id,
+            { agentId: mona },
+            { expectedGroupId: sales, expectedAssigneeId: shown },
+          ),
+        ).toEqual({ ok: false, reason: 'reassigned' });
+        await expectUntouched(id, care, lina);
+      }
+
+      // And one let go of since: the agent confirmed taking it off Lina, and
+      // the page drawn again shows them what the ticket is now.
+      const freed = await ticket({ groupId: care, categoryId: salesCategory });
+      expect(
+        await handToRouteGroup(freed, { agentId: mona }, { expectedAssigneeId: lina }),
+      ).toEqual({ ok: false, reason: 'reassigned' });
     });
 
     // The button named the group the category routed to when the page was

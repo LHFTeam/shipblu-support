@@ -44,11 +44,16 @@ export async function beginRouting(
 ): Promise<'routed' | 'continue'> {
   try {
     const found = await db.transaction(async (tx) => {
+      // The ticket first, then its routing row, as every routing writer takes
+      // them. NO KEY UPDATE: it serialises against every other writer just the
+      // same, where FOR UPDATE would also stop the customer's next message —
+      // whose foreign key takes KEY SHARE on the ticket — until this commits
+      // (`lib/routing/apply.ts`).
       const [ticket] = await tx
         .select({ categoryId: conversations.categoryId })
         .from(conversations)
         .where(eq(conversations.id, conversationId))
-        .for('update');
+        .for('no key update');
       if (!ticket) return null;
 
       const [row] = await tx

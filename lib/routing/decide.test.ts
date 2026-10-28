@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { decide, type DecideInput, type DecidedOutcome } from './decide';
+import { decide, isWorkable, type DecideInput, type DecidedOutcome } from './decide';
 
 /**
  * The router's precedence, which `apply.ts` writes under the row lock and the
@@ -101,6 +101,26 @@ describe('decide, not_open', () => {
       decide({ ...base, statusCategory: 'pending', categoryId: CATEGORY, routeGroupId: SALES })
         .outcome,
     ).toBe('category');
+  });
+});
+
+// The resume path asks this of a ticket whose decision is already written, and
+// must answer as `decide` would: a decision completed on a ticket deleted or
+// resolved since runs no rules and sends nothing, exactly as a fresh one would
+// have been recorded `not_open`.
+describe('isWorkable', () => {
+  it.each<[string, boolean, Partial<DecideInput>]>([
+    ['open', true, {}],
+    ['pending', true, { statusCategory: 'pending' }],
+    ['resolved', false, { statusCategory: 'resolved' }],
+    ['closed', false, { statusCategory: 'closed' }],
+    ['deleted', false, { deletedAt: new Date('2026-10-21T10:00:00Z') }],
+    ['spam', false, { isSpam: true }],
+    ['merged', false, { mergedIntoId: 'ticket-survivor' }],
+  ])('a ticket %s is workable: %s', (_label, workable, trigger) => {
+    const ticket = { ...base, ...trigger };
+    expect(isWorkable(ticket)).toBe(workable);
+    expect(decide(ticket).outcome === 'not_open').toBe(!workable);
   });
 });
 

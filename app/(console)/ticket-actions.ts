@@ -49,7 +49,8 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
   const field = String(formData.get('field') ?? '');
   const value = String(formData.get('value') ?? '');
 
-  // Set by the category case when the edit routed a held ticket.
+  // Set by the category case when the edit routed a held ticket, whose router
+  // runs the update pass itself.
   let routedByCategory = false;
   // Set when the edit ended a routing hold, whose assignment and held reply
   // are owed once the observer rules below have run (`afterHoldEnded`).
@@ -243,13 +244,24 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
       // pass below would assign before it had. A shadow ticket records where it
       // would have gone and carries on. Clearing the category settles nothing,
       // and the window runs on.
+      //
+      // The pass below is skipped only where the router owns the rules on the
+      // category this edit wrote: `decided` ran them itself, and `failed`
+      // left the hold for `settle_routing`, which runs them at the window's
+      // end. `in_flight` is another caller's decision part-way through — Jev's
+      // answer a moment before this edit — whose pass read the category the
+      // edit replaced, and nothing runs the rules again once it ends the hold,
+      // so a rule keyed on the new category would never fire. That caller
+      // still owns the hold, so the pass is safe to run here: the ticket is
+      // held, so its assignment answers `awaiting_route`, and a rule's move
+      // ends nothing once phase one is written (`endHold`).
       const routing =
         write.outcome === 'changed' && categoryId
           ? await undecidedRouting(db, conversationId)
           : null;
       if (routing) {
         const routed = await routeNow(conversationId, { agentId: agent.id, label: 'agent' });
-        if (!routing.shadow && routed !== 'none') {
+        if (!routing.shadow && (routed === 'decided' || routed === 'failed')) {
           routedByCategory = true;
           break;
         }
@@ -346,7 +358,7 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
   // Observer rules see the ticket as the agent has just left it. Actions taken
   // by a rule write to the ticket directly and do not come back through here,
   // so a rule cannot trigger itself. Not after a category edit that routed a
-  // held ticket, whose router ran them already.
+  // held ticket, whose router runs them on the category it wrote.
   if (!routedByCategory) await afterTicketUpdate(conversationId);
   // After the rules, so the held reply is told the hours of the group they
   // left the ticket in.
@@ -380,6 +392,8 @@ const HAND_TO_REFUSALS: Record<Exclude<HandToResult, { ok: true }>['reason'], st
   no_route: "This ticket's category does not route to a group",
   already_there: "This ticket is already in its category's group",
   changed: "This ticket's category has changed since the page loaded. Check where it routes now.",
+  reassigned:
+    'Who holds this ticket has changed since the page loaded. Check who it is before handing it over.',
 };
 
 /**
@@ -393,10 +407,21 @@ const HAND_TO_REFUSALS: Record<Exclude<HandToResult, { ok: true }>['reason'], st
  * the page loaded is refused rather than followed somewhere the agent never
  * saw named.
  *
+ * The form's `assigneeAgentId` is the assignee the page drew the button from,
+ * empty for nobody, and is compared the same way: it decided whether the
+ * button asked twice, so a ticket somebody took since the page loaded is
+ * refused rather than taken off them in the one click a page showing nobody
+ * offers. The refusal re-reads the page, which then asks twice.
+ *
  * Nobody to assign — outside the group's hours, a manual strategy, nobody
  * accepting — is still a success, since the ticket is in the group's queue
  * where somebody will look for it; but the agent is told, because the page
  * otherwise shows a ticket the button just unassigned sitting with nobody.
+ * Told only then, and of the queue the ticket is really in (`waitsIn`): one a
+ * rule moved on before the rota ran is named by where the rule took it, and
+ * one a rule resolved, or somebody moved meanwhile, is said nothing of — the
+ * route group's queue is not where it waits, and the page drawn with the
+ * answer shows where it went.
  */
 export async function handToGroup(_state: ActionState, formData: FormData): Promise<ActionState> {
   const agent = await requireAgent();
@@ -408,8 +433,15 @@ export async function handToGroup(_state: ActionState, formData: FormData): Prom
 
   // Malformed reads as "not said": it is a staleness check, never the target.
   const expectedGroupId = uuidField(formData, 'groupId') ?? null;
+  // Empty, absent and malformed all read as nobody, the strictest answer: it
+  // matches only a ticket nobody holds, which the hand-over takes from no one.
+  const expectedAssigneeId = uuidField(formData, 'assigneeAgentId') ?? null;
 
-  const handed = await handToRouteGroup(conversationId, { agentId: agent.id }, { expectedGroupId });
+  const handed = await handToRouteGroup(
+    conversationId,
+    { agentId: agent.id },
+    { expectedGroupId, expectedAssigneeId },
+  );
   if (!handed.ok) return { error: HAND_TO_REFUSALS[handed.reason] };
 
   refresh(row.conversation.number);
@@ -419,13 +451,16 @@ export async function handToGroup(_state: ActionState, formData: FormData): Prom
   // in `updateTicket` answers it.
   if (!(await seesTicket(agent, conversationId))) redirect('/inbox');
 
-  // `already_assigned`: an `on_update` rule gave the ticket to somebody first.
-  if (handed.assignedTo || handed.skipped === 'already_assigned') return ok();
+  if (!handed.waitsIn) return ok();
   return {
     ...ok(),
     // Worded for a manual group as well as a busy or closed one; the Activity
-    // list names the hours and the capacity cases (`assignment_skipped`).
-    message: `Handed to ${handed.groupName}. Nobody there was given it, so it waits in the group's queue.`,
+    // list names the hours and the capacity cases (`assignment_skipped`). A
+    // rule that moved the ticket on is named by where it took it, since that
+    // is the queue the ticket now waits in.
+    message: handed.waitsIn.movedOn
+      ? `Handed to ${handed.groupName} and then moved on to ${handed.waitsIn.groupName}. Nobody there was given it, so it waits in that group's queue.`
+      : `Handed to ${handed.groupName}. Nobody there was given it, so it waits in the group's queue.`,
   };
 }
 

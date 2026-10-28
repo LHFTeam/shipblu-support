@@ -506,6 +506,40 @@ describe('assignConversation on a ticket held for the router', () => {
     expect(await routingOf(id)).toMatchObject({ stage: 'holding', outcome: null });
   });
 
+  // An `auto_assign` rule's strategy, met by the hold before it is read: kept
+  // on the routing row for whatever ends the hold (`afterHoldEnded`). The
+  // sweep and the creation pass name none, and leave it where it is.
+  it('keeps a strategy it was asked for, which a caller naming none leaves alone', async () => {
+    const now = new Date();
+    const care = await desk('Customer Care', 'Omar Care', now);
+    const id = await ticketIn(care.groupId, at(now, 5));
+    const kept = async () => {
+      const [row] = await db
+        .select({
+          strategy: routingDecisions.heldStrategy,
+          label: routingDecisions.heldActorLabel,
+        })
+        .from(routingDecisions)
+        .where(eq(routingDecisions.conversationId, id));
+      return row;
+    };
+
+    expect(
+      await assignConversation(id, {
+        now,
+        strategy: 'load_balanced',
+        actorLabel: 'automation:Balance care',
+      }),
+    ).toMatchObject({ reason: 'awaiting_route' });
+    expect(await kept()).toEqual({ strategy: 'load_balanced', label: 'automation:Balance care' });
+
+    expect((await assignConversation(id, { now, actorLabel: 'assign_sweep' })).reason).toBe(
+      'awaiting_route',
+    );
+    expect(await kept()).toEqual({ strategy: 'load_balanced', label: 'automation:Balance care' });
+    expect(await eventsOf(id, ASSIGNMENT_EVENTS)).toEqual([]);
+  });
+
   // The grace is a valve for a settle that never came, and it is exclusive:
   // the instant it runs out the hold is over, a millisecond before it is not.
   it('holds through the grace and assigns the instant it runs out', async () => {

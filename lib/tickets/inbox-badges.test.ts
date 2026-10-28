@@ -26,6 +26,7 @@ const row = (overrides: Partial<Parameters<typeof rowBadges>[0]> = {}) => ({
   categoryLabel: null,
   assigneeId: null,
   routingUntil: null,
+  isSpam: false,
   ...overrides,
 });
 
@@ -203,6 +204,30 @@ describe('rowBadges', () => {
     expect(labels(row({ routingUntil: lapsed }), NOW, 'avatar')).toEqual([]);
   });
 
+  // Nothing routes a ticket that is not work — `decide` answers `not_open` —
+  // and no status, spam or merge writer ends its hold, so its window stays on
+  // the row until `settle_routing` records that. The badge would promise a
+  // route that never comes.
+  it('draws no hold on a ticket that is not work, whatever its window says', () => {
+    const held = { routingUntil: inMinutes(5) };
+    for (const statusCategory of ['resolved', 'closed'] as const) {
+      expect(
+        labels(row({ ...held, statusCategory, statusName: statusCategory }), NOW, 'ticket'),
+      ).toEqual([statusCategory]);
+      // Before there is a clock too: the server's paint says the same.
+      expect(
+        labels(row({ ...held, statusCategory, statusName: statusCategory }), null, 'ticket'),
+      ).toEqual([statusCategory]);
+    }
+    expect(labels(row({ ...held, isSpam: true }), NOW, 'avatar')).toEqual([]);
+    expect(labels(row({ ...held, isSpam: true }), null, 'avatar')).toEqual([]);
+
+    // Pending is work, and still held.
+    expect(
+      labels(row({ ...held, statusCategory: 'pending', statusName: 'Pending' }), NOW, 'ticket'),
+    ).toEqual(['Pending', 'Routing until 15:05']);
+  });
+
   // The server and the browser's first render agree on the columns alone; the
   // grace and the time are the clock's to add after mount.
   it('draws the hold from the columns alone before the list has a clock', () => {
@@ -249,12 +274,32 @@ describe('rowBadges', () => {
 });
 
 describe('routingHold', () => {
-  const held = { routingWindowEndsAt: inMinutes(5), routingDecidedAt: null, assigneeAgentId: null };
+  const held = {
+    routingWindowEndsAt: inMinutes(5),
+    routingDecidedAt: null,
+    assigneeAgentId: null,
+    statusCategory: 'open' as const,
+    isSpam: false,
+    mergedIntoId: null,
+  };
 
   it('is the open ticket’s answer as well as the row’s', () => {
     expect(routingHold(held, NOW)).toEqual({ until: inMinutes(5) });
     expect(routingHold({ ...held, routingDecidedAt: hoursAgo(1) }, NOW)).toBeNull();
     expect(routingHold({ ...held, routingWindowEndsAt: null }, NOW)).toBeNull();
     expect(routingLabel({ until: null })).toBe('Routing…');
+  });
+
+  // The header's badge and the sidebar's hints read the open ticket, which
+  // can be one merged into another: the hold is over for it as for a
+  // resolved one, and the hint "choosing its category now routes it" with it.
+  it('answers none on a ticket resolved, closed, spam or merged inside its window', () => {
+    expect(routingHold({ ...held, statusCategory: 'pending' }, NOW)).toEqual({
+      until: inMinutes(5),
+    });
+    expect(routingHold({ ...held, statusCategory: 'resolved' }, NOW)).toBeNull();
+    expect(routingHold({ ...held, statusCategory: 'closed' }, null)).toBeNull();
+    expect(routingHold({ ...held, isSpam: true }, NOW)).toBeNull();
+    expect(routingHold({ ...held, mergedIntoId: 'ticket-2' }, NOW)).toBeNull();
   });
 });

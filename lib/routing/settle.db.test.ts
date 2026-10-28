@@ -667,6 +667,146 @@ describe('a decision interrupted between its phases', () => {
     await expectDecided(id, 'category');
   });
 
+  it('throws when its own phase three fails, so its retry completes the decision', async () => {
+    // The window's job is the one caller nothing comes after: its key is
+    // spent once it completes, so a phase three it swallowed left the ticket
+    // held, unassigned and unanswered for good.
+    errorsExpected = true;
+    await closedEverywhere();
+    await outOfHoursReply();
+    const t = await teams();
+    const sales = await routeTo('sales', t.sales.group);
+    const round = { firstResponseMins: 30, nextResponseMins: 30, resolutionMins: 240 };
+    const [salesPolicy] = await db
+      .insert(slaPolicies)
+      .values({
+        name: 'Sales',
+        hoursSource: 'round_the_clock',
+        targets: { low: round, medium: round, high: round, urgent: round },
+        conditions: inCategory(sales),
+      })
+      .returning({ id: slaPolicies.id });
+    const { id } = await heldTicket(t.channel, t.home.group);
+    await applySlaOnCreate(id);
+    await jevFiles(id, sales);
+
+    // Phase one commits; the transaction that ends the hold does not. No
+    // rules, so phase two opens none in between.
+    const transaction = PgDatabase.prototype.transaction;
+    const spy = vi
+      .spyOn(PgDatabase.prototype, 'transaction')
+      .mockImplementationOnce(function (this: PgDatabase<never>, run, config) {
+        return transaction.call(this, run, config) as never;
+      })
+      .mockImplementationOnce(() => Promise.reject(new Error('the connection was lost')));
+    const failure = await settleRoutingJob(claimed(id)).then(
+      () => null,
+      (error: unknown) => error,
+    );
+    spy.mockRestore();
+
+    // Retried, not dead: the decision is written, and only its end failed.
+    expect(failure).toBeInstanceOf(Error);
+    expect(failure).not.toBeInstanceOf(PermanentJobError);
+    expect(await decision(id)).toMatchObject({ stage: 'holding', outcome: 'category' });
+    expect(await ticketRow(id)).toMatchObject({
+      groupId: t.sales.group,
+      assigneeAgentId: null,
+      routingDecidedAt: null,
+    });
+    expect(await acknowledgements(id)).toEqual([]);
+
+    // The queue's first retry comes within the minute, which still belongs
+    // to the run that wrote phase one: it looks again, without a key.
+    await settleRoutingJob(claimed(id));
+    expect(await settleJobs(id)).toEqual([
+      expect.objectContaining({ dedupeKey: `settle_routing:${id}` }),
+      expect.objectContaining({ dedupeKey: null, status: 'pending' }),
+    ]);
+
+    // And once the minute is up, the decision is completed: the hold ended,
+    // the ticket assigned in its route group, the SLA chosen again for the
+    // category, and the held reply sent.
+    await phaseOneWritten(id, 2 * MINUTE);
+    await settleRoutingJob(claimed(id));
+
+    await expectDecided(id, 'category');
+    expect(await ticketRow(id)).toMatchObject({
+      groupId: t.sales.group,
+      assigneeAgentId: t.sales.agent,
+      slaPolicyId: salesPolicy!.id,
+    });
+    expect((await events(id, 'sla_recalculated')).map((e) => e.data)).toEqual([
+      expect.objectContaining({ cause: 'category', policyId: salesPolicy!.id }),
+    ]);
+    expect(await acknowledgements(id)).toHaveLength(1);
+  });
+
+  // The ticket may have changed since the decision was written, and what was
+  // owed is owed only on a ticket somebody may still work — the answer a
+  // fresh decision would have recorded as `not_open`.
+  it.each<[string, (id: string, survivor: string) => Promise<void>]>([
+    [
+      'resolved',
+      async (id) => {
+        await db
+          .update(conversations)
+          .set({ statusId: await status('Resolved') })
+          .where(eq(conversations.id, id));
+      },
+    ],
+    [
+      'deleted',
+      async (id) => {
+        await db
+          .update(conversations)
+          .set({ deletedAt: new Date() })
+          .where(eq(conversations.id, id));
+      },
+    ],
+    [
+      'marked spam',
+      async (id) => {
+        await db.update(conversations).set({ isSpam: true }).where(eq(conversations.id, id));
+      },
+    ],
+    [
+      'merged',
+      async (id, survivor) => {
+        await db
+          .update(conversations)
+          .set({ mergedIntoId: survivor })
+          .where(eq(conversations.id, id));
+      },
+    ],
+  ])('on a ticket %s since, ends the hold and owes nothing', async (_label, since) => {
+    errorsExpected = true;
+    await closedEverywhere();
+    await outOfHoursReply();
+    const t = await teams();
+    const sales = await routeTo('sales', t.sales.group);
+    const survivor = await heldTicket(t.channel, t.home.group);
+    const { id } = await heldTicket(t.channel, t.home.group);
+    await jevFiles(id, sales);
+    await interruptedAfterPhaseOne(id);
+    await phaseOneWritten(id, 2 * MINUTE);
+    await rule('on_update', 'Tag everything', always, [{ type: 'add_tags', tags: ['ran'] }]);
+    await since(id, survivor.id);
+
+    const result = await settleRouting(id);
+
+    // No rule ran on it, nobody was given it, and nothing was said.
+    const [row] = await db
+      .select({ tags: conversations.tags, assigneeAgentId: conversations.assigneeAgentId })
+      .from(conversations)
+      .where(eq(conversations.id, id));
+    expect(row).toEqual({ tags: [], assigneeAgentId: null });
+    expect(await acknowledgements(id)).toEqual([]);
+    // Phase one's decision stands, and the hold is over.
+    await expectDecided(id, 'category');
+    expect(result).toBe('none');
+  });
+
   it('keeps the creation pass from assigning a ticket the router has taken', async () => {
     errorsExpected = true;
     const t = await teams();

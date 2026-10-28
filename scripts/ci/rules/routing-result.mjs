@@ -31,9 +31,11 @@ import { fail, lineOfNode, parseSource, read, requireAtLeast, scannableSource } 
 //     parenthesised or cast — nor `void`ed. Kept in a variable, in a
 //     condition, returned or passed on, it is somebody's answer to use.
 //     `assignConversation` counts only when its options can name a group:
-//     without one it never moves the ticket, and the console's group case
-//     (assigning in the group it has just moved to) and the lifecycle drop its
-//     answer owing nothing. Given a `routed` carrier it answers through that
+//     without one it never moves the ticket, so a caller assigning in the
+//     group the ticket is in owes nothing for its answer, kept or dropped —
+//     Hand to after its own move (`lib/routing/hand-to.ts`, which reads the
+//     answer only for what it tells the agent), the lifecycle's `autoAssign`
+//     and `afterHoldEnded`. Given a `routed` carrier it answers through that
 //     instead, which is how the engine hears of a move the pick after it then
 //     failed (`AssignOptions.routed`).
 //   - A module that calls one also calls `afterRoutingChanged`, unless it

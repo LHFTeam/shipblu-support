@@ -22,9 +22,12 @@ only) by 07:45:42 UTC. The plan's status section has each deploy's reads.
 
 **Stage 5.1 of that plan, routing by category, is built and in review, not
 deployed** (this file's §5.1, beside the category classifier). Deployed, it
-changes nothing
-that is live until an admin moves a channel off `default_group` _and_ the
-classifier is in `apply`.
+routes nothing until an admin moves a channel off `default_group` _and_ the
+classifier is in `apply`, but four things change on every ticket at once (§5.1):
+the out-of-hours acknowledgement's guards, assignment's locks and its checked
+update, a console group move running the rules before it assigns, and the
+transactions an agent's reply and a rule's assignment or move are now written
+in.
 
 The release before those, `f761e5e`, was deployed by hand on 2026-10-26, all
 six services by 23:32 UTC: release #426, which carries Stage 3.2 (#424) — a
@@ -1646,29 +1649,47 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
   category mode _while the classifier is in `apply`_ — so nothing happens
   until both, and the classifier is off today. `Hand to <group>` stays out of sight
   too, since no category has a route group and no ticket carries a category
-  (read 10:31 UTC on 2026-10-28). Two things do change on every ticket:
-  assignment locks the ticket before the group and re-reads it there (§6.105),
-  and the out-of-hours acknowledgement goes only to an open or pending ticket,
-  and not to a customer writing again after an agent answered in the same
-  closed stretch, who could be told "we are closed" after the answer before.
-  Deploy web first (it migrates `0051_routing`), then the worker and all four
-  crons — `shipblu-sla-sweep` and `shipblu-time-automations` both assign (§2)
-  — before any channel leaves `default_group`. Turning it on is the plan's
-  Stage 5.2, channel by channel through `category_shadow`, and it needs what
-  5.2 lists: the plan's 0.2 SLA reorder, 0.6's staffing (the roster paragraph
-  above), route groups on the categories, and the classifier in `apply`. The
-  readiness panel on `/admin/channels` names what would leave routed tickets
-  unassigned, and the
+  (read 10:31 UTC on 2026-10-28). Four things do change on every ticket:
+  - **Assignment** locks the ticket (`FOR NO KEY UPDATE`) before the group,
+    re-reads its assignee, group and hold there, and checks its guarded
+    update's result (§6.105).
+  - **The out-of-hours acknowledgement** goes only to an open or pending ticket,
+    and not to a customer writing again after an agent answered in the same
+    closed stretch, who could be told "we are closed" after the answer before.
+  - **A console group move runs the `on_update` rules before it assigns.** Its
+    own `assignConversation` is gone, and the pass's `autoAssign` assigns after
+    the rules, so a rule moving the ticket on is obeyed before anybody holds it
+    — and an `on_update` rule now sees an unassigned ticket moved into an
+    auto-assigning group still unassigned, where it used to see it assigned.
+    Production has no active `on_update` rule (read 2026-10-28), so nothing
+    shows yet.
+  - **An agent's reply, and a rule's `assign_agent` or `assign_group`, are
+    written in a transaction with `endHold`**, as the console's assignee and
+    group writes already were. On a ticket that never routed `endHold` is one
+    read of `routing_decisions` and takes no lock. The first version locked the
+    ticket `FOR UPDATE` there, after the write, and deadlocked against a
+    customer's message on any ticket; the review found it and it never shipped
+    (§6.106).
+
+  Every lock the router and assignment take on a ticket's row is
+  `FOR NO KEY UPDATE`, so none of them holds a customer's message back. Deploy
+  web first (it migrates `0051_routing`), then the worker and all four crons —
+  `shipblu-sla-sweep` and `shipblu-time-automations` both assign (§2) — before
+  any channel leaves `default_group`. Turning it on is the plan's Stage 5.2,
+  channel by channel through `category_shadow`, and it needs what 5.2 lists: the
+  plan's 0.2 SLA reorder, 0.6's staffing (the roster paragraph above), route
+  groups on the categories, and the classifier in `apply`. The readiness panel
+  on `/admin/channels` names what would leave routed tickets unassigned, and the
   active rules that would decide before the router. Production has two (read
-  10:06 UTC on 2026-10-28): "Route Account Web Chat to Merchant Care" and
-  "Route Public Web Chat to Customer Care", `on_create` `assign_group` on
+  10:06 UTC on 2026-10-28): "Route Account Web Chat to Merchant Care" and "Route
+  Public Web Chat to Customer Care", `on_create` `assign_group` on
   `channel eq webchat`, one for a requester with an email and one without. The
-  Web Chat row defaults to Support, so between them they move every new web
-  chat ticket at creation, and on that row in `category` mode every hold ends
-  there as `rule` and the router decides nothing. That is by design — rules
-  decide — and it means web chat routes by category only once those two are
-  changed. Rollback is the channel's mode back to `default_group`, which holds
-  no new ticket and lets held ones settle in their window.
+  Web Chat row defaults to Support, so between them they move every new web chat
+  ticket at creation, and on that row in `category` mode every hold ends there
+  as `rule` and the router decides nothing. That is by design — rules decide —
+  and it means web chat routes by category only once those two are changed.
+  Rollback is the channel's mode back to `default_group`, which holds no new
+  ticket and lets held ones settle in their window.
 
 ### 5.2 Live-provider verification
 
@@ -6901,13 +6922,49 @@ dryRun=true`, then without, gives those two theirs back from their
       ticket moved out of the group meanwhile, so the pick could come from a
       group the ticket had left.
 
-      Stage 5.1 locks the ticket's row first and the group's second, the order
-      every writer that moves a ticket takes, re-reads the assignee, the group
-      and the routing hold under it (`already_assigned`, `moved`,
-      `awaiting_route`), and checks the update's result: a write that matched
-      nothing moves no cursor and records nothing. The general lesson: a guarded
-      `UPDATE` that matches no row is not an error, so whatever follows one has
-      to ask how many rows it wrote.
+      Stage 5.1 locks the ticket's row first (`FOR NO KEY UPDATE`, §6.106) and
+      the group's second, the order every writer that moves a ticket takes,
+      re-reads the assignee, the group and the routing hold under it
+      (`already_assigned`, `moved`, `awaiting_route`), and checks the update's
+      result: a write that matched nothing moves no cursor and records nothing.
+      The general lesson: a guarded `UPDATE` that matches no row is not an
+      error, so whatever follows one has to ask how many rows it wrote.
+
+106.  **A `FOR UPDATE` taken after a write deadlocked against every customer
+      message.** _2026-10-28, found by the adversarial review of Stage 5.1 of
+      `plans/ticket-category-routing.md` and reproduced on a test database; it
+      never shipped._ `endHold` (`lib/routing/end-hold.ts`) runs in the
+      transaction of the write that ends a routing hold — an agent's reply's
+      ticket update, the console's assignee and group writes, the engine's
+      `assign_agent` and `assign_group` — and its first statement was
+      `SELECT … FOR UPDATE` on the ticket, on every ticket, routed or not. The
+      write already held the row `FOR NO KEY UPDATE`, which a concurrent child
+      insert's `FOR KEY SHARE` does not conflict with; `FOR UPDATE` does. Every
+      ingest path continuing a ticket inserts the message — taking KEY SHARE on
+      the ticket through the foreign key — and then updates the ticket, in one
+      transaction, and nothing serialises it against a reply: `lockThread` is
+      advisory, and the reply never takes it. So the upgrade waited on the
+      message's KEY SHARE while the ingest's update waited on the reply's write,
+      and Postgres aborted one of them with `40P01`, which nothing here retries.
+      Reproduced: an agent's reply stored with no `send_whatsapp` queued and
+      `last_agent_message_at` never set; a customer's second WhatsApp message
+      not stored, and lost if another item in its delivery succeeded; and an
+      `on_create` `assign_group` shaped like production's two web chat rules
+      aborted, leaving the ticket in its default group. Before 5.1 the reply's
+      update and the engine's actions were autocommit statements, and no cycle
+      could form.
+
+      `endHold` now reads the routing row first, with no lock, and returns on a
+      ticket that never routed; otherwise it locks the ticket
+      `FOR NO KEY UPDATE`, which still waits on every other writer of the row.
+      The router, `beginRouting`, Hand to and `assignConversation`'s pick lock
+      it the same way, though they lock before writing and could not close this
+      cycle, because `FOR UPDATE` there still holds every inbound message on the
+      ticket until they commit (`lib/routing/locks.db.test.ts`). The general
+      lesson: a row lock taken after the same transaction wrote the row is an
+      upgrade, and `FOR UPDATE` is the one upgrade a foreign key's KEY SHARE
+      refuses — and every message and event inserted for a ticket holds one on
+      it.
 
 ### Tooling notes for this environment
 

@@ -14,12 +14,16 @@ import {
   groups,
   messages,
   routingDecisions,
+  ticketCategories,
   ticketStatuses,
 } from '@/db/schema';
+import { setConversationCategory } from '@/lib/categories/write';
 import { forgetCategoryAiSettings } from '@/lib/category-ai/settings';
 import { forgetHoursCatalog } from '@/lib/hours/catalog';
-import { settleRouting } from '@/lib/routing/apply';
+import { afterHoldEnded } from '@/lib/routing/after-hold';
+import { routeNow, settleRouting } from '@/lib/routing/apply';
 import { beginRouting } from '@/lib/routing/begin';
+import { endHold } from '@/lib/routing/end-hold';
 import { startRouting } from '@/lib/routing/start';
 import { withCleanDatabase } from '@/lib/testing/db';
 import { holdNextTransaction } from '@/lib/testing/hold-transaction';
@@ -198,8 +202,33 @@ async function rule(
   trigger: 'on_create' | 'on_update' | 'time_based',
   name: string,
   actions: unknown[],
+  conditions: unknown = { all: [] },
 ): Promise<void> {
-  await db.insert(automationRules).values({ name, trigger, conditions: { all: [] }, actions });
+  await db.insert(automationRules).values({ name, trigger, conditions, actions });
+}
+
+/** A group that hands nothing out on its own: only a rule's strategy assigns there. */
+async function manual(groupId: string): Promise<void> {
+  await db.update(groups).set({ assignmentStrategy: 'manual' }).where(eq(groups.id, groupId));
+}
+
+const inGroup = (groupId: string) => ({ field: 'group.id', op: 'eq', value: groupId });
+
+/** Jev filing the ticket as sales, routed to `groupId`, and the router deciding on it. */
+async function jevRoutes(id: string, groupId: string): Promise<void> {
+  const [sales] = await db
+    .update(ticketCategories)
+    .set({ routeGroupId: groupId })
+    .where(eq(ticketCategories.key, 'sales'))
+    .returning({ id: ticketCategories.id });
+  await setConversationCategory(id, sales!.id, { label: 'jev:category' });
+  expect(await routeNow(id, { label: 'jev:category' })).toBe('decided');
+}
+
+/** The rule's pick the hold is keeping, if any. */
+async function kept(id: string) {
+  const { heldStrategy, heldActorLabel } = await decision(id);
+  return { heldStrategy, heldActorLabel };
 }
 
 async function ticketRow(id: string) {
@@ -430,6 +459,142 @@ describe('auto_assign on a held ticket', () => {
     await runAutomations('on_update', id);
 
     await expectStillHeld(id);
+  });
+
+  it('naming another group picks there with its own strategy, at once', async () => {
+    const t = await teams();
+    await manual(t.sales.group);
+    const id = await heldTicket(t.channel, t.home.group);
+    await rule('on_update', 'Sales rota', [
+      { type: 'auto_assign', groupId: t.sales.group, strategy: 'round_robin' },
+    ]);
+
+    await runAutomations('on_update', id);
+
+    expect((await ticketRow(id)).assigneeAgentId).toBe(t.sales.agent);
+    expect(await kept(id)).toEqual({ heldStrategy: null, heldActorLabel: null });
+  });
+});
+
+// --- A rule's strategy, kept for the hold's end -----------------------------
+
+/**
+ * A group-less `auto_assign` with a strategy of its own is how a rule turns
+ * assignment on for a ticket without moving it — round robin over a group an
+ * admin leaves on `manual`. Held, it is answered `awaiting_route` before any
+ * strategy is read, so the hold keeps the rule's pick on the routing row for
+ * whatever ends the hold; without it, the hold's end picks with the group's
+ * own strategy and assigns nobody.
+ */
+describe('an auto_assign rule’s strategy on a held ticket', () => {
+  it('is kept, and assigns the ticket with it once the window ends', async () => {
+    const t = await teams();
+    await manual(t.home.group);
+    const id = await heldTicket(t.channel, t.home.group);
+    await rule('on_update', 'Round robin', [
+      { type: 'auto_assign', groupId: null, strategy: 'round_robin' },
+    ]);
+
+    await runAutomations('on_update', id);
+
+    await expectStillHeld(id);
+    expect(await kept(id)).toEqual({
+      heldStrategy: 'round_robin',
+      heldActorLabel: 'automation:Round robin',
+    });
+
+    expect(await settleRouting(id)).toBe('decided');
+
+    expect((await ticketRow(id)).assigneeAgentId).toBe(t.home.agent);
+    expect(await events(id, 'assigned')).toMatchObject([
+      {
+        actorLabel: 'automation:Round robin',
+        data: { to: t.home.agent, strategy: 'round_robin' },
+      },
+    ]);
+    expect(await acknowledgements(id)).toHaveLength(1);
+  });
+
+  it('is dropped by a decision whose own rules no longer match the ticket', async () => {
+    // Kept while the ticket sat in Customer Care, for a rule about Customer
+    // Care. The router moves it to Sales, and that rule matches nothing there.
+    const t = await teams();
+    await manual(t.home.group);
+    await manual(t.sales.group);
+    const id = await heldTicket(t.channel, t.home.group);
+    await rule(
+      'on_update',
+      'Care round robin',
+      [{ type: 'auto_assign', groupId: null, strategy: 'round_robin' }],
+      inGroup(t.home.group),
+    );
+    await runAutomations('on_update', id);
+    expect((await kept(id)).heldStrategy).toBe('round_robin');
+
+    await jevRoutes(id, t.sales.group);
+
+    expect(await ticketRow(id)).toMatchObject({
+      groupId: t.sales.group,
+      assigneeAgentId: null,
+    });
+    expect((await ticketRow(id)).routingDecidedAt).toBeInstanceOf(Date);
+    expect(await kept(id)).toEqual({ heldStrategy: null, heldActorLabel: null });
+  });
+
+  it('is kept by the decision’s own pass for a rule matching the ticket as it left it', async () => {
+    const t = await teams();
+    await manual(t.home.group);
+    await manual(t.sales.group);
+    const id = await heldTicket(t.channel, t.home.group);
+    await rule(
+      'on_update',
+      'Sales round robin',
+      [{ type: 'auto_assign', groupId: null, strategy: 'round_robin' }],
+      inGroup(t.sales.group),
+    );
+
+    await jevRoutes(id, t.sales.group);
+
+    expect(await ticketRow(id)).toMatchObject({
+      groupId: t.sales.group,
+      assigneeAgentId: t.sales.agent,
+    });
+    expect(await events(id, 'assigned')).toMatchObject([
+      { actorLabel: 'automation:Sales round robin', data: { strategy: 'round_robin' } },
+    ]);
+  });
+
+  it('is dropped by a person deciding where the ticket goes instead', async () => {
+    const t = await teams();
+    await manual(t.home.group);
+    await manual(t.sales.group);
+    const lead = await agent('Laila');
+    const id = await heldTicket(t.channel, t.home.group);
+    await rule('on_update', 'Round robin', [
+      { type: 'auto_assign', groupId: null, strategy: 'round_robin' },
+    ]);
+    await runAutomations('on_update', id);
+    expect((await kept(id)).heldStrategy).toBe('round_robin');
+
+    // The console's group case: the move and `endHold` in one transaction,
+    // then what the hold owed.
+    const ended = await db.transaction(async (tx) => {
+      await tx
+        .update(conversations)
+        .set({ groupId: t.sales.group })
+        .where(eq(conversations.id, id));
+      return endHold(tx, id, 'manual', { agentId: lead });
+    });
+    expect(ended).toBe(true);
+    await afterHoldEnded(id);
+
+    expect(await decision(id)).toMatchObject({
+      stage: 'decided',
+      outcome: 'manual',
+      heldStrategy: null,
+      heldActorLabel: null,
+    });
+    expect((await ticketRow(id)).assigneeAgentId).toBeNull();
   });
 });
 

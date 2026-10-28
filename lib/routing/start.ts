@@ -50,9 +50,13 @@ export type RoutingChannel = {
  * keeps on its default group.
  *
  * The classifier's switch comes through its thirty-second memo, the same read
- * that decides whether this message is classified at all, so a ticket is held
- * only when its message will be asked about. A failed read is off, and starts
- * nothing.
+ * that decides whether this message is classified at all, so a ticket enters
+ * routing — held, or watched in shadow — only while the classifier is in
+ * `apply`. Not only when its message will be asked about: the switch is all
+ * this reads, and a message carrying no words of the customer's — a photo sent
+ * without a caption, stored as `[image]` — is never queued for the
+ * classifier, and its ticket is held for the whole window and settles as
+ * `fallback` unless words follow. A failed read is off, and starts nothing.
  */
 export async function planRouting(channel: RoutingChannel | null): Promise<RoutingPlan | null> {
   if (!channel?.id) return null;
@@ -133,8 +137,11 @@ export async function startRouting(
 }
 
 /**
- * Behind `classify_category`'s 30, so an answer already queued at the window's
- * end is applied before the window is settled without one; ahead of the
- * default 100.
+ * Behind `classify_category`'s 30 and ahead of the default 100. The priority
+ * orders only the claim: a classifier job due beside this one is claimed
+ * first, but the worker runs what it claims at once, so this sees an answer
+ * that has already landed and nothing still in flight. An answer that lands
+ * after the window is settled is a late one, and relabels the ticket where
+ * the window left it.
  */
 export const SETTLE_ROUTING_PRIORITY = 40;

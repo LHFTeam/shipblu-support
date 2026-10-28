@@ -209,6 +209,7 @@ export function Sidebar({
             key={conversation.id}
             conversationId={conversation.id}
             target={handTo}
+            assigneeAgentId={conversation.assigneeAgentId}
             clears={clears}
           />
         </SidebarField>

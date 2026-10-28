@@ -4,6 +4,7 @@ import { isHeld, type HoldColumns } from '@/lib/routing/hold';
 import { formatRemaining, windowState } from '@/lib/whatsapp/window';
 import { answeredFromConsole, isMetaChannel } from './channel-policy';
 import type { InboxRow } from './inbox';
+import type { StatusCategory } from './vocabulary';
 
 /**
  * The badges on an inbox row, decided before anything renders.
@@ -48,6 +49,7 @@ type BadgeRow = Pick<
   | 'categoryLabel'
   | 'assigneeId'
   | 'routingUntil'
+  | 'isSpam'
 >;
 
 /** Under two hours is when a WhatsApp window starts mattering; above that it is noise. */
@@ -85,10 +87,29 @@ function windowBadge(row: BadgeRow, now: Date | null): RowBadge | null {
 }
 
 /**
+ * What `routingHold` reads: the hold's three columns, and whether the ticket
+ * is still work the router would move.
+ */
+export type HoldTicket = HoldColumns & {
+  statusCategory: StatusCategory;
+  isSpam: boolean;
+  mergedIntoId: string | null;
+};
+
+/**
  * The routing hold, as everything that draws it reads it — the list row, the
  * ticket header and the sidebar's hints — so the list and the open ticket
  * cannot disagree about whether a ticket is held, which is the rule
  * `windowBadge` states for the window. Null when it is not held.
+ *
+ * Only on work: open or pending, and not spam or merged — `decide`'s
+ * `not_open` the other way round (a deleted ticket reaches no reader). No
+ * status, spam or merge writer ends a hold, so a held ticket resolved in its
+ * window keeps the window on its row until `settle_routing` records
+ * `not_open`, and nothing routes it meanwhile: a category chosen then decides
+ * `not_open` at once. "Routing…" on it, and "choosing its category now routes
+ * it" beside it, would promise a route that never comes. Reopened inside the
+ * window, it is work again and held again, which is what the columns say.
  *
  * Drawn before the list has a clock, unlike the window: with `now` null it
  * reads the columns alone — a window opened, nothing decided, nobody holding
@@ -102,7 +123,12 @@ function windowBadge(row: BadgeRow, now: Date | null): RowBadge | null {
  * from `/api/inbox` crossed JSON, and a string the type still calls a `Date`
  * would throw in `isHeld`.
  */
-export function routingHold(ticket: HoldColumns, now: Date | null): { until: Date | null } | null {
+export function routingHold(ticket: HoldTicket, now: Date | null): { until: Date | null } | null {
+  const work =
+    (ticket.statusCategory === 'open' || ticket.statusCategory === 'pending') &&
+    !ticket.isSpam &&
+    !ticket.mergedIntoId;
+  if (!work) return null;
   const endsAt = ticket.routingWindowEndsAt ? new Date(ticket.routingWindowEndsAt) : null;
   if (!endsAt || ticket.routingDecidedAt || ticket.assigneeAgentId) return null;
   if (now && !isHeld({ ...ticket, routingWindowEndsAt: endsAt }, now)) return null;
@@ -185,6 +211,10 @@ export function rowBadges(
       routingWindowEndsAt: row.routingUntil,
       routingDecidedAt: null,
       assigneeAgentId: row.assigneeId,
+      statusCategory: row.statusCategory,
+      isSpam: row.isSpam,
+      // `listInbox` lists no merged ticket.
+      mergedIntoId: null,
     },
     now,
   );

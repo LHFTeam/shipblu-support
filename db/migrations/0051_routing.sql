@@ -18,7 +18,9 @@ CREATE TABLE "routing_decisions" (
 	"window_ends_at" timestamp with time zone NOT NULL,
 	"started_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"phase_one_at" timestamp with time zone,
-	"decided_at" timestamp with time zone
+	"decided_at" timestamp with time zone,
+	"held_strategy" "assignment_strategy",
+	"held_actor_label" text
 );
 --> statement-breakpoint
 ALTER TABLE "channels" ADD COLUMN "routing_mode" "routing_mode" DEFAULT 'default_group' NOT NULL;--> statement-breakpoint
