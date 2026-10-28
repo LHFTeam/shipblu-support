@@ -49,7 +49,10 @@ export async function storeAgentReply(
       .update(conversations)
       .set({ lastMessageAt: new Date(), lastAgentMessageAt: new Date() })
       .where(eq(conversations.id, conversationId));
-    return endHold(tx, conversationId, 'manual', { agentId: message.authorAgentId });
+    return endHold(tx, conversationId, 'manual', {
+      agentId: message.authorAgentId,
+      decidesShadow: false,
+    });
   });
 
   // The clock stops when the agent writes, not when the provider accepts the

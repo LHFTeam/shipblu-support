@@ -1409,9 +1409,14 @@ README says why it is a setting and not a rule. The rules:
   judged against the locked row: a rule naming the ticket's own group matches
   on every pass and would end every hold on its channel, and "Unassigned" or a
   group-less `auto_assign` decides nothing about where the ticket goes. A no-op
-  on a ticket with no undecided row, so a caller need not ask first. Once phase one has written the router's decision, a rule ends nothing
-  — it is part of the pass the router waits for — and a person ends the hold
-  but keeps the router's outcome.
+  on a ticket with no undecided row, so a caller need not ask first. Once
+  phase one has written the router's decision, a rule ends nothing — it is
+  part of the pass the router waits for — and a person ends the hold but keeps
+  the router's outcome. What the hold owed (`afterHoldEnded`) follows the
+  caller's own `on_update` pass, never precedes it: the console's group and
+  assignee cases call it after `afterTicketUpdate`, so the rules decide the
+  group before anybody is assigned and before the held reply chooses its
+  calendar.
 - **A category is not a stamp.** A person's category edit during the hold
   routes the ticket now (`routeNow`), in place of the update pass the edit
   would have run; clearing one leaves the window running. A rule's
@@ -1485,8 +1490,11 @@ README says why it is a setting and not a rule. The rules:
   ticket kept, and only `default_group` releases one. It records when a category
   settles or at the window's end, a `pending` row waiting for `beginRouting`
   so that a rule gets the first word in shadow too, and a person's or a rule's
-  move through `endHold`. It never writes `routing_decided_at`, so moving the
-  channel to `category` later starts clean.
+  move or assignment through `endHold` — but not an agent's reply
+  (`decidesShadow: false`), since the rota assigned that agent on arrival,
+  which a live hold would have prevented. It never writes
+  `routing_decided_at`, so moving the channel to `category` later starts
+  clean.
 - **The readiness panel on `/admin/channels` reads what the code reads**
   (`lib/routing/readiness.ts`): `routingModeOf`, `routingStartFor`,
   `routeGroupSummaries` (assignment's `filterCandidates`), a group's hours as

@@ -4454,20 +4454,24 @@ gains another first, 0051 is regenerated rather than renumbered.
     that is a no-op write that ended the hold, and `afterHoldEnded` then
     assigned the ticket in its default group — the outcome the hold exists to
     prevent. It now ends one only by naming somebody, as `assign_agent` does.
+- **Fixed after the review of the build.**
+  - **The console's group and assignee cases now run the `on_update` pass
+    before anything is assigned or the held reply goes.** A group move used to
+    call `assignConversation` and then `afterTicketUpdate`, so a rule that
+    moved the ticket on left the first group's agent holding it — older than
+    Stage 5, and the order the two-phase argument warns against. The explicit
+    assignment is gone (the pass's own `autoAssign` assigns after the rules),
+    and a hold either case ended is followed by `afterHoldEnded` only after
+    the pass, so the reply is told the hours of the group the rules left. This
+    changes every console group move, held or not.
+  - **`endHold`'s `routed` event is stamped `CHANGE_STAMP`**, so it sorts after
+    the write that ended the hold in the same transaction.
+  - **An agent's reply does not count as a shadow decision**
+    (`decidesShadow: false`). On a shadow channel the rota assigns on arrival,
+    which a live hold would have prevented, so that agent answering is no
+    `manual` decision the live mode would have seen. A move or an assignment
+    by a person still counts.
 - **Left, with the reason.**
-  - **The console's group case on a held ticket runs `afterHoldEnded` before
-    the `on_update` pass.** A rule that then moves the ticket on leaves the
-    first group's agent holding it, and the customer was told the first
-    group's hours: the order the two-phase argument warns against. A group
-    move on an unheld ticket has done the same since before Stage 5
-    (`assignConversation`, then `afterTicketUpdate`), so the fix — the pass
-    first — is a change to the console's order, not to routing.
-  - **`endHold`'s `routed` event takes the column's default `now()`**, the
-    transaction's start, so inside a caller's transaction it sorts before
-    events stamped `CHANGE_STAMP` after the write that ended the hold. In Hand
-    to's grace-ran-out case the timeline reads `routed`, `group_changed`,
-    `unassigned` rather than the move first. Stamping it would order it after
-    the write.
   - **`transferred_away_count` counts only Hand to's `unassigned`**, the one
     assignment event that names `from` (`docs/PROJECT-STATE.md` §5.5). Older
     than this plan.

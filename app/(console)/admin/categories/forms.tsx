@@ -130,9 +130,8 @@ export function CategoriesTable({
           <>
             Route group{' '}
             <InfoTip label="Route group">
-              Where a ticket with this category goes on a channel that routes by category. No
-              channel does yet, so nothing moves because of it today. Without one, the ticket stays
-              in the group its channel puts it in.
+              Where a ticket with this category goes on a channel that routes by category
+              (/admin/channels). Without one, the ticket stays in the group its channel puts it in.
             </InfoTip>
           </>,
           <>

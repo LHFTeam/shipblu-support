@@ -1,6 +1,7 @@
 import { and, eq, ne, sql } from 'drizzle-orm';
 import type { db } from '@/db/client';
 import { conversationEvents, conversations, groups, routingDecisions } from '@/db/schema';
+import { CHANGE_STAMP } from '@/lib/tickets/change-stamp';
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
@@ -30,6 +31,13 @@ type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
  * the would-be outcome: a person or a rule moving a ticket the router was only
  * watching is what the shadow period exists to measure.
  *
+ * `actor.decidesShadow: false` is for a write that ends a live hold but says
+ * nothing about where a ticket goes — an agent's reply. On a shadow row the
+ * rota assigned the ticket on arrival, which a live hold would have
+ * prevented, so that agent answering it is no decision the live mode would
+ * have seen, and counting it as `manual` would inflate exactly the figure the
+ * shadow week is read for.
+ *
  * Answers whether it ended a live hold, which is what owes the held reply and
  * the assignment (`afterHoldEnded`) once the caller's transaction commits.
  */
@@ -37,7 +45,7 @@ export async function endHold(
   tx: Tx,
   conversationId: string,
   outcome: 'manual' | 'rule',
-  actor: { agentId?: string | null; label?: string | null },
+  actor: { agentId?: string | null; label?: string | null; decidesShadow?: boolean },
   now: Date = new Date(),
 ): Promise<boolean> {
   // The ticket's row first, as every routing writer takes them, whether or not
@@ -77,6 +85,7 @@ export async function endHold(
   // chosen whose calendar it speaks for. A router that died there leaves the
   // hold to `settle_routing`, which completes the decision either way.
   if (outcome === 'rule' && row.phaseOneAt) return false;
+  if (row.shadow && actor.decidesShadow === false) return false;
 
   const first = row.outcome === null;
   await tx
@@ -106,6 +115,9 @@ export async function endHold(
     await tx.insert(conversationEvents).values({
       conversationId,
       type: 'routed',
+      // After the write that ended the hold, which may stamp its own event
+      // the same way: the transaction's start would sort this before it.
+      createdAt: CHANGE_STAMP,
       actorAgentId: actor.agentId ?? null,
       actorLabel: actor.agentId ? null : (actor.label ?? 'routing'),
       data: {

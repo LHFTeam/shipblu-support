@@ -7,7 +7,6 @@ import { db } from '@/db/client';
 import { agents, conversationEvents, conversations, groups, ticketStatuses } from '@/db/schema';
 import { purgeConversation, type PurgeRefusal } from '@/lib/admin/purge';
 import { hiddenScopeRefusal } from '@/lib/admin/purge-visibility';
-import { assignConversation } from '@/lib/assignment';
 import { requireAgent } from '@/lib/auth/guard';
 import { ok } from '@/lib/http/action-state';
 import { uuidField } from '@/lib/http/form-data';
@@ -52,6 +51,9 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
 
   // Set by the category case when the edit routed a held ticket.
   let routedByCategory = false;
+  // Set when the edit ended a routing hold, whose assignment and held reply
+  // are owed once the observer rules below have run (`afterHoldEnded`).
+  let endedHold = false;
   switch (field) {
     case 'status': {
       if (!isUuid(value)) return { error: 'Unknown status' };
@@ -113,7 +115,7 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
         if (!assignee.isActive) return { error: 'That agent is deactivated' };
       }
 
-      const endedHold = await db.transaction(async (tx) => {
+      endedHold = await db.transaction(async (tx) => {
         await tx
           .update(conversations)
           .set({ assigneeAgentId, assignedAt: assigneeAgentId ? new Date() : null })
@@ -137,7 +139,6 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
           ? endHold(tx, conversationId, 'manual', { agentId: agent.id })
           : false;
       });
-      if (endedHold) await afterHoldEnded(conversationId);
       break;
     }
 
@@ -183,11 +184,12 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
       // can keep their own operating days and holidays.
       await afterRoutingChanged(conversationId, { category: false, group: true });
 
-      // The new team may route automatically where the old one did not. A no-op
-      // if somebody already holds the ticket, which is the usual case. A hold
-      // the move ended owes its out-of-hours reply too.
-      if (move.endedHold) await afterHoldEnded(conversationId);
-      else await assignConversation(conversationId, { actorLabel: 'auto_assign' });
+      // The new team may route automatically where the old one did not: the
+      // update pass below assigns the ticket, after the observer rules, so a
+      // rule that moves it on from here is obeyed before anybody holds it —
+      // assigning first left the group the person chose holding a ticket a
+      // rule had sent elsewhere. A hold the move ended owes its reply too.
+      endedHold = move.endedHold;
       break;
     }
 
@@ -346,6 +348,9 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
   // so a rule cannot trigger itself. Not after a category edit that routed a
   // held ticket, whose router ran them already.
   if (!routedByCategory) await afterTicketUpdate(conversationId);
+  // After the rules, so the held reply is told the hours of the group they
+  // left the ticket in.
+  if (endedHold) await afterHoldEnded(conversationId);
 
   refresh(row.conversation.number);
 

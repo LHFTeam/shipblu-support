@@ -99,7 +99,7 @@ export async function restoreCategory(
 
 /**
  * The classifier's switch, the share below which an answer never settles a
- * ticket, and the routing window Stage 5 will read — one form, one row.
+ * ticket, and the router's window (`lib/routing/start.ts`) — one form, one row.
  *
  * `admin.categories`, the page's own gate: whoever decides what the categories
  * are decides whether Jev files tickets under them. Saving is allowed with no
