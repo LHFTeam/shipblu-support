@@ -37,10 +37,11 @@ const log = logger('rollup');
  * same measurement rather than two definitions that drift apart, and a team
  * that watches both never has to work out which one is lying.
  *
- * Four slices are produced per day — the totals, and then by group, by agent
- * and by channel — with null meaning "all" in each dimension. Storing every
- * combination instead would multiply the row count for cuts nobody asks for;
- * these four are the questions a support team actually has.
+ * Five slices are produced per day — the totals, and then by group, by agent,
+ * by channel and by category — with null meaning "all" in each dimension, and
+ * no row naming two (`metrics_daily_one_dimension`). Storing every combination
+ * instead would multiply the row count for cuts nobody asks for; these five are
+ * the questions a support team actually has.
  *
  * The agent a ticket's figures belong to is the one its SLA counted against
  * when each happened (`accountableOrAssigneeAt`): the owner of the WhatsApp
@@ -52,6 +53,33 @@ const log = logger('rollup');
  * re-file the days before it when the nightly run rebuilds them. Surveys are
  * the exception: a score is the survey's own snapshot of who handled the
  * ticket.
+ *
+ * The category is read the other way: a ticket's figures are filed under its
+ * category as it stands when the day is rolled up (`conversations.category_id`),
+ * every figure alike, and a survey under the category of the ticket it is on,
+ * since `csat_surveys` keeps none of its own. That is the rule the group
+ * already follows, and the report draws the two side by side, so a ticket
+ * handed to another team and re-filed reads as one ticket in both tables. Not
+ * as of each figure's instant, as the agent is, for three reasons. A category
+ * charges nobody, and fairness to a person was the only reason the agent is
+ * frozen. A person's correction is the ground truth Jev is graded against, so
+ * a rebuild should take it up rather than keep the guess it replaced. And as
+ * of its creation every ticket had no category at all: `CHANGE_STAMP` stamps
+ * even `createTicket`'s own `category_changed` after the row's `created_at`,
+ * so a created figure filed that way would be under no category for every
+ * ticket, and a backlog filed afterwards (`backfill_category_ai mode=apply`)
+ * would never appear on its own days.
+ *
+ * What that costs is a drift, bounded, and the one the group already has. The
+ * nightly run recomputes three days, so a relabel moves those days' figures
+ * with the ticket; an older day moves only when somebody rebuilds it with
+ * `rollup_metrics from=`, and until then still files the ticket where it was.
+ * And a ticket relabelled after its first response is filed under its new
+ * category with the "Within SLA" verdict of the policy its old one chose,
+ * since the policy follows the category only until somebody answers. A ticket
+ * nothing has filed is in the totals and in no category slice, so "no
+ * category" is the totals less the category slices — never negative, because
+ * `reconciles` refuses a day whose category slices sum past its totals.
  */
 
 /**
@@ -204,24 +232,41 @@ export async function earliestDay(zone: string): Promise<string | null> {
   return dateIn(new Date(first), zone);
 }
 
-export type Dimensions = { groupId: string | null; agentId: string | null; channel: string | null };
+/**
+ * What a slice is keyed on, in the order a day's slices list them.
+ *
+ * The type below is made from this list rather than written beside it,
+ * because the list is what the bucket key, the totals test and the round trip
+ * back into a `Slice` all read: a dimension the type names and they did not
+ * would be one a fact could be filed under and the key could not tell apart,
+ * and a category slice keyed without its category is the totals' own key —
+ * every categorised fact counted in the totals twice.
+ */
+const DIMENSIONS = ['groupId', 'agentId', 'channel', 'categoryId'] as const;
+
+export type Dimensions = Record<(typeof DIMENSIONS)[number], string | null>;
+
+/** The totals slice: "all" in every dimension. */
+const ALL: Dimensions = { groupId: null, agentId: null, channel: null, categoryId: null };
 
 /**
  * The rows one ticket's numbers belong in: the totals, plus one row per
- * dimension the ticket actually has.
+ * dimension the ticket actually has, each naming that dimension alone.
  *
  * A ticket nobody is accountable for and nobody holds counts in the totals but
- * not in a "by agent" row, which would otherwise read as an agent called null.
+ * not in a "by agent" row, which would otherwise read as an agent called null;
+ * one nothing has filed is in no "by category" row for the same reason.
  * Exported because getting this wrong is invisible in the output — it inflates
  * every figure rather than producing an obviously broken one — so it is worth
  * a test of its own.
  */
 export function slicesFor(dims: Dimensions): Dimensions[] {
-  const slices: Dimensions[] = [{ groupId: null, agentId: null, channel: null }];
+  const slices: Dimensions[] = [{ ...ALL }];
 
-  if (dims.groupId) slices.push({ groupId: dims.groupId, agentId: null, channel: null });
-  if (dims.agentId) slices.push({ groupId: null, agentId: dims.agentId, channel: null });
-  if (dims.channel) slices.push({ groupId: null, agentId: null, channel: dims.channel });
+  if (dims.groupId) slices.push({ ...ALL, groupId: dims.groupId });
+  if (dims.agentId) slices.push({ ...ALL, agentId: dims.agentId });
+  if (dims.channel) slices.push({ ...ALL, channel: dims.channel });
+  if (dims.categoryId) slices.push({ ...ALL, categoryId: dims.categoryId });
 
   return slices;
 }
@@ -259,6 +304,48 @@ export const RATING_COLUMNS = [
   'csatRating4',
   'csatRating5',
 ] as const satisfies readonly (keyof Bucket)[];
+
+export type SliceAccumulator = {
+  add: (dims: Dimensions, apply: (bucket: Bucket) => void) => void;
+  slices: () => Slice[];
+};
+
+/**
+ * Gathers a day's facts into its slices: each fact `add`ed once, with the
+ * dimensions of the ticket it is about, counts in the totals and in every
+ * slice `slicesFor` names for it.
+ *
+ * Each slice is kept whole in the map, dimensions beside its bucket, so what
+ * comes out is what went in. The dimensions used to be read back out of the
+ * key with `key.split('|')`, and a split that names one segment fewer than the
+ * key holds hands every category slice back as a second all-null slice: two
+ * totals rows on the day, both summed by every reader, which `reconciles`
+ * could not see while it compared only the first against the channels (it
+ * counts them now, and `metrics_daily_slice_key` refuses the second at insert).
+ * Exported so the round trip is tested without Postgres.
+ */
+export function sliceAccumulator(): SliceAccumulator {
+  const slices = new Map<string, Slice>();
+
+  const sliceFor = (dims: Dimensions): Slice => {
+    // Every dimension, from the list the type is made of, and null kept apart
+    // from any string a dimension could hold.
+    const key = JSON.stringify(DIMENSIONS.map((name) => dims[name]));
+    const existing = slices.get(key);
+    if (existing) return existing;
+
+    const fresh: Slice = { ...dims, bucket: emptyBucket() };
+    slices.set(key, fresh);
+    return fresh;
+  };
+
+  return {
+    add: (dims, apply) => {
+      for (const slice of slicesFor(dims)) apply(sliceFor(slice).bucket);
+    },
+    slices: () => [...slices.values()],
+  };
+}
 
 export function emptyBucket(): Bucket {
   return {
@@ -306,12 +393,7 @@ export async function computeDay(
   const { start: from, end: endOfDay } = window;
   const to = until && until < endOfDay ? until : endOfDay;
 
-  const buckets = new Map<string, Bucket>();
-
-  /** Adds one fact to the totals and to each single-dimension slice. */
-  const add = (dims: Dimensions, apply: (bucket: Bucket) => void) => {
-    for (const slice of slicesFor(dims)) apply(bucketFor(buckets, slice));
-  };
+  const { add, slices } = sliceAccumulator();
 
   const worked = workedConversation();
 
@@ -321,6 +403,7 @@ export async function computeDay(
       channel: conversations.channel,
       groupId: conversations.groupId,
       agentId: accountableOrAssigneeAt(conversations.createdAt),
+      categoryId: conversations.categoryId,
     })
     .from(conversations)
     .where(
@@ -345,6 +428,7 @@ export async function computeDay(
       channel: conversations.channel,
       groupId: conversations.groupId,
       agentId: accountableOrAssigneeAt(conversations.firstRespondedAt),
+      categoryId: conversations.categoryId,
       createdAt: conversations.createdAt,
       firstRespondedAt: conversations.firstRespondedAt,
       firstResponseDueAt: conversations.firstResponseDueAt,
@@ -385,6 +469,7 @@ export async function computeDay(
       channel: conversations.channel,
       groupId: conversations.groupId,
       agentId: accountableOrAssigneeAt(conversations.resolvedAt),
+      categoryId: conversations.categoryId,
       createdAt: conversations.createdAt,
       resolvedAt: conversations.resolvedAt,
       resolutionDueAt: conversations.resolutionDueAt,
@@ -428,6 +513,7 @@ export async function computeDay(
       channel: conversations.channel,
       groupId: conversations.groupId,
       agentId: accountableOrAssigneeAt(conversationEvents.createdAt),
+      categoryId: conversations.categoryId,
     })
     .from(conversationEvents)
     .innerJoin(conversations, eq(conversations.id, conversationEvents.conversationId))
@@ -467,6 +553,10 @@ export async function computeDay(
       // the survey had a channel — without one, a fact would land in the
       // totals and in no channel slice, and `reconciles` would refuse the day.
       channel: sql<string>`coalesce(${csatSurveys.channel}, ${conversations.channel})`,
+      // The ticket's, as it stands: a survey keeps no category of its own, and
+      // the header says why the current one is what every figure reads — so a
+      // score and the resolution it was asked about are in one category.
+      categoryId: conversations.categoryId,
     })
     .from(csatSurveys)
     .innerJoin(conversations, eq(conversations.id, csatSurveys.conversationId))
@@ -486,7 +576,7 @@ export async function computeDay(
   for (const row of surveys) {
     // The agent and group are the survey's own snapshot, not the ticket's
     // current owner: a score belongs to whoever handled it at the time.
-    add({ groupId: row.groupId, agentId: row.agentId, channel: row.channel }, (bucket) => {
+    add(dimsOf(row), (bucket) => {
       if (inDay(row.sentAt)) bucket.csatSentCount += 1;
       if (row.status === 'skipped' && inDay(row.createdAt)) bucket.csatSkippedCount += 1;
 
@@ -505,10 +595,7 @@ export async function computeDay(
     });
   }
 
-  return [...buckets.entries()].map(([key, bucket]) => {
-    const [groupId, agentId, channel] = key.split('|');
-    return { groupId: groupId || null, agentId: agentId || null, channel: channel || null, bucket };
-  });
+  return slices();
 }
 
 /**
@@ -556,24 +643,43 @@ export function surveyedConversation(ticket: TicketColumns = conversations) {
 }
 
 /**
- * Whether a day's slices agree with each other.
+ * Why a day's slices disagree with each other, completing "totals do not match
+ * …", or null when they agree. `reconciles` is the same question as a yes or
+ * no; the nightly job logs this, so its one line says which rule a day broke.
  *
- * Every countable fact carries a channel — `conversations.channel` is NOT NULL —
- * so each one lands in exactly one channel slice, and the totals row must equal
- * the sum of them. That equality is precisely what the double-counted totals
- * slice broke, and it is cheap enough to assert on every write.
+ * Three rules, each one a bug that is invisible in the output — a totals row
+ * that reads high looks like a busy day, not like a bug — and each cheap
+ * enough to assert on every write:
  *
- * Checked rather than assumed because the failure is invisible in the output: a
- * totals row that reads high looks like a busy day, not like a bug.
+ * - **One totals row.** `totalsOf` reads the first slice with every dimension
+ *   null, so a second one — a category slice that lost its category on the
+ *   way back out of the accumulator — is never compared with anything, and
+ *   every reader sums both. `metrics_daily_slice_key` refuses it at insert,
+ *   before this runs; here it is the same rule in code, so every test that
+ *   asks this of `computeDay` holds the accumulator to it without a write.
+ * - **The totals are the sum of the channel slices.** Every countable fact
+ *   carries a channel — `conversations.channel` is NOT NULL — so each one lands
+ *   in exactly one channel slice. That equality is precisely what the
+ *   double-counted totals slice broke. Group, agent and category slices have no
+ *   channel, so they are not in the sum, as they must not be: an unassigned
+ *   ticket is in no agent slice, and an unfiled one in no category slice.
+ * - **No column of the category slices sums past the totals.** A ticket has
+ *   one category or none, so a fact is in at most one category slice, and every
+ *   column is a count or a sum of non-negative figures. Not an equality,
+ *   because a ticket nothing has filed is in none; a sum above the totals is a
+ *   fact filed twice, and would make the report's "no category" row negative.
  */
-export function reconciles(slices: Slice[]): boolean {
+export function reconcileFailure(slices: Slice[]): string | null {
+  const totalsRows = slices.filter(isTotals).length;
+  if (totalsRows > 1) return `each other: ${totalsRows} slices name no dimension`;
+
   const totals = totalsOf(slices);
+  const sumOf = (rows: Slice[], pick: (bucket: Bucket) => number) =>
+    rows.reduce((running, slice) => running + pick(slice.bucket), 0);
+
   const byChannel = slices.filter((slice) => slice.channel !== null);
-
-  const sum = (pick: (bucket: Bucket) => number) =>
-    byChannel.reduce((running, slice) => running + pick(slice.bucket), 0);
-
-  return (
+  const sum = (pick: (bucket: Bucket) => number) => sumOf(byChannel, pick);
+  const channelsAgree =
     totals.ticketsCreated === sum((b) => b.ticketsCreated) &&
     totals.ticketsResolved === sum((b) => b.ticketsResolved) &&
     totals.ticketsReopened === sum((b) => b.ticketsReopened) &&
@@ -582,16 +688,34 @@ export function reconciles(slices: Slice[]): boolean {
     totals.csatResponseCount === sum((b) => b.csatResponseCount) &&
     totals.csatSentCount === sum((b) => b.csatSentCount) &&
     totals.csatSkippedCount === sum((b) => b.csatSkippedCount) &&
-    RATING_COLUMNS.every((column) => totals[column] === sum((b) => b[column]))
+    RATING_COLUMNS.every((column) => totals[column] === sum((b) => b[column]));
+  if (!channelsAgree) return 'the sum of the channel slices';
+
+  const byCategory = slices.filter((slice) => slice.categoryId !== null);
+  const over = BUCKET_COLUMNS.find(
+    (column) => sumOf(byCategory, (b) => b[column]) > totals[column],
   );
+  if (over) return `the category slices, which sum past them in ${over}`;
+
+  return null;
+}
+
+/** Whether a day's slices agree with each other: `reconcileFailure` says how not. */
+export function reconciles(slices: Slice[]): boolean {
+  return reconcileFailure(slices) === null;
+}
+
+/** Every column of a bucket, from the one place that lists them all. */
+const BUCKET_COLUMNS = Object.keys(emptyBucket()) as (keyof Bucket)[];
+
+/** "All" in every dimension, read from the list the type is made of. */
+function isTotals(slice: Dimensions): boolean {
+  return DIMENSIONS.every((name) => slice[name] === null);
 }
 
 /** The all-dimensions-null slice, which is the one a dashboard leads with. */
 export function totalsOf(slices: Slice[]): Bucket {
-  const total = slices.find(
-    (slice) => slice.groupId === null && slice.agentId === null && slice.channel === null,
-  );
-  return total?.bucket ?? emptyBucket();
+  return slices.find(isTotals)?.bucket ?? emptyBucket();
 }
 
 /** Slices as `metrics_daily` rows, ready to insert. */
@@ -601,6 +725,7 @@ export function asRows(day: string, slices: Slice[]): (typeof metricsDaily.$infe
     groupId: slice.groupId,
     agentId: slice.agentId,
     channel: slice.channel as (typeof metricsDaily.$inferInsert)['channel'],
+    categoryId: slice.categoryId,
     ...slice.bucket,
     computedAt: new Date(),
   }));
@@ -610,18 +735,14 @@ function dimsOf(row: {
   channel: string;
   groupId: string | null;
   agentId: string | null;
+  categoryId: string | null;
 }): Dimensions {
-  return { groupId: row.groupId, agentId: row.agentId, channel: row.channel };
-}
-
-function bucketFor(buckets: Map<string, Bucket>, dims: Dimensions): Bucket {
-  const key = `${dims.groupId ?? ''}|${dims.agentId ?? ''}|${dims.channel ?? ''}`;
-  const existing = buckets.get(key);
-  if (existing) return existing;
-
-  const fresh = emptyBucket();
-  buckets.set(key, fresh);
-  return fresh;
+  return {
+    groupId: row.groupId,
+    agentId: row.agentId,
+    channel: row.channel,
+    categoryId: row.categoryId,
+  };
 }
 
 /**
