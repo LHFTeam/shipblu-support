@@ -87,7 +87,7 @@ update.
 | 4.0   | Merged: #425 (`1c733c2`), then `dev` → `main` in #428 (`156004d`). As built below                                                           | **Done.** All six services live on `156004d` by 07:45:42 UTC on 2026-10-27, web first. Its checks read clean (below)                                                                                                      |
 | 4.1   | Merged: #427 (`959404a`), then `dev` → `main` in #430 (`dbf4376`). As built below                                                           | **Done.** All six services live on `dbf4376` by 12:07:54 UTC on 2026-10-27, web first, with `0050` applied. Shipped off: no settings row. Its checks read clean (below)                                                   |
 | 4.2   | Merged: #429 (`c6eb1ac`), then `dev` → `main` in #431 (`ad6a062`). As built below                                                           | **Done.** All six services live on `ad6a062` by 21:49:08 UTC on 2026-10-27, web first; code only. Its checks read clean (below). Its operations wait for the user's go-ahead                                              |
-| 5.1   | In review, branch `claude/jolly-noether-hxhez1-stage-5-1`, PR pending. As built below                                                       | —                                                                                                                                                                                                                         |
+| 5.1   | In review as #432, branch `claude/jolly-noether-hxhez1-stage-5-1`. As built below                                                           | —                                                                                                                                                                                                                         |
 | 5.2–6 | Not started                                                                                                                                 | —                                                                                                                                                                                                                         |
 
 **4.2's deploy and checks, read on Render and production on 2026-10-27.**
@@ -502,7 +502,7 @@ Every production write needs the user's go-ahead for that step, and the
    off; from 4.1, `156004d`, and the tables stay, since nothing reads them
    there.
 8. **5.1 is built, and in review** on `claude/jolly-noether-hxhez1-stage-5-1`,
-   PR pending: [5.1, as built](#51-as-built). Deploy web first, since it
+   #432: [5.1, as built](#51-as-built). Deploy web first, since it
    migrates `0051_routing`; then the worker and **all four** crons, before any
    channel leaves `default_group`. Two of the crons assign: an old
    `shipblu-sla-sweep` runs an `assign_sweep` that assigns held tickets, and an

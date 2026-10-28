@@ -20,7 +20,7 @@ web first: `dbf4376` (#430, Stage 4.1, the classifier shipped off, applying
 `0050_category_ai`) by 12:07:54 UTC, and `156004d` (#428, Stage 4.0, code
 only) by 07:45:42 UTC. The plan's status section has each deploy's reads.
 
-**Stage 5.1 of that plan, routing by category, is built and in review, not
+**Stage 5.1 of that plan, routing by category, is built and in review as #432, not
 deployed** (this file's §5.1, beside the category classifier). Deployed, it
 routes nothing until an admin moves a channel off `default_group` _and_ the
 classifier is in `apply`, but four things change on every ticket at once (§5.1):
