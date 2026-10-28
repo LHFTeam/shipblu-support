@@ -18,6 +18,7 @@ import { afterHoldEnded } from './after-hold';
 import { decide, type DecidedOutcome } from './decide';
 import { endHoldOnRow } from './end-hold';
 import { routingModeOf } from './mode';
+import { SETTLE_ROUTING_PRIORITY } from './start';
 
 const log = logger('routing');
 
@@ -142,7 +143,10 @@ export async function settleRouting(
     await enqueue(
       'settle_routing',
       { conversationId },
-      { runAt: new Date(step.phaseOneAt.getTime() + PHASE_ONE_RESUME_MS + 1_000), priority: 40 },
+      {
+        runAt: new Date(step.phaseOneAt.getTime() + PHASE_ONE_RESUME_MS + 1_000),
+        priority: SETTLE_ROUTING_PRIORITY,
+      },
     );
     return 'requeued';
   }
@@ -194,7 +198,9 @@ async function phaseOne(
     }
     // The caller that wrote it is gone. Its decision stands; what it owed is
     // finished from what it wrote.
-    log.warn('completing an interrupted decision', { conversationId, outcome: row.outcome ?? '' });
+    log.warn(
+      `completing an interrupted decision conversation=${conversationId} outcome=${row.outcome ?? 'none'}`,
+    );
     const outcome = (row.outcome ?? 'fallback') as DecidedOutcome;
     return {
       kind: 'decided',

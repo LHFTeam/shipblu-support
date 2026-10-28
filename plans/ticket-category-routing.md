@@ -508,8 +508,10 @@ Every production write needs the user's go-ahead for that step, and the
    `shipblu-sla-sweep` runs an `assign_sweep` that assigns held tickets, and an
    old `shipblu-time-automations` runs rules whose `auto_assign` assigns them
    and whose `assign_group` moves one without ending its hold. Deployed, it
-   changes nothing: every channel reads `default_group`, and nothing is held or
-   enqueued until an admin moves one while the classifier is in `apply`.
+   routes nothing: every channel reads `default_group`, and nothing is held or
+   enqueued until an admin moves one while the classifier is in `apply`. Two
+   things change on every ticket at once, decisions 6 and 7 below: the
+   out-of-hours acknowledgement's guards, and assignment's locks.
 9. **Before Stage 5.2 turns routing on**, a person does 0.2's reorder and 0.6's
    staffing, the support lead answers the questions still open (below), and the
    classifier reaches `apply` by 4.2's sequence.
@@ -4247,6 +4249,278 @@ enqueues `settle_routing` until an admin changes a channel's mode.
   - `AGENTS.md` gets a "Routing by category" section with decision 5's rules.
   - The handbook gets an article on routing, the hold, the "Routing…" badge
     and "Hand to <group>".
+
+#### 5.1, as built
+
+Built on 2026-10-27 and 2026-10-28 on `claude/jolly-noether-hxhez1-stage-5-1`,
+off `dev` at `c6eb1ac`. `0051_routing` is the newest migration, so if `dev`
+gains another first, 0051 is regenerated rather than renumbered.
+
+- **What landed, by the spec's bullets.**
+  - **Schema.** `0051_routing` creates the `routing_mode`, `routing_stage` and
+    `routing_outcome` types — new types, so deploy rule 5 does not apply — and
+    adds `channels.routing_mode` (`not null default 'default_group'`), the two
+    columns on `conversations` and `routing_decisions`, unique per ticket.
+    `db/sql/001` adds both columns to `queue_relevant`. `db/sql/003` adds
+    `routing_decisions_decided_complete`: a decided row carries its outcome and
+    `decided_at`, the two things the routing report counts, so a hand-run
+    repair or a later writer cannot leave the report silently short.
+  - **`lib/routing/`.** `mode.ts`, `hold.ts` and `decide.ts` are pure, as is
+    `mode-copy.ts`: the labels, and the one sentence each for a row that never
+    routes and a mode the classifier leaves idle, which the forms, the action
+    and the panel share. `start.ts` (`planRouting`, `startRouting`),
+    `begin.ts`, `apply.ts` (`routeNow`, `settleRouting`), `end-hold.ts`,
+    `after-hold.ts` (`afterHoldEnded`), `state.ts` (`undecidedRouting`),
+    `hand-to.ts` and `readiness.ts`.
+  - **Wired.** Email, WhatsApp, Meta direct messages and comments, and the
+    widget; the creation pass; assignment (`awaiting_route` and `moved`,
+    neither recorded, and `endsHoldAs`); the out-of-hours reply; the engine's
+    three stamps, and `afterHoldEnded` after a pass whose rule ended a hold;
+    the sweep's escalation; the classifier's four cases; the agent reply; the
+    console's assignee, group and category cases; the onboarding job's reset;
+    and `backfill_category_ai`'s `apply`, which leaves a ticket the router is
+    still holding (`held for routing`), since `settle_routing` would route on
+    the filing.
+  - **`settle_routing {conversationId}`.** A strict payload, priority 40, the
+    key `settle_routing:<id>`, a handler that ends on `subjectGone`, a place
+    beside `send_csat` in `purge-jobs` and a `skip:` line in `db-jobs.txt`.
+  - **Console.** The inbox row and the ticket header carry "Routing until
+    15:05" while the window is ahead and "Routing…" after; the sidebar says
+    under Assignee, Group and Category what changing each does to a held
+    ticket; `routed` has a sentence for each of the eight outcomes; and "Hand
+    to <group>" sits under the Category field.
+  - **Admin.** Every form that posts to `saveChannel` carries a Routing select
+    with an `InfoTip`, disabled with the reason on a coexistence number and the
+    bot. `saveChannel` reads an absent field as unchanged (`formData.get`,
+    which tells absent from empty), refuses a category mode on those rows, and
+    saves one while the classifier is not in `apply` with a notice that it
+    holds nothing. The readiness panel is on `/admin/channels`.
+  - **Handbook.** A `routing` article in the tickets folder — the badge, the
+    sidebar's hints, what ends a hold, the timeline line, "Hand to <group>" —
+    and the Group field, channel and category passages amended.
+  - **Tests.** Pure: `decide.test.ts` (every outcome, the precedence between
+    each pair, shadow ignoring machine assignments), `mode.test.ts` (the lists
+    held to the enums, a coexistence row whose column says `category`, the
+    bot), `hold.test.ts` (the grace to the millisecond) and `hand-to.test.ts`,
+    with new badge and `routed` sentence cases.
+    Against Postgres, each case in the spec's list and more:
+    - `begin.db.test.ts`: the insert, `planRouting`, the race into the
+      creation pass, a rule's first word, the creation pass and the SLA, and
+      shadow at creation;
+    - `apply.db.test.ts`: `routeNow`, the two-phase order, what ends a hold
+      early, and the held reply once for every way a hold ends and never
+      after an agent answered;
+    - `settle.db.test.ts`: the window's end, an interrupted decision, the
+      route's policy with its pause credit, and shadow;
+    - `ingest-routing.db.test.ts`: every ingest path, what starts nothing, and
+      a duplicate delivery processed at once;
+    - `routing-hold.db.test.ts` (the engine), `hand-to.db.test.ts`,
+      `readiness.db.test.ts` and `db/sql/routing-decision-check.db.test.ts`;
+    - new cases in the assignment, sweep, out-of-hours, agent reply,
+      classifier, backfill, `saveChannel` and onboarding tests, among them
+      `awaiting_route` covering the sweep, the settle and the sweep at the
+      window's end, and the grace lapsing on a stuck job before a settle that
+      records `taken`.
+- **Decisions taken while building.**
+  1. **`beginRouting` runs after `applySlaOnCreate`**, not straight after the
+     `on_create` rules as decision 5 had it. That order left a ticket an
+     `on_create` rule had filed with no SLA policy at all when the route moved
+     nothing (`no_route_for_category`), and gave a moved one its first policy
+     through an `sla_recalculated` describing a change nothing made. "After
+     the rules" still holds, so a rule keeps the first word.
+  2. **Routing starts only while the classifier is in `apply`, live and shadow
+     alike** (`routingStartFor`). Off or in shadow it files nothing: a live
+     hold would wait out every window for nothing, and a shadow record would
+     read `fallback` for every ticket, measuring the classifier's absence
+     rather than the route.
+  3. **Some tickets never start**: one assigned in its insert, which is an
+     owned plain WhatsApp number's, whose owner is outside the rota; spam,
+     meaning an email bounce or out-of-office; a WhatsApp number no row names,
+     which has no mode for the router to re-read; and the bot and coexistence
+     rows (`routingModeOf`). The first two would only ever be recorded `taken`
+     or `not_open`. A deactivated owner counts as nobody, so that number's
+     tickets route like a team number's.
+  4. **The held reply answers the message that opened the ticket**
+     (`routing_decisions.message_id`), the one the creation pass would have
+     answered, and not the newest inbound row.
+  5. **The rules run whenever the ticket carries a category**, whatever the
+     outcome but `not_open` — not only after a decision that "settled a
+     category or moved the group". A ticket `released` or found `taken` after
+     Jev filed it still owes the `on_update` pass Jev gave up for the router.
+     A ticket with no category has nothing for the rules to react to, and its
+     hold ends in phase one.
+  6. **The answered guard is scoped to the closed stretch**: the agent's last
+     reply at or after the customer's last message, _or_ an agent's reply out
+     of hours with nothing opened since. With the first half alone, an agent's
+     23:02 reply that ended a hold claims nothing, and the customer's 23:05
+     message is told "we are closed". It applies to every ticket.
+  7. **`assignConversation` locks the ticket, then the group** — the order the
+     router, `endHold`, the console and Hand to take — and re-reads the
+     assignee, the group and the hold under it. A re-read under the group's
+     lock alone could not see a move out of the group. It also checks its
+     guarded update's result: before, a write that matched nothing still moved
+     the cursor and wrote `assigned` (`docs/PROJECT-STATE.md` §6.105).
+  8. **A grouped `auto_assign` ends the hold inside `assignConversation`'s move
+     transaction** (`endsHoldAs`), so the move and the stamp commit together:
+     stamped first, the sweep could assign in the group being left; stamped
+     after, a crash between would leave the ticket in the rule's group still
+     held, for the router to move away from the rule. `group_changed` stays
+     outside that transaction, as 4.0 placed it, so a failed event insert
+     cannot take the follow-up with it (`lib/sla/reselect-policy.db.test.ts`).
+  9. **The sweep's escalation skips held tickets.** Unassigned by design, in a
+     group it may be leaving, a held ticket would make that group's lead a
+     watcher on another team's work.
+  10. **A `routed` event for every live decision, and one when `endHold`
+      writes `manual` or `rule`**, so a hold a person or a rule ended says so
+      on the page too.
+  11. **Shadow records when a category settles** — `beginRouting`, the
+      classifier while the row is `holding`, a person — or at `settle_routing`.
+      A `pending` shadow row waits for `beginRouting`, so a rule gets the first
+      word in shadow too.
+  12. **A person's category edit routes a held ticket only when it sets a
+      category.** Clearing one settles nothing, and the window runs on.
+  13. **`settle_routing` meeting a phase one younger than a minute enqueues
+      itself again without a key**, at phase one plus 61 s. The first key is
+      spent for good, and this is the same work legitimately asked for again.
+  14. **`not_open` includes merged.**
+- **Where else it departs from decision 5's text.**
+  - **A shadow row is `released` only by `default_group`.** A channel moved
+    on from `category_shadow` to `category` still wants the shadow ticket's
+    would-be answer.
+  - **`endHold(tx, id, outcome, actor, now)` answers whether it ended a live
+    hold**, which is what owes `afterHoldEnded`. Once phase one has written
+    the router's decision a rule ends nothing — its move is part of the pass
+    the router waits for, and ending the hold there would let the next rule's
+    group-less `auto_assign` hand the ticket out before a later rule moved it
+    — and a person ends the hold but keeps the router's outcome.
+  - **The classifier's `holding` case checks who decided when the router
+    answers `none`** (`decidedByHold`): after a person or a rule the relabel is
+    still owed, after the router it would fire every category rule twice.
+  - **`saveChannel` decides a WhatsApp row's mode inside its UPDATE**, a
+    `case` on the coexistence object, and `complete_coexistence_onboarding`
+    resets the column in the statement that takes the row's lock. Either alone
+    loses to the other's order: a form opened before an adoption would put
+    back the mode the job had just cleared.
+  - **The readiness panel is on `/admin/channels`**, beside the control it
+    informs, not on `/admin/categories`, which keeps its route-group badges.
+    Besides the spec's facts it names the channel rows whose mode does nothing
+    — a second row of a type tickets are not filed under, an inactive one, an
+    owned number — and the active rules that would end a hold on the channel,
+    read through the engine's own condition evaluator. Production's two
+    `on_create` web chat rules (read 10:06 UTC on 2026-10-28: `assign_group`
+    to Merchant Care for a requester with an email and to Customer Care for
+    one without, both `channel eq webchat`) move every new web chat ticket
+    out of Support, so on that row every hold ends as `rule` and the router
+    decides nothing. That is by design: rules decide.
+- **"Hand to <group>" and the badge.**
+  - **Offered by state, not by "a category edit just happened"**: to an agent
+    holding `ticket.assign`, on open or pending work, not held, whose
+    category's route group is somewhere else — an agent who went to ask
+    somebody is still owed the button. Not on a number whose active owner
+    answers for the ticket, since the rota would hand the cleared ticket
+    straight back to them (the Group field still moves it; a deactivated
+    owner counts as nobody), nor on a coexistence number. A retired category
+    still routes, as `decide` routes on one.
+  - **The page and the write ask one pure function.** `handToTarget` decides
+    on what the page already loaded, and `handToRouteGroup` asks it again of
+    the row it has locked. The form's `groupId` is only a staleness check:
+    a category changed since the page loaded is refused as `changed`, never
+    followed to a group the agent never saw named.
+  - **One transaction, the ticket's row first**: the move, `group_changed`
+    `{to, from}`, the assignee cleared with `unassigned` `{to: null, from}`
+    when somebody held it, both stamped `CHANGE_STAMP`, and `endHold` as
+    `manual`, which only matters on a ticket whose grace ran out. After it:
+    `afterRoutingChanged`, then the `on_update` pass — every console edit owes
+    one, and run before assignment a rule moving the ticket on does not leave
+    the new group's agent holding it — then `assignConversation`, which writes
+    `assigned`, then `afterHoldEnded` if a live hold ended. The spec's three
+    events are there; the pass between is this build's.
+  - **Nobody to assign is still a success**, with a sentence saying the ticket
+    waits in the group's queue. Two clicks only when the hand-over would
+    unassign a colleague. Refusals re-read the page, since most mean it is
+    stale.
+  - **The badge is the `automated` tone, never coral**, reads "Routing until
+    HH:MM" in Cairo time while the window is ahead and "Routing…" after, and
+    is drawn from the columns alone until the browser has a clock, so the
+    server and the first client render agree. `InboxRow` gains one field,
+    `routingUntil`, so no reader can pair a window with a decision it did not
+    read.
+- **Found while building.**
+  - **Fixed: auto-assignment recorded an assignment it had not made**
+    (decision 7, `docs/PROJECT-STATE.md` §6.105). In production on
+    `ad6a062`.
+  - **Fixed before it shipped: "Unassigned" ended a hold.** The console's
+    assignee case called `endHold` for an empty choice too. On a held ticket
+    that is a no-op write that ended the hold, and `afterHoldEnded` then
+    assigned the ticket in its default group — the outcome the hold exists to
+    prevent. It now ends one only by naming somebody, as `assign_agent` does.
+- **Left, with the reason.**
+  - **The console's group case on a held ticket runs `afterHoldEnded` before
+    the `on_update` pass.** A rule that then moves the ticket on leaves the
+    first group's agent holding it, and the customer was told the first
+    group's hours: the order the two-phase argument warns against. A group
+    move on an unheld ticket has done the same since before Stage 5
+    (`assignConversation`, then `afterTicketUpdate`), so the fix — the pass
+    first — is a change to the console's order, not to routing.
+  - **`endHold`'s `routed` event takes the column's default `now()`**, the
+    transaction's start, so inside a caller's transaction it sorts before
+    events stamped `CHANGE_STAMP` after the write that ended the hold. In Hand
+    to's grace-ran-out case the timeline reads `routed`, `group_changed`,
+    `unassigned` rather than the move first. Stamping it would order it after
+    the write.
+  - **`transferred_away_count` counts only Hand to's `unassigned`**, the one
+    assignment event that names `from` (`docs/PROJECT-STATE.md` §5.5). Older
+    than this plan.
+  - **The widget's open/closed line** still reads the channel's default
+    group's calendar (Risks).
+  - **No `/reports/routing`.** That is Stage 6; until then
+    `routing_decisions` answers by query.
+- **Deploying it.** Web first, then the worker and **all four** crons, before
+  any channel leaves `default_group`.
+  - **Before.** Read `git log origin/main..origin/dev` and every migration in
+    it (deploy rule 7). Expect 51 migrations, the newest `1793058419292`; no
+    `category_ai_settings` row; no route group on any category and no
+    categorised ticket (all read at 10:06–10:31 UTC on 2026-10-28). Check
+    §5.5's `pg_stat_activity` query in `docs/PROJECT-STATE.md` for a long
+    transaction or a strong lock: `0051` adds a column to `conversations` and
+    one to `channels`, each a brief exclusive lock, and seven foreign keys
+    from the new table, each taking a share-row-exclusive lock on
+    `conversations`, `channels`, `groups`, `ticket_categories`, `agents` or
+    `messages`.
+  - **Web**, whose preDeploy applies `0051` and replays `db/sql`, so the
+    trigger and the CHECK land with it. A worker on 5.1 before the migration
+    would fail every insert into `conversations` and every whole-row select
+    (rule 1). Nothing is held or enqueued in between, since no channel can be
+    in a category mode before the column exists, and none is after it.
+  - **Then the worker and the four crons.** `shipblu-sla-sweep` and
+    `shipblu-time-automations` must run 5.1 before a channel is moved: an old
+    `assign_sweep` assigns a held ticket, and an old time-based rule's
+    `auto_assign` assigns one and its `assign_group` moves one without ending
+    the hold, so the router may then move it away from the rule's group.
+  - **Checks.** 52 migrations; the three types, the three columns and
+    `routing_decisions` with RLS on; `routing_decisions_decided_complete`;
+    `notify_conversation_change` naming both routing columns; every channel on
+    `default_group`; no `routing_decisions` row and no `settle_routing` job;
+    every job since the deploy completed; no warning or error on the six and
+    no 5xx; `/api/health` on the new commit. Signed in: `/admin/channels`
+    shows the Routing select on each form and the readiness panel.
+  - **The handbook.** Production held no console handbook at 10:08 UTC on
+    2026-10-28 (no `handbook-` article, no `seed_console_handbook` job ever),
+    so there is nothing to seed: the first seed writes these words. If it has
+    been seeded since, run `seed_console_handbook dryRun=true` once web is
+    live, read what it reports, then `overwrite=true`.
+- **Rolling it back.**
+  - **The switch first: set every channel back to `default_group`.** New
+    tickets are never held again. Tickets already held settle at the end of
+    their own window as `released`, are assigned where they are, and get
+    their held reply; routed tickets stay where they were routed.
+  - **Then, if the code must go, redeploy `ad6a062`** on all six, once no
+    `settle_routing` job is pending or processing: the old worker has no
+    handler for one, and it would retry to `dead`. `0051`'s columns and table
+    stay, unread there — the old schema names none of them and an insert
+    takes their defaults — and so do the trigger's two extra columns and the
+    CHECK, on a table nothing writes. Dropping them is a forward migration of
+    its own.
 
 **5.2 — Turning it on, channel by channel (operations).**
 

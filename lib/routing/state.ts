@@ -22,7 +22,10 @@ export async function undecidedRouting(
     .select({ shadow: routingDecisions.shadow, stage: routingDecisions.stage })
     .from(routingDecisions)
     .where(
-      and(eq(routingDecisions.conversationId, conversationId), ne(routingDecisions.stage, 'decided')),
+      and(
+        eq(routingDecisions.conversationId, conversationId),
+        ne(routingDecisions.stage, 'decided'),
+      ),
     );
   if (!row || row.stage === 'decided') return null;
   return { shadow: row.shadow, stage: row.stage };

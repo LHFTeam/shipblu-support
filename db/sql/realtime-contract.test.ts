@@ -54,6 +54,17 @@ describe('realtime SQL producer contract', () => {
     expect(code).toContain('OLD.category_id IS DISTINCT FROM NEW.category_id');
   });
 
+  // The "Routing…" badge is drawn from the hold's two columns, and the hold
+  // ending is often the only change a decision makes — one that moved nothing
+  // and assigned nobody — so without them a list keeps the badge on a ticket
+  // that is no longer held until somebody reloads.
+  it('treats the routing hold starting or ending as a queue change', () => {
+    expect(code).toContain(
+      'OLD.routing_window_ends_at IS DISTINCT FROM NEW.routing_window_ends_at',
+    );
+    expect(code).toContain('OLD.routing_decided_at IS DISTINCT FROM NEW.routing_decided_at');
+  });
+
   it('emits no global topic, so one write cannot wake every browser', () => {
     // The regression §6.23 was about: a single `conversation_changed` reaching
     // every console and widget turned one message insert into a full inbox

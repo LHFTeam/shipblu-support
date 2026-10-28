@@ -58,7 +58,10 @@ export function routingModeOf(channel: {
  * shadow record would read `fallback` for every ticket: the mode is idle, and
  * the channel page says so.
  */
-export function routingStartFor(mode: RoutingMode, classifier: CategoryAiMode): RoutingStart | null {
+export function routingStartFor(
+  mode: RoutingMode,
+  classifier: CategoryAiMode,
+): RoutingStart | null {
   if (classifier !== 'apply') return null;
   switch (mode) {
     case 'category':
