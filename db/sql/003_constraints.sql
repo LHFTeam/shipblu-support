@@ -362,3 +362,34 @@ BEGIN
       );
   END IF;
 END $$;
+
+-- --------------------------------------------------------------------------
+-- A metrics_daily row is one slice: the totals, or one dimension
+--
+-- Null in a dimension means "all", so the totals row is the one with every
+-- dimension null, and each other row names exactly one — a group, an agent, a
+-- channel or a category (lib/reports/rollup.ts, slicesFor). Every reader
+-- leans on that: a totals read selects the row with every dimension null
+-- (TOTALS_SLICE in lib/reports/queries.ts), and a breakdown selects the rows
+-- naming its own. A row naming two would be counted in both breakdowns, and
+-- one naming none but sitting beside the totals would be a second totals row,
+-- which every headline figure would add. The second is the unique key's to
+-- refuse (metrics_daily_slice_key, NULLS NOT DISTINCT, in the schema); this is
+-- the first, which no key can say.
+--
+-- It holds for every row production stored before category_id existed: the
+-- four slices summed to every row on 2026-10-28, and none named two.
+-- --------------------------------------------------------------------------
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'metrics_daily_one_dimension'
+      AND conrelid = 'public.metrics_daily'::regclass
+  ) THEN
+    ALTER TABLE metrics_daily
+      ADD CONSTRAINT metrics_daily_one_dimension CHECK (
+        num_nonnulls(group_id, agent_id, channel, category_id) <= 1
+      );
+  END IF;
+END $$;

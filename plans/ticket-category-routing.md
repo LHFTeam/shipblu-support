@@ -88,7 +88,8 @@ update.
 | 4.1   | Merged: #427 (`959404a`), then `dev` → `main` in #430 (`dbf4376`). As built below                                                           | **Done.** All six services live on `dbf4376` by 12:07:54 UTC on 2026-10-27, web first, with `0050` applied. Shipped off: no settings row. Its checks read clean (below)                                                   |
 | 4.2   | Merged: #429 (`c6eb1ac`), then `dev` → `main` in #431 (`ad6a062`). As built below                                                           | **Done.** All six services live on `ad6a062` by 21:49:08 UTC on 2026-10-27, web first; code only. Its checks read clean (below). Its operations wait for the user's go-ahead                                              |
 | 5.1   | In review as #432, branch `claude/jolly-noether-hxhez1-stage-5-1`. As built below                                                           | —                                                                                                                                                                                                                         |
-| 5.2–6 | Not started                                                                                                                                 | —                                                                                                                                                                                                                         |
+| 5.2   | Not started (operations: turning routing on)                                                                                                | —                                                                                                                                                                                                                         |
+| 6     | Draft #433, stacked on #432; unreviewed. As built so far below                                                                              | —                                                                                                                                                                                                                         |
 
 **4.2's deploy and checks, read on Render and production on 2026-10-27.**
 
@@ -4672,8 +4673,8 @@ gains another first, 0051 is regenerated rather than renumbered.
     than this plan.
   - **The widget's open/closed line** still reads the channel's default
     group's calendar (Risks).
-  - **No `/reports/routing`.** That is Stage 6; until then
-    `routing_decisions` answers by query.
+  - **No `/reports/routing`.** Stage 6 builds it (below, not yet in review);
+    until it ships, `routing_decisions` answers by query.
   - **`sendCannedReply` and the engine's `loadTicket` still act on a deleted
     or merged ticket** in general (review #3). Only the router's resume path
     is guarded, which is the one place 5.1 made reach such a ticket.
@@ -4782,6 +4783,243 @@ Web first (it migrates `metrics_daily`), then the worker and crons, with
   Those are the numbers that say whether the window and the threshold are
   right, and whether ask 5 is met.
 
+#### 6, as built so far — pushed for safekeeping, not yet reviewed
+
+On `claude/jolly-noether-hxhez1-stage-6`, a draft pull request (#433) stacked
+on 5.1 at `ff6d262` (#432, in review), whose base moves to `dev` once #432
+merges. Four builders worked from one written
+design, each piece with its own tests. The screenshot pass, the docs, the full
+check and the adversarial review did not run: the organisation's spend limit
+stopped them on 2026-10-28, and the branch was pushed as it stood so the work
+is not lost. What follows is what is on the branch, what was verified, and
+what is left, in order.
+
+**Decisions, as built.**
+
+1. **A category figure follows the ticket's current category**, for every
+   figure: created, first response, resolved, reopened, and CSAT through the
+   surveyed ticket's row. It is the rule the group already follows, and
+   `byCategory` is drawn beside `byGroup`. A category charges nobody, so the
+   reason the agent slice is frozen as of each instant does not apply, and a
+   person's correction is the ground truth 4.2 grades against, which a rebuild
+   should take up. "As of creation" would file every ticket under no
+   category: `CHANGE_STAMP` stamps the first `category_changed` after
+   `created_at`, even in `createTicket`, and the back-classified backlog (Q12)
+   would never reach its own days. The drift is the group's: the nightly
+   recomputes three days, and an older day moves only on a `from=` rebuild.
+   Nothing snapshots a category onto `csat_surveys`.
+2. **One row per slice per day, and one dimension per row, are facts.**
+   Migration `0052` adds `metrics_daily.category_id` (`restrict`, as every
+   reference to a category is) and replaces `metrics_daily_dimensions_idx` —
+   NULLS DISTINCT, so it enforced nothing on any slice — with
+   `metrics_daily_slice_key`, UNIQUE NULLS NOT DISTINCT over all five
+   dimensions. `db/sql/003` adds `metrics_daily_one_dimension`
+   (`num_nonnulls(group_id, agent_id, channel, category_id) <= 1`). A slice
+   written twice, or a row naming two dimensions, would otherwise be summed
+   into another slice by every reader, and `reconciles()` cannot see it.
+   Production pre-flight, read-only, 2026-10-28: no duplicate slice, no row
+   naming two dimensions, one totals row on each of the 67 days, Postgres
+   17.6. So both build there.
+3. **The engine** (`lib/reports/rollup.ts`). `Dimensions` is built from one
+   `DIMENSIONS` list, so the bucket key and `totalsOf` cannot miss one. The
+   accumulator keeps each slice's dimensions in its Map value
+   (`sliceAccumulator`, exported for unit tests), where the old
+   `key.split('|')` round trip could silently drop a fourth.
+   - `slicesFor` adds the category slice only for a categorised ticket.
+   - `reconciles` keeps the channel-sum equality (category slices have
+     `channel = null`) and adds two invariants: at most one all-null slice,
+     and per column the category slices sum to no more than the totals.
+     `reconcileFailure()` names which one a day broke.
+   - The handler's per-day line reads `<day>: N rows (K by category), …`.
+   - A constraint violation is not caught per day. It means the rollup's own
+     code is wrong, every day would fail the same way, and the day's
+     transaction rolls back whole, so the day keeps its previous rows.
+4. **Every totals read names every dimension null.** `TOTALS_SLICE` in
+   `lib/reports/queries.ts` serves `totals()`, `daily()` and `rolledUpDays()`.
+   A category slice has the other three dimensions null, so without it every
+   categorised ticket is counted twice in every headline figure: the overview,
+   the CSAT page and its export, and the dashboard's History. `AGENT_SLICE`
+   adds the fifth null too. A test fails with it removed.
+5. **The overview** (`/reports`) draws "By category" after "By group":
+   `byCategory` (registry order, retired categories kept and marked) plus a
+   "No category" remainder (`uncategorised()`, totals less the category slices,
+   unclamped). A line from `categoryCoverage()` says where category figures
+   start, or that none in the window has one yet, so the section never
+   vanishes on a window with no category (§6.54). Its reads go through
+   `allLimited(3)`, and its header links to the routing report. It is not on
+   the CSAT page: surveys snapshot group, agent and channel but not category,
+   so a by-category CSAT would re-file scores on a relabel.
+6. **The live board** (`/admin/dashboard`) gains "Open work by category":
+   `categoryLoad()`, one scan of the open backlog full-joined to the registry.
+   Active categories always show, retired ones only while they hold open work,
+   and "No category" comes last. Each row links to `/inbox?category=<id>`.
+   - The dashboard's reads go through `allLimited(3)`. It had put ten
+     statements on eight places.
+   - A held ticket is unassigned by design. So `queueSnapshot` counts the
+     tickets being routed through `heldSql` (`lib/routing/held-sql.ts`), the
+     SQL twin of `isHeld`, server-only because `hold.ts` is client-safe, and
+     held to `isHeld` and `routingHold` by a test over the same rows.
+   - The Unassigned tile says how many of them are being routed, and turns
+     amber only for the rest.
+7. **`/reports/routing`** (`report.view`; reads in `lib/routing/report.ts`;
+   page and `parts.tsx` under `app/(console)/reports/routing/`). Each read is
+   one statement taking the page's `now`, run through `allLimited(2)`. Each
+   line is per `routing_decisions.channel_id` and live or shadow, never mixed,
+   and filed on the Cairo day the ticket entered routing (`within` on
+   `started_at`). The figures:
+   - **Outcome counts.** Entered, decided (`stage = 'decided'`, never
+     `outcome is not null`, which phase one writes while still holding),
+     deciding, stranded and the eight outcomes. Stranded begins at exactly
+     the instant the grace runs out, as `isHeld` ends the hold.
+   - **The fallback and taken shares** are over the router's own decisions
+     (category, no route, fallback, taken). Over all decisions, a channel whose
+     holds a rule ends (production's two web chat rules) reads 0% fallback and
+     looks perfect. "A person or rule decided first" is its own share.
+   - **Time to decision** runs from `coalesce(phase_one_at, decided_at) -
+started_at`, over a settled category only. It shows p50, p90 from ten
+     rows, and the share inside the window. The page warns when two window
+     lengths were in force in the range, and gives the settle job's lag past
+     the window.
+   - **Why a fallback fell back**: a category that arrived after the decision
+     (Jev, a person, or a rule or form), and what Jev had said by then
+     (nothing asked, unsure, every call failed).
+   - **Routed, then assigned**, with the median wait. Every taken ticket is
+     listed.
+   - **Now, not range-bound**: routed tickets nobody holds ten minutes after
+     their hold ended (`decided_at`, two `*/5` sweeps), by the ticket's current
+     group and strategy; stranded rows, with the recovery command. Lists stop
+     at 50 with an exact total.
+   - **The shadow comparison**: each would-be decision against the group a
+     person moved the ticket to.
+   - **State and empty states** are built from the classifier's mode and each
+     channel's mode now, through `routingModeOf`.
+   - `ROUTING_OUTCOME_LABELS` lives in `mode-copy.ts`. The readiness panel
+     takes a `canViewReport` prop for its link.
+
+**Left out, on purpose.** A history of open-by-category: it would be a snapshot
+(its own table, sampled hourly), never recomputed from `conversations`.
+By-category CSAT (above). A per-category routing table, and a `?channel=`
+drill-down; `routing_decisions_channel_idx` is ready for the second. A "no
+category" inbox filter.
+
+**Verified on the pushed head, 2026-10-28.**
+
+- **Passed, on the whole tree:**
+  - `tsc`, `eslint`, `prettier --check`;
+  - `vitest`: 276 files, 4,303 tests;
+  - `knip`;
+  - the repo rules: 34 checks, none violated;
+  - `db:generate`: no drift;
+  - `npm run build`, run from a real checkout of this commit: Turbopack
+    refuses the worktree's symlinked `node_modules`, so build the worktree's
+    commits from a real checkout.
+- **Database tests passed, on a freshly migrated database:** every file in
+  Stage 6's areas, 19 files and 257 tests — `lib/reports`, `lib/routing`, the
+  rollup handler, the WhatsApp ingest's totals check, the resolve stamp, the
+  constraint test and the routing page.
+- **Mutation runs:** each builder showed its invariant tests failing with the
+  code they guard broken.
+- **Not run:**
+  - The full `test:db` tier and the CI `database` job's steps.
+  - The screenshot pass. It got far enough to reorder the routing page's
+    outcome columns and split its table, with a test of what it changed, and
+    was stopped before it looked again.
+  - The adversarial review.
+
+**Left to do, in order.**
+
+1. Draw the readiness panel's report link. `app/(console)/admin/channels/page.tsx`
+   passes `canViewReport={can(agent, 'report.view')}` to
+   `RoutingReadinessPanel`. The prop defaults to false, so the link is never
+   drawn until then.
+2. Rebase onto 5.1's final head once #432 lands, and onto `dev` after it is
+   squash-merged. The rebase brings the claim on the rules' pass, the single
+   `isWorkable`, and the change that leaves a decision in flight to the router.
+   `0052` stays the next migration. If 0051 is regenerated again, regenerate
+   `0052` after it: an entry whose journal `when` is older than the last
+   applied one is skipped for good.
+3. Every CI check after the rebase, the full `test:db` tier included.
+4. The screenshot pass, over seeded data at 1400×900 and 390×844, on
+   `/reports?days=30`, `/reports/routing` at 7 and 30 days and with nothing
+   routed, `/admin/dashboard`, and `/admin/channels` (the readiness link).
+   Check for no horizontal page scroll on the phone, no console errors, and
+   empty sections that say why. Look again at the routing page's outcome
+   table, restructured mid-pass.
+5. The docs:
+   - **AGENTS.md:** a paragraph beside "A snapshot cannot be recomputed" — a
+     totals read names every dimension null (`TOTALS_SLICE`), and the key and
+     the CHECK make one row per slice and one dimension per row facts.
+     `heldSql` beside `isHeld`. `/reports/routing` where the decided-complete
+     CHECK names the report.
+   - **README:** four slices become five, plus a pointer to the routing report.
+   - **PROJECT-STATE:** the header line; §5.1's notes sending the shadow week
+     to the report; the rollup's new log line and its three reconcile reasons.
+   - **The handbook:** the supervision `reports` article gains the category cut
+     and the Routing screen, saying shadow figures are would-be, and its
+     "facts" gain the current-category rule, with the count in its heading.
+     The channels article's shadow bullet says the comparison is read on
+     Reports › Routing.
+   - **Stale comments:** the four-slice contract in `db/schema/metrics.ts`
+     (`agent_metrics_daily`, and the subcategory table's NULL-distinctness
+     remark). `rollup-metrics.ts`'s header, which says "two tables" of the
+     four it writes (older than this stage). This section's opening line
+     numbers, and 5.1's "No `/reports/routing`" line.
+6. An adversarial review of the whole stage, its fixes, then a pull request
+   into `dev` with the template filled in.
+7. Optional: the assignment-strategy labels are written in four places
+   (`routing-readiness.tsx`, `admin/categories/forms.tsx`,
+   `admin/groups/forms.tsx`, the report's `parts.tsx`); one module would do.
+
+**Tests left to write or run.**
+
+- The full `test:db` tier and the CI `database` steps on the branch. Only
+  Stage 6's own areas have run.
+- After the rebase onto 5.1's last fixes, `lib/routing/report.db.test.ts`,
+  `held-sql.db.test.ts` and the page test again. The report reads
+  `routing_decisions` columns whose meaning those fixes touch: `decided_at`,
+  once a person no longer ends a decision in flight. It reads neither
+  `rules_claimed_at` nor `rules_done_at`.
+- For the readiness link once drawn: a test that it appears with
+  `report.view` and not without.
+- `byCategory`'s "no row for a category with no slice in the window" and
+  `categoryCoverage`'s branches have behaviour tests with no mutation run
+  against them. Prove each fails without its code.
+- The screenshot checks in step 4. There is no browser suite, so what they
+  find goes in the PR.
+- In production after the deploy, the verification rows added for Stage 6 to
+  the table below.
+
+**Deploy, when it is time.**
+
+- **Order.** Release after 5.1 and apart from it, so Stage 6's rollback has a
+  commit that keeps 5.1. Web first: only web migrates, and the new readers
+  must name the fifth null before any writer stores a category slice. Then the
+  worker, then all four crons, of which `shipblu-nightly` is the writer
+  (`cleanup && rollup_metrics`, 00:00 UTC).
+- **An old nightly against the new schema is safe.** It inserts four
+  single-dimension slices with `category_id` null, which satisfy the key and
+  the CHECK, and loses only the category slices of the three days it rebuilds.
+- **Before web, read-only:**
+  - the duplicate-slice query and the two-dimension query (both 0 on
+    2026-10-28);
+  - §5.5's `pg_stat_activity`;
+  - not within 23:50–00:10 UTC.
+- **The first Stage 6 nightly** proves the writer with no hand write.
+- **The `rollup_metrics from=2026-08-18` rebuild** writes no category rows
+  today: nothing in production carries a category. Its moment is after 4.2's
+  `backfill_category_ai mode=apply`, and again whenever the backlog is
+  re-filed. It runs from the worker's shell, on Stage 6 code, with the user's
+  go-ahead.
+- **Rollback.**
+  1. Stop the writers: the nightly and the worker go back first.
+  2. Count category rows, then
+     `delete from metrics_daily where category_id is not null`. This is
+     required whenever any exists: the old web reads one as a second totals
+     row.
+  3. Redeploy web.
+
+  `0052`'s column, key and CHECK stay, since the old code satisfies all three.
+
 ## Verification queries (run after each stage, read-only)
 
 | Stage | Question                                                  | Shape                                                                                                                                                 |
@@ -4800,6 +5038,11 @@ Web first (it migrates `metrics_daily`), then the worker and crons, with
 | 5     | Routes match categories                                   | `outcome='category'` rows whose `to_group_id` ≠ the category's `route_group_id` at decision time = 0                                                  |
 | 5     | Routed means assigned                                     | `outcome='category'` tickets still unassigned N minutes after `decided_at`, broken down by group and strategy                                         |
 | 5     | Nothing taken by accident                                 | `outcome='taken'` per week, which should be near 0; each one is read                                                                                  |
+| 6     | One row per slice                                         | `group by day, group_id, agent_id, channel, category_id having count(*) > 1` = 0 (a fact once `metrics_daily_slice_key` exists)                       |
+| 6     | One dimension per row                                     | `num_nonnulls(group_id, agent_id, channel, category_id) > 1` = 0                                                                                      |
+| 6     | Categories never exceed the totals                        | per day and column, the category slices' sum above the totals row = 0 days                                                                            |
+| 6     | Category slices match the tickets                         | yesterday's `tickets_created` per category slice = worked tickets created that Cairo day by `category_id`                                             |
+| 6     | The routing report adds up                                | `/reports/routing`'s outcome counts for a window = `routing_decisions` grouped by `channel_id, shadow, outcome` over `started_at` in it               |
 
 ## Risks not closed by the design
 

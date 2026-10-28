@@ -5,23 +5,30 @@ import { Stat } from '@/components/charts';
 import { buttonClass, Cell, EmptyState, Notice, PageHeader, Row, Table } from '@/components/ui';
 import { requireAgent } from '@/lib/auth/guard';
 import { can } from '@/lib/auth/permissions';
+import { categoryLabel } from '@/lib/categories/choices';
+import { allLimited } from '@/lib/concurrency';
 import { channelLabel } from '@/lib/format';
 import {
   averageRating,
   averageSeconds,
   byAgent,
+  byCategory,
   byChannel,
   byGroup,
+  categorisedFrom,
+  categoryCoverage,
   daily,
   formatDuration,
   metPercentage,
   responsesHint,
   rolledUpDays,
   totals,
+  uncategorised,
   type Row as ReportRow,
 } from '@/lib/reports/queries';
 import { rangeIn, reportingContext } from '@/lib/reports/rollup';
 import { RangeNav } from './range-nav';
+import { Quiet } from './report-parts';
 
 export const dynamic = 'force-dynamic';
 
@@ -54,14 +61,28 @@ export default async function ReportsPage({
   const { zone } = await reportingContext();
   const range = rangeIn(zone, days);
 
-  const [summary, agentRows, groupRows, channelRows, series, rolledUp] = await Promise.all([
-    totals(range),
-    byAgent(range),
-    byGroup(range),
-    byChannel(range),
-    daily(range),
-    rolledUpDays(range),
-  ]);
+  // A few at a time rather than all at once, as the CSAT page reads: eight
+  // reads against a pool of eight places would hold every one of them for
+  // this page's render, the §6.91 freeze waiting to happen.
+  const [
+    summary,
+    agentRows,
+    groupRows,
+    categoryRows,
+    channelRows,
+    series,
+    rolledUp,
+    categorisedSince,
+  ] = await allLimited(3, [
+    () => totals(range),
+    () => byAgent(range),
+    () => byGroup(range),
+    () => byCategory(range),
+    () => byChannel(range),
+    () => daily(range),
+    () => rolledUpDays(range),
+    () => categorisedFrom(range),
+  ] as const);
 
   const hasData = series.length > 0;
   // The history starting inside the window is what makes the range buttons
@@ -69,6 +90,24 @@ export default async function ReportsPage({
   // start, not the first row in the window, so a window opening on a quiet
   // day does not claim the history is younger than it is.
   const startsLate = rolledUp.first !== null && rolledUp.first > range.from;
+  // Every category in the window, then the rest of the totals. The remainder
+  // row is always there, so the section is drawn on every window with data —
+  // nothing categorised included, which is where production starts and where
+  // a table that vanished would read as a page not finished (§6.54).
+  const categoryBreakdown: ReportRow[] = [
+    ...categoryRows.map((row) => ({ ...row, label: categoryLabel(row.label, row.isActive) })),
+    { ...uncategorised(summary, categoryRows), label: 'No category' },
+  ];
+  // Measured from the history's first day when the window opens before it:
+  // the notice above says that already, and a second "start" here would read
+  // as a different one.
+  const categoryNote = coverageNote(
+    categoryCoverage(
+      categoryRows.length,
+      categorisedSince,
+      startsLate ? rolledUp.first! : range.from,
+    ),
+  );
 
   return (
     <div className="app-scroll relative h-full overflow-y-auto p-4 sm:p-6">
@@ -129,6 +168,18 @@ export default async function ReportsPage({
               className={buttonClass({ variant: 'secondary', size: 'sm' })}
             >
               Category classifier
+            </Link>
+            {/*
+              `report.view` too: where routing sent each new ticket, and how soon,
+              is read by the supervisors who run the queues this page measures.
+              Its figures are per channel and group, never per person, so it
+              needs no key of its own.
+            */}
+            <Link
+              href={`/reports/routing?days=${days}`}
+              className={buttonClass({ variant: 'secondary', size: 'sm' })}
+            >
+              Routing
             </Link>
             {/*
               `report.view` too: what customers said of the work is this page's
@@ -216,6 +267,12 @@ export default async function ReportsPage({
           />
           <Breakdown title="By group" rows={groupRows} />
           <Breakdown
+            title="By category"
+            hint="Each ticket under its category as it stands now — but the nightly run recomputes only the last three days, so a ticket re-filed later moves on those days and keeps its old category on older ones. No category is every ticket nothing had filed: no person, rule, form default or Jev."
+            note={categoryNote}
+            rows={categoryBreakdown}
+          />
+          <Breakdown
             title="By channel"
             rows={channelRows.map((row) => ({ ...row, label: channelLabel(row.label) }))}
             marks={Object.fromEntries(
@@ -259,15 +316,38 @@ function percentage(value: number | null): string {
   return value === null ? '—' : `${value}%`;
 }
 
+/** Where the category figures start, in words (`categoryCoverage` says when to). */
+function coverageNote(coverage: ReturnType<typeof categoryCoverage>): React.ReactNode {
+  switch (coverage.kind) {
+    case 'never':
+      return 'No ticket in this window has a category yet, so every figure here is under No category.';
+    case 'none-here':
+      return 'No ticket in this window has a category, so every figure here is under No category.';
+    case 'starts':
+      return (
+        <>
+          Category figures start on <b>{coverage.on}</b>. On the days of this window before it every
+          ticket is under No category, and one filed since moves only when those days are rolled up
+          again.
+        </>
+      );
+    case 'whole':
+      return null;
+  }
+}
+
 function Breakdown({
   title,
   hint,
+  note,
   rows,
   marks,
 }: {
   title: string;
   /** Says whose a row's tickets are, where that is not obvious from the title. */
   hint?: string;
+  /** A line between the hint and the table, when the figures need one. */
+  note?: React.ReactNode;
   rows: ReportRow[];
   /** Optional per-row element shown instead of the plain label. */
   marks?: Record<string, React.ReactNode>;
@@ -282,6 +362,11 @@ function Breakdown({
         {title}
       </h2>
       {hint ? <p className="mb-2 text-xs text-(--color-text-tertiary)">{hint}</p> : null}
+      {note ? (
+        <div className="mb-2">
+          <Quiet>{note}</Quiet>
+        </div>
+      ) : null}
       <Table head={['', 'Created', 'Resolved', 'First response', 'Within SLA', 'CSAT']}>
         {/* Keyed by position, as the page always was: a label is a display name,
             and two agents can share one. */}
