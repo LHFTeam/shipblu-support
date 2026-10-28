@@ -13,6 +13,7 @@ import {
   uuid,
 } from 'drizzle-orm/pg-core';
 import { agents, groups } from './agents';
+import { ticketCategories } from './config';
 import { conversations, messages } from './conversations';
 import {
   channelEnum,
@@ -240,6 +241,16 @@ export const metricsDaily = pgTable(
     groupId: uuid('group_id').references(() => groups.id, { onDelete: 'cascade' }),
     agentId: uuid('agent_id').references(() => agents.id, { onDelete: 'cascade' }),
     channel: channelEnum('channel'),
+    /**
+     * The ticket's category as it stands when the day is rolled up, as the
+     * group is — `lib/reports/rollup.ts` says why not as of each figure's
+     * instant. `restrict`, as every reference to a category is: a category is
+     * retired, never deleted, so its history keeps reporting under it. Where
+     * the group and the agent cascade, a deleted one's slice goes with it.
+     */
+    categoryId: uuid('category_id').references(() => ticketCategories.id, {
+      onDelete: 'restrict',
+    }),
 
     ticketsCreated: integer('tickets_created').notNull().default(0),
     ticketsResolved: integer('tickets_resolved').notNull().default(0),
@@ -279,7 +290,18 @@ export const metricsDaily = pgTable(
     computedAt: timestamp('computed_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
-    uniqueIndex('metrics_daily_dimensions_idx').on(t.day, t.groupId, t.agentId, t.channel),
+    // One row per slice per day, as a fact rather than a convention. Every
+    // slice is mostly NULLs, so a plain unique index — NULLS DISTINCT, which is
+    // what `metrics_daily_dimensions_idx` was — enforced nothing on any of
+    // them: a slice written twice would be summed twice by every reader, and
+    // `reconciles()` cannot see it. A constraint rather than a unique index
+    // because `nullsNotDistinct` exists only on `unique()` here (as
+    // `csat_rules_scope_key`). The day's delete-and-insert in `rollup_metrics`
+    // stays: a slice whose figures vanished must vanish too, which an upsert
+    // would not do. `db/sql/003` holds the other half, one dimension per row.
+    unique('metrics_daily_slice_key')
+      .on(t.day, t.groupId, t.agentId, t.channel, t.categoryId)
+      .nullsNotDistinct(),
     index('metrics_daily_day_idx').on(t.day),
   ],
 );
