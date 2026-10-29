@@ -38,12 +38,16 @@ import type {
 export function RoutingReadinessPanel({
   readiness,
   canEditCategories,
-  canViewReport = false,
+  canViewReport,
 }: {
   readiness: RoutingReadiness;
   canEditCategories: boolean;
-  /** `report.view`, which every admin holds: the link to the routing report. */
-  canViewReport?: boolean;
+  /**
+   * `report.view`, which every admin holds: the link to the routing report.
+   * Required, like the permission beside it: a default of `false` let the one
+   * page that draws the panel leave it out, and the link was never shown.
+   */
+  canViewReport: boolean;
 }) {
   const routing = readiness.channels.filter((channel) => channel.column !== 'default_group');
   const { classifier } = readiness;
