@@ -135,8 +135,9 @@ export function RoutingReadinessPanel({
  * What a row in the channel list says about its routing: nothing on its
  * default group, and otherwise its mode and whether a new ticket gets a hold,
  * a record or nothing — the panel below says why. A row that starts routing
- * with no classifier key is a warning, never a success: its tickets are held
- * for the whole window and routed nowhere, and the list is all an admin sees
+ * with no classifier key is a warning, never a success: nothing files its
+ * tickets but a person or a rule, so a held ticket waits out the window and a
+ * shadow record reads "Window ran out", and the list is all an admin sees
  * without scrolling to the panel.
  */
 export function RoutingBadge({ channel }: { channel: ChannelRouting | undefined }) {
@@ -174,10 +175,10 @@ function ClassifierNotice({ classifier }: { classifier: RoutingReadiness['classi
   if (!classifier.keyConfigured) {
     return (
       <Notice tone="warning" icon className="mb-4">
-        No TypeSafe key is configured, so the classifier asks nothing. A channel routing by category
-        holds each new ticket for the whole {classifier.windowMinutes}-minute window and then leaves
-        it in its default group, and one in shadow records every ticket as &ldquo;Window ran
-        out&rdquo;.
+        No TypeSafe key is configured, so the classifier asks nothing and files no category. Unless
+        a person or a rule decides first, a channel routing by category holds each new ticket for
+        the whole {classifier.windowMinutes}-minute window and then leaves it in its default group,
+        and one in shadow records it as &ldquo;Window ran out&rdquo;.
       </Notice>
     );
   }
@@ -280,7 +281,7 @@ function statusSentence(channel: ChannelRouting): string {
         : 'New tickets are held until routed';
     case 'shadow':
       return channel.noKey
-        ? 'New tickets are recorded as “Window ran out”, not held'
+        ? 'New tickets are recorded, not held, and read “Window ran out” unless somebody decides first'
         : 'New tickets are recorded, not held';
     case null:
       return 'New tickets are neither held nor recorded';

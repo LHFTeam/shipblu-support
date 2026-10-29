@@ -115,10 +115,11 @@ export type ChannelRouting = {
   /** What a new ticket on it gets now: a hold, a record, or nothing. */
   starts: RoutingStart | null;
   /**
-   * It starts routing with no TypeSafe key, so nothing is asked: a held ticket
-   * waits out its window and stays in its default group, and a shadow record
-   * ends `fallback`. A fact about the classifier, stated once above the rows,
-   * but each row's badge and status must not claim routing works without it.
+   * It starts routing with no TypeSafe key, so nothing is asked and only a
+   * person or a rule files a category: otherwise a held ticket waits out its
+   * window and stays in its default group, and a shadow record ends
+   * `fallback`. A fact about the classifier, stated once above the rows, but
+   * each row's badge and status must not claim routing works without it.
    */
   noKey: boolean;
   /**

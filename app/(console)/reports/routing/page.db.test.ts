@@ -1,7 +1,7 @@
 import { eq } from 'drizzle-orm';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { db } from '@/db/client';
 import {
   agents,
@@ -13,6 +13,7 @@ import {
   routingDecisions,
   ticketStatuses,
 } from '@/db/schema';
+import { resetEnvCache } from '@/lib/env';
 import { withCleanDatabase } from '@/lib/testing/db';
 import RoutingReportPage from './page';
 
@@ -43,6 +44,11 @@ withCleanDatabase();
 
 beforeEach(() => {
   viewer.role = 'admin';
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+  resetEnvCache();
 });
 
 const MINUTE = 60_000;
@@ -231,6 +237,24 @@ describe('the routing report page', () => {
     const html = await render();
     expect(html).toContain('Idle until the category classifier is in Apply');
     expect(html).toContain('The classifier is in Shadow, filing nothing.');
+  });
+
+  it('calls Apply a setting, not filing, while there is no key to ask with', async () => {
+    await classifier('apply');
+    await channel({ name: 'Web chat', routingMode: 'category' });
+
+    vi.stubEnv('TYPESAFE_API_KEY', '');
+    resetEnvCache();
+    let html = await render();
+    expect(html).toContain('<b class="text-(--color-text-primary)">set to Apply</b>');
+    expect(html).not.toContain('filing tickets');
+    expect(html).toContain('This environment has no TYPESAFE_API_KEY');
+
+    vi.stubEnv('TYPESAFE_API_KEY', 'test-key');
+    resetEnvCache();
+    html = await render();
+    expect(html).toContain('in Apply, filing tickets');
+    expect(html).not.toContain('This environment has no TYPESAFE_API_KEY');
   });
 
   it('says when the window holds nothing, and when the last ticket entered', async () => {

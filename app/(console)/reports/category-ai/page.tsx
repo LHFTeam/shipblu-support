@@ -155,8 +155,22 @@ export default async function CategoryAiReportPage({
       >
         {questions.length === 0 ? (
           <Quiet>
-            Jev has not answered anything yet. Answers appear here once the classifier is in shadow
-            or apply, or once <code>backfill_category_ai mode=record</code> has run.
+            {/* Without a key neither the live job nor the backfill asks
+                anything, so "once the classifier is in shadow or apply" was
+                a wait for answers that could never come. */}
+            {keyConfigured ? (
+              <>
+                Jev has not answered anything yet. Answers appear here once the classifier is in
+                shadow or apply and a customer writes, or once{' '}
+                <code>backfill_category_ai mode=record</code> has run.
+              </>
+            ) : (
+              <>
+                Jev has not answered anything, and cannot here: this environment has no
+                TYPESAFE_API_KEY, so neither the classifier nor <code>backfill_category_ai</code>{' '}
+                asks it anything.
+              </>
+            )}
           </Quiet>
         ) : (
           <Table

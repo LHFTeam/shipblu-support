@@ -10,7 +10,11 @@ import { allLimited } from '@/lib/concurrency';
 import { formatDateTime } from '@/lib/format';
 import { dateIn, rangeIn, reportingZone, type ReportWindow } from '@/lib/reports/rollup';
 import { routingStartFor, type RoutingMode } from '@/lib/routing/mode';
-import { idleRoutingSentence, ROUTING_MODE_LABELS } from '@/lib/routing/mode-copy';
+import {
+  idleRoutingSentence,
+  ROUTING_MODE_LABELS,
+  ROUTING_OUTCOME_LABELS,
+} from '@/lib/routing/mode-copy';
 import {
   decisionTiming,
   fallbackReasons,
@@ -283,11 +287,12 @@ export default async function RoutingReportPage({
               }
               explain={
                 <>
-                  Live tickets that entered routing, of any range and whatever was decided, still
-                  open and never assigned since, {STILL_UNASSIGNED_IN_WORDS} after their hold ended:
-                  long enough for the assignment as the hold ends and the sweeps behind it. Tickets
-                  in a group set to manual wait for somebody to pick them, by design, and are
-                  counted apart.
+                  Live tickets that entered routing, of any range, still open and never assigned
+                  since, {STILL_UNASSIGNED_IN_WORDS} after their hold ended: long enough for the
+                  assignment as the hold ends and the sweeps behind it. Every decision counts but
+                  &ldquo;{ROUTING_OUTCOME_LABELS.not_open}&rdquo;, since the router assigns nobody a
+                  ticket that was no longer open when it decided. Tickets in a group set to manual
+                  wait for somebody to pick them, by design, and are counted apart.
                 </>
               }
             />
@@ -372,12 +377,13 @@ export default async function RoutingReportPage({
 
       <Section
         title="Still unassigned after routing"
-        hint={`Live tickets that entered routing, whatever was decided, that nobody has been assigned since, ${STILL_UNASSIGNED_IN_WORDS} after their hold ended, by the group each is in now — a rule may have moved it since — and the decision that put it there.`}
+        hint={`Live tickets that entered routing, whatever was decided but “${ROUTING_OUTCOME_LABELS.not_open}”, that nobody has been assigned since, ${STILL_UNASSIGNED_IN_WORDS} after their hold ended, by the group each is in now — a rule may have moved it since — and the decision that put it there.`}
       >
         {unassigned.length === 0 ? (
           <Quiet>
             Every live ticket that entered routing and is still open has had somebody assigned
-            since, or its hold ended less than {STILL_UNASSIGNED_IN_WORDS} ago.
+            since, its hold ended less than {STILL_UNASSIGNED_IN_WORDS} ago, or it was no longer
+            open when the router decided.
           </Quiet>
         ) : (
           <UnassignedTable rows={unassigned} />
@@ -489,8 +495,14 @@ function StateNotice({
   return (
     <>
       <Notice tone="neutral">
+        {/* With no key Apply is a setting, not what Jev does: "filing
+            tickets" sat over the warning below that it is asked nothing. */}
         The category classifier is{' '}
-        <b className="text-(--color-text-primary)">{CLASSIFIER_STATES[classifier]}</b>
+        <b className="text-(--color-text-primary)">
+          {classifier === 'apply' && !keyConfigured
+            ? 'set to Apply'
+            : CLASSIFIER_STATES[classifier]}
+        </b>
         {holding.length > 0 ? (
           <>
             , and a new ticket on <ChannelNames channels={holding} last="or" /> is held for{' '}
