@@ -410,7 +410,13 @@ export default async function ChannelsPage() {
             the one channel whose configuration a customer sees directly. */}
         {webchat ? (
           <Card className="mb-4">
+            {/* Keyed on the row, because a switch can hand the widget to
+                another one while the card is open: reused, its hidden id
+                followed the new row while its selects kept the old row's
+                group, mode and folders, and saving wrote those over the new
+                row's own. */}
             <WebchatSettings
+              key={webchat.id}
               channel={{
                 id: webchat.id,
                 name: webchat.name,

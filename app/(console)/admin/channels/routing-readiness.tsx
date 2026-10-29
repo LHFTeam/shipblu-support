@@ -323,7 +323,8 @@ function WarningText({ warning }: { warning: ChannelWarning }) {
         <>
           New tickets of this type are filed under &ldquo;
           <span dir="auto">{warning.filingRow}</span>
-          &rdquo;, the oldest active row of it, so this row&rsquo;s mode does nothing.
+          &rdquo;, the oldest active row of it, so this row&rsquo;s mode does nothing for them. A
+          ticket held under this row before then is still decided by its mode.
         </>
       );
     case 'owned':

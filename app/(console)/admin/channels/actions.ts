@@ -580,7 +580,9 @@ export async function setWebchatActive(
 ): Promise<AdminState> {
   await requirePermission('admin.channels');
 
-  const id = uuidField(formData, 'id');
+  // Canonical, not as given: the switch finds its row among the ones it reads
+  // back by comparing ids in code, which Postgres prints lower-case.
+  const id = canonicalUuid(text(formData, 'id'));
   if (!id) return { error: GONE };
   const active = formData.get('active');
   if (active !== 'on' && active !== 'off') {

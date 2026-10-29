@@ -8,7 +8,7 @@ import { switchNotice, webchatSwitch, type ReportedRow } from './rows';
 const log = logger('webchat');
 
 export const ONLY_WEBCHAT_ROW =
-  'This is the only active web chat row, and the widget needs one: without it chats are filed under no row and no group. Switch another web chat row on first.';
+  'This is the only active web chat row, and the widget needs one: without it chats are filed under no row and no group. Switch another web chat row on, or add one, first.';
 
 export type SwitchOutcome = { ok: true; notice: string } | { ok: false; error: string };
 
@@ -26,12 +26,15 @@ export type SwitchOutcome = { ok: true; notice: string } | { ok: false; error: s
  * last two rows at once would each find the other still on, and both commit.
  * One conditional UPDATE does not close that either, since under READ
  * COMMITTED its subquery does not wait on the other's uncommitted write. An
- * advisory lock rather than row locks, as `lockRoleChanges` takes for the last
- * account admin: this is the only writer of a web chat row's `is_active`, and a
- * row lock would also be held against the widget's ticket inserts, which take
- * KEY SHARE on the row through `conversations.channel_id`. The rows are read
- * after the wait, each statement on a snapshot taken then, so they include
- * whatever the switch before this one committed.
+ * advisory lock, as `lockRoleChanges` takes for the last account admin, and
+ * no lock on any channel row: this is the only writer of a web chat row's
+ * `is_active`, so serialising the switches is all that is needed, and a save
+ * of the row's name or group (`saveChannel`) is then never queued behind one.
+ * Row locks taken `FOR NO KEY UPDATE` would serialise them too without holding
+ * up the widget's ticket inserts, whose foreign key takes KEY SHARE; `FOR
+ * UPDATE` would hold those up. The rows are read after the wait, each statement
+ * on a snapshot taken then, so they include whatever the switch before this one
+ * committed.
  *
  * A row switched off keeps its tickets: a visitor's chat continues on the
  * ticket it is on, threaded on the visitor alone (`findLiveConversation`), and a
@@ -68,7 +71,8 @@ export async function switchWebchatRow(id: string, active: boolean): Promise<Swi
       hasFaqFolders: Object.keys(parseWidgetConfig(config).faqFolders).length > 0,
     }));
 
-    const row = rows.find((candidate) => candidate.id === id)!;
+    const row = rows.find((candidate) => candidate.id === id);
+    if (!row) return { ok: false, error: 'That channel no longer exists — reload the page' };
     if (row.isActive === active) {
       return { ok: true, notice: `“${row.name}” is already ${active ? 'on' : 'off'}.` };
     }

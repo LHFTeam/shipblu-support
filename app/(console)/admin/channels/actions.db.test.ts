@@ -924,7 +924,9 @@ describe('web chat rows', () => {
     const first = await webchatRow('Web chat', {}, 0);
     await webchatRow('Second chat', {}, 1);
 
-    const state = await setWebchatActive(INITIAL, form({ id: first, active: 'off' }));
+    // Upper-cased, which a uuid check accepts: the switch compares ids in code
+    // against the lower-case ones Postgres returns, so the action canonicalises.
+    const state = await setWebchatActive(INITIAL, form({ id: first.toUpperCase(), active: 'off' }));
     expect(state.error).toBeNull();
     expect(state.notice).toContain('the widget now uses “Second chat”');
     expect((await configOf(first)).isActive).toBe(false);

@@ -836,11 +836,11 @@ export function WebchatActiveSwitch({
   if (plan.kind === 'only_row') {
     return (
       <span className="inline-flex items-center gap-1 text-xs text-(--color-text-secondary)">
-        The widget&rsquo;s only row
+        The only active web chat row
         <InfoTip label="why this row stays on">
           The widget needs an active web chat row: without one its chats are filed under no row and
-          no group, and it shows the default opening hours. Switch another web chat row on to switch
-          this one off.
+          no group, and it shows the default opening hours. Switch another web chat row on, or add
+          one, to switch this one off.
         </InfoTip>
       </span>
     );
