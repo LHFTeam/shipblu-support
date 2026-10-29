@@ -9,13 +9,13 @@ import { readCategoryAiSettings } from '@/lib/category-ai/settings';
 import { allLimited } from '@/lib/concurrency';
 import { formatDateTime } from '@/lib/format';
 import { dateIn, rangeIn, reportingZone, type ReportWindow } from '@/lib/reports/rollup';
-import { ROUTING_OUTCOMES, type RoutingOutcome } from '@/lib/routing/decide';
 import { routingStartFor, type RoutingMode } from '@/lib/routing/mode';
 import { idleRoutingSentence, ROUTING_MODE_LABELS } from '@/lib/routing/mode-copy';
 import {
   decisionTiming,
   fallbackReasons,
   GRACE_IN_WORDS,
+  minutesInWords,
   routedStillUnassigned,
   routerDecided,
   routingChannels,
@@ -24,6 +24,7 @@ import {
   shadowAgainstPeople,
   STILL_UNASSIGNED_IN_WORDS,
   strandedRouting,
+  sumOutcomes,
   takenTickets,
   type RoutingChannel,
 } from '@/lib/routing/report';
@@ -173,7 +174,7 @@ export default async function RoutingReportPage({
 
   const live = slices.filter((slice) => !slice.shadow);
   const shadowSlices = slices.filter((slice) => slice.shadow);
-  const liveTotals = sum(live.map((slice) => slice.outcomes));
+  const liveTotals = sumOutcomes(live.map((slice) => slice.outcomes));
   const router = routerDecided(liveTotals);
   const waiting = unassigned.filter((row) => row.strategy !== 'manual');
   const waitingCount = waiting.reduce((total, row) => total + row.tickets, 0);
@@ -423,15 +424,6 @@ export default async function RoutingReportPage({
   );
 }
 
-function sum(rows: Record<RoutingOutcome, number>[]): Record<RoutingOutcome, number> {
-  const total = Object.fromEntries(ROUTING_OUTCOMES.map((outcome) => [outcome, 0])) as Record<
-    RoutingOutcome,
-    number
-  >;
-  for (const row of rows) for (const outcome of ROUTING_OUTCOMES) total[outcome] += row[outcome];
-  return total;
-}
-
 /**
  * The tile's line under a share of the router's own decisions. Under ten
  * decisions `rate` already prints the share as "n of d", and the same words
@@ -503,7 +495,7 @@ function StateNotice({
         {holding.length > 0 ? (
           <>
             , and a new ticket on <ChannelNames channels={holding} last="or" /> is held for{' '}
-            {windowMinutes} {windowMinutes === 1 ? 'minute' : 'minutes'}.{' '}
+            {minutesInWords(windowMinutes * 60_000)}.{' '}
           </>
         ) : (
           <>, and no new ticket is held. </>

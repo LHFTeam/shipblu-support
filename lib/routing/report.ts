@@ -1,4 +1,4 @@
-import { asc, eq, sql, type SQL } from 'drizzle-orm';
+import { asc, eq, inArray, sql, type SQL } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { CATEGORY_AI_LIVE_LABEL, agents, channels } from '@/db/schema';
 import { CATEGORY_AI_ACTOR, type CategoryOutcome } from '@/lib/category-ai/decide';
@@ -6,11 +6,11 @@ import type { AssignmentStrategy } from '@/lib/assignment';
 import { asDate } from '@/lib/reports/live';
 import { within, type ReportWindow } from '@/lib/reports/rollup';
 import { openBacklog } from '@/lib/tickets/backlog';
-import { SETTLE_ACTOR } from './apply';
 import { ROUTING_OUTCOMES, type RoutingOutcome } from './decide';
 import { filesRoutableTickets } from './filing';
 import { ROUTING_GRACE_MS } from './hold';
 import { routingModeOf, type RoutingMode } from './mode';
+import { SETTLE_ACTOR } from './settle-label';
 
 /**
  * The reads behind `/reports/routing`: where each channel's new tickets went,
@@ -61,7 +61,7 @@ export const STILL_UNASSIGNED_AFTER_MS = 10 * 60_000;
  * change to either constant would have left describing a threshold the page no
  * longer applied.
  */
-function minutesInWords(ms: number): string {
+export function minutesInWords(ms: number): string {
   const minutes = Math.round(ms / 60_000);
   return `${minutes} ${minutes === 1 ? 'minute' : 'minutes'}`;
 }
@@ -113,15 +113,12 @@ function instant(at: Date): SQL {
   return sql`${at.toISOString()}::timestamptz`;
 }
 
-/** `<column> in (…)`, one parameter per value — never `= any(${array})`, a row constructor (§6.46). */
-function textIn(column: SQL, values: readonly string[]): SQL {
-  return sql`${column} in (${sql.join(
-    values.map((value) => sql`${value}`),
-    sql`, `,
-  )})`;
-}
-
-const outcomeIn = (values: readonly RoutingOutcome[]) => textIn(sql`rd.outcome`, values);
+/**
+ * `rd.outcome in (…)` through drizzle's `inArray`, one parameter per value —
+ * never `= any(${array})`, a row constructor (§6.46) — which answers false
+ * rather than writing `in ()` for an empty list.
+ */
+const outcomeIn = (values: readonly RoutingOutcome[]) => inArray(sql`rd.outcome`, [...values]);
 
 /** The rows a range-bound figure reads: entered routing on one of the window's days, by `now`. */
 function entered(window: ReportWindow, now: Date): SQL {
@@ -261,6 +258,15 @@ function noOutcomes(): Record<RoutingOutcome, number> {
   >;
 }
 
+/** Several slices' outcome counts added together, every outcome present. */
+export function sumOutcomes(
+  rows: readonly Record<RoutingOutcome, number>[],
+): Record<RoutingOutcome, number> {
+  const total = noOutcomes();
+  for (const row of rows) for (const outcome of ROUTING_OUTCOMES) total[outcome] += row[outcome];
+  return total;
+}
+
 /**
  * The decisions the router made itself, which its fallback and taken shares
  * are read over. Not every decision: `manual` and `rule` are tickets a person
@@ -299,7 +305,17 @@ export type DecisionTiming = ReportChannel & {
   settledByJob: number;
   settleLagP90: number | null;
   settleLagMax: number | null;
-  /** Live `category` decisions, and those an `assigned` event followed. Zero on a shadow line. */
+  /**
+   * Live `category` decisions, and those an `assigned` event followed. Zero on
+   * a shadow line. "Followed" is bounded by `started_at`, not by the decision:
+   * the decision's instant is the app server's clock and the event's the
+   * database's (`CHANGE_STAMP`), and the router's own assignment comes
+   * milliseconds after its phase one, so a database clock that runs behind
+   * would stamp it before the decision. Nothing assigns a held ticket before
+   * its decision — that would have been `taken` or `manual` — so every
+   * assignment since the ticket entered routing is the one that followed it,
+   * and its wait is counted from the decision, floored at nothing.
+   */
   routed: number;
   routedAssigned: number;
   routedAssignedP50: number | null;
@@ -341,7 +357,7 @@ export function timingStatement(window: ReportWindow, now: Date): SQL {
            (max(t.lag) filter (where ${byJob}))::float8 as "settleLagMax",
            count(*) filter (where ${routed})::int as "routed",
            count(a.at) filter (where ${routed})::int as "routedAssigned",
-           (percentile_cont(0.5) within group (order by extract(epoch from a.at - r.recorded)::float8)
+           (percentile_cont(0.5) within group (order by greatest(0, extract(epoch from a.at - r.recorded))::float8)
               filter (where ${routed} and a.at is not null))::float8 as "routedAssignedP50"
       from routing_decisions rd
       left join channels c on c.id = rd.channel_id
@@ -356,7 +372,7 @@ export function timingStatement(window: ReportWindow, now: Date): SQL {
             where ${routed}
               and e.conversation_id = rd.conversation_id
               and e.type = 'assigned'
-              and e.created_at >= r.recorded
+              and e.created_at >= rd.started_at
               and e.created_at <= ${instant(now)}
          ) a on true
      where ${entered(window, now)}
@@ -428,7 +444,7 @@ export type FallbackReasons = ReportChannel & {
  * would otherwise refuse the whole page.
  */
 export function fallbackStatement(window: ReportWindow, now: Date): SQL {
-  const unsure = textIn(sql`run.outcome`, UNSURE_OUTCOMES);
+  const unsure = inArray(sql`run.outcome`, [...UNSURE_OUTCOMES]);
   return sql`
     select rd.channel_id as "channelId",
            c.name as "channelName",

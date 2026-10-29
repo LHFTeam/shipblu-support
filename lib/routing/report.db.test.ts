@@ -18,7 +18,7 @@ import { CATEGORY_AI_ACTOR, type CategoryOutcome } from '@/lib/category-ai/decid
 import type { ReportWindow } from '@/lib/reports/rollup';
 import { withCleanDatabase } from '@/lib/testing/db';
 import { cairo, inCairo } from '@/lib/testing/time';
-import { SETTLE_ACTOR } from './apply';
+import { SETTLE_ACTOR } from './settle-label';
 import { ROUTING_OUTCOMES, type RoutingOutcome } from './decide';
 import { ROUTING_GRACE_MS } from './hold';
 import {
@@ -419,22 +419,28 @@ describe('decisionTiming', () => {
     expect(timing!.settleLagP90).toBeCloseTo(14, 6);
   });
 
-  it('reads routed as assigned only when an assignment followed the decision', async () => {
+  it('reads routed as assigned when an assignment followed it into routing, whatever the clocks', async () => {
     const id = await channel();
     const decidedAt = at(IN_WEEK, MINUTE);
     const followed = await decision({ channelId: id, outcome: 'category', decidedAt });
     await event(followed.id, { type: 'assigned', createdAt: at(decidedAt, 30_000) });
     await event(followed.id, { type: 'assigned', createdAt: at(decidedAt, 90_000) });
-    const before = await decision({ channelId: id, outcome: 'category', decidedAt });
-    await event(before.id, { type: 'assigned', createdAt: at(decidedAt, -1) });
+    // The router's own assignment, stamped by a database clock 40 ms behind
+    // the app's: before the decision on paper, after it in fact. Counted, and
+    // waited for no time rather than less than none.
+    const skewed = await decision({ channelId: id, outcome: 'category', decidedAt });
+    await event(skewed.id, { type: 'assigned', createdAt: at(decidedAt, -40) });
+    // Before the ticket entered routing: not this decision's assignment.
+    const earlier = await decision({ channelId: id, outcome: 'category', decidedAt });
+    await event(earlier.id, { type: 'assigned', createdAt: at(IN_WEEK, -1) });
     const shadow = await decision({ channelId: id, shadow: true, outcome: 'category', decidedAt });
     await event(shadow.id, { type: 'assigned', createdAt: at(decidedAt, 1_000) });
 
     const rows = await decisionTiming(WEEK, NOW);
     expect(sliceOf(rows, id)).toMatchObject({
-      routed: 2,
-      routedAssigned: 1,
-      routedAssignedP50: 30,
+      routed: 3,
+      routedAssigned: 2,
+      routedAssignedP50: 15,
     });
     // A shadow `category` moved nothing, so nothing was routed to be assigned.
     expect(sliceOf(rows, id, true)).toMatchObject({ routed: 0, routedAssigned: 0 });

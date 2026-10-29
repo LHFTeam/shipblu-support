@@ -23,6 +23,7 @@ import { decide, isWorkable, type DecidedOutcome } from './decide';
 import { endHoldOnRow } from './end-hold';
 import { ROUTING_GRACE_MS } from './hold';
 import { routingModeOf } from './mode';
+import { SETTLE_ACTOR } from './settle-label';
 import { SETTLE_ROUTING_PRIORITY } from './start';
 
 const log = logger('routing');
@@ -301,9 +302,6 @@ export async function settleRouting(
 async function lookAgain(conversationId: string, runAt: Date): Promise<void> {
   await enqueue('settle_routing', { conversationId }, { runAt, priority: SETTLE_ROUTING_PRIORITY });
 }
-
-/** The label a decision made at the window's end carries. */
-export const SETTLE_ACTOR = 'settle_routing';
 
 async function phaseOne(
   tx: Tx,
