@@ -269,9 +269,10 @@ export default async function ReportsPage({
           <Breakdown title="By group" rows={groupRows} />
           <Breakdown
             title="By category"
-            hint="Each ticket under its category as it stands now — but the nightly run recomputes only the last three days, so a ticket re-filed later moves on those days and keeps its old category on older ones. No category is every ticket nothing had filed: no person, rule, form default or Jev."
+            hint="Each ticket under its category as it stands now — but the nightly run recomputes only the last three days, so a ticket re-filed later moves on those days and keeps its old category on older ones. No category is every ticket nothing had filed: no person, rule, form default or Jev. No CSAT here: a survey records the group, agent and channel it was asked under but no category, so a score filed by category would move whenever its ticket is re-filed."
             note={categoryNote}
             rows={categoryBreakdown}
+            csat={false}
           />
           <Breakdown
             title="By channel"
@@ -343,6 +344,7 @@ function Breakdown({
   note,
   rows,
   marks,
+  csat = true,
 }: {
   title: string;
   /** Says whose a row's tickets are, where that is not obvious from the title. */
@@ -352,6 +354,14 @@ function Breakdown({
   rows: ReportRow[];
   /** Optional per-row element shown instead of the plain label. */
   marks?: Record<string, React.ReactNode>;
+  /**
+   * False for a cut a survey keeps no snapshot of — the category. A score
+   * there would move with every relabel, where every other CSAT here and on
+   * `/reports/csat` stays where the survey was asked, which is why the CSAT
+   * page has no by-category table either. Left out rather than drawn as "—",
+   * which this table already uses for "no answers".
+   */
+  csat?: boolean;
 }) {
   if (rows.length === 0) return null;
 
@@ -368,7 +378,16 @@ function Breakdown({
           <Quiet>{note}</Quiet>
         </div>
       ) : null}
-      <Table head={['', 'Created', 'Resolved', 'First response', 'Within SLA', 'CSAT']}>
+      <Table
+        head={[
+          '',
+          'Created',
+          'Resolved',
+          'First response',
+          'Within SLA',
+          ...(csat ? ['CSAT'] : []),
+        ]}
+      >
         {/* Keyed by position, as the page always was: a label is a display name,
             and two agents can share one. */}
         {rows.map((row, index) => (
@@ -382,9 +401,11 @@ function Breakdown({
             <Cell>
               {percentage(metPercentage(row.slaFirstResponseMet, row.slaFirstResponseBreached))}
             </Cell>
-            <Cell>
-              {averageRating(row.csatRatingSum, row.csatResponseCount)?.toFixed(1) ?? '—'}
-            </Cell>
+            {csat ? (
+              <Cell>
+                {averageRating(row.csatRatingSum, row.csatResponseCount)?.toFixed(1) ?? '—'}
+              </Cell>
+            ) : null}
           </Row>
         ))}
       </Table>

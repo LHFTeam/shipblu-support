@@ -559,6 +559,9 @@ export async function computeDay(
       // The ticket's, as it stands: a survey keeps no category of its own, and
       // the header says why the current one is what every figure reads — so a
       // score and the resolution it was asked about are in one category.
+      // Filed so that every column of a category slice is one partition and
+      // "No category" is exact, and drawn nowhere, for that reason: a score
+      // that moves with a relabel is not the survey's own figure.
       categoryId: conversations.categoryId,
     })
     .from(csatSurveys)

@@ -4916,12 +4916,16 @@ what is left, in order.
 5. **The overview** (`/reports`) draws "By category" after "By group":
    `byCategory` (registry order, retired categories kept and marked) plus a
    "No category" remainder (`uncategorised()`, totals less the category slices,
-   unclamped). A line from `categoryCoverage()` says where category figures
+   unclamped), read in the same statement as the categories so the two halves
+   of the subtraction are one moment's. A line from `categoryCoverage()` says where category figures
    start, or that none in the window has one yet, so the section never
    vanishes on a window with no category (§6.54). Its reads go through
    `allLimited(3)`, and its header links to the routing report. It is not on
    the CSAT page: surveys snapshot group, agent and channel but not category,
-   so a by-category CSAT would re-file scores on a relabel.
+   so a by-category CSAT would re-file scores on a relabel. Nor does this
+   table draw a CSAT column, for the same reason. The rollup still files each
+   score under its ticket's category, so a category slice is one partition in
+   every column and "No category" stays exact.
 6. **The live board** (`/admin/dashboard`) gains "Open work by category":
    `categoryLoad()`, one scan of the open backlog full-joined to the registry.
    Active categories always show, retired ones only while they hold open work,
