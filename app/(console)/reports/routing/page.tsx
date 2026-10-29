@@ -281,10 +281,10 @@ export default async function RoutingReportPage({
               }
               explain={
                 <>
-                  Routed tickets, of any range, still open with nobody holding them{' '}
-                  {STILL_UNASSIGNED_IN_WORDS} after their hold ended: long enough for assignment and
-                  two sweeps. Tickets in a group set to manual wait for somebody to pick them, by
-                  design, and are counted apart.
+                  Routed tickets, of any range, still open and never assigned since they entered
+                  routing, {STILL_UNASSIGNED_IN_WORDS} after their hold ended: long enough for the
+                  assignment as the hold ends and the sweeps behind it. Tickets in a group set to
+                  manual wait for somebody to pick them, by design, and are counted apart.
                 </>
               }
             />
@@ -369,12 +369,12 @@ export default async function RoutingReportPage({
 
       <Section
         title="Still unassigned after routing"
-        hint={`Live routed tickets still open with nobody holding them ${STILL_UNASSIGNED_IN_WORDS} after their hold ended, by the group each is in now — a rule may have moved it since — and the decision that put it there.`}
+        hint={`Live routed tickets nobody has been assigned since they entered routing, ${STILL_UNASSIGNED_IN_WORDS} after their hold ended, by the group each is in now — a rule may have moved it since — and the decision that put it there.`}
       >
         {unassigned.length === 0 ? (
           <Quiet>
-            Every routed ticket still open has somebody holding it, or was decided less than{' '}
-            {STILL_UNASSIGNED_IN_WORDS} ago.
+            Every routed ticket still open has had somebody assigned since it entered routing, or
+            its hold ended less than {STILL_UNASSIGNED_IN_WORDS} ago.
           </Quiet>
         ) : (
           <UnassignedTable rows={unassigned} />

@@ -567,10 +567,23 @@ export type StillUnassigned = {
 };
 
 /**
- * Live decided tickets, other than `not_open`, still in the open backlog with
- * nobody holding them `STILL_UNASSIGNED_AFTER_MS` after the hold ended. Not
- * range-bound: a routed ticket left unassigned for sixty days matters most and
- * would fall out of a thirty-day window.
+ * Live decided tickets, other than `not_open`, still in the open backlog that
+ * nobody has been assigned since they entered routing, `STILL_UNASSIGNED_AFTER_MS`
+ * after the hold ended. Not range-bound: a routed ticket left unassigned for
+ * sixty days matters most and would fall out of a thirty-day window.
+ *
+ * Never assigned since, not merely unassigned now: a ticket the rota gave
+ * somebody and the sweep then reclaimed, one an agent unassigned or handed on,
+ * is waiting for reasons that are not routing's, and the dashboard's
+ * Unassigned counts it. Read off the `assigned` events, which every writer of
+ * an assignee records (assignment, the console, a rule, a handover), from
+ * `started_at` rather than `decided_at`: a ticket taken during its hold was
+ * held at the decision, and a person's assignment that ended a hold is stamped
+ * at its transaction's start, before the `decided_at` its `endHold` writes.
+ * Routing never starts on a ticket assigned at its insert, so nothing before
+ * `started_at` needs asking about. Driven from the unassigned open tickets,
+ * which `conversations_assignee_idx` serves, with each probe of this table and
+ * of the events by conversation.
  *
  * The backlog is `openBacklog()`, imported rather than restated, so this and
  * the dashboard's Unassigned cannot disagree about which tickets are work. The
@@ -595,6 +608,14 @@ export function stillUnassignedStatement(now: Date): SQL {
        and conversations.assignee_agent_id is null
        and ${openBacklog()}
        and rd.decided_at < ${instant(new Date(now.getTime() - STILL_UNASSIGNED_AFTER_MS))}
+       and not exists (
+             select 1
+               from conversation_events e
+              where e.conversation_id = rd.conversation_id
+                and e.type = 'assigned'
+                and e.created_at >= rd.started_at
+                and e.created_at <= ${instant(now)}
+           )
      group by conversations.group_id, g.name, g.assignment_strategy, rd.outcome`;
 }
 

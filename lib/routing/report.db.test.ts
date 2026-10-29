@@ -539,6 +539,63 @@ describe('takenTickets', () => {
 });
 
 describe('routedStillUnassigned', () => {
+  it('leaves out a ticket somebody was assigned after it entered routing, whatever unassigned it since', async () => {
+    const id = await channel();
+    const holder = await agent();
+    const late = at(NOW, -STILL_UNASSIGNED_AFTER_MS - MINUTE);
+    const never = await decision({ channelId: id, outcome: 'category', decidedAt: late });
+    // Assigned by the rota as its hold ended three weeks ago; reclaimed yesterday.
+    const reclaimed = await decision({
+      channelId: id,
+      outcome: 'category',
+      startedAt: cairo('2026-10-08T10:00'),
+    });
+    await event(reclaimed.id, {
+      type: 'assigned',
+      actorLabel: 'auto_assign',
+      data: { to: holder },
+      createdAt: cairo('2026-10-08T10:06'),
+    });
+    await event(reclaimed.id, {
+      type: 'assignment_reclaimed',
+      actorLabel: 'assign_sweep',
+      data: { from: holder },
+      createdAt: cairo('2026-10-29T09:00'),
+    });
+    // Taken during its hold, then unassigned and left.
+    const taken = await decision({ channelId: id, outcome: 'taken', decidedAt: late });
+    await event(taken.id, {
+      type: 'assigned',
+      actorLabel: 'assign_sweep',
+      data: { to: holder },
+      createdAt: at(late, -MINUTE),
+    });
+    await event(taken.id, {
+      type: 'unassigned',
+      actorAgentId: holder,
+      data: { to: null },
+      createdAt: at(late, MINUTE),
+    });
+    // A person's assignment ended the hold: its event carries the
+    // transaction's start, a moment before the decided_at endHold wrote.
+    const manual = await decision({ channelId: id, outcome: 'manual', decidedAt: late });
+    await event(manual.id, {
+      type: 'assigned',
+      actorAgentId: holder,
+      data: { to: holder },
+      createdAt: at(late, -5),
+    });
+    await event(manual.id, {
+      type: 'unassigned',
+      actorAgentId: holder,
+      data: { to: null },
+      createdAt: at(late, MINUTE),
+    });
+
+    const rows = await routedStillUnassigned(NOW);
+    expect(rows.flatMap((row) => row.numbers)).toEqual([never.number]);
+  });
+
   it('counts a routed ticket nobody holds ten minutes after its hold ended, whenever it routed', async () => {
     const id = await channel();
     const sales = await group('Sales', 'manual');

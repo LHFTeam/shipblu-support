@@ -4958,16 +4958,20 @@ started_at`, over a settled category only. It shows p50, p90 from ten
      (nothing asked, unsure, every call failed).
    - **Routed, then assigned**, with the median wait. Every taken ticket is
      listed.
-   - **Now, not range-bound**: routed tickets nobody holds ten minutes after
-     their hold ended (`decided_at`, two `*/5` sweeps), by the ticket's current
-     group and strategy; stranded rows, with the recovery command. Lists stop
-     at 50 with an exact total.
+   - **Now, not range-bound**: routed tickets nobody has been assigned since
+     they entered routing (no `assigned` event since `started_at`), ten minutes
+     after their hold ended (`decided_at`, two `*/5` sweeps), by the ticket's
+     current group and strategy; stranded rows, with the recovery command. A
+     ticket assigned and then reclaimed, unassigned or handed on is waiting for
+     reasons that are not routing's, and the dashboard's Unassigned counts it.
+     Lists stop at 50 with an exact total.
    - **The shadow comparison**: each would-be decision against the group a
      person moved the ticket to.
    - **State and empty states** are built from the classifier's mode and each
      channel's mode now, through `routingModeOf`.
    - `ROUTING_OUTCOME_LABELS` lives in `mode-copy.ts`. The readiness panel
-     takes a `canViewReport` prop for its link.
+     takes a required `canViewReport` prop for its link, which
+     `/admin/channels` passes as `report.view`.
 
 **Left out, on purpose.** A history of open-by-category: it would be a snapshot
 (its own table, sampled hourly), never recomputed from `conversations`.
