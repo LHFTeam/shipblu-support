@@ -1,7 +1,12 @@
-import { and, eq, ne } from 'drizzle-orm';
+import { and, eq, isNotNull, ne, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
-import { routingDecisions } from '@/db/schema';
-import type { RoutingOutcome } from './decide';
+import { conversations, routingDecisions } from '@/db/schema';
+import { logger } from '@/lib/log';
+import { loadClockInputs, type ClockInputs } from '@/lib/sla';
+import { lockedStatusCategory, statusCategoryOf } from '@/lib/tickets/status-category';
+import { isWorkable, type RoutingOutcome } from './decide';
+
+const log = logger('routing');
 
 type Executor = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -10,6 +15,12 @@ type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 export type UndecidedRouting = {
   shadow: boolean;
   stage: 'pending' | 'holding';
+  /**
+   * Phase one is written and the hold not yet ended: a decision some caller is
+   * finishing. A writer that asked `deferToRouter` first and was refused meets
+   * one only on a ticket nobody may work, whose pass the router gives up.
+   */
+  decisionInFlight: boolean;
 };
 
 /**
@@ -27,7 +38,11 @@ export async function undecidedRouting(
   conversationId: string,
 ): Promise<UndecidedRouting | null> {
   const [row] = await executor
-    .select({ shadow: routingDecisions.shadow, stage: routingDecisions.stage })
+    .select({
+      shadow: routingDecisions.shadow,
+      stage: routingDecisions.stage,
+      phaseOneAt: routingDecisions.phaseOneAt,
+    })
     .from(routingDecisions)
     .where(
       and(
@@ -38,7 +53,11 @@ export async function undecidedRouting(
   if (!row) return null;
   // The WHERE has left `decided` out, so the row is one of the other two; the
   // column's type still carries all three, and the answer names only these.
-  return { shadow: row.shadow, stage: row.stage === 'pending' ? 'pending' : 'holding' };
+  return {
+    shadow: row.shadow,
+    stage: row.stage === 'pending' ? 'pending' : 'holding',
+    decisionInFlight: row.phaseOneAt !== null,
+  };
 }
 
 /**
@@ -51,10 +70,26 @@ export async function undecidedRouting(
  * hold's end, the policy and the assignment follow it.
  *
  * Asked by every writer with a pass of its own that can land in that gap — the
- * console's category, group and assignee cases, Hand to, and Jev's answer —
- * in its write's own transaction, once the write holds the ticket's lock. Not
- * by an agent's reply, which runs no pass; nor by a rule, whose pass is either
+ * console's edits, Hand to, Jev's answer and the priority classifier's — in
+ * its write's own transaction, once the write holds the ticket's lock. Not by
+ * an agent's reply, which runs no pass; nor by a rule, whose pass is either
  * the router's own or one that read the ticket before this decision existed.
+ *
+ * Nor on a ticket nobody may work any more — resolved, closed, deleted, merged
+ * or marked spam, by this write or before it (`isWorkable`), read under the
+ * lock the write holds — where this answers false, and the writer runs its own
+ * pass as an edit on any resolved ticket does. The router owes such a ticket no
+ * pass, and gives its own up as it claims it (`phaseTwo`): handed to it, the
+ * pass was handed to nobody, and no rule keyed on what the write changed ever
+ * ran. Nothing races the writer's pass there, because the router assigns
+ * nobody a ticket nobody may work. One resolved after this write re-armed the
+ * pass gives it up the same way. A person's resolve runs its own pass, which
+ * reads this write. A rule's resolve may come from a pass that read the ticket
+ * before this write — the router's own, claimed before it — and then this
+ * write's rules run nowhere: that pass was not owed them, and the one this
+ * write re-armed is given up on the ticket it resolved. Accepted: a ticket the
+ * rules resolved in the moment the write landed is owed nothing more, as a
+ * fresh decision would find it `not_open`.
  *
  * A pass of the writer's own here would be unordered with the router's end of
  * the hold. The router assigns as soon as its last pass is over and phase
@@ -65,11 +100,12 @@ export async function undecidedRouting(
  * read the ticket at some point the writer could not see, so a write landing
  * then was passed by both, or by neither.
  *
- * So the write re-arms the router's pass instead: its claim cleared, and its
- * mark of done with it. Under the ticket's lock, which the write took first,
- * and then the routing row's, the order every routing writer takes them in,
- * this write is ordered against each of the router's steps that read the
- * ticket or end the hold, both of which take the ticket's lock too:
+ * So the write re-arms the router's pass instead: its claim cleared, so that
+ * phase three runs the pass again rather than ending the hold (below for what
+ * becomes of the mark of done). Under the ticket's lock, which the write took
+ * first, and then the routing row's, the order every routing writer takes
+ * them in, this write is ordered against each of the router's steps that read
+ * the ticket or end the hold, both of which take the ticket's lock too:
  *
  * - **before the router's claim**, the pass the claim begins reads this write;
  * - **after it**, the pass read the ticket before this write, and phase three,
@@ -77,9 +113,33 @@ export async function undecidedRouting(
  * - **after phase three**, the row is decided, this answers false, and the
  *   writer's pass is a relabel's, like any write after the hold.
  *
- * A router that died meanwhile leaves the row undecided and the pass unclaimed,
- * which `settle_routing` claims and runs when it completes the decision — never
- * read as a claimant that died part-way, since a cleared claim is no claim.
+ * Clearing the claim does not stop the pass it was taken for: a claimant
+ * part-way through its rules runs the rest of them on the ticket it read. So
+ * the re-arm keeps the age of a claim still running, in `rules_done_at` — a
+ * row with no claim and a done mark is a pass re-armed over a claim taken
+ * then, a state nothing else writes — and `settle_routing`, resuming the
+ * decision, treats it as the claim it was: left to its claimant until
+ * `RULES_RUNNING_MS` is up, then run, the claimant having died, as the pass
+ * this write is owed. Cleared outright, it read as no claim at all, and a
+ * resume falling due during a slow pass ran a second one beside it, ended the
+ * hold and assigned the ticket, and the first pass's remaining rules then moved
+ * it away from the agent the resume had chosen. A claim already marked done
+ * leaves nothing to wait out — its claimant has only phase three to run, which
+ * ends nothing on a claim it no longer holds — so the re-arm clears its mark
+ * with it, and a resume runs the pass this write is owed at once, as it did
+ * before re-arming kept ages. A second re-arm before anybody claims again keeps
+ * the age the first one kept: the claimant it speaks for is the same.
+ *
+ * A rule's pick kept for the hold's end (`recordHeldAssignment`) is not dropped
+ * here, though a move in the gap takes the ticket out of the group the pick was
+ * about. `endHold`, which every writer of a ticket's group calls in the move's
+ * own transaction, drops it (`movedGroup`): for a rule's move, which never asks
+ * this, as for a person's, and on a ticket nobody may work, where this hands
+ * nothing over. One mechanism, so that no mover is left out of it: dropped here
+ * as well, the console's move and Hand to cleared the pick twice and a rule's
+ * move not at all. A re-arm alone drops nothing: a category or an assignee
+ * written in the gap leaves the ticket in the group the pick was made for, and
+ * an `on_create` rule's pick has no later pass to make it again.
  */
 export async function deferToRouter(tx: Tx, conversationId: string): Promise<boolean> {
   const [row] = await tx
@@ -93,11 +153,88 @@ export async function deferToRouter(tx: Tx, conversationId: string): Promise<boo
     )
     .for('update');
   if (!row?.phaseOneAt) return false;
+
+  // The ticket as the write left it. Its lock is the write's, so this takes
+  // none and waits on nobody; the status through `statusCategoryOf` all the
+  // same, the one way a read of the row asks it.
+  const [ticket] = await tx
+    .select({
+      statusId: conversations.statusId,
+      statusCategory: statusCategoryOf(),
+      deletedAt: conversations.deletedAt,
+      isSpam: conversations.isSpam,
+      mergedIntoId: conversations.mergedIntoId,
+    })
+    .from(conversations)
+    .where(eq(conversations.id, conversationId));
+  if (
+    !ticket ||
+    !isWorkable({ ...ticket, statusCategory: await lockedStatusCategory(tx, ticket) })
+  ) {
+    return false;
+  }
+
   await tx
     .update(routingDecisions)
-    .set({ rulesClaimedAt: null, rulesDoneAt: null })
+    .set({
+      rulesClaimedAt: null,
+      // Read off the row as it was, as every expression in a SET is: a claim
+      // still running keeps its age; a mark of done goes with its claim; a
+      // re-arm already kept keeps the age it kept.
+      rulesDoneAt: sql`case
+        when ${routingDecisions.rulesDoneAt} is null then ${routingDecisions.rulesClaimedAt}
+        when ${routingDecisions.rulesClaimedAt} is null then ${routingDecisions.rulesDoneAt}
+      end`,
+    })
     .where(eq(routingDecisions.id, row.id));
   return true;
+}
+
+/**
+ * The policies and the hours a write needs to re-time the clocks inside its
+ * own transaction should it hand its pass to the router there
+ * (`onPriorityChangedIn`, `onStatusChangedIn`): the console's priority and
+ * status, and the priority classifier's applied answer. Loaded before that
+ * transaction opens, on the pool, since a pooled read under the write's lock
+ * is a second connection wanted by one already held (§6.91).
+ *
+ * Only when an unlocked read finds a decision in flight — phase one written,
+ * the row undecided — the one case `deferToRouter` can answer true; any other
+ * write, on nearly every ticket, pays this one indexed read and no more. And
+ * best-effort, as every re-time is (`lib/sla`): a read or a load that fails is
+ * logged and answers null, and the write goes on — outside any transaction, so
+ * nothing is left to roll back. Loaded for every such write, and before
+ * its transaction outside any try, a catalog that could not be read failed the
+ * edit itself, where it had been written and the re-time's failure logged; and
+ * a write that kept its pass read the policies and the catalog twice, once
+ * here and once to re-time after its commit.
+ *
+ * A write that defers with no inputs — the read raced a phase one written
+ * after it, or the load failed — re-times after its commit, as a write that
+ * keeps its pass does, and still hands the pass over. What that costs is the
+ * order the re-time inside the write exists for: the router's pass claims the
+ * ticket as soon as the write commits, and may read the clock from before the
+ * change, so a rule asking `is_first_response_overdue` can answer from
+ * medium's deadline on a ticket just raised to urgent. Only on that race or a
+ * failed read, and the clock itself is right once the re-time lands.
+ */
+export async function clockInputsIfInFlight(conversationId: string): Promise<ClockInputs | null> {
+  try {
+    const [inFlight] = await db
+      .select({ id: routingDecisions.id })
+      .from(routingDecisions)
+      .where(
+        and(
+          eq(routingDecisions.conversationId, conversationId),
+          ne(routingDecisions.stage, 'decided'),
+          isNotNull(routingDecisions.phaseOneAt),
+        ),
+      );
+    return inFlight ? await loadClockInputs() : null;
+  } catch (error) {
+    log.error(`could not load the clocks' policies and hours for ${conversationId}`, error);
+    return null;
+  }
 }
 
 /**

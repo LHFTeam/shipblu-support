@@ -12,6 +12,7 @@ import {
   ticketForms,
   ticketStatuses,
 } from '@/db/schema';
+import { gotNoAnswer } from '@/lib/errors';
 import { loadHoursCatalog } from '@/lib/hours/catalog';
 import { isWithinBusinessHours } from '@/lib/hours';
 import { groupHours } from '@/lib/hours/resolve';
@@ -126,11 +127,37 @@ const WORTH_RECORDING: ReadonlySet<SkipReason> = new Set<SkipReason>([
   'no_skill_match',
 ]);
 
+/** What the routing half of `assignConversation` did, as it happens (`routed`). */
+export type Routed = {
+  /** This call moved the ticket into the group the caller named. */
+  moved: boolean;
+  /**
+   * The ticket is in the group the caller named once the routing half is over:
+   * moved there by this call, or found there — by this call's read, or by its
+   * move, another writer having put it there since that read. What a caller
+   * keeping track of where its own rules left the ticket takes (the engine's
+   * `Pass.groupId`), since a rule naming the group the ticket is already in has
+   * left it there as surely as one that moved it. Unset when the caller named
+   * no group, or the ticket stays elsewhere: held by somebody, no longer work,
+   * or the group gone.
+   */
+  inGroup?: boolean;
+  /** The move ended a routing hold (`endsHoldAs`), which owes the held reply. */
+  endedHold?: boolean;
+};
+
 export type AssignOptions = {
   /** Route into this group instead of the ticket's own. Also moves the ticket. */
   groupId?: string | null;
   /** Override the group's configured strategy for this one assignment. */
   strategy?: AssignmentStrategy;
+  /**
+   * The group the caller's rule matched the ticket in — the automation
+   * engine's snapshot, as the moves of its own pass left it. On a ticket held
+   * for the router, `strategy` is kept for the hold's end only while the ticket
+   * is still there (`keepForHold`); left out, the group this call read it in.
+   */
+  matchedInGroupId?: string | null;
   /** Names the rule or job that asked, for the timeline. */
   actorLabel?: string;
   now?: Date;
@@ -141,10 +168,8 @@ export type AssignOptions = {
    * pick that fails afterwards takes `movedGroup` down with it and leaves the
    * ticket in the new group on the old one's policy and hours. A fresh
    * `{ moved: false }`; `movedGroup` reads the same answer once the call returns.
-   * `endedHold` is set beside it when the move ended a routing hold
-   * (`endsHoldAs`), which owes the held reply once the caller is done.
    */
-  routed?: { moved: boolean; endedHold?: boolean };
+  routed?: Routed;
   /**
    * Ends a routing hold (`endHold`), as this outcome, in the transaction that
    * moves the ticket into `groupId` — and only when it does move it. A rule's
@@ -177,7 +202,7 @@ export async function assignConversation(
 async function routeAndPick(
   conversationId: string,
   options: AssignOptions,
-  routed: { moved: boolean; endedHold?: boolean },
+  routed: Routed,
 ): Promise<Picked> {
   const now = options.now ?? new Date();
 
@@ -219,6 +244,7 @@ async function routeAndPick(
    */
   const routeTo =
     options.groupId && options.groupId !== conversation.groupId ? options.groupId : null;
+  if (options.groupId && !routeTo) routed.inGroup = true;
 
   /*
    * The move, made once and here, so the one write is the one answer
@@ -240,6 +266,13 @@ async function routeAndPick(
 
   if (!assignable) return { assignedTo: null, reason: 'not_assignable' };
 
+  // The group a strategy kept for the hold's end is about (`keepForHold`): the
+  // one the caller named, where the move above has put the ticket; else the
+  // one its rule matched the ticket in; else the one this call read it in.
+  const pickFor =
+    options.groupId ??
+    (options.matchedInGroupId === undefined ? conversation.groupId : options.matchedInGroupId);
+
   /*
    * Held for the router, ahead of the owner and the rota both: the hold is
    * absolute, and whatever ends it assigns the ticket then (`afterHoldEnded`).
@@ -255,8 +288,7 @@ async function routeAndPick(
    * for a rule has ended it.
    */
   if (!endedHold && isHeld(conversation, now)) {
-    await keepForHold(conversationId, options);
-    return { assignedTo: null, reason: 'awaiting_route' };
+    return keepForHold(conversationId, options, pickFor);
   }
 
   // The number's owner, ahead of everything the rota would ask — see the
@@ -453,12 +485,15 @@ async function routeAndPick(
     return { assignedTo: agentId, reason: null };
   });
 
-  if (outcome.reason === 'awaiting_route') await keepForHold(conversationId, options);
-  if (!outcome.assignedTo && outcome.reason) {
-    await recordSkip(conversationId, outcome.reason, options.actorLabel);
+  const answer =
+    outcome.reason === 'awaiting_route'
+      ? await keepForHold(conversationId, options, pickFor)
+      : outcome;
+  if (!answer.assignedTo && answer.reason) {
+    await recordSkip(conversationId, answer.reason, options.actorLabel);
   }
 
-  return outcome;
+  return answer;
 }
 
 /**
@@ -485,20 +520,37 @@ function isWorkToHandOut(ticket: Parameters<typeof isWorkable>[0] & { channel: s
  * the hold's end picks with the group's own, and a round-robin rule over a
  * group left on `manual` assigns nobody (`recordHeldAssignment`).
  *
- * After the transaction, never in it, and best-effort: the skip is the
- * answer either way, and a failure here costs the rule its strategy, not the
- * caller its pass.
+ * Kept only while the ticket is still in `groupId`, the group the pick is
+ * about, read under the ticket's lock: a pass that read the ticket before
+ * somebody else moved it — a person, or a rule in another pass — would
+ * otherwise keep, after the move, a pick about the group the ticket has left.
+ * Answered `moved` then, as the rota's own re-read answers a ticket that left
+ * its group, and whatever ends the hold assigns it in the group it is in. A
+ * move landing after the pick is kept, while the hold lasts, drops it
+ * (`endHold`'s `movedGroup`); one after the hold has ended does not.
+ *
+ * In a transaction of its own, never inside the pick's or any other, and
+ * best-effort: the skip is the answer either way, and a failure here costs the
+ * rule its strategy, not the caller its pass.
  */
 async function keepForHold(
   conversationId: string,
   { strategy, actorLabel }: Pick<AssignOptions, 'strategy' | 'actorLabel'>,
-): Promise<void> {
-  if (!strategy) return;
+  groupId: string | null,
+): Promise<Picked> {
+  if (!strategy) return { assignedTo: null, reason: 'awaiting_route' };
   try {
-    await recordHeldAssignment(conversationId, strategy, actorLabel ?? 'auto_assign');
+    const kept = await recordHeldAssignment(
+      conversationId,
+      strategy,
+      actorLabel ?? 'auto_assign',
+      groupId,
+    );
+    if (kept === 'moved') return { assignedTo: null, reason: 'moved' };
   } catch (error) {
     log.error(`could not keep the held strategy on ${conversationId}`, error);
   }
+  return { assignedTo: null, reason: 'awaiting_route' };
 }
 
 /**
@@ -521,7 +573,7 @@ async function moveToGroup(
   conversationId: string,
   groupId: string,
   { actorLabel, endsHoldAs }: Pick<AssignOptions, 'actorLabel' | 'endsHoldAs'>,
-  routed: { moved: boolean; endedHold?: boolean },
+  routed: Routed,
 ): Promise<boolean> {
   const label = actorLabel ?? 'auto_assign';
   // The hold ends in the move's own transaction, so neither commits without
@@ -535,7 +587,15 @@ async function moveToGroup(
         groupMustExist: true,
       }))
     ) {
-      return { moved: false, endedHold: false };
+      // Not moved: the group is gone, or another writer put the ticket in it
+      // since this call's read — which `groupMustExist` answers alike, and
+      // which the caller is owed apart (`inGroup`). Read only on this path,
+      // which is that race or a rule naming a deleted group.
+      const [found] = await tx
+        .select({ groupId: conversations.groupId })
+        .from(conversations)
+        .where(eq(conversations.id, conversationId));
+      return { moved: false, endedHold: false, inGroup: found?.groupId === groupId };
     }
     // In the move's transaction and ahead of the hold's end, so the timeline
     // reads the move before the `routed` line naming it, as the console's
@@ -543,9 +603,14 @@ async function moveToGroup(
     // (`CHANGE_STAMP`), and this one, inserted after the commit as it was,
     // sorted after the decision it was the reason for.
     await recordGroupChanged(tx, conversationId, groupId, label);
-    const endedHold = endsHoldAs ? await endHold(tx, conversationId, endsHoldAs, { label }) : false;
-    return { moved: true, endedHold };
+    // On a decision in flight, ending nothing, it drops a rule's pick kept for
+    // the group the ticket has just left (`movedGroup`).
+    const endedHold = endsHoldAs
+      ? await endHold(tx, conversationId, endsHoldAs, { label, movedGroup: true })
+      : false;
+    return { moved: true, endedHold, inGroup: true };
   });
+  if (result.inGroup) routed.inGroup = true;
   if (!result.moved) return false;
 
   routed.moved = true;
@@ -592,13 +657,17 @@ async function recordGroupChanged(
  * refused by Postgres — a trigger, a constraint — it is rolled back to and
  * answered, and the write, the hold's end and the follow-up they owe all
  * stand, as they did while the line was written after the commit. Only a
- * refusal. A statement that got no answer — the admission gate giving it up as
- * lost, or a cancel, either way `57014` — is thrown on, so the body fails and
- * its transaction rolls back, which is what `db/client.ts` relies on once it
- * has told the caller the transaction failed: swallowed here, the body went on
- * queueing `endHold` behind the stuck statement, and a connection that
- * answered after all committed a move and a hold's end the caller had been
- * told had failed, with nothing owed for either ever run.
+ * refusal. A statement that got no answer — `57014`, the admission gate giving
+ * it up as lost or a cancel Postgres answered — is thrown on, so the body fails
+ * and its transaction rolls back. A cancel is a statement that ran into its
+ * deadline, and is not tried again inside a write that has already waited that
+ * long: failing the write is the conservative answer. The gate's give-up, which
+ * this cannot tell from a cancel by its code, must fail it, since that is what
+ * `db/client.ts` relies on once it has told the caller the transaction failed:
+ * swallowed here, the body went on queueing `endHold` behind the stuck
+ * statement, and a connection that answered after all committed a move and a
+ * hold's end the caller had been told had failed, with nothing owed for either
+ * ever run.
  */
 export async function recordLineIn(
   tx: Tx,
@@ -615,9 +684,6 @@ export async function recordLineIn(
   }
 }
 
-/** `query_canceled`: a statement cancelled, or given up on by the admission gate. */
-const QUERY_CANCELED = '57014';
-
 /**
  * Whether Postgres itself answered a statement with an error, other than a
  * cancel: postgres.js's `PostgresError`, which drizzle hands on as the `cause`
@@ -627,15 +693,14 @@ const QUERY_CANCELED = '57014';
  * (`pool-confinement`); the name is the class's own, and survives because
  * neither the worker (`tsx`) nor Next (`serverExternalPackages`) bundles the
  * package. The admission gate's own errors are plain ones carrying `57014`,
- * and Postgres's answer to a cancel is a `PostgresError` carrying it too.
+ * and Postgres's answer to a cancel is a `PostgresError` carrying it too
+ * (`gotNoAnswer`, asked of the `PostgresError` itself).
  */
 function refusedByPostgres(error: unknown): boolean {
   const cause = error instanceof Error ? error.cause : undefined;
   return [error, cause].some(
     (candidate) =>
-      candidate instanceof Error &&
-      candidate.name === 'PostgresError' &&
-      (candidate as Error & { code?: unknown }).code !== QUERY_CANCELED,
+      candidate instanceof Error && candidate.name === 'PostgresError' && !gotNoAnswer(candidate),
   );
 }
 

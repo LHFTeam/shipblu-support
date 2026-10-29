@@ -24,7 +24,7 @@ import { ROUTING_GRACE_MS } from '@/lib/routing/hold';
 import { withCleanDatabase } from '@/lib/testing/db';
 import { holdNextTransaction, untilWaitingOnALock } from '@/lib/testing/hold-transaction';
 import { afterTicketUpdate } from '@/lib/tickets/lifecycle';
-import { assignConversation, recordLineIn } from './index';
+import { assignConversation, recordLineIn, type Routed } from './index';
 
 /**
  * The owner's path through `assignConversation`, against Postgres: an
@@ -579,6 +579,45 @@ describe('assignConversation on a ticket held for the router', () => {
     expect(await eventsOf(id, ASSIGNMENT_EVENTS)).toEqual([]);
   });
 
+  // A rule that matched the ticket in another group — a pass that read it
+  // before a person moved it to Customer Care — is asking about a queue the
+  // ticket has left, and keeps nothing: `moved`, as the rota's own re-read
+  // answers a ticket that left its group. Matched where it is, it is kept.
+  it('keeps a strategy only for the group the rule matched the ticket in', async () => {
+    const now = new Date();
+    const care = await desk('Customer Care', 'Omar Care', now);
+    const sales = await desk('Sales', 'Sara Sales', now);
+    const id = await ticketIn(care.groupId, at(now, 5));
+    const kept = async () => {
+      const [row] = await db
+        .select({ strategy: routingDecisions.heldStrategy })
+        .from(routingDecisions)
+        .where(eq(routingDecisions.conversationId, id));
+      return row!.strategy;
+    };
+
+    expect(
+      await assignConversation(id, {
+        now,
+        strategy: 'round_robin',
+        actorLabel: 'automation:Sales round robin',
+        matchedInGroupId: sales.groupId,
+      }),
+    ).toEqual({ assignedTo: null, reason: 'moved', movedGroup: false });
+    expect(await kept()).toBeNull();
+
+    expect(
+      await assignConversation(id, {
+        now,
+        strategy: 'round_robin',
+        actorLabel: 'automation:Care round robin',
+        matchedInGroupId: care.groupId,
+      }),
+    ).toMatchObject({ reason: 'awaiting_route' });
+    expect(await kept()).toBe('round_robin');
+    expect(await eventsOf(id, ASSIGNMENT_EVENTS)).toEqual([]);
+  });
+
   // The grace is a valve for a settle that never came, and it is exclusive:
   // the instant it runs out the hold is over, a millisecond before it is not.
   it('holds through the grace and assigns the instant it runs out', async () => {
@@ -743,7 +782,7 @@ describe('assignConversation on a ticket held for the router', () => {
     const care = await desk('Customer Care', 'Omar Care', now);
     const merchants = await desk('Merchant Care', 'Mona Merchant', now);
     const id = await ticketIn(care.groupId, at(now, 5));
-    const routed: { moved: boolean; endedHold?: boolean } = { moved: false };
+    const routed: Routed = { moved: false };
 
     const outcome = await assignConversation(id, {
       groupId: merchants.groupId,
@@ -754,7 +793,7 @@ describe('assignConversation on a ticket held for the router', () => {
     });
 
     expect(outcome).toEqual({ assignedTo: merchants.agentId, reason: null, movedGroup: true });
-    expect(routed).toEqual({ moved: true, endedHold: true });
+    expect(routed).toEqual({ moved: true, inGroup: true, endedHold: true });
     expect(await held(id)).toEqual({
       assignee: merchants.agentId,
       groupId: merchants.groupId,
@@ -822,14 +861,19 @@ describe('assignConversation on a ticket held for the router', () => {
 
   // A rule naming the team the ticket is already in matches on every pass,
   // and has decided nothing; nor has one naming no team at all, which means
-  // "assign within the current group". Both are held like any assignment.
+  // "assign within the current group". Both are held like any assignment. The
+  // first still leaves the ticket in the team it names (`inGroup`), which the
+  // engine's pass takes as where the ticket is.
   it('keeps the hold for an auto_assign naming the group the ticket is in, or none', async () => {
     const now = new Date();
     const care = await desk('Customer Care', 'Omar Care', now);
     const id = await ticketIn(care.groupId, at(now, 5));
-    const routed: { moved: boolean; endedHold?: boolean } = { moved: false };
 
-    for (const groupId of [care.groupId, undefined]) {
+    for (const [groupId, reported] of [
+      [care.groupId, { moved: false, inGroup: true }],
+      [undefined, { moved: false }],
+    ] as const) {
+      const routed: Routed = { moved: false };
       expect(
         await assignConversation(id, {
           groupId,
@@ -839,9 +883,9 @@ describe('assignConversation on a ticket held for the router', () => {
           now,
         }),
       ).toEqual({ assignedTo: null, reason: 'awaiting_route', movedGroup: false });
+      expect(routed).toEqual(reported);
     }
 
-    expect(routed).toEqual({ moved: false });
     expect(await held(id)).toEqual({ assignee: null, groupId: care.groupId, decidedAt: null });
     expect(await routingOf(id)).toMatchObject({ stage: 'holding', outcome: null });
     expect(await eventsOf(id, ['group_changed', 'routed', ...ASSIGNMENT_EVENTS])).toEqual([]);

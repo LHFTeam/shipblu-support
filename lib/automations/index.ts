@@ -10,7 +10,7 @@ import {
   ticketForms,
   ticketStatuses,
 } from '@/db/schema';
-import { assignConversation, recordLineIn } from '@/lib/assignment';
+import { assignConversation, recordLineIn, type Routed } from '@/lib/assignment';
 import { afterHoldEnded } from '@/lib/routing/after-hold';
 import { endHold } from '@/lib/routing/end-hold';
 import { textToHtml } from '@/lib/html/sanitize';
@@ -138,6 +138,7 @@ export async function applyRules(
     categoryChanged: false,
     groupMoved: false,
     endedHold: false,
+    groupId: ticket.conversation.groupId,
   };
   let applied = 0;
 
@@ -207,6 +208,18 @@ type Pass = {
   groupMoved: boolean;
   /** A rule ended a routing hold, which owes the assignment and the held reply. */
   endedHold: boolean;
+  /**
+   * The group the pass has the ticket in: its snapshot's, then the group of
+   * each rule in it that moved the ticket, or found it already there. What an
+   * `auto_assign`'s pick is about, which a held ticket keeps only while it is
+   * still there (`matchedInGroupId`): a move by anybody else since the
+   * snapshot makes the pick one about a group the ticket has left — unless a
+   * rule in this pass has since named the group that move put it in. A move of
+   * this pass's own drops a pick an earlier rule kept, about the group it left
+   * (`endHold`'s `movedGroup`), and a later rule's pick is about where the
+   * move put it, and is kept.
+   */
+  groupId: string | null;
 };
 
 /**
@@ -380,7 +393,9 @@ async function applyAction(
       // already in matches on every pass (`moveToGroupIfElsewhere`), and must
       // not end every routing hold on its channel. Compared against the row as
       // the move's own update finds it, and the hold ended in that transaction
-      // — after the move's line, written there too (`recordIn`).
+      // — after the move's line, written there too (`recordIn`). On a decision
+      // in flight it ends nothing, and drops a rule's pick kept for the group
+      // the ticket has left (`movedGroup`).
       const move = await db.transaction(async (tx) => {
         if (!(await moveToGroupIfElsewhere(conversationId, action.groupId, { executor: tx }))) {
           return null;
@@ -389,9 +404,17 @@ async function applyAction(
         return {
           endedHold: await endHold(tx, conversationId, 'rule', {
             label: `automation:${ruleName}`,
+            movedGroup: true,
           }),
         };
       });
+      // The ticket is in the rule's group either way: with no `groupMustExist`,
+      // the move answers false only for a ticket already there, or gone. So a
+      // later rule's pick in this pass is about it (`Pass.groupId`) whoever
+      // put it there. Left on the group the pass read, the pick was refused
+      // when another pass's move had beaten this rule's, and kept when it came
+      // after, so who was assigned turned on which landed first.
+      pass.groupId = action.groupId;
       if (!move) return;
       if (move.endedHold) pass.endedHold = true;
 
@@ -420,17 +443,26 @@ async function applyAction(
       // like any other assignment, and the rule's strategy waits with it for
       // whatever ends the hold (`recordHeldAssignment`) — a round-robin rule
       // over a group left on `manual` would otherwise assign nobody.
-      const routed: { moved: boolean; endedHold?: boolean } = { moved: false };
+      // The strategy is kept only while the ticket is in the group this pass
+      // has it in (`Pass.groupId`): a pass that read it before somebody else
+      // moved it would otherwise keep, after the move, a pick about the group
+      // it has left. A rule naming a group leaves the pass there whenever the
+      // call finds or leaves the ticket in it (`inGroup`), as `assign_group`
+      // does, so a move another pass made first is no reason to refuse a
+      // later rule's pick.
+      const routed: Routed = { moved: false };
       try {
         await assignConversation(conversationId, {
           groupId: action.groupId,
           strategy: action.strategy === 'group_default' ? undefined : action.strategy,
           actorLabel: `automation:${ruleName}`,
+          matchedInGroupId: pass.groupId,
           routed,
           endsHoldAs: 'rule',
         });
       } finally {
         if (routed.moved) pass.groupMoved = true;
+        if (routed.inGroup) pass.groupId = action.groupId;
         if (routed.endedHold) pass.endedHold = true;
       }
       return;

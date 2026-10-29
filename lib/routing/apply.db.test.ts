@@ -21,6 +21,7 @@ import {
 } from '@/db/schema';
 import { assignConversation } from '@/lib/assignment';
 import { maybeSendAutoResponse } from '@/lib/auto-response';
+import { runAutomations } from '@/lib/automations';
 import { setConversationCategory, setConversationCategoryOn } from '@/lib/categories/write';
 import { forgetCategoryAiSettings } from '@/lib/category-ai/settings';
 import { forgetHoursCatalog } from '@/lib/hours/catalog';
@@ -1416,6 +1417,275 @@ describe('what ends a hold early', () => {
   });
 });
 
+// --- A rule's pick, and a move after phase one --------------------------------
+
+/**
+ * A rule's pick kept for the hold's end (`recordHeldAssignment`) is about the
+ * group its rule matched the ticket in. Phase one drops it when its own
+ * decision moves the ticket, since the override does not carry to the new
+ * group; every move after phase one drops it for the same reason, whoever
+ * makes it (`endHold`'s `movedGroup`). Here Sales, where sales goes, and
+ * Escalations both assign by hand, so only a rule's round robin assigns there.
+ * Dropped by a person's move alone, a rule's move after the router's pass had
+ * kept the pick about Sales left it to be made in Escalations under the Sales
+ * rule's name — and the same move landing a moment earlier, before the pick
+ * was kept, assigned nobody (`recordHeldAssignment` answers `moved`): the same
+ * rules and the same writes, a different holder by timing.
+ */
+describe('a rule’s pick kept for the hold’s end, and a rule’s move after phase one', () => {
+  /**
+   * Home routes nothing. `Escalate` moves a ticket the customer's next message
+   * has tagged; `Sales round robin` turns round robin on for a sales ticket
+   * nobody is escalating. Jev has filed the held ticket as sales.
+   */
+  async function desk() {
+    const home = await group('Home', [await agent('Hana Home')]);
+    const sales = await group('Sales', [await agent('Samir Sales')], {
+      assignmentStrategy: 'manual',
+    });
+    const escalations = await group('Escalations', [await agent('Ezz Escalations')], {
+      assignmentStrategy: 'manual',
+    });
+    const salesCategory = await routeTo('sales', sales);
+    const { id } = await heldTicket(await mailbox(home), home);
+    await rule(
+      'on_update',
+      'Escalate',
+      { field: 'tags', op: 'contains', value: 'escalate' },
+      [{ type: 'assign_group', groupId: escalations }],
+      0,
+    );
+    await rule(
+      'on_update',
+      'Sales round robin',
+      {
+        all: [inCategory(salesCategory), { field: 'tags', op: 'not_contains', value: 'escalate' }],
+      },
+      [{ type: 'auto_assign', groupId: null, strategy: 'round_robin' }],
+      1,
+    );
+    await jevFiles(id, salesCategory);
+    return { id, escalations };
+  }
+
+  /** The customer's next message tagging the ticket, and its own `on_update` pass. */
+  async function customerEscalates(id: string): Promise<void> {
+    await db
+      .update(conversations)
+      .set({ tags: ['escalate'] })
+      .where(eq(conversations.id, id));
+    await runAutomations('on_update', id);
+  }
+
+  async function expectNobodyIn(id: string, groupId: string): Promise<void> {
+    expect(await ticketRow(id)).toMatchObject({ groupId, assigneeAgentId: null });
+    expect(await events(id, 'assigned')).toEqual([]);
+    expect(await decision(id)).toMatchObject({
+      stage: 'decided',
+      heldStrategy: null,
+      heldActorLabel: null,
+    });
+  }
+
+  // The router's transactions: 1 phase one, 2 the claim that reads the
+  // ticket for the pass, 3 the pick `Sales round robin` keeps, 4 phase three.
+  it('a move in another pass after the router’s pass kept a pick: nobody is assigned', async () => {
+    const d = await desk();
+    beforeTransaction(4, async () => {
+      expect(await decision(d.id)).toMatchObject({
+        stage: 'holding',
+        heldStrategy: 'round_robin',
+      });
+      await customerEscalates(d.id);
+    });
+
+    expect(await routeNow(d.id, { label: 'jev:category' })).toBe('decided');
+
+    await expectNobodyIn(d.id, d.escalations);
+  });
+
+  it('the same move before the pick is kept: nobody is assigned', async () => {
+    const d = await desk();
+    beforeTransaction(3, async () => {
+      expect(await decision(d.id)).toMatchObject({ stage: 'holding', heldStrategy: null });
+      await customerEscalates(d.id);
+    });
+
+    expect(await routeNow(d.id, { label: 'jev:category' })).toBe('decided');
+
+    await expectNobodyIn(d.id, d.escalations);
+  });
+
+  // Within the router's own pass: one rule keeps round robin about Sales, a
+  // later one sends every sales ticket on to Escalations — and, when there is
+  // a third, its round robin is about Escalations, where the pass then has the
+  // ticket (`Pass.groupId`), and that pick is the one made. Matched on the
+  // category, since a pass judges every rule against the ticket it read.
+  it.each([
+    ['no rule after the move', false],
+    ['a rule after the move keeping a pick about Escalations', true],
+  ] as const)('a move later in the router’s own pass, %s', async (_, after) => {
+    const sales = await group('Sales', [await agent('Samir Sales')], {
+      assignmentStrategy: 'manual',
+    });
+    const ezz = await agent('Ezz Escalations');
+    const escalations = await group('Escalations', [ezz], { assignmentStrategy: 'manual' });
+    const home = await group('Home', [await agent('Hana Home')]);
+    const salesCategory = await routeTo('sales', sales);
+    const { id } = await heldTicket(await mailbox(home), home);
+    await rule(
+      'on_update',
+      'Sales round robin',
+      inCategory(salesCategory),
+      [{ type: 'auto_assign', groupId: null, strategy: 'round_robin' }],
+      0,
+    );
+    await rule(
+      'on_update',
+      'Sales escalates',
+      inCategory(salesCategory),
+      [{ type: 'assign_group', groupId: escalations }],
+      1,
+    );
+    if (after) {
+      await rule(
+        'on_update',
+        'Escalations round robin',
+        inCategory(salesCategory),
+        [{ type: 'auto_assign', groupId: null, strategy: 'round_robin' }],
+        2,
+      );
+    }
+    await jevFiles(id, salesCategory);
+
+    expect(await routeNow(id, { label: 'jev:category' })).toBe('decided');
+
+    if (!after) {
+      await expectNobodyIn(id, escalations);
+      return;
+    }
+    expect(await ticketRow(id)).toMatchObject({ groupId: escalations, assigneeAgentId: ezz });
+    expect((await events(id, 'assigned')).map((event) => event.actorLabel)).toEqual([
+      'automation:Escalations round robin',
+    ]);
+  });
+
+  /**
+   * The router's pass sends every sales ticket to Escalations, by `assign_group`
+   * or by an `auto_assign` naming the group that picks nobody itself, and a
+   * later rule keeps round robin for the hold's end; the customer's message
+   * moves the ticket to Escalations too (`Escalate`). Whichever of the two moves
+   * lands first, the ticket ends in Escalations by the same rules, so the same
+   * holder: the rule that found it already there leaves the pass there
+   * (`Pass.groupId`) as the one that moved it does. On the pass's snapshot
+   * instead, a move landing first left the later pick about Sales, refused as
+   * `moved`, and nobody was assigned.
+   */
+  async function escalatingDesk(by: 'assign_group' | 'auto_assign') {
+    const home = await group('Home', [await agent('Hana Home')]);
+    const sales = await group('Sales', [await agent('Samir Sales')], {
+      assignmentStrategy: 'manual',
+    });
+    const ezz = await agent('Ezz Escalations');
+    const escalations = await group('Escalations', [ezz], { assignmentStrategy: 'manual' });
+    const salesCategory = await routeTo('sales', sales);
+    const { id } = await heldTicket(await mailbox(home), home);
+    await rule(
+      'on_update',
+      'Escalate',
+      { field: 'tags', op: 'contains', value: 'escalate' },
+      [{ type: 'assign_group', groupId: escalations }],
+      0,
+    );
+    await rule(
+      'on_update',
+      'Sales escalates',
+      inCategory(salesCategory),
+      [
+        by === 'assign_group'
+          ? { type: 'assign_group', groupId: escalations }
+          : { type: 'auto_assign', groupId: escalations, strategy: 'group_default' },
+      ],
+      1,
+    );
+    await rule(
+      'on_update',
+      'Escalations round robin',
+      {
+        all: [inCategory(salesCategory), { field: 'tags', op: 'not_contains', value: 'escalate' }],
+      },
+      [{ type: 'auto_assign', groupId: null, strategy: 'round_robin' }],
+      2,
+    );
+    await jevFiles(id, salesCategory);
+    return { id, sales, escalations, ezz };
+  }
+
+  type Desk = Awaited<ReturnType<typeof escalatingDesk>>;
+  /** Where the router's pass is when the customer's message lands, checked there. */
+  type Landing = (d: Desk) => void;
+
+  /** Just before the `nth` of the router's transactions, the ticket in `where`. */
+  const before =
+    (nth: number, where: 'sales' | 'escalations', heldStrategy: string | null): Landing =>
+    (d) =>
+      beforeTransaction(nth, async () => {
+        expect((await ticketRow(d.id)).groupId).toBe(d[where]);
+        expect(await decision(d.id)).toMatchObject({ stage: 'holding', heldStrategy });
+        await customerEscalates(d.id);
+      });
+
+  // The router's transactions: 1 phase one, 2 the claim that reads the ticket
+  // for the pass, 3 `Sales escalates`'s move, 4 the pick `Escalations round
+  // robin` keeps, 5 phase three. An `auto_assign` reads the ticket before its
+  // move's transaction, so landing after the claim it finds the ticket in
+  // Escalations, and landing just before 3 its move does.
+  it.each([
+    ['assign_group', 'no customer message', null],
+    ['assign_group', 'the customer’s move before the router’s', before(3, 'sales', null)],
+    ['assign_group', 'the customer’s after the router’s', before(4, 'escalations', null)],
+    [
+      'assign_group',
+      'the customer’s after the pick is kept',
+      before(5, 'escalations', 'round_robin'),
+    ],
+    ['auto_assign', 'no customer message', null],
+    [
+      'auto_assign',
+      'the customer’s move before the rule reads the ticket',
+      (d: Desk) =>
+        afterTransaction(2, async () => {
+          expect((await ticketRow(d.id)).groupId).toBe(d.sales);
+          await customerEscalates(d.id);
+        }),
+    ],
+    ['auto_assign', 'the customer’s move before the rule’s', before(3, 'sales', null)],
+    ['auto_assign', 'the customer’s after the router’s', before(4, 'escalations', null)],
+    [
+      'auto_assign',
+      'the customer’s after the pick is kept',
+      before(5, 'escalations', 'round_robin'),
+    ],
+  ] as const)(
+    'the router’s pass escalates by %s, %s: the same holder',
+    async (by, _, landing: Landing | null) => {
+      const d = await escalatingDesk(by);
+      landing?.(d);
+
+      expect(await routeNow(d.id, { label: 'jev:category' })).toBe('decided');
+
+      expect(await ticketRow(d.id)).toMatchObject({
+        groupId: d.escalations,
+        assigneeAgentId: d.ezz,
+      });
+      expect((await events(d.id, 'assigned')).map((event) => event.actorLabel)).toEqual([
+        'automation:Escalations round robin',
+      ]);
+      expect(await decision(d.id)).toMatchObject({ stage: 'decided' });
+    },
+  );
+});
+
 /**
  * The console's group case, its write's lib half: the move, its line stamped
  * as the console stamps it, `endHold`, and `deferToRouter`.
@@ -1431,7 +1701,7 @@ async function consoleMoves(id: string, groupId: string, agentId: string) {
       data: { to: groupId },
     });
     return {
-      ended: await endHold(tx, id, 'manual', { agentId }),
+      ended: await endHold(tx, id, 'manual', { agentId, movedGroup: true }),
       deferred: await deferToRouter(tx, id),
     };
   });
@@ -1468,6 +1738,27 @@ function beforeTransaction(nth: number, meanwhile: () => Promise<void>): void {
     if (opened < nth) return transaction.call(this, run, config) as never;
     spy.mockRestore();
     return meanwhile().then(() => transaction.call(this, run, config)) as never;
+  });
+}
+
+/**
+ * Runs `meanwhile` just after the `nth` transaction opened from now commits,
+ * before whatever its caller does next.
+ */
+function afterTransaction(nth: number, meanwhile: () => Promise<void>): void {
+  const transaction = PgDatabase.prototype.transaction;
+  let opened = 0;
+  const spy = vi.spyOn(PgDatabase.prototype, 'transaction').mockImplementation(async function (
+    this: PgDatabase<never>,
+    run,
+    config,
+  ) {
+    opened += 1;
+    if (opened < nth) return transaction.call(this, run, config) as never;
+    spy.mockRestore();
+    const result: unknown = await transaction.call(this, run, config);
+    await meanwhile();
+    return result as never;
   });
 }
 

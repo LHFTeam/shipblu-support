@@ -338,6 +338,24 @@ async function refuseLine(type: string) {
   };
 }
 
+/**
+ * Refuses the router's phase one — the one write that stamps `phase_one_at` —
+ * as a lost connection would, until the answer is called.
+ */
+async function refusePhaseOne() {
+  await db.execute(sql`
+    create function refuse_phase_one() returns trigger language plpgsql
+    as $$ begin raise exception 'the connection was lost'; end $$`);
+  await db.execute(sql`
+    create trigger refuse_phase_one before update on routing_decisions
+    for each row when (old.phase_one_at is null and new.phase_one_at is not null)
+    execute function refuse_phase_one()`);
+  return async () => {
+    await db.execute(sql`drop trigger refuse_phase_one on routing_decisions`);
+    await db.execute(sql`drop function refuse_phase_one()`);
+  };
+}
+
 async function tagsOf(id: string) {
   const [row] = await db
     .select({ tags: conversations.tags })
@@ -886,6 +904,61 @@ describe('updateTicket on a ticket held for routing', () => {
       expect(await eventsOf(id, 'priority_changed')).toHaveLength(1);
     });
 
+    // The edit's own call into the router fails — phase one refused, as a lost
+    // connection would refuse it — on a ticket held with no decision yet. The
+    // window's job is still to come, and decides on what the edit wrote, its
+    // pass over the rules included (`routerDecidedOn`, which answers so for a
+    // row still undecided). So the edit runs no pass of its own: one now and
+    // the router's at the window's end would fire every rule keyed on the
+    // category twice, and a rule moving the ticket would move it while it was
+    // still held for a decision nobody had made.
+    it('runs no pass of its own when its call into the router fails, and the window’s end runs it once', async () => {
+      const lina = await agent('Lina Care');
+      const omar = await agent('Omar Sales');
+      const care = await group('Customer Care', [lina]);
+      const sales = await group('Inbound Sales Team', [omar]);
+      const salesCategory = await routeTo('sales', sales);
+      await onUpdate('Sales is seen', { field: 'category.id', op: 'eq', value: salesCategory }, [
+        { type: 'add_tags', tags: ['sales-seen'] },
+      ]);
+      const id = await heldTicket(await mailbox(care, 'category'), care);
+
+      const allow = await refusePhaseOne();
+      try {
+        expect(await edit(id, 'category', salesCategory)).toMatchObject({ error: null });
+      } finally {
+        await allow();
+      }
+      expect(errors.mock.calls.map((call) => String(call[0]))).toEqual([
+        expect.stringContaining(`could not route ${id}`),
+      ]);
+      errors.mockClear();
+
+      expect(await eventsOf(id, 'tagged')).toEqual([]);
+      expect(await decisionOf(id)).toMatchObject({
+        stage: 'holding',
+        outcome: null,
+        phaseOneAt: null,
+      });
+      expect(await ticketRow(id)).toMatchObject({
+        groupId: care,
+        assigneeAgentId: null,
+        routingDecidedAt: null,
+      });
+
+      expect(await settleRouting(id)).toBe('decided');
+
+      expect(await decisionOf(id)).toMatchObject({
+        stage: 'decided',
+        outcome: 'category',
+        categoryId: salesCategory,
+        toGroupId: sales,
+        decidedByLabel: 'settle_routing',
+      });
+      expect(await eventsOf(id, 'tagged')).toHaveLength(1);
+      expect(await ticketRow(id)).toMatchObject({ groupId: sales, assigneeAgentId: omar });
+    });
+
     // Jev's answer routed the ticket a moment ago, and its pass over the rules
     // read the ticket filed as Sales; the agent files it as merchant work
     // while that pass is still going. The router's pass will never see the
@@ -1129,13 +1202,18 @@ describe('updateTicket on a decision in flight', () => {
     expect(await decisionOf(d.id)).toMatchObject({ stage: 'decided', outcome: 'category' });
   });
 
-  // The edit's own call into the router would fail — a lost connection — and
-  // that was once read as "the window's job runs the rules". With a decision
-  // on another category in flight, the router gave its pass up to the edit,
-  // decided the row, and the window's job found nothing to do: no rule keyed
-  // on what the person chose ever ran. Handed to the router under the edit's
-  // lock, the pass runs whatever the edit's later calls would have done.
-  it('a category edit whose own call into the router would fail: its rules still run, once', async () => {
+  // The edit lands after phase one, and every transaction it might open after
+  // its write fails, as a lost connection would — none is opened, because the
+  // write itself handed the edit's pass to the router (`deferToRouter`). Once,
+  // with a decision on another category in flight, the router gave its pass up
+  // to the edit, decided the row, and left the rest to the edit's later calls;
+  // when they failed, the window's job found nothing to do and no rule keyed on
+  // what the person chose ever ran. Handed over in the write, the pass is the
+  // router's, run once on the person's category, and the window's job finds
+  // the decision made. The edit's own call into the router failing, on a
+  // ticket with no phase one yet, is "runs no pass of its own when its call
+  // into the router fails", above.
+  it('a category edit after phase one: its rules run once, in the router’s pass, whatever fails after its write', async () => {
     const d = await desk();
     await onUpdate('Tag support', { field: 'category.id', op: 'eq', value: d.support }, [
       { type: 'add_tags', tags: ['support'] },
@@ -1386,5 +1464,254 @@ describe('a category edit on a ticket resolved in its window', () => {
 
     expect(await edit(id, 'category', salesKey)).toMatchObject({ error: null });
     expect(await tagsOf(id)).toEqual(['sales']);
+  });
+});
+
+// A group-less `auto_assign` met on a held ticket keeps its strategy for the
+// hold's end (`recordHeldAssignment`), and the strategy speaks about the group
+// the ticket was in when the rule matched: phase one drops it when its own
+// decision moves the ticket. A person moving the ticket while the decision is
+// in flight is the same move. Here the rule matches Sales and asks for round
+// robin; the agent moves the ticket to Billing, which assigns by hand. Kept,
+// the pick was made in Billing at the hold's end under the Sales rule's name,
+// though the pass that runs again on Billing matched no rule at all — the
+// rota of a group whose admin turned it off, overruled by a rule about
+// another team. Landing before the router's pass reads the ticket, the move
+// is all the pass sees and nothing is kept; landing after the read, the pass
+// that read Sales asks for its pick once the move has committed, and is
+// refused it, the ticket being in Billing now (`recordHeldAssignment`).
+describe('a group move on a decision in flight, and a rule’s held pick', () => {
+  beforeEach(async () => {
+    await classifierApplies();
+  });
+
+  it.each([
+    ['before the router’s pass reads the ticket', 1],
+    ['after the router’s pass has read it', 2],
+  ] as const)('a move to a manual group %s: nobody is assigned there', async (_, at) => {
+    const hana = await agent('Hana Home');
+    const omar = await agent('Omar Sales');
+    const bilal = await agent('Bilal Billing');
+    const home = await group('Home', [hana]);
+    const sales = await group('Sales', [omar]);
+    const billing = await group('Billing', [bilal], { assignmentStrategy: 'manual' });
+    const salesCategory = await routeTo('sales', sales);
+    const id = await heldTicket(await mailbox(home, 'category'), home);
+    await setConversationCategory(id, salesCategory, { label: 'jev:category' });
+    await onUpdate('Sales: round robin', inGroup(sales), [
+      { type: 'auto_assign', groupId: null, strategy: 'round_robin' },
+    ]);
+
+    // Router transaction 1 is phase one, which moves the ticket to Sales; 2 is
+    // the claim that reads it for the pass.
+    const { routed, edited } = await routeWithEditBetween({
+      route: () => routeNow(id, { label: 'jev:category' }),
+      afterRouterTransaction: at,
+      edit: () => edit(id, 'group', billing),
+    });
+
+    expect(routed).toBe('decided');
+    expect(edited).toMatchObject({ error: null });
+    expect(await ticketRow(id)).toMatchObject({ groupId: billing, assigneeAgentId: null });
+    expect(await eventsOf(id, 'assigned')).toEqual([]);
+    expect(await decisionOf(id)).toMatchObject({
+      stage: 'decided',
+      heldStrategy: null,
+      heldActorLabel: null,
+    });
+  });
+
+  // A pick kept before the decision — an `on_create` rule's, for the group the
+  // ticket arrived in — survives a phase one that leaves the ticket there, as
+  // it must: that rule has no later pass to ask again. A person then moving
+  // the ticket before the router's pass reads it takes it out of the group the
+  // pick was for, and the move's re-arm drops it.
+  it('a pick kept before the decision, and a move before the router’s pass: nobody is assigned there', async () => {
+    const hana = await agent('Hana Home');
+    const bilal = await agent('Bilal Billing');
+    const home = await group('Home', [hana], { assignmentStrategy: 'manual' });
+    const billing = await group('Billing', [bilal], { assignmentStrategy: 'manual' });
+    // Sales work is Home's: the decision leaves the ticket where it is.
+    const salesCategory = await routeTo('sales', home);
+    const id = await heldTicket(await mailbox(home, 'category'), home);
+    expect(
+      await assignConversation(id, {
+        strategy: 'round_robin',
+        actorLabel: 'automation:Home: round robin',
+      }),
+    ).toMatchObject({ assignedTo: null, reason: 'awaiting_route' });
+    expect(await decisionOf(id)).toMatchObject({ heldStrategy: 'round_robin' });
+    await setConversationCategory(id, salesCategory, { label: 'jev:category' });
+
+    const { routed, edited } = await routeWithEditBetween({
+      route: () => routeNow(id, { label: 'jev:category' }),
+      afterRouterTransaction: 1,
+      edit: () => edit(id, 'group', billing),
+    });
+
+    expect(routed).toBe('decided');
+    expect(edited).toMatchObject({ error: null });
+    expect(await ticketRow(id)).toMatchObject({ groupId: billing, assigneeAgentId: null });
+    expect(await eventsOf(id, 'assigned')).toEqual([]);
+  });
+
+  // The same pick, the ticket moved where it was not: phase one kept the pick
+  // and the agent's re-arm changed the category alone. The rule spoke about
+  // Home, and the ticket is still there, so the hold's end makes its pick.
+  it('a pick kept before the decision, and a category edit in the gap: the pick is made', async () => {
+    const hana = await agent('Hana Home');
+    const home = await group('Home', [hana], { assignmentStrategy: 'manual' });
+    const salesCategory = await routeTo('sales', home);
+    const [support] = await db
+      .select({ id: ticketCategories.id })
+      .from(ticketCategories)
+      .where(eq(ticketCategories.key, 'customer_support'));
+    const id = await heldTicket(await mailbox(home, 'category'), home);
+    await assignConversation(id, {
+      strategy: 'round_robin',
+      actorLabel: 'automation:Home: round robin',
+    });
+    await setConversationCategory(id, salesCategory, { label: 'jev:category' });
+
+    const { routed, edited } = await routeWithEditBetween({
+      route: () => routeNow(id, { label: 'jev:category' }),
+      afterRouterTransaction: 1,
+      edit: () => edit(id, 'category', support!.id),
+    });
+
+    expect(routed).toBe('decided');
+    expect(edited).toMatchObject({ error: null });
+    expect(await ticketRow(id)).toMatchObject({ groupId: home, assigneeAgentId: hana });
+    expect((await eventsOf(id, 'assigned')).map((event) => event.actorLabel)).toEqual([
+      'automation:Home: round robin',
+    ]);
+  });
+
+  // The same pick, kept in Home, which assigns by hand; the decision leaves the
+  // ticket there, and a rule in the router's pass moves it on to Care, which
+  // assigns by hand too. The rule's move takes the ticket out of the group the
+  // pick was about, and the pick goes with it, as with any move after phase
+  // one (`endHold`'s `movedGroup`): nobody is assigned in Care. The writes and
+  // the rules are the same in every case, and so must the holder be: what
+  // becomes of the pick may not turn on whether a write that decides nothing
+  // about the group — a priority, an "Unassigned" on a ticket nobody holds —
+  // happened to land after the pass had read the ticket and re-arm it. Once it
+  // did: the pass run again compared the group with the one the pass it
+  // replaced had read, and dropped the pick only then. Later the rule's move
+  // kept it, and Lina in Care was handed the ticket under a rule about Home.
+  it.each([
+    ['no edit at all', 0, null],
+    ['a priority edit before the pass claims', 1, 'priority'],
+    ['a priority edit after the pass read', 2, 'priority'],
+    ['an "Unassigned" before the pass claims', 1, 'assignee'],
+    ['an "Unassigned" after the pass read', 2, 'assignee'],
+  ] as const)(
+    'a pick kept before the decision, and a rule’s move in the router’s pass, with %s: nobody is assigned',
+    async (_, at, field) => {
+      const hana = await agent('Hana Home');
+      const lina = await agent('Lina Care');
+      const home = await group('Home', [hana], { assignmentStrategy: 'manual' });
+      const care = await group('Care', [lina], { assignmentStrategy: 'manual' });
+      const salesCategory = await routeTo('sales', home);
+      const id = await heldTicket(await mailbox(home, 'category'), home);
+      expect(
+        await assignConversation(id, { strategy: 'round_robin', actorLabel: 'automation:Pick' }),
+      ).toMatchObject({ assignedTo: null, reason: 'awaiting_route' });
+      await setConversationCategory(id, salesCategory, { label: 'jev:category' });
+      await onUpdate(
+        'Sales goes to Care',
+        { field: 'category.id', op: 'eq', value: salesCategory },
+        [{ type: 'assign_group', groupId: care }],
+      );
+
+      const route = () => routeNow(id, { label: 'jev:category' });
+      if (field === null) {
+        expect(await route()).toBe('decided');
+      } else {
+        const { routed, edited } = await routeWithEditBetween({
+          route,
+          afterRouterTransaction: at,
+          edit: () => edit(id, field, field === 'priority' ? 'high' : ''),
+        });
+        expect(routed).toBe('decided');
+        expect(edited).toMatchObject({ error: null });
+      }
+
+      expect(await ticketRow(id)).toMatchObject({ groupId: care, assigneeAgentId: null });
+      expect(await eventsOf(id, 'assigned')).toEqual([]);
+      expect(await decisionOf(id)).toMatchObject({
+        stage: 'decided',
+        heldStrategy: null,
+        heldActorLabel: null,
+      });
+    },
+  );
+
+  // The router's pass reads the ticket in Sales and its rule asks for round
+  // robin; the agent moves the ticket to Billing, which assigns by hand, after
+  // that read. Then the router dies before it can run the pass the move
+  // re-armed — here its claim on that pass is refused, as a lost connection
+  // would refuse it — and the window's job runs it, on Billing, matching
+  // nothing. The job knows nothing of what the dead pass read, so a pick that
+  // pass kept after the move, about Sales, was made in Billing at the hold's
+  // end, under the Sales rule's name. Never kept, there is nothing to make.
+  it('a move after the router’s pass read the ticket, and the router dies: nobody is assigned there', async () => {
+    const hana = await agent('Hana Home');
+    const omar = await agent('Omar Sales');
+    const bilal = await agent('Bilal Billing');
+    const home = await group('Home', [hana]);
+    const sales = await group('Sales', [omar]);
+    const billing = await group('Billing', [bilal], { assignmentStrategy: 'manual' });
+    const salesCategory = await routeTo('sales', sales);
+    const id = await heldTicket(await mailbox(home, 'category'), home);
+    await setConversationCategory(id, salesCategory, { label: 'jev:category' });
+    await onUpdate('Sales: round robin', inGroup(sales), [
+      { type: 'auto_assign', groupId: null, strategy: 'round_robin' },
+    ]);
+
+    // A claim on a pass re-armed over a claim still running — the second
+    // claim of this decision, and only that one.
+    await db.execute(sql`
+      create function refuse_second_claim() returns trigger language plpgsql
+      as $$ begin raise exception 'the connection was lost'; end $$`);
+    await db.execute(sql`
+      create trigger refuse_second_claim before update on routing_decisions
+      for each row when (
+        old.rules_claimed_at is null and new.rules_claimed_at is not null
+        and old.rules_done_at is not null)
+      execute function refuse_second_claim()`);
+    let routed: RouteResult;
+    try {
+      ({ routed } = await routeWithEditBetween({
+        route: () => routeNow(id, { label: 'jev:category' }),
+        afterRouterTransaction: 2,
+        edit: () => edit(id, 'group', billing),
+      }));
+    } finally {
+      await db.execute(sql`drop trigger refuse_second_claim on routing_decisions`);
+      await db.execute(sql`drop function refuse_second_claim()`);
+    }
+    expect(routed).toBe('failed');
+    expect(errors.mock.calls.map((call) => String(call[0]))).toEqual([
+      expect.stringContaining(`could not route ${id}`),
+    ]);
+    errors.mockClear();
+    expect(await decisionOf(id)).toMatchObject({ stage: 'holding', heldStrategy: null });
+
+    // The dead claim aged past the time its claimant could still be running,
+    // so the window's job runs the pass the move is owed.
+    const row = await decisionOf(id);
+    const back = 15 * 60_000;
+    await db
+      .update(routingDecisions)
+      .set({
+        phaseOneAt: new Date(row.phaseOneAt!.getTime() - back),
+        rulesDoneAt: new Date(row.rulesDoneAt!.getTime() - back),
+      })
+      .where(eq(routingDecisions.conversationId, id));
+    expect(await settleRouting(id)).toBe('decided');
+
+    expect(await ticketRow(id)).toMatchObject({ groupId: billing, assigneeAgentId: null });
+    expect(await eventsOf(id, 'assigned')).toEqual([]);
   });
 });

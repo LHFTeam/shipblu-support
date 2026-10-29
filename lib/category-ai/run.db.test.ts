@@ -1374,6 +1374,66 @@ describe('classifyMessageCategory, on a ticket routing by category', () => {
     });
   });
 
+  // The answer's own call into the router fails — phase one refused, as a
+  // lost connection would refuse it — on a ticket held with no decision yet.
+  // The window's job is still to come and decides on what Jev wrote, its pass
+  // over the rules included (`routerDecidedOn`, which answers so for a row
+  // still undecided), so the answer runs no pass of its own: one now and the
+  // router's at the window's end would fire every rule keyed on the category
+  // twice.
+  it('runs no pass of its own when its call into the router fails, and the window’s end runs it once', async () => {
+    answers('sales');
+    const r = await routing();
+    const { id, message } = await mailTicket(r);
+    await db.execute(sql`
+      create function refuse_phase_one() returns trigger language plpgsql
+      as $$ begin raise exception 'the connection was lost'; end $$`);
+    await db.execute(sql`
+      create trigger refuse_phase_one before update on routing_decisions
+      for each row when (old.phase_one_at is null and new.phase_one_at is not null)
+      execute function refuse_phase_one()`);
+    try {
+      await expect(classifyMessageCategory(message, { baseUrl: BASE })).resolves.toMatchObject({
+        outcome: 'applied',
+      });
+    } finally {
+      await db.execute(sql`drop trigger refuse_phase_one on routing_decisions`);
+      await db.execute(sql`drop function refuse_phase_one()`);
+    }
+    expect(errors.mock.calls.map((call) => String(call[0]))).toEqual([
+      expect.stringContaining(`could not route ${id}`),
+    ]);
+    errors.mockClear();
+
+    expect(await carried(id)).toBe(await categoryId('sales'));
+    expect(await passes(id)).toBe(0);
+    expect(await decisionOf(id)).toMatchObject({
+      stage: 'holding',
+      outcome: null,
+      phaseOneAt: null,
+    });
+    expect(await where(id)).toMatchObject({
+      groupId: r.home.group,
+      assigneeAgentId: null,
+      routingDecidedAt: null,
+    });
+
+    expect(await settleRouting(id)).toBe('decided');
+
+    expect(await decisionOf(id)).toMatchObject({
+      stage: 'decided',
+      outcome: 'category',
+      categoryId: await categoryId('sales'),
+      toGroupId: r.sales.group,
+      decidedByLabel: 'settle_routing',
+    });
+    expect(await passes(id)).toBe(1);
+    expect(await where(id)).toMatchObject({
+      groupId: r.sales.group,
+      assigneeAgentId: r.sales.agent,
+    });
+  });
+
   // Resolved in the same moment: the router decides `not_open`, which owes
   // nothing, and a relabel would run the category's rules on work that is over.
   it('runs no pass on a held ticket resolved between its commit and the router', async () => {

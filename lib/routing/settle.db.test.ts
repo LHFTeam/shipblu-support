@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { and, asc, eq, sql } from 'drizzle-orm';
 import { PgDatabase } from 'drizzle-orm/pg-core';
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
@@ -448,6 +449,49 @@ function claimedByAnotherAfterNextTransaction(id: string): void {
       .where(eq(routingDecisions.conversationId, id));
     return result as never;
   });
+}
+
+/** Whose transactions `pausedAt` counts: the caller it runs, and nobody else's. */
+const pausing = new AsyncLocalStorage<true>();
+
+/**
+ * Runs `decide` with its `nth` transaction held back until `release()`, which
+ * answers what `decide` did. The caller's transactions alone are counted, so a
+ * write or a `settleRouting` the test makes meanwhile runs free. With 3 and a
+ * rule whose action opens one, a `routeNow` is stopped part-way through its
+ * pass: phase one and the claim committed, the claim live and not done — a
+ * slow pass, made certain.
+ */
+async function pausedAt<T>(
+  nth: number,
+  decide: () => Promise<T>,
+): Promise<{ result: Promise<T>; release: () => Promise<T> }> {
+  const real = PgDatabase.prototype.transaction;
+  let opened = 0;
+  let reached!: () => void;
+  const atPause = new Promise<void>((resolve) => (reached = resolve));
+  let go!: () => void;
+  const released = new Promise<void>((resolve) => (go = resolve));
+  vi.spyOn(PgDatabase.prototype, 'transaction').mockImplementation(async function (
+    this: PgDatabase<never>,
+    run,
+    config,
+  ) {
+    if (pausing.getStore() && ++opened === nth) {
+      reached();
+      await released;
+    }
+    return real.call(this, run, config) as never;
+  });
+  const result = pausing.run(true, decide);
+  await Promise.race([atPause, result]);
+  return {
+    result,
+    release: () => {
+      go();
+      return result;
+    },
+  };
 }
 
 /** How many times a rule's `add_tags` has run on the ticket: one event each. */
@@ -1182,9 +1226,10 @@ describe('a decision interrupted between its phases', () => {
   // A claimant that died part-way leaves a pass nobody may run again, since
   // which of its rules ran is written nowhere (above). A person's write after
   // it is owed a pass of its own all the same, and has handed it to the
-  // router (`deferToRouter`): the re-arm clears the claim, and the window's
-  // job runs the pass on the ticket as the write left it rather than ending
-  // the hold without one.
+  // router (`deferToRouter`): the re-arm clears the claim, keeping its age,
+  // and the window's job — the claim long past `RULES_RUNNING_MS` — runs the
+  // pass on the ticket as the write left it rather than ending the hold
+  // without one.
   it('runs a pass a writer re-armed, though the claim it cleared was a dead claimant’s', async () => {
     errorsExpected = true;
     const t = await teams();
@@ -1195,7 +1240,7 @@ describe('a decision interrupted between its phases', () => {
     await jevFiles(id, sales);
     await diedAfterPhaseOne(id);
     await phaseOneWritten(id, 15 * MINUTE);
-    await rulesClaimed(id, RULES_RUNNING_MS + MINUTE);
+    const claimedAt = await rulesClaimed(id, RULES_RUNNING_MS + MINUTE);
     await rule('on_update', 'Tag customer support', inCategory(support), [
       { type: 'add_tags', tags: ['support'] },
     ]);
@@ -1205,7 +1250,7 @@ describe('a decision interrupted between its phases', () => {
         await setConversationCategoryOn(tx, id, support, { agentId: lead });
       }, id),
     ).toBe(true);
-    expect(await decision(id)).toMatchObject({ rulesClaimedAt: null, rulesDoneAt: null });
+    expect(await decision(id)).toMatchObject({ rulesClaimedAt: null, rulesDoneAt: claimedAt });
 
     expect(await settleRouting(id)).toBe('decided');
 
@@ -1215,10 +1260,175 @@ describe('a decision interrupted between its phases', () => {
       assigneeAgentId: t.sales.agent,
     });
     const row = await expectDecided(id, 'category');
-    expect(row.rulesDoneAt).toBeInstanceOf(Date);
-    expect(warnings.mock.calls.map((call) => String(call[0]))).not.toContainEqual(
-      expect.stringContaining("without the rules' pass"),
+    expect(row.rulesClaimedAt).toBeInstanceOf(Date);
+    expect(row.rulesDoneAt).toEqual(row.rulesClaimedAt);
+    const warned = warnings.mock.calls.map((call) => String(call[0]));
+    expect(warned).not.toContainEqual(expect.stringContaining("without the rules' pass"));
+    expect(warned).toContainEqual(expect.stringContaining('re-armed over a claim never finished'));
+  });
+
+  // The same re-arm over a claim taken a minute ago, whose claimant may still
+  // be running its pass: the window's job leaves it alone until the claim
+  // would have aged had nobody cleared it, then runs the pass the write is
+  // owed — once, however many times the job comes.
+  it('waits out the claim a writer re-armed over, then runs the pass it is owed once', async () => {
+    errorsExpected = true;
+    const t = await teams();
+    const lead = await agent('Laila');
+    const sales = await routeTo('sales', t.sales.group);
+    const support = await routeTo('customer_support', null);
+    const { id } = await heldTicket(t.channel, t.home.group);
+    await jevFiles(id, sales);
+    await diedAfterPhaseOne(id);
+    await phaseOneWritten(id, 2 * MINUTE);
+    const claimedAt = await rulesClaimed(id, MINUTE);
+    await rule('on_update', 'Tag customer support', inCategory(support), [
+      { type: 'add_tags', tags: ['support'] },
+    ]);
+    expect(
+      await rearmedBy(async (tx) => {
+        await setConversationCategoryOn(tx, id, support, { agentId: lead });
+      }, id),
+    ).toBe(true);
+    const lookAgainAt = new Date(claimedAt.getTime() + RULES_RUNNING_MS + 1_000);
+
+    expect(await settleRouting(id)).toBe('requeued');
+    expect(await settleRouting(id, new Date(claimedAt.getTime() + RULES_RUNNING_MS - 1))).toBe(
+      'requeued',
     );
+
+    // Nothing run, nothing ended, and the job looks again once the claim has aged.
+    expect(await tagged(id)).toBe(0);
+    expect(await decision(id)).toMatchObject({
+      stage: 'holding',
+      rulesClaimedAt: null,
+      rulesDoneAt: claimedAt,
+    });
+    expect(await ticketRow(id)).toMatchObject({ assigneeAgentId: null, routingDecidedAt: null });
+    expect((await settleJobs(id)).slice(1)).toEqual([
+      expect.objectContaining({ dedupeKey: null, status: 'pending', runAt: lookAgainAt }),
+      expect.objectContaining({ dedupeKey: null, status: 'pending', runAt: lookAgainAt }),
+    ]);
+
+    expect(await settleRouting(id, new Date(claimedAt.getTime() + RULES_RUNNING_MS))).toBe(
+      'decided',
+    );
+    expect(await settleRouting(id, lookAgainAt)).toBe('none');
+
+    expect(await tagged(id)).toBe(1);
+    expect((await ticketRow(id)).groupId).toBe(t.sales.group);
+    await expectDecided(id, 'category');
+  });
+
+  // The window's job falls due while the router is part-way through its pass
+  // — a pool slow enough that the pass outlasts the minute after phase one —
+  // and a person's write lands in that pass, re-arming it. The claim the write
+  // cleared is still the router's, running the rest of its rules, so the job
+  // waits it out as it would the claim itself. Read as no claim, the job ran a
+  // pass beside the router's, ended the hold and handed the ticket to Sales;
+  // the router's last rule then moved it to Merchant Care, with the Sales
+  // agent still holding it. Without the write the job waits all the same, as
+  // it always has: the control.
+  it.each([
+    ['a person’s write re-armed it', true],
+    ['nothing re-armed it', false],
+  ] as const)('leaves a pass still running to its claimant when %s', async (_, rearmed) => {
+    errorsExpected = true;
+    const t = await teams();
+    const lead = await agent('Laila');
+    const sales = await routeTo('sales', t.sales.group);
+    const support = await routeTo('customer_support', null);
+    await rule('on_update', 'Count passes', always, [{ type: 'add_tags', tags: ['seen'] }], 0);
+    await rule(
+      'on_update',
+      'Sales goes to Merchant Care',
+      inCategory(sales),
+      [{ type: 'assign_group', groupId: t.care.group }],
+      1,
+    );
+    const { id } = await heldTicket(t.channel, t.home.group);
+    await jevFiles(id, sales);
+
+    // Phase one, the claim, and the pass stopped at its move: the third
+    // transaction the router opens.
+    const routing = await pausedAt(3, () => routeNow(id, { label: 'jev:category' }));
+    try {
+      const claimed = await decision(id);
+      expect(claimed).toMatchObject({ stage: 'holding', rulesDoneAt: null });
+      expect(claimed.rulesClaimedAt).toBeInstanceOf(Date);
+      expect(await tagged(id)).toBe(1);
+
+      if (rearmed) {
+        expect(
+          await rearmedBy(async (tx) => {
+            await setConversationCategoryOn(tx, id, support, { agentId: lead });
+          }, id),
+        ).toBe(true);
+        expect(await decision(id)).toMatchObject({
+          rulesClaimedAt: null,
+          rulesDoneAt: claimed.rulesClaimedAt,
+        });
+      }
+
+      // The window's job, a minute and more after phase one.
+      await phaseOneWritten(id, 2 * MINUTE);
+      expect(await settleRouting(id)).toBe('requeued');
+      expect(await tagged(id)).toBe(1);
+      expect(await ticketRow(id)).toMatchObject({
+        groupId: t.sales.group,
+        assigneeAgentId: null,
+        routingDecidedAt: null,
+      });
+      expect((await settleJobs(id))[1]).toMatchObject({
+        dedupeKey: null,
+        runAt: new Date(claimed.rulesClaimedAt!.getTime() + RULES_RUNNING_MS + 1_000),
+      });
+    } finally {
+      expect(await routing.release()).toBe('decided');
+    }
+
+    // The router's pass moved the ticket on, and — re-armed — ran again on
+    // what the person wrote before it ended the hold: one holder, from the
+    // group the ticket is in.
+    expect(await ticketRow(id)).toMatchObject({
+      groupId: t.care.group,
+      assigneeAgentId: t.care.agent,
+    });
+    expect((await events(id, 'assigned')).map((event) => event.data.to)).toEqual([t.care.agent]);
+    expect(await tagged(id)).toBe(rearmed ? 2 : 1);
+    await expectDecided(id, 'category');
+  });
+
+  // A pass re-armed over a claimant that died, on a ticket resolved since: the
+  // job gives the pass up as it does any other's — claimed with the decision,
+  // never done — rather than leaving the dead claim's age standing as a mark
+  // of a pass that never ran.
+  it('gives up a pass re-armed over a dead claim on a ticket resolved since', async () => {
+    errorsExpected = true;
+    const t = await teams();
+    const lead = await agent('Laila');
+    const sales = await routeTo('sales', t.sales.group);
+    const support = await routeTo('customer_support', null);
+    const { id } = await heldTicket(t.channel, t.home.group);
+    await jevFiles(id, sales);
+    await diedAfterPhaseOne(id);
+    await phaseOneWritten(id, 15 * MINUTE);
+    await rulesClaimed(id, RULES_RUNNING_MS + MINUTE);
+    await rule('on_update', 'Tag everything', always, [{ type: 'add_tags', tags: ['ran'] }]);
+    await rearmedBy(async (tx) => {
+      await setConversationCategoryOn(tx, id, support, { agentId: lead });
+    }, id);
+    await db
+      .update(conversations)
+      .set({ statusId: await status('Resolved') })
+      .where(eq(conversations.id, id));
+
+    expect(await settleRouting(id)).toBe('none');
+
+    expect(await tagged(id)).toBe(0);
+    const row = await expectDecided(id, 'category');
+    expect(row.rulesClaimedAt).toBeInstanceOf(Date);
+    expect(row.rulesDoneAt).toBeNull();
   });
 
   // The router ran its pass, and its phase three failed. A person moving the
@@ -1255,6 +1465,10 @@ describe('a decision interrupted between its phases', () => {
         expect(await endHold(tx, id, 'manual', { agentId: lead })).toBe(false);
       }, id),
     ).toBe(true);
+    // The pass it re-armed was done, and its claimant has nothing left to run
+    // but a phase three that yields to any claim: no claim to wait out, so the
+    // job runs the pass at once rather than ten minutes on.
+    expect(await decision(id)).toMatchObject({ rulesClaimedAt: null, rulesDoneAt: null });
 
     await phaseOneWritten(id, 2 * MINUTE);
     expect(await settleRouting(id)).toBe('decided');

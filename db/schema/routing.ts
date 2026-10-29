@@ -99,6 +99,14 @@ export const routingDecisions = pgTable(
      * part-way, ending the hold without running the rules again. Null on a
      * decision with no rules owed, whose hold ends in phase one, and on a
      * shadow row.
+     *
+     * A writer handing its own pass to the router re-arms this one
+     * (`deferToRouter`): the claim cleared, so the pass is owed again, and —
+     * when the claim was still running — its age kept in `rules_done_at`, the
+     * one row with a done mark and no claim. Its claimant runs the rest of
+     * that pass all the same, so a resume waits that age out as it would the
+     * claim, and then runs the pass the write is owed. The next claim clears
+     * the mark.
      */
     rulesClaimedAt: timestamp('rules_claimed_at', { withTimezone: true }),
     rulesDoneAt: timestamp('rules_done_at', { withTimezone: true }),
@@ -114,10 +122,18 @@ export const routingDecisions = pgTable(
      * cleared by the router's phase one when its decision moves the ticket,
      * since the rule spoke about the group the ticket has left (phase two
      * records again a rule matching it where it now is), and by `endHold`,
-     * whose person or rule has decided instead. A decision that leaves the
-     * ticket where it was keeps it: the rule still speaks about that group,
-     * and an `on_create` rule has no later pass to say it again. Both null, or
-     * both set.
+     * whose person or rule has decided instead. Any move on a decision in
+     * flight — a person's, Hand to's or a rule's, in the router's own pass or
+     * another — clears it for phase one's reason (`endHold` with
+     * `movedGroup`), and a pick is never written for a group the ticket has
+     * already left — a pass that read it before such a move matching the
+     * group it was in (`recordHeldAssignment`). So while the hold lasts the
+     * pick is about the group the ticket is in; a move between the hold's
+     * end and its assignment is not seen (the plan's 5.1 Left). A decision
+     * that leaves the ticket where it was keeps it, and so does any write
+     * that is not a move: the rule still speaks about that group, and an
+     * `on_create` rule has no later pass to say it again. Both null, or both
+     * set.
      */
     heldStrategy: assignmentStrategyEnum('held_strategy'),
     heldActorLabel: text('held_actor_label'),
