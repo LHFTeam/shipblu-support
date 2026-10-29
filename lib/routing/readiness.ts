@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray } from 'drizzle-orm';
+import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { agents, automationRules, channels } from '@/db/schema';
 import { parseAction } from '@/lib/automations/actions';
@@ -17,6 +17,7 @@ import {
   type ConversationChannel,
 } from '@/lib/tickets/channel-policy';
 import { typesafeConfigured } from '@/lib/typesafe/client';
+import { filesRoutableTickets, filingRowFor, ownedByActiveAgent } from './filing';
 import { routingModeOf, routingStartFor, type RoutingMode, type RoutingStart } from './mode';
 import { routingLock, type RoutingLock } from './mode-copy';
 
@@ -203,7 +204,10 @@ function readChannels(): Promise<ChannelInput[]> {
       isActive: channels.isActive,
       createdAt: channels.createdAt,
       defaultGroupId: channels.defaultGroupId,
-      ownerName: agents.name,
+      // The owner's name, or their email where the name is blank, as every
+      // other place the console names an agent: the warning keyed on owning
+      // must have somebody to name.
+      ownerName: sql<string | null>`coalesce(nullif(${agents.name}, ''), ${agents.email})`,
       ownerActive: agents.isActive,
     })
     .from(channels)
@@ -264,8 +268,8 @@ function assessReadiness(input: {
   const routingChannels = input.channels.map((channel): ChannelRouting => {
     const mode = routingModeOf(channel);
     const filingRow = filingRowFor(channel, input.channels);
-    const owned = channel.type === 'whatsapp' && channel.ownerActive ? channel.ownerName : null;
-    const files = channel.isActive && filingRow === channel && !owned;
+    const owned = ownedByActiveAgent(channel) ? (channel.ownerName ?? 'its owner') : null;
+    const files = filesRoutableTickets(channel, input.channels);
     const starts = files ? routingStartFor(mode, classifier.mode) : null;
     const base = {
       id: channel.id,
@@ -288,7 +292,7 @@ function assessReadiness(input: {
     else if (filingRow && filingRow !== channel) {
       warnings.push({ kind: 'not_filing_row', filingRow: filingRow.name });
     }
-    if (owned) warnings.push({ kind: 'owned', owner: owned });
+    if (owned !== null) warnings.push({ kind: 'owned', owner: owned });
     if (classifier.mode !== 'apply') {
       warnings.push({ kind: 'classifier_idle', classifier: classifier.mode });
     } else if (!classifier.keyConfigured) {
@@ -366,18 +370,6 @@ function groupGaps(group: GroupFacts): GroupGap[] {
   if (group.acceptingNow === 0) gaps.push('nobody_accepting');
   if (group.assignWithinHoursOnly && !group.openNow) gaps.push('closed');
   return gaps;
-}
-
-/**
- * The row of `channel`'s kind new tickets are filed under, which is not
- * always `channel`: email, the Meta rows and web chat each file under the
- * oldest active row of their type, so a second one's mode does nothing.
- * A WhatsApp row is its number, and is its own. A comments row, while none
- * is active, is stood in for by its platform's row — that is not this one.
- */
-function filingRowFor(channel: ChannelInput, rows: ChannelInput[]): ChannelInput | null {
-  if (channel.type === 'whatsapp' || channel.type === 'whatsapp_bot') return channel;
-  return rows.find((row) => row.type === channel.type && row.isActive) ?? null;
 }
 
 /**

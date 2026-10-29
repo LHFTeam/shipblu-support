@@ -1,0 +1,1 @@
+ALTER TABLE "rollup_days" ADD COLUMN "categories_computed_at" timestamp with time zone;

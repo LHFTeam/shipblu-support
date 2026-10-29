@@ -408,6 +408,7 @@ export default async function ChannelsPage() {
       <RoutingReadinessPanel
         readiness={routing}
         canEditCategories={can(agent, 'admin.categories')}
+        canViewReport={can(agent, 'report.view')}
       />
 
       {/* The groups that the default-group picker above chooses between, listed

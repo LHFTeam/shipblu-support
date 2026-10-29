@@ -404,7 +404,9 @@ export default async function CsatReportPage({
               >
                 {comments.map((row) => (
                   <Row key={row.id}>
-                    <Cell className="whitespace-nowrap">{formatDateTime(row.respondedAt)}</Cell>
+                    <Cell className="whitespace-nowrap">
+                      {formatDateTime(row.respondedAt, zone)}
+                    </Cell>
                     <Cell className="whitespace-nowrap">{row.rating} / 5</Cell>
                     <Cell>
                       <ChannelBadge channel={row.channel} />

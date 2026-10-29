@@ -1,10 +1,12 @@
 import type { CategoryAiMode } from '@/lib/category-ai/modes';
+import type { RoutingOutcome } from './decide';
 import { routingModeOf, type RoutingMode } from './mode';
 
 /**
- * What the console calls each routing mode, and the sentences about a mode
- * that more than one screen says: the channel forms, `saveChannel`'s answer
- * and the readiness panel on `/admin/channels`.
+ * What the console calls each routing mode and outcome, and the sentences
+ * about a mode that more than one screen says: the channel forms,
+ * `saveChannel`'s answer, the readiness panel on `/admin/channels` and the
+ * routing report.
  *
  * Pure and client-safe, beside `mode.ts`, so the forms can name the modes
  * without importing the schema — and so the editor's disabled control, the
@@ -15,6 +17,24 @@ export const ROUTING_MODE_LABELS: Record<RoutingMode, string> = {
   default_group: 'Default group',
   category_shadow: 'By category — shadow',
   category: 'By category',
+};
+
+/**
+ * Each outcome as a column of `/reports/routing` names it: the timeline's
+ * `routed` sentence (`describeRouted` in `lib/tickets/event-labels.ts`)
+ * shortened to a heading, so a supervisor who reads "Window ran out" over a
+ * column finds "nothing had said what it is about by the end of the routing
+ * window" on the tickets counted in it. In `ROUTING_OUTCOMES`' order.
+ */
+export const ROUTING_OUTCOME_LABELS: Record<RoutingOutcome, string> = {
+  taken: 'Already taken',
+  not_open: 'No longer open',
+  released: 'Channel stopped routing',
+  category: 'Routed',
+  no_route_for_category: 'No route for its category',
+  fallback: 'Window ran out',
+  manual: 'A person decided first',
+  rule: 'A rule decided first',
 };
 
 /** The two kinds of row whose mode the router never acts on. */

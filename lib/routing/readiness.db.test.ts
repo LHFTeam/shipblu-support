@@ -277,6 +277,14 @@ describe('routingReadiness', () => {
       warnings: expect.arrayContaining([{ kind: 'owned', owner: 'Nayera' }]),
     });
 
+    // An owner with no name is still an owner, and the warning names them by
+    // email: keyed on the name, it went silent and the number read as routing.
+    await db.update(agents).set({ name: '' }).where(eq(agents.id, owner!.id));
+    expect(of(await routingReadiness(NOW), owned)).toMatchObject({
+      starts: null,
+      warnings: expect.arrayContaining([{ kind: 'owned', owner: 'nayera@shipblu.test' }]),
+    });
+
     // A deactivated owner counts as nobody, so that number routes again.
     await db.update(agents).set({ isActive: false }).where(eq(agents.id, owner!.id));
     expect(of(await routingReadiness(NOW), owned).starts).toBe('live');

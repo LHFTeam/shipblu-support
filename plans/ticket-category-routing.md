@@ -63,7 +63,7 @@ records the answers, and the plan below already reflects them.
 
 ## Status and handoff
 
-As of 2026-10-28, 10:06 UTC. A session picking this plan up starts here.
+As of 2026-10-29, 08:28 UTC. A session picking this plan up starts here.
 Everything after this section is the design as it was reasoned and as each stage
 was built. This section says where the work stands, what comes next and how, and
 what has already bitten. Whoever moves any of it updates this section in the
@@ -74,21 +74,85 @@ update.
 
 ### Where it stands
 
-| Stage | Code                                                                                                                                        | Production                                                                                                                                                                                                                |
-| ----- | ------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 0     | Merged: #386 (`01488c9`)                                                                                                                    | Live since 2026-10-20. Its two operational steps were never done (below)                                                                                                                                                  |
-| 1.1   | Merged: #387, then `dev` → `main` in #389 (`1f89219`)                                                                                       | Live since 2026-10-21 10:13 UTC                                                                                                                                                                                           |
-| 1.2   | Merged: #391 (`31f7379`) and follow-up #392 (`7b7d276`), then `dev` → `main` in #393 (`634a28d`), which also carried another session's #390 | **Done.** All six services live on `634a28d` by 17:38 UTC on 2026-10-21, worker first. The user ran the backfill and the rollup from a shell, leaving no `jobs` row. Every check below reads clean                        |
-| 1.3   | Merged: #395 (`58c5ed9`), then `dev` → `main` in #397 (`447d8be`), which also carried #394, #396 and #398. As built below                   | **Done.** All six services live on `447d8be` by 18:36 UTC, web first. Its checks read clean (below), though no comment has arrived since                                                                                  |
-| 2.A   | Merged: #400 (`a558c5b`), then `dev` → `main` in #406 (`e88d357`), which also carried #399, #401 and #402. As built below                   | **Done.** All six services live on `e88d357` by 22:13 UTC on 2026-10-23, deployed at once by an environment update. Its checks read clean (below)                                                                         |
-| 2.B   | Merged: #403 (`1d21cdc`), then `dev` → `main` in #413 (`516c8ff`) and #415 (`48cb284`). As built below                                      | **Done.** All six services live on `48cb284` by 06:01 UTC on 2026-10-25, web first, with nothing suspended. Its checks read clean, and a new message was subcategorised; one read left (below)                            |
-| 3.1   | Merged: #419 (`ff3bbfd`), then `dev` → `main` in #420 (`b9a4743`), which also carried #411, #416, #417 and #418. As built below             | **Done.** Web live on `b9a4743` at 19:44 UTC on 2026-10-25, the worker and the four crons by 08:05 UTC on 2026-10-26, and the four categories seeded at 08:13. Its checks read clean (below); the signed-in ones are left |
-| 3.2   | Merged: #424 (`07a5527`), then `dev` → `main` in #426 (`f761e5e`), which also carried #421, #422 and #423. As built below                   | **Done.** All six services live on `f761e5e` by 23:32 UTC on 2026-10-26, web first. Its checks read clean (below); the signed-in ones are left                                                                            |
-| 4.0   | Merged: #425 (`1c733c2`), then `dev` → `main` in #428 (`156004d`). As built below                                                           | **Done.** All six services live on `156004d` by 07:45:42 UTC on 2026-10-27, web first. Its checks read clean (below)                                                                                                      |
-| 4.1   | Merged: #427 (`959404a`), then `dev` → `main` in #430 (`dbf4376`). As built below                                                           | **Done.** All six services live on `dbf4376` by 12:07:54 UTC on 2026-10-27, web first, with `0050` applied. Shipped off: no settings row. Its checks read clean (below)                                                   |
-| 4.2   | Merged: #429 (`c6eb1ac`), then `dev` → `main` in #431 (`ad6a062`). As built below                                                           | **Done.** All six services live on `ad6a062` by 21:49:08 UTC on 2026-10-27, web first; code only. Its checks read clean (below). Its operations wait for the user's go-ahead                                              |
-| 5.1   | In review as #432, branch `claude/jolly-noether-hxhez1-stage-5-1`. As built below                                                           | —                                                                                                                                                                                                                         |
-| 5.2–6 | Not started                                                                                                                                 | —                                                                                                                                                                                                                         |
+| Stage | Code                                                                                                                                        | Production                                                                                                                                                                                                                                                                                                                                                       |
+| ----- | ------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0     | Merged: #386 (`01488c9`)                                                                                                                    | Live since 2026-10-20. Its two operational steps were never done (below)                                                                                                                                                                                                                                                                                         |
+| 1.1   | Merged: #387, then `dev` → `main` in #389 (`1f89219`)                                                                                       | Live since 2026-10-21 10:13 UTC                                                                                                                                                                                                                                                                                                                                  |
+| 1.2   | Merged: #391 (`31f7379`) and follow-up #392 (`7b7d276`), then `dev` → `main` in #393 (`634a28d`), which also carried another session's #390 | **Done.** All six services live on `634a28d` by 17:38 UTC on 2026-10-21, worker first. The user ran the backfill and the rollup from a shell, leaving no `jobs` row. Every check below reads clean                                                                                                                                                               |
+| 1.3   | Merged: #395 (`58c5ed9`), then `dev` → `main` in #397 (`447d8be`), which also carried #394, #396 and #398. As built below                   | **Done.** All six services live on `447d8be` by 18:36 UTC, web first. Its checks read clean (below), though no comment has arrived since                                                                                                                                                                                                                         |
+| 2.A   | Merged: #400 (`a558c5b`), then `dev` → `main` in #406 (`e88d357`), which also carried #399, #401 and #402. As built below                   | **Done.** All six services live on `e88d357` by 22:13 UTC on 2026-10-23, deployed at once by an environment update. Its checks read clean (below)                                                                                                                                                                                                                |
+| 2.B   | Merged: #403 (`1d21cdc`), then `dev` → `main` in #413 (`516c8ff`) and #415 (`48cb284`). As built below                                      | **Done.** All six services live on `48cb284` by 06:01 UTC on 2026-10-25, web first, with nothing suspended. Its checks read clean, and a new message was subcategorised; one read left (below)                                                                                                                                                                   |
+| 3.1   | Merged: #419 (`ff3bbfd`), then `dev` → `main` in #420 (`b9a4743`), which also carried #411, #416, #417 and #418. As built below             | **Done.** Web live on `b9a4743` at 19:44 UTC on 2026-10-25, the worker and the four crons by 08:05 UTC on 2026-10-26, and the four categories seeded at 08:13. Its checks read clean (below); the signed-in ones are left                                                                                                                                        |
+| 3.2   | Merged: #424 (`07a5527`), then `dev` → `main` in #426 (`f761e5e`), which also carried #421, #422 and #423. As built below                   | **Done.** All six services live on `f761e5e` by 23:32 UTC on 2026-10-26, web first. Its checks read clean (below); the signed-in ones are left                                                                                                                                                                                                                   |
+| 4.0   | Merged: #425 (`1c733c2`), then `dev` → `main` in #428 (`156004d`). As built below                                                           | **Done.** All six services live on `156004d` by 07:45:42 UTC on 2026-10-27, web first. Its checks read clean (below)                                                                                                                                                                                                                                             |
+| 4.1   | Merged: #427 (`959404a`), then `dev` → `main` in #430 (`dbf4376`). As built below                                                           | **Done.** All six services live on `dbf4376` by 12:07:54 UTC on 2026-10-27, web first, with `0050` applied. Shipped off: no settings row. Its checks read clean (below)                                                                                                                                                                                          |
+| 4.2   | Merged: #429 (`c6eb1ac`), then `dev` → `main` in #431 (`ad6a062`). As built below                                                           | **Done.** All six services live on `ad6a062` by 21:49:08 UTC on 2026-10-27, web first; code only. Its checks read clean (below). Its first step is under way: the archive record run is done, and Shadow has run since 06:00:32 UTC on 2026-10-29, for two weeks at least, while a supervisor labels (below). Apply and the backlog wait for the user's go-ahead |
+| 5.1   | Merged: #432 (`9d5b4fb`), then `dev` → `main` in #435 (`1470902`). As built below                                                           | **Done.** All six services live on `1470902` by 06:35:36 UTC on 2026-10-29, web first, with `0051` applied. Shipped off: every channel on `default_group`. Its checks read clean (below); the signed-in one is left                                                                                                                                              |
+| 5.2   | Not started (operations: turning routing on)                                                                                                | —                                                                                                                                                                                                                                                                                                                                                                |
+| 6     | In review as #434, against `dev`; it replaces draft #433 and answers its review. As built below                                             | —                                                                                                                                                                                                                                                                                                                                                                |
+
+**5.1's deploy and checks, read on Render and production on 2026-10-29.**
+
+- **Before** (read 06:18–06:26 UTC): 51 migrations; no transaction waiting on a
+  lock and none idle in one; every job created in the hour before completed,
+  and the same one dead job, a `subscribe_meta_webhooks` from 2026-09-21. All
+  six services ran `ad6a062`, and `origin/main..origin/dev` held `9d5b4fb`
+  alone. The classifier was in Shadow (below), so nothing could be held.
+- **The release and web.** #432 was squashed into `dev` as `9d5b4fb`, its tree
+  identical to the reviewed head `ec8487b`. #435 merged `dev` into `main` as
+  `1470902` once its nine checks were green. Web was deployed on it through
+  Render's API at 06:26:10. Its preDeploy logged `Applying drizzle
+migrations...` at 06:28:24.4, and all nine `db/sql` files were done at
+  06:28:25.5. Web was live at 06:29:13.
+- **Then the worker and the four crons.** The worker was triggered at 06:32:46
+  and live at 06:34:39. The crons were triggered at 06:34:50–56 and live at
+  06:35:31–36. The old worker took jobs until 06:37:31 (its instance's last
+  line, a `process_webhook … ok`), about three minutes after Render reported
+  the new one live, against a schema `0051` only adds to.
+- **The checks** (read 06:30–08:28 UTC):
+  - 52 migrations; the three types, `channels.routing_mode`,
+    `conversations.routing_window_ends_at` and `routing_decided_at`, and
+    `routing_decisions` with RLS enabled, not forced, and no policy;
+  - `routing_decisions_decided_complete` present, and
+    `notify_conversation_change` naming both routing columns;
+  - all nine channels on `default_group`; no `routing_decisions` row, no
+    `settle_routing` job, and no ticket with either routing column set;
+  - all 783 jobs created since the migration completed, none overdue and none
+    dead;
+  - none of the six services logged a warning or an error, and web served no
+    5xx;
+  - every cron run since was successful: `shipblu-sla-sweep` from 06:36,
+    `shipblu-time-automations` from 06:46, `shipblu-whatsapp-template-sync` at
+    07:03 and 08:03;
+  - `/api/health` reports `1470902`;
+  - eleven tickets created since; the new worker's first customer message,
+    at 06:40:24 on the bot number, was appended to its ticket with nothing
+    routed;
+  - still no console handbook (no `handbook-` article, no
+    `seed_console_handbook` job), so nothing to re-seed.
+
+  Left: the signed-in read, that `/admin/channels` shows the Routing select on
+  each form and the readiness panel.
+
+**4.2's first operation, 2026-10-29.**
+
+- **The archive record run.** `backfill_category_ai mode=record
+runLabel=archive-1`, job `28da8309`, enqueued at 05:55:54 UTC at the user's
+  go-ahead, completed on its first attempt. It wrote 1,467 rows over 509
+  tickets between 05:55:57 and 05:58:52, for messages from 2026-08-16 to
+  2026-10-28, under one question fingerprint and with no error. 923 asked Jev:
+  590 `unknown`, 257 `would_apply`, 76 `below_threshold`. 544 were recorded
+  without a call: 501 `after_settle`, 43 `capped`.
+- **Shadow.** `category_ai_settings` was written at 06:00:32 UTC: mode `shadow`,
+  minimum probability 0.6, routing window five minutes.
+- **Its first live answer** (read 08:26 UTC): one `classify_category` job since,
+  completed in 545 ms on its first attempt; one `live` row, `shadow`,
+  `unknown`, with no error; no `category_changed` event since 06:00:32 and no
+  ticket carrying a category; no warning or error from the worker or web since
+  06:00.
+- **Next**: labelling (4.2, step 2) from `/reports/category-ai`, during at least
+  two weeks of Shadow, so until 2026-11-12 at the earliest. The way back is the
+  switch: `mode` to `off` on `/admin/categories`.
 
 **4.2's deploy and checks, read on Render and production on 2026-10-27.**
 
@@ -488,29 +552,34 @@ Every production write needs the user's go-ahead for that step, and the
 6. **4.0 is deployed.** #425 was squashed into `dev` as `1c733c2`, and #428
    (`156004d`) took it to `main` on 2026-10-27. All six services were live on
    it by 07:45:42 UTC, web first, and its checks read clean (above).
-7. **4.1 and 4.2 are deployed, and the classifier is off.** #427 was squashed
+7. **4.1 and 4.2 are deployed, and the classifier is in Shadow.** #427 was squashed
    into `dev` as `959404a`, and #430 (`dbf4376`) took it to `main` on
    2026-10-27; all six services were live on it by 12:07:54 UTC, web first.
    #429, 4.2's report with the fixes to the live job's locked ticket read, was
    squashed into `dev` as `c6eb1ac`, and #431 (`ad6a062`) took it to `main` the
    same day; all six were live on it by 21:49:08 UTC, web first. Both sets of
-   checks read clean (above). Nothing in the code holds the switch off any more,
-   so the classifier may now be switched on at `/admin/categories`, at the
-   user's go-ahead. 4.2's operations (the archive record run, shadow,
-   labelling, apply, the backlog) each wait for it in turn. The way back from
-   4.2 is to redeploy `dbf4376`, which is safe only while the classifier is
-   off; from 4.1, `156004d`, and the tables stay, since nothing reads them
-   there.
-8. **5.1 is built, and in review** on `claude/jolly-noether-hxhez1-stage-5-1`,
-   #432: [5.1, as built](#51-as-built). Deploy web first, since it
-   migrates `0051_routing`; then the worker and **all four** crons, before any
-   channel leaves `default_group`. Two of the crons assign: an old
+   checks read clean (above). At the user's go-ahead the archive record run
+   went first, and the classifier has been in Shadow since 06:00:32 UTC on
+   2026-10-29 (4.2's first operation, above). A supervisor labels from
+   `/reports/category-ai` during Shadow; apply and then the backlog each wait
+   for the user's go-ahead, in turn. The way back starts with the switch, `off` on
+   `/admin/categories`; the code's way back is then 5.1's (Rolling it back,
+   under [5.1, as built](#51-as-built): `ad6a062`, once no `settle_routing` job
+   is pending or processing), and only below that `dbf4376` for 4.2 and `156004d` for 4.1, whose tables stay, since
+   nothing reads them there.
+8. **5.1 is deployed, and routes nothing.** #432 was squashed into `dev` as
+   `9d5b4fb`, and #435 (`1470902`) took it to `main` on 2026-10-29; all six
+   services were live on it by 06:35:36 UTC, with `0051_routing` applied, and
+   its checks read clean (above): [5.1, as built](#51-as-built). It went web
+   first, since it migrates `0051_routing`; then the worker and **all four**
+   crons, before any channel could leave `default_group`. Two of the crons
+   assign: an old
    `shipblu-sla-sweep` runs an `assign_sweep` that assigns held tickets, and an
    old `shipblu-time-automations` runs rules whose `auto_assign` assigns them
    and whose `assign_group` moves one without ending its hold. Deployed, it
    routes nothing: every channel reads `default_group`, and nothing is held or
    enqueued until an admin moves one while the classifier is in `apply`. Four
-   things change on every ticket at once, all under
+   things changed on every ticket at the deploy, all under
    [5.1, as built](#51-as-built): the out-of-hours acknowledgement's guards
    (decision 6); assignment's ticket-first `FOR NO KEY UPDATE` lock and its
    checked update (decision 7); a console group move running the `on_update`
@@ -3797,8 +3866,10 @@ enqueued, so no job type is ever unknown.
 
 Built on 2026-10-27 on top of 4.0 (#425 at `4a41a24`), because 4.1 is a writer
 of the category and `afterRoutingChanged` is what it calls; it is rebased onto
-`dev` once #425 merges. `0050_category_ai` is the newest migration, so if `dev`
-gains another first, 0050 is regenerated rather than renumbered.
+`dev` once #425 merges. `0050_category_ai` was the newest migration while 4.1
+was built, so had `dev` gained another first, 0050 would have been regenerated
+rather than renumbered; applied in production on 2026-10-27, it is now as fixed
+as any other.
 
 - **What landed, by the spec's bullets.**
   - `lib/category-ai/`: `modes`, `settings`, `options`, `request`, `decide`,
@@ -3954,7 +4025,9 @@ gains another first, 0050 is regenerated rather than renumbered.
 **4.2 — Shadow, then evaluate, then apply.** Operations, plus the report.
 
 1. Run `backfill_category_ai mode=record` over the archive, then switch the
-   live classifier to `shadow` for at least two weeks.
+   live classifier to `shadow` for at least two weeks. Begun on 2026-10-29: the
+   `archive-1` run, then Shadow since 06:00:32 UTC, which lasts until 2026-11-12
+   at the earliest (4.2's first operation, in the status section).
 2. **Ground truth is made, not assumed.** Nobody has ever reviewed a
    subcategory (1 confirmed, 0 rejected), so labels cannot be expected to
    appear on their own.
@@ -4003,8 +4076,9 @@ gains another first, 0050 is regenerated rather than renumbered.
 
 Built on 2026-10-27, stacked on 4.1 (#427), since it reads `ai_category_runs`.
 Code only: no migration, no `db/sql`, no job, no variable, so it deploys with
-web alone. The operations in steps 1 and 3–5 are each a production write and
-wait for the user's go-ahead, after 4.1 is deployed.
+web alone. The operations in steps 1 and 3–5 are each a production write:
+step 1 began at the user's go-ahead on 2026-10-29, and steps 3–5 wait for it in
+turn.
 
 - **What landed.**
   - `lib/category-ai/grade.ts` judges, purely, and its rules are
@@ -4271,8 +4345,9 @@ enqueues `settle_routing` until an admin changes a channel's mode.
 #### 5.1, as built
 
 Built on 2026-10-27 and 2026-10-28 on `claude/jolly-noether-hxhez1-stage-5-1`,
-off `dev` at `c6eb1ac`. `0051_routing` is the newest migration, so if `dev`
-gains another first, 0051 is regenerated rather than renumbered.
+off `dev` at `c6eb1ac`. `0051_routing` was the newest migration while 5.1 was
+built, and was regenerated rather than renumbered when `dev` moved; applied in
+production on 2026-10-29, it is now as fixed as any other.
 
 - **What landed, by the spec's bullets.**
   - **Schema.** `0051_routing` creates the `routing_mode`, `routing_stage` and
@@ -4563,8 +4638,8 @@ gains another first, 0051 is regenerated rather than renumbered.
     `settle_routing` records `not_open`.
 - **Found while building.**
   - **Fixed: auto-assignment recorded an assignment it had not made**
-    (decision 7, `docs/PROJECT-STATE.md` §6.105). In production on
-    `ad6a062`.
+    (decision 7, `docs/PROJECT-STATE.md` §6.105). In production until
+    `1470902` on 2026-10-29.
   - **Fixed before it shipped: "Unassigned" ended a hold.** The console's
     assignee case called `endHold` for an empty choice too. On a held ticket
     that is a no-op write that ended the hold, and `afterHoldEnded` then
@@ -5006,7 +5081,7 @@ gains another first, 0051 is regenerated rather than renumbered.
     than this plan.
   - **The widget's open/closed line** still reads the channel's default
     group's calendar (Risks).
-  - **No `/reports/routing`.** That is Stage 6; until then
+  - **`/reports/routing` is Stage 6's** (below); until it is deployed,
     `routing_decisions` answers by query.
   - **`sendCannedReply` and the engine's `loadTicket` still act on a deleted
     or merged ticket** in general (review #3). Only the router's resume path
@@ -5105,7 +5180,10 @@ gains another first, 0051 is regenerated rather than renumbered.
     AGENTS.md states the deferral as the code has it; the comments go with the
     next change to those files.
 - **Deploying it.** Web first, then the worker and **all four** crons, before
-  any channel leaves `default_group`.
+  any channel leaves `default_group`. Done so on 2026-10-29, with one
+  expectation different: the classifier was in Shadow rather than off, which
+  holds nothing, since routing starts only under `apply`. The reads are under
+  5.1's deploy and checks, in the status section.
   - **Before.** Read `git log origin/main..origin/dev` and every migration in
     it (deploy rule 7). Expect 51 migrations, the newest `1793058419292`; no
     `category_ai_settings` row; no route group on any category and no
@@ -5188,8 +5266,8 @@ Web first (it migrates `metrics_daily`), then the worker and crons, with
 
 - `metrics_daily` gains a category dimension: a fifth single-dimension slice
   and `byCategory` beside `byGroup`. This changes its unique index and the
-  slice reconcile (`lib/reports/rollup.ts:171-190,533-559`), then
-  `rollup_metrics from=` rebuilds history.
+  slice reconcile (`slicesFor` and `reconcileFailure` in
+  `lib/reports/rollup.ts`), then `rollup_metrics from=` rebuilds history.
 - Live open/awaiting by category beside `channelLoad`.
 - `/reports/routing` shows, per channel:
   - routes by outcome;
@@ -5199,6 +5277,315 @@ Web first (it migrates `metrics_daily`), then the worker and crons, with
 
   Those are the numbers that say whether the window and the threshold are
   right, and whether ask 5 is met.
+
+#### 6, as built
+
+Built on `claude/jolly-noether-hxhez1-stage-6` as draft #433, whose fourteen
+review threads were answered on `claude/epic-heisenberg-w60nbl`. That branch
+carries #433's three commits, rebased onto 5.1 at `357b25c` (#432, then in
+review) and since merged with #432's final head `ec8487b` and with `dev`
+(`4622f71`), and a fix for each thread, and replaces #433 as the stage's pull request,
+#434. #432 was squash-merged into `dev` as `9d5b4fb` on 2026-10-29, and #434
+targets `dev` since, with its own review's thirteen threads answered (below).
+Four builders
+worked from one written design, each piece with its own tests. The organisation's
+spend limit stopped the first session's screenshot pass, docs, full check and
+adversarial review on 2026-10-28; the review on #433 and the docs are answered
+below, and the screenshot pass is still owed. What follows is what is on the
+branch, what was verified, and what is left, in order.
+
+**Decisions, as built.**
+
+1. **A category figure follows the ticket's current category**, for every
+   figure: created, first response, resolved, reopened, and CSAT through the
+   surveyed ticket's row. It is the rule the group already follows, and
+   `byCategory` is drawn beside `byGroup`. A category charges nobody, so the
+   reason the agent slice is frozen as of each instant does not apply, and a
+   person's correction is the ground truth 4.2 grades against, which a rebuild
+   should take up. "As of creation" would file every ticket under no
+   category: `CHANGE_STAMP` stamps the first `category_changed` after
+   `created_at`, even in `createTicket`, and the back-classified backlog (Q12)
+   would never reach its own days. The drift is the group's: the nightly
+   recomputes three days, and an older day moves only on a `from=` rebuild.
+   Nothing snapshots a category onto `csat_surveys`.
+2. **One row per slice per day, and one dimension per row, are facts.**
+   Migration `0052` adds `metrics_daily.category_id` (`restrict`, as every
+   reference to a category is) and replaces `metrics_daily_dimensions_idx` —
+   NULLS DISTINCT, so it enforced nothing on any slice — with
+   `metrics_daily_slice_key`, UNIQUE NULLS NOT DISTINCT over the day and all
+   four dimensions. `db/sql/003` adds `metrics_daily_one_dimension`
+   (`num_nonnulls(group_id, agent_id, channel, category_id) <= 1`). A slice
+   written twice, or a row naming two dimensions, would otherwise be summed
+   into another slice by every reader, and `reconcileFailure()` cannot see it.
+   Production pre-flight, read-only, 2026-10-28: no duplicate slice, no row
+   naming two dimensions, one totals row on each of the 67 days, Postgres
+   17.6. So both build there.
+3. **The engine** (`lib/reports/rollup.ts`). `Dimensions` is built from one
+   `DIMENSIONS` list, so the bucket key and `totalsOf` cannot miss one. The
+   accumulator keeps each slice's dimensions in its Map value
+   (`sliceAccumulator`, exported for unit tests), where the old
+   `key.split('|')` round trip could silently drop a fourth.
+   - `slicesFor` adds the category slice only for a categorised ticket.
+   - `reconcileFailure` keeps the channel-sum equality (category slices have
+     `channel = null`) and adds two invariants: at most one all-null slice,
+     and per column the category slices sum to no more than the totals.
+     `reconcileFailure()` names which one a day broke.
+   - The handler's per-day line reads `<day>: N rows (K by category), …`.
+   - `reconcileFailure` is asked of a day's slices before anything is
+     written (#433's review): a day that fails is not written, keeps the rows
+     and the marker the last run to write it left, and the run carries on to
+     the older days and then fails. A day no run wrote before has nothing to
+     keep: every report reading up to today shows it empty from that night,
+     and the CSAT page, which stops short of it, does too once a later day is
+     written (`countedThrough` is the newest day computed whole, a `max()`).
+     So its line says `has no rows until a run reconciles it` rather than
+     `keeps its previous rows`, and `rollup_metrics day=<day>` writes it once
+     the cause is fixed, after the nightly's three days. Asked after the write, as it was, the day
+     was published anyway and the one-totals-row rule could never fire, since
+     `metrics_daily_slice_key` refused the second totals row first.
+   - A constraint violation is not caught per day. It means the rollup's own
+     code is wrong in a way `reconcileFailure` cannot name, every day would
+     fail the same way, and the day's transaction rolls back whole, so the day
+     keeps its previous rows.
+4. **Every totals read names every dimension null.** `TOTALS_SLICE` in
+   `lib/reports/queries.ts` serves `totals()`, `daily()` and `rolledUpDays()`.
+   A category slice has the other three dimensions null, so without it every
+   categorised ticket is counted twice in every headline figure: the overview,
+   the CSAT page and its export, and the dashboard's History. `AGENT_SLICE`
+   names the category null too. A test fails with it removed.
+5. **The overview** (`/reports`) draws "By category" after "By group":
+   `byCategory` (registry order, retired categories kept and marked) plus a
+   "No category" remainder (`uncategorised()`, totals less the category slices,
+   unclamped), read in the same statement as the categories so the two halves
+   of the subtraction are one moment's. A line from `categoryCoverage()` names
+   the window's days last rolled up by code that did not file by category, or
+   says that none in the window has one, so the section never vanishes on a
+   window with no category (§6.54). It counts those days one by one
+   (`categoryFiling`), off `rollup_days.categories_computed_at` (`0054`), which
+   this rollup writes with `computed_at` and the code before it never writes.
+   A day rebuilt by hand ahead of the history's rebuild, or by a rollback's
+   nightly, is then told apart from the days around it, where the first
+   category slice in the window called every later day covered. Its reads go through
+   `allLimited(3)`, and its header links to the routing report. It is not on
+   the CSAT page: surveys snapshot group, agent and channel but not category,
+   so a by-category CSAT would re-file scores on a relabel. Nor does this
+   table draw a CSAT column, for the same reason. The rollup still files each
+   score under its ticket's category, so a category slice is one partition in
+   every column and "No category" stays exact.
+6. **The live board** (`/admin/dashboard`) gains "Open work by category":
+   `backlogCuts()`, one scan of the open backlog grouped by channel and by
+   category (`grouping sets`), its category cut full-joined to the registry.
+   Active categories always show, retired ones only while they hold open work,
+   and "No category" comes last. Each row links to `/inbox?category=<id>`.
+   - The dashboard's reads go through `allLimited(3)`. It had put ten
+     statements on eight places.
+   - A held ticket is unassigned by design. So `queueSnapshot` counts the
+     tickets being routed through `heldSql` (`lib/routing/held-sql.ts`), the
+     SQL twin of `isHeld`, server-only because `hold.ts` is client-safe, and
+     held to `isHeld` and `routingHold` by a test over the same rows.
+   - The Unassigned tile says how many of them are being routed, and turns
+     amber only for the rest.
+7. **`/reports/routing`** (`report.view`; reads in `lib/routing/report.ts`;
+   page and `parts.tsx` under `app/(console)/reports/routing/`). Each read is
+   one statement taking the page's `now`, run through `allLimited(2)`. Each
+   line is per `routing_decisions.channel_id` and live or shadow, never mixed,
+   and filed on the reporting zone's day the ticket entered routing (`within` on
+   `started_at`). The figures:
+   - **Outcome counts.** Entered, decided (`stage = 'decided'`, never
+     `outcome is not null`, which phase one writes while still holding),
+     deciding, stranded and the eight outcomes. Stranded begins at exactly
+     the instant the grace runs out, as `isHeld` ends the hold.
+   - **The fallback and taken shares** are over the router's own decisions
+     (category, no route, fallback, taken). Over all decisions, a channel whose
+     holds a rule ends (production's two web chat rules) reads 0% fallback and
+     looks perfect. "A person or rule decided first" is its own share.
+   - **Time to decision** runs from `coalesce(phase_one_at, decided_at) -
+started_at`, over a settled category only. It shows p50, p90 from ten
+     rows, and the share inside the window. The page warns when two window
+     lengths were in force in the range, and gives the settle job's lag past
+     the window.
+   - **Why a fallback fell back**: a category that arrived after the decision
+     (Jev, a person, or a rule or form), and what Jev had said by then
+     (nothing asked, unsure, every call failed).
+   - **Routed, then assigned**, with the median wait. Every taken ticket is
+     listed.
+   - **Now, not range-bound**: routed tickets nobody has been assigned since
+     they entered routing (no `assigned` event since `started_at`), ten minutes
+     after their hold ended (`decided_at`, two `*/5` sweeps), by the ticket's
+     current group and strategy; stranded rows, with the recovery command. A
+     ticket assigned and then reclaimed, unassigned or handed on is waiting for
+     reasons that are not routing's, and the dashboard's Unassigned counts it.
+     Lists stop at 50 with an exact total.
+   - **The shadow comparison**: each would-be decision against the group a
+     person moved the ticket to.
+   - **State and empty states** are built from the classifier's mode and each
+     channel's mode now, through `routingModeOf`.
+   - `ROUTING_OUTCOME_LABELS` lives in `mode-copy.ts`. The readiness panel
+     takes a required `canViewReport` prop for its link, which
+     `/admin/channels` passes as `report.view`.
+
+**Left out, on purpose.** A history of open-by-category: it would be a snapshot
+(its own table, sampled hourly), never recomputed from `conversations`.
+By-category CSAT (above). A per-category routing table, and a `?channel=`
+drill-down; `routing_decisions_channel_idx` is ready for the second. A "no
+category" inbox filter.
+
+**Verified on the pushed head, 2026-10-28.**
+
+- **Passed, on the whole tree:**
+  - `tsc`, `eslint`, `prettier --check`;
+  - `vitest`: 276 files, 4,303 tests;
+  - `knip`;
+  - the repo rules: 34 checks, none violated;
+  - `db:generate`: no drift;
+  - `npm run build`, run from a real checkout of this commit: Turbopack
+    refuses the worktree's symlinked `node_modules`, so build the worktree's
+    commits from a real checkout.
+- **Database tests passed, on a freshly migrated database:** every file in
+  Stage 6's areas, 19 files and 257 tests — `lib/reports`, `lib/routing`, the
+  rollup handler, the WhatsApp ingest's totals check, the resolve stamp, the
+  constraint test and the routing page.
+- **Mutation runs:** each builder showed its invariant tests failing with the
+  code they guard broken.
+- **Not run:**
+  - The full `test:db` tier and the CI `database` job's steps.
+  - The screenshot pass. It got far enough to reorder the routing page's
+    outcome columns and split its table, with a test of what it changed, and
+    was stopped before it looked again.
+  - The adversarial review.
+
+**#433's review, answered.** Fourteen threads, each a commit on
+`claude/epic-heisenberg-w60nbl` with a test that fails without it where the
+fix has behaviour:
+
+- **The rollup refuses before it writes** (two threads): `reconcileFailure`
+  moved ahead of the day's transaction, above.
+- **"No category" is one statement's**: `byCategory` reads the totals slice
+  beside the category slices and returns the rows and the rest together, so a
+  rollup committing between two reads can no longer print it short or
+  negative.
+- **No CSAT by category on the overview either**: the table leaves the column
+  out, for the CSAT page's reason (5, above).
+- **"Still unassigned after routing" counts a ticket nobody was assigned since
+  it entered routing** (no `assigned` event since `started_at`), not merely one
+  unassigned now: a ticket reclaimed, unassigned or handed on after it was
+  worked waits for reasons that are not routing's.
+- **The stranded read has an index of its own**: `0053` adds
+  `routing_decisions_undecided_idx`, partial on the undecided rows, so the read
+  on every load stays the size of what is stranded. The test asks the planner
+  for it.
+- **The live board's two backlog cuts are one statement** (`backlogCuts`,
+  `grouping sets`), one snapshot and one scan instead of two.
+- **The routing page**: its instants are written in the reporting zone
+  (`formatDateTime` takes a zone); "held for N minutes" is said only where a
+  ticket entering routing now is held, asked through `routingStartFor`; its
+  thresholds are said from `ROUTING_GRACE_MS` and `STILL_UNASSIGNED_AFTER_MS`
+  rather than typed as "ten minutes".
+- **The readiness panel's report link is drawn**: `/admin/channels` passes
+  `report.view`, and the prop is required, so leaving it out does not compile.
+- **One `asDate`, one map of strategy labels**
+  (`lib/assignment/strategy-copy.ts`), where there were two and four copies.
+- **The docs**: the AGENTS.md paragraph on totals reads, `heldSql` beside
+  `isHeld`, the routing report named where the decided-complete CHECK is;
+  README's five slices; PROJECT-STATE's header, §5.1's shadow week and §5.5's
+  reconcile; the handbook's reports and channels articles; and the stale
+  comments.
+
+**#434's review, answered.** Thirteen threads, in ten commits (`17997c8`
+answers four), each with a test that fails without it where the fix has
+behaviour:
+
+- **Unfiled days are counted one by one** (`categoryFiling`): the coverage
+  line names the window's days with figures last rolled up by code that did
+  not file by category, where the first category slice in the window called
+  every later day covered. `0054` adds `rollup_days.categories_computed_at`,
+  written with `computed_at` by this rollup and never by the code before it,
+  so a day a rollback's nightly rebuilds reads as unfiled again.
+- **`0055` indexes `routing_decisions(started_at)`** for every range-bound read
+  on `/reports/routing` and the history's first and last. The test plans each
+  on a year of rows with fresh statistics: on an empty table the planner
+  prefers the channel index for the timing read.
+- **"Routed, then assigned" is bounded by `started_at`**, as "still
+  unassigned" is, and its median wait floored at zero, so the app's clock and
+  the database's cannot drop an assignment or make a wait negative.
+- **The tiles and the By category table are one statement's**: `byCategory`
+  returns the totals it was read with, and the tiles print them.
+- **Every slice predicate is built from `DIMENSIONS`** (`sliceWhere`), through
+  a column map the type holds to it, so a fifth dimension left out does not
+  compile.
+- **An owner with a blank name still makes a number owned** on the readiness
+  panel, named by email.
+- **Every report prints its instants in the reporting zone**: the CSAT
+  comments, the suggestions hint and the classifier report's runs.
+- **Smaller**: `reconciles()` removed for `reconcileFailure`; `inArray` for the
+  report's IN lists; `SETTLE_ACTOR` in a leaf module; `sumOutcomes` and
+  `minutesInWords` exported rather than copied into the page; the
+  `computeDay` mock reset after each test; the overview test's rows
+  mid-window.
+
+**Verified again on `4622f71`, 2026-10-29**, the head with every thread
+answered and `dev` merged: `tsc`, both `eslint` runs, `prettier --check`,
+`vitest` (4,309 tests), `knip`, the repo rules and `npm run build`; the full
+`test:db` tier on Postgres 17, migrated and `db/sql` replayed twice, then
+seeded (118 files, 1,584 tests); and every CI check.
+
+**Left to do, in order.**
+
+1. The screenshot pass, over seeded data at 1400×900 and 390×844, on
+   `/reports?days=30`, `/reports/routing` at 7 and 30 days and with nothing
+   routed, `/admin/dashboard`, and `/admin/channels` (the readiness link).
+   Check for no horizontal page scroll on the phone, no console errors, and
+   empty sections that say why. Look again at the routing page's outcome
+   table, restructured mid-pass. There is no browser suite, so what it finds
+   goes in the pull request.
+2. In production after the deploy, the verification rows added for Stage 6 to
+   the table below.
+
+**Deploy, when it is time.**
+
+- **Order.** Release after 5.1 and apart from it, so Stage 6's rollback has a
+  commit that keeps 5.1. Web first: only web migrates, and the new readers
+  must name the category null before any writer stores a category slice. Then the
+  worker, then all four crons, of which `shipblu-nightly` is the writer
+  (`cleanup && rollup_metrics`, 00:00 UTC).
+- **An old nightly against the new schema is safe.** It inserts four
+  single-dimension slices with `category_id` null, which satisfy the key and
+  the CHECK, and loses only the category slices of the three days it rebuilds.
+- **`0053`** is one `CREATE INDEX` on `routing_decisions`, not concurrent,
+  since a migration runs in a transaction: a SHARE lock for the milliseconds
+  the table takes to read, which is young and small in production. An ingest
+  inserting a routing row on a channel in a category mode waits that long.
+  **`0055`** is the same shape on the same table: `routing_decisions(started_at)`,
+  which every range-bound read on `/reports/routing` and the history's first
+  and last use, where the channel index leads on a column none of them
+  constrains.
+- **`0054`** adds `rollup_days.categories_computed_at`, nullable with no
+  default, so a catalog change under an ACCESS EXCLUSIVE lock held for
+  milliseconds. Every existing row reads unfiled, which is the truth: each was
+  rolled up before categories. The overview then names those days in its By
+  category section until the history's rebuild files them; the first Stage 6
+  nightly files its three. A rollback's nightly writes `computed_at` alone, so
+  a day it rebuilds reads unfiled again once Stage 6 is back.
+- **Before web, read-only:**
+  - the duplicate-slice query and the two-dimension query (both 0 on
+    2026-10-28);
+  - §5.5's `pg_stat_activity`;
+  - not within 23:50–00:10 UTC.
+- **The first Stage 6 nightly** proves the writer with no hand write.
+- **The `rollup_metrics from=2026-08-18` rebuild** writes no category rows
+  today: nothing in production carries a category. Its moment is after 4.2's
+  `backfill_category_ai mode=apply`, and again whenever the backlog is
+  re-filed. It runs from the worker's shell, on Stage 6 code, with the user's
+  go-ahead.
+- **Rollback.**
+  1. Stop the writers: the nightly and the worker go back first.
+  2. Count category rows, then
+     `delete from metrics_daily where category_id is not null`. This is
+     required whenever any exists: the old web reads one as a second totals
+     row.
+  3. Redeploy web.
+
+  `0052`'s column, key and CHECK stay, since the old code satisfies all three.
 
 ## Verification queries (run after each stage, read-only)
 
@@ -5218,6 +5605,11 @@ Web first (it migrates `metrics_daily`), then the worker and crons, with
 | 5     | Routes match categories                                   | `outcome='category'` rows whose `to_group_id` ≠ the category's `route_group_id` at decision time = 0                                                  |
 | 5     | Routed means assigned                                     | `outcome='category'` tickets still unassigned N minutes after `decided_at`, broken down by group and strategy                                         |
 | 5     | Nothing taken by accident                                 | `outcome='taken'` per week, which should be near 0; each one is read                                                                                  |
+| 6     | One row per slice                                         | `group by day, group_id, agent_id, channel, category_id having count(*) > 1` = 0 (a fact once `metrics_daily_slice_key` exists)                       |
+| 6     | One dimension per row                                     | `num_nonnulls(group_id, agent_id, channel, category_id) > 1` = 0                                                                                      |
+| 6     | Categories never exceed the totals                        | per day and column, the category slices' sum above the totals row = 0 days                                                                            |
+| 6     | Category slices match the tickets                         | yesterday's `tickets_created` per category slice = worked tickets created that Cairo day by `category_id`                                             |
+| 6     | The routing report adds up                                | `/reports/routing`'s outcome counts for a window = `routing_decisions` grouped by `channel_id, shadow, outcome` over `started_at` in it               |
 
 ## Risks not closed by the design
 
