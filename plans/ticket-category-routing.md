@@ -63,7 +63,7 @@ records the answers, and the plan below already reflects them.
 
 ## Status and handoff
 
-As of 2026-10-28, 10:06 UTC. A session picking this plan up starts here.
+As of 2026-10-29, 08:28 UTC. A session picking this plan up starts here.
 Everything after this section is the design as it was reasoned and as each stage
 was built. This section says where the work stands, what comes next and how, and
 what has already bitten. Whoever moves any of it updates this section in the
@@ -150,8 +150,9 @@ runLabel=archive-1`, job `28da8309`, enqueued at 05:55:54 UTC at the user's
   `unknown`, with no error; no `category_changed` event since 06:00:32 and no
   ticket carrying a category; no warning or error from the worker or web since
   06:00.
-- **Next**: at least two weeks of Shadow, then labelling (4.2, step 2). The way
-  back is the switch: `mode` to `off` on `/admin/categories`.
+- **Next**: labelling (4.2, step 2) from `/reports/category-ai`, during at least
+  two weeks of Shadow, so until 2026-11-12 at the earliest. The way back is the
+  switch: `mode` to `off` on `/admin/categories`.
 
 **4.2's deploy and checks, read on Render and production on 2026-10-27.**
 
@@ -561,8 +562,9 @@ Every production write needs the user's go-ahead for that step, and the
    went first, and the classifier has been in Shadow since 06:00:32 UTC on
    2026-10-29 (4.2's first operation, above). Labelling, apply and the backlog
    each wait for it in turn. The way back starts with the switch, `off` on
-   `/admin/categories`; the code's way back is then 5.1's (item 8), and only
-   below that `dbf4376` for 4.2 and `156004d` for 4.1, whose tables stay, since
+   `/admin/categories`; the code's way back is then 5.1's (Rolling it back,
+   under [5.1, as built](#51-as-built): `ad6a062`, once no `settle_routing` job
+   is pending or processing), and only below that `dbf4376` for 4.2 and `156004d` for 4.1, whose tables stay, since
    nothing reads them there.
 8. **5.1 is deployed, and routes nothing.** #432 was squashed into `dev` as
    `9d5b4fb`, and #435 (`1470902`) took it to `main` on 2026-10-29; all six
@@ -576,7 +578,7 @@ Every production write needs the user's go-ahead for that step, and the
    and whose `assign_group` moves one without ending its hold. Deployed, it
    routes nothing: every channel reads `default_group`, and nothing is held or
    enqueued until an admin moves one while the classifier is in `apply`. Four
-   things change on every ticket at once, all under
+   things changed on every ticket at the deploy, all under
    [5.1, as built](#51-as-built): the out-of-hours acknowledgement's guards
    (decision 6); assignment's ticket-first `FOR NO KEY UPDATE` lock and its
    checked update (decision 7); a console group move running the `on_update`
@@ -3863,8 +3865,10 @@ enqueued, so no job type is ever unknown.
 
 Built on 2026-10-27 on top of 4.0 (#425 at `4a41a24`), because 4.1 is a writer
 of the category and `afterRoutingChanged` is what it calls; it is rebased onto
-`dev` once #425 merges. `0050_category_ai` is the newest migration, so if `dev`
-gains another first, 0050 is regenerated rather than renumbered.
+`dev` once #425 merges. `0050_category_ai` was the newest migration while 4.1
+was built, so had `dev` gained another first, 0050 would have been regenerated
+rather than renumbered; applied in production on 2026-10-27, it is now as fixed
+as any other.
 
 - **What landed, by the spec's bullets.**
   - `lib/category-ai/`: `modes`, `settings`, `options`, `request`, `decide`,
@@ -4020,9 +4024,9 @@ gains another first, 0050 is regenerated rather than renumbered.
 **4.2 — Shadow, then evaluate, then apply.** Operations, plus the report.
 
 1. Run `backfill_category_ai mode=record` over the archive, then switch the
-   live classifier to `shadow` for at least two weeks. Done on 2026-10-29: the
-   `archive-1` run, then Shadow since 06:00:32 UTC (4.2's first operation, in
-   the status section).
+   live classifier to `shadow` for at least two weeks. Begun on 2026-10-29: the
+   `archive-1` run, then Shadow since 06:00:32 UTC, which lasts until 2026-11-12
+   at the earliest (4.2's first operation, in the status section).
 2. **Ground truth is made, not assumed.** Nobody has ever reviewed a
    subcategory (1 confirmed, 0 rejected), so labels cannot be expected to
    appear on their own.
@@ -4071,8 +4075,9 @@ gains another first, 0050 is regenerated rather than renumbered.
 
 Built on 2026-10-27, stacked on 4.1 (#427), since it reads `ai_category_runs`.
 Code only: no migration, no `db/sql`, no job, no variable, so it deploys with
-web alone. The operations in steps 1 and 3–5 are each a production write and
-wait for the user's go-ahead, after 4.1 is deployed.
+web alone. The operations in steps 1 and 3–5 are each a production write:
+step 1 began at the user's go-ahead on 2026-10-29, and steps 3–5 wait for it in
+turn.
 
 - **What landed.**
   - `lib/category-ai/grade.ts` judges, purely, and its rules are
@@ -4339,8 +4344,9 @@ enqueues `settle_routing` until an admin changes a channel's mode.
 #### 5.1, as built
 
 Built on 2026-10-27 and 2026-10-28 on `claude/jolly-noether-hxhez1-stage-5-1`,
-off `dev` at `c6eb1ac`. `0051_routing` is the newest migration, so if `dev`
-gains another first, 0051 is regenerated rather than renumbered.
+off `dev` at `c6eb1ac`. `0051_routing` was the newest migration while 5.1 was
+built, and was regenerated rather than renumbered when `dev` moved; applied in
+production on 2026-10-29, it is now as fixed as any other.
 
 - **What landed, by the spec's bullets.**
   - **Schema.** `0051_routing` creates the `routing_mode`, `routing_stage` and
@@ -4631,8 +4637,8 @@ gains another first, 0051 is regenerated rather than renumbered.
     `settle_routing` records `not_open`.
 - **Found while building.**
   - **Fixed: auto-assignment recorded an assignment it had not made**
-    (decision 7, `docs/PROJECT-STATE.md` §6.105). In production on
-    `ad6a062`.
+    (decision 7, `docs/PROJECT-STATE.md` §6.105). In production until
+    `1470902` on 2026-10-29.
   - **Fixed before it shipped: "Unassigned" ended a hold.** The console's
     assignee case called `endHold` for an empty choice too. On a held ticket
     that is a no-op write that ended the hold, and `afterHoldEnded` then
@@ -5173,7 +5179,9 @@ gains another first, 0051 is regenerated rather than renumbered.
     AGENTS.md states the deferral as the code has it; the comments go with the
     next change to those files.
 - **Deploying it.** Web first, then the worker and **all four** crons, before
-  any channel leaves `default_group`. Done so on 2026-10-29: the reads are under
+  any channel leaves `default_group`. Done so on 2026-10-29, with one
+  expectation different: the classifier was in Shadow rather than off, which
+  holds nothing, since routing starts only under `apply`. The reads are under
   5.1's deploy and checks, in the status section.
   - **Before.** Read `git log origin/main..origin/dev` and every migration in
     it (deploy rule 7). Expect 51 migrations, the newest `1793058419292`; no
@@ -5273,8 +5281,9 @@ Web first (it migrates `metrics_daily`), then the worker and crons, with
 
 Built on `claude/jolly-noether-hxhez1-stage-6` as draft #433, whose fourteen
 review threads were answered on `claude/epic-heisenberg-w60nbl`. That branch
-carries #433's three commits, rebased onto 5.1 at `357b25c` (#432, in review),
-and a fix for each thread, and replaces #433 as the stage's pull request,
+carries #433's three commits, rebased onto 5.1 at `357b25c` (#432, then in
+review) and since merged with #432's final head `ec8487b` and with `dev`
+(`4622f71`), and a fix for each thread, and replaces #433 as the stage's pull request,
 #434. #432 was squash-merged into `dev` as `9d5b4fb` on 2026-10-29, and #434
 targets `dev` since, with its own review's thirteen threads answered (below).
 Four builders

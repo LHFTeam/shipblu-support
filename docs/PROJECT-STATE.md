@@ -148,8 +148,9 @@ is written now, by the console's lightweight presence stream and by nothing
 else. Conversation invalidations use a separate inbox-only stream, so ticket
 traffic cannot make presence expensive. Every group ships on `manual`, so none
 of it changes behaviour until somebody opts a team in. Stage 5.1 of
-`plans/ticket-category-routing.md`, built and in review, gives a fresh ticket
-one more way to find its group: its category, on a channel an admin has moved
+`plans/ticket-category-routing.md`, deployed on 2026-10-29 and routing nothing
+until an admin moves a channel while the classifier is in `apply`, gives a
+fresh ticket one more way to find its group: its category, on a channel an admin has moved
 off `default_group`, with the ticket held unassigned for a few minutes while
 the classifier files it (README, "Ticket assignment"; §5.1 below).
 
@@ -1083,8 +1084,9 @@ doubling every fortnight.
 
 ~~**And `main` is not deployed.**~~ **Deployed 2026-09-20.** The production
 services were then on `6d9b7f3`. This said all seven, but staging, the seventh,
-has had no deploy since 2026-08-18. Production runs `447d8be` now (header);
-`/api/health` reports the commit and the new `pool` block from #153. The
+has had no deploy since 2026-08-18. The header names the commit production
+runs now, since a commit named here goes stale at every release; `/api/health`
+reports the commit and the new `pool` block from #153. The
 standing hazard is unchanged, though, and it is why this paragraph stays:
 `autoDeploy` is off everywhere, so the next merge is again not running until
 somebody triggers it — including the job whose handler a queued row will look
@@ -1646,7 +1648,7 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
   switch is on `/admin/categories` (`category_ai_settings`, no row = off), not
   the key, which production already holds; the threshold beside it defaults to
   0.6 and every answer records the one it met. Turning it on is 4.2's sequence,
-  whose first step is done: `backfill_category_ai mode=record runLabel=<label>`
+  whose first step is under way: `backfill_category_ai mode=record runLabel=<label>`
   over the archive, then `shadow` for at least two weeks while a supervisor labels a sample from
   `/reports/category-ai` (4.2), whose figures decide the switch, then
   `apply`, then `backfill_category_ai mode=record` again under a fresh label with
