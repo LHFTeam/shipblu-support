@@ -1,7 +1,18 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { Button, Card, Cell, Field, Input, Row, Select, Table, Toggle } from '@/components/ui';
+import {
+  Badge,
+  Button,
+  Card,
+  Cell,
+  Field,
+  Input,
+  Row,
+  Select,
+  Table,
+  Toggle,
+} from '@/components/ui';
 import { InfoTip } from '@/components/tooltip';
 import { DangerAction, Disclosure, EditorForm } from '../forms-shared';
 import { deleteGroup, saveGroup } from './actions';
@@ -44,6 +55,68 @@ function HoursField({ group, schedules }: { group?: Group; schedules: Choice[] }
           </option>
         ))}
       </Select>
+    </Field>
+  );
+}
+
+/**
+ * Who is in the group: the only people auto-assignment hands its tickets to,
+ * and, for an agent-role user, which of its tickets they can see at all.
+ *
+ * A box drawn ticked also posts a hidden `memberIdsHeld`, so a save writes only
+ * the boxes somebody clicked (`MembershipChoice`): an agent the agents page
+ * added or removed while this was open, and whose box here nobody touched,
+ * stays as that page left them. A deactivated agent has a box only while they
+ * are a member, so they can be taken off; their row is kept otherwise, because
+ * reactivating them puts them back where they were.
+ */
+function MembersField({
+  memberIds = [],
+  agents,
+  deactivatedAgents = [],
+}: {
+  memberIds?: string[];
+  agents: Choice[];
+  deactivatedAgents?: Choice[];
+}) {
+  // Read once, when the editor mounts, for `GroupCheckboxes`' reason on the
+  // agents page: the boxes are uncontrolled, so a held set taken from each
+  // render's props would move with a revalidation the boxes never see.
+  const [held] = useState(() => new Set(memberIds));
+  const choices = [
+    ...agents.map((agent) => ({ ...agent, deactivated: false })),
+    ...deactivatedAgents
+      .filter((agent) => held.has(agent.value))
+      .map((agent) => ({ ...agent, deactivated: true })),
+  ];
+
+  return (
+    <Field
+      as="group"
+      label="Members"
+      hint="Auto-assignment hands this group's tickets only to its members, and an agent sees the tickets of every group they are in. Supervisors and admins see every ticket either way."
+    >
+      <div className="mt-1 grid gap-1 sm:grid-cols-2">
+        {choices.map((agent) => (
+          <label key={agent.value} className="flex min-w-0 items-center gap-2 text-sm">
+            {held.has(agent.value) ? (
+              <input type="hidden" name="memberIdsHeld" value={agent.value} />
+            ) : null}
+            <input
+              type="checkbox"
+              name="memberIds"
+              value={agent.value}
+              defaultChecked={held.has(agent.value)}
+              className="size-4 shrink-0 accent-(--color-control-accent)"
+            />
+            <span className="min-w-0 truncate">{agent.label}</span>
+            {agent.deactivated ? <Badge tone="neutral">Deactivated</Badge> : null}
+          </label>
+        ))}
+        {choices.length === 0 ? (
+          <p className="text-xs text-(--color-text-secondary)">No active agents yet.</p>
+        ) : null}
+      </div>
     </Field>
   );
 }
@@ -195,6 +268,7 @@ export function NewGroup({ schedules, agents }: { schedules: Choice[]; agents: C
             <Input name="description" placeholder="Handles delivery and tracking questions" />
           </Field>
           <HoursField schedules={schedules} />
+          <MembersField agents={agents} />
           <AssignmentFields agents={agents} />
         </EditorForm>
       )}
@@ -207,6 +281,7 @@ type GroupSummary = {
   /** The group's own schedule, or null when it works the company one. */
   scheduleName: string | null;
   members: number;
+  memberIds: string[];
   tickets: number;
 };
 
@@ -230,15 +305,18 @@ export function GroupsTable({
   rows,
   schedules,
   agents,
+  deactivatedAgents,
   defaultScheduleName,
 }: {
   rows: GroupSummary[];
   schedules: Choice[];
   agents: Choice[];
+  deactivatedAgents: Choice[];
   defaultScheduleName: string | null;
 }) {
   const [editingId, setEditingId] = useState<string | null>(null);
-  const editing = rows.find((row) => row.group.id === editingId)?.group ?? null;
+  const editingRow = rows.find((row) => row.group.id === editingId) ?? null;
+  const editing = editingRow?.group ?? null;
   const editorRef = useRef<HTMLDivElement | null>(null);
 
   // The open form is above the table, so clicking the twentieth group would
@@ -274,6 +352,11 @@ export function GroupsTable({
                 />
               </Field>
               <HoursField group={editing} schedules={schedules} />
+              <MembersField
+                memberIds={editingRow?.memberIds}
+                agents={agents}
+                deactivatedAgents={deactivatedAgents}
+              />
               <AssignmentFields group={editing} agents={agents} />
             </EditorForm>
           </Card>
@@ -288,8 +371,8 @@ export function GroupsTable({
           <>
             Agents{' '}
             <InfoTip label="Agents">
-              How many people are members of this group. Only members are ever assigned its tickets,
-              so a routing group with none is a queue nothing comes out of.
+              How many people are members of this group. Auto-assignment hands its tickets only to
+              members, so a routing group with none is a queue nothing comes out of.
             </InfoTip>
           </>,
           <>

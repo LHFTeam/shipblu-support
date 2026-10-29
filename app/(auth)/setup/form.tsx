@@ -2,6 +2,7 @@
 
 import { bootstrapAdmin, type AuthFormState } from '../actions';
 import { ErrorText, Input, Label } from '@/components/ui';
+import { MAX_AGENT_NAME } from '@/lib/admin/agent-name';
 import { SubmitButton } from '@/components/submit-button';
 import { useActionForm } from '@/components/use-action-form';
 
@@ -18,7 +19,7 @@ export function SetupForm() {
 
       <div>
         <Label htmlFor="name">Your name</Label>
-        <Input id="name" name="name" required autoFocus />
+        <Input id="name" name="name" required maxLength={MAX_AGENT_NAME} autoFocus />
       </div>
 
       <div>

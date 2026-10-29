@@ -393,3 +393,24 @@ BEGIN
       );
   END IF;
 END $$;
+
+-- --------------------------------------------------------------------------
+-- agent_changes records a role or a sign-in address, and nothing else
+--
+-- The column is text so a third kind of change is one more value rather than
+-- an enum migration, and this is what stops it being any text at all: a
+-- reader asking "who changed this person's role?" filters on 'role', and a
+-- row spelled 'Role' or 'roles' by a later writer would be a change that
+-- question never finds. The one writer today is saveAgentProfile.
+-- --------------------------------------------------------------------------
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'agent_changes_field_known'
+      AND conrelid = 'public.agent_changes'::regclass
+  ) THEN
+    ALTER TABLE agent_changes
+      ADD CONSTRAINT agent_changes_field_known CHECK (field IN ('role', 'email'));
+  END IF;
+END $$;

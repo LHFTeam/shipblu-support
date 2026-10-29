@@ -228,6 +228,38 @@ export const groups = pgTable(
   (t) => [uniqueIndex('groups_name_idx').on(t.name)],
 );
 
+/**
+ * Every change to an agent's role or sign-in address: whose, from what, to what,
+ * by whom and when. Append-only, written only by `saveAgentProfile` in the
+ * transaction that makes the change.
+ *
+ * A row rather than only the log line beside it, because both are the changes
+ * a security question is asked about — who made this person an account admin,
+ * who moved their sign-in to another address — and Render keeps logs for days.
+ * The labels are copies, like `channel_owner_changes`', so a row still names
+ * the people after either agent's row is gone. The name, the groups and the cap
+ * are left out: none of them changes what somebody can do or sign in as.
+ */
+export const agentChanges = pgTable(
+  'agent_changes',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    agentId: uuid('agent_id').references(() => agents.id, { onDelete: 'set null' }),
+    agentLabel: text('agent_label').notNull(),
+    /** `role` or `email`; `agent_changes_field_known` in `db/sql/003` holds it to those. */
+    field: text('field').$type<'role' | 'email'>().notNull(),
+    fromValue: text('from_value').notNull(),
+    toValue: text('to_value').notNull(),
+    changedByAgentId: uuid('changed_by_agent_id').references(() => agents.id, {
+      onDelete: 'set null',
+    }),
+    changedByLabel: text('changed_by_label'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  // "What has happened to this agent?", newest first.
+  (t) => [index('agent_changes_agent_idx').on(t.agentId, t.createdAt)],
+);
+
 export const groupMembers = pgTable(
   'group_members',
   {
