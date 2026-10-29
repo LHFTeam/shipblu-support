@@ -8,6 +8,7 @@ import { ROUTING_OUTCOMES, type RoutingOutcome } from '@/lib/routing/decide';
 import { ROUTING_MODE_LABELS, ROUTING_OUTCOME_LABELS } from '@/lib/routing/mode-copy';
 import {
   decidedFirst,
+  GRACE_IN_WORDS,
   routerDecided,
   type DecisionTiming,
   type FallbackReasons,
@@ -142,8 +143,8 @@ export function OutcomeTable({
     <span key="stranded" className="flex items-center gap-1">
       Stranded
       <InfoTip label="Stranded">
-        Undecided ten minutes after its window ended, when the hold&rsquo;s grace runs out. Should
-        always be 0; every one still open, whatever the range, is listed under Now.
+        Undecided {GRACE_IN_WORDS} after its window ended, when the hold&rsquo;s grace runs out.
+        Should always be 0; every one still open, whatever the range, is listed under Now.
       </InfoTip>
     </span>,
     <span key="fallback" className="flex items-center gap-1">
@@ -280,8 +281,8 @@ export function TimingTable({ rows }: { rows: DecisionTiming[] }) {
           Settle job late by
           <InfoTip label="Settle job late by">
             How far past the window&rsquo;s end the settle job recorded the decisions it made, 90th
-            percentile and worst. Past ten minutes the hold had already lapsed, and the sweep could
-            assign the ticket in the group it was leaving.
+            percentile and worst. Past {GRACE_IN_WORDS} the hold had already lapsed, and the sweep
+            could assign the ticket in the group it was leaving.
           </InfoTip>
         </span>,
         <span key="assigned" className="flex items-center gap-1">

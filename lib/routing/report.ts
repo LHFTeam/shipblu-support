@@ -53,6 +53,23 @@ import { routingModeOf, type RoutingMode } from './mode';
  */
 export const STILL_UNASSIGNED_AFTER_MS = 10 * 60_000;
 
+/**
+ * A length of time as the page's sentences say it, built from the constant it
+ * describes. Written out by hand, "ten minutes" stood in seven strings that a
+ * change to either constant would have left describing a threshold the page no
+ * longer applied.
+ */
+function minutesInWords(ms: number): string {
+  const minutes = Math.round(ms / 60_000);
+  return `${minutes} ${minutes === 1 ? 'minute' : 'minutes'}`;
+}
+
+/** The hold's grace (`ROUTING_GRACE_MS`), past which an undecided record is stranded. */
+export const GRACE_IN_WORDS = minutesInWords(ROUTING_GRACE_MS);
+
+/** `STILL_UNASSIGNED_AFTER_MS`, as the page's sentences say it. */
+export const STILL_UNASSIGNED_IN_WORDS = minutesInWords(STILL_UNASSIGNED_AFTER_MS);
+
 /** How many tickets a list on the page names; every count beside it is exact. */
 const LISTED = 50;
 

@@ -15,12 +15,14 @@ import { idleRoutingSentence, ROUTING_MODE_LABELS } from '@/lib/routing/mode-cop
 import {
   decisionTiming,
   fallbackReasons,
+  GRACE_IN_WORDS,
   routedStillUnassigned,
   routerDecided,
   routingChannels,
   routingHistory,
   routingOutcomes,
   shadowAgainstPeople,
+  STILL_UNASSIGNED_IN_WORDS,
   strandedRouting,
   takenTickets,
   type RoutingChannel,
@@ -279,10 +281,10 @@ export default async function RoutingReportPage({
               }
               explain={
                 <>
-                  Routed tickets, of any range, still open with nobody holding them ten minutes
-                  after their hold ended: long enough for assignment and two sweeps. Tickets in a
-                  group set to manual wait for somebody to pick them, by design, and are counted
-                  apart.
+                  Routed tickets, of any range, still open with nobody holding them{' '}
+                  {STILL_UNASSIGNED_IN_WORDS} after their hold ended: long enough for assignment and
+                  two sweeps. Tickets in a group set to manual wait for somebody to pick them, by
+                  design, and are counted apart.
                 </>
               }
             />
@@ -367,12 +369,12 @@ export default async function RoutingReportPage({
 
       <Section
         title="Still unassigned after routing"
-        hint="Live routed tickets still open with nobody holding them ten minutes after their hold ended, by the group each is in now — a rule may have moved it since — and the decision that put it there."
+        hint={`Live routed tickets still open with nobody holding them ${STILL_UNASSIGNED_IN_WORDS} after their hold ended, by the group each is in now — a rule may have moved it since — and the decision that put it there.`}
       >
         {unassigned.length === 0 ? (
           <Quiet>
-            Every routed ticket still open has somebody holding it, or was decided less than ten
-            minutes ago.
+            Every routed ticket still open has somebody holding it, or was decided less than{' '}
+            {STILL_UNASSIGNED_IN_WORDS} ago.
           </Quiet>
         ) : (
           <UnassignedTable rows={unassigned} />
@@ -381,7 +383,7 @@ export default async function RoutingReportPage({
 
       <Section
         title="Stranded"
-        hint="Routing records nothing decided by ten minutes after their window ended. A live one is no longer held, so the sweep may already have assigned it: what is left open is the record, and what its decision owed."
+        hint={`Routing records nothing decided by ${GRACE_IN_WORDS} after their window ended. A live one is no longer held, so the sweep may already have assigned it: what is left open is the record, and what its decision owed.`}
       >
         {stranded.rows.length === 0 ? (
           <Quiet>Nothing stranded: every routing record was decided in time.</Quiet>
@@ -452,7 +454,7 @@ function strandedSentence(live: number, shadow: number): string {
     Boolean,
   );
   const total = live + shadow;
-  return `${parts.join(' and ')} routing ${total === 1 ? 'record is' : 'records are'} still undecided ten minutes after ${total === 1 ? 'its window' : 'their windows'} ended, long after the job that decides each was due.`;
+  return `${parts.join(' and ')} routing ${total === 1 ? 'record is' : 'records are'} still undecided ${GRACE_IN_WORDS} after ${total === 1 ? 'its window' : 'their windows'} ended, long after the job that decides each was due.`;
 }
 
 /**
