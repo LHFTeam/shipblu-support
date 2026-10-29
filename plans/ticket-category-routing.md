@@ -5659,8 +5659,8 @@ seeded (118 files, 1,584 tests); and every CI check.
      Apply would meet; and the scroll cue's shades are linear, so a tall
      table's header has one.
 
-   One is left, and decided, but not built:
-   - **A second web chat row cannot be edited.** `ChannelEditor` returns
+   One was left, decided, and is now built (below):
+   - _Built on 2026-10-29._ **A second web chat row cannot be edited.** `ChannelEditor` returns
      null for every `webchat` row, and the Chat widget card configures only
      the oldest active one. So a second row's saved mode, name, default group
      and active switch are unreachable. The readiness panel says truly that
@@ -5674,6 +5674,17 @@ seeded (118 files, 1,584 tests); and every CI check.
      keeps configuring the oldest active one. The first wording of this
      decision named an active switch among what other channels have; none
      has one.
+     **As built.** Every web chat row but the widget's has the row editor;
+     the widget's is edited by the Chat widget card, which gains its name
+     field, so no two forms save one row's group and mode. The editor posts
+     no FAQ folders, and `saveChannel` now leaves a row's folders as they
+     are when none is posted. Each web chat row has a switch, a form of its
+     own behind a second click whose confirmation names where the widget
+     goes (`setWebchatActive`, `switchWebchatRow`). The last active row
+     says why it stays on, and the action refuses it under a transaction
+     lock. The card also refuses to save folders onto a row the widget no
+     longer uses, and a name another channel holds is now a sentence
+     rather than a throw.
 
 2. In production after the deploy, the verification rows added for Stage 6 to
    the table below. Read clean on 2026-10-29; the first nightly's rows are left.

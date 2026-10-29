@@ -112,7 +112,10 @@ export async function widgetHours(): Promise<HoursConfig | null> {
  * Ordered, because nothing stops an admin adding a second `webchat` row: without
  * it Postgres may return either, and the admin page would configure one row
  * while the widget read the other. Oldest wins, which is the row that has been
- * routing tickets.
+ * routing tickets. A web chat row can be switched off on /admin/channels, and
+ * the next oldest active one then takes the widget over; `switchWebchatRow`
+ * refuses the last, so this finds a row unless one was switched off in the
+ * database by hand (`lib/widget/rows.ts` says what each switch does).
  */
 export const webchatChannel = cache(async () => {
   const rows = await db

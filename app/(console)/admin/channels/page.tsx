@@ -33,6 +33,7 @@ import {
   shownOnboardings,
 } from '@/lib/whatsapp/onboarding-view';
 import { offerableFaqFolders, parseWidgetConfig } from '@/lib/widget/config';
+import { webchatSwitch, widgetRow } from '@/lib/widget/rows';
 import {
   CoexistenceBadges,
   ConnectBusinessAppNumber,
@@ -44,8 +45,10 @@ import {
   ChannelEditor,
   ChannelForm,
   OwnerEditor,
+  WebchatActiveSwitch,
   WebchatSettings,
   type OwnerChoice,
+  type WebchatSwitchView,
 } from './forms';
 import { RoutingBadge, RoutingReadinessPanel } from './routing-readiness';
 import { NewWhatsAppAccount, WhatsAppAccountEditor, type WhatsAppAccountRow } from './waba-forms';
@@ -110,12 +113,21 @@ export default async function ChannelsPage() {
     }),
   );
 
-  // The same row `webchatChannel()` reads — oldest active first. Picking by a
+  // The same row `webchatChannel()` reads: oldest active first, ties by id,
+  // which is the order `routingReadiness` read every row in. Picking by a
   // different rule would let an admin configure one row while the widget read
-  // another, and the setting would look saved and do nothing.
-  const webchat = channelList
-    .filter((channel) => channel.type === 'webchat' && channel.isActive)
-    .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())[0];
+  // another, and the setting would look saved and do nothing — sorting this
+  // page's own list, ordered by name and timed to the millisecond, was one.
+  // Each web chat row's switch is worded from the same rows, by the rule the
+  // action applies again under its lock.
+  const webchatRows = routing.channels.filter((channel) => channel.type === 'webchat');
+  const widget = widgetRow(webchatRows);
+  const webchat = widget ? channelList.find((channel) => channel.id === widget.id) : undefined;
+  const switchView = (channelId: string): WebchatSwitchView | null => {
+    const plan = webchatSwitch(webchatRows, channelId);
+    if (plan?.kind !== 'switch_off') return plan;
+    return { kind: 'switch_off', widgetMovesTo: plan.widgetMovesTo?.name ?? null };
+  };
 
   const accountChoices = accountList.map((account) => ({ id: account.id, name: account.name }));
   const ownerChoices: OwnerChoice[] = agentList.map(({ id, name, email }) => ({ id, name, email }));
@@ -312,6 +324,7 @@ export default async function ChannelsPage() {
               ? onboardings.find((onboarding) => onboarding.id === coexistence.onboardingId)
               : undefined;
             const stillConnecting = attempt?.status === 'exchanged';
+            const switchPlan = channel.type === 'webchat' ? switchView(channel.id) : null;
 
             return (
               <li key={channel.id} className="flex flex-wrap items-center gap-3 px-4 py-3">
@@ -341,7 +354,9 @@ export default async function ChannelsPage() {
                       : isMetaChannel(channel.type)
                         ? 'hardcoded in server environment variables'
                         : channel.type === 'webchat'
-                          ? 'the widget'
+                          ? channel.id === widget?.id
+                            ? 'the widget'
+                            : 'not the widget’s row'
                           : (channel.config.address as string) || 'no address'}
                 </span>
                 {coexistence && canConnect && channel.isActive && !stillConnecting
@@ -359,12 +374,24 @@ export default async function ChannelsPage() {
                       );
                     })
                   : null}
-                <ChannelEditor
-                  channel={{ ...channel, routingMode: savedRoutingMode(channel.id) }}
-                  groups={groupList}
-                  whatsappAccounts={accountChoices}
-                  classifierMode={classifierMode}
-                />
+                {/* The widget's row is edited by the Chat widget card below,
+                    which has its folders: two forms saving one row's group and
+                    mode would each put the other's stale values back. */}
+                {channel.type === 'webchat' && channel.id === widget?.id ? (
+                  <span className="text-xs text-(--color-text-secondary)">
+                    Edited under Chat widget
+                  </span>
+                ) : (
+                  <ChannelEditor
+                    channel={{ ...channel, routingMode: savedRoutingMode(channel.id) }}
+                    groups={groupList}
+                    whatsappAccounts={accountChoices}
+                    classifierMode={classifierMode}
+                  />
+                )}
+                {switchPlan ? (
+                  <WebchatActiveSwitch channelId={channel.id} plan={switchPlan} />
+                ) : null}
                 {reconnectable && canConnect ? (
                   <ConnectBusinessAppNumber
                     {...connectProps}

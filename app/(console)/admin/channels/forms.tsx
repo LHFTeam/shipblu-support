@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useActionState, useState } from 'react';
 import {
   Badge,
   Button,
@@ -22,8 +22,9 @@ import {
   type ConversationChannel,
 } from '@/lib/tickets/channel-policy';
 import type { AdminState } from '../settings-shared';
-import { saveChannel, setNumberOwner } from './actions';
+import { saveChannel, setNumberOwner, setWebchatActive } from './actions';
 import { ConfirmSubmit } from '@/components/confirm-submit';
+import { InfoTip } from '@/components/tooltip';
 import { SubmitButton } from '@/components/submit-button';
 import { useActionForm } from '@/components/use-action-form';
 import { CHANNEL_TYPES, channelTypeLabel, isChannelType, type ChannelType } from './channel-types';
@@ -151,11 +152,13 @@ export function ChannelEditor({
   const [open, setOpen] = useState(false);
 
   const type = editableType(channel.type);
-  // Web chat is edited by `WebchatSettings` below the list, and must not be
-  // edited here: `saveChannel` rebuilds a webchat row's config from the
-  // `faqFolder_*` fields, and this form has none, so saving the name from here
-  // would silently clear the folders the widget lists.
-  if (!type || type === 'webchat') return null;
+  // A web chat row is edited here too, but never the widget's own: the page
+  // draws `WebchatSettings` for that one, since two forms saving the same
+  // group and mode would put each other's stale values back. This form posts
+  // no `faqFolder_*` field, and `saveChannel` leaves a row's folders as they
+  // are when none is posted, so a rename here keeps what the widget lists once
+  // the row becomes the widget's.
+  if (!type) return null;
   const connectedThroughMeta = type === 'whatsapp' && parseCoexistence(channel.config) !== null;
 
   if (!open) {
@@ -694,6 +697,11 @@ export function WebchatSettings({
         <div className="min-w-0 flex-1">
           <h3 className="flex flex-wrap items-center gap-2 text-sm font-medium">
             Chat widget
+            {/* Which row, because there can be more than one: the widget reads
+                the oldest active, and this card follows it. */}
+            <span className="font-normal text-(--color-text-secondary)">
+              on &ldquo;<span dir="auto">{channel.name}</span>&rdquo;
+            </span>
             {chosen.length === 0 ? <Badge tone="warning">No questions chosen</Badge> : null}
           </h3>
           <p className="mt-0.5 text-xs text-(--color-text-secondary)">
@@ -713,7 +721,10 @@ export function WebchatSettings({
     <form {...form} className="flex flex-col gap-3">
       <input type="hidden" name="id" value={channel.id} />
       <input type="hidden" name="type" value="webchat" />
-      <input type="hidden" name="name" value={channel.name} />
+
+      {/* The widget's row is edited here rather than by the row editor in the
+          list, so its name is too. */}
+      <NameField className="sm:w-72" defaultValue={channel.name} />
 
       <div className="grid gap-3 sm:grid-cols-2">
         {(['ar', 'en'] as const).map((locale) => (
@@ -785,6 +796,80 @@ export function WebchatSettings({
           Cancel
         </Button>
       </div>
+    </form>
+  );
+}
+
+/**
+ * What switching a web chat row would do, as the page worked it out from the
+ * rows it drew (`webchatSwitch`), carrying names rather than rows into the
+ * browser.
+ */
+export type WebchatSwitchView =
+  | { kind: 'only_row' }
+  | { kind: 'switch_off'; widgetMovesTo: string | null }
+  | { kind: 'switch_on'; takesWidget: boolean };
+
+/**
+ * A web chat row's active switch.
+ *
+ * Its own form posting to `setWebchatActive`, with nothing in it but the row
+ * and the direction, so `ConfirmSubmit` may sit in it: the row editor beside it
+ * holds a text box, where Enter would submit past a confirmation. The second
+ * click is the one that says where the widget goes, since a switch either way
+ * can move it: off on the widget's own row, on for a row older than the
+ * widget's. The page's wording is a forecast; the action decides again under
+ * its lock and says what happened, which is what stays on screen.
+ *
+ * Not drawn on the widget's only active row, which the action would refuse:
+ * the line there says why.
+ */
+export function WebchatActiveSwitch({
+  channelId,
+  plan,
+}: {
+  channelId: string;
+  plan: WebchatSwitchView;
+}) {
+  const [state, formAction] = useActionState(setWebchatActive, INITIAL);
+
+  if (plan.kind === 'only_row') {
+    return (
+      <span className="inline-flex items-center gap-1 text-xs text-(--color-text-secondary)">
+        The widget&rsquo;s only row
+        <InfoTip label="why this row stays on">
+          The widget needs an active web chat row: without one its chats are filed under no row and
+          no group, and it shows the default opening hours. Switch another web chat row on to switch
+          this one off.
+        </InfoTip>
+      </span>
+    );
+  }
+
+  const on = plan.kind === 'switch_on';
+  const confirmLabel = on
+    ? plan.takesWidget
+      ? 'Move the widget to this row?'
+      : 'Really switch on?'
+    : plan.widgetMovesTo
+      ? `Move the widget to “${plan.widgetMovesTo}”?`
+      : 'Really switch off?';
+
+  return (
+    <form action={formAction} className="inline-flex flex-col items-end gap-1">
+      <input type="hidden" name="id" value={channelId} />
+      <input type="hidden" name="active" value={on ? 'on' : 'off'} />
+      <ConfirmSubmit label={on ? 'Switch on' : 'Switch off'} confirmLabel={confirmLabel} />
+      {state.error ? (
+        <span className="max-w-xs text-end">
+          <ErrorText inline>{state.error}</ErrorText>
+        </span>
+      ) : null}
+      {state.notice ? (
+        <div className="max-w-xs text-end">
+          <SuccessText>{state.notice}</SuccessText>
+        </div>
+      ) : null}
     </form>
   );
 }

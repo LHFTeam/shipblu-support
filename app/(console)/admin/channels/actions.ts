@@ -41,6 +41,8 @@ import { canonicalUuid } from '@/lib/http/uuid';
 import { listFolderOptions } from '@/lib/kb/admin';
 import { LOCALES } from '@/lib/kb/locale';
 import { resolveFaqFolders } from '@/lib/widget/config';
+import { webchatChannel } from '@/lib/widget/session';
+import { switchWebchatRow } from '@/lib/widget/switch';
 import { isChannelType } from './channel-types';
 
 const log = logger('admin_channels');
@@ -373,9 +375,26 @@ export async function saveChannel(_state: AdminState, formData: FormData): Promi
 
   // Which knowledge base folder the chat widget lists, per locale. The rule
   // lives in `lib/widget/config.ts`, shared with the picker that offers them.
+  // Only the Chat widget card posts them. A web chat row's own editor does not,
+  // and its save leaves the folders as the row holds them (the UPDATE below):
+  // absent is "unchanged", as the routing mode's is, where `''` is the card's
+  // "Most-read articles". The editor sending them back as hidden fields would
+  // write the page's snapshot over a card saved since, and refuse a rename once
+  // a chosen folder stopped being public.
+  const foldersPosted = LOCALES.some((locale) => formData.get(`faqFolder_${locale}`) !== null);
   let faqFolders: Record<string, string> = {};
 
-  if (type === 'webchat') {
+  if (type === 'webchat' && foldersPosted) {
+    // The card configures the row the widget reads. One drawn before that row
+    // was switched off, or before an older one was switched on, would save
+    // questions nobody is shown and say they were saved.
+    if (id && (await webchatChannel())?.id !== id) {
+      return {
+        error:
+          'This is no longer the web chat row the widget uses — reload the page to configure the one that is',
+      };
+    }
+
     const chosen = Object.fromEntries(
       LOCALES.map((locale) => [locale, String(formData.get(`faqFolder_${locale}`) ?? '')]),
     );
@@ -419,24 +438,34 @@ export async function saveChannel(_state: AdminState, formData: FormData): Promi
       type === 'whatsapp'
         ? whatsappEditColumns({ phoneNumberId, whatsappAccountId: account, routingMode })
         : {
-            config,
+            ...(type === 'webchat' && !foldersPosted ? {} : { config }),
             whatsappAccountId: account,
             ...(routingMode === undefined ? {} : { routingMode }),
           };
-    await db
-      .update(channels)
-      .set({ name, defaultGroupId, ...columns, updatedAt: new Date() })
-      .where(eq(channels.id, id));
+    try {
+      await db
+        .update(channels)
+        .set({ name, defaultGroupId, ...columns, updatedAt: new Date() })
+        .where(eq(channels.id, id));
+    } catch (error) {
+      if (isNameTaken(error)) return { error: nameTaken(name) };
+      throw error;
+    }
   } else {
-    await db.insert(channels).values({
-      type: type as (typeof channels.$inferInsert)['type'],
-      name,
-      defaultGroupId,
-      config,
-      whatsappAccountId: account,
-      // Absent: the column's default, `default_group`.
-      ...(routingMode ? { routingMode } : {}),
-    });
+    try {
+      await db.insert(channels).values({
+        type: type as (typeof channels.$inferInsert)['type'],
+        name,
+        defaultGroupId,
+        config,
+        whatsappAccountId: account,
+        // Absent: the column's default, `default_group`.
+        ...(routingMode ? { routingMode } : {}),
+      });
+    } catch (error) {
+      if (isNameTaken(error)) return { error: nameTaken(name) };
+      throw error;
+    }
   }
 
   revalidatePath('/admin/channels');
@@ -448,6 +477,26 @@ export async function saveChannel(_state: AdminState, formData: FormData): Promi
     }),
   );
   return notice ? { ...ok(), notice } : ok();
+}
+
+/**
+ * Whether a write was refused because another channel holds the name.
+ * `channels_name_idx` is unique, and nothing above reads for a clash first:
+ * a read could not see a rename committed beside it, and the index answers
+ * every case. Without the catch the clash was a throw, which the form turns
+ * into its "no answer came back" sentence about a connection that was fine.
+ * The constraint by name, so no other unique violation is reported as this.
+ */
+function isNameTaken(error: unknown): boolean {
+  const fields = (value: unknown) =>
+    value as { code?: unknown; constraint_name?: unknown } | null | undefined;
+  return [fields(error), fields((error as { cause?: unknown } | null)?.cause)].some(
+    (candidate) => candidate?.code === '23505' && candidate.constraint_name === 'channels_name_idx',
+  );
+}
+
+function nameTaken(name: string): string {
+  return `Another channel is already called “${name}” — choose a different name`;
 }
 
 /**
@@ -509,6 +558,40 @@ export async function setNumberOwner(_state: AdminState, formData: FormData): Pr
 
   revalidatePath('/admin/channels');
   return { ...ok(), notice: handoverNotice(handover) };
+}
+
+// --- Which web chat row the widget uses ---------------------------------------
+
+/**
+ * Switch a web chat row on or off.
+ *
+ * Its own action and its own form, as `setNumberOwner` is, and for the same
+ * reason: three forms post to `saveChannel`, and an `isActive` field there
+ * would be one any of them could leave out. The switch is a button behind a
+ * second click, `ConfirmSubmit`, whose confirmation names where the widget
+ * goes; it cannot share the row editor's form, which holds a text box.
+ * `switchWebchatRow` decides the rest under its lock, from the stored type:
+ * other channels have no switch, and the one it refuses is the widget's last
+ * active row.
+ */
+export async function setWebchatActive(
+  _state: AdminState,
+  formData: FormData,
+): Promise<AdminState> {
+  await requirePermission('admin.channels');
+
+  const id = uuidField(formData, 'id');
+  if (!id) return { error: GONE };
+  const active = formData.get('active');
+  if (active !== 'on' && active !== 'off') {
+    return { error: 'That form is out of date — reload the page and try again' };
+  }
+
+  const outcome = await switchWebchatRow(id, active === 'on');
+  if (!outcome.ok) return { error: outcome.error };
+
+  revalidatePath('/admin/channels');
+  return { ...ok(), notice: outcome.notice };
 }
 
 // --- Numbers on the WhatsApp Business app -----------------------------------

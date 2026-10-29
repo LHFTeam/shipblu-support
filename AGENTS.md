@@ -1050,6 +1050,19 @@ confirm that states how many tickets go with it, and never through
 `saveChannel`, which three forms post to. See
 `plans/whatsapp-number-ownership.md`.
 
+**The widget uses the oldest active web chat row** (`webchatChannel`): its
+default group, and so the hours the widget and the help centre's home page
+show, its FAQ folders and its routing mode. Every other web chat row files
+nothing. So a web chat row's switch on `/admin/channels` (`setWebchatActive`,
+`switchWebchatRow`) can move the widget either way, and its confirmation says
+where; the last active row is refused, under a transaction lock, because
+without one the widget files its chats under no row and no group.
+`lib/widget/rows.ts` is the one statement of what a switch does, asked by the
+page and again by the action. Only the Chat widget card posts the FAQ folders,
+and only for the widget's row, which it alone edits; `saveChannel` leaves a
+row's folders as they are when none is posted, so the row editor and the add
+form keep what the widget lists.
+
 **Explaining a control.** A label short enough to fit a dense table is rarely
 long enough to explain itself. `InfoTip` from `components/tooltip.tsx` is the
 console's answer — an ⓘ that opens on hover, focus _and_ tap, portalled to

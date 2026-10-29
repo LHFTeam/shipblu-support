@@ -7,6 +7,8 @@ import {
   channels,
   contacts,
   conversations,
+  kbCategories,
+  kbFolders,
   ticketStatuses,
   whatsappAccounts,
   whatsappCredentialEvents,
@@ -19,6 +21,8 @@ import { untilWaitingOnALock } from '@/lib/testing/hold-transaction';
 import { stubFetch } from '@/lib/testing/fetch';
 import { parseCoexistence } from '@/lib/whatsapp/coexistence';
 import { credentialStatuses, storeBusinessToken } from '@/lib/whatsapp/credentials';
+import { ONLY_WEBCHAT_ROW } from '@/lib/widget/switch';
+import { GONE } from '../settings-shared';
 
 /**
  * Two things the channel actions must not let an `admin.channels` holder do
@@ -61,8 +65,13 @@ vi.mock('@/lib/auth/guard', async () => {
 const revalidated = vi.hoisted(() => [] as string[]);
 vi.mock('next/cache', () => ({ revalidatePath: (path: string) => revalidated.push(path) }));
 
-const { connectBusinessAppNumber, deleteWhatsAppAccount, saveChannel, setNumberOwner } =
-  await import('./actions');
+const {
+  connectBusinessAppNumber,
+  deleteWhatsAppAccount,
+  saveChannel,
+  setNumberOwner,
+  setWebchatActive,
+} = await import('./actions');
 
 withCleanDatabase();
 
@@ -802,5 +811,148 @@ describe('setNumberOwner', () => {
     expect(await records()).toEqual([
       expect.objectContaining({ toAgentId: null, changedByAgentId: signedIn.id, ticketsMoved: 1 }),
     ]);
+  });
+});
+
+// A web chat row is edited from two places: the Chat widget card for the row
+// the widget uses, and the row editor for the rest. Only the card carries the
+// FAQ folders, and a save that carries none must leave them as they are.
+describe('web chat rows', () => {
+  async function webchatRow(name: string, faqFolders: Record<string, string>, second = 0) {
+    const [row] = await db
+      .insert(channels)
+      .values({
+        type: 'webchat',
+        name,
+        config: { faqFolders },
+        createdAt: new Date(Date.UTC(2026, 9, 1, 9, 0, second)),
+      })
+      .returning({ id: channels.id });
+    return row!.id;
+  }
+
+  async function configOf(id: string) {
+    const [row] = await db
+      .select({ name: channels.name, config: channels.config, isActive: channels.isActive })
+      .from(channels)
+      .where(eq(channels.id, id));
+    return row!;
+  }
+
+  /** A public folder in each locale, which is what the card may choose. */
+  async function folders() {
+    const ids: Record<string, string> = {};
+    for (const locale of ['en', 'ar'] as const) {
+      const [category] = await db
+        .insert(kbCategories)
+        .values({ name: `Shipping ${locale}`, slug: 'shipping', locale })
+        .returning({ id: kbCategories.id });
+      const [folder] = await db
+        .insert(kbFolders)
+        .values({ categoryId: category!.id, name: 'Delivery', slug: 'delivery' })
+        .returning({ id: kbFolders.id });
+      ids[locale] = folder!.id;
+    }
+    return ids;
+  }
+
+  it('keeps the folders when the row editor saves, which posts none', async () => {
+    const chosen = await folders();
+    const chat = await webchatRow('Web chat', chosen);
+
+    expect(
+      (await saveChannel(INITIAL, form({ id: chat, type: 'webchat', name: 'Website chat' }))).error,
+    ).toBeNull();
+    expect(await configOf(chat)).toMatchObject({
+      name: 'Website chat',
+      config: { faqFolders: chosen },
+    });
+
+    // The card posts the field, and empty is its "Most-read articles".
+    expect(
+      (
+        await saveChannel(
+          INITIAL,
+          form({
+            id: chat,
+            type: 'webchat',
+            name: 'Website chat',
+            faqFolder_en: '',
+            faqFolder_ar: chosen.ar!,
+          }),
+        )
+      ).error,
+    ).toBeNull();
+    expect((await configOf(chat)).config).toEqual({ faqFolders: { ar: chosen.ar } });
+  });
+
+  // A card drawn before its row stopped being the widget's would otherwise
+  // save questions the widget never shows, and say they were saved.
+  it("refuses the card's folders on a row the widget no longer uses", async () => {
+    const chosen = await folders();
+    await webchatRow('Web chat', {}, 0);
+    const newer = await webchatRow('Second chat', {}, 1);
+
+    expect(
+      await saveChannel(
+        INITIAL,
+        form({ id: newer, type: 'webchat', name: 'Second chat', faqFolder_en: chosen.en! }),
+      ),
+    ).toEqual({
+      error:
+        'This is no longer the web chat row the widget uses — reload the page to configure the one that is',
+    });
+    expect((await configOf(newer)).config).toEqual({ faqFolders: {} });
+  });
+
+  it('answers a name another channel holds with a sentence, not a throw', async () => {
+    await webchatRow('Web chat', {}, 0);
+    const second = await webchatRow('Second chat', {}, 1);
+
+    expect(
+      await saveChannel(INITIAL, form({ id: second, type: 'webchat', name: 'Web chat' })),
+    ).toEqual({ error: 'Another channel is already called “Web chat” — choose a different name' });
+    expect(
+      await saveChannel(
+        INITIAL,
+        form({ type: 'email', name: 'Web chat', address: 'help@shipblu.test' }),
+      ),
+    ).toEqual({ error: 'Another channel is already called “Web chat” — choose a different name' });
+  });
+
+  it('switches a row off and says where the widget went', async () => {
+    const first = await webchatRow('Web chat', {}, 0);
+    await webchatRow('Second chat', {}, 1);
+
+    const state = await setWebchatActive(INITIAL, form({ id: first, active: 'off' }));
+    expect(state.error).toBeNull();
+    expect(state.notice).toContain('the widget now uses “Second chat”');
+    expect((await configOf(first)).isActive).toBe(false);
+    expect(revalidated).toEqual(['/admin/channels']);
+  });
+
+  it('refuses the last active row and a form it cannot read, writing nothing', async () => {
+    const only = await webchatRow('Web chat', {}, 0);
+
+    expect(await setWebchatActive(INITIAL, form({ id: only, active: 'off' }))).toEqual({
+      error: ONLY_WEBCHAT_ROW,
+    });
+    expect(await setWebchatActive(INITIAL, form({ id: only, active: 'maybe' }))).toEqual({
+      error: 'That form is out of date — reload the page and try again',
+    });
+    expect((await setWebchatActive(INITIAL, form({ id: 'not-a-uuid', active: 'off' }))).error).toBe(
+      GONE,
+    );
+    expect((await configOf(only)).isActive).toBe(true);
+    expect(revalidated).toEqual([]);
+  });
+
+  it('is refused without admin.channels', async () => {
+    const only = await webchatRow('Web chat', {}, 0);
+    signedIn.permissions = { 'admin.channels': false };
+
+    await expect(setWebchatActive(INITIAL, form({ id: only, active: 'off' }))).rejects.toThrow(
+      /forbidden: admin\.channels/,
+    );
   });
 });
