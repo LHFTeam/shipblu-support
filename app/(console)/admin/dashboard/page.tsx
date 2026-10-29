@@ -5,8 +5,7 @@ import { can } from '@/lib/auth/permissions';
 import { allLimited } from '@/lib/concurrency';
 import {
   agentLoad,
-  categoryLoad,
-  channelLoad,
+  backlogCuts,
   queueSnapshot,
   systemHealth,
   todayByHour,
@@ -86,19 +85,18 @@ export default async function DashboardPage({
   // other request for the length of the render (§6.91). `todaySoFar` goes
   // first because it is the long pole, five statements one after another and
   // so the render's floor whatever the others do: started first, the rest fit
-  // in beside it.
-  const [today, queue, agentRows, channels, categories, health, hourly, series, window] =
-    await allLimited(3, [
-      () => todaySoFar(context, now),
-      () => queueSnapshot(now),
-      () => agentLoad(),
-      () => channelLoad(),
-      () => categoryLoad(),
-      () => systemHealth(),
-      () => todayByHour(context.zone, now),
-      () => daily(history),
-      () => totals(history),
-    ]);
+  // in beside it. The channel and category tables are one statement
+  // (`backlogCuts`), so they are one moment's queue.
+  const [today, queue, agentRows, cuts, health, hourly, series, window] = await allLimited(3, [
+    () => todaySoFar(context, now),
+    () => queueSnapshot(now),
+    () => agentLoad(),
+    () => backlogCuts(),
+    () => systemHealth(),
+    () => todayByHour(context.zone, now),
+    () => daily(history),
+    () => totals(history),
+  ]);
 
   const online = agentRows.filter((agent) => agent.presence === 'online').length;
   const trend: Point[] = perDay(history, series).map(({ day, label, row }) => ({
@@ -163,10 +161,10 @@ export default async function DashboardPage({
       <AgentLoad agentRows={agentRows} now={now} />
 
       {/* ------------------------------------------------------------- Channels */}
-      <ChannelLoad channels={channels} />
+      <ChannelLoad channels={cuts.channels} />
 
       {/* ----------------------------------------------------------- Categories */}
-      <CategoryLoad categories={categories} />
+      <CategoryLoad categories={cuts.categories} />
 
       {/* --------------------------------------------------------------- Health */}
       <Health health={health} now={now} />

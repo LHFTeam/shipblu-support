@@ -280,23 +280,8 @@ export async function agentLoad(): Promise<AgentLoad[]> {
 
 export type ChannelLoad = { channel: string; open: number; awaitingReply: number };
 
-/** Open work by channel — the same one-pass scan over the live backlog. */
-export async function channelLoad(): Promise<ChannelLoad[]> {
-  return db
-    .select({
-      channel: conversations.channel,
-      open: sql<number>`count(*)::int`,
-      awaitingReply: sql<number>`count(*) filter (where ${AWAITING_US})::int`,
-    })
-    .from(conversations)
-    .innerJoin(ticketStatuses, eq(ticketStatuses.id, conversations.statusId))
-    .where(liveTickets())
-    .groupBy(conversations.channel)
-    .orderBy(desc(sql`count(*)`));
-}
-
 /**
- * A row of `categoryLoad`. Named `categoryId`, never `category`: in this module
+ * A row of `backlogCuts`' category cut. Named `categoryId`, never `category`: in this module
  * `ticketStatuses.category` is the *status* category — open, pending, resolved,
  * closed — which `openBacklog` and `queueSnapshot` filter on, and the two
  * confused compile cleanly and count the wrong thing.
@@ -307,19 +292,26 @@ export type CategoryLoad = { open: number; awaitingReply: number } & (
   | { categoryId: null; labelEn: null; isActive: true }
 );
 
+/** Open work cut by channel and by category, from one snapshot of the backlog. */
+export type BacklogCuts = { channels: ChannelLoad[]; categories: CategoryLoad[] };
+
 /**
- * Open work by ticket category — the same one-pass scan over the live backlog
- * as `channelLoad`, waiting counted by the same `AWAITING_US`, so the two
- * tables are two cuts of one queue and add up to the same totals.
+ * Open work by channel and by ticket category: one scan of the live backlog,
+ * grouped both ways at once (`grouping sets`), waiting counted by the same
+ * `AWAITING_US`, so the two tables are two cuts of one queue and add up to the
+ * same totals. Read as two statements, as they were, each took its own
+ * snapshot: a ticket arriving or resolved between them was in one table and
+ * not the other, and the board scanned the backlog twice on every refresh.
  *
- * Driven from the registry rather than from the tickets, for `agentLoad`'s
- * reason: a category with nothing open reads 0 instead of going missing, and
- * "nothing is filed there" and "that category is gone" look the same otherwise.
- * A retired category is listed only while it still holds open work — it cannot
- * be chosen any more, so a row of zeros for it is noise. And the tickets
- * nothing has filed are one row of their own, last, present at 0 too: how much
- * of the queue no category speaks for is the figure this table is read for
- * while categories are new, and "none" is news worth seeing.
+ * Channels come back most open first. Categories are driven from the registry
+ * rather than from the tickets, for `agentLoad`'s reason: a category with
+ * nothing open reads 0 instead of going missing, and "nothing is filed there"
+ * and "that category is gone" look the same otherwise. A retired category is
+ * listed only while it still holds open work — it cannot be chosen any more,
+ * so a row of zeros for it is noise. And the tickets nothing has filed are one
+ * row of their own, last, present at 0 too: how much of the queue no category
+ * speaks for is the figure this table is read for while categories are new,
+ * and "none" is news worth seeing.
  *
  * The category is each ticket's as it stands now (a snapshot of the queue, as
  * every figure in this module is), in the registry's own order — `position`,
@@ -333,17 +325,24 @@ export type CategoryLoad = { open: number; awaitingReply: number } & (
  * for the inbox's filter, and probing it per category could not produce the
  * uncategorised bucket without walking every null in the archive — tens of
  * thousands of bot transcripts and imports — and would still filter each probe
- * by status. The backlog is selected the way `channelLoad` selects it.
+ * by status.
  *
- * A full join, so one statement brings both the registry's empty rows and the
- * aggregate's uncategorised one. Its WHERE is the row rule above: an active
- * category always; a retired one only when its count is there (a missing count
- * is null, and `false or null` drops the row); the uncategorised group, whose
- * registry side is all null, exactly when the aggregate produced it.
+ * Which cut a row belongs to is `grouping(category_id)`, never a null test: in
+ * the channel set the category is null because it is not grouped on, and in
+ * the category set null is a group of its own, the tickets nothing has filed.
+ * Only the category set may meet a registry row. A full join, so one statement
+ * brings the registry's empty rows, the aggregate's uncategorised one and its
+ * channel rows. Its WHERE keeps every channel row, then applies the category
+ * rule above: an active category always; a retired one only when its count is
+ * there (a missing count is null, and `false or null` drops the row); the
+ * uncategorised group, whose registry side is all null, exactly when the
+ * aggregate produced it.
  */
-export async function categoryLoad(): Promise<CategoryLoad[]> {
+export async function backlogCuts(): Promise<BacklogCuts> {
   const live = db
     .select({
+      byCategory: sql<boolean>`grouping(${conversations.categoryId}) = 0`.as('by_category'),
+      channel: conversations.channel,
       categoryId: conversations.categoryId,
       // Raw SQL in a subquery needs an alias, or the outer query cannot name it.
       open: sql<number>`count(*)::int`.as('open'),
@@ -352,11 +351,13 @@ export async function categoryLoad(): Promise<CategoryLoad[]> {
     .from(conversations)
     .innerJoin(ticketStatuses, eq(ticketStatuses.id, conversations.statusId))
     .where(liveTickets())
-    .groupBy(conversations.categoryId)
+    .groupBy(sql`grouping sets ((${conversations.channel}), (${conversations.categoryId}))`)
     .as('live');
 
   const rows = await db
     .select({
+      byCategory: live.byCategory,
+      channel: live.channel,
       categoryId: ticketCategories.id,
       labelEn: ticketCategories.labelEn,
       isActive: ticketCategories.isActive,
@@ -364,19 +365,22 @@ export async function categoryLoad(): Promise<CategoryLoad[]> {
       awaitingReply: sql<number>`coalesce(${live.awaitingReply}, 0)::int`,
     })
     .from(ticketCategories)
-    .fullJoin(live, eq(live.categoryId, ticketCategories.id))
-    .where(sql`${ticketCategories.isActive} or ${live.open} > 0`)
+    .fullJoin(live, and(sql`${live.byCategory}`, eq(live.categoryId, ticketCategories.id)))
+    .where(sql`${live.byCategory} is false or ${ticketCategories.isActive} or ${live.open} > 0`)
     .orderBy(
-      // The uncategorised row last, then retired after active.
+      // The uncategorised row after the registry's, then retired after active;
+      // the channel rows sort among themselves, most open first.
       sql`${ticketCategories.id} is null`,
       desc(ticketCategories.isActive),
       asc(ticketCategories.position),
       asc(ticketCategories.key),
+      desc(sql`${live.open}`),
     );
 
-  // The uncategorised row is the one with no registry side. A backlog with
-  // nothing uncategorised in it gives the query no such row, and it is drawn
-  // at 0 rather than left out.
+  // The uncategorised row is the category cut's row with no registry side. A
+  // backlog with nothing uncategorised in it gives the query no such row, and
+  // it is drawn at 0 rather than left out.
+  const channels: ChannelLoad[] = [];
   const filed: CategoryLoad[] = [];
   let none: CategoryLoad = {
     categoryId: null,
@@ -385,14 +389,17 @@ export async function categoryLoad(): Promise<CategoryLoad[]> {
     open: 0,
     awaitingReply: 0,
   };
-  for (const { categoryId, labelEn, isActive, open, awaitingReply } of rows) {
-    if (categoryId === null || labelEn === null || isActive === null) {
+  for (const { byCategory, channel, categoryId, labelEn, isActive, open, awaitingReply } of rows) {
+    if (byCategory === false) {
+      // `conversations.channel` is NOT NULL, and this set is grouped on it.
+      if (channel !== null) channels.push({ channel, open, awaitingReply });
+    } else if (categoryId === null || labelEn === null || isActive === null) {
       none = { ...none, open, awaitingReply };
     } else {
       filed.push({ categoryId, labelEn, isActive, open, awaitingReply });
     }
   }
-  return [...filed, none];
+  return { channels, categories: [...filed, none] };
 }
 
 export type SystemHealth = {

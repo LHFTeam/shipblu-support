@@ -1,10 +1,10 @@
 import { ChannelBadge } from '@/components/channel';
 import { Cell, EmptyState, Row, Table } from '@/components/ui';
-import type { channelLoad } from '@/lib/reports/live';
+import type { ChannelLoad as ChannelLoadRow } from '@/lib/reports/live';
 
 import { Section } from './section';
 
-export function ChannelLoad({ channels }: { channels: Awaited<ReturnType<typeof channelLoad>> }) {
+export function ChannelLoad({ channels }: { channels: ChannelLoadRow[] }) {
   return (
     <Section title="Open work by channel" hint="Live, across the same open backlog.">
       {channels.length === 0 ? (

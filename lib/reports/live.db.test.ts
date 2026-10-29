@@ -13,7 +13,7 @@ import {
 import { ROUTING_GRACE_MS } from '@/lib/routing/hold';
 import { withCleanDatabase } from '@/lib/testing/db';
 import { cairo } from '@/lib/testing/time';
-import { agentLoad, categoryLoad, channelLoad, queueSnapshot, todayByHour } from './live';
+import { agentLoad, backlogCuts, queueSnapshot, todayByHour } from './live';
 
 /**
  * The live report's hourly volume, the one figure on it counted from messages
@@ -167,7 +167,7 @@ async function categoryIds(): Promise<Record<string, string>> {
 async function loadByKey() {
   const ids = await categoryIds();
   const keyOf = new Map(Object.entries(ids).map(([key, id]) => [id, key]));
-  const load = await categoryLoad();
+  const load = (await backlogCuts()).categories;
   return {
     keys: load.map((row) => (row.categoryId === null ? null : keyOf.get(row.categoryId))),
     row: (key: string | null) =>
@@ -175,11 +175,11 @@ async function loadByKey() {
   };
 }
 
-describe('categoryLoad', () => {
+describe('backlogCuts', () => {
   it('lists every active category at zero, in the registry’s order, and No category last', async () => {
     const ids = await categoryIds();
 
-    expect(await categoryLoad()).toEqual([
+    expect((await backlogCuts()).categories).toEqual([
       ...SEEDED.map((key) => ({
         categoryId: ids[key],
         labelEn: expect.any(String),
@@ -303,9 +303,10 @@ describe('categoryLoad', () => {
     await ticket('email', { categoryId: ids.sales, status: 'Resolved', ...waiting });
     await ticket('whatsapp_bot', { ...waiting });
 
-    const [categories, channels, queue] = await Promise.all([
-      categoryLoad(),
-      channelLoad(),
+    // One statement for the two tables: a ticket arriving between two reads
+    // would be in one cut and not the other.
+    const [{ categories, channels }, queue] = await Promise.all([
+      backlogCuts(),
       queueSnapshot(INSTANT),
     ]);
     const sum = (rows: { open: number; awaitingReply: number }[]) => ({
@@ -318,6 +319,32 @@ describe('categoryLoad', () => {
     expect({ open: queue.open + queue.pending, awaitingReply: queue.awaitingReply }).toEqual(
       sum(categories),
     );
+  });
+});
+
+describe('backlogCuts, its two cuts apart', () => {
+  // In the channel set the category is null because it is not grouped on; in
+  // the category set null is the tickets nothing has filed. Told apart by
+  // `grouping()`, a channel row must never be read as "No category".
+  it('tells a channel row from No category, which both read as a null category', async () => {
+    const ids = await categoryIds();
+    await ticket('email', { categoryId: ids.sales });
+    await ticket('whatsapp', { categoryId: ids.courier_jobs });
+    await ticket('whatsapp', { categoryId: ids.courier_jobs });
+
+    const { channels, categories } = await backlogCuts();
+
+    expect(channels).toEqual([
+      { channel: 'whatsapp', open: 2, awaitingReply: 0 },
+      { channel: 'email', open: 1, awaitingReply: 0 },
+    ]);
+    expect(categories.at(-1)).toEqual({
+      categoryId: null,
+      labelEn: null,
+      isActive: true,
+      open: 0,
+      awaitingReply: 0,
+    });
   });
 });
 

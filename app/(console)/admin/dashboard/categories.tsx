@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { Cell, EmptyState, Row, Table } from '@/components/ui';
 import { categoryLabel } from '@/lib/categories/choices';
-import type { categoryLoad } from '@/lib/reports/live';
+import type { CategoryLoad as CategoryLoadRow } from '@/lib/reports/live';
 
 import { Section } from './section';
 
@@ -15,11 +15,7 @@ import { Section } from './section';
  * newer than its tickets reads as every row at zero and the whole queue under
  * "No category", which is true and looks broken.
  */
-export function CategoryLoad({
-  categories,
-}: {
-  categories: Awaited<ReturnType<typeof categoryLoad>>;
-}) {
+export function CategoryLoad({ categories }: { categories: CategoryLoadRow[] }) {
   return (
     <Section
       title="Open work by category"
