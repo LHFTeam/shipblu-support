@@ -10,6 +10,7 @@ import { can } from '@/lib/auth/permissions';
 import { warningLeadMs } from '@/lib/presence/idle';
 import { loadPresencePolicy } from '@/lib/presence/policy';
 import { inboxCounts } from '@/lib/tickets/inbox';
+import { SETTINGS_PERMISSIONS } from './admin/sections';
 import { AvailabilitySwitch } from './availability';
 import { Rail, type NavItem } from './nav';
 
@@ -54,8 +55,10 @@ export default async function ConsoleLayout({ children }: { children: React.Reac
     ...(can(agent, 'report.view')
       ? [{ href: '/reports', label: 'Reports', icon: 'reports' } as const]
       : []),
-    ...(can(agent, 'admin.agents')
-      ? [{ href: '/admin', label: 'Admin', icon: 'admin' } as const]
+    // Whoever may open any one settings page, which is the settings layout's
+    // own gate; called Settings, as the area's home and sidebar call it.
+    ...(SETTINGS_PERMISSIONS.some((permission) => can(agent, permission))
+      ? [{ href: '/admin', label: 'Settings', icon: 'admin' } as const]
       : []),
   ];
 

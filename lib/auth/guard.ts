@@ -37,6 +37,21 @@ export async function requirePermission(permission: Permission): Promise<Session
 }
 
 /**
+ * Any one of several keys — for a page that gathers what several of them own,
+ * like the settings area as a whole, which anybody holding one of its pages'
+ * keys may enter. Each control on such a page still asks `can()` for its own.
+ */
+export async function requireAnyPermission(
+  permissions: readonly Permission[],
+): Promise<SessionAgent> {
+  const agent = await requireAgent();
+  if (!permissions.some((permission) => can(agent, permission))) {
+    redirect('/inbox?error=forbidden');
+  }
+  return agent;
+}
+
+/**
  * Latched once an agent exists, and in that direction only.
  *
  * `false` is permanent by the definition below — "the page stops working
