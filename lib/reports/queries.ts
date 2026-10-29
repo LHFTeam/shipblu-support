@@ -188,14 +188,17 @@ export async function byCategory(range: Range): Promise<CategoryBreakdown> {
       ? []
       : [{ ...normalise(sums), label, isActive: isActive ?? false }],
   );
-  return {
-    rows: categories,
-    rest: uncategorised(normalise(rows.find((row) => row.id === null)), categories),
-  };
+  const total = normalise(rows.find((row) => row.id === null));
+  return { total, rows: categories, rest: uncategorised(total, categories) };
 }
 
-/** The window's category rows, and what no category holds, from one snapshot. */
+/** The window's totals, its category rows, and what no category holds, from one snapshot. */
 export type CategoryBreakdown = {
+  /**
+   * The totals slice, read in the statement the rows are: what the overview's
+   * tiles print, so the tiles and the table summing to them are one moment's.
+   */
+  total: Totals;
   /** One row per category with a slice in the window, in the registry's order. */
   rows: (Row & { isActive: boolean })[];
   /** The window's totals less every row above. */

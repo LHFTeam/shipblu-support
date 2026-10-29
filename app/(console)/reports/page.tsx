@@ -22,7 +22,6 @@ import {
   metPercentage,
   responsesHint,
   rolledUpDays,
-  totals,
   type Row as ReportRow,
 } from '@/lib/reports/queries';
 import { rangeIn, reportingContext } from '@/lib/reports/rollup';
@@ -63,26 +62,22 @@ export default async function ReportsPage({
   // A few at a time rather than all at once, as the CSAT page reads: eight
   // reads against a pool of eight places would hold every one of them for
   // this page's render, the §6.91 freeze waiting to happen.
-  const [
-    summary,
-    agentRows,
-    groupRows,
-    categories,
-    channelRows,
-    series,
-    rolledUp,
-    categorisedSince,
-  ] = await allLimited(3, [
-    () => totals(range),
-    () => byAgent(range),
-    () => byGroup(range),
-    () => byCategory(range),
-    () => byChannel(range),
-    () => daily(range),
-    () => rolledUpDays(range),
-    () => categorisedFrom(range),
-  ] as const);
+  const [agentRows, groupRows, categories, channelRows, series, rolledUp, categorisedSince] =
+    await allLimited(3, [
+      () => byAgent(range),
+      () => byGroup(range),
+      () => byCategory(range),
+      () => byChannel(range),
+      () => daily(range),
+      () => rolledUpDays(range),
+      () => categorisedFrom(range),
+    ] as const);
 
+  // The tiles print the totals the By category table was read with, in one
+  // statement, so the table's rows and its No category sum to the tiles on
+  // every load — read apart, a nightly committing between the two put one more
+  // day in one of them. The other tables are reads of their own, as before.
+  const summary = categories.total;
   const hasData = series.length > 0;
   // The history starting inside the window is what makes the range buttons
   // look broken: every wider window answers the same. `first` is the history's

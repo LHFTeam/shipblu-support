@@ -297,6 +297,7 @@ describe('byCategory', () => {
   it('has no row for a category with no slice in the window, and leaves the totals as the rest', async () => {
     await db.insert(metricsDaily).values({ day: '2026-10-12', ticketsCreated: 3 });
     expect(await byCategory({ from: '2026-10-12', to: '2026-10-13' })).toEqual({
+      total: expect.objectContaining({ ticketsCreated: 3 }),
       rows: [],
       rest: expect.objectContaining({ ticketsCreated: 3 }),
     });
@@ -320,8 +321,13 @@ describe('byCategory', () => {
       { day: '2026-10-14', ticketsCreated: 100 },
     ]);
 
-    const { rows, rest } = await byCategory({ from: '2026-10-12', to: '2026-10-13' });
+    const window = { from: '2026-10-12', to: '2026-10-13' };
+    const { total, rows, rest } = await byCategory(window);
 
+    // The overview's tiles print `total`: the totals slice, read in the same
+    // statement, so the rows and the rest sum to it whatever commits between.
+    expect(total).toEqual(await totals(window));
+    expect(total).toMatchObject({ ticketsCreated: 15, csatRating5: 3 });
     expect(rows.map((row) => [row.label, row.ticketsCreated])).toEqual(
       expect.arrayContaining([
         ['Sales', 4],
