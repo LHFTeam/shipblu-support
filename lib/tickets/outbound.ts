@@ -48,6 +48,15 @@ import { windowState as whatsappWindowState } from '@/lib/whatsapp/window';
  *
  * What answers non-null:
  *
+ *   whatsapp_bot         always. Its conversations are the customer bot's, and
+ *                        nobody on the team writes to them (`isReadOnlyChannel`):
+ *                        a message there lands in front of a customer part-way
+ *                        through the bot's flow, and `carrierFor` would queue it
+ *                        as an email besides. The out-of-hours acknowledgement
+ *                        and the survey turned the bot away themselves, but the
+ *                        automation engine asked only this, so an `on_update`
+ *                        rule's `send_reply` fired by an edit on a bot ticket
+ *                        was written and queued.
  *   whatsapp             outside 24 hours only an approved template sends, and
  *                        an automation has no way to fill one in.
  *   facebook, instagram  outside 24 hours only `HUMAN_AGENT` sends, and that tag
@@ -94,6 +103,10 @@ export function automatedReplyBlocked(
   now: Date = new Date(),
   kind: 'message' | 'feedback_template' = 'message',
 ): string | null {
+  if (isReadOnlyChannel(ticket.channel)) {
+    return "nobody on the team writes to the customer bot's conversations";
+  }
+
   if (ticket.channel === 'whatsapp') {
     return whatsappWindowState(ticket.lastCustomerMessageAt, now).isOpen
       ? null
@@ -288,9 +301,11 @@ export async function deliverAutomatedReply(reply: AutomatedReply): Promise<stri
  * web chat aside by name, and `writeAutomatedReply` names it only for the
  * delivery status, so an automated web chat message is stored with the
  * requester's address and whatever HTML its sender passed, as it always was.
- * The bot's conversations are not answered from the console, but nothing on
- * the `on_update` automation path refuses one, so a rule's `send_reply` there
- * would be queued here as an email — a gap older than this switch.
+ * The bot's conversations are answered by nobody: the console offers no reply
+ * there, and `automatedReplyBlocked` refuses every automated sender before it
+ * writes, so `whatsapp_bot` never reaches this but by a new sender that skipped
+ * the guard. Until the guard refused it, an `on_update` rule's `send_reply` on a
+ * bot ticket was queued here as an email.
  */
 export function carrierFor(
   channel: ConversationChannel,

@@ -1519,10 +1519,13 @@ preDeploy applied both at 19:43:50 UTC on 2026-10-25.
   "Facebook comments" or "Instagram comments" row gives new comment tickets a
   default group of their own; the moved tickets keep the platform row they were
   filed through. Which group is the support lead's call.
-- **A gap older than this plan.** An automation's `send_reply` on a
-  `whatsapp_bot` ticket would be queued as an email, as `carrierFor`'s docstring
-  in `lib/tickets/outbound.ts` records. It was found during 1.1, and nothing
-  here depends on it.
+- _Closed, outside this plan, on 2026-10-29._ **A gap older than this plan.**
+  An automation's `send_reply` on a `whatsapp_bot` ticket was queued as an
+  email: the engine asked only `automatedReplyBlocked`, which knew nothing of
+  the bot, and `carrierFor` answers `send_email` for it. The guard now refuses
+  the bot's tickets for every automated sender before anything is written. It
+  was found during 1.1; nothing reached it in production, where no rule sends
+  a reply.
 - **Two more, found in #395's review and left out of its seam.**
   - _Closed, outside this plan, on 2026-10-23._ An agent's private reply on a
     comment thread was sent to the newest inbound comment's author, who can be
@@ -5655,13 +5658,16 @@ seeded (118 files, 1,584 tests); and every CI check.
      Apply would meet; and the scroll cue's shades are linear, so a tall
      table's header has one.
 
-   One is left, because it needs a decision first:
+   One is left, and decided, but not built:
    - **A second web chat row cannot be edited.** `ChannelEditor` returns
      null for every `webchat` row, and the Chat widget card configures only
      the oldest active one. So a second row's saved mode, name, default group
      and active switch are unreachable. The readiness panel says truly that
      such a row's mode does nothing; nothing on the page can change it.
-     Should a second row be editable, deletable, or refused when created?
+     **Decided on 2026-10-29: make it editable.** Every web chat row gets the
+     editor other channels have (name, default group, routing, active
+     switch), and the Chat widget card keeps configuring the oldest active
+     one.
 
 2. In production after the deploy, the verification rows added for Stage 6 to
    the table below. Read clean on 2026-10-29; the first nightly's rows are left.

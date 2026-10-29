@@ -7,6 +7,7 @@ import {
   contacts,
   conversationEvents,
   conversations,
+  jobs,
   messages,
   ticketStatuses,
 } from '@/db/schema';
@@ -33,10 +34,13 @@ async function cannedResponse(body: { ar: string; en: string }) {
   return row!.id;
 }
 
-async function acknowledgeWith(cannedResponseId: string) {
+async function acknowledgeWith(
+  cannedResponseId: string,
+  trigger: 'on_create' | 'on_update' = 'on_create',
+) {
   await db.insert(automationRules).values({
     name: 'Acknowledge',
-    trigger: 'on_create',
+    trigger,
     conditions: {},
     actions: [{ type: 'send_reply', cannedResponseId }],
   });
@@ -45,7 +49,10 @@ async function acknowledgeWith(cannedResponseId: string) {
 /** A ticket, an email one unless told otherwise, whose requester last wrote `text`. */
 async function ticketFrom(
   text: string,
-  on: { channel: 'email' | 'facebook' | 'facebook_comment'; externalId?: string } = {
+  on: {
+    channel: 'email' | 'facebook' | 'facebook_comment' | 'whatsapp_bot';
+    externalId?: string;
+  } = {
     channel: 'email',
   },
 ) {
@@ -117,6 +124,24 @@ describe("an automation's canned reply", () => {
     expect(await automatedReplyOn(comment)).toEqual([]);
     // A direct message on the same platform is answered as it always was.
     expect(await automatedReplyOn(message)).toEqual(['We have your message.']);
+  });
+
+  // Nobody on the team writes to the customer bot's conversations, and the
+  // reply would have been queued as an email (`carrierFor`): an edit on a bot
+  // ticket fired an `on_update` rule, and nothing on that path refused it.
+  it('is never sent on the customer bot’s conversation, nor queued as an email', async () => {
+    const id = await cannedResponse({ ar: 'وصلتنا رسالتك.', en: 'We have your message.' });
+    await acknowledgeWith(id, 'on_update');
+
+    const bot = await ticketFrom('1', { channel: 'whatsapp_bot' });
+    const mail = await ticketFrom('Where is my parcel?');
+    for (const ticket of [bot, mail]) await runAutomations('on_update', ticket);
+
+    expect(await automatedReplyOn(bot)).toEqual([]);
+    expect(await automatedReplyOn(mail)).toEqual(['We have your message.']);
+    // One carrier queued, for the email ticket's reply alone.
+    const queued = await db.select({ type: jobs.type }).from(jobs);
+    expect(queued).toEqual([{ type: 'send_email' }]);
   });
 
   it('goes out in the language chosen for each requester and counts nothing', async () => {

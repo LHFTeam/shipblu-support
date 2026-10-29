@@ -604,6 +604,10 @@ sender — the automation engine, the out-of-hours acknowledgement, the CSAT
 survey and the survey's thanks after a tapped rating — at **24 hours** on a
 Facebook or Instagram direct message, not at seven days. The seven days belong
 to a human.
+It refuses the customer bot's tickets outright, whatever the clock says:
+nobody on the team writes there, and `carrierFor` would queue the message as
+an email. The engine asked only this guard, so until it refused the bot an
+`on_update` rule's reply on a bot ticket was written and queued.
 It is shared with WhatsApp's template rule because a guard only some of the
 senders apply is not a guard, and it refuses before the row is written:
 delivery refuses it too, but by then the customer's timeline carries a reply
