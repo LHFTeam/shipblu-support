@@ -5665,10 +5665,15 @@ seeded (118 files, 1,584 tests); and every CI check.
      the oldest active one. So a second row's saved mode, name, default group
      and active switch are unreachable. The readiness panel says truly that
      such a row's mode does nothing; nothing on the page can change it.
-     **Decided on 2026-10-29: make it editable.** Every web chat row gets the
-     editor other channels have (name, default group, routing, active
-     switch), and the Chat widget card keeps configuring the oldest active
-     one.
+     **Decided on 2026-10-29: make it editable, with an active switch.**
+     Every web chat row gets the editor other channels have (name, default
+     group, routing), and web chat rows alone get an active switch, since
+     the widget uses the oldest active row and a second row's settings do
+     nothing while the first is active. The last active web chat row cannot
+     be switched off, so the widget always has a row. The Chat widget card
+     keeps configuring the oldest active one. The first wording of this
+     decision named an active switch among what other channels have; none
+     has one.
 
 2. In production after the deploy, the verification rows added for Stage 6 to
    the table below. Read clean on 2026-10-29; the first nightly's rows are left.
