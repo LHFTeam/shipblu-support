@@ -104,8 +104,10 @@ export function automatedReplyBlocked(
   now: Date = new Date(),
   kind: 'message' | 'feedback_template' = 'message',
 ): string | null {
+  // Named by the ticket's own channel rather than by the bot, so a second
+  // read-only channel cannot inherit a sentence about the first.
   if (isReadOnlyChannel(ticket.channel)) {
-    return "nobody on the team writes to the customer bot's conversations";
+    return `the ${ticket.channel} channel is read-only, and nobody on the team writes to its conversations`;
   }
 
   if (ticket.channel === 'whatsapp') {

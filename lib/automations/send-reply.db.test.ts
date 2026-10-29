@@ -1,4 +1,4 @@
-import { and, eq } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { db } from '@/db/client';
 import {
@@ -139,8 +139,12 @@ describe("an automation's canned reply", () => {
 
     expect(await automatedReplyOn(bot)).toEqual([]);
     expect(await automatedReplyOn(mail)).toEqual(['We have your message.']);
-    // One carrier queued, for the email ticket's reply alone.
-    const queued = await db.select({ type: jobs.type }).from(jobs);
+    // One carrier queued, for the email ticket's reply alone. Carriers only:
+    // whatever else an `on_update` pass starts queuing is not this test's.
+    const queued = await db
+      .select({ type: jobs.type })
+      .from(jobs)
+      .where(inArray(jobs.type, ['send_email', 'send_whatsapp', 'send_meta']));
     expect(queued).toEqual([{ type: 'send_email' }]);
   });
 
