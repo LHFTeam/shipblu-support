@@ -227,45 +227,66 @@ export function uncategorised(total: Totals, rows: readonly Totals[]): Totals {
 }
 
 /**
- * The first day with a category slice, on or before the window's end — where
- * the overview's category figures start, so a window opening before it can say
- * that its earlier days are all under "No category" rather than leaving a
- * reader to take them for tickets nobody filed.
+ * The window's days with figures, and those of them last rolled up by code
+ * that did not file tickets by category (`rollup_days.categories_computed_at`):
+ * how many, and the first and last of them. Every ticket on such a day is
+ * under "No category", whatever it carries now, until the day is rolled up
+ * again.
  *
- * No lower bound, for the reason `rolledUpDays` gives: a quiet first day in
- * the window would otherwise read as the day category figures began.
+ * Counted day by day rather than read off where category figures begin. A day
+ * rebuilt by hand ahead of the history's rebuild, or by a rollback's nightly,
+ * leaves unfiled days after a filed one, and a first filed day would call
+ * them covered. Days with a totals row only, since `computeDay` writes none
+ * for an empty day and there is nothing on one to misfile; a day with figures
+ * and no `rollup_days` row was rolled up before the table existed, so before
+ * categories too.
  */
-export async function categorisedFrom(range: Range): Promise<string | null> {
-  const [row] = await db
-    .select({ first: sql<string | null>`min(${metricsDaily.day})::text` })
-    .from(metricsDaily)
-    .where(and(lte(metricsDaily.day, range.to), isNotNull(metricsDaily.categoryId)));
+export type CategoryFiling = {
+  days: number;
+  unfiled: number;
+  first: string | null;
+  last: string | null;
+};
 
-  return row?.first ?? null;
+export async function categoryFiling(range: Range): Promise<CategoryFiling> {
+  const unfiled = sql`not coalesce(${rollupDays.categoriesComputedAt} = ${rollupDays.computedAt}, false)`;
+  const [row] = await db
+    .select({
+      days: sql<number>`count(*)::int`,
+      unfiled: sql<number>`(count(*) filter (where ${unfiled}))::int`,
+      first: sql<string | null>`(min(${metricsDaily.day}) filter (where ${unfiled}))::text`,
+      last: sql<string | null>`(max(${metricsDaily.day}) filter (where ${unfiled}))::text`,
+    })
+    .from(metricsDaily)
+    .leftJoin(rollupDays, eq(rollupDays.day, metricsDaily.day))
+    .where(and(inRange(range), TOTALS_SLICE));
+
+  return row ?? { days: 0, unfiled: 0, first: null, last: null };
 }
 
 /**
- * What the overview says about where its category figures start: `never`, no
- * category slice on or before the window's end; `none-here`, some before the
- * window and none in it; `starts`, the first is after `from`; `whole`, nothing
- * to say. Without a word, a window holding none reads as one whose tickets
- * nobody filed, and one whose category slices begin part-way through reads as
- * a team that started filing that day — when the days before may simply have
- * been rolled up before the rollup had a category to file under.
- *
- * `first` is `categorisedFrom`'s answer, so with no category slice in the
- * window it is null or before the window. `from` is the later of the window's
- * start and the rolled-up history's, so a window the page already says starts
- * late is not told so a second time, as though there were two starts.
+ * What the overview says about its category figures: `unfiled`, some of the
+ * window's days were rolled up before the rollup filed by category, and
+ * `all` says whether every one was; `none-here`, every day is filed and no
+ * ticket on them has a category; `whole`, nothing to say. Without a word,
+ * days rolled up before categories read as days whose tickets nobody filed,
+ * and a window holding no category reads as a section not finished (§6.54).
  */
-export function categoryCoverage(
-  rowsInWindow: number,
-  first: string | null,
-  from: string,
-): { kind: 'never' | 'none-here' | 'whole' } | { kind: 'starts'; on: string } {
-  if (first === null) return { kind: 'never' };
-  if (rowsInWindow === 0) return { kind: 'none-here' };
-  return first > from ? { kind: 'starts', on: first } : { kind: 'whole' };
+export type CategoryCoverage =
+  | { kind: 'none-here' | 'whole' }
+  | { kind: 'unfiled'; all: boolean; days: number; first: string; last: string };
+
+export function categoryCoverage(rowsInWindow: number, filing: CategoryFiling): CategoryCoverage {
+  if (filing.unfiled > 0) {
+    return {
+      kind: 'unfiled',
+      all: filing.unfiled === filing.days,
+      days: filing.unfiled,
+      first: filing.first!,
+      last: filing.last!,
+    };
+  }
+  return rowsInWindow === 0 ? { kind: 'none-here' } : { kind: 'whole' };
 }
 
 /** Daily series for the totals slice, oldest first, for the trend table. */

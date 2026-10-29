@@ -327,6 +327,18 @@ export const metricsDaily = pgTable(
 export const rollupDays = pgTable('rollup_days', {
   day: date('day').primaryKey(),
   computedAt: timestamp('computed_at', { withTimezone: true }).notNull().defaultNow(),
+  /**
+   * The `computed_at` of the last run that filed this day's tickets by
+   * category. The day's rows are such a run's only while the two are equal.
+   *
+   * Not a boolean, because the code that came before it writes `computed_at`
+   * and nothing else: a day it rebuilds keeps this column, now older, and so
+   * reads as unfiled again. A flag would still say filed over rows with no
+   * category slice, once a rollback's nightly had rebuilt them. And not read
+   * off `metrics_daily`: a day whose tickets nobody filed has no category
+   * slice either, and is filed all the same.
+   */
+  categoriesComputedAt: timestamp('categories_computed_at', { withTimezone: true }),
 });
 
 /**

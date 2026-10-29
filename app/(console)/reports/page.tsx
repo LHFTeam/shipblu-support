@@ -15,8 +15,9 @@ import {
   byCategory,
   byChannel,
   byGroup,
-  categorisedFrom,
   categoryCoverage,
+  categoryFiling,
+  type CategoryCoverage,
   daily,
   formatDuration,
   metPercentage,
@@ -62,7 +63,7 @@ export default async function ReportsPage({
   // A few at a time rather than all at once, as the CSAT page reads: eight
   // reads against a pool of eight places would hold every one of them for
   // this page's render, the §6.91 freeze waiting to happen.
-  const [agentRows, groupRows, categories, channelRows, series, rolledUp, categorisedSince] =
+  const [agentRows, groupRows, categories, channelRows, series, rolledUp, filing] =
     await allLimited(3, [
       () => byAgent(range),
       () => byGroup(range),
@@ -70,7 +71,7 @@ export default async function ReportsPage({
       () => byChannel(range),
       () => daily(range),
       () => rolledUpDays(range),
-      () => categorisedFrom(range),
+      () => categoryFiling(range),
     ] as const);
 
   // The tiles print the totals the By category table was read with, in one
@@ -94,16 +95,7 @@ export default async function ReportsPage({
     ...categories.rows.map((row) => ({ ...row, label: categoryLabel(row.label, row.isActive) })),
     { ...categories.rest, label: 'No category' },
   ];
-  // Measured from the history's first day when the window opens before it:
-  // the notice above says that already, and a second "start" here would read
-  // as a different one.
-  const categoryNote = coverageNote(
-    categoryCoverage(
-      categories.rows.length,
-      categorisedSince,
-      startsLate ? rolledUp.first! : range.from,
-    ),
-  );
+  const categoryNote = coverageNote(categoryCoverage(categories.rows.length, filing));
 
   return (
     <div className="app-scroll relative h-full overflow-y-auto p-4 sm:p-6">
@@ -314,20 +306,30 @@ function percentage(value: number | null): string {
 }
 
 /** Where the category figures start, in words (`categoryCoverage` says when to). */
-function coverageNote(coverage: ReturnType<typeof categoryCoverage>): React.ReactNode {
+function coverageNote(coverage: CategoryCoverage): React.ReactNode {
   switch (coverage.kind) {
-    case 'never':
-      return 'No ticket in this window has a category yet, so every figure here is under No category.';
-    case 'none-here':
-      return 'No ticket in this window has a category, so every figure here is under No category.';
-    case 'starts':
-      return (
+    case 'unfiled':
+      return coverage.all ? (
+        'Every day of this window was rolled up before the rollup filed tickets by category, so every figure here is under No category until those days are rolled up again.'
+      ) : (
         <>
-          Category figures start on <b>{coverage.on}</b>. On the days of this window before it every
-          ticket is under No category, and one filed since moves only when those days are rolled up
-          again.
+          {coverage.days === 1 ? 'One day' : `${coverage.days} days`} of this window,{' '}
+          {coverage.first === coverage.last ? (
+            <>
+              <b>{coverage.first}</b>,
+            </>
+          ) : (
+            <>
+              between <b>{coverage.first}</b> and <b>{coverage.last}</b>,
+            </>
+          )}{' '}
+          {coverage.days === 1 ? 'was' : 'were'} rolled up before the rollup filed tickets by
+          category. Every ticket on {coverage.days === 1 ? 'it' : 'them'} is under No category until{' '}
+          {coverage.days === 1 ? 'that day is' : 'those days are'} rolled up again.
         </>
       );
+    case 'none-here':
+      return 'No ticket in this window has a category, so every figure here is under No category.';
     case 'whole':
       return null;
   }

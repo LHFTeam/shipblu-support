@@ -5005,9 +5005,15 @@ branch, what was verified, and what is left, in order.
    `byCategory` (registry order, retired categories kept and marked) plus a
    "No category" remainder (`uncategorised()`, totals less the category slices,
    unclamped), read in the same statement as the categories so the two halves
-   of the subtraction are one moment's. A line from `categoryCoverage()` says where category figures
-   start, or that none in the window has one yet, so the section never
-   vanishes on a window with no category (§6.54). Its reads go through
+   of the subtraction are one moment's. A line from `categoryCoverage()` names
+   the window's days last rolled up by code that did not file by category, or
+   says that none in the window has one, so the section never vanishes on a
+   window with no category (§6.54). It counts those days one by one
+   (`categoryFiling`), off `rollup_days.categories_computed_at` (`0054`), which
+   this rollup writes with `computed_at` and the code before it never writes.
+   A day rebuilt by hand ahead of the history's rebuild, or by a rollback's
+   nightly, is then told apart from the days around it, where the first
+   category slice in the window called every later day covered. Its reads go through
    `allLimited(3)`, and its header links to the routing report. It is not on
    the CSAT page: surveys snapshot group, agent and channel but not category,
    so a by-category CSAT would re-file scores on a relabel. Nor does this

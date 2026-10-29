@@ -197,23 +197,27 @@ describe('uncategorised', () => {
 });
 
 describe('categoryCoverage', () => {
-  it('says nothing has a category when no category slice reaches the window', () => {
-    expect(categoryCoverage(0, null, '2026-10-01')).toEqual({ kind: 'never' });
+  const filed = (days: number) => ({ days, unfiled: 0, first: null, last: null });
+
+  it('names the days rolled up before the rollup filed by category, wherever they fall', () => {
+    // Ahead of a filed day as well as before it: a day rebuilt by hand first
+    // must not make the days after it read as filed.
+    expect(
+      categoryCoverage(2, { days: 30, unfiled: 3, first: '2026-09-02', last: '2026-09-20' }),
+    ).toEqual({ kind: 'unfiled', all: false, days: 3, first: '2026-09-02', last: '2026-09-20' });
   });
 
-  it('says the window has none when the category slices are all before it', () => {
-    expect(categoryCoverage(0, '2026-09-01', '2026-10-01')).toEqual({ kind: 'none-here' });
+  it('says so of every day when no day of the window was filed', () => {
+    expect(
+      categoryCoverage(0, { days: 4, unfiled: 4, first: '2026-10-01', last: '2026-10-04' }),
+    ).toMatchObject({ kind: 'unfiled', all: true });
   });
 
-  it('names the day the category slices start when that is inside the window', () => {
-    expect(categoryCoverage(2, '2026-10-12', '2026-10-01')).toEqual({
-      kind: 'starts',
-      on: '2026-10-12',
-    });
+  it('says the window has no category when every day was filed and none carries one', () => {
+    expect(categoryCoverage(0, filed(30))).toEqual({ kind: 'none-here' });
   });
 
-  it('has nothing to say when they cover the window from its first day', () => {
-    expect(categoryCoverage(2, '2026-10-01', '2026-10-01')).toEqual({ kind: 'whole' });
-    expect(categoryCoverage(2, '2026-09-01', '2026-10-01')).toEqual({ kind: 'whole' });
+  it('has nothing to say when every day was filed and the table has rows', () => {
+    expect(categoryCoverage(2, filed(30))).toEqual({ kind: 'whole' });
   });
 });

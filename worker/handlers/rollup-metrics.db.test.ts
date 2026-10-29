@@ -48,9 +48,12 @@ describe('rollup_metrics', () => {
     const [marker] = await db.select().from(rollupDays);
     expect(marker?.day).toBe('2026-10-14');
     expect(marker!.computedAt >= before).toBe(true);
+    // Filed by category, by this code: the overview reads the day as filed.
+    expect(marker!.categoriesComputedAt).toEqual(marker!.computedAt);
   });
 
   it('moves the record forward when the day is computed again, and keeps one row for it', async () => {
+    // As the code before categories left it: a run that filed none.
     await db
       .insert(rollupDays)
       .values({ day: '2026-10-14', computedAt: new Date('2026-10-15T00:00:05Z') });
@@ -60,6 +63,7 @@ describe('rollup_metrics', () => {
     const markers = await db.select().from(rollupDays);
     expect(markers).toHaveLength(1);
     expect(markers[0]!.computedAt > new Date('2026-10-15T00:00:05Z')).toBe(true);
+    expect(markers[0]!.categoriesComputedAt).toEqual(markers[0]!.computedAt);
   });
 });
 

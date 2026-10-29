@@ -7,7 +7,7 @@ import { withCleanDatabase } from '@/lib/testing/db';
 import {
   byCategory,
   byChannel,
-  categorisedFrom,
+  categoryFiling,
   daily,
   lastWholeDay,
   rolledUpDays,
@@ -339,29 +339,64 @@ describe('byCategory', () => {
   });
 });
 
-describe('categorisedFrom', () => {
-  it('names the first category slice on or before the window’s end, however far before its start', async () => {
-    const { sales, courierJobs } = await categoryIds();
-    const range = { from: '2026-10-10', to: '2026-10-13' };
-    await db.insert(metricsDaily).values({ day: '2026-09-01', ticketsCreated: 1 });
-    expect(await categorisedFrom(range)).toBeNull();
-
-    // After the window's end: not where its figures start.
+describe('categoryFiling', () => {
+  it('counts the window’s days with figures that a run filing by category did not last roll up', async () => {
+    const { sales } = await categoryIds();
+    const range = { from: '2026-10-10', to: '2026-10-14' };
+    const at = (iso: string) => new Date(iso);
+    const totals = (day: string) => ({ day, ticketsCreated: 1 });
     await db
       .insert(metricsDaily)
-      .values({ day: '2026-10-14', categoryId: sales, ticketsCreated: 1 });
-    expect(await categorisedFrom(range)).toBeNull();
+      .values([
+        totals('2026-10-09'),
+        totals('2026-10-10'),
+        totals('2026-10-11'),
+        totals('2026-10-12'),
+        totals('2026-10-13'),
+        { day: '2026-10-13', categoryId: sales, ticketsCreated: 1 },
+      ]);
+    await db.insert(rollupDays).values([
+      // Before the window: not counted, unfiled or not.
+      { day: '2026-10-09', computedAt: at('2026-10-10T00:00:05Z') },
+      // Filed, though nobody filed its ticket: no category slice, and filed.
+      {
+        day: '2026-10-10',
+        computedAt: at('2026-10-11T00:00:05Z'),
+        categoriesComputedAt: at('2026-10-11T00:00:05Z'),
+      },
+      // Filed once, then rebuilt by code that writes `computed_at` alone, as a
+      // rollback's nightly would: unfiled again.
+      {
+        day: '2026-10-12',
+        computedAt: at('2026-10-20T00:00:05Z'),
+        categoriesComputedAt: at('2026-10-13T00:00:05Z'),
+      },
+      // Filed, after an unfiled day: the first filed day does not cover it.
+      {
+        day: '2026-10-13',
+        computedAt: at('2026-10-14T00:00:05Z'),
+        categoriesComputedAt: at('2026-10-14T00:00:05Z'),
+      },
+      // An empty day, rolled up before categories: nothing on it to misfile.
+      { day: '2026-10-14', computedAt: at('2026-10-15T00:00:05Z') },
+    ]);
+    // 2026-10-11 has figures and no `rollup_days` row: rolled up before the
+    // table existed, so before categories.
 
-    await db
-      .insert(metricsDaily)
-      .values({ day: '2026-10-12', categoryId: sales, ticketsCreated: 1 });
-    expect(await categorisedFrom(range)).toBe('2026-10-12');
+    expect(await categoryFiling(range)).toEqual({
+      days: 4,
+      unfiled: 2,
+      first: '2026-10-11',
+      last: '2026-10-12',
+    });
+  });
 
-    // Before the window opens, and still the answer: a window whose first days
-    // are quiet must not read as the day category figures began.
-    await db
-      .insert(metricsDaily)
-      .values({ day: '2026-09-02', categoryId: courierJobs, ticketsCreated: 1 });
-    expect(await categorisedFrom(range)).toBe('2026-09-02');
+  it('answers no days on a window with no figures', async () => {
+    expect(await categoryFiling({ from: '2026-10-10', to: '2026-10-14' })).toEqual({
+      days: 0,
+      unfiled: 0,
+      first: null,
+      last: null,
+    });
   });
 });

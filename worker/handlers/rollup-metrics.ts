@@ -271,11 +271,14 @@ export async function rollupMetrics(job?: ClaimedJob): Promise<void> {
       // other's inserts, and the second's inserts meet the first's rows in
       // every table's unique key — `metrics_daily_slice_key` among them — so
       // the second run fails on a day it had every right to rebuild. The last
-      // to commit leaves its own instant beside its own rows.
+      // to commit leaves its own instant beside its own rows, twice: this code
+      // files by category, and the overview reads a day whose two instants
+      // differ as one rolled up by code that did not.
+      const stamp = { computedAt: startedAt, categoriesComputedAt: startedAt };
       await tx
         .insert(rollupDays)
-        .values({ day, computedAt: startedAt })
-        .onConflictDoUpdate({ target: rollupDays.day, set: { computedAt: startedAt } });
+        .values({ day, ...stamp })
+        .onConflictDoUpdate({ target: rollupDays.day, set: stamp });
 
       await tx.delete(metricsDaily).where(eq(metricsDaily.day, day));
       if (rows.length) await tx.insert(metricsDaily).values(rows);
