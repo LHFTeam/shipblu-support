@@ -48,6 +48,16 @@ import { windowState as whatsappWindowState } from '@/lib/whatsapp/window';
  *
  * What answers non-null:
  *
+ *   whatsapp_bot         always. Its conversations are the customer bot's, and
+ *                        nobody on the team writes to them (`isReadOnlyChannel`):
+ *                        a message there lands in front of a customer part-way
+ *                        through the bot's flow, and `carrierFor` would queue it
+ *                        as an email besides. The out-of-hours acknowledgement
+ *                        and the survey turned the bot away themselves, but the
+ *                        automation engine asked only this, so an `on_update`
+ *                        rule's `send_reply` fired by an edit on a bot ticket
+ *                        was written and queued. `writeAutomatedReply` refuses
+ *                        it too, for a sender that refuses it nowhere.
  *   whatsapp             outside 24 hours only an approved template sends, and
  *                        an automation has no way to fill one in.
  *   facebook, instagram  outside 24 hours only `HUMAN_AGENT` sends, and that tag
@@ -94,6 +104,12 @@ export function automatedReplyBlocked(
   now: Date = new Date(),
   kind: 'message' | 'feedback_template' = 'message',
 ): string | null {
+  // Named by the ticket's own channel rather than by the bot, so a second
+  // read-only channel cannot inherit a sentence about the first.
+  if (isReadOnlyChannel(ticket.channel)) {
+    return `the ${ticket.channel} channel is read-only, and nobody on the team writes to its conversations`;
+  }
+
   if (ticket.channel === 'whatsapp') {
     return whatsappWindowState(ticket.lastCustomerMessageAt, now).isOpen
       ? null
@@ -159,12 +175,34 @@ export type AutomatedReplyOptions = {
  * it is given, and returns the new message's id. The carrier is queued apart
  * (`enqueueAutomatedDelivery`), on the same executor when the caller holds a
  * transaction, so the job commits with the message it carries.
+ *
+ * It throws on a read-only channel (`whatsapp_bot`) before the row exists. Every
+ * automated sender writes through here, and each turns the bot away first, in
+ * its own way:
+ *
+ *   the acknowledgement  its own `isReadOnlyChannel` check, before it asks the
+ *                        guard, and without a word;
+ *   the engine           `automatedReplyBlocked`, with a warning in the log;
+ *   the survey           `decideSurvey`, recorded as a `read_only_channel` skip,
+ *                        since it asks the guard only on Meta's channels;
+ *   the thanks           answering only a tap whose platform is the ticket's
+ *                        channel, and then the guard.
+ *
+ * So this is the one refusal no sender can skip. Reaching it is a sender that
+ * did not refuse, and a throw says so where a skip would leave nothing to find.
  */
 export async function writeAutomatedReply(
   on: Executor,
   reply: AutomatedReply,
   { stampFirstAutoReply = true }: AutomatedReplyOptions = {},
 ): Promise<string> {
+  if (isReadOnlyChannel(reply.channel)) {
+    throw new Error(
+      `automated reply refused on ${reply.channel} conversation ${reply.conversationId}: ` +
+        'nobody on the team writes there, and its sender should have refused it first',
+    );
+  }
+
   // Asked of the carrier rather than of the channel name, because `send_email`
   // is what carries `portal` and `api` as well as `email` — and it is the
   // carrier that decides whether an HTML part and a recipient are worth
@@ -288,9 +326,12 @@ export async function deliverAutomatedReply(reply: AutomatedReply): Promise<stri
  * web chat aside by name, and `writeAutomatedReply` names it only for the
  * delivery status, so an automated web chat message is stored with the
  * requester's address and whatever HTML its sender passed, as it always was.
- * The bot's conversations are not answered from the console, but nothing on
- * the `on_update` automation path refuses one, so a rule's `send_reply` there
- * would be queued here as an email — a gap older than this switch.
+ * The bot's conversations are answered by nobody: the console offers no reply
+ * there, every automated sender turns the bot away before it writes, and
+ * `writeAutomatedReply` throws for one that did not (its docstring says who
+ * refuses where). So `whatsapp_bot` never reaches this. Until the guard refused
+ * it, an `on_update` rule's `send_reply` on a bot ticket was queued here as an
+ * email.
  */
 export function carrierFor(
   channel: ConversationChannel,
@@ -326,9 +367,9 @@ export function carrierFor(
  * `carrierFor` answers `send_email` for two kinds of channel that do not send
  * by email, so they are excluded by name rather than by carrier. Web chat has no
  * carrier at all — writing its row is its delivery. A read-only channel
- * (`whatsapp_bot`) is not answered from the console, and the acknowledgement
- * and the survey refuse it before they ask; the `on_update` automation path
- * does not (`carrierFor` says what follows).
+ * (`whatsapp_bot`) is answered by nobody: the console offers no reply there,
+ * and every automated sender is refused it before the row exists
+ * (`writeAutomatedReply` says by what).
  * Answering "email" for it would only be true by accident. `api` does go out by
  * email, and is written as email.
  */
