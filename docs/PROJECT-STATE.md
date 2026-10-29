@@ -1227,10 +1227,18 @@ is code:
   once. **Seven `send_agent_invite` jobs died on 2026-09-03** with `the token …
 cannot be unsealed — APP_SECRET may have been rotated`, so some of that
   onboarding did not go out by email; check nobody is still waiting on one before
-  inviting the rest. `groups` (3 rows) still needs its membership — which is now load-bearing rather than
+  inviting the rest. `groups` (3 rows then, 4 by 2026-10-29) still needs its membership — which is now load-bearing rather than
   decorative: auto-assignment only ever considers members of the ticket's group,
   so a group with an empty roster hands out nothing and says `no_group_members`
-  on the timeline.
+  on the timeline. Until 2026-10-29 nothing in the console wrote
+  `group_members` (the invite's `group_ids` was honoured on acceptance but never
+  filled), so Support's three members were put there by hand. It is a console
+  task now: the group's editor has a members list, `Edit` on an agent's row sets
+  their groups (and name, address and role), and the invite takes groups. An
+  agent-role user in no group carries a `No group` badge on `/admin/agents`,
+  unless they own a WhatsApp number, whose tickets reach them whatever their
+  groups; on 2026-10-29 that was all five of them, and Customer Care, Merchant
+  Care and Inbound Sales Team had nobody.
 - ~~**Assignment is configured but off.**~~ **Switched on for `Support` on
   2026-09-02**, round robin; 161 conversations now carry an assignee. **The
   roster is still 3 of 11 agents**, though, which is the thing to fix next here —

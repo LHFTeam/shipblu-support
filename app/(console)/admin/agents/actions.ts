@@ -2,15 +2,18 @@
 
 import { requirePermission } from '@/lib/auth/guard';
 import { ok } from '@/lib/http/action-state';
-import { text } from '@/lib/http/form-data';
 import { validatePolicy } from '@/lib/presence/idle';
 import { savePresencePolicy } from '@/lib/presence/policy';
-import { refresh, type SettingsState, type AdminState } from '../settings-shared';
+import { MALFORMED, refresh, type SettingsState, type AdminState } from '../settings-shared';
 import { revalidatePath } from 'next/cache';
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, eq, inArray, isNull } from 'drizzle-orm';
 import { db } from '@/db/client';
-import { agents, invites } from '@/db/schema';
-import { isAgentRole } from '@/lib/auth/permissions';
+import { agents, groups, invites } from '@/db/schema';
+import { MAX_AGENT_NAME } from '@/lib/admin/agent-name';
+import { GROUP_GONE, lockAddress, saveAgentProfile } from '@/lib/admin/agent-profile';
+import { changesMembership, membershipChoice } from '@/lib/admin/group-members';
+import { text, uuidList } from '@/lib/http/form-data';
+import { can, isAgentRole } from '@/lib/auth/permissions';
 import { canonicalUuid } from '@/lib/http/uuid';
 import { looksLikeEmail, normaliseEmail } from '@/lib/auth/normalise';
 import { sealInviteToken } from '@/lib/auth/invite-token';
@@ -83,13 +86,7 @@ function minutesOrOff(formData: FormData, key: string): number | null | 'not_a_n
 
 const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
-/**
- * A cap on the invited name, checked server-side because the action is
- * reachable without the form. Unbounded, it would reach `invites.name`, then
- * `agents.name`, and from there every inbox row and assignment dropdown that
- * renders an agent — one paste of a large clipboard buffer away.
- */
-const MAX_INVITE_NAME = 120;
+const GROUPS_FORBIDDEN = "Changing somebody's groups needs the Groups permission";
 
 /**
  * Creates an invite, emails the invitee a link to activate it, and returns that
@@ -123,19 +120,33 @@ export async function createInvite(_state: AdminState, formData: FormData): Prom
   // `invites.name` is NOT NULL and a blank one would otherwise reach the
   // insert as '', which satisfies the column and satisfies nobody else.
   if (!name) return { error: 'Enter the name of the person you are inviting' };
-  if (name.length > MAX_INVITE_NAME) {
-    return { error: `A name cannot be longer than ${MAX_INVITE_NAME} characters` };
+  if (name.length > MAX_AGENT_NAME) {
+    return { error: `A name cannot be longer than ${MAX_AGENT_NAME} characters` };
   }
   if (!isAgentRole(role)) {
     return { error: 'Unknown role' };
   }
 
-  const existing = await db
-    .select({ id: agents.id })
-    .from(agents)
-    .where(eq(agents.email, email))
-    .limit(1);
-  if (existing.length > 0) return { error: 'That agent already exists' };
+  // The groups they join on accepting. Checked now, so a group deleted while
+  // the form was open is a sentence here rather than a box silently ignored;
+  // acceptance asks again, since the ids sit in jsonb with no foreign key for
+  // the week the link is live (`joinGroups`).
+  const groupIds = uuidList(formData, 'groupIds');
+  if (!groupIds) return { error: MALFORMED };
+  // Joining a group is a change to its roster, which is `admin.groups`' to
+  // make: it decides who is handed the group's tickets and, for an agent, which
+  // tickets they can see at all. The form leaves the boxes out for an admin
+  // without it; this is for a request that sends them anyway.
+  if (groupIds.length > 0 && !can(admin, 'admin.groups')) {
+    return { error: GROUPS_FORBIDDEN };
+  }
+  if (groupIds.length > 0) {
+    const found = await db
+      .select({ id: groups.id })
+      .from(groups)
+      .where(inArray(groups.id, groupIds));
+    if (found.length !== groupIds.length) return { error: GROUP_GONE };
+  }
 
   let inviteBaseUrl: string;
   try {
@@ -156,6 +167,18 @@ export async function createInvite(_state: AdminState, formData: FormData): Prom
   const expiresAt = new Date(Date.now() + INVITE_TTL_MS);
 
   const inviteId = await db.transaction(async (tx) => {
+    // Under the address's lock, so an agent editor moving somebody onto this
+    // address at the same moment is either seen here or sees this invite
+    // (`lockAddress`). Accepting an invite overwrites the password of an agent
+    // already holding its address, which is why that is refused at all.
+    await lockAddress(tx, email);
+    const existing = await tx
+      .select({ id: agents.id })
+      .from(agents)
+      .where(eq(agents.email, email))
+      .limit(1);
+    if (existing.length > 0) return null;
+
     // Supersede any open invite for the same address, so a resend does not leave
     // two working links with different roles. Delete and insert are one unit:
     // an insertion failure must leave the existing invitation usable.
@@ -169,6 +192,7 @@ export async function createInvite(_state: AdminState, formData: FormData): Prom
         email,
         name,
         role,
+        groupIds,
         invitedByAgentId: admin.id,
         expiresAt,
       })
@@ -176,6 +200,7 @@ export async function createInvite(_state: AdminState, formData: FormData): Prom
 
     return inserted[0]!.id;
   });
+  if (!inviteId) return { error: 'That agent already exists' };
 
   const inviteUrl = `${inviteBaseUrl}/invite/${token}`;
 
@@ -294,4 +319,49 @@ export async function setAgentCapacity(
 
   revalidatePath('/admin/agents');
   return { error: null };
+}
+
+/**
+ * The agent editor: name, sign-in address, role and groups in one save.
+ *
+ * Everything that decides whether it may happen is `saveAgentProfile`'s, so
+ * the database tier can hold it — the last account admin, your own role, an
+ * address with an invite waiting. The groups are a picker that posts which
+ * boxes it drew ticked beside which are ticked now (`membershipChoice`), so a
+ * save changes only the groups somebody clicked.
+ */
+export async function saveAgent(_state: AdminState, formData: FormData): Promise<AdminState> {
+  const admin = await requirePermission('admin.agents');
+
+  const agentId = canonicalUuid(formData.get('agentId'));
+  if (!agentId) return { error: 'Unknown agent' };
+  const groupChoice = membershipChoice(formData, 'groupIds');
+  if (!groupChoice) return { error: MALFORMED };
+  // The roster is `admin.groups`' (see `createInvite`): an admin without it may
+  // still save a name or a role, but not a click on somebody's groups.
+  if (changesMembership(groupChoice) && !can(admin, 'admin.groups')) {
+    return { error: GROUPS_FORBIDDEN };
+  }
+
+  // The role asked for is the select's value only where it differs from the
+  // role it was drawn with (`roleHeld`), so a save that only fixes a name
+  // cannot put back a role a colleague changed while the editor was open.
+  const role = formData.get('role');
+  const roleHeld = formData.get('roleHeld');
+  const askedRole = typeof role === 'string' && role !== roleHeld ? role : null;
+
+  const refusal = await saveAgentProfile(admin.id, agentId, {
+    name: text(formData, 'name'),
+    email: text(formData, 'email'),
+    role: askedRole,
+    groups: groupChoice,
+  });
+  if (refusal) return { error: refusal };
+
+  revalidatePath('/admin/agents');
+  // Each shows who is in a group: the count on the list, the members in the
+  // editor, and the route-group picker's "how many could take one now".
+  refresh('/admin/groups');
+  refresh('/admin/categories');
+  return ok();
 }

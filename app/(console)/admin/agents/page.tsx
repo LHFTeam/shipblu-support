@@ -1,22 +1,45 @@
 import { PageHeader } from '@/components/ui';
-import { listAgentsForAdmin, listOpenInvites } from '@/lib/admin/settings';
+import {
+  listAgentsForAdmin,
+  listGroupMemberships,
+  listGroupNames,
+  listNumberOwnerIds,
+  listOpenInvites,
+} from '@/lib/admin/settings';
 import { requirePermission } from '@/lib/auth/guard';
+import { can } from '@/lib/auth/permissions';
 import { unsealInviteToken } from '@/lib/auth/invite-token';
 import { appUrl, env } from '@/lib/env';
 import { formatDateTime } from '@/lib/format';
 import { loadPresencePolicy } from '@/lib/presence/policy';
-import { AgentRow, IdlePolicyForm, InviteForm, PendingInviteLink } from './forms';
+import { AgentList, IdlePolicyForm, InviteForm, PendingInviteLink } from './forms';
 
 export const dynamic = 'force-dynamic';
 
 export default async function AgentsPage() {
   const admin = await requirePermission('admin.agents');
 
-  const [policy, agentList, openInvites] = await Promise.all([
+  const [policy, agentList, openInvites, groupRows, memberships, ownerIds] = await Promise.all([
     loadPresencePolicy(),
     listAgentsForAdmin(),
     listOpenInvites(new Date()),
+    listGroupNames(),
+    listGroupMemberships(),
+    listNumberOwnerIds(),
   ]);
+  const owners = new Set(ownerIds);
+
+  const groupChoices = groupRows.map((group) => ({ value: group.id, label: group.name }));
+  const groupName = new Map(groupRows.map((group) => [group.id, group.name]));
+  const groupsOf = new Map<string, string[]>();
+  for (const { agentId, groupId } of memberships) {
+    const held = groupsOf.get(agentId);
+    if (held) held.push(groupId);
+    else groupsOf.set(agentId, [groupId]);
+  }
+  // A roster is `admin.groups`' to change, so an admin without it sees each
+  // agent's groups and the invite's without a box to tick (`saveAgent`).
+  const canEditGroups = can(admin, 'admin.groups');
 
   const hasStoredLinks = openInvites.some((invite) => invite.tokenCiphertext);
   let inviteBaseUrl: string | null = null;
@@ -60,11 +83,16 @@ export default async function AgentsPage() {
     <div className="flex flex-col gap-8">
       <section>
         <PageHeader title="Agents" />
-        <ul className="divide-y divide-(--color-border-subtle) rounded-xl border border-(--color-border-subtle) bg-(--color-background-surface)">
-          {agentList.map((agent) => (
-            <AgentRow key={agent.id} agent={agent} isSelf={agent.id === admin.id} />
-          ))}
-        </ul>
+        <AgentList
+          agents={agentList.map((agent) => ({
+            ...agent,
+            groupIds: groupsOf.get(agent.id) ?? [],
+            ownsNumber: owners.has(agent.id),
+          }))}
+          groups={groupChoices}
+          canEditGroups={canEditGroups}
+          selfId={admin.id}
+        />
       </section>
 
       <section>
@@ -85,7 +113,7 @@ export default async function AgentsPage() {
 
       <section>
         <h2 className="mb-3 text-lg font-semibold">Invite an agent</h2>
-        <InviteForm />
+        <InviteForm groups={canEditGroups ? groupChoices : []} />
       </section>
 
       {pendingInvites.length > 0 ? (
@@ -99,6 +127,13 @@ export default async function AgentsPage() {
                 <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                   <span className="min-w-0 break-all">{invite.email}</span>
                   <span className="text-(--color-text-tertiary)">{invite.role}</span>
+                  {/* What they join on accepting. A group deleted since is
+                      skipped then, so it is left out here too. */}
+                  {invite.groupIds.some((id) => groupName.has(id)) ? (
+                    <span className="text-(--color-text-tertiary)">
+                      {invite.groupIds.flatMap((id) => groupName.get(id) ?? []).join(' · ')}
+                    </span>
+                  ) : null}
                   <span className="ms-auto text-xs text-(--color-text-tertiary)">
                     expires {formatDateTime(invite.expiresAt)}
                   </span>

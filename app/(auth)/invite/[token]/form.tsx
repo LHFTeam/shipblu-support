@@ -2,6 +2,7 @@
 
 import { acceptInvite, type AuthFormState } from '../../actions';
 import { ErrorText, Input, Label } from '@/components/ui';
+import { MAX_AGENT_NAME } from '@/lib/admin/agent-name';
 import { SubmitButton } from '@/components/submit-button';
 import { useActionForm } from '@/components/use-action-form';
 
@@ -51,7 +52,14 @@ export function InviteForm({ token, email, name }: { token: string; email: strin
           the one moment somebody can correct a misspelling of their own name is
           before the account carries it into every ticket they ever answer.
         */}
-        <Input id="name" name="name" defaultValue={name} required autoComplete="name" />
+        <Input
+          id="name"
+          name="name"
+          defaultValue={name}
+          required
+          maxLength={MAX_AGENT_NAME}
+          autoComplete="name"
+        />
       </div>
 
       <div>

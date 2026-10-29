@@ -1,5 +1,5 @@
 import { DEFAULT_LOCALE, isLocale, type Locale } from '@/lib/kb/locale';
-import { isUuid } from './uuid';
+import { canonicalUuid, isUuid } from './uuid';
 
 /**
  * Reading a server action's `FormData` into the values a query can take.
@@ -28,6 +28,21 @@ export function uuidField(formData: FormData, key: string): string | null | unde
   const value = text(formData, key);
   if (!value) return null;
   return isUuid(value) ? value : undefined;
+}
+
+/**
+ * Every uuid a field repeats — a set of checkboxes sharing one name — lower
+ * case and each once, or `undefined` when any of them is not a uuid.
+ *
+ * All or nothing, for `uuidField`'s reason: dropping the one malformed id and
+ * carrying on would save the set without it, which reads as somebody having
+ * unticked it. Canonical, so an id compared against a row's in code agrees
+ * with the one Postgres will match (`canonicalUuid`).
+ */
+export function uuidList(formData: FormData, key: string): string[] | undefined {
+  const ids = formData.getAll(key).map(canonicalUuid);
+  if (ids.some((id) => id === null)) return undefined;
+  return [...new Set(ids as string[])];
 }
 
 export function int(formData: FormData, key: string, fallback = 0): number {

@@ -3,12 +3,13 @@
 import { and, eq } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { agents, businessHours, groups } from '@/db/schema';
+import { agentsExist, applyGroupMembers, membershipChoice } from '@/lib/admin/group-members';
 import { deleteGroupIfUnused } from '@/lib/admin/group-uses';
 import { requirePermission } from '@/lib/auth/guard';
 import { ok } from '@/lib/http/action-state';
 import { optionalMinutes, text, uuidField } from '@/lib/http/form-data';
 import { forgetHoursCatalog } from '@/lib/hours/catalog';
-import { GONE, refresh, type SettingsState } from '../settings-shared';
+import { GONE, MALFORMED, refresh, type SettingsState } from '../settings-shared';
 
 // --- Groups -----------------------------------------------------------------
 
@@ -25,6 +26,15 @@ export async function saveGroup(_state: SettingsState, formData: FormData): Prom
   const businessHoursId = text(formData, 'businessHoursId') || null;
 
   if (!name) return { error: 'Give the group a name' };
+
+  // The members picker posts which boxes it drew ticked beside which are
+  // ticked now, so the save changes only the boxes somebody clicked
+  // (`MembershipChoice`).
+  const members = membershipChoice(formData, 'memberIds');
+  if (!members) return { error: MALFORMED };
+  if (!(await agentsExist(members))) {
+    return { error: 'One of those agents no longer exists — reload the page and try again' };
+  }
 
   if (businessHoursId) {
     const schedule = await db
@@ -69,20 +79,41 @@ export async function saveGroup(_state: SettingsState, formData: FormData): Prom
     escalateAfterMins: optionalMinutes(formData, 'escalateAfterMins'),
   };
 
-  if (id) {
-    await db
-      .update(groups)
-      .set({ name, description, businessHoursId, ...assignment, updatedAt: new Date() })
-      .where(eq(groups.id, id));
-  } else {
-    const existing = await db.select({ id: groups.id }).from(groups).where(eq(groups.name, name));
-    if (existing.length) return { error: 'A group with that name already exists' };
-    await db.insert(groups).values({ name, description, businessHoursId, ...assignment });
-  }
+  // One transaction, so a new group is never left behind without the members
+  // it was created with, and an edit's settings and roster land together.
+  const refusal = await db.transaction(async (tx) => {
+    let groupId: string;
+    if (id) {
+      const updated = await tx
+        .update(groups)
+        .set({ name, description, businessHoursId, ...assignment, updatedAt: new Date() })
+        .where(eq(groups.id, id))
+        .returning({ id: groups.id });
+      // Deleted while the editor was open. Saying so is the answer either way,
+      // and here it is also what keeps the members' insert off a foreign key.
+      if (!updated.length) return GONE;
+      groupId = id;
+    } else {
+      const existing = await tx.select({ id: groups.id }).from(groups).where(eq(groups.name, name));
+      if (existing.length) return 'A group with that name already exists';
+      const [created] = await tx
+        .insert(groups)
+        .values({ name, description, businessHoursId, ...assignment })
+        .returning({ id: groups.id });
+      groupId = created!.id;
+    }
+    await applyGroupMembers(tx, groupId, members);
+    return null;
+  });
+  if (refusal) return { error: refusal };
 
   // A group's hours are the arithmetic behind every due date on its tickets, so
   // the SLA and reports pages are showing stale wording until they re-read.
   refresh('/admin/groups');
+  // Its members are each agent's groups on the agents page, and the
+  // route-group picker counts who could take a ticket now.
+  refresh('/admin/agents');
+  refresh('/admin/categories');
   // The catalogue is memoised for thirty seconds and a due date is computed
   // from it, so the process that took the edit drops its copy now rather than
   // serving a stale schedule to the next SLA calculation.
