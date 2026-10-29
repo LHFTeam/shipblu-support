@@ -3,7 +3,8 @@
 import { redirect } from 'next/navigation';
 import { and, eq, isNull } from 'drizzle-orm';
 import { db } from '@/db/client';
-import { agents, groupMembers, invites } from '@/db/schema';
+import { agents, invites } from '@/db/schema';
+import { joinGroups } from '@/lib/admin/group-members';
 import { needsBootstrap } from '@/lib/auth/guard';
 import { safePath } from '@/lib/auth/next-path';
 import { normaliseEmail } from '@/lib/auth/normalise';
@@ -150,9 +151,7 @@ export async function acceptInvite(
 
     const id = inserted[0]!.id;
 
-    for (const groupId of invite.groupIds) {
-      await tx.insert(groupMembers).values({ groupId, agentId: id }).onConflictDoNothing();
-    }
+    await joinGroups(tx, id, invite.groupIds);
 
     return id;
   });

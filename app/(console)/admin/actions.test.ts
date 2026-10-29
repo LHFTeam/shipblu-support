@@ -49,8 +49,38 @@ describe('admin actions given an id no row can have', () => {
       'setAgentCapacity',
       () => actions.setAgentCapacity(INITIAL, form({ agentId: MALFORMED, maxOpenTickets: '5' })),
     ],
+    [
+      'saveAgent',
+      () =>
+        actions.saveAgent(
+          INITIAL,
+          form({ agentId: MALFORMED, name: 'Omar', email: 'omar@shipblu.test' }),
+        ),
+    ],
   ])('%s refuses the agent id with a sentence, without querying', async (_name, run) => {
     await expect(run()).resolves.toEqual({ error: 'Unknown agent' });
+    expectNoQuery();
+  });
+
+  // One id per ticked box. Saving the rest without the malformed one would
+  // read as somebody having unticked it.
+  it.each(['groupIds', 'groupIdsHeld'])(
+    'saveAgent refuses a malformed %s whole, without querying',
+    async (field) => {
+      const data = form({ agentId: NOBODY, name: 'Omar', email: 'omar@shipblu.test' });
+      data.append(field, NOBODY);
+      data.append(field, MALFORMED);
+
+      await expect(actions.saveAgent(INITIAL, data)).resolves.toEqual({ error: GONE });
+      expectNoQuery();
+    },
+  );
+
+  it('createInvite refuses a malformed group id before it reads or writes anything', async () => {
+    const data = form({ email: 'new@shipblu.test', name: 'New', role: 'agent' });
+    data.append('groupIds', MALFORMED);
+
+    await expect(actions.createInvite(INITIAL, data)).resolves.toEqual({ error: GONE });
     expectNoQuery();
   });
 

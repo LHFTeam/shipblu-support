@@ -2,14 +2,21 @@
 
 import { requirePermission } from '@/lib/auth/guard';
 import { ok } from '@/lib/http/action-state';
-import { text } from '@/lib/http/form-data';
 import { validatePolicy } from '@/lib/presence/idle';
 import { savePresencePolicy } from '@/lib/presence/policy';
-import { refresh, type SettingsState, type AdminState } from '../settings-shared';
+import { GONE, refresh, type SettingsState, type AdminState } from '../settings-shared';
 import { revalidatePath } from 'next/cache';
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, eq, inArray, isNull } from 'drizzle-orm';
 import { db } from '@/db/client';
-import { agents, invites } from '@/db/schema';
+import { agents, groups, invites } from '@/db/schema';
+import {
+  GROUP_GONE,
+  MAX_AGENT_NAME,
+  lockAddress,
+  saveAgentProfile,
+} from '@/lib/admin/agent-profile';
+import { membershipChoice } from '@/lib/admin/group-members';
+import { text, uuidList } from '@/lib/http/form-data';
 import { isAgentRole } from '@/lib/auth/permissions';
 import { canonicalUuid } from '@/lib/http/uuid';
 import { looksLikeEmail, normaliseEmail } from '@/lib/auth/normalise';
@@ -84,14 +91,6 @@ function minutesOrOff(formData: FormData, key: string): number | null | 'not_a_n
 const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 /**
- * A cap on the invited name, checked server-side because the action is
- * reachable without the form. Unbounded, it would reach `invites.name`, then
- * `agents.name`, and from there every inbox row and assignment dropdown that
- * renders an agent — one paste of a large clipboard buffer away.
- */
-const MAX_INVITE_NAME = 120;
-
-/**
  * Creates an invite, emails the invitee a link to activate it, and returns that
  * link to the admin as well.
  *
@@ -123,19 +122,26 @@ export async function createInvite(_state: AdminState, formData: FormData): Prom
   // `invites.name` is NOT NULL and a blank one would otherwise reach the
   // insert as '', which satisfies the column and satisfies nobody else.
   if (!name) return { error: 'Enter the name of the person you are inviting' };
-  if (name.length > MAX_INVITE_NAME) {
-    return { error: `A name cannot be longer than ${MAX_INVITE_NAME} characters` };
+  if (name.length > MAX_AGENT_NAME) {
+    return { error: `A name cannot be longer than ${MAX_AGENT_NAME} characters` };
   }
   if (!isAgentRole(role)) {
     return { error: 'Unknown role' };
   }
 
-  const existing = await db
-    .select({ id: agents.id })
-    .from(agents)
-    .where(eq(agents.email, email))
-    .limit(1);
-  if (existing.length > 0) return { error: 'That agent already exists' };
+  // The groups they join on accepting. Checked now, so a group deleted while
+  // the form was open is a sentence here rather than a box silently ignored;
+  // acceptance asks again, since the ids sit in jsonb with no foreign key for
+  // the week the link is live (`joinGroups`).
+  const groupIds = uuidList(formData, 'groupIds');
+  if (!groupIds) return { error: GONE };
+  if (groupIds.length > 0) {
+    const found = await db
+      .select({ id: groups.id })
+      .from(groups)
+      .where(inArray(groups.id, groupIds));
+    if (found.length !== groupIds.length) return { error: GROUP_GONE };
+  }
 
   let inviteBaseUrl: string;
   try {
@@ -156,6 +162,18 @@ export async function createInvite(_state: AdminState, formData: FormData): Prom
   const expiresAt = new Date(Date.now() + INVITE_TTL_MS);
 
   const inviteId = await db.transaction(async (tx) => {
+    // Under the address's lock, so an agent editor moving somebody onto this
+    // address at the same moment is either seen here or sees this invite
+    // (`lockAddress`). Accepting an invite overwrites the password of an agent
+    // already holding its address, which is why that is refused at all.
+    await lockAddress(tx, email);
+    const existing = await tx
+      .select({ id: agents.id })
+      .from(agents)
+      .where(eq(agents.email, email))
+      .limit(1);
+    if (existing.length > 0) return null;
+
     // Supersede any open invite for the same address, so a resend does not leave
     // two working links with different roles. Delete and insert are one unit:
     // an insertion failure must leave the existing invitation usable.
@@ -169,6 +187,7 @@ export async function createInvite(_state: AdminState, formData: FormData): Prom
         email,
         name,
         role,
+        groupIds,
         invitedByAgentId: admin.id,
         expiresAt,
       })
@@ -176,6 +195,7 @@ export async function createInvite(_state: AdminState, formData: FormData): Prom
 
     return inserted[0]!.id;
   });
+  if (!inviteId) return { error: 'That agent already exists' };
 
   const inviteUrl = `${inviteBaseUrl}/invite/${token}`;
 
@@ -294,4 +314,38 @@ export async function setAgentCapacity(
 
   revalidatePath('/admin/agents');
   return { error: null };
+}
+
+/**
+ * The agent editor: name, sign-in address, role and groups in one save.
+ *
+ * Everything that decides whether it may happen is `saveAgentProfile`'s, so
+ * the database tier can hold it — the last account admin, your own role, an
+ * address with an invite waiting. The groups are a picker that posts which
+ * boxes it drew ticked beside which are ticked now (`membershipChoice`), so a
+ * save changes only the groups somebody clicked.
+ */
+export async function saveAgent(_state: AdminState, formData: FormData): Promise<AdminState> {
+  const admin = await requirePermission('admin.agents');
+
+  const agentId = canonicalUuid(formData.get('agentId'));
+  if (!agentId) return { error: 'Unknown agent' };
+  const groupChoice = membershipChoice(formData, 'groupIds');
+  if (!groupChoice) return { error: GONE };
+  const role = formData.get('role');
+
+  const refusal = await saveAgentProfile(admin.id, agentId, {
+    name: text(formData, 'name'),
+    email: text(formData, 'email'),
+    role: typeof role === 'string' ? role : null,
+    groups: groupChoice,
+  });
+  if (refusal) return { error: refusal };
+
+  revalidatePath('/admin/agents');
+  // Each shows who is in a group: the count on the list, the members in the
+  // editor, and the route-group picker's "how many could take one now".
+  refresh('/admin/groups');
+  refresh('/admin/categories');
+  return ok();
 }

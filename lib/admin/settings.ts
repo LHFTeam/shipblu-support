@@ -159,6 +159,32 @@ export function listGroupsForAdmin() {
     .orderBy(asc(groups.name));
 }
 
+/**
+ * Every group membership, as pairs. The groups page ticks each group's members
+ * from it and the agents page names each agent's groups, so neither asks once
+ * per row.
+ */
+export async function listGroupMemberships() {
+  return db
+    .select({ groupId: groupMembers.groupId, agentId: groupMembers.agentId })
+    .from(groupMembers);
+}
+
+/**
+ * The agents who own a WhatsApp number. The agents page leaves the "No group"
+ * warning off them: an owner sees and is assigned every ticket on their number
+ * whatever their groups (`heldByOrInGroupsOf`, `assignConversation`), so being
+ * in none is how an owner who answers only their own phone is meant to look.
+ * Any row naming them counts, as it does for `ownsANumber`.
+ */
+export async function listNumberOwnerIds(): Promise<string[]> {
+  const rows = await db
+    .selectDistinct({ id: channels.ownerAgentId })
+    .from(channels)
+    .where(isNotNull(channels.ownerAgentId));
+  return rows.flatMap((row) => (row.id ? [row.id] : []));
+}
+
 /** Business-hours schedules for the group editor's picker, by name. */
 export function listScheduleOptions() {
   return db
@@ -301,6 +327,7 @@ export function listOpenInvites(now: Date) {
       id: invites.id,
       email: invites.email,
       role: invites.role,
+      groupIds: invites.groupIds,
       expiresAt: invites.expiresAt,
       tokenCiphertext: invites.tokenCiphertext,
     })

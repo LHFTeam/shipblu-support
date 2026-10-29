@@ -82,6 +82,22 @@ describe('settings actions given an id no row can have', () => {
     expect(state.error).toMatch(/no longer exists/);
     for (const fn of Object.values(db)) expect(fn).not.toHaveBeenCalled();
   });
+
+  // The members picker posts one id per box. Saving without the malformed one
+  // would read as somebody having unticked it, so the whole save is refused.
+  it.each(['memberIds', 'memberIdsHeld'])(
+    'a group save with a malformed %s is refused before anything is read',
+    async (field) => {
+      const data = form({ name: 'Hubs' });
+      data.append(field, '0b6f3c2e-8a51-4d3e-9f0a-2c7d1e5b9a44');
+      data.append(field, 'not-a-uuid');
+
+      const state = await actions.saveGroup(INITIAL, data);
+
+      expect(state.error).toMatch(/no longer exists/);
+      for (const fn of Object.values(db)) expect(fn).not.toHaveBeenCalled();
+    },
+  );
 });
 
 // A value the CHECKs in `db/sql/003` would refuse is refused here first, with a

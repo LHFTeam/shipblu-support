@@ -14,8 +14,15 @@ import {
 import { RelativeTime } from '@/components/relative-time';
 import { InfoTip, Tooltip } from '@/components/tooltip';
 import { ago, sentenceCase } from '@/lib/format';
+import { EditorForm } from '../forms-shared';
 import type { AdminState } from '../settings-shared';
-import { createInvite, savePresenceSettings, setAgentActive, setAgentCapacity } from './actions';
+import {
+  createInvite,
+  saveAgent,
+  savePresenceSettings,
+  setAgentActive,
+  setAgentCapacity,
+} from './actions';
 import type { ActionState } from '@/lib/http/action-state';
 import { SubmitButton } from '@/components/submit-button';
 import { useActionForm } from '@/components/use-action-form';
@@ -109,7 +116,9 @@ export function IdlePolicyForm({
   );
 }
 
-export function InviteForm() {
+type Choice = { value: string; label: string };
+
+export function InviteForm({ groups }: { groups: Choice[] }) {
   const { state, key, form } = useActionForm(createInvite, INITIAL);
 
   // Keyed on the last success, so a sent invitation clears the address and the
@@ -150,6 +159,19 @@ export function InviteForm() {
           </Select>
         </div>
       </div>
+
+      {/* Chosen here because an agent in no group opens the console to an
+          empty inbox: they see their groups' tickets and what is assigned to
+          them, and nothing else. */}
+      {groups.length > 0 ? (
+        <Field
+          as="group"
+          label="Groups"
+          hint="They join these when they accept. You can change them later from Edit on their row."
+        >
+          <GroupCheckboxes name="groupIds" groups={groups} />
+        </Field>
+      ) : null}
 
       <ErrorText>{state.error}</ErrorText>
 
@@ -250,24 +272,214 @@ export function PendingInviteLink({
   return <CopyInviteLink inviteUrl={inviteUrl} label={`Copy invite link for ${email}`} />;
 }
 
+/**
+ * A set of group checkboxes under one name. A box drawn ticked also posts a
+ * hidden `${name}Held`, so the save writes only the boxes somebody clicked
+ * (`MembershipChoice`) — the invite draws none ticked, so posts none.
+ */
+function GroupCheckboxes({
+  name,
+  groups,
+  checked = [],
+}: {
+  name: string;
+  groups: Choice[];
+  checked?: string[];
+}) {
+  const held = new Set(checked);
+  return (
+    <div className="mt-1 grid gap-1 sm:grid-cols-2">
+      {groups.map((group) => (
+        <label key={group.value} className="flex min-w-0 items-center gap-2 text-sm">
+          {held.has(group.value) ? (
+            <input type="hidden" name={`${name}Held`} value={group.value} />
+          ) : null}
+          <input
+            type="checkbox"
+            name={name}
+            value={group.value}
+            defaultChecked={held.has(group.value)}
+            className="size-4 shrink-0 accent-(--color-control-accent)"
+          />
+          <span className="min-w-0 truncate">{group.label}</span>
+        </label>
+      ))}
+    </div>
+  );
+}
+
+type AgentSummary = {
+  id: string;
+  name: string;
+  email: string;
+  role: 'agent' | 'supervisor' | 'admin' | 'account_admin';
+  isActive: boolean;
+  lastSeenAt: Date | string | null;
+  presence: 'online' | 'away' | 'offline';
+  isAcceptingTickets: boolean;
+  maxOpenTickets: number | null;
+  groupIds: string[];
+  /** Owns a WhatsApp number, whose tickets reach them whatever their groups. */
+  ownsNumber: boolean;
+};
+
+/**
+ * The list, and which row's editor is open.
+ *
+ * Held here so opening a second agent closes the first: two editors open at
+ * once is how you save the wrong person's address.
+ */
+export function AgentList({
+  agents,
+  groups,
+  selfId,
+}: {
+  agents: AgentSummary[];
+  groups: Choice[];
+  selfId: string;
+}) {
+  const [editingId, setEditingId] = useState<string | null>(null);
+
+  return (
+    <ul className="divide-y divide-(--color-border-subtle) rounded-xl border border-(--color-border-subtle) bg-(--color-background-surface)">
+      {agents.map((agent) => (
+        <AgentRow
+          key={agent.id}
+          agent={agent}
+          groups={groups}
+          isSelf={agent.id === selfId}
+          editing={editingId === agent.id}
+          onEdit={() => setEditingId(editingId === agent.id ? null : agent.id)}
+          onClose={() => setEditingId(null)}
+        />
+      ))}
+    </ul>
+  );
+}
+
+const ROLE_CHOICES: { value: AgentSummary['role']; label: string }[] = [
+  { value: 'agent', label: 'Agent' },
+  { value: 'supervisor', label: 'Supervisor' },
+  { value: 'admin', label: 'Admin' },
+  { value: 'account_admin', label: 'Account admin' },
+];
+
+/**
+ * One agent's name, address, role and groups, saved together by `saveAgent`.
+ *
+ * The role select is disabled on your own row rather than left for the action
+ * to refuse: a disabled control posts nothing, which the action reads as "no
+ * change", so the form cannot even ask. What else may be refused — the last
+ * account admin, an address somebody already signs in with — only the server
+ * can know, and it answers in a sentence under the form.
+ */
+function AgentEditor({
+  agent,
+  groups,
+  isSelf,
+  onClose,
+}: {
+  agent: AgentSummary;
+  groups: Choice[];
+  isSelf: boolean;
+  onClose: () => void;
+}) {
+  return (
+    <div
+      id={`agent-editor-${agent.id}`}
+      className="mt-3 rounded-md border border-(--color-border-focus)/30 p-3"
+    >
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <h3 className="min-w-0 truncate text-sm font-semibold">Edit {agent.name}</h3>
+        <Button variant="ghost" size="sm" onClick={onClose}>
+          Cancel
+        </Button>
+      </div>
+
+      <EditorForm action={saveAgent} submitLabel="Save" onSaved={onClose}>
+        <input type="hidden" name="agentId" value={agent.id} />
+        <div className="grid gap-3 sm:grid-cols-2">
+          {/* `autoComplete="off"` for the invite form's reason: a name and an
+              address side by side is an address form to the browser, which
+              offers the signed-in admin's own details. */}
+          <Field label="Name">
+            <Input
+              name="name"
+              defaultValue={agent.name}
+              required
+              maxLength={120}
+              autoComplete="off"
+            />
+          </Field>
+          <Field label="Email" hint="What they sign in with, so tell them when it changes.">
+            <Input
+              name="email"
+              type="email"
+              defaultValue={agent.email}
+              required
+              autoComplete="off"
+            />
+          </Field>
+
+          <Field
+            label="Role"
+            hint={isSelf ? 'Nobody can change their own role.' : 'Takes effect on their next page.'}
+            explain={
+              <>
+                <b>Agent</b> sees their groups&rsquo; tickets and anything assigned to them.{' '}
+                <b>Supervisor</b> sees every ticket, and adds reports and the knowledge base.{' '}
+                <b>Admin</b> adds every setting, these included. <b>Account admin</b> is an admin
+                who also holds billing; the last active one keeps the role.
+              </>
+            }
+          >
+            {/* Named outright: `Field` puts its InfoTip button inside the label,
+              and a label with no `for` names its first labelable descendant —
+              the button — so the select would reach a screen reader unnamed. */}
+            <Select name="role" defaultValue={agent.role} disabled={isSelf} aria-label="Role">
+              {ROLE_CHOICES.map((role) => (
+                <option key={role.value} value={role.value}>
+                  {role.label}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        </div>
+
+        <Field
+          as="group"
+          label="Groups"
+          hint="An agent sees the tickets of every group they are in, and auto-assignment hands a group's tickets only to its members."
+        >
+          {groups.length > 0 ? (
+            <GroupCheckboxes name="groupIds" groups={groups} checked={agent.groupIds} />
+          ) : (
+            <p className="mt-1 text-xs text-(--color-text-secondary)">
+              No groups yet. Add one under Groups.
+            </p>
+          )}
+        </Field>
+      </EditorForm>
+    </div>
+  );
+}
+
 /** Badge words are sentence case; the role and the availability are stored lower case. */
 
-export function AgentRow({
+function AgentRow({
   agent,
+  groups,
   isSelf,
+  editing,
+  onEdit,
+  onClose,
 }: {
-  agent: {
-    id: string;
-    name: string;
-    email: string;
-    role: string;
-    isActive: boolean;
-    lastSeenAt: Date | string | null;
-    presence: 'online' | 'away' | 'offline';
-    isAcceptingTickets: boolean;
-    maxOpenTickets: number | null;
-  };
+  agent: AgentSummary;
+  groups: Choice[];
   isSelf: boolean;
+  editing: boolean;
+  onEdit: () => void;
+  onClose: () => void;
 }) {
   const [state, action] = useActionState(setAgentActive, INITIAL);
   const capacity = useActionForm(setAgentCapacity, INITIAL);
@@ -285,112 +497,162 @@ export function AgentRow({
   const availability =
     agent.presence === 'online' ? (agent.isAcceptingTickets ? 'online' : 'away') : 'offline';
 
+  const groupNames = groups
+    .filter((group) => agent.groupIds.includes(group.value))
+    .map((group) => group.label);
+
   /*
    * One row per agent above `sm`, three stacked bands below it.
    *
-   * Everything here — a name, three badges, a capacity box, a last-seen stamp
-   * and a button — is about 560px of content, so a single non-wrapping row on a
-   * phone pushed the buttons off the side of the screen and squeezed the name
-   * that identifies the row down to an ellipsis. The bands keep the reading
-   * order (who, what state, what you can do about it) at every width.
+   * Everything here — a name, up to four badges, a capacity box, a last-seen
+   * stamp and two buttons — is about 660px of content, so a single non-wrapping
+   * row on a phone pushed the buttons off the side of the screen and squeezed
+   * the name that identifies the row down to an ellipsis. The bands keep the
+   * reading order (who, what state, what you can do about it) at every width.
+   * Above `sm` the row wraps rather than shrinking the name, which keeps
+   * 12rem: on a tablet the name column otherwise went to nothing beside the
+   * badges and buttons, and the row stopped saying who it was about.
    */
   return (
-    <li className="flex flex-col gap-2 px-4 py-3 text-sm sm:flex-row sm:items-center sm:gap-3">
-      <div className="min-w-0 sm:flex-1">
-        <p className="truncate font-medium">
-          {agent.name} {isSelf ? <span className="text-(--color-text-tertiary)">(you)</span> : null}
-        </p>
-        <p className="truncate text-xs text-(--color-text-tertiary)">{agent.email}</p>
-      </div>
+    <li className="px-4 py-3 text-sm">
+      <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:gap-3">
+        <div className="min-w-0 sm:min-w-48 sm:flex-1">
+          <p className="truncate font-medium">
+            {agent.name}{' '}
+            {isSelf ? <span className="text-(--color-text-tertiary)">(you)</span> : null}
+          </p>
+          <p className="truncate text-xs text-(--color-text-tertiary)">{agent.email}</p>
+          <p className="truncate text-xs text-(--color-text-secondary)">
+            {groupNames.length > 0 ? groupNames.join(' · ') : 'In no group'}
+          </p>
+        </div>
 
-      <div className="flex flex-wrap items-center gap-1.5">
-        <Badge>{sentenceCase(agent.role)}</Badge>
-        {!agent.isActive ? <Badge tone="neutral">Deactivated</Badge> : null}
-        <Tooltip
-          label="Availability"
-          content={
-            <>
-              What assignment sees, which is not the same as being signed in. <b>Online</b> is
-              connected and accepting tickets; <b>away</b> is connected with &ldquo;accepting
-              tickets&rdquo; switched off, so nothing is routed to them; <b>offline</b> is no open
-              console.
-            </>
-          }
-        >
-          <Badge
-            tone={
-              availability === 'online'
-                ? 'success'
-                : availability === 'away'
-                  ? 'warning'
-                  : 'neutral'
+        <div className="flex flex-wrap items-center gap-1.5">
+          <Badge>{sentenceCase(agent.role)}</Badge>
+          {!agent.isActive ? <Badge tone="neutral">Deactivated</Badge> : null}
+          {/* Only for the agent role, where it is a fault: a supervisor or an
+            admin in no group still sees every ticket, but an agent sees only
+            what is assigned to them, and auto-assignment never picks them.
+            Not for the owner of a WhatsApp number either, who sees and is
+            handed every ticket on it whatever their groups — an owner who
+            answers only their own phone is meant to be in none. */}
+          {agent.isActive &&
+          agent.role === 'agent' &&
+          !agent.ownsNumber &&
+          groupNames.length === 0 ? (
+            <Tooltip
+              label="No group"
+              content={
+                <>
+                  An agent sees only the tickets of their groups and the ones assigned to them, and
+                  auto-assignment hands a group&rsquo;s tickets only to its members. In no group,
+                  their inbox stays empty until somebody assigns them a ticket by hand.
+                </>
+              }
+            >
+              <Badge tone="warning">No group</Badge>
+            </Tooltip>
+          ) : null}
+          <Tooltip
+            label="Availability"
+            content={
+              <>
+                What assignment sees, which is not the same as being signed in. <b>Online</b> is
+                connected and accepting tickets; <b>away</b> is connected with &ldquo;accepting
+                tickets&rdquo; switched off, so nothing is routed to them; <b>offline</b> is no open
+                console.
+              </>
             }
           >
-            {sentenceCase(availability)}
-          </Badge>
-        </Tooltip>
-      </div>
+            <Badge
+              tone={
+                availability === 'online'
+                  ? 'success'
+                  : availability === 'away'
+                    ? 'warning'
+                    : 'neutral'
+              }
+            >
+              {sentenceCase(availability)}
+            </Badge>
+          </Tooltip>
+        </div>
 
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-        <form {...capacity.form} className="flex shrink-0 items-center gap-1">
-          <input type="hidden" name="agentId" value={agent.id} />
-          <label className="text-xs text-(--color-text-tertiary)" htmlFor={`cap-${agent.id}`}>
-            cap
-          </label>
-          <InfoTip label="Ticket cap">
-            The most open tickets auto-assignment will give this agent at once. Leave it blank and
-            the group&rsquo;s default cap applies; with neither set they are uncapped. It never
-            stops you assigning a ticket by hand.
-          </InfoTip>
-          {/* 16px on a phone for the same reason as every other field in the
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+          <form {...capacity.form} className="flex shrink-0 items-center gap-1">
+            <input type="hidden" name="agentId" value={agent.id} />
+            <label className="text-xs text-(--color-text-tertiary)" htmlFor={`cap-${agent.id}`}>
+              cap
+            </label>
+            <InfoTip label="Ticket cap">
+              The most open tickets auto-assignment will give this agent at once. Leave it blank and
+              the group&rsquo;s default cap applies; with neither set they are uncapped. It never
+              stops you assigning a ticket by hand.
+            </InfoTip>
+            {/* 16px on a phone for the same reason as every other field in the
               console: iOS zooms into anything smaller and does not zoom back. */}
-          <input
-            id={`cap-${agent.id}`}
-            name="maxOpenTickets"
-            type="number"
-            min={0}
-            defaultValue={agent.maxOpenTickets ?? ''}
-            placeholder="group"
-            onBlur={(event) => {
-              const value = event.currentTarget.value;
-              if (value === capacitySent.current) return;
-              capacitySent.current = value;
-              event.currentTarget.form?.requestSubmit();
-            }}
-            // Enter submits the form itself; noted, so the blur after it does
-            // not send the same value a second time.
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') capacitySent.current = event.currentTarget.value;
-            }}
-            className="w-16 rounded-md border border-(--color-border-subtle) bg-(--color-background-surface) px-1.5 py-1 text-base outline-none hover:border-(--color-border-default) focus:border-(--color-border-focus) focus:ring-2 focus:ring-(--color-border-focus)/20 sm:text-xs"
-          />
-        </form>
+            <input
+              id={`cap-${agent.id}`}
+              name="maxOpenTickets"
+              type="number"
+              min={0}
+              defaultValue={agent.maxOpenTickets ?? ''}
+              placeholder="group"
+              onBlur={(event) => {
+                const value = event.currentTarget.value;
+                if (value === capacitySent.current) return;
+                capacitySent.current = value;
+                event.currentTarget.form?.requestSubmit();
+              }}
+              // Enter submits the form itself; noted, so the blur after it does
+              // not send the same value a second time.
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') capacitySent.current = event.currentTarget.value;
+              }}
+              className="w-16 rounded-md border border-(--color-border-subtle) bg-(--color-background-surface) px-1.5 py-1 text-base outline-none hover:border-(--color-border-default) focus:border-(--color-border-focus) focus:ring-2 focus:ring-(--color-border-focus)/20 sm:text-xs"
+            />
+          </form>
 
-        <span className="shrink-0 text-xs text-(--color-text-tertiary)">
-          {agent.lastSeenAt ? (
-            <RelativeTime at={agent.lastSeenAt}>
-              {(relative) => `seen ${ago(relative)}`}
-            </RelativeTime>
-          ) : (
-            'never signed in'
-          )}
-        </span>
+          <span className="shrink-0 text-xs text-(--color-text-tertiary)">
+            {agent.lastSeenAt ? (
+              <RelativeTime at={agent.lastSeenAt}>
+                {(relative) => `seen ${ago(relative)}`}
+              </RelativeTime>
+            ) : (
+              'never signed in'
+            )}
+          </span>
 
-        <form action={action} className="ms-auto sm:ms-0">
-          <input type="hidden" name="agentId" value={agent.id} />
-          <input type="hidden" name="active" value={agent.isActive ? 'false' : 'true'} />
-          <Button
-            type="submit"
-            variant={agent.isActive ? 'secondary' : 'primary'}
-            disabled={isSelf}
-          >
-            {agent.isActive ? 'Deactivate' : 'Reactivate'}
-          </Button>
-        </form>
+          <div className="ms-auto flex items-center gap-2 sm:ms-0">
+            <Button
+              variant="secondary"
+              onClick={onEdit}
+              aria-expanded={editing}
+              aria-controls={`agent-editor-${agent.id}`}
+            >
+              Edit
+            </Button>
+            <form action={action}>
+              <input type="hidden" name="agentId" value={agent.id} />
+              <input type="hidden" name="active" value={agent.isActive ? 'false' : 'true'} />
+              <Button
+                type="submit"
+                variant={agent.isActive ? 'secondary' : 'primary'}
+                disabled={isSelf}
+              >
+                {agent.isActive ? 'Deactivate' : 'Reactivate'}
+              </Button>
+            </form>
+          </div>
+        </div>
+
+        {state.error || capacity.state.error ? (
+          <ErrorText inline>{state.error ?? capacity.state.error}</ErrorText>
+        ) : null}
       </div>
 
-      {state.error || capacity.state.error ? (
-        <ErrorText inline>{state.error ?? capacity.state.error}</ErrorText>
+      {editing ? (
+        <AgentEditor agent={agent} groups={groups} isSelf={isSelf} onClose={onClose} />
       ) : null}
     </li>
   );
