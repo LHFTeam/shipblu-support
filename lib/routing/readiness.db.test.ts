@@ -184,8 +184,9 @@ describe('routingReadiness', () => {
 
     expect(readiness.categories.map((row) => row.key)).not.toContain('courier_jobs');
     expect(readiness.categories.every((row) => row.routeGroup === null)).toBe(true);
-    const warning = of(readiness, id).warnings.find((row) => row.kind === 'no_route_group');
-    expect(warning).toMatchObject({ categories: expect.arrayContaining(['Sales']) });
+    // Said once, on the category's own line, and not again on every channel:
+    // the row carries only what is about it, here its missing default group.
+    expect(of(readiness, id).warnings).toEqual([{ kind: 'default_group', group: null, gaps: [] }]);
   });
 
   it('says nothing about a channel on its default group, and gives every channel its saved mode', async () => {
@@ -233,6 +234,10 @@ describe('routingReadiness', () => {
   it('starts routing only on the row tickets are filed under, active, unowned, with the classifier in Apply', async () => {
     const support = await group('Desk');
     await member(support, 'Here', {});
+    // A route group nobody is assigned from, so a row that files tickets has
+    // a warning beyond its reason — and one that files none must not.
+    const sales = await group('Sales', { assignmentStrategy: 'manual' });
+    await route('sales', sales);
     const first = await channel({
       name: 'Support mailbox',
       routingMode: 'category',
@@ -266,15 +271,17 @@ describe('routingReadiness', () => {
     const readiness = await routingReadiness(NOW);
 
     expect(of(readiness, first).starts).toBe('live');
+    expect(kinds(of(readiness, first))).toContain('route_gaps');
+    // A row that files nothing is its one reason: anything after it described
+    // tickets the row never holds, under a line saying nothing is held.
     expect(of(readiness, second)).toMatchObject({
       starts: null,
-      warnings: expect.arrayContaining([{ kind: 'not_filing_row', filingRow: 'Support mailbox' }]),
+      warnings: [{ kind: 'not_filing_row', filingRow: 'Support mailbox' }],
     });
-    expect(of(readiness, off)).toMatchObject({ starts: null });
-    expect(kinds(of(readiness, off))).toContain('inactive');
+    expect(of(readiness, off)).toMatchObject({ starts: null, warnings: [{ kind: 'inactive' }] });
     expect(of(readiness, owned)).toMatchObject({
       starts: null,
-      warnings: expect.arrayContaining([{ kind: 'owned', owner: 'Nayera' }]),
+      warnings: [{ kind: 'owned', owner: 'Nayera' }],
     });
 
     // An owner with no name is still an owner, and the warning names them by
@@ -282,7 +289,7 @@ describe('routingReadiness', () => {
     await db.update(agents).set({ name: '' }).where(eq(agents.id, owner!.id));
     expect(of(await routingReadiness(NOW), owned)).toMatchObject({
       starts: null,
-      warnings: expect.arrayContaining([{ kind: 'owned', owner: 'nayera@shipblu.test' }]),
+      warnings: [{ kind: 'owned', owner: 'nayera@shipblu.test' }],
     });
 
     // A deactivated owner counts as nobody, so that number routes again.
@@ -290,21 +297,32 @@ describe('routingReadiness', () => {
     expect(of(await routingReadiness(NOW), owned).starts).toBe('live');
   });
 
-  it('calls a category mode idle while the classifier is off or in Shadow, and blind with no key', async () => {
+  it('leaves the classifier to the panel, and marks a row that starts routing with no key', async () => {
     const id = await channel({ name: 'Support mailbox', routingMode: 'category_shadow' });
+    const second = await channel({ name: 'Second mailbox', routingMode: 'category' });
+    // What is about this row alone: it has no default group.
+    const ownWarnings = [{ kind: 'default_group', group: null, gaps: [] }];
 
     await classifier('shadow');
-    let row = of(await routingReadiness(NOW), id);
-    expect(row.starts).toBeNull();
-    expect(row.warnings).toContainEqual({ kind: 'classifier_idle', classifier: 'shadow' });
+    let readiness = await routingReadiness(NOW);
+    expect(readiness.classifier).toMatchObject({ mode: 'shadow', keyConfigured: true });
+    expect(of(readiness, id)).toMatchObject({ starts: null, noKey: false, warnings: ownWarnings });
 
     await classifier('apply');
+    readiness = await routingReadiness(NOW);
+    expect(of(readiness, id)).toMatchObject({ starts: 'shadow', noKey: false });
+
     vi.stubEnv('TYPESAFE_API_KEY', '');
     resetEnvCache();
-    row = of(await routingReadiness(NOW), id);
-    expect(row.starts).toBe('shadow');
-    expect(kinds(row)).toContain('no_key');
-    expect(kinds(row)).not.toContain('classifier_idle');
+    readiness = await routingReadiness(NOW);
+    expect(readiness.classifier.keyConfigured).toBe(false);
+    expect(of(readiness, id)).toMatchObject({
+      starts: 'shadow',
+      noKey: true,
+      warnings: ownWarnings,
+    });
+    // A row that starts nothing is not blind: it has nothing to ask about.
+    expect(of(readiness, second)).toMatchObject({ starts: null, noKey: false });
   });
 
   it('warns where routed tickets, and those that stay, would wait unassigned', async () => {

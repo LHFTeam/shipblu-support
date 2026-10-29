@@ -31,7 +31,7 @@ export const ROUTING_OUTCOME_LABELS: Record<RoutingOutcome, string> = {
   not_open: 'No longer open',
   released: 'Channel stopped routing',
   category: 'Routed',
-  no_route_for_category: 'No route for its category',
+  no_route_for_category: 'Routes to no other group',
   fallback: 'Window ran out',
   manual: 'A person decided first',
   rule: 'A rule decided first',

@@ -5591,13 +5591,35 @@ seeded (118 files, 1,584 tests); and every CI check.
 
 **Left to do, in order.**
 
-1. The screenshot pass, over seeded data at 1400×900 and 390×844, on
-   `/reports?days=30`, `/reports/routing` at 7 and 30 days and with nothing
-   routed, `/admin/dashboard`, and `/admin/channels` (the readiness link).
-   Check for no horizontal page scroll on the phone, no console errors, and
-   empty sections that say why. Look again at the routing page's outcome
-   table, restructured mid-pass. There is no browser suite, so what it finds
-   goes in the pull request.
+1. ~~The screenshot pass.~~ Done on 2026-10-29 on the deployed code
+   (`9b4bc5b`), over seeded data at 1400×900 and 390×844. It covered
+   `/reports` at 30 and 90 days in three coverage states (filed, a gap,
+   nothing filed), `/reports/routing` at 7 and 30 days and with nothing
+   routed, `/admin/dashboard`, `/admin/channels`, `/reports/category-ai` and
+   `/reports/csat`. All 24 captures answered 200, with no console error and
+   no horizontal page scroll on the phone. The visual review confirmed 23
+   findings and refuted 20. The follow-up pull request into `dev` fixes 20 of
+   them; each is named there with its file. Three are left, because each one
+   changes something shared beyond Stage 6:
+   - **A sideways-scrolling table gives no sign that it scrolls.** At 390px
+     every `/reports` breakdown shows Label, Created, Resolved and First
+     response, and hides Within SLA and CSAT inside `Table`'s own
+     `overflow-x-auto` (`components/ui.tsx`). Only a header cut mid-word
+     hints that more is there. The cure is a cue on `Table`, or a
+     phone layout for it, which every table in the console would take.
+   - **`Columns`' axis labels shrink with the drawing.** They are SVG
+     `<text>` in a 720-unit `viewBox`, so at 390px the hours and dates under
+     the dashboard's two column charts render at about 4px. `RatingBars` in
+     the same file already draws its labels in HTML for that reason
+     (`components/charts.tsx`). Every page with a `Columns` chart takes the
+     change.
+   - **A second web chat row cannot be edited.** `ChannelEditor` returns
+     null for every `webchat` row, and the Chat widget card configures only
+     the oldest active one. So a second row's saved mode, name, default group
+     and active switch are unreachable. The readiness panel says truly that
+     such a row's mode does nothing; nothing on the page can change it. This
+     needs a decision first: should a second row be editable, deletable, or
+     refused when created?
 2. In production after the deploy, the verification rows added for Stage 6 to
    the table below. Read clean on 2026-10-29; the first nightly's rows are left.
 

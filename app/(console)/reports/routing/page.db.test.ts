@@ -309,7 +309,7 @@ describe('the routing report page', () => {
     expect(headers.slice(0, 9)).toEqual([
       'Channel',
       'Routed',
-      'No route for its category',
+      'Routes to no other group',
       'Window ran out',
       'Already taken',
       'A person decided first',

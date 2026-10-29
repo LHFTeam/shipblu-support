@@ -67,7 +67,7 @@ const CLASSIFIER_STATES: Record<CategoryAiMode, string> = {
  *
  * Range-bound figures are filed on the day a ticket entered routing in the
  * reporting zone (`reportingZone()`, the default business hours' zone).
- * The two sections under Now are not: a routed ticket left unassigned for
+ * The two sections under Now are not: a ticket left unassigned after routing for
  * sixty days, or a record that never closed, matters most and would fall out
  * of a thirty-day window.
  */
@@ -273,7 +273,7 @@ export default async function RoutingReportPage({
               }
             />
             <Stat
-              label="Still unassigned"
+              label="Unassigned after routing"
               value={waitingCount.toLocaleString()}
               tone={waitingCount > 0 ? 'caution' : undefined}
               hint={
@@ -283,10 +283,11 @@ export default async function RoutingReportPage({
               }
               explain={
                 <>
-                  Routed tickets, of any range, still open and never assigned since they entered
-                  routing, {STILL_UNASSIGNED_IN_WORDS} after their hold ended: long enough for the
-                  assignment as the hold ends and the sweeps behind it. Tickets in a group set to
-                  manual wait for somebody to pick them, by design, and are counted apart.
+                  Live tickets that entered routing, of any range and whatever was decided, still
+                  open and never assigned since, {STILL_UNASSIGNED_IN_WORDS} after their hold ended:
+                  long enough for the assignment as the hold ends and the sweeps behind it. Tickets
+                  in a group set to manual wait for somebody to pick them, by design, and are
+                  counted apart.
                 </>
               }
             />
@@ -371,12 +372,12 @@ export default async function RoutingReportPage({
 
       <Section
         title="Still unassigned after routing"
-        hint={`Live routed tickets nobody has been assigned since they entered routing, ${STILL_UNASSIGNED_IN_WORDS} after their hold ended, by the group each is in now — a rule may have moved it since — and the decision that put it there.`}
+        hint={`Live tickets that entered routing, whatever was decided, that nobody has been assigned since, ${STILL_UNASSIGNED_IN_WORDS} after their hold ended, by the group each is in now — a rule may have moved it since — and the decision that put it there.`}
       >
         {unassigned.length === 0 ? (
           <Quiet>
-            Every routed ticket still open has had somebody assigned since it entered routing, or
-            its hold ended less than {STILL_UNASSIGNED_IN_WORDS} ago.
+            Every live ticket that entered routing and is still open has had somebody assigned
+            since, or its hold ended less than {STILL_UNASSIGNED_IN_WORDS} ago.
           </Quiet>
         ) : (
           <UnassignedTable rows={unassigned} />
@@ -413,12 +414,10 @@ export default async function RoutingReportPage({
       </Section>
 
       <p className="max-w-3xl text-xs text-(--color-text-tertiary)">
-        A ticket enters routing when it arrives on a channel set to By category or By category —
-        shadow while the category classifier is in Apply, and a continuation, a reopen or a ticket
-        opened by an agent never does. A ticket deleted for good leaves every figure here, since its
-        record goes with it. A decision a person or a rule made first carries no category, so what
-        the router decided on is known only for its own outcomes. Times are measured to when the
-        decision was recorded.
+        {`While the category classifier is in Apply, a ticket enters routing when it arrives on a channel set to “${ROUTING_MODE_LABELS.category}” or “${ROUTING_MODE_LABELS.category_shadow}”, unless another row of that kind files its tickets or the number’s owner is given it as it arrives; a continuation, a reopen or a ticket opened by an agent never does.`}{' '}
+        A ticket deleted for good leaves every figure here, since its record goes with it. A
+        decision a person or a rule made first carries no category, so what the router decided on is
+        known only for its own outcomes. Times are measured to when the decision was recorded.
       </p>
     </div>
   );
@@ -447,7 +446,7 @@ function strandedSentence(live: number, shadow: number): string {
     Boolean,
   );
   const total = live + shadow;
-  return `${parts.join(' and ')} routing ${total === 1 ? 'record is' : 'records are'} still undecided ${GRACE_IN_WORDS} after ${total === 1 ? 'its window' : 'their windows'} ended, long after the job that decides each was due.`;
+  return `${parts.join(' and ')} routing ${total === 1 ? 'record is' : 'records are'} still undecided more than ${GRACE_IN_WORDS} after ${total === 1 ? 'its window' : 'their windows'} ended, long after the job that decides each was due.`;
 }
 
 /**
@@ -564,7 +563,7 @@ function ChannelNames({
  * hold a ticket at all (`files`), which only the readiness panel can explain.
  */
 function neverRoutedHint(classifier: CategoryAiMode, routingNow: RoutingChannel[]): string {
-  const rule = `A ticket enters routing when it arrives on a channel set to ${ROUTING_MODE_LABELS.category} or ${ROUTING_MODE_LABELS.category_shadow} under Admin › Channels, while the category classifier is in Apply under Admin › Categories.`;
+  const rule = `A ticket enters routing when it arrives on a channel set to “${ROUTING_MODE_LABELS.category}” or “${ROUTING_MODE_LABELS.category_shadow}” under Admin › Channels, while the category classifier is in Apply under Admin › Categories.`;
   const missing = [
     classifier === 'apply' ? null : `The classifier is ${CLASSIFIER_STATES[classifier]}.`,
     routingNow.length === 0

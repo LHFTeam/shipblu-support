@@ -116,19 +116,26 @@ export default async function CategoryAiReportPage({
       />
 
       <div className="mb-6 max-w-3xl space-y-2">
+        {/* With no key the switch is a setting, not what Jev does: said as
+            "is filing tickets" over "it is asked nothing", the bold half was
+            the false one. */}
         <Notice tone="neutral">
           Jev is{' '}
           <b className="text-(--color-text-primary)">
             {settings.mode === 'off'
               ? 'switched off'
-              : settings.mode === 'shadow'
-                ? 'in shadow: asked, and its answers recorded, with no ticket changed'
-                : 'filing tickets'}
+              : !keyConfigured
+                ? settings.mode === 'shadow'
+                  ? 'set to shadow'
+                  : 'set to file tickets'
+                : settings.mode === 'shadow'
+                  ? 'in shadow: asked, and its answers recorded, with no ticket changed'
+                  : 'filing tickets'}
           </b>
-          {settings.mode === 'off' ? '' : `, at a threshold of ${settings.minProbability}`}.
-          {keyConfigured
-            ? ''
-            : ' This environment has no TYPESAFE_API_KEY, so it is asked nothing.'}{' '}
+          {settings.mode === 'off' ? '' : `, at a threshold of ${settings.minProbability}`}
+          {settings.mode === 'off' || keyConfigured
+            ? '.'
+            : `, but this environment has no TYPESAFE_API_KEY, so it is asked nothing and ${settings.mode === 'shadow' ? 'records' : 'files'} nothing.`}{' '}
           A ticket counts as labelled when a person chose its category in the ticket&rsquo;s
           Category select before anything else wrote it &mdash; Jev, a rule or a form.
         </Notice>

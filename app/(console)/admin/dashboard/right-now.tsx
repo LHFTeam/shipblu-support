@@ -56,7 +56,7 @@ export function RightNow({
         <Stat
           label="Unassigned"
           value={queue.unassigned.toLocaleString('en-GB')}
-          explain="Open tickets nobody holds. On a channel that routes by category, a new ticket is held — assigned to nobody — until its category settles or its routing window ends, and then goes to its category’s group. Those are counted here as being routed, the ones the inbox marks “Routing…”: nobody is meant to have picked them up yet."
+          explain="Open tickets nobody holds. On a channel that routes by category, a new ticket is held — assigned to nobody — until its category settles or its routing window ends. It then moves to the group its category routes to, or stays in the channel’s default group when no category settled or its category routes nowhere else. Those are counted here as being routed, the ones the inbox marks “Routing until …” or “Routing…”: nobody is meant to have picked them up yet."
           hint={unassignedHint(queue)}
           // Amber for the work nobody has picked up, not for the tickets held
           // so that nobody does: a queue of nothing but held tickets is the
@@ -109,6 +109,8 @@ export function RightNow({
 function unassignedHint({ unassigned, routing }: { unassigned: number; routing: number }): string {
   if (unassigned === 0) return 'Everything has an owner';
   if (routing === 0) return 'Nobody has picked these up';
-  if (routing === unassigned) return 'Being routed — held until their category settles';
+  if (routing === unassigned) {
+    return 'Being routed — held until their category settles or the window ends';
+  }
   return `${routing.toLocaleString('en-GB')} being routed · ${(unassigned - routing).toLocaleString('en-GB')} nobody has picked up`;
 }

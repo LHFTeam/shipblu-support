@@ -115,13 +115,21 @@ export function Columns({
           );
         })}
 
+        {/* The first and last labels are pinned to their slot's outer edge:
+            centred, half of each fell outside the drawing and was cut. */}
         {slots.map((slot, index) =>
           index % tickEvery === 0 || index === slots.length - 1 ? (
             <text
               key={index}
-              x={slot.x + slot.width / 2}
+              x={
+                index === slots.length - 1
+                  ? slot.x + slot.width
+                  : index === 0
+                    ? slot.x
+                    : slot.x + slot.width / 2
+              }
               y={height - 4}
-              textAnchor="middle"
+              textAnchor={index === slots.length - 1 ? 'end' : index === 0 ? 'start' : 'middle'}
               fontSize="10"
               fill={INK}
             >
@@ -241,7 +249,14 @@ export function Meter({
       aria-valuemax={100}
       aria-label={label}
       className="h-1.5 w-full overflow-hidden rounded-full"
-      style={{ background: `color-mix(in oklch, ${color} 22%, transparent)` }}
+      // Nothing to measure is a grey track, not a pale version of the tone:
+      // an empty meter tinted green read as a target met.
+      style={{
+        background:
+          value === null
+            ? 'var(--color-border-subtle)'
+            : `color-mix(in oklch, ${color} 22%, transparent)`,
+      }}
     >
       <div className="h-full rounded-full" style={{ width: `${value ?? 0}%`, background: color }} />
     </div>
