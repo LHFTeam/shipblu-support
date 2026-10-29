@@ -74,22 +74,84 @@ update.
 
 ### Where it stands
 
-| Stage | Code                                                                                                                                        | Production                                                                                                                                                                                                                |
-| ----- | ------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 0     | Merged: #386 (`01488c9`)                                                                                                                    | Live since 2026-10-20. Its two operational steps were never done (below)                                                                                                                                                  |
-| 1.1   | Merged: #387, then `dev` → `main` in #389 (`1f89219`)                                                                                       | Live since 2026-10-21 10:13 UTC                                                                                                                                                                                           |
-| 1.2   | Merged: #391 (`31f7379`) and follow-up #392 (`7b7d276`), then `dev` → `main` in #393 (`634a28d`), which also carried another session's #390 | **Done.** All six services live on `634a28d` by 17:38 UTC on 2026-10-21, worker first. The user ran the backfill and the rollup from a shell, leaving no `jobs` row. Every check below reads clean                        |
-| 1.3   | Merged: #395 (`58c5ed9`), then `dev` → `main` in #397 (`447d8be`), which also carried #394, #396 and #398. As built below                   | **Done.** All six services live on `447d8be` by 18:36 UTC, web first. Its checks read clean (below), though no comment has arrived since                                                                                  |
-| 2.A   | Merged: #400 (`a558c5b`), then `dev` → `main` in #406 (`e88d357`), which also carried #399, #401 and #402. As built below                   | **Done.** All six services live on `e88d357` by 22:13 UTC on 2026-10-23, deployed at once by an environment update. Its checks read clean (below)                                                                         |
-| 2.B   | Merged: #403 (`1d21cdc`), then `dev` → `main` in #413 (`516c8ff`) and #415 (`48cb284`). As built below                                      | **Done.** All six services live on `48cb284` by 06:01 UTC on 2026-10-25, web first, with nothing suspended. Its checks read clean, and a new message was subcategorised; one read left (below)                            |
-| 3.1   | Merged: #419 (`ff3bbfd`), then `dev` → `main` in #420 (`b9a4743`), which also carried #411, #416, #417 and #418. As built below             | **Done.** Web live on `b9a4743` at 19:44 UTC on 2026-10-25, the worker and the four crons by 08:05 UTC on 2026-10-26, and the four categories seeded at 08:13. Its checks read clean (below); the signed-in ones are left |
-| 3.2   | Merged: #424 (`07a5527`), then `dev` → `main` in #426 (`f761e5e`), which also carried #421, #422 and #423. As built below                   | **Done.** All six services live on `f761e5e` by 23:32 UTC on 2026-10-26, web first. Its checks read clean (below); the signed-in ones are left                                                                            |
-| 4.0   | Merged: #425 (`1c733c2`), then `dev` → `main` in #428 (`156004d`). As built below                                                           | **Done.** All six services live on `156004d` by 07:45:42 UTC on 2026-10-27, web first. Its checks read clean (below)                                                                                                      |
-| 4.1   | Merged: #427 (`959404a`), then `dev` → `main` in #430 (`dbf4376`). As built below                                                           | **Done.** All six services live on `dbf4376` by 12:07:54 UTC on 2026-10-27, web first, with `0050` applied. Shipped off: no settings row. Its checks read clean (below)                                                   |
-| 4.2   | Merged: #429 (`c6eb1ac`), then `dev` → `main` in #431 (`ad6a062`). As built below                                                           | **Done.** All six services live on `ad6a062` by 21:49:08 UTC on 2026-10-27, web first; code only. Its checks read clean (below). Its operations wait for the user's go-ahead                                              |
-| 5.1   | In review as #432, branch `claude/jolly-noether-hxhez1-stage-5-1`. As built below                                                           | —                                                                                                                                                                                                                         |
-| 5.2   | Not started (operations: turning routing on)                                                                                                | —                                                                                                                                                                                                                         |
-| 6     | In review as #434, stacked on #432; it replaces draft #433 and answers its review. As built below                                           | —                                                                                                                                                                                                                         |
+| Stage | Code                                                                                                                                        | Production                                                                                                                                                                                                                                                                        |
+| ----- | ------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0     | Merged: #386 (`01488c9`)                                                                                                                    | Live since 2026-10-20. Its two operational steps were never done (below)                                                                                                                                                                                                          |
+| 1.1   | Merged: #387, then `dev` → `main` in #389 (`1f89219`)                                                                                       | Live since 2026-10-21 10:13 UTC                                                                                                                                                                                                                                                   |
+| 1.2   | Merged: #391 (`31f7379`) and follow-up #392 (`7b7d276`), then `dev` → `main` in #393 (`634a28d`), which also carried another session's #390 | **Done.** All six services live on `634a28d` by 17:38 UTC on 2026-10-21, worker first. The user ran the backfill and the rollup from a shell, leaving no `jobs` row. Every check below reads clean                                                                                |
+| 1.3   | Merged: #395 (`58c5ed9`), then `dev` → `main` in #397 (`447d8be`), which also carried #394, #396 and #398. As built below                   | **Done.** All six services live on `447d8be` by 18:36 UTC, web first. Its checks read clean (below), though no comment has arrived since                                                                                                                                          |
+| 2.A   | Merged: #400 (`a558c5b`), then `dev` → `main` in #406 (`e88d357`), which also carried #399, #401 and #402. As built below                   | **Done.** All six services live on `e88d357` by 22:13 UTC on 2026-10-23, deployed at once by an environment update. Its checks read clean (below)                                                                                                                                 |
+| 2.B   | Merged: #403 (`1d21cdc`), then `dev` → `main` in #413 (`516c8ff`) and #415 (`48cb284`). As built below                                      | **Done.** All six services live on `48cb284` by 06:01 UTC on 2026-10-25, web first, with nothing suspended. Its checks read clean, and a new message was subcategorised; one read left (below)                                                                                    |
+| 3.1   | Merged: #419 (`ff3bbfd`), then `dev` → `main` in #420 (`b9a4743`), which also carried #411, #416, #417 and #418. As built below             | **Done.** Web live on `b9a4743` at 19:44 UTC on 2026-10-25, the worker and the four crons by 08:05 UTC on 2026-10-26, and the four categories seeded at 08:13. Its checks read clean (below); the signed-in ones are left                                                         |
+| 3.2   | Merged: #424 (`07a5527`), then `dev` → `main` in #426 (`f761e5e`), which also carried #421, #422 and #423. As built below                   | **Done.** All six services live on `f761e5e` by 23:32 UTC on 2026-10-26, web first. Its checks read clean (below); the signed-in ones are left                                                                                                                                    |
+| 4.0   | Merged: #425 (`1c733c2`), then `dev` → `main` in #428 (`156004d`). As built below                                                           | **Done.** All six services live on `156004d` by 07:45:42 UTC on 2026-10-27, web first. Its checks read clean (below)                                                                                                                                                              |
+| 4.1   | Merged: #427 (`959404a`), then `dev` → `main` in #430 (`dbf4376`). As built below                                                           | **Done.** All six services live on `dbf4376` by 12:07:54 UTC on 2026-10-27, web first, with `0050` applied. Shipped off: no settings row. Its checks read clean (below)                                                                                                           |
+| 4.2   | Merged: #429 (`c6eb1ac`), then `dev` → `main` in #431 (`ad6a062`). As built below                                                           | **Done.** All six services live on `ad6a062` by 21:49:08 UTC on 2026-10-27, web first; code only. Its checks read clean (below). Its first operation is done: the archive record run, then Shadow since 06:00:32 UTC on 2026-10-29 (below). The rest wait for the user's go-ahead |
+| 5.1   | Merged: #432 (`9d5b4fb`), then `dev` → `main` in #435 (`1470902`). As built below                                                           | **Done.** All six services live on `1470902` by 06:35:36 UTC on 2026-10-29, web first, with `0051` applied. Shipped off: every channel on `default_group`. Its checks read clean (below); the signed-in one is left                                                               |
+| 5.2   | Not started (operations: turning routing on)                                                                                                | —                                                                                                                                                                                                                                                                                 |
+| 6     | In review as #434, against `dev`; it replaces draft #433 and answers its review. As built below                                             | —                                                                                                                                                                                                                                                                                 |
+
+**5.1's deploy and checks, read on Render and production on 2026-10-29.**
+
+- **Before** (read 06:18–06:26 UTC): 51 migrations; no transaction waiting on a
+  lock and none idle in one; every job created in the hour before completed,
+  and the same one dead job, a `subscribe_meta_webhooks` from 2026-09-21. All
+  six services ran `ad6a062`, and `origin/main..origin/dev` held `9d5b4fb`
+  alone. The classifier was in Shadow (below), so nothing could be held.
+- **The release and web.** #432 was squashed into `dev` as `9d5b4fb`, its tree
+  identical to the reviewed head `ec8487b`. #435 merged `dev` into `main` as
+  `1470902` once its nine checks were green. Web was deployed on it through
+  Render's API at 06:26:10. Its preDeploy logged `Applying drizzle
+migrations...` at 06:28:24.4, and all nine `db/sql` files were done at
+  06:28:25.5. Web was live at 06:29:13.
+- **Then the worker and the four crons.** The worker was triggered at 06:32:46
+  and live at 06:34:39. The crons were triggered at 06:34:50–56 and live at
+  06:35:31–36. The old worker took jobs until 06:37:31 (its instance's last
+  line, a `process_webhook … ok`), about three minutes after Render reported
+  the new one live, against a schema `0051` only adds to.
+- **The checks** (read 06:30–08:28 UTC):
+  - 52 migrations; the three types, `channels.routing_mode`,
+    `conversations.routing_window_ends_at` and `routing_decided_at`, and
+    `routing_decisions` with RLS enabled, not forced, and no policy;
+  - `routing_decisions_decided_complete` present, and
+    `notify_conversation_change` naming both routing columns;
+  - all nine channels on `default_group`; no `routing_decisions` row, no
+    `settle_routing` job, and no ticket with either routing column set;
+  - all 783 jobs created since the migration completed, none overdue and none
+    dead;
+  - none of the six services logged a warning or an error, and web served no
+    5xx;
+  - every cron run since was successful: `shipblu-sla-sweep` from 06:36,
+    `shipblu-time-automations` from 06:46, `shipblu-whatsapp-template-sync` at
+    07:03 and 08:03;
+  - `/api/health` reports `1470902`;
+  - eleven tickets created since; the new worker's first customer message,
+    at 06:40:24 on the bot number, was appended to its ticket with nothing
+    routed;
+  - still no console handbook (no `handbook-` article, no
+    `seed_console_handbook` job), so nothing to re-seed.
+
+  Left: the signed-in read, that `/admin/channels` shows the Routing select on
+  each form and the readiness panel.
+
+**4.2's first operation, 2026-10-29.**
+
+- **The archive record run.** `backfill_category_ai mode=record
+runLabel=archive-1`, job `28da8309`, enqueued at 05:55:54 UTC at the user's
+  go-ahead, completed on its first attempt. It wrote 1,467 rows over 509
+  tickets between 05:55:57 and 05:58:52, for messages from 2026-08-16 to
+  2026-10-28, under one question fingerprint and with no error. 923 asked Jev:
+  590 `unknown`, 257 `would_apply`, 76 `below_threshold`. 544 were recorded
+  without a call: 501 `after_settle`, 43 `capped`.
+- **Shadow.** `category_ai_settings` was written at 06:00:32 UTC: mode `shadow`,
+  minimum probability 0.6, routing window five minutes.
+- **Its first live answer** (read 08:26 UTC): one `classify_category` job since,
+  completed in 545 ms on its first attempt; one `live` row, `shadow`,
+  `unknown`, with no error; no `category_changed` event since 06:00:32 and no
+  ticket carrying a category; no warning or error from the worker or web since
+  06:00.
+- **Next**: at least two weeks of Shadow, then labelling (4.2, step 2). The way
+  back is the switch: `mode` to `off` on `/admin/categories`.
 
 **4.2's deploy and checks, read on Render and production on 2026-10-27.**
 
@@ -489,23 +551,26 @@ Every production write needs the user's go-ahead for that step, and the
 6. **4.0 is deployed.** #425 was squashed into `dev` as `1c733c2`, and #428
    (`156004d`) took it to `main` on 2026-10-27. All six services were live on
    it by 07:45:42 UTC, web first, and its checks read clean (above).
-7. **4.1 and 4.2 are deployed, and the classifier is off.** #427 was squashed
+7. **4.1 and 4.2 are deployed, and the classifier is in Shadow.** #427 was squashed
    into `dev` as `959404a`, and #430 (`dbf4376`) took it to `main` on
    2026-10-27; all six services were live on it by 12:07:54 UTC, web first.
    #429, 4.2's report with the fixes to the live job's locked ticket read, was
    squashed into `dev` as `c6eb1ac`, and #431 (`ad6a062`) took it to `main` the
    same day; all six were live on it by 21:49:08 UTC, web first. Both sets of
-   checks read clean (above). Nothing in the code holds the switch off any more,
-   so the classifier may now be switched on at `/admin/categories`, at the
-   user's go-ahead. 4.2's operations (the archive record run, shadow,
-   labelling, apply, the backlog) each wait for it in turn. The way back from
-   4.2 is to redeploy `dbf4376`, which is safe only while the classifier is
-   off; from 4.1, `156004d`, and the tables stay, since nothing reads them
-   there.
-8. **5.1 is built, and in review** on `claude/jolly-noether-hxhez1-stage-5-1`,
-   #432: [5.1, as built](#51-as-built). Deploy web first, since it
-   migrates `0051_routing`; then the worker and **all four** crons, before any
-   channel leaves `default_group`. Two of the crons assign: an old
+   checks read clean (above). At the user's go-ahead the archive record run
+   went first, and the classifier has been in Shadow since 06:00:32 UTC on
+   2026-10-29 (4.2's first operation, above). Labelling, apply and the backlog
+   each wait for it in turn. The way back starts with the switch, `off` on
+   `/admin/categories`; the code's way back is then 5.1's (item 8), and only
+   below that `dbf4376` for 4.2 and `156004d` for 4.1, whose tables stay, since
+   nothing reads them there.
+8. **5.1 is deployed, and routes nothing.** #432 was squashed into `dev` as
+   `9d5b4fb`, and #435 (`1470902`) took it to `main` on 2026-10-29; all six
+   services were live on it by 06:35:36 UTC, with `0051_routing` applied, and
+   its checks read clean (above): [5.1, as built](#51-as-built). It went web
+   first, since it migrates `0051_routing`; then the worker and **all four**
+   crons, before any channel could leave `default_group`. Two of the crons
+   assign: an old
    `shipblu-sla-sweep` runs an `assign_sweep` that assigns held tickets, and an
    old `shipblu-time-automations` runs rules whose `auto_assign` assigns them
    and whose `assign_group` moves one without ending its hold. Deployed, it
@@ -3955,7 +4020,9 @@ gains another first, 0050 is regenerated rather than renumbered.
 **4.2 — Shadow, then evaluate, then apply.** Operations, plus the report.
 
 1. Run `backfill_category_ai mode=record` over the archive, then switch the
-   live classifier to `shadow` for at least two weeks.
+   live classifier to `shadow` for at least two weeks. Done on 2026-10-29: the
+   `archive-1` run, then Shadow since 06:00:32 UTC (4.2's first operation, in
+   the status section).
 2. **Ground truth is made, not assumed.** Nobody has ever reviewed a
    subcategory (1 confirmed, 0 rejected), so labels cannot be expected to
    appear on their own.
@@ -5106,7 +5173,8 @@ gains another first, 0051 is regenerated rather than renumbered.
     AGENTS.md states the deferral as the code has it; the comments go with the
     next change to those files.
 - **Deploying it.** Web first, then the worker and **all four** crons, before
-  any channel leaves `default_group`.
+  any channel leaves `default_group`. Done so on 2026-10-29: the reads are under
+  5.1's deploy and checks, in the status section.
   - **Before.** Read `git log origin/main..origin/dev` and every migration in
     it (deploy rule 7). Expect 51 migrations, the newest `1793058419292`; no
     `category_ai_settings` row; no route group on any category and no
@@ -5207,7 +5275,9 @@ Built on `claude/jolly-noether-hxhez1-stage-6` as draft #433, whose fourteen
 review threads were answered on `claude/epic-heisenberg-w60nbl`. That branch
 carries #433's three commits, rebased onto 5.1 at `357b25c` (#432, in review),
 and a fix for each thread, and replaces #433 as the stage's pull request,
-#434, stacked on #432, whose base moves to `dev` once #432 merges. Four builders
+#434. #432 was squash-merged into `dev` as `9d5b4fb` on 2026-10-29, and #434
+targets `dev` since, with its own review's thirteen threads answered (below).
+Four builders
 worked from one written design, each piece with its own tests. The organisation's
 spend limit stopped the first session's screenshot pass, docs, full check and
 adversarial review on 2026-10-28; the review on #433 and the docs are answered
@@ -5411,21 +5481,53 @@ fix has behaviour:
   reconcile; the handbook's reports and channels articles; and the stale
   comments.
 
+**#434's review, answered.** Thirteen threads, each a commit with a test that
+fails without it where the fix has behaviour:
+
+- **Unfiled days are counted one by one** (`categoryFiling`): the coverage
+  line names the window's days with figures last rolled up by code that did
+  not file by category, where the first category slice in the window called
+  every later day covered. `0054` adds `rollup_days.categories_computed_at`,
+  written with `computed_at` by this rollup and never by the code before it,
+  so a day a rollback's nightly rebuilds reads as unfiled again.
+- **`0055` indexes `routing_decisions(started_at)`** for every range-bound read
+  on `/reports/routing` and the history's first and last. The test plans each
+  on a year of rows with fresh statistics: on an empty table the planner
+  prefers the channel index for the timing read.
+- **"Routed, then assigned" is bounded by `started_at`**, as "still
+  unassigned" is, and its median wait floored at zero, so the app's clock and
+  the database's cannot drop an assignment or make a wait negative.
+- **The tiles and the By category table are one statement's**: `byCategory`
+  returns the totals it was read with, and the tiles print them.
+- **Every slice predicate is built from `DIMENSIONS`** (`sliceWhere`), through
+  a column map the type holds to it, so a fifth dimension left out does not
+  compile.
+- **An owner with a blank name still makes a number owned** on the readiness
+  panel, named by email.
+- **Every report prints its instants in the reporting zone**: the CSAT
+  comments, the suggestions hint and the classifier report's runs.
+- **Smaller**: `reconciles()` removed for `reconcileFailure`; `inArray` for the
+  report's IN lists; `SETTLE_ACTOR` in a leaf module; `sumOutcomes` and
+  `minutesInWords` exported rather than copied into the page; the
+  `computeDay` mock reset after each test; the overview test's rows
+  mid-window.
+
+**Verified again on `4622f71`, 2026-10-29**, the head with every thread
+answered and `dev` merged: `tsc`, both `eslint` runs, `prettier --check`,
+`vitest` (4,309 tests), `knip`, the repo rules and `npm run build`; the full
+`test:db` tier on Postgres 17, migrated and `db/sql` replayed twice, then
+seeded (118 files, 1,584 tests); and every CI check.
+
 **Left to do, in order.**
 
-1. Rebase onto 5.1's final head once #432 lands, and onto `dev` after it is
-   squash-merged. `0052` and `0053` follow `0051`; if 0051 is regenerated
-   again, regenerate both after it, in order: an entry whose journal `when` is
-   older than the last applied one is skipped for good.
-2. Every CI check after each rebase.
-3. The screenshot pass, over seeded data at 1400×900 and 390×844, on
+1. The screenshot pass, over seeded data at 1400×900 and 390×844, on
    `/reports?days=30`, `/reports/routing` at 7 and 30 days and with nothing
    routed, `/admin/dashboard`, and `/admin/channels` (the readiness link).
    Check for no horizontal page scroll on the phone, no console errors, and
    empty sections that say why. Look again at the routing page's outcome
    table, restructured mid-pass. There is no browser suite, so what it finds
    goes in the pull request.
-4. In production after the deploy, the verification rows added for Stage 6 to
+2. In production after the deploy, the verification rows added for Stage 6 to
    the table below.
 
 **Deploy, when it is time.**

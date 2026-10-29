@@ -5,35 +5,42 @@ it is designed; **this file is about the state of the work** — what is live,
 what is merely built, what is left, and the mistakes that have already cost us
 time. Read both. Do not re-derive settled decisions.
 
-Last updated: 2026-10-29, against `main` at `ad6a062`. The figures in §1 and §5
+Last updated: 2026-10-29, against `main` at `1470902`. The figures in §1 and §5
 were last re-measured as a whole against production on 2026-09-20, and a
 paragraph re-read since gives its own date; where a number here disagrees with
 an older paragraph elsewhere in the file, the older one has not been re-checked.
 
-**Production runs `ad6a062`, deployed by hand on 2026-10-27, all six services
-by 21:49:08 UTC:** release #431, which carries Stage 4.2 (#429) of
-`plans/ticket-category-routing.md` — `/reports/category-ai`, and the fixes to
-the category classifier's locked ticket read. Code only, web first, then the
-worker and the four crons; the classifier is still off (no
-`category_ai_settings` row, read 21:52 UTC). Earlier that day, also by hand and
-web first: `dbf4376` (#430, Stage 4.1, the classifier shipped off, applying
-`0050_category_ai`) by 12:07:54 UTC, and `156004d` (#428, Stage 4.0, code
-only) by 07:45:42 UTC. The plan's status section has each deploy's reads.
+**Production runs `1470902`, deployed by hand on 2026-10-29, all six services
+by 06:35:36 UTC:** release #435, which carries Stage 5.1 (#432) of
+`plans/ticket-category-routing.md`, routing by category, shipped off. Web went
+first, and its preDeploy applied `0051_routing`; then the worker and the four
+crons. Every channel reads `default_group`, so nothing is held or routed until
+an admin moves one _and_ the classifier is in `apply` (§5.1). Four things
+changed on every ticket at once (§5.1): the out-of-hours acknowledgement's
+guards, assignment's locks, what it re-reads under them and its checked update,
+a console group move running the rules before it assigns, and the transactions
+an agent's reply and a rule's assignment or move are now written in, with the
+rule's own timeline line inside them. The category classifier has been in
+Shadow since 06:00:32 UTC that day, after its archive record run: it records an
+answer for each message it judges and writes nothing to a ticket (§5.1). The
+plan's status section has the deploy's reads.
 
-**Stage 5.1 of that plan, routing by category, is built and in review as #432, not
-deployed** (this file's §5.1, beside the category classifier). Deployed, it
-routes nothing until an admin moves a channel off `default_group` _and_ the
-classifier is in `apply`, but four things change on every ticket at once (§5.1):
-the out-of-hours acknowledgement's guards, assignment's locks, what it re-reads
-under them and its checked update, a console group move running the rules
-before it assigns, and the transactions an agent's reply and a rule's assignment
-or move are now written in, with the rule's own timeline line inside them.
+The release before it, `ad6a062`, was deployed by hand on 2026-10-27, all six
+services by 21:49:08 UTC: release #431, which carries Stage 4.2 (#429), that is
+`/reports/category-ai` and the fixes to the category classifier's locked ticket
+read. Code only, web first, then the worker and the four crons. Earlier that
+day, also by hand and web first: `dbf4376` (#430, Stage 4.1, the classifier
+shipped off, applying `0050_category_ai`) by 12:07:54 UTC, and `156004d` (#428,
+Stage 4.0, code only) by 07:45:42 UTC.
 
 **Stage 6 of that plan, reporting by category and `/reports/routing`, is built
-and in review as #434, stacked on #432, not deployed.** It replaces #433, whose review
-it answers. Web migrates `0052_metrics_category` (`metrics_daily.category_id`
+and in review as #434, against `dev`, not deployed.** It replaces #433, whose
+review it answers. Web migrates `0052_metrics_category` (`metrics_daily.category_id`
 and the one-row-per-slice key `metrics_daily_slice_key`; `db/sql/003` adds the
-one-dimension CHECK) and `0053_routing_undecided_index`. Production carries no
+one-dimension CHECK), `0053_routing_undecided_index`,
+`0054_rollup_days_categories` (`rollup_days.categories_computed_at`, which
+tells a day rolled up with categories from one rolled up before them) and
+`0055_routing_started_index`. Production carries no
 category yet, so the first Stage 6 nightly writes no category row and the
 overview's By category reads all No category; the `rollup_metrics
 from=2026-08-18` rebuild waits for 4.2's `backfill_category_ai mode=apply`. Web
@@ -1621,22 +1628,26 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
   second, by analogy with the 647 shadow subcategorisation calls (p50 234 ms) — and
   every row stores both.
 
-- **Jev's category classifier is deployed and switched off** (Stages 4.1 and
-  4.2 of `plans/ticket-category-routing.md`; `lib/category-ai/`): live since
-  2026-10-27 12:07 UTC, with `0050`'s two tables in production, no settings row
-  and no answers. #429, which fixed the locked ticket read that lost a ticket
-  whose status changed under the lock and sent the job to `dead`, has been live
-  on all six services, worker included, on `ad6a062` since 21:49:08 UTC that
-  day. So nothing in the code now holds the switch off: turning it on waits
-  only for the user's go-ahead, step by step. Once on, it asks
+- **Jev's category classifier is deployed, and in Shadow since 06:00:32 UTC on
+  2026-10-29** (Stages 4.1 and 4.2 of `plans/ticket-category-routing.md`;
+  `lib/category-ai/`): live since 2026-10-27 12:07 UTC, with `0050`'s two
+  tables in production. #429, which fixed the locked ticket read that lost a
+  ticket whose status changed under the lock and sent the job to `dead`, has
+  been live on all six services, worker included, since `ad6a062`. The archive
+  record run went first, at the user's go-ahead: `archive-1`, 1,467 rows over
+  509 tickets, 923 of them asked (590 `unknown`, 257 `would_apply`, 76
+  `below_threshold`) and none failed. In Shadow each message the live job
+  decides about is a `live` row and nothing is written to a ticket; the first
+  came at 07:55:50 UTC, `unknown`. Each step after Shadow waits for the user's
+  go-ahead. Once on, it asks
   which team's work each of the first five customer messages on an unanswered
   ticket is, and under `apply` files the ticket — never over a category a
   person, a rule, a form's default or an agent opening the ticket chose. Its
   switch is on `/admin/categories` (`category_ai_settings`, no row = off), not
   the key, which production already holds; the threshold beside it defaults to
-  0.6 and every answer records the one it met. Turning it on is 4.2's sequence:
-  `backfill_category_ai mode=record runLabel=<label>` over the archive, then
-  `shadow` for at least two weeks while a supervisor labels a sample from
+  0.6 and every answer records the one it met. Turning it on is 4.2's sequence,
+  whose first step is done: `backfill_category_ai mode=record runLabel=<label>`
+  over the archive, then `shadow` for at least two weeks while a supervisor labels a sample from
   `/reports/category-ai` (4.2), whose figures decide the switch, then
   `apply`, then `backfill_category_ai mode=record` again under a fresh label with
   no `since=` — it has no status scope, and must reach the oldest open ticket —
@@ -1650,22 +1661,25 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
   effective within thirty seconds per instance; nothing it wrote needs undoing
   for that, and a category it set is changed like any other.
 
-- **Routing by category is built and in review, not deployed** (Stage 5.1 of
-  `plans/ticket-category-routing.md`, branch
-  `claude/jolly-noether-hxhez1-stage-5-1`; `lib/routing/`). A channel's mode on
+- **Routing by category is deployed, and routes nothing** (Stage 5.1 of
+  `plans/ticket-category-routing.md`, #432, live on all six services on
+  `1470902` since 06:35:36 UTC on 2026-10-29; `lib/routing/`). A channel's mode on
   `/admin/channels` sends a fresh ticket to the group its category names,
   holding it unassigned, with its out-of-hours reply kept back, for the routing
-  window (five minutes by default) while the classifier files it. Deployed, it
-  routes nothing: every channel reads `default_group`, and a ticket is held, or
+  window (five minutes by default) while the classifier files it. It routes
+  nothing yet: every channel reads `default_group` (read 07:59 UTC on
+  2026-10-29), and a ticket is held, or
   a `settle_routing` job queued, only on a channel an admin has moved to a
   category mode _while the classifier is in `apply`_ — so nothing happens
-  until both, and the classifier is off today. `Hand to <group>` stays out of sight
+  until both, and the classifier is in Shadow today. `Hand to <group>` stays out of sight
   too, since no category has a route group and no ticket carries a category
-  (read 10:31 UTC on 2026-10-28). Four things do change on every ticket:
+  (read 10:31 UTC on 2026-10-28, and again 08:28 UTC on 2026-10-29). Four
+  things changed on every ticket at the deploy:
   - **Assignment** locks the ticket (`FOR NO KEY UPDATE`) before the group,
     re-reads there its assignee, group and hold and whether the ticket is still
     work — open or pending, not deleted, merged or spam — and checks its guarded
-    update's result (§6.105). Read off the snapshot, as production's still is,
+    update's result (§6.105). Read off the snapshot, as production's was until
+    `1470902`,
     a resolve landing while the pick read its roster left the ticket resolved
     in somebody's name.
   - **The out-of-hours acknowledgement** goes only to an open or pending ticket,
@@ -1692,10 +1706,10 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
     review found it and it never shipped (§6.106).
 
   Every lock the router and assignment take on a ticket's row is
-  `FOR NO KEY UPDATE`, so none of them holds a customer's message back. Deploy
-  web first (it migrates `0051_routing`), then the worker and all four crons —
-  `shipblu-sla-sweep` and `shipblu-time-automations` both assign (§2) — before
-  any channel leaves `default_group`. Turning it on is the plan's Stage 5.2,
+  `FOR NO KEY UPDATE`, so none of them holds a customer's message back. It was
+  deployed web first (it migrates `0051_routing`), then the worker and all four
+  crons — `shipblu-sla-sweep` and `shipblu-time-automations` both assign (§2) —
+  so every service ran it before any channel could leave `default_group`. Turning it on is the plan's Stage 5.2,
   channel by channel through `category_shadow`, and it needs what 5.2 lists: the
   plan's 0.2 SLA reorder, 0.6's staffing (the roster paragraph above), route
   groups on the categories, and the classifier in `apply`. The readiness panel
@@ -6949,7 +6963,7 @@ dryRun=true`, then without, gives those two theirs back from their
 105.  **Auto-assignment recorded an assignment it had not made.** _2026-10-28,
       found by reading the code while building Stage 5.1 of
       `plans/ticket-category-routing.md`; not measured against production,
-      whose `ad6a062` still has it._ (Numbered on from 104, which with 92–103
+      which had it until `1470902` on 2026-10-29._ (Numbered on from 104, which with 92–103
       sits under §7's heading; moving them is a change of its own.)
       `assignConversation` locked the group, re-read the ticket's assignee with
       a plain `select`, picked an agent, and wrote the pick under
