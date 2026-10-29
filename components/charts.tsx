@@ -1,6 +1,15 @@
 import type { ReactNode } from 'react';
 import { InfoTip } from './tooltip';
-import { bands, barWidths, compact, linePath, niceCeiling, share, split } from '@/lib/charts/scale';
+import {
+  axisTicks,
+  bands,
+  barWidths,
+  compact,
+  linePath,
+  niceCeiling,
+  share,
+  split,
+} from '@/lib/charts/scale';
 
 /**
  * The two chart shapes the dashboard needs.
@@ -17,7 +26,6 @@ import { bands, barWidths, compact, linePath, niceCeiling, share, split } from '
  */
 
 const GRID = 'var(--color-chart-grid)';
-const INK = 'var(--color-text-secondary)';
 
 export type Series = { label: string; values: number[]; color: string };
 
@@ -62,14 +70,23 @@ export function Columns({
   /** Draw every nth x label — a 90-day chart cannot carry ninety of them. */
   tickEvery?: number;
 }) {
-  const plotHeight = height - 18; // room for the x labels
+  // The drawing is the plot alone: `height` still counts 18 units for the
+  // x labels, which are HTML under it now.
+  const plotHeight = height - 18;
   const peak = Math.max(0, ...series.flatMap((one) => one.values));
   const ceiling = niceCeiling(peak);
   const slots = bands(labels.length, width);
+  const ticks = axisTicks(slots, width, tickEvery);
 
   return (
     <figure className="m-0">
-      <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label={caption} className="w-full">
+      {/* One unit below the baseline, so its hairline is not cut in half. */}
+      <svg
+        viewBox={`0 0 ${width} ${plotHeight + 1}`}
+        role="img"
+        aria-label={caption}
+        className="w-full"
+      >
         {/* Two hairlines rather than a grid: the baseline the bars grow from,
             and the ceiling the axis label names. */}
         <line x1="0" y1={plotHeight} x2={width} y2={plotHeight} stroke={GRID} strokeWidth="1" />
@@ -114,30 +131,37 @@ export function Columns({
             </g>
           );
         })}
-
-        {/* The first and last labels are pinned to their slot's outer edge:
-            centred, half of each fell outside the drawing and was cut. */}
-        {slots.map((slot, index) =>
-          index % tickEvery === 0 || index === slots.length - 1 ? (
-            <text
-              key={index}
-              x={
-                index === slots.length - 1
-                  ? slot.x + slot.width
-                  : index === 0
-                    ? slot.x
-                    : slot.x + slot.width / 2
-              }
-              y={height - 4}
-              textAnchor={index === slots.length - 1 ? 'end' : index === 0 ? 'start' : 'middle'}
-              fontSize="10"
-              fill={INK}
-            >
-              {labels[index]}
-            </text>
-          ) : null,
-        )}
       </svg>
+
+      {/* The x labels, in HTML so they keep their size on a phone, where an
+          SVG's text shrank with the drawing to about 4px (`axisTicks` says
+          which and where). Each is centred on its slot and held inside the
+          chart: `translate` takes the smaller of half its own width (`%`)
+          and its distance to either edge (`cqw`, the row's width), so only a
+          label that would hang off an end moves, and only by the overhang.
+          Pinned to the end slots' outer edges instead, the first and last sat
+          half a label nearer their neighbours and touched them on a phone.
+          Left to right whatever the page's direction, as the drawing above
+          them is; hidden from a screen reader, as they were inside the
+          drawing, whose `role="img"` reads as its caption alone. */}
+      <div
+        aria-hidden
+        dir="ltr"
+        className="@container relative h-4 text-2xs text-(--color-text-secondary)"
+      >
+        {ticks.map((tick) => (
+          <span
+            key={tick.index}
+            className={`absolute top-0 whitespace-nowrap ${tick.narrow ? '' : 'max-sm:hidden'}`}
+            style={{
+              left: `${tick.at}%`,
+              translate: `max(${-tick.at}cqw, min(-50%, calc(${100 - tick.at}cqw - 100%)))`,
+            }}
+          >
+            {labels[tick.index]}
+          </span>
+        ))}
+      </div>
 
       {/* The tallest value, named rather than drawn as a ladder of gridlines.
           The axis itself stops at a round number above it — labelling *that*

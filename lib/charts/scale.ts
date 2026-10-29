@@ -69,6 +69,47 @@ export function split(band: Band, series: number, gap = 2): Band[] | null {
   }));
 }
 
+/** An x label: which slot, its centre as a percentage of the width, and whether it stays on a narrow screen. */
+export type AxisTick = { index: number; at: number; narrow: boolean };
+
+/** A chart's width on a phone: 390px less the page's gutters and the card's padding. */
+const NARROW_WIDTH_PX = 300;
+/** Room for a date label at 11px and a gap beside it. */
+const LABEL_SPACING_PX = 40;
+
+/**
+ * The x labels of a column chart: every `tickEvery`th slot and the last, at
+ * each slot's centre across the width, for labels drawn in HTML under the
+ * drawing, which keeps each one inside the chart (`Columns`).
+ *
+ * In HTML because an SVG's text shrinks with the drawing: at 390px a label
+ * drawn at 10 units in a 720-unit box rendered at about 4px. A label in HTML
+ * keeps its size, so its spacing is now the constraint, and two rules keep
+ * neighbours apart. A regular label nearer the last than `tickEvery` slots is
+ * left out: on a chart whose bars fill it, the last is held inside the edge,
+ * up to half a label to the left of its centre, so the two would touch. And
+ * where `tickEvery` slots come to less than a label's room on a phone —
+ * ninety days at every tenth is about 33px there — a narrow screen keeps
+ * every other regular label, and none within twice the spacing of the last.
+ * "Left" here is the drawing's own, which is left to right in either
+ * direction of text.
+ */
+export function axisTicks(slots: readonly Band[], width: number, tickEvery = 1): AxisTick[] {
+  const last = slots.length - 1;
+  const every = Math.max(1, Math.floor(tickEvery));
+  const thin = slots.length > 0 && (every * NARROW_WIDTH_PX) / slots.length < LABEL_SPACING_PX;
+  const ticks: AxisTick[] = [];
+  slots.forEach((slot, index) => {
+    if (index !== last && (index % every !== 0 || last - index < every)) return;
+    ticks.push({
+      index,
+      at: ((slot.x + slot.width / 2) / width) * 100,
+      narrow: index === last || !thin || ((index / every) % 2 === 0 && last - index >= every * 2),
+    });
+  });
+  return ticks;
+}
+
 /**
  * A polyline through `values`, scaled to fit `width` × `height`.
  *

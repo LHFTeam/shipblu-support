@@ -5599,27 +5599,31 @@ seeded (118 files, 1,584 tests); and every CI check.
    `/reports/csat`. All 24 captures answered 200, with no console error and
    no horizontal page scroll on the phone. The visual review confirmed 23
    findings and refuted 20. The follow-up pull request into `dev` fixes 20 of
-   them; each is named there with its file. Three are left, because each one
-   changes something shared beyond Stage 6:
-   - **A sideways-scrolling table gives no sign that it scrolls.** At 390px
-     every `/reports` breakdown shows Label, Created, Resolved and First
-     response, and hides Within SLA and CSAT inside `Table`'s own
-     `overflow-x-auto` (`components/ui.tsx`). Only a header cut mid-word
-     hints that more is there. The cure is a cue on `Table`, or a
-     phone layout for it, which every table in the console would take.
-   - **`Columns`' axis labels shrink with the drawing.** They are SVG
-     `<text>` in a 720-unit `viewBox`, so at 390px the hours and dates under
-     the dashboard's two column charts render at about 4px. `RatingBars` in
-     the same file already draws its labels in HTML for that reason
-     (`components/charts.tsx`). Every page with a `Columns` chart takes the
-     change.
+   them; each is named there with its file. Two more changed shared
+   components, so they went in after, in the same pull request:
+   - **A sideways-scrolling table now shows that it scrolls.** At 390px
+     every `/reports` breakdown hid Within SLA and CSAT inside `Table`'s
+     own `overflow-x-auto`, with only a header cut mid-word to hint at
+     them. `Table`'s background is now `.scroll-cue` (`app/globals.css`):
+     a shade on each edge with columns beyond it, in CSS alone. It is left
+     to right only, because Chromium places a `local` background in a
+     right-to-left box as though it scrolled left to right; under
+     `dir="rtl"` the cue is off, and only the console draws `Table`.
+   - **`Columns`' axis labels are HTML.** As SVG `<text>` in a 720-unit
+     `viewBox` they rendered at about 4px at 390px. Each is now centred on
+     its slot and held inside the chart by `translate` against `cqw`, and
+     `axisTicks` (`lib/charts/scale.ts`) leaves out a label that would
+     crowd the last, and on a phone every other one where a step is under
+     a label's room (ninety days at every tenth).
+
+   One is left, because it needs a decision first:
    - **A second web chat row cannot be edited.** `ChannelEditor` returns
      null for every `webchat` row, and the Chat widget card configures only
      the oldest active one. So a second row's saved mode, name, default group
      and active switch are unreachable. The readiness panel says truly that
-     such a row's mode does nothing; nothing on the page can change it. This
-     needs a decision first: should a second row be editable, deletable, or
-     refused when created?
+     such a row's mode does nothing; nothing on the page can change it.
+     Should a second row be editable, deletable, or refused when created?
+
 2. In production after the deploy, the verification rows added for Stage 6 to
    the table below. Read clean on 2026-10-29; the first nightly's rows are left.
 
