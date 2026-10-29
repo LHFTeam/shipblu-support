@@ -518,8 +518,8 @@ function StateNotice({
               <>
                 Set to route, though no ticket can enter routing there:{' '}
                 <ChannelNames channels={inert} modes />. Another row of the same kind files its
-                tickets, or its number’s owner is given them as they arrive; Admin › Channels says
-                which.{' '}
+                tickets, or its number’s owner is given them as they arrive; Settings → Channels
+                says which.{' '}
               </>
             ) : null}
             Every other active channel starts its tickets in its default group.
@@ -569,7 +569,7 @@ function ChannelNames({
  * hold a ticket at all (`files`), which only the readiness panel can explain.
  */
 function neverRoutedHint(classifier: CategoryAiMode, routingNow: RoutingChannel[]): string {
-  const rule = `A ticket enters routing when it arrives on a channel set to “${ROUTING_MODE_LABELS.category}” or “${ROUTING_MODE_LABELS.category_shadow}” under Admin › Channels, while the category classifier is in Apply under Admin › Categories.`;
+  const rule = `A ticket enters routing when it arrives on a channel set to “${ROUTING_MODE_LABELS.category}” or “${ROUTING_MODE_LABELS.category_shadow}” under Settings → Channels, while the category classifier is in Apply under Settings → Categories.`;
   const missing = [
     classifier === 'apply' ? null : `The classifier is ${CLASSIFIER_STATES[classifier]}.`,
     routingNow.length === 0
@@ -579,7 +579,7 @@ function neverRoutedHint(classifier: CategoryAiMode, routingNow: RoutingChannel[
   if (missing.length > 0) return `${rule} ${missing.join(' ')}`;
   const entering = routingNow.filter((channel) => channel.files);
   if (entering.length === 0) {
-    return `${rule} Both are set, but no ticket on ${routingNow.map((channel) => channel.name).join(', ')} can enter it: another row of its kind files its tickets, or its number’s owner is given them as they arrive. Admin › Channels says which.`;
+    return `${rule} Both are set, but no ticket on ${routingNow.map((channel) => channel.name).join(', ')} can enter it: another row of its kind files its tickets, or its number’s owner is given them as they arrive. Settings → Channels says which.`;
   }
   return `${rule} Both are set, so the next new ticket on ${entering.map((channel) => channel.name).join(', ')} enters routing.`;
 }

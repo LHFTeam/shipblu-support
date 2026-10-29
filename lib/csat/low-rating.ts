@@ -86,7 +86,7 @@ export function lowRatingEmail(alert: LowRatingAlert): EmailBody {
   const ask =
     'Open the ticket to read the conversation, and anything the customer added to the rating:';
   const why =
-    'You get this because you can see the satisfaction report and every ticket. An admin can turn these emails off under Admin → Satisfaction surveys.';
+    'You get this because you can see the satisfaction report and every ticket. An admin can turn these emails off under Settings → Satisfaction surveys.';
   // A reply goes to the support mailbox (`sendTransactionalEmail`'s Reply-To),
   // where it is a new ticket from a colleague rather than an answer to anybody.
   const noReply = 'Don’t reply to this email — open the ticket instead.';

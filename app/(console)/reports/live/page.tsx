@@ -46,6 +46,16 @@ export const dynamic = 'force-dynamic';
  *
  * It refreshes itself, which is what makes the bounded queries in
  * `lib/reports/live` a requirement rather than a preference.
+ *
+ * It lived under Settings as `/admin/dashboard` and moved here because it is a
+ * report, read rather than configured; `next.config.ts` sends the old address
+ * on, for the wallboards bookmarked on it. It kept its key, `admin.agents`,
+ * rather than taking `report.view` with the move: past the queue it shows the
+ * worker's health — jobs given up on, webhooks left unprocessed, how far the
+ * rollup reaches — and every agent's load and presence by name, and the gate
+ * has always been the admins'. Opening it to supervisors may be right, but it
+ * is a decision about who watches the machinery, for a change of its own, not a
+ * side effect of the page changing address.
  */
 export default async function DashboardPage({
   searchParams,
@@ -124,9 +134,11 @@ export default async function DashboardPage({
   );
 
   return (
-    <>
+    // Its own scroll container, as every report brings: the console shell does
+    // not scroll, and the settings layout that gave it one is no longer above it.
+    <div className="app-scroll relative h-full overflow-y-auto p-4 sm:p-6">
       <PageHeader
-        title="Dashboard"
+        title="Live dashboard"
         description="The queue as it stands, today as it happens, and how both compare with the weeks behind them."
         actions={<LiveTicker renderedAt={now.toISOString()} />}
       />
@@ -168,6 +180,6 @@ export default async function DashboardPage({
 
       {/* --------------------------------------------------------------- Health */}
       <Health health={health} now={now} />
-    </>
+    </div>
   );
 }

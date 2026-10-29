@@ -35,7 +35,7 @@ export function LocationBackfillForm({
   return (
     <div className="flex flex-col gap-6">
       <section>
-        <h1 className="mb-1 text-lg font-semibold">Shared location backfill</h1>
+        <h2 className="mb-1 text-lg font-semibold">Shared location backfill</h2>
         <p className="text-sm text-(--color-text-secondary)">
           Recovers the map pins customers shared before the console could read them. New messages
           keep their coordinates as they arrive; this is for everything that came before, where the
@@ -49,9 +49,9 @@ export function LocationBackfillForm({
 
       {counts ? (
         <section className="rounded-xl border border-(--color-border-subtle) bg-(--color-background-surface) p-(--density-card-pad)">
-          <h2 className="mb-2 text-xs font-semibold text-(--color-text-secondary)">
+          <h3 className="mb-2 text-xs font-semibold text-(--color-text-secondary)">
             Shared locations
-          </h2>
+          </h3>
           <dl className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-3">
             <div>
               <dt className="text-xs text-(--color-text-secondary)">Messages with a pin</dt>

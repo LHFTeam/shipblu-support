@@ -105,6 +105,19 @@ export default async function ReportsPage({
         actions={
           <>
             <RangeNav ranges={RANGES} current={days} href={(each) => `/reports?days=${each}`} />
+            {/*
+              `admin.agents`, the key the live dashboard kept when it moved here
+              from Settings — its page says why it did not take `report.view`
+              with the move — so it is offered only to whoever holds both.
+            */}
+            {can(agent, 'admin.agents') ? (
+              <Link
+                href={`/reports/live?days=${days}`}
+                className={buttonClass({ variant: 'secondary', size: 'sm' })}
+              >
+                Live dashboard
+              </Link>
+            ) : null}
             {can(agent, 'report.agents') ? (
               <Link
                 href={`/reports/agents?days=${days}`}

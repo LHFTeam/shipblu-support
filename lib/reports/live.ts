@@ -417,9 +417,10 @@ export type SystemHealth = {
 /**
  * Whether the machinery behind the numbers is actually running.
  *
- * This belongs on an admin dashboard rather than in reporting: a dead job is
- * invisible on every other screen — replies simply stop being sent — and the
- * first sign is usually a customer asking why nobody answered.
+ * This belongs on the live dashboard (`/reports/live`, behind `admin.agents`)
+ * rather than in the rolled-up reports: a dead job is invisible on every other
+ * screen — replies simply stop being sent — and the first sign is usually a
+ * customer asking why nobody answered.
  *
  * Bounded by the queue, which the cleanup job keeps short; completed jobs are
  * never counted.

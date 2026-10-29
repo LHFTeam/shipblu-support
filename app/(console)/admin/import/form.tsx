@@ -45,7 +45,7 @@ export function ImportForm({
   return (
     <div className="flex flex-col gap-6">
       <section>
-        <h1 className="mb-1 text-lg font-semibold">Freshdesk import</h1>
+        <h2 className="mb-1 text-lg font-semibold">Freshdesk import</h2>
         <p className="text-sm text-(--color-text-secondary)">
           Pulls categories, folders and articles from Freshdesk into the knowledge base, and records
           redirects so existing article links keep working.
@@ -59,9 +59,9 @@ export function ImportForm({
 
       {counts ? (
         <section className="rounded-xl border border-(--color-border-subtle) bg-(--color-background-surface) p-(--density-card-pad)">
-          <h2 className="mb-2 text-xs font-semibold text-(--color-text-secondary)">
+          <h3 className="mb-2 text-xs font-semibold text-(--color-text-secondary)">
             Knowledge base now holds
-          </h2>
+          </h3>
           <dl className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
             {[
               ['Categories', counts.categories],
@@ -129,7 +129,7 @@ export function ImportForm({
       </section>
 
       <section>
-        <h2 className="mb-2 text-sm font-semibold text-(--color-text-secondary)">Recent runs</h2>
+        <h3 className="mb-2 text-sm font-semibold text-(--color-text-secondary)">Recent runs</h3>
 
         {runs.length === 0 ? (
           <p className="text-sm text-(--color-text-tertiary)">No imports have been run yet.</p>
