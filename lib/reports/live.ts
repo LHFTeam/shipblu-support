@@ -39,10 +39,12 @@ import { computeDay, todayIn, totalsOf, type Bucket, type ReportingContext } fro
 /**
  * An aggregate over a timestamp column comes back as a Date from postgres.js
  * when drizzle knows the column and as a string when it does not — `min(...)`
- * inside a `filter` clause is the second case. Both are handled here rather
- * than at six call sites.
+ * inside a `filter` clause is the second case, and every column of a raw
+ * statement is the same. Both are handled here rather than at every call
+ * site: the routing report reads its raw statements through this too, so the
+ * two cannot come to disagree about what an unparsable value is.
  */
-function asDate(value: unknown): Date | null {
+export function asDate(value: unknown): Date | null {
   if (value === null || value === undefined) return null;
   const date = value instanceof Date ? value : new Date(String(value));
   return Number.isNaN(date.getTime()) ? null : date;

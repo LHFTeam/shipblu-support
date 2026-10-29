@@ -2,6 +2,7 @@ import { asc, sql, type SQL } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { CATEGORY_AI_LIVE_LABEL, channels } from '@/db/schema';
 import { CATEGORY_AI_ACTOR, type CategoryOutcome } from '@/lib/category-ai/decide';
+import { asDate } from '@/lib/reports/live';
 import { within, type ReportWindow } from '@/lib/reports/rollup';
 import { openBacklog } from '@/lib/tickets/backlog';
 import { SETTLE_ACTOR } from './apply';
@@ -110,13 +111,6 @@ function entered(window: ReportWindow, now: Date): SQL {
 
 /** The instant the recorded outcome was written (see the header). */
 const RECORDED = sql`coalesce(rd.phase_one_at, rd.decided_at)`;
-
-/** postgres.js hands a raw statement's timestamptz back as text; a typed column's as a Date. */
-function asDate(value: unknown): Date | null {
-  if (value === null || value === undefined) return null;
-  const at = value instanceof Date ? value : new Date(String(value));
-  return Number.isNaN(at.getTime()) ? null : at;
-}
 
 function asNumber(value: unknown): number | null {
   return value === null || value === undefined ? null : Number(value);
