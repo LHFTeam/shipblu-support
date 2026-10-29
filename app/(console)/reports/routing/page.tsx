@@ -481,25 +481,28 @@ function StateNotice({
         .filter((sentence): sentence is string => sentence !== null),
     ),
   ];
-  // Asked as ingest asks it: a row whose tickets reach the question of its
-  // mode (`files` — no other row files for it, no active owner is stamped on
-  // them, as the readiness panel says), then `routingStartFor`, where only a
-  // live start holds, so a shadow row holds nothing, and with the classifier
-  // off or in shadow nothing enters routing at all. Said whatever the modes,
-  // the sentence told an admin reading the page in the shadow week that new
-  // tickets were being kept back, and told one routing only an owned number
-  // what the panel beside it says never happens there.
-  const holds = routingNow.some(
+  // Asked as ingest asks it, row by row: whether its tickets reach the
+  // question of its mode at all (`files` — no other row files for it, no
+  // active owner is stamped on them, as the readiness panel says), then
+  // `routingStartFor`, where only a live start holds, so a shadow row holds
+  // nothing, and with the classifier off or in shadow nothing enters routing.
+  // The rows are named rather than "a channel set to By category": said of
+  // the mode, the sentence told an admin in the shadow week that tickets were
+  // being kept back, and with one row holding it spoke for an owned number
+  // beside it too, which the panel says never holds.
+  const holding = routingNow.filter(
     (channel) => channel.files && routingStartFor(channel.mode, classifier) === 'live',
   );
+  const filing = routingNow.filter((channel) => channel.files);
+  const inert = routingNow.filter((channel) => !channel.files);
   return (
     <>
       <Notice tone="neutral">
         The category classifier is{' '}
         <b className="text-(--color-text-primary)">{CLASSIFIER_STATES[classifier]}</b>
-        {holds ? (
+        {holding.length > 0 ? (
           <>
-            , and a new ticket on a channel set to {ROUTING_MODE_LABELS.category} is held for{' '}
+            , and a new ticket on <ChannelNames channels={holding} last="or" /> is held for{' '}
             {windowMinutes} {windowMinutes === 1 ? 'minute' : 'minutes'}.{' '}
           </>
         ) : (
@@ -509,17 +512,20 @@ function StateNotice({
           <>Every active channel starts its tickets in its default group.</>
         ) : (
           <>
-            Routing by category now:{' '}
-            {routingNow.map((channel, index) => (
-              <span key={channel.id}>
-                {index > 0 ? ', ' : ''}
-                <b className="text-(--color-text-primary)" dir="auto">
-                  {channel.name}
-                </b>{' '}
-                ({ROUTING_MODE_LABELS[channel.mode]})
-              </span>
-            ))}
-            . Every other active channel starts its tickets in its default group.
+            {filing.length > 0 ? (
+              <>
+                Routing by category now: <ChannelNames channels={filing} modes />.{' '}
+              </>
+            ) : null}
+            {inert.length > 0 ? (
+              <>
+                Set to route, though no ticket can enter routing there:{' '}
+                <ChannelNames channels={inert} modes />. Another row of the same kind files its
+                tickets, or its number’s owner is given them as they arrive; Admin › Channels says
+                which.{' '}
+              </>
+            ) : null}
+            Every other active channel starts its tickets in its default group.
           </>
         )}
       </Notice>
@@ -537,6 +543,27 @@ function StateNotice({
       ) : null}
     </>
   );
+}
+
+/** Channel names in bold, joined as a sentence would join them, each with its mode when asked. */
+function ChannelNames({
+  channels,
+  modes = false,
+  last = 'and',
+}: {
+  channels: RoutingChannel[];
+  modes?: boolean;
+  last?: 'and' | 'or';
+}) {
+  return channels.map((channel, index) => (
+    <span key={channel.id}>
+      {index === 0 ? '' : index === channels.length - 1 ? ` ${last} ` : ', '}
+      <b className="text-(--color-text-primary)" dir="auto">
+        {channel.name}
+      </b>
+      {modes ? ` (${ROUTING_MODE_LABELS[channel.mode]})` : null}
+    </span>
+  ));
 }
 
 /**

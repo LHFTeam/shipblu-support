@@ -186,6 +186,44 @@ describe('the routing report page', () => {
     expect(html).toContain('so the next new ticket on Nayera’s number enters routing.');
   });
 
+  // One row holding must not speak for the rows beside it that cannot: the
+  // sentence names the rows that hold, and the rest are listed apart.
+  it('names the rows that hold, and lists apart a row set to route that cannot', async () => {
+    await classifier('apply');
+    const [owner] = await db
+      .insert(agents)
+      .values({ name: 'Nayera', email: 'nayera@shipblu.test' })
+      .returning({ id: agents.id });
+    await channel({
+      type: 'whatsapp',
+      name: 'Nayera’s number',
+      routingMode: 'category',
+      config: { phoneNumberId: '106540352240000' },
+      ownerAgentId: owner!.id,
+    });
+    await channel({
+      name: 'Web chat',
+      routingMode: 'category',
+      createdAt: new Date('2026-01-01T00:00:00Z'),
+    });
+    await channel({
+      name: 'Second web chat',
+      routingMode: 'category',
+      createdAt: new Date('2026-02-01T00:00:00Z'),
+    });
+
+    const html = await render();
+    const [held, inert] = html.split('Set to route, though no ticket can enter routing there:');
+    expect(held).toContain(
+      'a new ticket on <span><b class="text-(--color-text-primary)" dir="auto">Web chat</b></span> is held for',
+    );
+    expect(held).toContain('Routing by category now:');
+    expect(held).not.toContain('Nayera’s number');
+    expect(held).not.toContain('Second web chat');
+    expect(inert).toContain('Nayera’s number');
+    expect(inert).toContain('Second web chat');
+  });
+
   it('warns that a category mode is idle while the classifier is not in Apply', async () => {
     await classifier('shadow');
     await channel({ name: 'Web chat', routingMode: 'category' });
