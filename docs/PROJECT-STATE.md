@@ -5,7 +5,7 @@ it is designed; **this file is about the state of the work** — what is live,
 what is merely built, what is left, and the mistakes that have already cost us
 time. Read both. Do not re-derive settled decisions.
 
-Last updated: 2026-10-28, against `main` at `ad6a062`. The figures in §1 and §5
+Last updated: 2026-10-29, against `main` at `ad6a062`. The figures in §1 and §5
 were last re-measured as a whole against production on 2026-09-20, and a
 paragraph re-read since gives its own date; where a number here disagrees with
 an older paragraph elsewhere in the file, the older one has not been re-checked.
@@ -28,6 +28,18 @@ the out-of-hours acknowledgement's guards, assignment's locks, what it re-reads
 under them and its checked update, a console group move running the rules
 before it assigns, and the transactions an agent's reply and a rule's assignment
 or move are now written in, with the rule's own timeline line inside them.
+
+**Stage 6 of that plan, reporting by category and `/reports/routing`, is built
+and in review, stacked on #432, not deployed.** It replaces #433, whose review
+it answers. Web migrates `0052_metrics_category` (`metrics_daily.category_id`
+and the one-row-per-slice key `metrics_daily_slice_key`; `db/sql/003` adds the
+one-dimension CHECK) and `0053_routing_undecided_index`. Production carries no
+category yet, so the first Stage 6 nightly writes no category row and the
+overview's By category reads all No category; the `rollup_metrics
+from=2026-08-18` rebuild waits for 4.2's `backfill_category_ai mode=apply`. Web
+goes first — its totals reads name the category null before any writer stores a
+category slice — and the rollback deletes the `metrics_daily` rows that carry a
+category before the old web returns (the plan's Stage 6 deploy).
 
 The release before those, `f761e5e`, was deployed by hand on 2026-10-26, all
 six services by 23:32 UTC: release #426, which carries Stage 3.2 (#424) — a
@@ -1696,8 +1708,13 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
   ticket at creation, and on that row in `category` mode every hold ends there
   as `rule` and the router decides nothing. That is by design — rules decide —
   and it means web chat routes by category only once those two are changed.
-  Rollback is the channel's mode back to `default_group`, which holds no new
-  ticket and lets held ones settle in their window.
+  A channel's shadow week is read on `/reports/routing` (Stage 6): outcomes per
+  channel, live and shadow never added together, time to decision against the
+  window, the fallback and taken shares over the router's own decisions, and
+  each would-be decision against the group a person later moved the ticket to.
+  Until it is deployed, `routing_decisions` answers by query. Rollback is the
+  channel's mode back to `default_group`, which holds no new ticket and lets
+  held ones settle in their window.
 
 ### 5.2 Live-provider verification
 
@@ -2656,9 +2673,17 @@ message bodies — the same reasoning as the deliberately tiny `pg_notify` paylo
 
 - ~~`metrics_daily` rows written before the totals-slice fix are inflated.~~
   Repaired. `rollup_metrics` now takes a range (`{"from","to"}`, `{"days":N}`)
-  and rebuilds those days from the source tables, and every write asserts that
-  the totals row equals the sum of its channel rows — the invariant the bug
-  broke — failing the run if it does not. To rebuild history after a change
+  and rebuilds those days from the source tables. Each day is checked before it
+  is written (`reconcileFailure`), and a day that fails is not written: it keeps
+  the rows the last run to write it left, and the run goes on to the older days
+  and then fails. The line is `[rollup_metrics] <day>: totals do not match
+<reason>, so the day keeps its previous rows`, and the reason is one of three:
+  `each other: N slices name no dimension` (a second totals row), `the sum of
+the channel slices` (the invariant the bug broke) or `the category slices,
+which sum past them in <column>` (the overview's No category would read
+  negative). A written day logs `<day>: N rows (K by category), …`: `0 by
+category` on a day that had categorised tickets is the failure no figure
+  beside it shows. To rebuild history after a change
   to the figures, `npm run job -- rollup_metrics days=90` (or `from=…`,
   `to=…`, `day=…`) runs it now: `run-job.ts` takes trailing `key=value` pairs
   as the payload, and the payload's schema refuses a mistyped key. **Read §6.98

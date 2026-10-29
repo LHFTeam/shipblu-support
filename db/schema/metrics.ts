@@ -425,11 +425,12 @@ export const agentBacklogSnapshots = pgTable(
  * rather than about the ticket.
  *
  * Deliberately its own table rather than more columns on `metrics_daily`. That
- * table's contract is four slices with null meaning "all", and `reconciles()`
- * asserts the totals row equals the sum of the channel slices. A login time has
- * no channel, so it would either break that assertion or force three of every
- * four rows to carry meaningless zeros — and the assertion is the only thing
- * standing between a double-counting bug and a report that merely looks busy.
+ * table's contract is one slice per row — the totals, or one dimension named
+ * and null meaning "all" in the rest — and `reconcileFailure()` refuses a day
+ * whose totals row is not the sum of its channel slices. A login time has no
+ * channel, so it would either break that check or force every row but the
+ * agent's to carry meaningless zeros — and that check is what stands between
+ * a double-counting bug and a report that merely looks busy.
  *
  * It holds only what `metrics_daily` does not. Resolved counts, response times,
  * SLA attainment and CSAT are already computed per agent there, by the same
@@ -520,8 +521,9 @@ export const agentMetricsDaily = pgTable(
     computedAt: timestamp('computed_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
-    // Both dimensions are NOT NULL here, unlike `metrics_daily`, so a plain
-    // unique index really is unique and the rollup can upsert onto it.
+    // Both dimensions are NOT NULL here, so a plain unique index is unique as
+    // it stands; `metrics_daily`'s key, over columns that are mostly null,
+    // needs NULLS NOT DISTINCT to be (`metrics_daily_slice_key`).
     uniqueIndex('agent_metrics_daily_dimensions_idx').on(t.day, t.agentId),
     index('agent_metrics_daily_day_idx').on(t.day),
   ],
@@ -546,9 +548,9 @@ export const agentMetricsDaily = pgTable(
  *
  * `channel` is NOT NULL with no "all" slice — the opposite choice from
  * `metrics_daily`, deliberately. There is no totals row to reconcile against, so
- * nulls buy nothing, and NOT NULL makes the unique index actually unique, which
- * sidesteps the NULL-distinctness trap that forces the delete-and-insert rebuild
- * next door. The page sums whichever channels it is showing.
+ * nulls buy nothing, and NOT NULL makes a plain unique index unique, where
+ * `metrics_daily`'s key needs NULLS NOT DISTINCT to be. The page sums whichever
+ * channels it is showing.
  *
  * **Everything here is recomputable**, which is what makes a delete-and-insert
  * rebuild safe: `conversations.created_at` is immutable and

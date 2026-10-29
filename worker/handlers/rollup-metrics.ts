@@ -31,9 +31,11 @@ const log = logger('rollup_metrics');
  * dashboard also runs against today. This handler is only the storage half:
  * which days to recompute, and writing them.
  *
- * It writes two tables. `metrics_daily` measures tickets, sliced five ways;
- * `agent_metrics_daily` measures the people, one row per agent per day. They are
- * separate tables for reasons `db/schema/metrics.ts` sets out, but they are
+ * It writes four tables and a marker. `metrics_daily` measures tickets, sliced
+ * five ways; `agent_metrics_daily` measures the people, one row per agent per
+ * day; `subcategory_metrics_daily` and `root_cause_metrics_daily` what the
+ * tickets were about and why; and `rollup_days` records that the day was
+ * computed. They are separate tables for reasons `db/schema/metrics.ts` sets out, but they are
  * deliberately one job: two nightly jobs would be two answers to "which day is
  * this", and the first daylight-saving change or late-running cron would make
  * an agent's shift and the tickets they closed during it land on different

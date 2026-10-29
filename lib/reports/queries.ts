@@ -78,8 +78,8 @@ function inRange(range: Range) {
 }
 
 /**
- * The totals slice: every dimension null, all five of them — one row per day
- * (`metrics_daily_slice_key`).
+ * The totals slice: every dimension null, all four of them — one row per day
+ * (`metrics_daily_slice_key`, over the day and the four).
  *
  * One predicate for every reader of the totals, because each slice is the
  * totals row with one dimension filled in (`metrics_daily_one_dimension`), so
@@ -87,8 +87,9 @@ function inRange(range: Range) {
  * slices. Leaving out the category is the one that would go unseen: every
  * categorised ticket counted twice in every headline figure — this page, the
  * CSAT page and its export, the dashboard's History — and `reconciles()`
- * cannot see it, since it checks what is written, not what is read. A sixth
- * dimension is added here, once.
+ * cannot see it, since it checks what is written, not what is read. A fifth
+ * dimension is added here once, in the commit that adds it to `DIMENSIONS`
+ * (`lib/reports/rollup.ts`), the key and the CHECK.
  */
 export const TOTALS_SLICE = and(
   isNull(metricsDaily.groupId),
