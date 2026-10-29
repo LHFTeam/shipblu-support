@@ -118,7 +118,9 @@ export const webchatChannel = cache(async () => {
   const rows = await db
     .select({
       id: channels.id,
+      type: channels.type,
       defaultGroupId: channels.defaultGroupId,
+      routingMode: channels.routingMode,
       // Read here rather than in a second query because every caller that wants
       // the settings already needs the row: the FAQ list resolves the folder for
       // its locale out of this column, through `parseWidgetConfig`.

@@ -21,6 +21,7 @@ import { afterInboundMessage, afterMessageStored } from './lifecycle';
 import { reopenResolved } from './reopen';
 import { requireDefaultOpenStatusId } from './statuses';
 import { logger } from '@/lib/log';
+import { planRouting, routingWindowValues, startRouting } from '@/lib/routing/start';
 
 const log = logger('ingest');
 
@@ -132,11 +133,21 @@ export async function ingestInboundEmail(
   const body = readEmailBody(email);
 
   const emailChannel = await defaultEmailChannel();
+  // Before the transaction: it reads the classifier's switch, and the insert
+  // transaction must read nothing on the pool (`lib/routing/start.ts`).
+  const routing = existingConversation ? null : await planRouting(emailChannel);
+  // A bounce or autoresponder is filed but kept out of the working queue, and
+  // nobody routes one.
+  const isSpam = automation.isBounce || automation.isAutoReply;
 
   const result = await db.transaction(async (tx) => {
     let conversationId: string;
     let conversationNumber: number;
     let createdConversation = false;
+    // When this mail was processed, which a routing window counts from — not
+    // `receivedAt`, which can be hours earlier after a worker pause. One
+    // instant for the window on the insert and the row and job beside it.
+    const now = new Date();
 
     if (existingConversation) {
       conversationId = existingConversation.id;
@@ -166,8 +177,10 @@ export async function ingestInboundEmail(
           subject: stripSubjectPrefixes(email.subject) || UNNAMED_SUBJECT.email,
           requesterContactId: contactId,
           groupId: emailChannel?.defaultGroupId ?? null,
-          // A bounce or autoresponder is filed but kept out of the working queue.
-          isSpam: automation.isBounce || automation.isAutoReply,
+          isSpam,
+          // Held for the router from the insert, on a mailbox that routes by
+          // category (`lib/routing/start.ts`).
+          ...routingWindowValues(routing, { isSpam }, now),
           // The ticket began when the mail reached us, however late the worker
           // got to it. The first-response and resolution targets count from
           // this column, so leaving it on the insert's `now()` would excuse a
@@ -219,6 +232,23 @@ export async function ingestInboundEmail(
       .returning({ id: messages.id });
 
     const messageId = insertedMessage[0]!.id;
+
+    // The routing row and the window's job, naming the mail that opened the
+    // ticket the insert held. Not for one filed as spam: nobody routes a
+    // bounce.
+    if (createdConversation) {
+      await startRouting(
+        tx,
+        routing,
+        {
+          conversationId,
+          messageId,
+          groupId: emailChannel?.defaultGroupId ?? null,
+          isSpam,
+        },
+        now,
+      );
+    }
 
     // An autoresponder is not the customer writing, so on a ticket that already
     // exists it does not move the time the customer last wrote — only the time
@@ -336,7 +366,13 @@ async function defaultEmailChannel() {
   // back either — so which group a new ticket starts in would depend on the
   // plan Postgres happened to pick. Oldest wins, the row that has been routing.
   const rows = await db
-    .select({ id: channels.id, defaultGroupId: channels.defaultGroupId })
+    .select({
+      id: channels.id,
+      type: channels.type,
+      config: channels.config,
+      routingMode: channels.routingMode,
+      defaultGroupId: channels.defaultGroupId,
+    })
     .from(channels)
     .where(and(eq(channels.type, 'email'), eq(channels.isActive, true)))
     .orderBy(asc(channels.createdAt), asc(channels.id))

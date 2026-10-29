@@ -15,6 +15,7 @@ import { allLimited } from '@/lib/concurrency';
 import { env } from '@/lib/env';
 import { formatDateTime } from '@/lib/format';
 import { listFolderOptions } from '@/lib/kb/admin';
+import { routingReadiness } from '@/lib/routing/readiness';
 import { isMetaChannel } from '@/lib/tickets/channel-policy';
 import {
   canRequestSync,
@@ -46,6 +47,7 @@ import {
   WebchatSettings,
   type OwnerChoice,
 } from './forms';
+import { RoutingBadge, RoutingReadinessPanel } from './routing-readiness';
 import { NewWhatsAppAccount, WhatsAppAccountEditor, type WhatsAppAccountRow } from './waba-forms';
 
 export const dynamic = 'force-dynamic';
@@ -57,12 +59,18 @@ export default async function ChannelsPage() {
   // offers the button, the copy buttons and "forget" only to those who have it.
   const canConnect = can(agent, 'admin.channels.connect');
 
-  // Three at a time rather than all nine at once. The layouts' own reads run
-  // beside these, and nine together would take every one of the gate's eight
+  // One clock for every sentence on the page, so the badge on a row and the
+  // card above it cannot disagree about whether a window has closed — nor the
+  // routing panel about who is accepting tickets.
+  const now = new Date();
+
+  // Three at a time rather than all ten at once. The layouts' own reads run
+  // beside these, and ten together would take every one of the gate's eight
   // places from every other request for the length of a render. On 2026-10-11,
   // before the gate, the onboarding's click set off two of these renders at
   // once on a pool of ten that had already lost connections, and that is where
-  // the freeze's last stretch began (§6.91).
+  // the freeze's last stretch began (§6.91). The routing panel's reads are one
+  // lane of the three, a query at a time.
   const [
     channelList,
     groupList,
@@ -73,6 +81,7 @@ export default async function ChannelsPage() {
     onboardings,
     agentList,
     ownershipList,
+    routing,
   ] = await allLimited(3, [
     () => listChannelsForAdmin(),
     () => listGroupNames(),
@@ -83,14 +92,12 @@ export default async function ChannelsPage() {
     () => listLatestOnboardings(),
     () => listActiveAgents(),
     () => numberOwnership(),
+    () => routingReadiness(now),
   ]);
 
   // Read on the server, where the variables are. Not ready is still a page:
   // the card names what is missing and where to set it.
   const readiness = coexistenceReadiness();
-  // One clock for every sentence on the page, so the badge on a row and the
-  // card above it cannot disagree about whether a window has closed.
-  const now = new Date();
 
   // The same rule `saveChannel` validates against, so the picker cannot offer a
   // folder the action would refuse.
@@ -114,6 +121,12 @@ export default async function ChannelsPage() {
   const ownerChoices: OwnerChoice[] = agentList.map(({ id, name, email }) => ({ id, name, email }));
   const ownershipById = new Map(ownershipList.map((row) => [row.channelId, row]));
   const templatesByAccount = new Map(templateCounts.map((row) => [row.accountId, row]));
+  // Each row's saved routing mode, which the three forms that save a channel
+  // open on, and what the router makes of it.
+  const routingById = new Map(routing.channels.map((row) => [row.id, row]));
+  const savedRoutingMode = (channelId: string) =>
+    routingById.get(channelId)?.column ?? 'default_group';
+  const classifierMode = routing.classifier.mode;
 
   // Spread whole into a client component's props, and so into the RSC payload:
   // safe only because `listAccountsForAdmin` names its columns. A column it
@@ -306,6 +319,7 @@ export default async function ChannelsPage() {
                 <span className="font-medium">{channel.name}</span>
                 {!channel.isActive ? <Badge tone="neutral">Inactive</Badge> : null}
                 {coexistence ? <CoexistenceBadges config={channel.config} now={now} /> : null}
+                <RoutingBadge channel={routingById.get(channel.id)} />
                 {/* A number with no account sends with the default one's
                     credential. Fine while there is exactly one account, and a
                     real hazard once there are two — so it is only called out
@@ -346,9 +360,10 @@ export default async function ChannelsPage() {
                     })
                   : null}
                 <ChannelEditor
-                  channel={channel}
+                  channel={{ ...channel, routingMode: savedRoutingMode(channel.id) }}
                   groups={groupList}
                   whatsappAccounts={accountChoices}
+                  classifierMode={classifierMode}
                 />
                 {reconnectable && canConnect ? (
                   <ConnectBusinessAppNumber
@@ -374,15 +389,26 @@ export default async function ChannelsPage() {
                 name: webchat.name,
                 defaultGroupId: webchat.defaultGroupId,
                 faqFolders: parseWidgetConfig(webchat.config).faqFolders,
+                routingMode: savedRoutingMode(webchat.id),
               }}
               groups={groupList}
               folders={faqFolders}
+              classifierMode={classifierMode}
             />
           </Card>
         ) : null}
 
-        <ChannelForm groups={groupList} whatsappAccounts={accountChoices} />
+        <ChannelForm
+          groups={groupList}
+          whatsappAccounts={accountChoices}
+          classifierMode={classifierMode}
+        />
       </section>
+
+      <RoutingReadinessPanel
+        readiness={routing}
+        canEditCategories={can(agent, 'admin.categories')}
+      />
 
       {/* The groups that the default-group picker above chooses between, listed
           so that "which group?" can be answered without leaving the page.

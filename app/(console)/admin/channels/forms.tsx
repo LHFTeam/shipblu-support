@@ -1,7 +1,19 @@
 'use client';
 
 import { useState } from 'react';
-import { Badge, Button, ErrorText, Field, Input, Select, SuccessText } from '@/components/ui';
+import {
+  Badge,
+  Button,
+  ErrorText,
+  Field,
+  Input,
+  Notice,
+  Select,
+  SuccessText,
+} from '@/components/ui';
+import type { CategoryAiMode } from '@/lib/category-ai/modes';
+import { ROUTING_MODES, type RoutingMode } from '@/lib/routing/mode';
+import { ROUTING_MODE_LABELS, routingLockReason } from '@/lib/routing/mode-copy';
 import { parseCoexistence } from '@/lib/whatsapp/coexistence';
 import {
   isCommentChannel,
@@ -33,6 +45,8 @@ export type ChannelRow = {
   config: Record<string, unknown>;
   defaultGroupId: string | null;
   whatsappAccountId: string | null;
+  /** As saved; `routingModeOf` decides what the router makes of it. */
+  routingMode: RoutingMode;
 };
 
 function editableType(type: ChannelRow['type']): ChannelType | null {
@@ -46,9 +60,11 @@ const isWhatsAppType = (type: ChannelType) => type === 'whatsapp' || type === 'w
 export function ChannelForm({
   groups,
   whatsappAccounts,
+  classifierMode,
 }: {
   groups: Choice[];
   whatsappAccounts: Choice[];
+  classifierMode: CategoryAiMode;
 }) {
   const { state, key, form } = useActionForm(saveChannel, INITIAL);
   const [type, setType] = useState<ChannelType>('email');
@@ -92,7 +108,13 @@ export function ChannelForm({
         <GroupField groups={groups} />
       </div>
 
+      {/* A row of its own: five controls already share the one above. */}
+      <div className="flex flex-col gap-3 sm:flex-row">
+        <RoutingModeField type={type} classifierMode={classifierMode} />
+      </div>
+
       <ErrorText>{state.error}</ErrorText>
+      <SavedNotice notice={state.notice} />
       <SubmitButton className="self-start" idle="Add channel" busy="Saving…" />
     </form>
   );
@@ -118,10 +140,12 @@ export function ChannelEditor({
   channel,
   groups,
   whatsappAccounts,
+  classifierMode,
 }: {
   channel: ChannelRow;
   groups: Choice[];
   whatsappAccounts: Choice[];
+  classifierMode: CategoryAiMode;
 }) {
   const { state, form } = useActionForm(saveChannel, INITIAL);
   const [open, setOpen] = useState(false);
@@ -187,7 +211,17 @@ export function ChannelEditor({
         <GroupField groups={groups} defaultValue={channel.defaultGroupId} />
       </div>
 
+      <div className="flex flex-col gap-3 sm:flex-row">
+        <RoutingModeField
+          type={type}
+          config={channel.config}
+          defaultValue={channel.routingMode}
+          classifierMode={classifierMode}
+        />
+      </div>
+
       <ErrorText>{state.error}</ErrorText>
+      <SavedNotice notice={state.notice} />
 
       <div className="flex items-center gap-3">
         <SubmitButton idle="Save channel" busy="Saving…" />
@@ -520,6 +554,95 @@ function GroupField({ groups, defaultValue }: { groups: Choice[]; defaultValue?:
     </Field>
   );
 }
+/**
+ * How a channel's new tickets find their group, on every form that saves a
+ * channel row.
+ *
+ * Uncontrolled, and absent from the submission wherever the mode cannot
+ * change: `saveChannel` reads a missing `routingMode` as "unchanged", so a
+ * row that can never route — a number on the Business app, the bot — shows a
+ * disabled select (which submits nothing) with the reason under it, rather
+ * than no control at all, which would leave an admin wondering where it went.
+ * The reason is `routingLockReason`'s, the sentence the action refuses with.
+ *
+ * The hint names an idle classifier whatever is selected: the select is
+ * uncontrolled, so a hint following it would need state the form-reset rules
+ * are written to keep out of these forms.
+ */
+function RoutingModeField({
+  type,
+  config,
+  defaultValue = 'default_group',
+  classifierMode,
+  className = 'sm:w-56',
+}: {
+  type: ChannelType;
+  config?: Record<string, unknown>;
+  defaultValue?: RoutingMode;
+  classifierMode: CategoryAiMode;
+  className?: string;
+}) {
+  const locked = routingLockReason({ type, config: config ?? {} });
+  const idle =
+    classifierMode === 'apply'
+      ? undefined
+      : `Both category modes hold and record nothing until the category classifier is in Apply on /admin/categories; it is ${classifierMode === 'off' ? 'off' : 'in Shadow'} now.`;
+
+  return (
+    <Field
+      label="Routing"
+      className={className}
+      hint={locked ?? idle}
+      explain={
+        <>
+          How a new ticket from this channel finds its group. <strong>Default group</strong>: it
+          starts in the default group and is assigned there, as always. <strong>By category</strong>
+          : assignment and the out-of-hours reply wait for the routing window set on the Categories
+          page while the category classifier files the ticket, which then moves once, to its
+          category&rsquo;s route group — an automation rule that assigns or moves the ticket first
+          decides instead. <strong>By category — shadow</strong>: nothing waits or moves; where each
+          ticket would have gone is recorded, to compare with what the team did. Both category modes
+          need the classifier in Apply. A number on the WhatsApp Business app and the customer bot
+          never route.
+        </>
+      }
+    >
+      {/* Named outright: `Field` puts its InfoTip button inside the label, and
+          a label with no `for` names its first labelable descendant — the
+          button — so the select would reach a screen reader unnamed. Keyed on
+          which of the two it is, so the add form switching to the bot and
+          back starts the open one again rather than reusing the element. */}
+      {locked ? (
+        <Select key="locked" aria-label="Routing" defaultValue="default_group" disabled>
+          <option value="default_group">{ROUTING_MODE_LABELS.default_group}</option>
+        </Select>
+      ) : (
+        <Select key="open" name="routingMode" aria-label="Routing" defaultValue={defaultValue}>
+          {ROUTING_MODES.map((mode) => (
+            <option key={mode} value={mode}>
+              {ROUTING_MODE_LABELS[mode]}
+            </option>
+          ))}
+        </Select>
+      )}
+    </Field>
+  );
+}
+
+/**
+ * What a save has to say beyond succeeding — that the mode it saved is idle —
+ * rendered from the answer rather than inside the fields, so the add form's
+ * remount on success does not take it away.
+ */
+function SavedNotice({ notice }: { notice?: string }) {
+  if (!notice) return null;
+  return (
+    <Notice tone="warning" icon>
+      {notice}
+    </Notice>
+  );
+}
+
 export type FaqFolderChoice = {
   id: string;
   name: string;
@@ -545,15 +668,18 @@ export function WebchatSettings({
   channel,
   groups,
   folders,
+  classifierMode,
 }: {
   channel: {
     id: string;
     name: string;
     defaultGroupId: string | null;
     faqFolders: Record<string, string>;
+    routingMode: RoutingMode;
   };
   groups: { id: string; name: string }[];
   folders: FaqFolderChoice[];
+  classifierMode: CategoryAiMode;
 }) {
   const { state, form } = useActionForm(saveChannel, INITIAL);
   const [editing, setEditing] = useState(false);
@@ -640,7 +766,18 @@ export function WebchatSettings({
         </Select>
       </Field>
 
+      {/* Carried for the same reason, though an absent mode would only be
+          left as it is: a control missing from one of the three forms that
+          save this row is a setting the widget's own screen cannot show. */}
+      <RoutingModeField
+        type="webchat"
+        defaultValue={channel.routingMode}
+        classifierMode={classifierMode}
+        className="sm:w-56"
+      />
+
       <ErrorText>{state.error}</ErrorText>
+      <SavedNotice notice={state.notice} />
 
       <div className="flex gap-2">
         <SubmitButton idle="Save widget" busy="Saving…" />

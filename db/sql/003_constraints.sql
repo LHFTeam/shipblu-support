@@ -326,3 +326,39 @@ BEGIN
       );
   END IF;
 END $$;
+
+-- --------------------------------------------------------------------------
+-- A decided routing row says what was decided, and when
+--
+-- `routing_decisions` is the record the timeline's `routed` event summarises
+-- and the routing report reads, and `decided` is its last stage
+-- (plans/ticket-category-routing.md, decision 5). A row decided with no
+-- outcome is counted under no outcome at all, and one with no decided_at drops
+-- out of time to decision — the figure the shadow week exists to measure, and
+-- the one the window is tuned from. Neither failure says anything: the report
+-- would simply be short.
+--
+-- Every writer in lib/routing sets them together: phase one writes the outcome
+-- with the stage, and decided_at with it when nothing is owed after it; the
+-- end of phase three coalesces decided_at over the outcome phase one wrote;
+-- endHold writes an outcome when there is none yet and coalesces decided_at.
+-- This is the half that also holds for an UPDATE nobody wrote a code path for
+-- — a hand-run repair of a stuck window is the likely one — and for a writer
+-- added later that moves the stage and forgets one of the two.
+--
+-- The enum value is safe to name here: db/sql replays after the migrations
+-- commit, so routing_stage already exists.
+-- --------------------------------------------------------------------------
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'routing_decisions_decided_complete'
+      AND conrelid = 'public.routing_decisions'::regclass
+  ) THEN
+    ALTER TABLE routing_decisions
+      ADD CONSTRAINT routing_decisions_decided_complete CHECK (
+        stage <> 'decided' OR (outcome IS NOT NULL AND decided_at IS NOT NULL)
+      );
+  END IF;
+END $$;

@@ -5,10 +5,14 @@ import { db } from '@/db/client';
 import { channels, whatsappAccounts, groups } from '@/db/schema';
 import { requirePermission } from '@/lib/auth/guard';
 import { can } from '@/lib/auth/permissions';
+import { readCategoryAiSettings } from '@/lib/category-ai/settings';
 import { ok } from '@/lib/http/action-state';
 import { text, uuidField } from '@/lib/http/form-data';
 import { allow } from '@/lib/http/rate-limit';
+import { logger } from '@/lib/log';
 import { enqueue } from '@/lib/queue';
+import { isRoutingMode, routingModeOf, type RoutingMode } from '@/lib/routing/mode';
+import { idleRoutingSentence, routingLockReason } from '@/lib/routing/mode-copy';
 import { isMetaChannel } from '@/lib/tickets/channel-policy';
 import { parseTokenEnvVar } from '@/lib/whatsapp/accounts';
 import {
@@ -38,6 +42,8 @@ import { listFolderOptions } from '@/lib/kb/admin';
 import { LOCALES } from '@/lib/kb/locale';
 import { resolveFaqFolders } from '@/lib/widget/config';
 import { isChannelType } from './channel-types';
+
+const log = logger('admin_channels');
 
 // --- WhatsApp business accounts ---------------------------------------------
 
@@ -229,6 +235,19 @@ export async function saveChannel(_state: AdminState, formData: FormData): Promi
   const id = canonicalUuid(rawId);
   const name = text(formData, 'name');
 
+  // How new tickets find their group. An absent field means "unchanged" — the
+  // opposite of the default group's convention below, on purpose: three forms
+  // post here, and a form that does not carry the mode (or a disabled select,
+  // which submits nothing) must not quietly take a channel off routing by
+  // category while an admin renames it. So `formData.get`, which tells absent
+  // from empty, and not `text()`, which does not. Parsed before anything is
+  // read: a value no form offers is a stale page or a forged one.
+  const rawMode = formData.get('routingMode');
+  const routingMode = rawMode === null ? undefined : String(rawMode);
+  if (routingMode !== undefined && !isRoutingMode(routingMode)) {
+    return { error: 'Unknown routing mode — reload the page and try again' };
+  }
+
   // On an edit the type is the stored row's, never the form's. Everything
   // below rebuilds `config` and the account link from the type, so a request
   // naming `email` for a WhatsApp channel's id would otherwise wipe its phone
@@ -236,7 +255,11 @@ export async function saveChannel(_state: AdminState, formData: FormData): Promi
   // and the same request could rewrite a `portal` or `api` row that no form
   // edits. The form's field only says what to create.
   let type = String(formData.get('type') ?? '');
-  let existing: { config: Record<string, unknown>; whatsappAccountId: string | null } | null = null;
+  let existing: {
+    config: Record<string, unknown>;
+    whatsappAccountId: string | null;
+    routingMode: RoutingMode;
+  } | null = null;
   if (rawId) {
     if (!id) return { error: 'That form is out of date — reload the page and try again' };
 
@@ -245,6 +268,7 @@ export async function saveChannel(_state: AdminState, formData: FormData): Promi
         type: channels.type,
         config: channels.config,
         whatsappAccountId: channels.whatsappAccountId,
+        routingMode: channels.routingMode,
       })
       .from(channels)
       .where(eq(channels.id, id))
@@ -284,6 +308,17 @@ export async function saveChannel(_state: AdminState, formData: FormData): Promi
   // ordinary WhatsApp tickets the team can reply to. Required, not defaulted.
   if (type === 'whatsapp_bot' && !phoneNumberId) {
     return { error: 'A customer bot channel needs the phone number ID it receives on' };
+  }
+
+  // A category mode on a row the router never routes — a number on the
+  // Business app, or the bot — is refused rather than saved, so the column
+  // never says one thing while `routingModeOf` acts on another. Asked of the
+  // stored config, read above; a new row is never a coexistence number, which
+  // only the onboarding job creates. The write below keeps the same promise
+  // against a number connected after this read.
+  if (routingMode && routingMode !== 'default_group') {
+    const locked = routingLockReason({ type, config: existing?.config ?? {} });
+    if (locked) return { error: `This channel stays on its default group. ${locked}` };
   }
 
   const isWhatsApp = type === 'whatsapp' || type === 'whatsapp_bot';
@@ -377,11 +412,17 @@ export async function saveChannel(_state: AdminState, formData: FormData): Promi
     // a rename used to wipe the connection, and copying it from the read above
     // wrote back a snapshot over every update that landed since.
     // `whatsappEditColumns` keeps both as the row holds them when the UPDATE
-    // runs, and writes the form's for any other number.
+    // runs, and writes the form's for any other number — and keeps a number
+    // connected since this read on its default group whatever mode the form
+    // sent. Absent, the mode is left as it is.
     const columns =
       type === 'whatsapp'
-        ? whatsappEditColumns({ phoneNumberId, whatsappAccountId: account })
-        : { config, whatsappAccountId: account };
+        ? whatsappEditColumns({ phoneNumberId, whatsappAccountId: account, routingMode })
+        : {
+            config,
+            whatsappAccountId: account,
+            ...(routingMode === undefined ? {} : { routingMode }),
+          };
     await db
       .update(channels)
       .set({ name, defaultGroupId, ...columns, updatedAt: new Date() })
@@ -393,11 +434,42 @@ export async function saveChannel(_state: AdminState, formData: FormData): Promi
       defaultGroupId,
       config,
       whatsappAccountId: account,
+      // Absent: the column's default, `default_group`.
+      ...(routingMode ? { routingMode } : {}),
     });
   }
 
   revalidatePath('/admin/channels');
-  return ok();
+  const notice = await idleRoutingNotice(
+    routingModeOf({
+      type,
+      config: existing?.config ?? config,
+      routingMode: routingMode ?? existing?.routingMode ?? 'default_group',
+    }),
+  );
+  return notice ? { ...ok(), notice } : ok();
+}
+
+/**
+ * The warning a channel that routes by category earns while the classifier is
+ * not in `apply`: saved, and holding or recording nothing, because routing
+ * starts only then (`routingStartFor`). Said on every save of such a row — a
+ * rename included — since the admin is looking at it.
+ *
+ * Read uncached, as `/admin/categories` reads it: the memo can be thirty
+ * seconds behind a switch the admin has just made in another tab. After the
+ * write, and never allowed to throw — the change is saved, and a failed read
+ * here would turn it into the form's "connection lost" sentence.
+ */
+async function idleRoutingNotice(mode: RoutingMode): Promise<string | null> {
+  if (mode === 'default_group') return null;
+  try {
+    const settings = await readCategoryAiSettings();
+    return idleRoutingSentence(mode, settings.mode);
+  } catch (error) {
+    log.warn('could not read the category classifier after saving a channel', error);
+    return 'Saved, but the category classifier’s switch could not be read: routing by category holds nothing unless it is in Apply on /admin/categories.';
+  }
 }
 
 // --- Who answers for a number -----------------------------------------------

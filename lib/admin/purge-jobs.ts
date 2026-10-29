@@ -106,7 +106,7 @@ export async function purgeJobs(
         ),
       )!,
       and(
-        eq(jobs.type, 'send_csat' satisfies JobType),
+        inArray(jobs.type, ['send_csat', 'settle_routing'] satisfies JobType[]),
         inArray(sql`${jobs.payload}->>'conversationId'`, conversationIds),
       )!,
       // A low rating's alert names its survey, which cascades with the ticket.

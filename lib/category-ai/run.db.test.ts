@@ -1,22 +1,34 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { and, asc, eq, inArray, sql } from 'drizzle-orm';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { PgDatabase } from 'drizzle-orm/pg-core';
+import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 import { db } from '@/db/client';
 import {
   CATEGORY_AI_LIVE_LABEL,
   agents,
   aiCategoryRuns,
   autoResponses,
+  automationRules,
+  channels,
   contacts,
   conversationEvents,
   conversations,
+  groupMembers,
+  groups,
   jobs,
   messages,
+  routingDecisions,
   ticketCategories,
   ticketStatuses,
 } from '@/db/schema';
 import { maybeSendAutoResponse } from '@/lib/auto-response';
 import { setConversationCategory } from '@/lib/categories/write';
 import { resetEnvCache } from '@/lib/env';
+import { settleRouting } from '@/lib/routing/apply';
+import { beginRouting } from '@/lib/routing/begin';
+import { endHold } from '@/lib/routing/end-hold';
+import { isHeld } from '@/lib/routing/hold';
+import { routingWindowValues, startRouting } from '@/lib/routing/start';
 import { stubFetch } from '@/lib/testing/fetch';
 import { withCleanDatabase } from '@/lib/testing/db';
 import { holdNextTransaction, untilWaitingOnALock } from '@/lib/testing/hold-transaction';
@@ -1019,3 +1031,714 @@ describe('the tables', () => {
     }
   });
 });
+
+/**
+ * What an applied answer owes once it has committed, by where the ticket's
+ * routing stands (`plans/ticket-category-routing.md`, decision 5):
+ *
+ * - live and `pending` — the creation pass has not begun routing, and will
+ *   route on the category itself, after the `on_create` rules: the answer
+ *   writes the category and nothing else;
+ * - live and `holding` — the router decides now, and runs the one `on_update`
+ *   pass between its decision and the assignment, so the classifier runs none
+ *   of its own;
+ * - shadow — the would-be decision is recorded once the creation pass has
+ *   begun, and the rest is the relabel, as though routing did not exist;
+ * - never routed, or decided already — the relabel: the SLA policy chosen
+ *   again, one `on_update` pass and auto-assignment.
+ *
+ * An `on_update` rule that tags the ticket counts the passes: it writes a
+ * `tagged` event every time it runs, so one event is one pass. The mailbox's
+ * team and Sales, the category's route group, each have one agent who takes
+ * tickets at any hour.
+ */
+describe('classifyMessageCategory, on a ticket routing by category', () => {
+  let errors: MockInstance;
+
+  beforeEach(async () => {
+    // The file's own spy, silent as it was; held here to read it afterwards.
+    errors = vi.spyOn(console, 'error');
+    await db.insert(automationRules).values({
+      name: 'Tag what Jev read',
+      trigger: 'on_update',
+      conditions: { all: [] },
+      actions: [{ type: 'add_tags', tags: ['jev'] }],
+    });
+  });
+
+  afterEach(() => {
+    // Every step after the commit is best-effort and logs a failure rather
+    // than throwing, which would read here as the step not being owed.
+    expect(errors.mock.calls.map((call) => String(call[0]))).toEqual([]);
+  });
+
+  let people = 0;
+
+  async function staffed(name: string): Promise<{ group: string; agent: string }> {
+    people += 1;
+    const [agent] = await db
+      .insert(agents)
+      .values({
+        name: `${name} agent`,
+        email: `routing${people}@shipblu.test`,
+        presence: 'online',
+        lastSeenAt: new Date(),
+      })
+      .returning({ id: agents.id });
+    const [group] = await db
+      .insert(groups)
+      .values({ name, assignmentStrategy: 'round_robin', assignWithinHoursOnly: false })
+      .returning({ id: groups.id });
+    await db.insert(groupMembers).values({ groupId: group!.id, agentId: agent!.id });
+    return { group: group!.id, agent: agent!.id };
+  }
+
+  /** A mailbox routing by category in Customer Care, and sales routed to Sales. */
+  async function routing() {
+    const home = await staffed('Customer Care');
+    const sales = await staffed('Sales');
+    await db
+      .update(ticketCategories)
+      .set({ routeGroupId: sales.group })
+      .where(eq(ticketCategories.key, 'sales'));
+    const [mailbox] = await db
+      .insert(channels)
+      .values({
+        type: 'email',
+        name: 'Support mail',
+        config: {},
+        defaultGroupId: home.group,
+        routingMode: 'category',
+      })
+      .returning({ id: channels.id });
+    return { home, sales, channel: mailbox!.id };
+  }
+
+  /**
+   * A new mail on the mailbox, its opening message the one Jev is asked
+   * about: started as the insert starts it — a live one's window on the
+   * ticket's own insert (`routingWindowValues`), then the row and the job
+   * (`startRouting`), from one `now` — and begun as the creation pass begins
+   * it unless `stage` stops it at the insert. A shadow one carries no window,
+   * as ingest gives it none. With `routed: false`, a ticket on the same
+   * mailbox that never entered routing, and carries no window either.
+   */
+  async function mailTicket(
+    r: Awaited<ReturnType<typeof routing>>,
+    {
+      stage = 'holding',
+      shadow = false,
+      routed = true,
+    }: { stage?: 'pending' | 'holding'; shadow?: boolean; routed?: boolean } = {},
+  ) {
+    const now = new Date();
+    const plan = routed
+      ? ({ start: shadow ? 'shadow' : 'live', channelId: r.channel, windowMinutes: 5 } as const)
+      : null;
+    const { id } = await ticket({
+      channel: 'email',
+      channelId: r.channel,
+      groupId: r.home.group,
+      lastMessageAt: now,
+      lastCustomerMessageAt: now,
+      ...routingWindowValues(plan, {}, now),
+    });
+    const message = await inbound(id, 'عايز اعرف اسعار الشحن للشركات', { createdAt: now });
+    if (plan) {
+      await db.transaction((tx) =>
+        startRouting(
+          tx,
+          plan,
+          { conversationId: id, messageId: message, groupId: r.home.group },
+          now,
+        ),
+      );
+      if (stage === 'holding') expect(await beginRouting(id)).toBe('continue');
+    }
+    // The fixture holds what it says, by the ticket's own columns as every
+    // reader of the hold reads them: a live ticket held, a shadow one or one
+    // never routed not.
+    const [columns] = await db
+      .select({
+        routingWindowEndsAt: conversations.routingWindowEndsAt,
+        routingDecidedAt: conversations.routingDecidedAt,
+        assigneeAgentId: conversations.assigneeAgentId,
+      })
+      .from(conversations)
+      .where(eq(conversations.id, id));
+    expect(isHeld(columns!, now)).toBe(plan?.start === 'live');
+    return { id, message };
+  }
+
+  async function where(id: string) {
+    const [row] = await db
+      .select({
+        groupId: conversations.groupId,
+        assigneeAgentId: conversations.assigneeAgentId,
+        routingDecidedAt: conversations.routingDecidedAt,
+      })
+      .from(conversations)
+      .where(eq(conversations.id, id));
+    return row!;
+  }
+
+  async function decisionOf(id: string) {
+    const [row] = await db
+      .select()
+      .from(routingDecisions)
+      .where(eq(routingDecisions.conversationId, id));
+    return row;
+  }
+
+  async function eventsOf(id: string, type: string) {
+    return db
+      .select({ data: conversationEvents.data })
+      .from(conversationEvents)
+      .where(and(eq(conversationEvents.conversationId, id), eq(conversationEvents.type, type)))
+      .orderBy(asc(conversationEvents.createdAt));
+  }
+
+  /** How many `on_update` passes ran over the ticket. */
+  async function passes(id: string): Promise<number> {
+    return (await eventsOf(id, 'tagged')).length;
+  }
+
+  /**
+   * Runs `between` once the classifier's own transaction has committed and
+   * before the next one opens: the router's, which then finds what `between`
+   * left. The classifier opens no transaction before the one its write
+   * commits in, so the router's is the second.
+   */
+  function betweenCommitAndRouter(between: () => Promise<void>): void {
+    const real = PgDatabase.prototype.transaction;
+    let opened = 0;
+    const spy = vi.spyOn(PgDatabase.prototype, 'transaction').mockImplementation(function (
+      this: PgDatabase<never>,
+      run,
+      config,
+    ) {
+      opened += 1;
+      if (opened < 2) return real.call(this, run, config) as never;
+      spy.mockRestore();
+      return between().then(() => real.call(this, run, config)) as never;
+    });
+  }
+
+  it('writes only the category while the creation pass has not begun routing, which then routes on it', async () => {
+    answers('sales');
+    const r = await routing();
+    const { id, message } = await mailTicket(r, { stage: 'pending' });
+
+    await expect(classifyMessageCategory(message, { baseUrl: BASE })).resolves.toMatchObject({
+      outcome: 'applied',
+    });
+
+    expect(await carried(id)).toBe(await categoryId('sales'));
+    expect(await decisionOf(id)).toMatchObject({
+      stage: 'pending',
+      outcome: null,
+      phaseOneAt: null,
+    });
+    expect(await eventsOf(id, 'routed')).toEqual([]);
+    expect(await passes(id)).toBe(0);
+    expect(await where(id)).toMatchObject({
+      groupId: r.home.group,
+      assigneeAgentId: null,
+      routingDecidedAt: null,
+    });
+
+    // The creation pass, after its rules, routes on what Jev wrote — the one
+    // pass, run by the router before it assigns.
+    expect(await beginRouting(id)).toBe('routed');
+    expect(await decisionOf(id)).toMatchObject({
+      stage: 'decided',
+      outcome: 'category',
+      decidedByLabel: 'creation',
+    });
+    expect(await where(id)).toMatchObject({
+      groupId: r.sales.group,
+      assigneeAgentId: r.sales.agent,
+    });
+    expect(await passes(id)).toBe(1);
+  });
+
+  it('routes a held ticket now, with the router’s one pass and none of its own', async () => {
+    answers('sales');
+    const r = await routing();
+    const { id, message } = await mailTicket(r);
+
+    await classifyMessageCategory(message, { baseUrl: BASE });
+
+    expect(await decisionOf(id)).toMatchObject({
+      stage: 'decided',
+      outcome: 'category',
+      categoryId: await categoryId('sales'),
+      fromGroupId: r.home.group,
+      toGroupId: r.sales.group,
+      probability: 0.9,
+      decidedByLabel: CATEGORY_AI_ACTOR,
+    });
+    expect(await eventsOf(id, 'routed')).toMatchObject([
+      { data: { outcome: 'category', by: CATEGORY_AI_ACTOR, to: r.sales.group, moved: true } },
+    ]);
+    expect(await passes(id)).toBe(1);
+    const after = await where(id);
+    expect(after).toMatchObject({ groupId: r.sales.group, assigneeAgentId: r.sales.agent });
+    expect(after.routingDecidedAt).toBeInstanceOf(Date);
+  });
+
+  // The classifier hands its pass to the router on a held ticket, so the
+  // router owes it whatever it decides on a category: a ticket released by
+  // its channel, or found taken by somebody who assigned without stamping,
+  // still meets the rules keyed on what Jev wrote.
+  it('still runs the one pass when the channel stopped routing during the hold', async () => {
+    answers('sales');
+    const r = await routing();
+    const { id, message } = await mailTicket(r);
+    await db
+      .update(channels)
+      .set({ routingMode: 'default_group' })
+      .where(eq(channels.id, r.channel));
+
+    await classifyMessageCategory(message, { baseUrl: BASE });
+
+    expect(await decisionOf(id)).toMatchObject({ outcome: 'released', toGroupId: r.home.group });
+    expect(await passes(id)).toBe(1);
+    expect(await where(id)).toMatchObject({ groupId: r.home.group, assigneeAgentId: r.home.agent });
+  });
+
+  it('still runs the one pass on a held ticket somebody assigned without stamping', async () => {
+    answers('sales');
+    const r = await routing();
+    const { id, message } = await mailTicket(r);
+    await db
+      .update(conversations)
+      .set({ assigneeAgentId: r.home.agent, assignedAt: new Date() })
+      .where(eq(conversations.id, id));
+
+    await classifyMessageCategory(message, { baseUrl: BASE });
+
+    expect(await decisionOf(id)).toMatchObject({ outcome: 'taken', toGroupId: r.home.group });
+    expect(await passes(id)).toBe(1);
+    expect(await where(id)).toMatchObject({ groupId: r.home.group, assigneeAgentId: r.home.agent });
+  });
+
+  // A person decided in the moment between the classifier's commit and the
+  // router's lock: the router has nothing left to decide, and the category
+  // Jev wrote is owed what any relabel is — or no rule keyed on it would run.
+  it('relabels a held ticket a person decided for between its commit and the router', async () => {
+    answers('sales');
+    const r = await routing();
+    const { id, message } = await mailTicket(r);
+    betweenCommitAndRouter(async () => {
+      await db.transaction((tx) => endHold(tx, id, 'manual', { agentId: r.home.agent }));
+    });
+
+    await classifyMessageCategory(message, { baseUrl: BASE });
+
+    expect(await carried(id)).toBe(await categoryId('sales'));
+    expect(await decisionOf(id)).toMatchObject({
+      stage: 'decided',
+      outcome: 'manual',
+      decidedByAgentId: r.home.agent,
+    });
+    expect((await eventsOf(id, 'routed')).map((event) => event.data.outcome)).toEqual(['manual']);
+    expect(await passes(id)).toBe(1);
+    // Where the person left it, and assigned there by the relabel.
+    expect(await where(id)).toMatchObject({ groupId: r.home.group, assigneeAgentId: r.home.agent });
+  });
+
+  // The window's end ran in the same moment, read the category Jev had just
+  // committed, routed on it and ran the pass it owed. A relabel after it is a
+  // second pass: every rule keyed on the category fires twice, a canned
+  // reply or a note among them.
+  it('runs no second pass when the window’s end routed on its category in between', async () => {
+    answers('sales');
+    const r = await routing();
+    const { id, message } = await mailTicket(r);
+    betweenCommitAndRouter(async () => {
+      expect(await settleRouting(id)).toBe('decided');
+    });
+
+    await classifyMessageCategory(message, { baseUrl: BASE });
+
+    expect(await decisionOf(id)).toMatchObject({
+      outcome: 'category',
+      categoryId: await categoryId('sales'),
+      decidedByLabel: 'settle_routing',
+    });
+    expect(await passes(id)).toBe(1);
+    expect(await where(id)).toMatchObject({
+      groupId: r.sales.group,
+      assigneeAgentId: r.sales.agent,
+    });
+  });
+
+  // The answer's own call into the router fails — phase one refused, as a
+  // lost connection would refuse it — on a ticket held with no decision yet.
+  // The window's job is still to come and decides on what Jev wrote, its pass
+  // over the rules included (`routerDecidedOn`, which answers so for a row
+  // still undecided), so the answer runs no pass of its own: one now and the
+  // router's at the window's end would fire every rule keyed on the category
+  // twice.
+  it('runs no pass of its own when its call into the router fails, and the window’s end runs it once', async () => {
+    answers('sales');
+    const r = await routing();
+    const { id, message } = await mailTicket(r);
+    await db.execute(sql`
+      create function refuse_phase_one() returns trigger language plpgsql
+      as $$ begin raise exception 'the connection was lost'; end $$`);
+    await db.execute(sql`
+      create trigger refuse_phase_one before update on routing_decisions
+      for each row when (old.phase_one_at is null and new.phase_one_at is not null)
+      execute function refuse_phase_one()`);
+    try {
+      await expect(classifyMessageCategory(message, { baseUrl: BASE })).resolves.toMatchObject({
+        outcome: 'applied',
+      });
+    } finally {
+      await db.execute(sql`drop trigger refuse_phase_one on routing_decisions`);
+      await db.execute(sql`drop function refuse_phase_one()`);
+    }
+    expect(errors.mock.calls.map((call) => String(call[0]))).toEqual([
+      expect.stringContaining(`could not route ${id}`),
+    ]);
+    errors.mockClear();
+
+    expect(await carried(id)).toBe(await categoryId('sales'));
+    expect(await passes(id)).toBe(0);
+    expect(await decisionOf(id)).toMatchObject({
+      stage: 'holding',
+      outcome: null,
+      phaseOneAt: null,
+    });
+    expect(await where(id)).toMatchObject({
+      groupId: r.home.group,
+      assigneeAgentId: null,
+      routingDecidedAt: null,
+    });
+
+    expect(await settleRouting(id)).toBe('decided');
+
+    expect(await decisionOf(id)).toMatchObject({
+      stage: 'decided',
+      outcome: 'category',
+      categoryId: await categoryId('sales'),
+      toGroupId: r.sales.group,
+      decidedByLabel: 'settle_routing',
+    });
+    expect(await passes(id)).toBe(1);
+    expect(await where(id)).toMatchObject({
+      groupId: r.sales.group,
+      assigneeAgentId: r.sales.agent,
+    });
+  });
+
+  // Resolved in the same moment: the router decides `not_open`, which owes
+  // nothing, and a relabel would run the category's rules on work that is over.
+  it('runs no pass on a held ticket resolved between its commit and the router', async () => {
+    answers('sales');
+    const r = await routing();
+    const { id, message } = await mailTicket(r);
+    const [resolved] = await db
+      .select({ id: ticketStatuses.id })
+      .from(ticketStatuses)
+      .where(eq(ticketStatuses.name, 'Resolved'));
+    betweenCommitAndRouter(async () => {
+      await db
+        .update(conversations)
+        .set({ statusId: resolved!.id, resolvedAt: new Date() })
+        .where(eq(conversations.id, id));
+    });
+
+    await classifyMessageCategory(message, { baseUrl: BASE });
+
+    expect(await carried(id)).toBe(await categoryId('sales'));
+    expect(await decisionOf(id)).toMatchObject({ stage: 'decided', outcome: 'not_open' });
+    expect(await passes(id)).toBe(0);
+    expect(await where(id)).toMatchObject({ groupId: r.home.group, assigneeAgentId: null });
+  });
+
+  it('records where a shadow ticket would have gone, then relabels it where it is', async () => {
+    answers('sales');
+    const r = await routing();
+    const { id, message } = await mailTicket(r, { shadow: true });
+
+    await classifyMessageCategory(message, { baseUrl: BASE });
+
+    expect(await decisionOf(id)).toMatchObject({
+      shadow: true,
+      stage: 'decided',
+      outcome: 'category',
+      toGroupId: r.sales.group,
+      decidedByLabel: CATEGORY_AI_ACTOR,
+    });
+    expect(await eventsOf(id, 'routed')).toEqual([]);
+    expect(await passes(id)).toBe(1);
+    expect(await where(id)).toMatchObject({
+      groupId: r.home.group,
+      assigneeAgentId: r.home.agent,
+      routingDecidedAt: null,
+    });
+  });
+
+  // The creation pass records it after the `on_create` rules, so in shadow too
+  // a rule gets the first word.
+  it('only relabels a shadow ticket the creation pass has not begun', async () => {
+    answers('sales');
+    const r = await routing();
+    const { id, message } = await mailTicket(r, { shadow: true, stage: 'pending' });
+
+    await classifyMessageCategory(message, { baseUrl: BASE });
+
+    expect(await decisionOf(id)).toMatchObject({ stage: 'pending', outcome: null });
+    expect(await passes(id)).toBe(1);
+    expect(await where(id)).toMatchObject({ groupId: r.home.group, assigneeAgentId: r.home.agent });
+  });
+
+  it('relabels a ticket the window’s end already decided, and leaves it where it is', async () => {
+    answers('sales');
+    const r = await routing();
+    const { id, message } = await mailTicket(r);
+    expect(await settleRouting(id)).toBe('decided');
+    const decided = await decisionOf(id);
+
+    await classifyMessageCategory(message, { baseUrl: BASE });
+
+    expect(await carried(id)).toBe(await categoryId('sales'));
+    expect(await decisionOf(id)).toEqual(decided);
+    expect(decided).toMatchObject({ outcome: 'fallback' });
+    expect(await eventsOf(id, 'routed')).toHaveLength(1);
+    expect(await passes(id)).toBe(1);
+    expect(await where(id)).toMatchObject({ groupId: r.home.group, assigneeAgentId: r.home.agent });
+  });
+
+  // Two messages, two answers, and the later message's answered first: its
+  // decision is on sales, and the earlier one's answer, customer support, lands
+  // while that decision is still in flight. The router's pass ran on sales, so
+  // customer support's rules are this answer's to run; returning on `in_flight`
+  // left a category written and not one rule keyed on it run.
+  it('runs the rules of a category answered late, while the router finishes a decision on another', async () => {
+    const r = await routing();
+    const { id, message: first } = await mailTicket(r);
+    const later = await inbound(id, 'فين الشحنه', { createdAt: new Date(Date.now() + 1_000) });
+    const cs = await categoryId('customer_support');
+    await db.insert(automationRules).values({
+      name: 'Tag customer support',
+      trigger: 'on_update',
+      conditions: { field: 'category.id', op: 'eq', value: cs },
+      actions: [{ type: 'add_tags', tags: ['cs'] }],
+    });
+
+    // The later message answered first: sales, routed, and its phase three lost
+    // (the end of the hold refused), so the row stays holding with phase one
+    // written and the pass done.
+    answers('sales');
+    await db.execute(sql`
+      create function refuse_hold_end() returns trigger language plpgsql
+      as $$ begin raise exception 'the connection was lost'; end $$`);
+    await db.execute(sql`
+      create trigger refuse_hold_end before update on conversations
+      for each row when (old.routing_decided_at is null and new.routing_decided_at is not null)
+      execute function refuse_hold_end()`);
+    try {
+      await classifyMessageCategory(later, { baseUrl: BASE });
+    } finally {
+      await db.execute(sql`drop trigger refuse_hold_end on conversations`);
+      await db.execute(sql`drop function refuse_hold_end()`);
+    }
+    errors.mockClear();
+    expect(await decisionOf(id)).toMatchObject({
+      stage: 'holding',
+      categoryId: await categoryId('sales'),
+    });
+    expect((await decisionOf(id))!.rulesDoneAt).toBeInstanceOf(Date);
+
+    // The earlier message answered late takes the settle over, and hands its
+    // pass to the decision in flight (`deferToRouter`): the pass is owed again.
+    answers('customer_support');
+    await expect(classifyMessageCategory(first, { baseUrl: BASE })).resolves.toMatchObject({
+      outcome: 'applied',
+    });
+    expect(await carried(id)).toBe(cs);
+    expect(await decisionOf(id)).toMatchObject({ rulesClaimedAt: null, rulesDoneAt: null });
+
+    // The window's job completes the decision, phase one a couple of minutes old.
+    await db
+      .update(routingDecisions)
+      .set({ phaseOneAt: new Date(Date.now() - 2 * 60_000) })
+      .where(eq(routingDecisions.conversationId, id));
+    expect(await settleRouting(id)).toBe('decided');
+
+    const tags = (await eventsOf(id, 'tagged')).map((e) => JSON.stringify(e.data));
+    expect(tags.filter((t) => t.includes('"cs"')).length).toBe(1);
+  });
+
+  it('runs them too when the late answer lands between the router’s pass and its end of the hold', async () => {
+    const r = await routing();
+    const { id, message: first } = await mailTicket(r);
+    const later = await inbound(id, 'فين الشحنه', { createdAt: new Date(Date.now() + 1_000) });
+    const cs = await categoryId('customer_support');
+    await db.insert(automationRules).values({
+      name: 'Tag customer support',
+      trigger: 'on_update',
+      conditions: { field: 'category.id', op: 'eq', value: cs },
+      actions: [{ type: 'add_tags', tags: ['cs'] }],
+    });
+
+    answers('sales');
+    const real = PgDatabase.prototype.transaction;
+    let tookOver: unknown = null;
+    // The classifier's write, the router's phase one, and the claim that reads
+    // the ticket for the pass, which opens no transaction of its own: the
+    // fourth is phase three.
+    vi.spyOn(PgDatabase.prototype, 'transaction')
+      .mockImplementationOnce(function (this: PgDatabase<never>, run, config) {
+        return real.call(this, run, config) as never;
+      })
+      .mockImplementationOnce(function (this: PgDatabase<never>, run, config) {
+        return real.call(this, run, config) as never;
+      })
+      .mockImplementationOnce(function (this: PgDatabase<never>, run, config) {
+        return real.call(this, run, config) as never;
+      })
+      .mockImplementationOnce(async function (this: PgDatabase<never>, run, config) {
+        // The router's pass has run on sales; its phase three is about to open.
+        answers('customer_support');
+        tookOver = await classifyMessageCategory(first, { baseUrl: BASE });
+        return real.call(this, run, config) as never;
+      });
+    await classifyMessageCategory(later, { baseUrl: BASE });
+    vi.mocked(PgDatabase.prototype.transaction).mockRestore?.();
+
+    expect(tookOver).toMatchObject({ outcome: 'applied' });
+    expect(await carried(id)).toBe(cs);
+    expect(await decisionOf(id)).toMatchObject({
+      stage: 'decided',
+      categoryId: await categoryId('sales'),
+    });
+    const tags = (await eventsOf(id, 'tagged')).map((e) => JSON.stringify(e.data));
+    expect(tags.filter((t) => t.includes('"cs"')).length).toBe(1);
+  });
+
+  // The late answer lands the moment the later message's phase one commits,
+  // and its follow-ups lag the router. Once, the router found the category
+  // changed, gave its pass up to the answer, and handed the ticket to the
+  // Sales agent; the answer's pass then moved it to Merchant Care with the
+  // Sales agent still holding it. Handed to the router under the answer's
+  // lock (`deferToRouter`), the pass runs on customer support before anybody
+  // is assigned.
+  it('moves a ticket a late answer files elsewhere before anybody is assigned', async () => {
+    const r = await routing();
+    const merchants = await staffed('Merchant Care');
+    const { id, message: first } = await mailTicket(r);
+    const later = await inbound(id, 'فين الشحنه', { createdAt: new Date(Date.now() + 1_000) });
+    const cs = await categoryId('customer_support');
+    await db.insert(automationRules).values({
+      name: 'Customer support goes to Merchant Care',
+      trigger: 'on_update',
+      conditions: { field: 'category.id', op: 'eq', value: cs },
+      actions: [{ type: 'assign_group', groupId: merchants.group }],
+      position: 1,
+    });
+
+    answers('sales');
+    const { routed, lateAnswer } = await classifyWithLateAnswerBetween({
+      // The classifier's write, then the router's phase one.
+      afterRouterTransaction: 2,
+      route: () => classifyMessageCategory(later, { baseUrl: BASE }),
+      late: () => {
+        answers('customer_support');
+        return classifyMessageCategory(first, { baseUrl: BASE });
+      },
+    });
+
+    expect(routed).toMatchObject({ outcome: 'applied' });
+    expect(lateAnswer).toMatchObject({ outcome: 'applied' });
+    expect(await carried(id)).toBe(cs);
+    expect(await where(id)).toMatchObject({
+      groupId: merchants.group,
+      assigneeAgentId: merchants.agent,
+    });
+    // One pass, the router's, on what the late answer wrote.
+    expect(await passes(id)).toBe(1);
+    expect(await decisionOf(id)).toMatchObject({
+      stage: 'decided',
+      categoryId: await categoryId('sales'),
+    });
+  });
+
+  it('relabels a ticket that never entered routing, as before Stage 5', async () => {
+    answers('sales');
+    const r = await routing();
+    const { id, message } = await mailTicket(r, { routed: false });
+
+    await classifyMessageCategory(message, { baseUrl: BASE });
+
+    expect(await decisionOf(id)).toBeUndefined();
+    expect(await passes(id)).toBe(1);
+    expect(await where(id)).toMatchObject({ groupId: r.home.group, assigneeAgentId: r.home.agent });
+  });
+});
+
+/** Who opened a transaction: the job routing the ticket, or the late answer. */
+const opener = new AsyncLocalStorage<'router' | 'late'>();
+
+/**
+ * Runs `route` with `late` landing once the router's `afterRouterTransaction`th
+ * transaction has committed, before the router goes on — the late answer's
+ * write commits there — and holds every transaction the late answer opens
+ * after its write until the router has finished: its follow-ups lagging the
+ * router, made certain. Transactions are told apart by who opened them.
+ */
+async function classifyWithLateAnswerBetween<T>({
+  afterRouterTransaction,
+  route,
+  late,
+}: {
+  afterRouterTransaction: number;
+  route: () => Promise<T>;
+  late: () => Promise<unknown>;
+}): Promise<{ routed: T; lateAnswer: unknown }> {
+  const real = PgDatabase.prototype.transaction;
+  let routerOpened = 0;
+  let lateOpened = 0;
+  let answered: Promise<unknown> | undefined;
+  let release!: () => void;
+  const released = new Promise<void>((resolve) => (release = resolve));
+  let wrote!: () => void;
+  const written = new Promise<void>((resolve) => (wrote = resolve));
+
+  const spy = vi.spyOn(PgDatabase.prototype, 'transaction').mockImplementation(async function (
+    this: PgDatabase<never>,
+    run,
+    config,
+  ) {
+    const who = opener.getStore();
+    if (who === 'late') {
+      const nth = ++lateOpened;
+      if (nth > 1) await released;
+      const result: unknown = await real.call(this, run, config);
+      if (nth === 1) wrote();
+      return result as never;
+    }
+    if (who === 'router') {
+      const nth = ++routerOpened;
+      const result: unknown = await real.call(this, run, config);
+      if (nth === afterRouterTransaction) {
+        answered = opener.run('late', late);
+        await Promise.race([written, answered]);
+      }
+      return result as never;
+    }
+    return real.call(this, run, config) as never;
+  });
+
+  try {
+    const routed = await opener.run('router', route);
+    release();
+    return { routed, lateAnswer: await answered };
+  } finally {
+    spy.mockRestore();
+  }
+}

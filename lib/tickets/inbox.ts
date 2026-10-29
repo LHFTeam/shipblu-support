@@ -110,6 +110,20 @@ export type InboxRow = {
    * what the ticket holds, as the sidebar's select does.
    */
   categoryLabel: string | null;
+  /**
+   * The end of the routing window while routing has not decided the ticket,
+   * else null — the two hold columns (`lib/routing/hold.ts`) folded into the
+   * one fact the row draws "Routing…" from, so no reader can pair a window
+   * with a decision it did not read. Whether the ticket is held still turns on
+   * the assignee and the clock: `routingHold` in `inbox-badges.ts`.
+   */
+  routingUntil: Date | null;
+  /**
+   * Marked as spam. Read only by the routing badge, which a spam ticket never
+   * carries however its window reads (`routingHold`); the list does not hide
+   * spam, so a held ticket marked as spam stays on it.
+   */
+  isSpam: boolean;
 };
 
 /**
@@ -140,6 +154,9 @@ function selectInboxRows(where: SQL | undefined) {
       assigneeColor: agents.avatarColor,
       lastMessageAt: conversations.lastMessageAt,
       lastCustomerMessageAt: conversations.lastCustomerMessageAt,
+      routingWindowEndsAt: conversations.routingWindowEndsAt,
+      routingDecidedAt: conversations.routingDecidedAt,
+      isSpam: conversations.isSpam,
       externalId: conversations.externalId,
       // The cursor's timestamp, at the precision Postgres stores it. See
       // `InboxCursor` for why the mapped `Date` above cannot serve.
@@ -388,6 +405,8 @@ export async function listInbox(
         row.categoryLabel === null
           ? null
           : categoryLabel(row.categoryLabel, row.categoryActive ?? true),
+      routingUntil: row.routingDecidedAt ? null : row.routingWindowEndsAt,
+      isSpam: row.isSpam,
     })),
   };
 }

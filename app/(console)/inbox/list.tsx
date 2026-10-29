@@ -480,6 +480,11 @@ function RowBadges({ row, layout }: { row: InboxRow; layout: 'avatar' | 'ticket'
           the row has no room to, so it says it only to the ear. */}
       {badge.key === 'category' ? <span className="sr-only">Category: </span> : null}
       {badge.label}
+      {/* What taking it means, which the ticket's sidebar says beside the
+          Assignee field; the row is one link and can hold no ⓘ. */}
+      {badge.key === 'routing' ? (
+        <span className="sr-only">, assigning it now ends the route</span>
+      ) : null}
     </Badge>
   ));
   const number = (
@@ -734,10 +739,16 @@ function useOlderPages({
   };
 }
 
-/** `InboxRow` as it survives JSON: the two timestamps arrive as strings. */
-type SerialisedRow = Omit<InboxRow, 'lastMessageAt' | 'lastCustomerMessageAt'> & {
+/**
+ * `InboxRow` as it survives JSON: the timestamps arrive as strings. Every
+ * `Date` on the row is named here, because one left out keeps its type through
+ * the `Omit` and arrives a string all the same — and fails only once an agent
+ * scrolls to a second page.
+ */
+type SerialisedRow = Omit<InboxRow, 'lastMessageAt' | 'lastCustomerMessageAt' | 'routingUntil'> & {
   lastMessageAt: string;
   lastCustomerMessageAt: string | null;
+  routingUntil: string | null;
 };
 
 function reviveRow(row: SerialisedRow): InboxRow {
@@ -745,6 +756,7 @@ function reviveRow(row: SerialisedRow): InboxRow {
     ...row,
     lastMessageAt: new Date(row.lastMessageAt),
     lastCustomerMessageAt: row.lastCustomerMessageAt ? new Date(row.lastCustomerMessageAt) : null,
+    routingUntil: row.routingUntil ? new Date(row.routingUntil) : null,
   };
 }
 

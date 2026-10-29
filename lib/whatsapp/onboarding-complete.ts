@@ -824,9 +824,24 @@ async function channelStep(
       // Pointed at this account and switched on: the number now sends with
       // the credential this attempt stored. Its name and group are the team's
       // and are kept.
+      //
+      // Its routing mode is not: a number on the Business app never routes,
+      // because its replies are typed on the phone and moving its tickets
+      // changes nothing about who answers them (`routingModeOf`). A plain row
+      // an admin had put in a category mode would otherwise keep a column
+      // that contradicts what the router reads — and the editor, which offers
+      // no control on a coexistence row, could never clear it. Written in the
+      // statement that takes the row's lock, before the object below lands, so
+      // a `saveChannel` waiting on the lock re-reads a connected row and keeps
+      // `default_group` too (its CASE).
       await tx
         .update(channels)
-        .set({ whatsappAccountId: row.whatsappAccountId, isActive: true, updatedAt: new Date() })
+        .set({
+          whatsappAccountId: row.whatsappAccountId,
+          isActive: true,
+          routingMode: 'default_group',
+          updatedAt: new Date(),
+        })
         .where(eq(channels.id, current.id));
       await writeOnboardedCoexistence(tx, current.id, {
         ...coexistence,

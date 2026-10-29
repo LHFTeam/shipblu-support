@@ -6,6 +6,7 @@ import type { TicketFieldDef } from '@/lib/tickets/custom-fields';
 import type { SubcategoryOption, RootCauseOption } from '@/lib/subcategorise/queries';
 import type { PurgePreview } from '@/lib/admin/purge-summary';
 import type { CategoryChoice } from '@/lib/categories/choices';
+import type { HandToTarget } from '@/lib/routing/hand-to';
 import { readOnlyReason } from '@/lib/tickets/channel-policy';
 import type { PickerEntry } from '@/lib/side-conversations/queries';
 import type { CannedLocale } from '@/lib/tickets/canned';
@@ -83,6 +84,7 @@ export function ConversationView({
   purgeRefusal,
   currentAgentId,
   canViewContact,
+  handTo,
 }: {
   conversation: ConversationDetail;
   statuses: { id: string; name: string; category: string }[];
@@ -124,6 +126,8 @@ export function ConversationView({
   currentAgentId: string;
   /** Whether this agent may open the contact's page; see the sidebar's Contact tab. */
   canViewContact: boolean;
+  /** "Hand to <group>", when it is offered; see the sidebar's Category field. */
+  handTo: HandToTarget | null;
 }) {
   return (
     // From `md` the thread is a white panel on the inbox's grey, as the list
@@ -187,6 +191,7 @@ export function ConversationView({
         purgeRefusal={purgeRefusal}
         currentAgentId={currentAgentId}
         canViewContact={canViewContact}
+        handTo={handTo}
       />
     </div>
   );

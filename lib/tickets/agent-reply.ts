@@ -2,6 +2,8 @@ import { eq } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { conversations, messages } from '@/db/schema';
 import { enqueue } from '@/lib/queue';
+import { afterHoldEnded } from '@/lib/routing/after-hold';
+import { endHold } from '@/lib/routing/end-hold';
 import { onAgentReply } from '@/lib/sla';
 import { afterMessageStored } from '@/lib/tickets/lifecycle';
 import type { ConversationChannel } from '@/lib/tickets/channel-policy';
@@ -40,15 +42,32 @@ export async function storeAgentReply(
 
   const messageId = inserted[0]!.id;
 
-  await db
-    .update(conversations)
-    .set({ lastMessageAt: new Date(), lastAgentMessageAt: new Date() })
-    .where(eq(conversations.id, conversationId));
+  // A person answering a ticket held for the router has decided for it: the
+  // hold ends with the reply, in its transaction (`endHold`). Not once the
+  // router has written its decision (phase one): that decision is the
+  // router's to finish, and the reply ends nothing.
+  const endedHold = await db.transaction(async (tx) => {
+    await tx
+      .update(conversations)
+      .set({ lastMessageAt: new Date(), lastAgentMessageAt: new Date() })
+      .where(eq(conversations.id, conversationId));
+    return endHold(tx, conversationId, 'manual', {
+      agentId: message.authorAgentId,
+      decidesShadow: false,
+    });
+  });
 
   // The clock stops when the agent writes, not when the provider accepts the
   // message: the delay is ours to own, and a send that fails is visible on the
   // timeline anyway.
   await onAgentReply(conversationId);
+
+  // What the hold kept back: the assignment, and an out-of-hours reply that
+  // the agent's answer has made moot, which its guard then skips. Owed here
+  // only when the reply ended the hold; on a decision in flight the router's
+  // own end of it pays both, after the category's rules, so the assignment
+  // lands in whichever group they leave the ticket.
+  if (endedHold) await afterHoldEnded(conversationId);
 
   // Web chat has no outbound provider: writing the row *is* delivery, because
   // the visitor's open stream reads the same table.

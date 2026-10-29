@@ -23,6 +23,7 @@ import { afterInboundMessage, afterMessageStored } from './lifecycle';
 import { findLiveConversation } from './live-conversation';
 import { reopenResolved } from './reopen';
 import { requireDefaultOpenStatusId } from './statuses';
+import { planRouting, routingWindowValues, startRouting } from '@/lib/routing/start';
 
 /**
  * Inbound Facebook and Instagram → conversations.
@@ -72,11 +73,17 @@ export async function ingestMetaMessage(
 
   const channel = await channelFor(message.platform);
   const existing = await findLiveConversation(contactId, { channel: message.platform });
+  // Before the transaction, which must read nothing on the pool (`lib/routing/start.ts`).
+  const routing = existing ? null : await planRouting(channel);
 
   const result = await db.transaction(async (tx) => {
     let conversationId: string;
     let conversationNumber: number;
     let createdConversation = false;
+    // When this was processed, which a routing window counts from, never the
+    // message's own `sentAt`: one instant for the window on the insert and the
+    // row and job beside it.
+    const now = new Date();
 
     if (existing) {
       conversationId = existing.id;
@@ -105,6 +112,8 @@ export async function ingestMetaMessage(
           groupId: channel?.defaultGroupId ?? null,
           lastMessageAt: message.sentAt,
           lastCustomerMessageAt: message.sentAt,
+          // Held for the router from the insert (`lib/routing/start.ts`).
+          ...routingWindowValues(routing, {}, now),
         })
         .returning({ id: conversations.id, number: conversations.number });
 
@@ -149,6 +158,15 @@ export async function ingestMetaMessage(
       .returning({ id: messages.id });
 
     const messageId = insertedMessage[0]!.id;
+
+    if (createdConversation) {
+      await startRouting(
+        tx,
+        routing,
+        { conversationId, messageId, groupId: channel?.defaultGroupId ?? null },
+        now,
+      );
+    }
 
     // With the message, not after it: once the message has committed, a retry
     // finds it by its mid and stops, so a download that failed to queue after
@@ -207,12 +225,18 @@ export async function ingestMetaComment(comment: NormalisedComment): Promise<Met
   // Read only for a thread that opens a ticket: a reply joining one keeps the
   // ticket's row and group, and on a busy post that is most comments.
   const channel = existing ? null : await channelFor(commentChannel);
+  // Until a comment row exists the ticket is filed under the platform's direct
+  // message row, and routes by that row's mode.
+  const routing = existing ? null : await planRouting(channel);
   const subject = subjectFrom(comment.text, UNNAMED_SUBJECT[`${comment.platform}Comment`]);
 
   const result = await db.transaction(async (tx) => {
     let conversationId: string;
     let conversationNumber: number;
     let createdConversation = false;
+    // When this was processed, which a routing window counts from, never the
+    // comment's own `createdAt` — as on a direct message.
+    const now = new Date();
 
     if (existing) {
       conversationId = existing.id;
@@ -231,11 +255,13 @@ export async function ingestMetaComment(comment: NormalisedComment): Promise<Met
       // author is who the thread is about, and who the requester would have
       // been had it arrived first, so they become it. Left on the replier,
       // every reader that answers the requester and nobody else — the
-      // out-of-hours acknowledgement (`answersRequester`), the language
-      // automated replies go out in (`requesterLocale`) and the console's
-      // private reply — would treat the customer as a passer-by on their own
-      // thread, and the passer-by as the customer. A reply's author never
-      // takes it: they are somebody under the customer's comment.
+      // out-of-hours acknowledgement (`answersRequester`), and the one a
+      // routing hold kept back, which answers this comment once the hold ends
+      // (`heldFollowUp`); the language automated replies go out in
+      // (`requesterLocale`); the console's private reply — would treat the
+      // customer as a passer-by on their own thread, and the passer-by as the
+      // customer. A reply's author never takes it: they are somebody under the
+      // customer's comment.
       if (!comment.parentCommentId) {
         await adoptRootAuthor(tx, {
           conversationId,
@@ -260,6 +286,8 @@ export async function ingestMetaComment(comment: NormalisedComment): Promise<Met
           externalId,
           lastMessageAt: comment.createdAt,
           lastCustomerMessageAt: comment.createdAt,
+          // Held for the router from the insert (`lib/routing/start.ts`).
+          ...routingWindowValues(routing, {}, now),
         })
         .returning({ id: conversations.id, number: conversations.number });
 
@@ -304,6 +332,19 @@ export async function ingestMetaComment(comment: NormalisedComment): Promise<Met
         createdAt: comment.createdAt,
       })
       .returning({ id: messages.id });
+
+    if (createdConversation) {
+      await startRouting(
+        tx,
+        routing,
+        {
+          conversationId,
+          messageId: insertedMessage[0]!.id,
+          groupId: channel?.defaultGroupId ?? null,
+        },
+        now,
+      );
+    }
 
     // A reply processed before the comment it answers is the newer of the two.
     await tx
@@ -705,14 +746,20 @@ async function channelFor(type: MetaChannel) {
   // back either — so which group a new ticket starts in would depend on the
   // plan Postgres happened to pick. Oldest wins, the row that has been routing.
   const rows = await db
-    .select({ id: channels.id, type: channels.type, defaultGroupId: channels.defaultGroupId })
+    .select({
+      id: channels.id,
+      type: channels.type,
+      config: channels.config,
+      routingMode: channels.routingMode,
+      defaultGroupId: channels.defaultGroupId,
+    })
     .from(channels)
     .where(and(inArray(channels.type, candidates), eq(channels.isActive, true)))
     .orderBy(asc(channels.createdAt), asc(channels.id));
 
   for (const candidate of candidates) {
     const row = rows.find((found) => found.type === candidate);
-    if (row) return { id: row.id, defaultGroupId: row.defaultGroupId };
+    if (row) return row;
   }
   return null;
 }

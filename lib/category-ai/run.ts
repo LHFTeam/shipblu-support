@@ -6,16 +6,20 @@ import {
   conversationEvents,
   conversations,
   messages,
+  routingDecisions,
   ticketCategories,
 } from '@/db/schema';
-import {
-  holdCategory,
-  setConversationCategoryOn,
-  type CategoryWrite,
-} from '@/lib/categories/write';
+import { holdCategory, setConversationCategoryOn } from '@/lib/categories/write';
 import { earlierMessages } from '@/lib/subcategorise-ai/context';
 import { errorMessage } from '@/lib/errors';
 import { logger } from '@/lib/log';
+import { routeNow } from '@/lib/routing/apply';
+import {
+  deferToRouter,
+  routerDecidedOn,
+  undecidedRouting,
+  type UndecidedRouting,
+} from '@/lib/routing/state';
 import { afterRoutingChanged } from '@/lib/sla';
 import { isCommentTicket } from '@/lib/tickets/channel-policy';
 import { skipReason } from '@/lib/tickets/classifiable';
@@ -290,7 +294,14 @@ export async function classifyMessageCategory(
         runLabel: CATEGORY_AI_LIVE_LABEL,
       },
     );
-    return { kind: 'decided' as const, outcome, write };
+    // Under the lock the write holds, because the stage moves under it. A
+    // decision in flight takes the write's pass over there and then
+    // (`deferToRouter`); otherwise where the routing stands says what is owed.
+    const routing =
+      write.outcome === 'changed' && (await deferToRouter(tx, row.conversationId))
+        ? ('deferred' as const)
+        : await undecidedRouting(tx, row.conversationId);
+    return { kind: 'decided' as const, outcome, write, routing };
   });
 
   if (decided === null) return { status: 'gone' };
@@ -304,18 +315,45 @@ export async function classifyMessageCategory(
       to: predicted,
       probability: prediction.probability,
     });
-    await afterCategoryApplied(row.conversationId, decided.write);
+    await afterCategoryApplied(row.conversationId, decided.routing ?? null);
   }
 
   return { status: 'recorded', outcome: decided.outcome, predicted };
 }
 
 /**
- * What a written category owes once it has committed: until Stage 5, the SLA
- * policy chosen again before the first reply, then the observer rules and
- * auto-assignment, exactly as after a console edit — so a rule keyed on the
- * category fires for a ticket Jev filed. Both best-effort inside. In one
- * function so Stage 5 can swap it for decision 5's four cases.
+ * What a written category owes once it has committed, which depends on where
+ * the ticket's routing stood under the write's lock
+ * (`plans/ticket-category-routing.md`, decision 5):
+ *
+ * - **A decision in flight** — phase one written, the hold not yet ended:
+ *   nothing. The write re-armed the router's pass in its own transaction
+ *   (`deferToRouter`), and the router runs it again on what Jev wrote, ahead
+ *   of its end of the hold and the assignment. A pass of Jev's own here was
+ *   unordered with the router's: run after the router had assigned, a rule's
+ *   `assign_group` moved the ticket away from its new holder.
+ * - **Live and `pending`** — the creation pass has not reached `beginRouting`,
+ *   which routes on this category. Nothing more here, so a rule always gets
+ *   the first word.
+ * - **Live and `holding`** — routed now (`routeNow`), *instead of* the update
+ *   pass below: the router runs that pass itself, between its decision and the
+ *   assignment, and a second would assign before the first had finished. If
+ *   somebody decided, or began to, in the moment between this commit and the
+ *   router's lock — `none`, `in_flight` — or this call `failed` and the
+ *   window's job is still to come, whether that decision reads this write says
+ *   what is owed (`routerDecidedOn`, the console's question too): a router's
+ *   does, and nothing is; a person's or a rule's does not, and this is a
+ *   relabel after all. Nor after a router that found the ticket in nobody's
+ *   queue, where Jev's answer parts from the console's (`decidedNotOpen`).
+ * - **Undecided shadow** — the rest as though routing did not exist, after
+ *   recording the would-be decision once the creation pass has begun routing
+ *   (`holding`); while it is `pending`, `beginRouting` records it after the
+ *   `on_create` rules, so in shadow too a rule gets the first word.
+ * - **Anything else** — never routed, or decided already, and so a relabel
+ *   only: the SLA policy chosen again before the first reply, then the
+ *   observer rules and auto-assignment, exactly as after a console edit — so a
+ *   rule keyed on the category fires for a ticket Jev filed. Both best-effort
+ *   inside.
  *
  * Only a write that changed the column: setting what the ticket already
  * carries wrote nothing a rule could react to.
@@ -325,12 +363,39 @@ export async function classifyMessageCategory(
  * redelivered job finds its own row and stops. The ticket then waits for its
  * next routing change, or a person's, to be re-timed and to meet its rules.
  */
-async function afterCategoryApplied(conversationId: string, write: CategoryWrite): Promise<void> {
-  await afterRoutingChanged(conversationId, {
-    category: write.outcome === 'changed',
-    group: false,
-  });
+async function afterCategoryApplied(
+  conversationId: string,
+  routing: UndecidedRouting | 'deferred' | null,
+): Promise<void> {
+  if (routing === 'deferred') return;
+  if (routing && !routing.shadow) {
+    if (routing.stage === 'pending') return;
+    const routed = await routeNow(conversationId, { label: CATEGORY_AI_ACTOR });
+    if (routed === 'decided' || (await routerDecidedOn(conversationId))) return;
+    if (await decidedNotOpen(conversationId)) return;
+  } else if (routing?.stage === 'holding') {
+    await routeNow(conversationId, { label: CATEGORY_AI_ACTOR });
+  }
+  await afterRoutingChanged(conversationId, { category: true, group: false });
   await afterTicketUpdate(conversationId);
+}
+
+/**
+ * Whether the ticket this write found held was then decided `not_open` —
+ * resolved, deleted, merged or marked spam in the moment between this write's
+ * commit and the router's lock, which finds it in nobody's queue and owes it
+ * nothing — or is gone, purged with its routing row in that moment. The one
+ * answer where Jev's question parts from the console's (`routerDecidedOn`): a
+ * person's edit on a ticket resolved in its window meets its rules as an edit
+ * on any resolved ticket does, but Jev never files a resolved ticket, and a
+ * relabel here would be a first pass on work that ended after Jev looked.
+ */
+async function decidedNotOpen(conversationId: string): Promise<boolean> {
+  const [row] = await db
+    .select({ outcome: routingDecisions.outcome })
+    .from(routingDecisions)
+    .where(eq(routingDecisions.conversationId, conversationId));
+  return !row || row.outcome === 'not_open';
 }
 
 type TicketState = {

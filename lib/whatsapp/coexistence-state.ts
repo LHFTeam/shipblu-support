@@ -1,6 +1,7 @@
 import { and, eq, inArray, type SQL, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { channels } from '@/db/schema';
+import type { RoutingMode } from '@/lib/routing/mode';
 import { type Coexistence, parseCoexistence, type SyncType } from './coexistence';
 import { recordCredentialRefusal } from './credentials';
 
@@ -68,17 +69,34 @@ export async function writeOnboardedCoexistence(
  * account. Under READ COMMITTED an UPDATE that waits on a concurrent writer
  * evaluates its SET again against the row it then locks, so the CASE sees the
  * object as it is when the write happens.
+ *
+ * The routing mode, when the form sent one, is decided the same way: a
+ * connected number keeps `default_group` whatever the form said, because its
+ * replies are typed on the phone (`routingModeOf`).
+ * `complete_coexistence_onboarding` resets the column in the transaction that
+ * writes the object, and a mode written as given by a save that waited on it
+ * would put back what the job had just cleared. The reset and this are both
+ * needed: either alone loses to the other's order. Any object under
+ * `coexistence` counts, where `parseCoexistence` also wants its ids, so a
+ * malformed one keeps `default_group` — the side a mistake should fall on.
  */
 export function whatsappEditColumns(form: {
   phoneNumberId: string;
   whatsappAccountId: string | null;
-}): { config: SQL; whatsappAccountId: SQL } {
+  routingMode?: RoutingMode;
+}): { config: SQL; whatsappAccountId: SQL; routingMode?: SQL } {
   const connected = sql`jsonb_typeof(${channels.config} -> 'coexistence') = 'object'`;
   return {
     config: sql`case when ${connected} then ${channels.config}
                      else ${JSON.stringify({ phoneNumberId: form.phoneNumberId })}::jsonb end`,
     whatsappAccountId: sql`case when ${connected} then ${channels.whatsappAccountId}
                                 else ${form.whatsappAccountId}::uuid end`,
+    ...(form.routingMode === undefined
+      ? {}
+      : {
+          routingMode: sql`case when ${connected} then 'default_group'::routing_mode
+                                else ${form.routingMode}::routing_mode end`,
+        }),
   };
 }
 

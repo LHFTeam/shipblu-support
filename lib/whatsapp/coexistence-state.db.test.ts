@@ -377,4 +377,83 @@ describe('whatsappEditColumns', () => {
     expect(row.whatsappAccountId).toBe(accountId);
     expect(parseCoexistence(row.config)).toMatchObject({ wabaId: WABA, syncs: {} });
   });
+
+  /**
+   * The routing mode the same way: a number on the Business app has its replies
+   * typed on the phone, so it stays on its default group whatever the form
+   * drawn before its connection said. The job's reset of the column and this
+   * are both needed — either alone loses to the other's order.
+   */
+  describe('the routing mode', () => {
+    async function saveMode(channelId: string, routingMode?: 'category' | 'category_shadow') {
+      await db
+        .update(channels)
+        .set({
+          ...whatsappEditColumns({
+            phoneNumberId: '106540352242922',
+            whatsappAccountId: null,
+            routingMode,
+          }),
+        })
+        .where(eq(channels.id, channelId));
+      const [row] = await db
+        .select({ routingMode: channels.routingMode })
+        .from(channels)
+        .where(eq(channels.id, channelId));
+      return row!.routingMode;
+    }
+
+    async function plainNumber(routingMode: 'default_group' | 'category' = 'default_group') {
+      const [row] = await db
+        .insert(channels)
+        .values({
+          type: 'whatsapp',
+          name: 'Plain',
+          config: { phoneNumberId: '106540352242922' },
+          routingMode,
+        })
+        .returning({ id: channels.id });
+      return row!.id;
+    }
+
+    it('writes the mode the form sent on a plain number, and leaves it alone when it sent none', async () => {
+      const id = await plainNumber();
+      expect(await saveMode(id, 'category_shadow')).toBe('category_shadow');
+      expect(await saveMode(id)).toBe('category_shadow');
+    });
+
+    it('keeps a connected number on its default group, a malformed connection included', async () => {
+      const connected = await channel(null, '106540352242922', '15550783881');
+      expect(await saveMode(connected, 'category')).toBe('default_group');
+
+      const [malformed] = await db
+        .insert(channels)
+        .values({
+          type: 'whatsapp',
+          name: 'Half',
+          config: { phoneNumberId: '106540352243333', coexistence: {} },
+        })
+        .returning({ id: channels.id });
+      expect(await saveMode(malformed!.id, 'category')).toBe('default_group');
+    });
+
+    /** The form was drawn before the job adopted the number and reset its mode. */
+    it('keeps the reset of a number the job adopted after the form was drawn', async () => {
+      const id = await plainNumber('category');
+      await db.transaction(async (tx) => {
+        await tx.update(channels).set({ routingMode: 'default_group' }).where(eq(channels.id, id));
+        await writeOnboardedCoexistence(tx, id, {
+          onboardingId: null,
+          onboardedAt: AT.toISOString(),
+          wabaId: WABA,
+          displayPhoneNumber: '15550783881',
+          verifiedName: null,
+          subscribedAt: null,
+          syncs: {},
+        });
+      });
+
+      expect(await saveMode(id, 'category')).toBe('default_group');
+    });
+  });
 });

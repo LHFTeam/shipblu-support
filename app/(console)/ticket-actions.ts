@@ -7,17 +7,27 @@ import { db } from '@/db/client';
 import { agents, conversationEvents, conversations, groups, ticketStatuses } from '@/db/schema';
 import { purgeConversation, type PurgeRefusal } from '@/lib/admin/purge';
 import { hiddenScopeRefusal } from '@/lib/admin/purge-visibility';
-import { assignConversation } from '@/lib/assignment';
 import { requireAgent } from '@/lib/auth/guard';
 import { ok } from '@/lib/http/action-state';
+import { uuidField } from '@/lib/http/form-data';
 import { isUuid } from '@/lib/http/uuid';
 import { can } from '@/lib/auth/permissions';
 import { isPriority } from '@/lib/tickets/vocabulary';
-import { CATEGORY_REFUSALS, setConversationCategory } from '@/lib/categories/write';
-import { afterRoutingChanged, onPriorityChanged } from '@/lib/sla';
+import { CATEGORY_REFUSALS, setConversationCategoryOn } from '@/lib/categories/write';
+import { afterRoutingChanged, onPriorityChanged, onPriorityChangedIn } from '@/lib/sla';
 import { afterTicketUpdate } from '@/lib/tickets/lifecycle';
 import { CHANGE_STAMP } from '@/lib/tickets/change-stamp';
 import { moveToGroupIfElsewhere } from '@/lib/tickets/move-group';
+import { routeNow } from '@/lib/routing/apply';
+import { afterHoldEnded } from '@/lib/routing/after-hold';
+import { endHold } from '@/lib/routing/end-hold';
+import { handToRouteGroup, type HandToResult } from '@/lib/routing/hand-to';
+import {
+  clockInputsIfInFlight,
+  deferToRouter,
+  routerDecidedOn,
+  undecidedRouting,
+} from '@/lib/routing/state';
 import { isBlank } from '@/lib/tickets/custom-fields';
 import { parseFieldValue } from '@/lib/tickets/custom-fields-parse';
 import { getTicketField } from '@/lib/tickets/lookups';
@@ -44,6 +54,21 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
   const field = String(formData.get('field') ?? '');
   const value = String(formData.get('value') ?? '');
 
+  // Set when routing owns the update pass this edit would have run: the
+  // router ran it, or is running it, on the ticket as the edit left it, or the
+  // creation pass's `beginRouting` routes on the category the edit wrote. On
+  // a decision in flight it is every edit below that writes and would run a
+  // pass (`deferToRouter`), but on a ticket nobody may work — a status taking
+  // it out of the queue, or one already out of it: the router's pass, run
+  // again, is the one owed, and the edit's own would be unordered with the
+  // router's end of the hold. A customer's message still runs its own
+  // (`afterInboundMessage`): it decides nothing about the ticket, its pass
+  // races the rota on every ticket as it does once anybody holds one, and its
+  // four ingest paths write in transactions this does not reach.
+  let routingRunsRules = false;
+  // Set when the edit ended a routing hold, whose assignment and held reply
+  // are owed once the observer rules below have run (`afterHoldEnded`).
+  let endedHold = false;
   switch (field) {
     case 'status': {
       if (!isUuid(value)) return { error: 'Unknown status' };
@@ -82,7 +107,13 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
         if (uncaused) return uncaused;
       }
 
-      await changeStatus(agent.id, conversationId, status);
+      // A move that keeps the ticket in somebody's queue defers as the edits
+      // below do; a resolve or a close never does, since the router owes a
+      // ticket nobody may work no pass, and its rules would never run
+      // (`changeStatus`).
+      routingRunsRules = await changeStatus(agent.id, conversationId, status, undefined, {
+        deferToRouter: true,
+      });
       break;
     }
 
@@ -105,7 +136,7 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
         if (!assignee.isActive) return { error: 'That agent is deactivated' };
       }
 
-      await db.transaction(async (tx) => {
+      const assigned = await db.transaction(async (tx) => {
         await tx
           .update(conversations)
           .set({ assigneeAgentId, assignedAt: assigneeAgentId ? new Date() : null })
@@ -115,9 +146,30 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
           conversationId,
           type: assigneeAgentId ? 'assigned' : 'unassigned',
           actorAgentId: agent.id,
+          // After the update above has the row lock (`CHANGE_STAMP`): an edit
+          // that waited on the router's phase one would otherwise be stamped
+          // when its transaction began, and sort before the decision it came
+          // after.
+          createdAt: CHANGE_STAMP,
           data: { to: assigneeAgentId },
         });
+
+        // A person deciding who answers a ticket held for the router has
+        // decided for it (`endHold`). Only by naming somebody, as a rule's
+        // `assign_agent` ends one only with an agent: "Unassigned" decides
+        // nothing about where the ticket goes — on a held ticket, which has no
+        // assignee, it is a no-op write — and ending the hold for it would
+        // assign the ticket in its default group, the outcome the hold exists
+        // to prevent. Either way a decision in flight runs its pass again on
+        // what this wrote, rather than the edit running one of its own
+        // (`deferToRouter`).
+        const ended = assigneeAgentId
+          ? await endHold(tx, conversationId, 'manual', { agentId: agent.id })
+          : false;
+        return { ended, deferred: await deferToRouter(tx, conversationId) };
       });
+      endedHold = assigned.ended;
+      routingRunsRules = assigned.deferred;
       break;
     }
 
@@ -136,11 +188,10 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
         if (!group) return { error: 'Unknown group' };
       }
 
-      const moved = await db.transaction(async (tx) => {
+      const move = await db.transaction(async (tx) => {
         // Only a move: a page drawn before somebody else moved the ticket can
         // post the group it is already in (`moveToGroupIfElsewhere`).
-        if (!(await moveToGroupIfElsewhere(conversationId, groupId, { executor: tx })))
-          return false;
+        if (!(await moveToGroupIfElsewhere(conversationId, groupId, { executor: tx }))) return null;
 
         // Recorded, where it was not before. Moving a ticket between teams is
         // the same weight of decision as reassigning it and the case above has
@@ -150,11 +201,26 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
           conversationId,
           type: 'group_changed',
           actorAgentId: agent.id,
+          // After the move has the row lock, as the assignee case's line is.
+          createdAt: CHANGE_STAMP,
           data: { to: groupId },
         });
-        return true;
+        // A person moving a ticket held for the router has decided where it
+        // goes (`endHold`); one whose decision is in flight leaves the router
+        // to finish it, its pass and the policy included (`deferToRouter`).
+        // Moved, always, by here: a rule's pick kept for the hold's end spoke
+        // about the group the ticket has left, and goes (`movedGroup`).
+        const ended = await endHold(tx, conversationId, 'manual', {
+          agentId: agent.id,
+          movedGroup: true,
+        });
+        return { endedHold: ended, deferred: await deferToRouter(tx, conversationId) };
       });
-      if (!moved) break;
+      if (!move) break;
+      if (move.deferred) {
+        routingRunsRules = true;
+        break;
+      }
 
       // Before anybody has answered, the policy itself may follow the new team
       // (a policy can be keyed on the group); after, it holds. Either way the
@@ -162,16 +228,22 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
       // can keep their own operating days and holidays.
       await afterRoutingChanged(conversationId, { category: false, group: true });
 
-      // The new team may route automatically where the old one did not. A no-op
-      // if somebody already holds the ticket, which is the usual case.
-      await assignConversation(conversationId, { actorLabel: 'auto_assign' });
+      // The new team may route automatically where the old one did not: the
+      // update pass below assigns the ticket, after the observer rules, so a
+      // rule that moves it on from here is obeyed before anybody holds it —
+      // assigning first left the group the person chose holding a ticket a
+      // rule had sent elsewhere. A hold the move ended owes its reply too.
+      endedHold = move.endedHold;
       break;
     }
 
     case 'priority': {
       if (!isPriority(value)) return { error: 'Unknown priority' };
 
-      await db.transaction(async (tx) => {
+      // For the re-time a deferral owes inside the transaction, read before it
+      // opens, and only on a decision in flight (`clockInputsIfInFlight`).
+      const clocks = await clockInputsIfInFlight(conversationId);
+      const written = await db.transaction(async (tx) => {
         await tx
           .update(conversations)
           .set({ priority: value })
@@ -185,11 +257,26 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
           createdAt: CHANGE_STAMP,
           data: { to: value },
         });
+        // A rule keyed on priority — "urgent goes to Escalations" — run by
+        // this edit beside a decision in flight moved the ticket after the
+        // router had handed it to somebody in Sales (`deferToRouter`).
+        const deferred = await deferToRouter(tx, conversationId);
+        if (!deferred || !clocks) return { deferred, retimed: false };
+        // Handed over, the clocks move in this transaction: the router's pass
+        // reads the ticket as soon as it commits, and a rule asking whether it
+        // is overdue must read the deadline this priority set, as it does when
+        // the pass is the edit's own, below.
+        await onPriorityChangedIn(tx, conversationId, clocks);
+        return { deferred, retimed: true };
       });
+      routingRunsRules = written.deferred;
 
       // The policy prices its targets per priority, so the deadline follows the
-      // badge rather than staying at whatever the ticket arrived as.
-      await onPriorityChanged(conversationId);
+      // badge rather than staying at whatever the ticket arrived as — before
+      // the observer rules below, which may ask whether it is overdue. After
+      // the commit unless it moved inside it: a deferral with no inputs to
+      // re-time with re-times here, its pass handed over all the same.
+      if (!written.retimed) await onPriorityChanged(conversationId);
       break;
     }
 
@@ -204,13 +291,90 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
       const categoryId = value || null;
       if (categoryId && !isUuid(categoryId)) return { error: CATEGORY_REFUSALS.unknown_category };
 
-      const write = await setConversationCategory(conversationId, categoryId, {
-        agentId: agent.id,
+      // The write and where the ticket's routing stands, in one transaction:
+      // the stage moves only under the ticket's lock, which the write holds
+      // from its first statement, so the answer is the one this write met —
+      // the classifier reads it the same way (`lib/category-ai/run.ts`). Read
+      // after the commit, a router deciding in between on this category read
+      // as a ticket routing had finished with, and the relabel below ran the
+      // rules a second time after the router's pass.
+      const { write, deferred, routing } = await db.transaction(async (tx) => {
+        const written = await setConversationCategoryOn(tx, conversationId, categoryId, {
+          agentId: agent.id,
+        });
+        if (written.outcome !== 'changed') {
+          return { write: written, deferred: false, routing: null };
+        }
+        // A decision in flight takes the edit's pass over, a category cleared
+        // included: the router runs it again on the ticket as this left it
+        // (`deferToRouter`).
+        if (await deferToRouter(tx, conversationId)) {
+          return { write: written, deferred: true, routing: null };
+        }
+        // Only for a category set: clearing one settles nothing, and the
+        // window runs on. And not on a decision in flight, which the deferral
+        // above turned down only because nobody may work the ticket: the
+        // router gives its pass up there, and asked to route it now it would
+        // answer `in_flight`, which `routerDecidedOn` reads as the router's
+        // pass covering this edit. The edit's own pass is owed, as on any
+        // resolved ticket.
+        const stage = written.to ? await undecidedRouting(tx, conversationId) : null;
+        return {
+          write: written,
+          deferred: false,
+          routing:
+            stage && written.to && !stage.decisionInFlight
+              ? { ...stage, settled: written.to }
+              : null,
+        };
       });
       if (write.outcome === 'unknown_category' || write.outcome === 'retired_category') {
         return { error: CATEGORY_REFUSALS[write.outcome] };
       }
       if (write.outcome === 'no_ticket') return { error: 'Ticket not found' };
+      if (deferred) {
+        routingRunsRules = true;
+        break;
+      }
+
+      // During a routing hold a person saying what the ticket is about is the
+      // best signal there is, so it routes on it, as Jev's answer would: the
+      // router runs the rules and chooses the policy itself, and the update
+      // pass below would assign before it had. Where the routing stands says
+      // what is owed, as it does for Jev:
+      //
+      // - **Live and `pending`** — the creation pass has not reached
+      //   `beginRouting`, which routes on this category after the `on_create`
+      //   rules, so a rule still gets the first word; or the pass never will,
+      //   and `settle_routing` decides on it at the window's end. Nothing more
+      //   here, not even the policy, which both of those choose again: routed
+      //   now, the ticket would be decided before its `on_create` rules ran,
+      //   and a rule's `assign_group` there would end nothing.
+      // - **Live and `holding`**, phase one not yet written (a decision in
+      //   flight took the pass over above) — routed now. The pass below is
+      //   skipped where the router owns it: `decided` ran it on this category.
+      //   Otherwise somebody decided, or began to, in the moment between this
+      //   commit and the router's lock — `none`, `in_flight` — or this call
+      //   `failed` and the window's job is still to come, and whether that
+      //   reads this write says whether the pass is owed (`routerDecidedOn`,
+      //   which Jev asks of its own write).
+      // - **Shadow** — the rest as though routing did not exist, after the
+      //   would-be decision is recorded once the creation pass has begun
+      //   routing; while it is `pending`, `beginRouting` records it after the
+      //   `on_create` rules, so in shadow too a rule gets the first word.
+      if (routing && !routing.shadow) {
+        if (routing.stage === 'pending') {
+          routingRunsRules = true;
+          break;
+        }
+        const routed = await routeNow(conversationId, { agentId: agent.id, label: 'agent' });
+        if (routed === 'decided' || (await routerDecidedOn(conversationId))) {
+          routingRunsRules = true;
+          break;
+        }
+      } else if (routing?.stage === 'holding') {
+        await routeNow(conversationId, { agentId: agent.id, label: 'agent' });
+      }
 
       // Before the first response, the policy follows the category (it may be
       // keyed on it). A no-op once somebody has answered, when the same policy
@@ -234,7 +398,12 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
         ),
       ];
 
-      await db.update(conversations).set({ tags }).where(eq(conversations.id, conversationId));
+      // In a transaction now, only so the deferral is asked under the lock the
+      // write took: a rule keyed on a tag meets the same race a priority's does.
+      routingRunsRules = await db.transaction(async (tx) => {
+        await tx.update(conversations).set({ tags }).where(eq(conversations.id, conversationId));
+        return deferToRouter(tx, conversationId);
+      });
       break;
     }
 
@@ -274,7 +443,7 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
 
       const before = row.conversation.customFields[def.key] ?? null;
 
-      await db.transaction(async (tx) => {
+      routingRunsRules = await db.transaction(async (tx) => {
         const [updated] = await tx
           .update(conversations)
           .set({ customFields: patch })
@@ -295,6 +464,8 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
             to: updated?.customFields[def.key] ?? null,
           },
         });
+        // A rule keyed on the field, on a decision in flight (`deferToRouter`).
+        return deferToRouter(tx, conversationId);
       });
       break;
     }
@@ -302,8 +473,12 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
 
   // Observer rules see the ticket as the agent has just left it. Actions taken
   // by a rule write to the ticket directly and do not come back through here,
-  // so a rule cannot trigger itself.
-  await afterTicketUpdate(conversationId);
+  // so a rule cannot trigger itself. Not where routing runs them on what the
+  // edit wrote: the router, on a decision in flight or one this edit made.
+  if (!routingRunsRules) await afterTicketUpdate(conversationId);
+  // After the rules, so the held reply is told the hours of the group they
+  // left the ticket in.
+  if (endedHold) await afterHoldEnded(conversationId);
 
   refresh(row.conversation.number);
 
@@ -317,6 +492,104 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
   // the rejection it causes on the client as the navigation it is.
   if (!(await seesTicket(agent, conversationId))) redirect('/inbox');
   return ok();
+}
+
+// --- Hand to <group> ----------------------------------------------------------
+
+const HAND_TO_REFUSALS: Record<Exclude<HandToResult, { ok: true }>['reason'], string> = {
+  not_permitted: 'You cannot reassign tickets',
+  not_found: 'Ticket not found',
+  not_open: 'Only an open or pending ticket can be handed to another group',
+  held: 'This ticket is still being routed. Choose its category to route it now.',
+  owned_number:
+    "This ticket's WhatsApp number has an owner, who answers it whatever its group. Use the Group field to move it.",
+  coexistence:
+    'Replies on this number are typed on the phone, so handing the ticket to a group changes nothing',
+  no_route: "This ticket's category does not route to a group",
+  already_there: "This ticket is already in its category's group",
+  changed: "This ticket's category has changed since the page loaded. Check where it routes now.",
+  reassigned:
+    'Who holds this ticket has changed since the page loaded. Check who it is before handing it over.',
+};
+
+/**
+ * "Hand to <group>": moves the ticket to its category's route group, clears
+ * whoever holds it and assigns it in the new group (`lib/routing/hand-to.ts`).
+ *
+ * Gated by `ticket.assign`, because it unassigns a colleague and picks
+ * somebody else, which is the assignee case's capability. The group comes from
+ * the ticket's own category, read under its lock; the form's `groupId` is the
+ * group the button named, and is only compared, so a category changed since
+ * the page loaded is refused rather than followed somewhere the agent never
+ * saw named.
+ *
+ * The form's `assigneeAgentId` is the assignee the page drew the button from,
+ * empty for nobody, and is compared the same way: it decided whether the
+ * button asked twice, so a ticket somebody took since the page loaded is
+ * refused rather than taken off them in the one click a page showing nobody
+ * offers. The refusal re-reads the page, which then asks twice.
+ *
+ * Nobody to assign — outside the group's hours, a manual strategy, nobody
+ * accepting — is still a success, since the ticket is in the group's queue
+ * where somebody will look for it; but the agent is told, because the page
+ * otherwise shows a ticket the button just unassigned sitting with nobody.
+ * Told only then, and of the queue the ticket is really in (`waitsIn`): one a
+ * rule moved on before the rota ran is named by where the rule took it, and
+ * one a rule resolved, or somebody moved meanwhile, is said nothing of — the
+ * route group's queue is not where it waits, and the page drawn with the
+ * answer shows where it went. An assignment that threw is a success for the
+ * same reason — the move and the unassignment have committed — and is said,
+ * since nobody knows then who holds the ticket.
+ */
+export async function handToGroup(_state: ActionState, formData: FormData): Promise<ActionState> {
+  const agent = await requireAgent();
+  if (!can(agent, 'ticket.assign')) return { error: HAND_TO_REFUSALS.not_permitted };
+
+  const conversationId = String(formData.get('conversationId') ?? '');
+  const row = await loadConversation(agent, conversationId);
+  if (!row) return { error: HAND_TO_REFUSALS.not_found };
+
+  // Malformed reads as "not said": it is a staleness check, never the target.
+  const expectedGroupId = uuidField(formData, 'groupId') ?? null;
+  // Empty, absent and malformed all read as nobody, the strictest answer: it
+  // matches only a ticket nobody holds, which the hand-over takes from no one.
+  const expectedAssigneeId = uuidField(formData, 'assigneeAgentId') ?? null;
+
+  const handed = await handToRouteGroup(
+    conversationId,
+    { agentId: agent.id },
+    { expectedGroupId, expectedAssigneeId },
+  );
+  if (!handed.ok) return { error: HAND_TO_REFUSALS[handed.reason] };
+
+  refresh(row.conversation.number);
+
+  // The ticket is in another group now, and for an agent who sees only their
+  // own and their groups' tickets that can be out of sight — as the group case
+  // in `updateTicket` answers it.
+  if (!(await seesTicket(agent, conversationId))) redirect('/inbox');
+
+  // The hand-over stands and the page drawn with this answer shows it, but who
+  // the rota picked is not known — the end of a hold the hand-over ended tries
+  // again on its own — so the agent is sent to look rather than told where the
+  // ticket waits.
+  if (handed.assignmentFailed) {
+    return {
+      ...ok(),
+      message: `Handed to ${handed.groupName}, but assigning it there failed. Check who holds it now.`,
+    };
+  }
+  if (!handed.waitsIn) return ok();
+  return {
+    ...ok(),
+    // Worded for a manual group as well as a busy or closed one; the Activity
+    // list names the hours and the capacity cases (`assignment_skipped`). A
+    // rule that moved the ticket on is named by where it took it, since that
+    // is the queue the ticket now waits in.
+    message: handed.waitsIn.movedOn
+      ? `Handed to ${handed.groupName} and then moved on to ${handed.waitsIn.groupName}. Nobody there was given it, so it waits in that group's queue.`
+      : `Handed to ${handed.groupName}. Nobody there was given it, so it waits in the group's queue.`,
+  };
 }
 
 const PURGE_ERRORS: Record<PurgeRefusal, string> = {

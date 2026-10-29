@@ -19,6 +19,58 @@ const SKIP_REASONS: Record<string, string> = {
 };
 
 /**
+ * A group a `routed` event names, by the name frozen into it when it was
+ * written, so a group renamed since still reads as what it was called.
+ */
+function groupNamed(name: unknown, id: unknown): string {
+  if (typeof name === 'string' && name) return name;
+  return id ? 'another group' : 'no group';
+}
+
+/**
+ * The router's decision (`lib/routing/`), one sentence per outcome. The actor
+ * printed ahead of it says who decided: "routing" for the router's own six,
+ * written by `apply.ts` with the category and Jev's probability when it had
+ * them; the person or the rule for `manual` and `rule`, written by `endHold`,
+ * which records the group the ticket was left in and nothing about a category.
+ * Worded so a decision that moved nothing still answers "why is this ticket
+ * still here?", which is why every one is on the timeline.
+ */
+function describeRouted(data: Record<string, unknown>): string {
+  const from = groupNamed(data.fromName, data.from);
+  const to = groupNamed(data.toName, data.to);
+  const named = data.label || data.key;
+  const likely =
+    typeof data.probability === 'number' ? ` (${Math.round(data.probability * 100)}% likely)` : '';
+  const category = named ? `its category, ${String(named)}${likely},` : `its category${likely}`;
+
+  switch (data.outcome) {
+    case 'category':
+      // Not moved only when the route group was deleted under the decision.
+      return data.moved === false
+        ? `could not move the ticket to ${to}, where ${category} routes, so it stays in ${from}`
+        : `moved the ticket from ${from} to ${to}, where ${category} routes`;
+    case 'no_route_for_category':
+      return `kept the ticket in ${to}: ${category} routes to no other group`;
+    case 'fallback':
+      return `kept the ticket in ${to}: nothing had said what it is about by the end of the routing window`;
+    case 'taken':
+      return `kept the ticket in ${to}: somebody had already taken it`;
+    case 'not_open':
+      return 'stopped routing the ticket: it was no longer open';
+    case 'released':
+      return `stopped routing the ticket: its channel no longer routes by category, so it stays in ${to}`;
+    case 'manual':
+    case 'rule':
+      return data.moved === true
+        ? `ended routing by moving the ticket to ${to}`
+        : `ended routing before it had decided, so the ticket stays in ${to}`;
+    default:
+      return 'routed the ticket';
+  }
+}
+
+/**
  * The subcategory an event is about. Written as `categoryKey` until Stage 2.A
  * of `plans/ticket-category-routing.md` and as `subcategoryKey` since, and
  * stored rows are never rewritten, so both are read.
@@ -117,6 +169,8 @@ export function describeEvent(type: string, data: Record<string, unknown>): stri
       return 'unassigned the ticket';
     case 'group_changed':
       return 'moved the ticket to another group';
+    case 'routed':
+      return describeRouted(data);
     /*
      * The whole point of recording a refusal. A queue that assigns itself has to
      * be able to say why it did not, in a sentence an agent looking at the ticket

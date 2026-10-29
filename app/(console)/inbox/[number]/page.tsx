@@ -6,6 +6,7 @@ import { requireAgent } from '@/lib/auth/guard';
 import { can } from '@/lib/auth/permissions';
 import { toCategoryChoices } from '@/lib/categories/choices';
 import { listCategories } from '@/lib/categories/queries';
+import { handToTarget } from '@/lib/routing/hand-to';
 import { suggestForAgent } from '@/lib/kb/agent-search';
 import { detectLocale } from '@/lib/kb/language';
 import { seedTerms } from '@/lib/kb/seed';
@@ -59,6 +60,7 @@ export default async function ConversationPage({
   const canClose = can(agent, 'ticket.close');
   const canSubcategorise = can(agent, 'ticket.subcategorise');
   const canSetCategory = can(agent, 'ticket.set_category');
+  const canAssign = can(agent, 'ticket.assign');
 
   // Read whatever the permission, because the sidebar shows what a ticket is
   // filed under to anybody who can open it — `ticket.subcategorise` gates
@@ -166,6 +168,23 @@ export default async function ConversationPage({
       mayReply ? suggestionsLive() : Promise.resolve(false),
     ]);
 
+  // "Hand to <group>", decided from what this page has already read — the
+  // ticket, the categories with their route groups (before `toCategoryChoices`
+  // drops them) and the groups' names — so it costs no query (§6.91). The
+  // action asks the same function again of the locked row.
+  const handTo = handToTarget(
+    {
+      ...conversation,
+      categoryId: conversation.category?.id ?? null,
+      // `getConversation` never loads a deleted ticket.
+      deletedAt: null,
+      ownerAnswers: conversation.accountable?.active === true,
+      coexistence: conversation.onCoexistenceNumber,
+    },
+    { categories, groups: groupList },
+    { canAssign, now: new Date() },
+  );
+
   return (
     <InboxShell
       searchParams={query}
@@ -197,6 +216,7 @@ export default async function ConversationPage({
         purgeRefusal={purgeRefusal}
         currentAgentId={agent.id}
         canViewContact={canViewContact}
+        handTo={handTo.offered ? handTo : null}
       />
       <FocusBeat conversationId={conversation.id} />
     </InboxShell>

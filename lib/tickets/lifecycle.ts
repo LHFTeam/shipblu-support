@@ -7,6 +7,7 @@ import { enqueuePriorityClassification } from '@/lib/priority-ai/enqueue';
 import { classifierTicket } from '@/lib/tickets/classifier-ticket';
 import { linkShipmentsFromMessage } from '@/lib/shipments/links';
 import { scheduleSurvey } from '@/lib/csat';
+import { beginRouting } from '@/lib/routing/begin';
 import { applySlaOnCreate, onCustomerReply } from '@/lib/sla';
 import { logger } from '@/lib/log';
 
@@ -36,6 +37,13 @@ const log = logger('lifecycle');
  * - **Reply to an existing ticket.** The SLA moves first, so an Observer rule
  *   asking `is_first_response_overdue` sees the state the customer's message
  *   just produced rather than the state before it.
+ *
+ * On a channel that routes by category, the new ticket was held from its
+ * insert (`startRouting`), and the creation pass begins routing between the
+ * first SLA selection and assignment (`beginRouting`): after the rules, so a
+ * rule gets the first word, and after the SLA, so a decision that moves
+ * nothing still leaves the ticket with a policy. While held, assignment and
+ * the acknowledgement below skip, and whatever ends the hold does both.
  *
  * The out-of-hours acknowledgement goes last in both, and that ordering is also
  * deliberate. It is the only step here that speaks to the customer, so it should
@@ -75,6 +83,9 @@ export async function afterInboundMessage(
   if (createdConversation) {
     await runAutomations('on_create', conversationId);
     await applySlaOnCreate(conversationId);
+    // A ticket the router has taken is assigned, and answered out of hours,
+    // by the router once it has decided (`lib/routing/`).
+    if ((await beginRouting(conversationId)) === 'routed') return;
     await autoAssign(conversationId);
     await maybeSendAutoResponse(trigger);
     return;
