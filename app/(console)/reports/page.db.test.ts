@@ -1,4 +1,5 @@
 import { eq } from 'drizzle-orm';
+import { DateTime } from 'luxon';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
@@ -37,8 +38,13 @@ describe('the reports overview', () => {
   // category, so a score filed by category would move with every relabel:
   // every other CSAT stays where the survey was asked.
   it('draws no CSAT by category, which a survey keeps no snapshot of', async () => {
+    // Mid-window, so the page's own window, read a moment later, still holds
+    // it if the zone's midnight falls between the two: on the window's first
+    // day, it was a day outside the page's.
     const { zone } = await reportingContext();
-    const day = rangeIn(zone, 30).from;
+    const day = DateTime.fromISO(rangeIn(zone, 30).to, { zone: 'utc' })
+      .minus({ days: 15 })
+      .toISODate()!;
     const [sales] = await db
       .select({ id: ticketCategories.id })
       .from(ticketCategories)
