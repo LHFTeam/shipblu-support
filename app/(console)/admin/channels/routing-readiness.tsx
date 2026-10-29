@@ -17,6 +17,7 @@ import type {
   HoldEndingRule,
   RoutingReadiness,
 } from '@/lib/routing/readiness';
+import { STRATEGY_LABELS } from '@/lib/assignment/strategy-copy';
 
 /**
  * The readiness panel on `/admin/channels`: whether routing by category would
@@ -149,12 +150,6 @@ export function RoutingBadge({ channel }: { channel: ChannelRouting | undefined 
 }
 
 const CLASSIFIER_LABELS = { off: 'Off', shadow: 'Shadow', apply: 'Apply' } as const;
-
-const STRATEGY_LABELS: Record<GroupFacts['strategy'], string> = {
-  manual: 'Manual',
-  round_robin: 'Round robin',
-  load_balanced: 'Load balanced',
-};
 
 const GAP_BADGES: Record<GroupGap, string> = {
   manual: 'Nobody assigned automatically',

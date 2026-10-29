@@ -2,6 +2,7 @@ import { asc, sql, type SQL } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { CATEGORY_AI_LIVE_LABEL, channels } from '@/db/schema';
 import { CATEGORY_AI_ACTOR, type CategoryOutcome } from '@/lib/category-ai/decide';
+import type { AssignmentStrategy } from '@/lib/assignment';
 import { asDate } from '@/lib/reports/live';
 import { within, type ReportWindow } from '@/lib/reports/rollup';
 import { openBacklog } from '@/lib/tickets/backlog';
@@ -559,7 +560,7 @@ export type StillUnassigned = {
   groupId: string | null;
   groupName: string | null;
   /** That group's assignment strategy now; `manual` leaves every ticket unassigned by design. */
-  strategy: string | null;
+  strategy: AssignmentStrategy | null;
   outcome: RoutingOutcome;
   tickets: number;
   /** The longest-waiting ones' numbers, at most `LISTED`. */
@@ -626,7 +627,7 @@ export async function routedStillUnassigned(now: Date = new Date()): Promise<Sti
     .map((row) => ({
       groupId: row.groupId as string | null,
       groupName: row.groupName as string | null,
-      strategy: row.strategy as string | null,
+      strategy: row.strategy as AssignmentStrategy | null,
       outcome: row.outcome as RoutingOutcome,
       tickets: Number(row.tickets),
       numbers: asNumbers(row.numbers),

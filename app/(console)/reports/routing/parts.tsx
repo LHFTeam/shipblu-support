@@ -20,6 +20,7 @@ import {
   type StillUnassigned,
 } from '@/lib/routing/report';
 import { rate } from '../report-parts';
+import { STRATEGY_LABELS } from '@/lib/assignment/strategy-copy';
 
 /**
  * The routing report's tables, apart from the page so the page reads as the
@@ -449,12 +450,6 @@ export function ShadowTable({ rows }: { rows: ShadowComparison[] }) {
   );
 }
 
-const STRATEGY_LABELS: Record<string, string> = {
-  manual: 'Manual',
-  round_robin: 'Round robin',
-  load_balanced: 'Load balanced',
-};
-
 /**
  * Routed tickets nobody holds, by the group each is in now and that group's
  * strategy. A `manual` group picks from its queue, so its tickets wait by
@@ -478,7 +473,7 @@ export function UnassignedTable({ rows }: { rows: StillUnassigned[] }) {
             ) : row.strategy === null ? (
               '—'
             ) : (
-              (STRATEGY_LABELS[row.strategy] ?? row.strategy)
+              STRATEGY_LABELS[row.strategy]
             )}
           </Cell>
           <Cell className="whitespace-nowrap">{ROUTING_OUTCOME_LABELS[row.outcome]}</Cell>
