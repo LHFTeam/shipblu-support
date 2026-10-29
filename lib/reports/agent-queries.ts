@@ -1,8 +1,8 @@
 import { DateTime } from 'luxon';
-import { and, asc, desc, eq, gte, isNull, lte, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, lte, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { agentMetricsDaily, agents, metricsDaily } from '@/db/schema';
-import { rangeIn } from '@/lib/reports/rollup';
+import { rangeIn, sliceWhere } from '@/lib/reports/rollup';
 
 /**
  * Read models for the agent productivity report.
@@ -21,8 +21,12 @@ import { rangeIn } from '@/lib/reports/rollup';
  * message history in front of the database.
  */
 
-/** The per-agent totals slice: group and channel both null, agent set. */
-const AGENT_SLICE = and(isNull(metricsDaily.groupId), isNull(metricsDaily.channel));
+/**
+ * The per-agent totals slice: agent set, every other dimension null, built
+ * from the same list as `TOTALS_SLICE` (`sliceWhere`), so a dimension added to
+ * the rollup reaches it too.
+ */
+const AGENT_SLICE = sliceWhere('agentId');
 
 const SUMS = {
   onlineSeconds: sql<number>`coalesce(sum(${agentMetricsDaily.onlineSeconds}), 0)::bigint`,

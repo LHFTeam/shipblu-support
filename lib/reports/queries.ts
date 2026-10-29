@@ -1,10 +1,10 @@
 import { DateTime } from 'luxon';
-import { and, between, eq, isNotNull, isNull, lt, lte, sql } from 'drizzle-orm';
+import { and, asc, between, eq, isNotNull, lt, lte, or, sql, type SQL } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { share } from '@/lib/charts/scale';
-import { agents, groups, metricsDaily, rollupDays } from '@/db/schema';
+import { agents, groups, metricsDaily, rollupDays, ticketCategories } from '@/db/schema';
 import type { Range } from './subcategory-queries';
-import { RATING_COLUMNS, type ReportWindow } from './rollup';
+import { RATING_COLUMNS, sliceWhere, type ReportWindow } from './rollup';
 
 /**
  * Read models for the reports page.
@@ -59,7 +59,10 @@ const SUMS = {
   csatRating3: sql<number>`coalesce(sum(${metricsDaily.csatRating3}), 0)::int`,
   csatRating4: sql<number>`coalesce(sum(${metricsDaily.csatRating4}), 0)::int`,
   csatRating5: sql<number>`coalesce(sum(${metricsDaily.csatRating5}), 0)::int`,
-};
+} satisfies Record<keyof Totals, SQL<number>>;
+
+/** Every column of `Totals`, from `SUMS`, which the compiler holds to the type. */
+const TOTALS_KEYS = Object.keys(SUMS) as (keyof Totals)[];
 
 /**
  * The window's days, both ends included.
@@ -75,24 +78,33 @@ function inRange(range: Range) {
 }
 
 /**
+ * The totals slice: every dimension null, all four of them — one row per day
+ * (`metrics_daily_slice_key`, over the day and the four).
+ *
+ * One predicate for every reader of the totals, because each slice is the
+ * totals row with one dimension filled in (`metrics_daily_one_dimension`), so
+ * a predicate that leaves a dimension out also matches that dimension's
+ * slices. Leaving out the category is the one that would go unseen: every
+ * categorised ticket counted twice in every headline figure — this page, the
+ * CSAT page and its export, the dashboard's History — and `reconcileFailure()`
+ * cannot see it, since it checks what is written, not what is read. So it is
+ * built from `DIMENSIONS` (`sliceWhere` in `lib/reports/rollup.ts`), and a
+ * fifth dimension reaches it in the commit that adds it there, with the key
+ * and the CHECK.
+ */
+export const TOTALS_SLICE = sliceWhere(null);
+
+/**
  * Headline numbers.
  *
- * Read from the totals slice — every dimension null — rather than by summing
- * the per-agent rows, which would double-count anything attributed to both an
- * agent and a group.
+ * Read from the totals slice rather than by summing the per-agent rows, which
+ * would double-count anything attributed to both an agent and a group.
  */
 export async function totals(range: Range): Promise<Totals> {
   const rows = await db
     .select(SUMS)
     .from(metricsDaily)
-    .where(
-      and(
-        inRange(range),
-        isNull(metricsDaily.groupId),
-        isNull(metricsDaily.agentId),
-        isNull(metricsDaily.channel),
-      ),
-    );
+    .where(and(inRange(range), TOTALS_SLICE));
 
   return normalise(rows[0]);
 }
@@ -134,19 +146,155 @@ export async function byChannel(range: Range): Promise<Row[]> {
   return rows.map((row) => ({ ...normalise(row), label: row.label }));
 }
 
+/**
+ * The category slices, one row per category with figures in the window, in
+ * the registry's order — `position`, then `key` — rather than by volume as the
+ * other breakdowns are: four fixed rows that keep their places from one week
+ * to the next can be compared week on week.
+ *
+ * Each ticket under its category as it stands when its day was rolled up
+ * (`lib/reports/rollup.ts` says why). A retired category is not filtered out:
+ * its days keep reporting under it, which is what retired-never-deleted is
+ * for, and `isActive` comes back so the page names it as retired
+ * (`categoryLabel`). The tickets nothing has filed are in no row here; `rest`
+ * is the rest of the totals (`uncategorised`).
+ *
+ * The totals come back from the same statement, because the rest is a
+ * subtraction and its two halves must be one moment's. Read apart — `totals()`
+ * and this, through `allLimited` — each statement took its own snapshot, and a
+ * rollup committing a day between them took one night's category slices off a
+ * total that did not yet hold that night, which printed "No category" short,
+ * or negative. The rows are `TOTALS_SLICE` or a category slice, which names
+ * nothing else (`metrics_daily_one_dimension`), and under the left join the
+ * totals are the one group with no registry row: the foreign key is
+ * `restrict`, so every category slice finds its row.
+ */
+export async function byCategory(range: Range): Promise<CategoryBreakdown> {
+  const rows = await db
+    .select({
+      id: ticketCategories.id,
+      label: ticketCategories.labelEn,
+      isActive: ticketCategories.isActive,
+      ...SUMS,
+    })
+    .from(metricsDaily)
+    .leftJoin(ticketCategories, eq(ticketCategories.id, metricsDaily.categoryId))
+    .where(and(inRange(range), or(TOTALS_SLICE, isNotNull(metricsDaily.categoryId))))
+    .groupBy(ticketCategories.id)
+    .orderBy(asc(ticketCategories.position), asc(ticketCategories.key));
+
+  const categories = rows.flatMap(({ id, label, isActive, ...sums }) =>
+    id === null || label === null
+      ? []
+      : [{ ...normalise(sums), label, isActive: isActive ?? false }],
+  );
+  const total = normalise(rows.find((row) => row.id === null));
+  return { total, rows: categories, rest: uncategorised(total, categories) };
+}
+
+/** The window's totals, its category rows, and what no category holds, from one snapshot. */
+export type CategoryBreakdown = {
+  /**
+   * The totals slice, read in the statement the rows are: what the overview's
+   * tiles print, so the tiles and the table summing to them are one moment's.
+   */
+  total: Totals;
+  /** One row per category with a slice in the window, in the registry's order. */
+  rows: (Row & { isActive: boolean })[];
+  /** The window's totals less every row above. */
+  rest: Totals;
+};
+
+/**
+ * The window's figures that no category slice holds: the totals less every
+ * category's, column by column — the tickets nothing had filed when their day
+ * was rolled up, and every ticket on a day rolled up before the rollup had a
+ * category at all.
+ *
+ * Exact because a ticket has one category, so no figure is in two category
+ * slices, and every column of `Totals` is a count or a sum. Not clamped at
+ * zero: the rollup writes no day whose category slices sum past its totals
+ * (`reconcileFailure`, asked before the write), and `byCategory` reads both
+ * halves in one statement, so a negative here would be a bug, and one worth
+ * seeing rather than printing as nothing.
+ */
+export function uncategorised(total: Totals, rows: readonly Totals[]): Totals {
+  return normalise(
+    Object.fromEntries(
+      TOTALS_KEYS.map((key) => [key, rows.reduce((rest, row) => rest - row[key], total[key])]),
+    ),
+  );
+}
+
+/**
+ * The window's days with figures, and those of them last rolled up by code
+ * that did not file tickets by category (`rollup_days.categories_computed_at`):
+ * how many, and the first and last of them. Every ticket on such a day is
+ * under "No category", whatever it carries now, until the day is rolled up
+ * again.
+ *
+ * Counted day by day rather than read off where category figures begin. A day
+ * rebuilt by hand ahead of the history's rebuild, or by a rollback's nightly,
+ * leaves unfiled days after a filed one, and a first filed day would call
+ * them covered. Days with a totals row only, since `computeDay` writes none
+ * for an empty day and there is nothing on one to misfile; a day with figures
+ * and no `rollup_days` row was rolled up before the table existed, so before
+ * categories too.
+ */
+export type CategoryFiling = {
+  days: number;
+  unfiled: number;
+  first: string | null;
+  last: string | null;
+};
+
+export async function categoryFiling(range: Range): Promise<CategoryFiling> {
+  const unfiled = sql`not coalesce(${rollupDays.categoriesComputedAt} = ${rollupDays.computedAt}, false)`;
+  const [row] = await db
+    .select({
+      days: sql<number>`count(*)::int`,
+      unfiled: sql<number>`(count(*) filter (where ${unfiled}))::int`,
+      first: sql<string | null>`(min(${metricsDaily.day}) filter (where ${unfiled}))::text`,
+      last: sql<string | null>`(max(${metricsDaily.day}) filter (where ${unfiled}))::text`,
+    })
+    .from(metricsDaily)
+    .leftJoin(rollupDays, eq(rollupDays.day, metricsDaily.day))
+    .where(and(inRange(range), TOTALS_SLICE));
+
+  return row ?? { days: 0, unfiled: 0, first: null, last: null };
+}
+
+/**
+ * What the overview says about its category figures: `unfiled`, some of the
+ * window's days were rolled up before the rollup filed by category, and
+ * `all` says whether every one was; `none-here`, every day is filed and no
+ * ticket on them has a category; `whole`, nothing to say. Without a word,
+ * days rolled up before categories read as days whose tickets nobody filed,
+ * and a window holding no category reads as a section not finished (§6.54).
+ */
+export type CategoryCoverage =
+  | { kind: 'none-here' | 'whole' }
+  | { kind: 'unfiled'; all: boolean; days: number; first: string; last: string };
+
+export function categoryCoverage(rowsInWindow: number, filing: CategoryFiling): CategoryCoverage {
+  if (filing.unfiled > 0) {
+    return {
+      kind: 'unfiled',
+      all: filing.unfiled === filing.days,
+      days: filing.unfiled,
+      first: filing.first!,
+      last: filing.last!,
+    };
+  }
+  return rowsInWindow === 0 ? { kind: 'none-here' } : { kind: 'whole' };
+}
+
 /** Daily series for the totals slice, oldest first, for the trend table. */
 export async function daily(range: Range): Promise<(Totals & { day: string })[]> {
   const rows = await db
     .select({ day: metricsDaily.day, ...SUMS })
     .from(metricsDaily)
-    .where(
-      and(
-        inRange(range),
-        isNull(metricsDaily.groupId),
-        isNull(metricsDaily.agentId),
-        isNull(metricsDaily.channel),
-      ),
-    )
+    .where(and(inRange(range), TOTALS_SLICE))
     .groupBy(metricsDaily.day)
     .orderBy(metricsDaily.day);
 
@@ -176,14 +324,7 @@ export async function rolledUpDays(range: Range): Promise<{ first: string | null
       days: sql<number>`(count(distinct ${metricsDaily.day}) filter (where ${metricsDaily.day} >= ${range.from}::date))::int`,
     })
     .from(metricsDaily)
-    .where(
-      and(
-        lte(metricsDaily.day, range.to),
-        isNull(metricsDaily.groupId),
-        isNull(metricsDaily.agentId),
-        isNull(metricsDaily.channel),
-      ),
-    );
+    .where(and(lte(metricsDaily.day, range.to), TOTALS_SLICE));
 
   return { first: row?.first ?? null, days: row?.days ?? 0 };
 }

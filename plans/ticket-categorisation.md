@@ -213,7 +213,7 @@ set on every change, with a ladder that puts a human's choice above any rule's.
 `rollup_metrics` transaction rather than a second nightly job — two jobs would be
 two answers to "which day is this".
 
-**Not a dimension on `metrics_daily`.** That table's `reconciles()` assertion
+**Not a dimension on `metrics_daily`.** That table's `reconcileFailure()` assertion
 checks a day's totals row equals the sum of its channel slices, and its own
 comment calls it the only thing standing between a double-counting bug and a
 report that merely looks busy. Categories are multi-valued — a ticket routinely

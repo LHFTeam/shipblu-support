@@ -17,6 +17,7 @@ import type {
   HoldEndingRule,
   RoutingReadiness,
 } from '@/lib/routing/readiness';
+import { STRATEGY_LABELS } from '@/lib/assignment/strategy-copy';
 
 /**
  * The readiness panel on `/admin/channels`: whether routing by category would
@@ -31,13 +32,23 @@ import type {
  *
  * A server component: every fact is a sentence by the time it reaches the
  * browser, and the dates in it are written once, on the server.
+ *
+ * The panel says what will happen; `/reports/routing` says what did, so it
+ * links there for anybody who may read the team's reports.
  */
 export function RoutingReadinessPanel({
   readiness,
   canEditCategories,
+  canViewReport,
 }: {
   readiness: RoutingReadiness;
   canEditCategories: boolean;
+  /**
+   * `report.view`, which every admin holds: the link to the routing report.
+   * Required, like the permission beside it: a default of `false` let the one
+   * page that draws the panel leave it out, and the link was never shown.
+   */
+  canViewReport: boolean;
 }) {
   const routing = readiness.channels.filter((channel) => channel.column !== 'default_group');
   const { classifier } = readiness;
@@ -48,13 +59,25 @@ export function RoutingReadinessPanel({
         title="Routing by category"
         description="Where each category’s tickets go, and what would stop a channel routing them, as of when this page loaded."
         actions={
-          canEditCategories ? (
-            <Link
-              href="/admin/categories"
-              className="text-sm text-(--color-text-link) hover:text-(--color-text-link-hover) hover:underline"
-            >
-              Categories and route groups
-            </Link>
+          canEditCategories || canViewReport ? (
+            <div className="flex flex-wrap items-center gap-3">
+              {canViewReport ? (
+                <Link
+                  href="/reports/routing"
+                  className="text-sm text-(--color-text-link) hover:text-(--color-text-link-hover) hover:underline"
+                >
+                  Routing report
+                </Link>
+              ) : null}
+              {canEditCategories ? (
+                <Link
+                  href="/admin/categories"
+                  className="text-sm text-(--color-text-link) hover:text-(--color-text-link-hover) hover:underline"
+                >
+                  Categories and route groups
+                </Link>
+              ) : null}
+            </div>
           ) : null
         }
       />
@@ -127,12 +150,6 @@ export function RoutingBadge({ channel }: { channel: ChannelRouting | undefined 
 }
 
 const CLASSIFIER_LABELS = { off: 'Off', shadow: 'Shadow', apply: 'Apply' } as const;
-
-const STRATEGY_LABELS: Record<GroupFacts['strategy'], string> = {
-  manual: 'Manual',
-  round_robin: 'Round robin',
-  load_balanced: 'Load balanced',
-};
 
 const GAP_BADGES: Record<GroupGap, string> = {
   manual: 'Nobody assigned automatically',

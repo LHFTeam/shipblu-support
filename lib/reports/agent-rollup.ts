@@ -35,8 +35,8 @@ const log = logger('agent-rollup');
  * One day of agent-productivity figures.
  *
  * The sibling of `lib/reports/rollup`, and deliberately a separate module rather
- * than more work inside it. That one measures *tickets* and slices them four
- * ways with null meaning "all"; this one measures *people* and has exactly one
+ * than more work inside it. That one measures *tickets* and slices them by
+ * group, agent, channel and category, with null meaning "all"; this one measures *people* and has exactly one
  * dimension. Folding them together would mean a login time with a channel
  * attached, and would break the reconciliation that guards the ticket figures.
  *

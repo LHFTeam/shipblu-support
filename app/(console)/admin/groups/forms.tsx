@@ -5,6 +5,7 @@ import { Button, Card, Cell, Field, Input, Row, Select, Table, Toggle } from '@/
 import { InfoTip } from '@/components/tooltip';
 import { DangerAction, Disclosure, EditorForm } from '../forms-shared';
 import { deleteGroup, saveGroup } from './actions';
+import { STRATEGY_LABELS } from '@/lib/assignment/strategy-copy';
 
 type Group = {
   id: string;
@@ -200,12 +201,6 @@ export function NewGroup({ schedules, agents }: { schedules: Choice[]; agents: C
     </Disclosure>
   );
 }
-
-const STRATEGY_LABELS: Record<Group['assignmentStrategy'], string> = {
-  manual: 'Manual',
-  round_robin: 'Round robin',
-  load_balanced: 'Load balanced',
-};
 
 type GroupSummary = {
   group: Group;

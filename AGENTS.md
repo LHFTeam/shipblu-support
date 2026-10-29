@@ -1408,7 +1408,14 @@ README says why it is a setting and not a rule. The rules:
   sweep could assign the ticket in the group it is leaving. An assignee ends it
   whoever gave it, and the router then records `taken` and never moves the
   ticket. Both columns are in `queue_relevant` (`db/sql/001`), so the badge
-  clears on the hold ending alone.
+  clears on the hold ending alone. A reader that counts held tickets rather than
+  holding a row asks `heldSql(now)` (`lib/routing/held-sql.ts`), the same
+  predicate in SQL, in a module of its own because `hold.ts` is client-safe and
+  that one imports the schema. It reads the hold's columns alone, so it counts
+  over a population already narrowed to work (the open backlog), and
+  `held-sql.db.test.ts` holds it, `isHeld` and `routingHold` to one answer on
+  the same rows. The live board's Unassigned tile counts those as being routed,
+  not as work nobody picked up.
 - **The ticket's row is locked first, and `FOR NO KEY UPDATE`**, then the
   group's or the routing row's, by the router, `endHold` and `deferToRouter`
   (each behind its caller's own write, which took the ticket's),
@@ -1855,7 +1862,9 @@ README says why it is a setting and not a rule. The rules:
   `routing_decided_at`, so moving the channel to `category` later starts
   clean.
 - **The readiness panel on `/admin/channels` reads what the code reads**
-  (`lib/routing/readiness.ts`): `routingModeOf`, `routingStartFor`,
+  (`lib/routing/readiness.ts`): `routingModeOf`, `routingStartFor` behind
+  `filesRoutableTickets` (`lib/routing/filing.ts` — the filing row and an
+  active owner, which `/reports/routing`'s "is held" sentence asks too),
   `routeGroupSummaries` (assignment's `filterCandidates`), a group's hours as
   assignment asks them, and the engine's own condition evaluator for the active
   rules that would end a hold on the channel. A panel that reasoned for itself
@@ -1873,10 +1882,11 @@ takes first to read the group — but for phase two's mark, and its claim where 
 `on_update` rule exists, which `finish()` writes, each in one statement of its
 own holding no other lock to close a cycle with — and
 `routing_decisions_decided_complete` (`db/sql/003`) refuses a decided row
-without its outcome or `decided_at`, which would leave the routing report short
-without a word. The timeline gets one `routed` event per live decision, one that
-moved nothing included, naming the category, the group, Jev's probability and
-the outcome, and one when `endHold` writes `manual` or `rule`.
+without its outcome or `decided_at`, which would leave `/reports/routing`
+(`lib/routing/report.ts`) short without a word. The timeline gets one `routed`
+event per live decision, one that moved nothing included, naming the category,
+the group, Jev's probability and the outcome, and one when `endHold` writes
+`manual` or `rule`.
 
 **The one AI provider, and the four things it is allowed to touch.**
 `lib/typesafe/` calls TypeSafe's System One endpoint, and four modules ask it a
@@ -2292,7 +2302,32 @@ state, so counting it during a rebuild writes today's answer onto an old date.
 `agent_backlog_snapshots` is sampled hourly for that reason, and the nightly
 rollup reads it rather than owning it: `rollup_metrics` rebuilds by delete and
 insert, and would otherwise destroy the only copy. Hourly rather than at
-midnight because Render's cron schedules are UTC and Cairo's offset moves.
+midnight because Render's cron schedules are UTC and Cairo's offset moves. The
+live board's open work by category has no history for the same reason.
+
+**A totals read names every dimension null.** A `metrics_daily` row is one
+slice: the totals, with group, agent, channel and category all null, or exactly
+one of them named. Both halves are constraints rather than habits —
+`metrics_daily_slice_key` (UNIQUE NULLS NOT DISTINCT over the day and the four
+dimensions; the index before it was NULLS DISTINCT and refused nothing) holds
+one row per slice per day, and `metrics_daily_one_dimension` (`db/sql/003`)
+refuses a row naming two — so a reader selects a slice by its nulls alone. Each
+slice is then the totals row with one column filled in, and a totals read that
+leaves a dimension out reads that dimension's slices as more totals: without
+the category, every categorised ticket counted twice in every headline figure,
+the CSAT page and the dashboard's History, and `reconcileFailure` cannot see
+it, since it checks what the rollup writes, not what a page reads. So the
+totals are read through `TOTALS_SLICE` (`lib/reports/queries.ts`) and an
+agent's slice through `AGENT_SLICE`, both built by `sliceWhere` from
+`DIMENSIONS` and a column map the type holds to it (`lib/reports/rollup.ts`),
+never a list of nulls typed out again. A new dimension goes into `DIMENSIONS`
+and that map (it does not compile without both), the key and the CHECK in one
+commit, and deploys web first, because an old reader meeting the new slices
+double-counts until it is replaced. The rollup
+asks `reconcileFailure` of a day before it writes it, and writes nothing for a
+day that fails. A category figure follows the ticket's category as it stands
+when its day is rolled up, as the group's does: the nightly recomputes three
+days, so a relabel reaches an older day only through `rollup_metrics from=`.
 
 **A report's window comes from `rangeIn()`, never from `current_date`.** The
 rollups bucket a day in the reporting zone so an evening shift does not land on
