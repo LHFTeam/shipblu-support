@@ -57,7 +57,7 @@ import { windowState as whatsappWindowState } from '@/lib/whatsapp/window';
  *                        automation engine asked only this, so an `on_update`
  *                        rule's `send_reply` fired by an edit on a bot ticket
  *                        was written and queued. `writeAutomatedReply` refuses
- *                        it too, for a sender that asks neither.
+ *                        it too, for a sender that refuses it nowhere.
  *   whatsapp             outside 24 hours only an approved template sends, and
  *                        an automation has no way to fill one in.
  *   facebook, instagram  outside 24 hours only `HUMAN_AGENT` sends, and that tag
@@ -177,12 +177,19 @@ export type AutomatedReplyOptions = {
  * transaction, so the job commits with the message it carries.
  *
  * It throws on a read-only channel (`whatsapp_bot`) before the row exists. Every
- * automated sender writes through here, and they do not all refuse the bot the
- * same way: the acknowledgement and the engine ask `automatedReplyBlocked`, and
- * the survey asks it only on Meta's channels and turns the bot away in
- * `decideSurvey`. So this is the one refusal no sender can skip. Each sender
- * refuses first, with a reason it can record; reaching this line is a sender
- * that did not, and a throw says so where a skip would leave nothing to find.
+ * automated sender writes through here, and each turns the bot away first, in
+ * its own way:
+ *
+ *   the acknowledgement  its own `isReadOnlyChannel` check, before it asks the
+ *                        guard, and without a word;
+ *   the engine           `automatedReplyBlocked`, with a warning in the log;
+ *   the survey           `decideSurvey`, recorded as a `read_only_channel` skip,
+ *                        since it asks the guard only on Meta's channels;
+ *   the thanks           answering only a tap whose platform is the ticket's
+ *                        channel, and then the guard.
+ *
+ * So this is the one refusal no sender can skip. Reaching it is a sender that
+ * did not refuse, and a throw says so where a skip would leave nothing to find.
  */
 export async function writeAutomatedReply(
   on: Executor,
@@ -320,11 +327,11 @@ export async function deliverAutomatedReply(reply: AutomatedReply): Promise<stri
  * delivery status, so an automated web chat message is stored with the
  * requester's address and whatever HTML its sender passed, as it always was.
  * The bot's conversations are answered by nobody: the console offers no reply
- * there, the acknowledgement and the engine are refused by
- * `automatedReplyBlocked`, the survey by `decideSurvey`, and any sender that
- * skipped its own refusal by `writeAutomatedReply`, before the row exists. So
- * `whatsapp_bot` never reaches this. Until the guard refused it, an `on_update`
- * rule's `send_reply` on a bot ticket was queued here as an email.
+ * there, every automated sender turns the bot away before it writes, and
+ * `writeAutomatedReply` throws for one that did not (its docstring says who
+ * refuses where). So `whatsapp_bot` never reaches this. Until the guard refused
+ * it, an `on_update` rule's `send_reply` on a bot ticket was queued here as an
+ * email.
  */
 export function carrierFor(
   channel: ConversationChannel,
@@ -361,8 +368,8 @@ export function carrierFor(
  * by email, so they are excluded by name rather than by carrier. Web chat has no
  * carrier at all — writing its row is its delivery. A read-only channel
  * (`whatsapp_bot`) is answered by nobody: the console offers no reply there,
- * and every automated sender is refused it before the row exists (`carrierFor`
- * says by what).
+ * and every automated sender is refused it before the row exists
+ * (`writeAutomatedReply` says by what).
  * Answering "email" for it would only be true by accident. `api` does go out by
  * email, and is written as email.
  */

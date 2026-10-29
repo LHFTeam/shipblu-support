@@ -10,7 +10,7 @@ import {
   ticketStatuses,
 } from '@/db/schema';
 import { withCleanDatabase } from '@/lib/testing/db';
-import { deliverAutomatedReply } from './outbound';
+import { deliverAutomatedReply, enqueueAutomatedDelivery, writeAutomatedReply } from './outbound';
 
 /**
  * The write both automated senders share — the out-of-hours reply and an
@@ -42,14 +42,10 @@ async function openTicket(channel: 'email' | 'whatsapp_bot' = 'email') {
   return row!.id;
 }
 
-function acknowledge(
-  conversationId: string,
-  bodyText: string,
-  channel: 'email' | 'whatsapp_bot' = 'email',
-) {
+function acknowledge(conversationId: string, bodyText: string) {
   return deliverAutomatedReply({
     conversationId,
-    channel,
+    channel: 'email',
     requesterEmail: 'amira@example.test',
     bodyText,
     bodyHtml: `<p>${bodyText}</p>`,
@@ -104,15 +100,30 @@ describe('deliverAutomatedReply', () => {
     expect(await stamp()).toEqual(first);
   });
 
-  // Every sender refuses the bot before it gets here, but not all through
-  // `automatedReplyBlocked` — the survey turns it away in `decideSurvey` — so
-  // the door refuses it too, and before the row exists: no message on the
-  // timeline, no event, and no email queued for a conversation nobody answers.
+  // Each sender turns the bot away first, in its own way (`writeAutomatedReply`
+  // says who refuses where), so the door refuses it too, before the row exists:
+  // no message on the timeline, no event, and no email queued for a
+  // conversation nobody answers. Both ways in: `deliverAutomatedReply` on the
+  // pool, as the acknowledgement and the engine write, and `writeAutomatedReply`
+  // inside a transaction of the caller's, as the survey and the thanks do.
   it("refuses the customer bot's conversation before writing anything", async () => {
     const conversationId = await openTicket('whatsapp_bot');
+    const reply = {
+      conversationId,
+      channel: 'whatsapp_bot' as const,
+      requesterEmail: 'amira@example.test',
+      bodyText: 'We have your message.',
+      bodyHtml: null,
+      actorLabel: 'automation:acknowledge',
+      eventType: 'auto_replied',
+    };
 
+    await expect(deliverAutomatedReply(reply)).rejects.toThrow('nobody on the team writes there');
     await expect(
-      acknowledge(conversationId, 'We have your message.', 'whatsapp_bot'),
+      db.transaction(async (tx) => {
+        const messageId = await writeAutomatedReply(tx, reply, { stampFirstAutoReply: false });
+        await enqueueAutomatedDelivery(reply.channel, messageId, 50, tx);
+      }),
     ).rejects.toThrow('nobody on the team writes there');
 
     expect(

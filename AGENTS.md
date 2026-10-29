@@ -607,11 +607,12 @@ to a human.
 It refuses the customer bot's tickets outright, whatever the clock says:
 nobody on the team writes there, and `carrierFor` would queue the message as
 an email. The engine asked only this guard, so until it refused the bot an
-`on_update` rule's reply on a bot ticket was written and queued. The survey
-asks it only on Meta's channels and turns the bot away in `decideSurvey`, so
-the door refuses it as well: `writeAutomatedReply` throws on a read-only
-channel before the row exists, for any sender that did not refuse it first.
-It is shared with WhatsApp's template rule because a guard only some of the
+`on_update` rule's reply on a bot ticket was written and queued. The
+acknowledgement and the survey turn the bot away themselves, and the survey
+asks this guard only on Meta's channels, so the door refuses it as well:
+`writeAutomatedReply` throws on a read-only channel before the row exists, for
+any sender that did not refuse it first. The guard is shared with WhatsApp's
+template rule because a guard only some of the
 senders apply is not a guard, and it refuses before the row is written:
 delivery refuses it too, but by then the customer's timeline carries a reply
 that permanently failed. Route a new automated sender through it and through
