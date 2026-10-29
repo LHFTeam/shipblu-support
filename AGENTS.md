@@ -2205,10 +2205,12 @@ the category, every categorised ticket counted twice in every headline figure,
 the CSAT page and the dashboard's History, and `reconcileFailure` cannot see
 it, since it checks what the rollup writes, not what a page reads. So the
 totals are read through `TOTALS_SLICE` (`lib/reports/queries.ts`) and an
-agent's slice through `AGENT_SLICE`, never a list of nulls typed out again; a
-new dimension goes into `DIMENSIONS` (`lib/reports/rollup.ts`), the key, the
-CHECK and both predicates in one commit, and deploys web first, because an old
-reader meeting the new slices double-counts until it is replaced. The rollup
+agent's slice through `AGENT_SLICE`, both built by `sliceWhere` from
+`DIMENSIONS` and a column map the type holds to it (`lib/reports/rollup.ts`),
+never a list of nulls typed out again. A new dimension goes into `DIMENSIONS`
+and that map (it does not compile without both), the key and the CHECK in one
+commit, and deploys web first, because an old reader meeting the new slices
+double-counts until it is replaced. The rollup
 asks `reconcileFailure` of a day before it writes it, and writes nothing for a
 day that fails. A category figure follows the ticket's category as it stands
 when its day is rolled up, as the group's does: the nightly recomputes three

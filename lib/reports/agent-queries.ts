@@ -1,8 +1,8 @@
 import { DateTime } from 'luxon';
-import { and, asc, desc, eq, gte, isNull, lte, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, lte, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { agentMetricsDaily, agents, metricsDaily } from '@/db/schema';
-import { rangeIn } from '@/lib/reports/rollup';
+import { rangeIn, sliceWhere } from '@/lib/reports/rollup';
 
 /**
  * Read models for the agent productivity report.
@@ -22,17 +22,11 @@ import { rangeIn } from '@/lib/reports/rollup';
  */
 
 /**
- * The per-agent totals slice: agent set, every other dimension null. The join
- * on `agent_id` already keeps out every slice but the agent's, since a row
- * names one dimension (`metrics_daily_one_dimension`); the nulls are named
- * anyway, as `TOTALS_SLICE` names its own, so this line is the whole
- * definition rather than half of one that holds only while that CHECK does.
+ * The per-agent totals slice: agent set, every other dimension null, built
+ * from the same list as `TOTALS_SLICE` (`sliceWhere`), so a dimension added to
+ * the rollup reaches it too.
  */
-const AGENT_SLICE = and(
-  isNull(metricsDaily.groupId),
-  isNull(metricsDaily.channel),
-  isNull(metricsDaily.categoryId),
-);
+const AGENT_SLICE = sliceWhere('agentId');
 
 const SUMS = {
   onlineSeconds: sql<number>`coalesce(sum(${agentMetricsDaily.onlineSeconds}), 0)::bigint`,

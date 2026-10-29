@@ -1,10 +1,10 @@
 import { DateTime } from 'luxon';
-import { and, asc, between, eq, isNotNull, isNull, lt, lte, or, sql, type SQL } from 'drizzle-orm';
+import { and, asc, between, eq, isNotNull, lt, lte, or, sql, type SQL } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { share } from '@/lib/charts/scale';
 import { agents, groups, metricsDaily, rollupDays, ticketCategories } from '@/db/schema';
 import type { Range } from './subcategory-queries';
-import { RATING_COLUMNS, type ReportWindow } from './rollup';
+import { RATING_COLUMNS, sliceWhere, type ReportWindow } from './rollup';
 
 /**
  * Read models for the reports page.
@@ -87,16 +87,12 @@ function inRange(range: Range) {
  * slices. Leaving out the category is the one that would go unseen: every
  * categorised ticket counted twice in every headline figure — this page, the
  * CSAT page and its export, the dashboard's History — and `reconcileFailure()`
- * cannot see it, since it checks what is written, not what is read. A fifth
- * dimension is added here once, in the commit that adds it to `DIMENSIONS`
- * (`lib/reports/rollup.ts`), the key and the CHECK.
+ * cannot see it, since it checks what is written, not what is read. So it is
+ * built from `DIMENSIONS` (`sliceWhere` in `lib/reports/rollup.ts`), and a
+ * fifth dimension reaches it in the commit that adds it there, with the key
+ * and the CHECK.
  */
-export const TOTALS_SLICE = and(
-  isNull(metricsDaily.groupId),
-  isNull(metricsDaily.agentId),
-  isNull(metricsDaily.channel),
-  isNull(metricsDaily.categoryId),
-);
+export const TOTALS_SLICE = sliceWhere(null);
 
 /**
  * Headline numbers.

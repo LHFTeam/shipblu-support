@@ -3,6 +3,7 @@ import {
   and,
   eq,
   gte,
+  isNotNull,
   isNull,
   lt,
   ne,
@@ -246,7 +247,39 @@ export async function earliestDay(zone: string): Promise<string | null> {
  */
 const DIMENSIONS = ['groupId', 'agentId', 'channel', 'categoryId'] as const;
 
-export type Dimensions = Record<(typeof DIMENSIONS)[number], string | null>;
+type Dimension = (typeof DIMENSIONS)[number];
+
+export type Dimensions = Record<Dimension, string | null>;
+
+/**
+ * Each dimension's column on `metrics_daily`, held to `DIMENSIONS` by the
+ * type: a dimension added to the list and not here does not compile. Every
+ * read of a slice is built from it (`sliceWhere`), so it cannot name one
+ * dimension fewer than the rollup writes — the way a totals read came to
+ * count every categorised ticket twice, which `reconcileFailure` cannot see,
+ * since it checks what is written, not what is read.
+ */
+const SLICE_COLUMNS = {
+  groupId: metricsDaily.groupId,
+  agentId: metricsDaily.agentId,
+  channel: metricsDaily.channel,
+  categoryId: metricsDaily.categoryId,
+} satisfies Record<Dimension, AnyPgColumn>;
+
+/**
+ * The rows of one slice of `metrics_daily`: `named` set and every other
+ * dimension null, or every one null for the totals. A row names one dimension
+ * at most (`metrics_daily_one_dimension`), but each null is stated anyway, so
+ * the predicate is the whole definition rather than half of one that holds
+ * only while that CHECK does.
+ */
+export function sliceWhere(named: Dimension | null): SQL {
+  return and(
+    ...DIMENSIONS.map((name) =>
+      name === named ? isNotNull(SLICE_COLUMNS[name]) : isNull(SLICE_COLUMNS[name]),
+    ),
+  )!;
+}
 
 /** The totals slice: "all" in every dimension. */
 const ALL: Dimensions = { groupId: null, agentId: null, channel: null, categoryId: null };
