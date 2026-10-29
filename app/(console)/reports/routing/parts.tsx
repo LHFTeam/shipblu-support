@@ -151,9 +151,9 @@ export function OutcomeTable({
     <span key="fallback" className="flex items-center gap-1">
       Ran out, of the router&rsquo;s
       <InfoTip label="Ran out, of the router’s">
-        Window ran out, over the decisions the router made itself: Routed, No route for its
-        category, Window ran out and Already taken. Not over every decision, or a channel whose
-        holds a rule always ends first would read as never running out.
+        Window ran out, over the decisions the router made itself: Routed, Routes to no other group,
+        Window ran out and Already taken. Not over every decision, or a channel whose holds a rule
+        always ends first would read as never running out.
       </InfoTip>
     </span>,
     'Taken, of the router’s',
@@ -263,7 +263,7 @@ export function TimingTable({ rows }: { rows: DecisionTiming[] }) {
         <span key="settled" className="flex items-center gap-1">
           Category settled
           <InfoTip label="Category settled">
-            Decisions made on a category — Routed and No route for its category — and how long after
+            Decisions made on a category — Routed and Routes to no other group — and how long after
             the ticket entered routing the router recorded each. A decision completed after its
             caller died counts from when it was first made, not from the completion.
           </InfoTip>
@@ -415,8 +415,8 @@ export function ShadowTable({ rows }: { rows: ShadowComparison[] }) {
         <span key="missed" className="flex items-center gap-1">
           A person moved it
           <InfoTip label="A person moved it">
-            Tickets the router would have left where they were — no route for the category, or the
-            window ran out — that a person then moved: a route missed.
+            Tickets the router would have left where they were — their category routes to no other
+            group, or the window ran out — that a person then moved: a route missed.
           </InfoTip>
         </span>,
         'Left where it was',

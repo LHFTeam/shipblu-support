@@ -27,6 +27,7 @@ import {
   type RunQuestion,
 } from '@/lib/category-ai/report';
 import { readCategoryAiSettings } from '@/lib/category-ai/settings';
+import { jevStatus } from '@/lib/category-ai/status';
 import { allLimited } from '@/lib/concurrency';
 import { channelLabel, formatDateTime } from '@/lib/format';
 import { reportingZone } from '@/lib/reports/rollup';
@@ -67,6 +68,7 @@ export default async function CategoryAiReportPage({
     () => reportingZone(),
   ]);
   const keyConfigured = typesafeConfigured();
+  const status = jevStatus(settings.mode, keyConfigured, settings.minProbability);
 
   const asked = label !== undefined || q !== undefined || mode !== undefined;
   // A link names a run the list may have dropped past its limit: looked up
@@ -117,20 +119,10 @@ export default async function CategoryAiReportPage({
 
       <div className="mb-6 max-w-3xl space-y-2">
         <Notice tone="neutral">
-          Jev is{' '}
-          <b className="text-(--color-text-primary)">
-            {settings.mode === 'off'
-              ? 'switched off'
-              : settings.mode === 'shadow'
-                ? 'in shadow: asked, and its answers recorded, with no ticket changed'
-                : 'filing tickets'}
-          </b>
-          {settings.mode === 'off' ? '' : `, at a threshold of ${settings.minProbability}`}.
-          {keyConfigured
-            ? ''
-            : ' This environment has no TYPESAFE_API_KEY, so it is asked nothing.'}{' '}
-          A ticket counts as labelled when a person chose its category in the ticket&rsquo;s
-          Category select before anything else wrote it &mdash; Jev, a rule or a form.
+          Jev is <b className="text-(--color-text-primary)">{status.bold}</b>
+          {status.tail} A ticket counts as labelled when a person chose its category in the
+          ticket&rsquo;s Category select before anything else wrote it &mdash; Jev, a rule or a
+          form.
         </Notice>
         {dead.count > 0 && (chosen === null || chosen.runLabel === CATEGORY_AI_LIVE_LABEL) ? (
           <Notice tone="warning" icon>
@@ -148,8 +140,22 @@ export default async function CategoryAiReportPage({
       >
         {questions.length === 0 ? (
           <Quiet>
-            Jev has not answered anything yet. Answers appear here once the classifier is in shadow
-            or apply, or once <code>backfill_category_ai mode=record</code> has run.
+            {/* Without a key neither the live job nor the backfill asks
+                anything, so "once the classifier is in shadow or apply" was
+                a wait for answers that could never come. */}
+            {keyConfigured ? (
+              <>
+                Jev has not answered anything yet. Answers appear here once the classifier is in
+                shadow or apply and a customer writes, or once{' '}
+                <code>backfill_category_ai mode=record</code> has run.
+              </>
+            ) : (
+              <>
+                Jev has not answered anything, and cannot here: this environment has no
+                TYPESAFE_API_KEY, so neither the classifier nor <code>backfill_category_ai</code>{' '}
+                asks it anything.
+              </>
+            )}
           </Quiet>
         ) : (
           <Table

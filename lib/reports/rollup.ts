@@ -100,6 +100,17 @@ const log = logger('rollup');
  */
 const FALLBACK_ZONE = TEAM_TIME_ZONE;
 
+/**
+ * How many days each unattended run recomputes.
+ *
+ * Not just yesterday: a survey answered on Tuesday about a Monday ticket, or a
+ * ticket resolved days after it arrived, both change an earlier day's numbers.
+ * Recomputing a short window is cheaper than being subtly wrong for good. Here
+ * rather than in the handler, so the overview can say which days the nightly
+ * reaches and be right when the number changes.
+ */
+export const RECOMPUTE_DAYS = 3;
+
 /** The schedule a ticket is measured against, given its policy and its group. */
 export type HoursFor = (policyId: string | null, groupId: string | null) => HoursConfig | null;
 

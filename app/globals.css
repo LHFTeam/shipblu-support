@@ -520,6 +520,10 @@
   --elevation-float: var(--shadow-float);
   --elevation-overlay: var(--shadow-overlay);
   --elevation-launcher: var(--shadow-launcher);
+  /* The shade on a sideways-scrolling box's edge with more beyond it
+     (`.scroll-cue`): neutral-950, the card and float shadows' colour, at a
+     strength that reads as a hint across 14px rather than as an edge. */
+  --color-scroll-cue: rgb(19 20 23 / 0.14);
 
   /* ── Legacy console names, pointed at the roles above. */
   --background: var(--color-background-canvas);
@@ -740,6 +744,37 @@ body {
     background-clip: content-box;
     border-radius: 999px;
   }
+}
+
+/* A box that scrolls sideways says so: a shade on each edge with more beyond
+   it. On a phone a table's last columns sat past the edge with nothing to say
+   they were there, the SLA figures among them. Two covers in the surface's
+   colour scroll with the content and two shades stay with the box, so at
+   either end that end's cover hides its shade, with no script. The shades
+   are linear, even from top to bottom: a radial one faded out towards both,
+   so a tall table's header row and its last rows had none. A row with a
+   background of its own sits over the shade, which only a hovered row has,
+   and that one only tints it. */
+.scroll-cue {
+  background:
+    linear-gradient(to right, var(--color-background-surface) 30%, transparent) left center / 2.5rem
+      100% no-repeat local,
+    linear-gradient(to left, var(--color-background-surface) 30%, transparent) right center / 2.5rem
+      100% no-repeat local,
+    linear-gradient(to right, var(--color-scroll-cue), transparent) left center / 0.875rem 100%
+      no-repeat scroll,
+    linear-gradient(to left, var(--color-scroll-cue), transparent) right center / 0.875rem 100%
+      no-repeat scroll,
+    var(--color-background-surface);
+}
+
+/* Left to right only. Chromium places a `local` background in a right-to-left
+   box as though it scrolled left to right, so there the shade sat on the edge
+   with nothing beyond it, which is worse than no shade. The console, the only
+   place `Table` draws, is left to right; a box under `dir="rtl"` gets the
+   plain surface until a cue is built for that direction. */
+[dir='rtl'] .scroll-cue {
+  background: var(--color-background-surface);
 }
 
 /* The KB and customer portal render Arabic; agent-authored content can mix
