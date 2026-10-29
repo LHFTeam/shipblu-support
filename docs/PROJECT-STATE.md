@@ -1641,14 +1641,14 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
   `below_threshold`) and none failed. In Shadow each message the live job
   decides about is a `live` row and nothing is written to a ticket; the first
   came at 07:55:50 UTC, `unknown`. Each step after Shadow waits for the user's
-  go-ahead. Once on, it asks
-  which team's work each of the first five customer messages on an unanswered
-  ticket is, and under `apply` files the ticket — never over a category a
-  person, a rule, a form's default or an agent opening the ticket chose. Its
+  go-ahead. In Shadow and under `apply` alike it asks which team's work each
+  of the first five customer messages on an unanswered ticket is; only under
+  `apply` does it file the ticket — never over a category a person, a rule, a
+  form's default or an agent opening the ticket chose. Its
   switch is on `/admin/categories` (`category_ai_settings`, no row = off), not
   the key, which production already holds; the threshold beside it defaults to
-  0.6 and every answer records the one it met. Turning it on is 4.2's sequence,
-  whose first step is under way: `backfill_category_ai mode=record runLabel=<label>`
+  0.6 and every answer records the one it met. Taking it to `apply` is 4.2's
+  sequence, whose first step is under way: `backfill_category_ai mode=record runLabel=<label>`
   over the archive, then `shadow` for at least two weeks while a supervisor labels a sample from
   `/reports/category-ai` (4.2), whose figures decide the switch, then
   `apply`, then `backfill_category_ai mode=record` again under a fresh label with
