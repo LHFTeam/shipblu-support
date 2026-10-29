@@ -72,7 +72,13 @@ export function TodaySoFar({
           value={formatDuration(
             averageSeconds(today.bucket.firstResponseSecondsSum, today.bucket.firstResponseCount),
           )}
-          hint={`Mean of ${today.bucket.firstResponseCount.toLocaleString('en-GB')}${
+          hint={`${
+            today.bucket.firstResponseCount === 0
+              ? 'No first responses yet today'
+              : `Mean of ${today.bucket.firstResponseCount.toLocaleString('en-GB')} ${
+                  today.bucket.firstResponseCount === 1 ? 'response' : 'responses'
+                }`
+          }${
             windowFirstResponse === null
               ? ''
               : ` · ${formatDuration(windowFirstResponse)} over ${days} days`
@@ -103,7 +109,9 @@ export function TodaySoFar({
           </p>
         </div>
 
-        {hourly.length === 0 ? (
+        {/* One bucket for every hour so far, quiet ones included, so the day
+            is empty when every bucket is, never when there are none. */}
+        {hourly.every((bucket) => bucket.inbound === 0 && bucket.outbound === 0) ? (
           <p className="py-6 text-center text-xs text-(--color-text-secondary)">
             Nothing has come in yet today.
           </p>

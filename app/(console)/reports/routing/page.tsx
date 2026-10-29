@@ -10,7 +10,12 @@ import { allLimited } from '@/lib/concurrency';
 import { formatDateTime } from '@/lib/format';
 import { dateIn, rangeIn, reportingZone, type ReportWindow } from '@/lib/reports/rollup';
 import { routingStartFor, type RoutingMode } from '@/lib/routing/mode';
-import { idleRoutingSentence, ROUTING_MODE_LABELS } from '@/lib/routing/mode-copy';
+import {
+  idleClassifierSentence,
+  noKeyRoutingSentence,
+  ROUTING_MODE_LABELS,
+  ROUTING_OUTCOME_LABELS,
+} from '@/lib/routing/mode-copy';
 import {
   decisionTiming,
   fallbackReasons,
@@ -67,7 +72,7 @@ const CLASSIFIER_STATES: Record<CategoryAiMode, string> = {
  *
  * Range-bound figures are filed on the day a ticket entered routing in the
  * reporting zone (`reportingZone()`, the default business hours' zone).
- * The two sections under Now are not: a routed ticket left unassigned for
+ * The two sections under Now are not: a ticket left unassigned after routing for
  * sixty days, or a record that never closed, matters most and would fall out
  * of a thirty-day window.
  */
@@ -273,7 +278,7 @@ export default async function RoutingReportPage({
               }
             />
             <Stat
-              label="Still unassigned"
+              label="Unassigned after routing"
               value={waitingCount.toLocaleString()}
               tone={waitingCount > 0 ? 'caution' : undefined}
               hint={
@@ -283,10 +288,12 @@ export default async function RoutingReportPage({
               }
               explain={
                 <>
-                  Routed tickets, of any range, still open and never assigned since they entered
-                  routing, {STILL_UNASSIGNED_IN_WORDS} after their hold ended: long enough for the
-                  assignment as the hold ends and the sweeps behind it. Tickets in a group set to
-                  manual wait for somebody to pick them, by design, and are counted apart.
+                  Live tickets that entered routing, of any range, still open and never assigned
+                  since, {STILL_UNASSIGNED_IN_WORDS} after their hold ended: long enough for the
+                  assignment as the hold ends and the sweeps behind it. Every decision counts but
+                  &ldquo;{ROUTING_OUTCOME_LABELS.not_open}&rdquo;, since the router assigns nobody a
+                  ticket that was no longer open when it decided. Tickets in a group set to manual
+                  wait for somebody to pick them, by design, and are counted apart.
                 </>
               }
             />
@@ -371,12 +378,13 @@ export default async function RoutingReportPage({
 
       <Section
         title="Still unassigned after routing"
-        hint={`Live routed tickets nobody has been assigned since they entered routing, ${STILL_UNASSIGNED_IN_WORDS} after their hold ended, by the group each is in now — a rule may have moved it since — and the decision that put it there.`}
+        hint={`Live tickets that entered routing, whatever was decided but “${ROUTING_OUTCOME_LABELS.not_open}”, that nobody has been assigned since, ${STILL_UNASSIGNED_IN_WORDS} after their hold ended, by the group each is in now — a rule may have moved it since — and the decision that put it there.`}
       >
         {unassigned.length === 0 ? (
           <Quiet>
-            Every routed ticket still open has had somebody assigned since it entered routing, or
-            its hold ended less than {STILL_UNASSIGNED_IN_WORDS} ago.
+            Every live ticket that entered routing and is still open has had somebody assigned
+            since, its hold ended less than {STILL_UNASSIGNED_IN_WORDS} ago, or it was no longer
+            open when the router decided.
           </Quiet>
         ) : (
           <UnassignedTable rows={unassigned} />
@@ -413,12 +421,10 @@ export default async function RoutingReportPage({
       </Section>
 
       <p className="max-w-3xl text-xs text-(--color-text-tertiary)">
-        A ticket enters routing when it arrives on a channel set to By category or By category —
-        shadow while the category classifier is in Apply, and a continuation, a reopen or a ticket
-        opened by an agent never does. A ticket deleted for good leaves every figure here, since its
-        record goes with it. A decision a person or a rule made first carries no category, so what
-        the router decided on is known only for its own outcomes. Times are measured to when the
-        decision was recorded.
+        {`While the category classifier is in Apply, a ticket enters routing when it arrives on a channel set to “${ROUTING_MODE_LABELS.category}” or “${ROUTING_MODE_LABELS.category_shadow}”, unless another row of that kind files its tickets or the number’s owner is given it as it arrives; a continuation, a reopen or a ticket opened by an agent never does.`}{' '}
+        A ticket deleted for good leaves every figure here, since its record goes with it. A
+        decision a person or a rule made first carries no category, so what the router decided on is
+        known only for its own outcomes. Times are measured to when the decision was recorded.
       </p>
     </div>
   );
@@ -447,7 +453,7 @@ function strandedSentence(live: number, shadow: number): string {
     Boolean,
   );
   const total = live + shadow;
-  return `${parts.join(' and ')} routing ${total === 1 ? 'record is' : 'records are'} still undecided ${GRACE_IN_WORDS} after ${total === 1 ? 'its window' : 'their windows'} ended, long after the job that decides each was due.`;
+  return `${parts.join(' and ')} routing ${total === 1 ? 'record is' : 'records are'} still undecided more than ${GRACE_IN_WORDS} after ${total === 1 ? 'its window' : 'their windows'} ended, long after the job that decides each was due.`;
 }
 
 /**
@@ -466,13 +472,6 @@ function StateNotice({
   keyConfigured: boolean;
   routingNow: RoutingChannel[];
 }) {
-  const idleSentences = [
-    ...new Set(
-      routingNow
-        .map((channel) => idleRoutingSentence(channel.mode, classifier))
-        .filter((sentence): sentence is string => sentence !== null),
-    ),
-  ];
   // Asked as ingest asks it, row by row: whether its tickets reach the
   // question of its mode at all (`files` — no other row files for it, no
   // active owner is stamped on them, as the readiness panel says), then
@@ -490,8 +489,14 @@ function StateNotice({
   return (
     <>
       <Notice tone="neutral">
+        {/* With no key Apply is a setting, not what Jev does: "filing
+            tickets" sat over the warning below that it is asked nothing. */}
         The category classifier is{' '}
-        <b className="text-(--color-text-primary)">{CLASSIFIER_STATES[classifier]}</b>
+        <b className="text-(--color-text-primary)">
+          {classifier === 'apply' && !keyConfigured
+            ? 'set to Apply'
+            : CLASSIFIER_STATES[classifier]}
+        </b>
         {holding.length > 0 ? (
           <>
             , and a new ticket on <ChannelNames channels={holding} last="or" /> is held for{' '}
@@ -521,16 +526,16 @@ function StateNotice({
           </>
         )}
       </Notice>
-      {idleSentences.map((sentence) => (
-        <Notice key={sentence} tone="warning" icon>
-          {sentence}
-        </Notice>
-      ))}
-      {classifier === 'apply' && !keyConfigured ? (
+      {/* The readiness panel's two sentences, said where they are true: only
+          over a row whose tickets would reach routing, as the panel asks it. */}
+      {classifier !== 'apply' && filing.length > 0 ? (
         <Notice tone="warning" icon>
-          This environment has no TYPESAFE_API_KEY, so Jev is asked nothing: unless a person or a
-          rule files a ticket during its window, the window runs out and the ticket stays in its
-          default group.
+          {idleClassifierSentence(classifier)}
+        </Notice>
+      ) : null}
+      {classifier === 'apply' && !keyConfigured && filing.length > 0 ? (
+        <Notice tone="warning" icon>
+          {noKeyRoutingSentence(windowMinutes)}
         </Notice>
       ) : null}
     </>
@@ -564,7 +569,7 @@ function ChannelNames({
  * hold a ticket at all (`files`), which only the readiness panel can explain.
  */
 function neverRoutedHint(classifier: CategoryAiMode, routingNow: RoutingChannel[]): string {
-  const rule = `A ticket enters routing when it arrives on a channel set to ${ROUTING_MODE_LABELS.category} or ${ROUTING_MODE_LABELS.category_shadow} under Admin › Channels, while the category classifier is in Apply under Admin › Categories.`;
+  const rule = `A ticket enters routing when it arrives on a channel set to “${ROUTING_MODE_LABELS.category}” or “${ROUTING_MODE_LABELS.category_shadow}” under Admin › Channels, while the category classifier is in Apply under Admin › Categories.`;
   const missing = [
     classifier === 'apply' ? null : `The classifier is ${CLASSIFIER_STATES[classifier]}.`,
     routingNow.length === 0

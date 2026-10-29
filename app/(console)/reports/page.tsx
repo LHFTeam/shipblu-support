@@ -25,7 +25,7 @@ import {
   rolledUpDays,
   type Row as ReportRow,
 } from '@/lib/reports/queries';
-import { rangeIn, reportingContext } from '@/lib/reports/rollup';
+import { RECOMPUTE_DAYS, rangeIn, reportingContext } from '@/lib/reports/rollup';
 import { RangeNav } from './range-nav';
 import { Quiet } from './report-parts';
 
@@ -256,7 +256,7 @@ export default async function ReportsPage({
           <Breakdown title="By group" rows={groupRows} />
           <Breakdown
             title="By category"
-            hint="Each ticket under its category as it stands now — but the nightly run recomputes only the last three days, so a ticket re-filed later moves on those days and keeps its old category on older ones. No category is every ticket nothing had filed: no person, rule, form default or Jev. No CSAT here: a survey records the group, agent and channel it was asked under but no category, so a score filed by category would move whenever its ticket is re-filed."
+            hint={`Each ticket under its category as it stands now — but the nightly run recomputes only the last ${RECOMPUTE_DAYS} days, so a ticket re-filed later moves on those days and keeps its old category on older ones. No category is every ticket nothing had filed: no person, rule, form default or Jev. No CSAT here: a survey records the group, agent and channel it was asked under but no category, so a score filed by category would move whenever its ticket is re-filed.`}
             note={categoryNote}
             rows={categoryBreakdown}
             csat={false}
@@ -277,7 +277,7 @@ export default async function ReportsPage({
             <Table head={['Day', 'Created', 'Resolved', 'First response', 'Resolution', 'CSAT']}>
               {series.map((row) => (
                 <Row key={row.day}>
-                  <Cell className="font-medium">{row.day}</Cell>
+                  <Cell className="font-medium whitespace-nowrap">{row.day}</Cell>
                   <Cell>{row.ticketsCreated.toLocaleString()}</Cell>
                   <Cell>{row.ticketsResolved.toLocaleString()}</Cell>
                   <Cell>
@@ -305,27 +305,40 @@ function percentage(value: number | null): string {
   return value === null ? '—' : `${value}%`;
 }
 
+/**
+ * What reaches an unfiled day: the note said "until those days are rolled up
+ * again" and left a supervisor waiting for a nightly that never comes back to
+ * a day older than its own.
+ */
+const REBUILD_REACHES = `The nightly run rolls up only the last ${RECOMPUTE_DAYS} days again, so an older day changes only when the history is rebuilt.`;
+
 /** Where the category figures start, in words (`categoryCoverage` says when to). */
 function coverageNote(coverage: CategoryCoverage): React.ReactNode {
   switch (coverage.kind) {
     case 'unfiled':
+      // "With figures": the count is over the days with a totals row, so a
+      // window opening before the history, or ending on today, holds days
+      // this says nothing about. And the nightly redoes `RECOMPUTE_DAYS`
+      // only, so the note says what does reach an older one.
       return coverage.all ? (
-        'Every day of this window was rolled up before the rollup filed tickets by category, so every figure here is under No category until those days are rolled up again.'
+        `Every day of this window with figures was rolled up before the rollup filed tickets by category, so every figure here is under No category until those days are rolled up again. ${REBUILD_REACHES}`
       ) : (
         <>
           {coverage.days === 1 ? 'One day' : `${coverage.days} days`} of this window,{' '}
           {coverage.first === coverage.last ? (
             <>
-              <b>{coverage.first}</b>,
+              <b className="whitespace-nowrap">{coverage.first}</b>,
             </>
           ) : (
             <>
-              between <b>{coverage.first}</b> and <b>{coverage.last}</b>,
+              between <b className="whitespace-nowrap">{coverage.first}</b> and{' '}
+              <b className="whitespace-nowrap">{coverage.last}</b>,
             </>
           )}{' '}
           {coverage.days === 1 ? 'was' : 'were'} rolled up before the rollup filed tickets by
           category. Every ticket on {coverage.days === 1 ? 'it' : 'them'} is under No category until{' '}
-          {coverage.days === 1 ? 'that day is' : 'those days are'} rolled up again.
+          {coverage.days === 1 ? 'that day is' : 'those days are'} rolled up again.{' '}
+          {REBUILD_REACHES}
         </>
       );
     case 'none-here':

@@ -16,12 +16,15 @@ const log = logger('csat');
  * stale copy or from a failed read taken as all-off. "Off" written on a
  * ticket, or saved over the real settings, outlives a hiccup.
  *
- * Only the ticket sidebar, which reads them on every render to decide whether
- * to offer "Send now", goes through `loadCsatSettings`: memoised per process
- * for thirty seconds, the way `lib/canned-suggest/settings.ts` memoises its
- * switch. A failed read there is null, uncached: the sidebar then says the
- * settings could not be read, never that surveys are off, which is a claim
- * about what an admin did.
+ * Two readers that act on nothing go through `loadCsatSettings`, memoised per
+ * process for thirty seconds, the way `lib/canned-suggest/settings.ts`
+ * memoises its switch: the ticket sidebar, which reads them on every render to
+ * decide whether to offer "Send now", and the CSAT report's empty state, which
+ * says why no survey has gone out. A failed read there is null, uncached: the
+ * sidebar then says the settings could not be read, and the report says only
+ * where they are set, never that surveys are off, which is a claim about what
+ * an admin did. Thirty seconds stale on a process that did not save changes
+ * only which of those sentences is shown.
  *
  * No row is a fresh install and reads as off with every channel off.
  */

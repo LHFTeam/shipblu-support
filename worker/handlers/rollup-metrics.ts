@@ -17,6 +17,7 @@ import {
   asRows,
   computeDay,
   earliestDay,
+  RECOMPUTE_DAYS,
   reconcileFailure,
   reportingContext,
 } from '@/lib/reports/rollup';
@@ -42,15 +43,6 @@ const log = logger('rollup_metrics');
  * an agent's shift and the tickets they closed during it land on different
  * dates.
  */
-
-/**
- * How many days each unattended run recomputes.
- *
- * Not just yesterday: a survey answered on Tuesday about a Monday ticket, or a
- * ticket resolved days after it arrived, both change an earlier day's numbers.
- * Recomputing a short window is cheaper than being subtly wrong for good.
- */
-const RECOMPUTE_DAYS = 3;
 
 /**
  * The most days one invocation will rebuild.

@@ -4,7 +4,8 @@ import { InfoTip } from '@/components/tooltip';
 import { Badge, Notice, PageHeader } from '@/components/ui';
 import { formatDateTime } from '@/lib/format';
 import {
-  idleRoutingSentence,
+  idleClassifierSentence,
+  noKeyRoutingSentence,
   ROUTING_LOCK_REASONS,
   ROUTING_MODE_LABELS,
 } from '@/lib/routing/mode-copy';
@@ -100,6 +101,7 @@ export function RoutingReadinessPanel({
           arrives, so a change never moves a window already running.
         </InfoTip>
       </p>
+      <ClassifierNotice classifier={classifier} routing={routing} />
 
       <div className="mb-4 flex flex-col gap-2">
         <h3 className="text-sm font-medium">Where each category goes</h3>
@@ -125,7 +127,7 @@ export function RoutingReadinessPanel({
         ) : (
           <ul className="divide-y divide-(--color-border-subtle) rounded-xl border border-(--color-border-subtle) bg-(--color-background-surface) text-sm">
             {routing.map((channel) => (
-              <ChannelLine key={channel.id} channel={channel} classifier={classifier.mode} />
+              <ChannelLine key={channel.id} channel={channel} />
             ))}
           </ul>
         )}
@@ -137,16 +139,62 @@ export function RoutingReadinessPanel({
 /**
  * What a row in the channel list says about its routing: nothing on its
  * default group, and otherwise its mode and whether a new ticket gets a hold,
- * a record or nothing — the panel below says why.
+ * a record or nothing — the panel below says why. A row that starts routing
+ * with no classifier key is a warning, never a success: nothing files its
+ * tickets but a person or a rule, so a held ticket waits out the window and a
+ * shadow record reads "Window ran out", and the list is all an admin sees
+ * without scrolling to the panel.
  */
 export function RoutingBadge({ channel }: { channel: ChannelRouting | undefined }) {
   if (!channel || channel.column === 'default_group') return null;
+  const { tone, suffix } = badgeLook(channel);
   return (
-    <Badge tone={channel.starts === 'live' ? 'success' : channel.starts ? 'info' : 'warning'}>
+    <Badge tone={tone}>
       {ROUTING_MODE_LABELS[channel.column]}
-      {channel.starts ? '' : ' — not routing'}
+      {suffix}
     </Badge>
   );
+}
+
+/** The badge's tone and what follows the mode, decided together so no state can get one and not the other. */
+function badgeLook(channel: ChannelRouting): {
+  tone: 'success' | 'info' | 'warning';
+  suffix: string;
+} {
+  if (channel.noKey) return { tone: 'warning', suffix: ' — no classifier key' };
+  if (channel.starts === 'live') return { tone: 'success', suffix: '' };
+  if (channel.starts === 'shadow') return { tone: 'info', suffix: '' };
+  return { tone: 'warning', suffix: ' — not routing' };
+}
+
+/**
+ * The classifier's state, said once for every channel off its default group
+ * rather than on each of them: it is the same fact for all, and repeated per
+ * row it buried the warnings that are about one channel. Only where some row
+ * would start routing in Apply — the idle notice — or does — the no-key one:
+ * with every row locked, inactive, second of its type or owned, it would
+ * describe routing that cannot happen. The words are `mode-copy.ts`'s, which
+ * `/reports/routing` says too.
+ */
+function ClassifierNotice({
+  classifier,
+  routing,
+}: {
+  classifier: RoutingReadiness['classifier'];
+  routing: ChannelRouting[];
+}) {
+  if (classifier.mode !== 'apply') {
+    return routing.some((channel) => channel.routesInApply) ? (
+      <Notice tone="warning" icon className="mb-4">
+        {idleClassifierSentence(classifier.mode)}
+      </Notice>
+    ) : null;
+  }
+  return routing.some((channel) => channel.noKey) ? (
+    <Notice tone="warning" icon className="mb-4">
+      {noKeyRoutingSentence(classifier.windowMinutes)}
+    </Notice>
+  ) : null;
 }
 
 const CLASSIFIER_LABELS = { off: 'Off', shadow: 'Shadow', apply: 'Apply' } as const;
@@ -215,13 +263,7 @@ function hoursSentence(group: GroupFacts): string {
     : `${now}; assigns at any hour`;
 }
 
-function ChannelLine({
-  channel,
-  classifier,
-}: {
-  channel: ChannelRouting;
-  classifier: RoutingReadiness['classifier']['mode'];
-}) {
+function ChannelLine({ channel }: { channel: ChannelRouting }) {
   return (
     <li className="flex flex-col gap-2 px-4 py-3">
       <div className="flex flex-wrap items-center gap-2">
@@ -231,31 +273,38 @@ function ChannelLine({
         </span>
         <RoutingBadge channel={channel} />
         <span className="ms-auto text-xs text-(--color-text-secondary)">
-          {channel.starts === 'live'
-            ? 'New tickets are held until routed'
-            : channel.starts === 'shadow'
-              ? 'New tickets are recorded, not held'
-              : 'New tickets are neither held nor recorded'}
+          {statusSentence(channel)}
         </span>
       </div>
       {channel.warnings.map((warning) => (
         <Notice key={warning.kind} tone={warning.kind === 'rules' ? 'info' : 'warning'} icon>
-          <WarningText warning={warning} channel={channel} classifier={classifier} />
+          <WarningText warning={warning} />
         </Notice>
       ))}
     </li>
   );
 }
 
-function WarningText({
-  warning,
-  channel,
-  classifier,
-}: {
-  warning: ChannelWarning;
-  channel: ChannelRouting;
-  classifier: RoutingReadiness['classifier']['mode'];
-}) {
+function statusSentence(channel: ChannelRouting): string {
+  switch (channel.starts) {
+    case 'live':
+      return channel.noKey
+        ? 'New tickets are held for the whole window, then stay in the default group, unless somebody decides first'
+        : 'New tickets are held until routed';
+    case 'shadow':
+      return channel.noKey
+        ? 'New tickets are recorded, not held, and read “Window ran out” unless somebody decides first'
+        : 'New tickets are recorded, not held';
+    case null:
+      // Idle, not locked: the warnings under it are what Apply would meet,
+      // kept on purpose, since this panel is read before routing is turned on.
+      return channel.routesInApply
+        ? 'Idle until the classifier is in Apply; below, what routing would meet then'
+        : 'New tickets are neither held nor recorded';
+  }
+}
+
+function WarningText({ warning }: { warning: ChannelWarning }) {
   switch (warning.kind) {
     case 'never_routes':
       return <>{`${ROUTING_LOCK_REASONS[warning.reason]} Its saved mode does nothing.`}</>;
@@ -274,22 +323,6 @@ function WarningText({
         <>
           Owned by <span dir="auto">{warning.owner}</span>: its tickets are theirs from the moment
           they arrive, so nothing is held or recorded. Hand the number back to the team to route it.
-        </>
-      );
-    case 'classifier_idle':
-      return <>{idleRoutingSentence(channel.mode, classifier)}</>;
-    case 'no_key':
-      return (
-        <>
-          No TypeSafe key is configured, so the classifier asks nothing: every ticket waits out its
-          window and stays in its default group.
-        </>
-      );
-    case 'no_route_group':
-      return (
-        <>
-          {list(warning.categories)} {warning.categories.length === 1 ? 'has' : 'have'} no route
-          group: those tickets stay in this channel&rsquo;s default group.
         </>
       );
     case 'route_gaps':
