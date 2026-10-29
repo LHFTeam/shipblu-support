@@ -221,9 +221,9 @@ describe('rollup_metrics, by category', () => {
     expect(markers[1]).toEqual(marker);
   });
 
-  // A day no run wrote before has nothing to keep: no rows and no marker, so
-  // the line says so — once a later day is written it reads as a day with
-  // nothing in it, and only `rollup_metrics from=` after the fix writes it.
+  // A day no run wrote before has nothing to keep: no rows and no marker. Every
+  // report but the CSAT page reads it as a day with nothing in it from that
+  // night, so the line says which kind of refused day it is.
   it('says a refused day no run wrote before has no rows, and leaves it without rows or a marker', async () => {
     const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
     vi.mocked(computeDay).mockResolvedValueOnce([

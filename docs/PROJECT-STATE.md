@@ -2679,11 +2679,14 @@ message bodies — the same reasoning as the deliberately tiny `pg_notify` paylo
   and then fails. The line is `[rollup_metrics] <day>: totals do not match
 <reason>, so the day is not written and keeps its previous rows`, or `… and has
 no rows until a run reconciles it` for a day no run wrote before. That second
-  kind reads as a day with nothing in it once a later day is written, since
-  `countedThrough` is the newest day computed whole and not the end of an
-  unbroken run: once the cause is fixed, `rollup_metrics from=<day> to=<day>`
-  writes it, which the nightly stops doing after three days. The reason is one
-  of three:
+  kind reads as a day with nothing in it from the night it is refused, on every
+  report but the CSAT page — the overview, the dashboard's History, agents and
+  subcategories all read up to today. The CSAT page stops short of it, and only
+  until a later day is written: `countedThrough` is the newest day computed
+  whole, not the end of an unbroken run, so the day is then a gap there too,
+  named only by `uncounted`. The nightly retries it for three days; after that,
+  `rollup_metrics day=<day>` once the cause is fixed writes it. The reason is
+  one of three:
   `each other: N slices name no dimension` (a second totals row), `the sum of
 the channel slices` (the invariant the bug broke) or `the category slices,
 which sum past them in <column>` (the overview's No category would read

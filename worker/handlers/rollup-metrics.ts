@@ -196,14 +196,16 @@ export async function rollupMetrics(job?: ClaimedJob): Promise<void> {
     // refused insert below: whether the older days agree is worth knowing from
     // the same run, which still fails at the end.
     // A day no run wrote before has nothing to keep, and that is the cost of
-    // refusing it. `countedThrough` is the newest day computed whole, not the
-    // end of an unbroken run of them, so once a later day is written this one
-    // is a gap inside the counted range, and every report reads it as a day
-    // with nothing in it; only the CSAT page's `uncounted` names what it is
-    // missing, and only its surveys. So the line says which of the two the day
-    // is. The run fails each night the day is in its plan; once it has left
-    // the nightly's three days, `rollup_metrics from=<day>` after the fix is
-    // what writes it.
+    // refusing it: every report but the CSAT page reads up to today — the
+    // overview, the dashboard's History, agents, subcategories — and so reads
+    // it as a day with nothing in it from the night it is refused. The CSAT
+    // page stops short of it, at `countedThrough`, and only until a later day
+    // is written: that is the newest day computed whole, not the end of an
+    // unbroken run of them, so the day is then a gap there too, which only its
+    // `uncounted` names, and only for surveys. So the line says which of the
+    // two the day is. The nightly retries it while it is one of its three days;
+    // after that, `rollup_metrics day=<day>` once the cause is fixed is what
+    // writes it.
     // Not extended to the subcategory and root-cause tables, and the absence
     // is deliberate rather than an oversight: they have no totals row to
     // reconcile against, because a ticket carrying three subcategories appears

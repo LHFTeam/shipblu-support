@@ -4910,11 +4910,12 @@ branch, what was verified, and what is left, in order.
      written (#433's review): a day that fails is not written, keeps the rows
      and the marker the last run to write it left, and the run carries on to
      the older days and then fails. A day no run wrote before has nothing to
-     keep, and once a later day is written it is a gap inside the counted
-     range (`countedThrough` is the newest day computed whole, a `max()`), so
-     its line says `has no rows until a run reconciles it` rather than
-     `keeps its previous rows`, and `rollup_metrics from=<day>` writes it once
-     the cause is fixed. Asked after the write, as it was, the day
+     keep: every report reading up to today shows it empty from that night,
+     and the CSAT page, which stops short of it, does too once a later day is
+     written (`countedThrough` is the newest day computed whole, a `max()`).
+     So its line says `has no rows until a run reconciles it` rather than
+     `keeps its previous rows`, and `rollup_metrics day=<day>` writes it once
+     the cause is fixed, after the nightly's three days. Asked after the write, as it was, the day
      was published anyway and the one-totals-row rule could never fire, since
      `metrics_daily_slice_key` refused the second totals row first.
    - A constraint violation is not caught per day. It means the rollup's own
