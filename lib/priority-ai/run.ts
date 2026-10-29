@@ -5,7 +5,8 @@ import { earlierMessages } from '@/lib/subcategorise-ai/context';
 import { predictionFrom, type AiPrediction } from '@/lib/subcategorise-ai/map';
 import { errorMessage } from '@/lib/errors';
 import { logger } from '@/lib/log';
-import { onPriorityChanged } from '@/lib/sla';
+import { clockInputsIfInFlight, deferToRouter } from '@/lib/routing/state';
+import { onPriorityChanged, onPriorityChangedIn } from '@/lib/sla';
 import { afterTicketUpdate } from '@/lib/tickets/lifecycle';
 import { CHANGE_STAMP } from '@/lib/tickets/change-stamp';
 import { skipReason } from '@/lib/tickets/classifiable';
@@ -155,11 +156,17 @@ export async function classifyMessagePriority(
     error: null,
   };
 
+  // For the re-time a deferral owes inside the transaction below
+  // (`onPriorityChangedIn`), so read before it opens; only where the answer
+  // can be written at all, and only on a decision in flight
+  // (`clockInputsIfInFlight`).
+  const clocks = mode === 'apply' ? await clockInputsIfInFlight(row.conversationId) : null;
+
   // Decided and written in one transaction, with the ticket row locked, so an
   // agent's change cannot land between reading the priority and writing over it.
   // The lock is held for a handful of indexed reads — the provider call is
   // already over — and it is the same row an agent's priority change locks.
-  const outcome = await db.transaction(async (tx) => {
+  const written = await db.transaction(async (tx) => {
     const [ticket] = await tx
       .select({ priority: conversations.priority })
       .from(conversations)
@@ -234,6 +241,8 @@ export async function classifyMessagePriority(
       .returning({ id: aiPriorityRuns.id });
     if (inserted.length === 0) return 'duplicate';
 
+    let deferred = false;
+    let retimed = false;
     if (decision.to) {
       await tx
         .update(conversations)
@@ -252,15 +261,29 @@ export async function classifyMessagePriority(
           messageId,
         },
       });
+      // On a decision in flight the router's pass, run again on what this
+      // wrote, is the one owed, as for an agent's edit (`deferToRouter`): run
+      // below, after the commit, a rule keyed on priority could move the
+      // ticket after the router had handed it to somebody in the group it was
+      // leaving. And the clocks move here, when their inputs were read
+      // beforehand, since that pass reads the ticket as soon as this commits,
+      // and a rule asking whether it is overdue must read the urgent
+      // deadline, as the pass below would.
+      deferred = await deferToRouter(tx, row.conversationId);
+      if (deferred && clocks) {
+        await onPriorityChangedIn(tx, row.conversationId, clocks);
+        retimed = true;
+      }
     }
 
-    return decision.outcome;
+    return { outcome: decision.outcome, deferred, retimed };
   });
 
   // A ticket deleted between the two reads cascades its run rows with it, so
   // there is nothing to record and nothing to tell anybody.
-  if (outcome === null) return { status: 'gone' };
-  if (outcome === 'duplicate') return { status: 'already_classified' };
+  if (written === null) return { status: 'gone' };
+  if (written === 'duplicate') return { status: 'already_classified' };
+  const { outcome, deferred, retimed } = written;
 
   if (outcome === 'applied') {
     log.info('applied', {
@@ -272,8 +295,10 @@ export async function classifyMessagePriority(
     // After the commit, and best-effort inside: an SLA that cannot be
     // re-timed leaves the ticket with its old due date, which is what every
     // priority change did before this, rather than failing a classification
-    // already written.
-    await onPriorityChanged(row.conversationId);
+    // already written. Unless the clocks moved in its transaction, ahead of
+    // the router's pass it handed its own to; a deferral with no inputs to
+    // move them with moves them here.
+    if (!retimed) await onPriorityChanged(row.conversationId);
 
     // Then the observer rules and auto-assignment, exactly as after a console
     // edit, so a rule keyed on priority — "urgent → the escalations group" —
@@ -295,7 +320,10 @@ export async function classifyMessagePriority(
     // this pass second; when it is not, an `on_create` rule writing the same
     // field has the last word. A `send_reply` rule that already answered since
     // the customer last wrote is held off by `alreadyReplied` either way.
-    await afterTicketUpdate(row.conversationId);
+    //
+    // Not when the write handed the pass to the router, which runs it on the
+    // ticket as this left it, and assigns after it.
+    if (!deferred) await afterTicketUpdate(row.conversationId);
   }
 
   return { status: 'recorded', outcome, predicted };

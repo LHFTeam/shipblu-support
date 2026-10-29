@@ -2,7 +2,14 @@ import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import postgres from 'postgres';
 import { describe, expect, it } from 'vitest';
 import { db } from '@/db/client';
-import { agents, contacts, conversationEvents, conversations, ticketStatuses } from '@/db/schema';
+import {
+  agents,
+  contacts,
+  conversationEvents,
+  conversations,
+  routingDecisions,
+  ticketStatuses,
+} from '@/db/schema';
 import { withCleanDatabase } from '@/lib/testing/db';
 import { untilWaitingOnALock } from '@/lib/testing/hold-transaction';
 import { changeStatus, type StatusTarget } from './status';
@@ -260,6 +267,80 @@ async function lineOrder(id: string) {
     .orderBy(asc(conversationEvents.createdAt), asc(conversationEvents.id));
   return lines.map((line) => line.type);
 }
+
+/**
+ * A decision in flight on the ticket: phase one written, its pass claimed, the
+ * hold not yet ended (`lib/routing/apply.ts`) — the row `deferToRouter` reads.
+ */
+async function decisionInFlight(conversationId: string) {
+  const now = new Date();
+  await db.insert(routingDecisions).values({
+    conversationId,
+    shadow: false,
+    stage: 'holding',
+    outcome: 'fallback',
+    windowEndsAt: new Date(now.getTime() + 5 * 60_000),
+    phaseOneAt: now,
+    rulesClaimedAt: now,
+  });
+}
+
+async function passClaimed(conversationId: string): Promise<boolean> {
+  const [row] = await db
+    .select({ claimedAt: routingDecisions.rulesClaimedAt })
+    .from(routingDecisions)
+    .where(eq(routingDecisions.conversationId, conversationId));
+  return row!.claimedAt !== null;
+}
+
+// The console's status picker hands its `on_update` pass to the router when
+// the move lands on a decision in flight, so a rule keyed on the new status
+// runs before the router assigns anybody. Only the picker, and only a move
+// the router still owes a pass: a resolve handed over is given up on the
+// resolved ticket the router finds, and its rules never run.
+describe('changeStatus on a decision in flight', () => {
+  it('hands the pass to the router for a move to Pending, when asked', async () => {
+    const { id, agentId } = await openTicket();
+    await decisionInFlight(id);
+
+    expect(
+      await changeStatus(agentId, id, await status('Pending'), undefined, { deferToRouter: true }),
+    ).toBe(true);
+    expect(await passClaimed(id)).toBe(false);
+  });
+
+  // "Reply and resolve" and every other caller: the default is the caller's
+  // own pass, which the caller then runs.
+  it('leaves the router’s pass alone when not asked', async () => {
+    const { id, agentId } = await openTicket();
+    await decisionInFlight(id);
+
+    expect(await changeStatus(agentId, id, await status('Pending'))).toBe(false);
+    expect(await passClaimed(id)).toBe(true);
+  });
+
+  it.each(['Resolved', 'Closed'])('keeps the pass of a move to %s, asked or not', async (to) => {
+    const { id, agentId } = await openTicket();
+    await decisionInFlight(id);
+
+    expect(
+      await changeStatus(agentId, id, await status(to), undefined, { deferToRouter: true }),
+    ).toBe(false);
+    expect(await passClaimed(id)).toBe(true);
+  });
+
+  // Open, but nobody's work: the router gives its pass up on it all the same.
+  it('keeps the pass of a ticket marked spam, though the move is to Open', async () => {
+    const { id, agentId } = await openTicket();
+    await db.update(conversations).set({ isSpam: true }).where(eq(conversations.id, id));
+    await decisionInFlight(id);
+
+    expect(
+      await changeStatus(agentId, id, await status('Open'), undefined, { deferToRouter: true }),
+    ).toBe(false);
+    expect(await passClaimed(id)).toBe(true);
+  });
+});
 
 // The router's phase one, an agent's priority: another writer can hold the
 // ticket's row as the status change's transaction begins. Stamped with that

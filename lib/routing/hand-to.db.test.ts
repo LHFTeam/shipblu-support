@@ -577,6 +577,62 @@ describe('handToRouteGroup', () => {
     ]);
   });
 
+  // A rule's pick kept for the hold's end — round robin, asked for while the
+  // ticket sat unassigned in Customer Care — speaks about Customer Care. The
+  // router found the ticket taken and left it there, so the pick stood; the
+  // hand-over then moves it to Sales, which assigns by hand, and the move
+  // drops the pick (`endHold`'s `movedGroup`). Kept, the router's end
+  // of the hold made it in Sales under the Care rule's name, a rota Sales'
+  // admin had turned off.
+  it('on a decision in flight, drops a rule’s pick kept for the group it moves the ticket out of', async () => {
+    const lina = await agent('Lina Care');
+    const omar = await agent('Omar Sales');
+    const mona = await agent('Mona Supervisor', { role: 'supervisor' });
+    const care = await group('Customer Care', [lina]);
+    const sales = await group('Inbound Sales Team', [omar], { assignmentStrategy: 'manual' });
+    const salesCategory = await category('sales', sales);
+    const id = await heldTicket(await instagram(), care, new Date(Date.now() + 3 * MINUTE));
+    expect(
+      await assignConversation(id, {
+        strategy: 'round_robin',
+        actorLabel: 'automation:Care: round robin',
+      }),
+    ).toMatchObject({ assignedTo: null, reason: 'awaiting_route' });
+    await db
+      .update(conversations)
+      .set({ assigneeAgentId: lina, assignedAt: new Date() })
+      .where(eq(conversations.id, id));
+    expect(
+      (await setConversationCategory(id, salesCategory, { label: 'jev:category' })).outcome,
+    ).toBe('changed');
+
+    const { routed, handed } = await routeWithHandOverBetween({
+      afterRouterTransaction: 1,
+      route: () => routeNow(id, { label: 'jev:category' }),
+      handOver: () =>
+        handToRouteGroup(
+          id,
+          { agentId: mona },
+          { expectedGroupId: sales, expectedAssigneeId: lina },
+        ),
+    });
+
+    expect(routed).toBe('decided');
+    expect(handed).toMatchObject({ ok: true, skipped: 'awaiting_route' });
+    expect(await row(id)).toMatchObject({ groupId: sales, assignee: null });
+    expect((await row(id)).decidedAt).not.toBeNull();
+    expect((await eventsOf(id, ['assigned'])).map((event) => event.actorLabel)).toEqual([]);
+    const [decision] = await db
+      .select({
+        outcome: routingDecisions.outcome,
+        heldStrategy: routingDecisions.heldStrategy,
+        heldActorLabel: routingDecisions.heldActorLabel,
+      })
+      .from(routingDecisions)
+      .where(eq(routingDecisions.conversationId, id));
+    expect(decision).toEqual({ outcome: 'taken', heldStrategy: null, heldActorLabel: null });
+  });
+
   // The hand-over lands once the router's pass has read the ticket — still
   // Lina's, in Customer Care — and before its phase three, and what it does
   // after its write lags the router. Run by the hand-over then, its pass

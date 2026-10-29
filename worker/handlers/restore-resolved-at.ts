@@ -32,10 +32,12 @@ type Restorable = { number: number; resolved_at: string };
  * have undone.
  *
  * The event's instant is the column's to within the request, not to the
- * microsecond: `changeStatus` stamped the column from the server's clock inside
- * the transaction the event took its default from, and `set_status` writes its
- * event just after its update. It falls on the same reporting day except within
- * a moment of midnight.
+ * microsecond: `changeStatus` stamps the column from the server's clock as it
+ * builds the update, and its event once that update holds the ticket's row
+ * lock (`CHANGE_STAMP`), so the event follows the column by at most the request
+ * and any wait on that lock; `set_status` writes its event just after its
+ * update. It falls on the same reporting day except within a moment of
+ * midnight.
  *
  * Hand-run and safe to run again: a restored ticket is no longer null, so a
  * second run finds nothing, and the update re-checks the row it read, so a

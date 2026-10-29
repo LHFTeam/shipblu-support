@@ -8,11 +8,13 @@ import {
   ticketForms,
   ticketStatuses,
 } from '@/db/schema';
+import { gotNoAnswer } from '@/lib/errors';
 import { businessMinutesBetween, type HoursConfig } from '@/lib/hours';
 import { loadHoursCatalog } from '@/lib/hours/catalog';
 import { ticketHours, type HoursCatalog } from '@/lib/hours/resolve';
 import { conversationFacts } from '@/lib/rules/facts';
 import { readOnlyChannels } from '@/lib/tickets/channel-policy';
+import { CHANGE_STAMP } from '@/lib/tickets/change-stamp';
 import { earliest } from '@/lib/tickets/latest';
 import {
   dueAt,
@@ -63,6 +65,20 @@ export async function loadPolicies(): Promise<LoadedPolicy[]> {
   return rows;
 }
 
+/** What a re-time reads besides the ticket: the active policies and the hours. */
+export type ClockInputs = { policies: LoadedPolicy[]; catalog: HoursCatalog };
+
+/**
+ * The policies and the hours catalog, read on the pool — before any lock on
+ * the ticket is taken, never under one (`withTicketLocked` says why). A writer
+ * that may owe a re-time inside its own transaction (`onPriorityChangedIn`)
+ * has them read before it opens that transaction, and only on a decision in
+ * flight (`clockInputsIfInFlight` in `lib/routing/state.ts`).
+ */
+export async function loadClockInputs(): Promise<ClockInputs> {
+  return { policies: await loadPolicies(), catalog: await loadHoursCatalog() };
+}
+
 /**
  * The schedule one ticket's clocks run on.
  *
@@ -91,9 +107,17 @@ type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 /**
  * The ticket and the facts about it the clocks read. Given a transaction, the
  * ticket's row is locked for it (`withTicketLocked`); the joined rows are read,
- * not claimed.
+ * not claimed — unless `held`, a transaction whose own write already holds the
+ * row's lock (`inWrite`). Nothing can move the row under that read, and a FOR
+ * UPDATE taken after the transaction has written the row waits on the KEY
+ * SHARE of a message being inserted for the ticket while that ingest's update
+ * waits on the write, and Postgres aborts one of them (§6.106).
  */
-async function loadConversation(conversationId: string, tx?: Tx): Promise<ConversationRow | null> {
+async function loadConversation(
+  conversationId: string,
+  tx?: Tx,
+  { held = false }: { held?: boolean } = {},
+): Promise<ConversationRow | null> {
   const query = (tx ?? db)
     .select({
       conversation: conversations,
@@ -109,7 +133,7 @@ async function loadConversation(conversationId: string, tx?: Tx): Promise<Conver
     .where(eq(conversations.id, conversationId))
     .limit(1);
 
-  const rows = tx ? await query.for('update', { of: conversations }) : await query;
+  const rows = tx && !held ? await query.for('update', { of: conversations }) : await query;
   return rows[0] ?? null;
 }
 
@@ -608,6 +632,77 @@ export async function onPriorityChanged(conversationId: string): Promise<void> {
 }
 
 /**
+ * `onPriorityChanged` and `onStatusChanged`, made inside the transaction of the
+ * write that owes them, for a writer that has just handed its `on_update` pass
+ * to the router on a decision in flight (`deferToRouter`): the console's
+ * priority and status, and the priority classifier. Only when the policies and
+ * the hours were read before that transaction (`clockInputsIfInFlight`, which
+ * says what a deferral without them costs); a writer without them re-times
+ * after its commit, as one that keeps its pass does.
+ *
+ * Every other writer re-times after its commit and then runs its pass, so a
+ * rule asking `is_first_response_overdue` reads the clock the change produced
+ * (`afterTicketUpdate`). A deferred write runs no pass: the router's runs
+ * instead, and claims and reads the ticket the moment this write's lock is
+ * released. Re-timed after the commit, unordered with that claim, the pass read
+ * medium's deadline on a ticket just raised to urgent, the escalation keyed on
+ * it never ran, and nothing ran a pass after the re-time. Made here, the clocks
+ * commit with the write, and whatever pass reads the write reads them too.
+ *
+ * Best-effort as the hooks after a commit are: in a savepoint of its own, so a
+ * policy that cannot be applied is rolled back to and logged, and the write
+ * stands with the clocks it had. Only a statement that got no answer — `57014`,
+ * a cancel Postgres answered or the admission gate giving the statement up —
+ * is thrown on, failing the write (`recordLineIn` in `lib/assignment` has the
+ * same rule): a statement that ran into its deadline is not tried again inside
+ * a write that has already waited that long, and failing the write is the
+ * conservative answer; and the gate's give-up, which this cannot tell from a
+ * cancel by its code, must fail it: the gate has told the caller the
+ * transaction failed, and a write that went on could commit after all.
+ * `inputs` come from `clockInputsIfInFlight`, before the transaction opened.
+ */
+export async function onPriorityChangedIn(
+  tx: Tx,
+  conversationId: string,
+  inputs: ClockInputs,
+): Promise<void> {
+  await inWrite(tx, conversationId, 'move the clocks', (savepoint, row) =>
+    recomputeHeld(savepoint, row, inputs, 'priority', { stamped: true }),
+  );
+}
+
+/** The status's half of `onPriorityChangedIn`, which says when and why. */
+export async function onStatusChangedIn(
+  tx: Tx,
+  conversationId: string,
+  stopsSlaClock: boolean,
+  inputs: ClockInputs,
+  at: Date = new Date(),
+): Promise<void> {
+  await inWrite(tx, conversationId, 'pause or resume the clock', (savepoint, row) =>
+    changeClock(savepoint, row, inputs.policies, inputs.catalog, stopsSlaClock, at),
+  );
+}
+
+/** The savepoint, the read under the write's lock, and the rule above for a failure. */
+async function inWrite(
+  tx: Tx,
+  conversationId: string,
+  failedTo: string,
+  work: (savepoint: Tx, row: ConversationRow) => Promise<void>,
+): Promise<void> {
+  try {
+    await tx.transaction(async (savepoint) => {
+      const row = await loadConversation(conversationId, savepoint, { held: true });
+      if (row) await work(savepoint, row);
+    });
+  } catch (error) {
+    if (gotNoAnswer(error)) throw error;
+    log.error(`could not ${failedTo} on ${conversationId}`, error);
+  }
+}
+
+/**
  * What a write of a ticket's category or group owes once it has committed —
  * the one entry point every routing writer calls, so the order lives here and
  * a new writer cannot take it the wrong way round.
@@ -844,112 +939,127 @@ async function recomputeOwedClocks(
   reason: 'group_hours' | 'priority',
 ): Promise<void> {
   try {
-    const policies = await loadPolicies();
-    const catalog = await loadHoursCatalog();
-
-    await withTicketLocked(conversationId, async (tx, row) => {
-      const conversation = row.conversation;
-
-      // Nothing owed, nothing to move.
-      if (
-        !conversation.firstResponseDueAt &&
-        !conversation.nextResponseDueAt &&
-        !conversation.resolutionDueAt
-      ) {
-        return;
-      }
-
-      const policy = policyIn(policies, conversation.slaPolicyId);
-      if (!policy) return;
-
-      const hours = hoursForTicket(catalog, conversation.groupId, policy);
-      const priority = conversation.priority as Priority;
-      const target = targetFor(policy, priority);
-      const nextAnchor = conversation.lastCustomerMessageAt ?? conversation.createdAt;
-      const pauses = await completedPauses(conversationId, tx);
-
-      /** The target plus the time already excused since `from`, in the ticket's current hours. */
-      const recompute = (
-        minutes: number | null,
-        from: Date | null,
-        satisfied: Date | null,
-        existing: Date | null,
-      ): Date | null => {
-        if (satisfied || !existing) return existing;
-        if (minutes === null || !from) return existing;
-        return dueAt(hours, minutes + excusedSince(hours, pauses, from), from);
-      };
-
-      const firstResponse = recompute(
-        target.firstResponseMins,
-        conversation.createdAt,
-        conversation.firstRespondedAt,
-        conversation.firstResponseDueAt,
-      );
-      const resolution = recompute(
-        target.resolutionMins,
-        conversation.createdAt,
-        conversation.resolvedAt,
-        conversation.resolutionDueAt,
-      );
-      const nextResponse = recompute(
-        target.nextResponseMins ?? target.firstResponseMins,
-        nextAnchor,
-        null,
-        conversation.nextResponseDueAt,
-      );
-
-      const moved =
-        !sameInstant(firstResponse, conversation.firstResponseDueAt) ||
-        !sameInstant(resolution, conversation.resolutionDueAt) ||
-        !sameInstant(nextResponse, conversation.nextResponseDueAt);
-
-      if (!moved) return;
-
-      // A breach flag stands for a target the ticket missed, and the target just
-      // changed. Lowered from urgent after urgent's target passed, a ticket whose
-      // new due date is still ahead has not missed anything it is held to, and the
-      // flag left set kept it in the live report's breached count and the backlog
-      // snapshot. Only the sweep sets the flag, so a re-time into the past leaves
-      // it to the sweep, which records the breach with its event as for any
-      // other; a re-time into the future is the one case nothing else would undo.
-      // A clock here is never unset under a set flag — `recompute` keeps an
-      // existing due date whatever the target — so the shared rule's "unset
-      // clears it" half is the re-selection's (`breachesCleared`).
-      const cleared = breachesCleared(conversation, { firstResponse, resolution }, new Date());
-
-      await tx
-        .update(conversations)
-        .set({
-          firstResponseDueAt: firstResponse,
-          nextResponseDueAt: nextResponse,
-          resolutionDueAt: resolution,
-          ...(cleared.includes('first_response') ? { firstResponseBreached: false } : {}),
-          ...(cleared.includes('resolution') ? { resolutionBreached: false } : {}),
-        })
-        .where(eq(conversations.id, conversationId));
-
-      // On the timeline for the same reason a pause is: an agent who sees a due
-      // date jump is owed the reason, and "the new group keeps different hours" is
-      // not a guess anyone should have to make.
-      await tx.insert(conversationEvents).values({
-        conversationId,
-        type: 'sla_recalculated',
-        actorLabel: 'sla',
-        data: {
-          reason,
-          priority,
-          timezone: hours?.timezone ?? null,
-          firstResponseDueAt: firstResponse?.toISOString() ?? null,
-          nextResponseDueAt: nextResponse?.toISOString() ?? null,
-          resolutionDueAt: resolution?.toISOString() ?? null,
-          clearedBreaches: cleared,
-        },
-      });
-    });
+    const inputs = await loadClockInputs();
+    await withTicketLocked(conversationId, (tx, row) => recomputeHeld(tx, row, inputs, reason));
   } catch (error) {
     log.error(`could not move the clocks on ${conversationId}`, error);
   }
+}
+
+/**
+ * `recomputeOwedClocks`'s work, on the row read under a lock already held.
+ * `stamped` stamps its timeline line as it is written (`CHANGE_STAMP`), for a
+ * re-time made inside the write that caused it, whose own line is stamped so:
+ * left to the column default, the transaction's start, the re-time would sort
+ * before the change it follows whenever that write had waited on the lock.
+ */
+async function recomputeHeld(
+  tx: Tx,
+  row: ConversationRow,
+  { policies, catalog }: ClockInputs,
+  reason: 'group_hours' | 'priority',
+  { stamped = false }: { stamped?: boolean } = {},
+): Promise<void> {
+  const conversation = row.conversation;
+  const conversationId = conversation.id;
+
+  // Nothing owed, nothing to move.
+  if (
+    !conversation.firstResponseDueAt &&
+    !conversation.nextResponseDueAt &&
+    !conversation.resolutionDueAt
+  ) {
+    return;
+  }
+
+  const policy = policyIn(policies, conversation.slaPolicyId);
+  if (!policy) return;
+
+  const hours = hoursForTicket(catalog, conversation.groupId, policy);
+  const priority = conversation.priority as Priority;
+  const target = targetFor(policy, priority);
+  const nextAnchor = conversation.lastCustomerMessageAt ?? conversation.createdAt;
+  const pauses = await completedPauses(conversationId, tx);
+
+  /** The target plus the time already excused since `from`, in the ticket's current hours. */
+  const recompute = (
+    minutes: number | null,
+    from: Date | null,
+    satisfied: Date | null,
+    existing: Date | null,
+  ): Date | null => {
+    if (satisfied || !existing) return existing;
+    if (minutes === null || !from) return existing;
+    return dueAt(hours, minutes + excusedSince(hours, pauses, from), from);
+  };
+
+  const firstResponse = recompute(
+    target.firstResponseMins,
+    conversation.createdAt,
+    conversation.firstRespondedAt,
+    conversation.firstResponseDueAt,
+  );
+  const resolution = recompute(
+    target.resolutionMins,
+    conversation.createdAt,
+    conversation.resolvedAt,
+    conversation.resolutionDueAt,
+  );
+  const nextResponse = recompute(
+    target.nextResponseMins ?? target.firstResponseMins,
+    nextAnchor,
+    null,
+    conversation.nextResponseDueAt,
+  );
+
+  const moved =
+    !sameInstant(firstResponse, conversation.firstResponseDueAt) ||
+    !sameInstant(resolution, conversation.resolutionDueAt) ||
+    !sameInstant(nextResponse, conversation.nextResponseDueAt);
+
+  if (!moved) return;
+
+  // A breach flag stands for a target the ticket missed, and the target just
+  // changed. Lowered from urgent after urgent's target passed, a ticket whose
+  // new due date is still ahead has not missed anything it is held to, and the
+  // flag left set kept it in the live report's breached count and the backlog
+  // snapshot. Only the sweep sets the flag, so a re-time into the past leaves
+  // it to the sweep, which records the breach with its event as for any
+  // other; a re-time into the future is the one case nothing else would undo.
+  // A clock here is never unset under a set flag — `recompute` keeps an
+  // existing due date whatever the target — so the shared rule's "unset
+  // clears it" half is the re-selection's (`breachesCleared`).
+  const cleared = breachesCleared(conversation, { firstResponse, resolution }, new Date());
+
+  await tx
+    .update(conversations)
+    .set({
+      firstResponseDueAt: firstResponse,
+      nextResponseDueAt: nextResponse,
+      resolutionDueAt: resolution,
+      ...(cleared.includes('first_response') ? { firstResponseBreached: false } : {}),
+      ...(cleared.includes('resolution') ? { resolutionBreached: false } : {}),
+    })
+    .where(eq(conversations.id, conversationId));
+
+  // On the timeline for the same reason a pause is: an agent who sees a due
+  // date jump is owed the reason, and "the new group keeps different hours" is
+  // not a guess anyone should have to make.
+  await tx.insert(conversationEvents).values({
+    conversationId,
+    type: 'sla_recalculated',
+    actorLabel: 'sla',
+    ...(stamped ? { createdAt: CHANGE_STAMP } : {}),
+    data: {
+      reason,
+      priority,
+      timezone: hours?.timezone ?? null,
+      firstResponseDueAt: firstResponse?.toISOString() ?? null,
+      nextResponseDueAt: nextResponse?.toISOString() ?? null,
+      resolutionDueAt: resolution?.toISOString() ?? null,
+      clearedBreaches: cleared,
+    },
+  });
 }
 
 function sameInstant(a: Date | null, b: Date | null): boolean {

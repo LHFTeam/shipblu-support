@@ -39,6 +39,15 @@ type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
  * have seen, and counting it as `manual` would inflate exactly the figure the
  * shadow week is read for.
  *
+ * `actor.movedGroup` is for a write that moved the ticket to another group —
+ * the console's group case, Hand to, the engine's `assign_group` and a grouped
+ * `auto_assign`'s move — and drops a rule's pick kept for the hold's end
+ * (`recordHeldAssignment`) on a decision in flight, where nothing else here is
+ * written. Every writer of a ticket's group but the router's phase one calls
+ * this, since before phase one the move ends the hold; so the same call is
+ * where a move after it lets go of the pick, and phase one drops one when its
+ * own decision moves the ticket.
+ *
  * Answers whether it ended a live hold, which is what owes the held reply and
  * the assignment (`afterHoldEnded`) once the caller's transaction commits. A
  * decision in flight answers false, so the caller pays none of that: the
@@ -48,7 +57,12 @@ export async function endHold(
   tx: Tx,
   conversationId: string,
   outcome: 'manual' | 'rule',
-  actor: { agentId?: string | null; label?: string | null; decidesShadow?: boolean },
+  actor: {
+    agentId?: string | null;
+    label?: string | null;
+    decidesShadow?: boolean;
+    movedGroup?: boolean;
+  },
   now: Date = new Date(),
 ): Promise<boolean> {
   // The routing row first, read without a lock, so a ticket that never routed
@@ -133,7 +147,25 @@ export async function endHold(
   // `on_update` pass of its own hands that to the router too, in this same
   // transaction (`deferToRouter`): run beside the router's, it could follow
   // the router's assignment, and the same holder followed.
-  if (row.phaseOneAt) return false;
+  //
+  // A move drops a rule's pick kept for the hold's end all the same. The rule
+  // said "assign here, with this strategy" about the group the ticket was in,
+  // and the override does not carry to the one it has been moved to — phase
+  // one's own rule for its own move. Whoever moved it: kept through a rule's
+  // move, as it once was, the hold's end assigned in the new group under the
+  // old group's rule when the move landed after the pick was kept, and nobody
+  // when it landed before (`recordHeldAssignment` answers `moved`), the same
+  // rules and writes giving a different holder by timing. A rule in the same
+  // pass that matches the ticket where it now is keeps its pick again.
+  if (row.phaseOneAt) {
+    if (actor.movedGroup) {
+      await tx
+        .update(routingDecisions)
+        .set({ heldStrategy: null, heldActorLabel: null })
+        .where(eq(routingDecisions.id, row.id));
+    }
+    return false;
+  }
   if (row.shadow && actor.decidesShadow === false) return false;
 
   // The outcome is this one's, always: the only other writer of an outcome on

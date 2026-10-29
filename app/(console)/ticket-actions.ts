@@ -14,7 +14,7 @@ import { isUuid } from '@/lib/http/uuid';
 import { can } from '@/lib/auth/permissions';
 import { isPriority } from '@/lib/tickets/vocabulary';
 import { CATEGORY_REFUSALS, setConversationCategoryOn } from '@/lib/categories/write';
-import { afterRoutingChanged, onPriorityChanged } from '@/lib/sla';
+import { afterRoutingChanged, onPriorityChanged, onPriorityChangedIn } from '@/lib/sla';
 import { afterTicketUpdate } from '@/lib/tickets/lifecycle';
 import { CHANGE_STAMP } from '@/lib/tickets/change-stamp';
 import { moveToGroupIfElsewhere } from '@/lib/tickets/move-group';
@@ -22,7 +22,12 @@ import { routeNow } from '@/lib/routing/apply';
 import { afterHoldEnded } from '@/lib/routing/after-hold';
 import { endHold } from '@/lib/routing/end-hold';
 import { handToRouteGroup, type HandToResult } from '@/lib/routing/hand-to';
-import { deferToRouter, routerDecidedOn, undecidedRouting } from '@/lib/routing/state';
+import {
+  clockInputsIfInFlight,
+  deferToRouter,
+  routerDecidedOn,
+  undecidedRouting,
+} from '@/lib/routing/state';
 import { isBlank } from '@/lib/tickets/custom-fields';
 import { parseFieldValue } from '@/lib/tickets/custom-fields-parse';
 import { getTicketField } from '@/lib/tickets/lookups';
@@ -53,8 +58,13 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
   // router ran it, or is running it, on the ticket as the edit left it, or the
   // creation pass's `beginRouting` routes on the category the edit wrote. On
   // a decision in flight it is every edit below that writes and would run a
-  // pass (`deferToRouter`): the router's pass, run again, is the one owed, and
-  // the edit's own would be unordered with the router's end of the hold.
+  // pass (`deferToRouter`), but on a ticket nobody may work — a status taking
+  // it out of the queue, or one already out of it: the router's pass, run
+  // again, is the one owed, and the edit's own would be unordered with the
+  // router's end of the hold. A customer's message still runs its own
+  // (`afterInboundMessage`): it decides nothing about the ticket, its pass
+  // races the rota on every ticket as it does once anybody holds one, and its
+  // four ingest paths write in transactions this does not reach.
   let routingRunsRules = false;
   // Set when the edit ended a routing hold, whose assignment and held reply
   // are owed once the observer rules below have run (`afterHoldEnded`).
@@ -97,7 +107,13 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
         if (uncaused) return uncaused;
       }
 
-      await changeStatus(agent.id, conversationId, status);
+      // A move that keeps the ticket in somebody's queue defers as the edits
+      // below do; a resolve or a close never does, since the router owes a
+      // ticket nobody may work no pass, and its rules would never run
+      // (`changeStatus`).
+      routingRunsRules = await changeStatus(agent.id, conversationId, status, undefined, {
+        deferToRouter: true,
+      });
       break;
     }
 
@@ -192,7 +208,12 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
         // A person moving a ticket held for the router has decided where it
         // goes (`endHold`); one whose decision is in flight leaves the router
         // to finish it, its pass and the policy included (`deferToRouter`).
-        const ended = await endHold(tx, conversationId, 'manual', { agentId: agent.id });
+        // Moved, always, by here: a rule's pick kept for the hold's end spoke
+        // about the group the ticket has left, and goes (`movedGroup`).
+        const ended = await endHold(tx, conversationId, 'manual', {
+          agentId: agent.id,
+          movedGroup: true,
+        });
         return { endedHold: ended, deferred: await deferToRouter(tx, conversationId) };
       });
       if (!move) break;
@@ -219,7 +240,10 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
     case 'priority': {
       if (!isPriority(value)) return { error: 'Unknown priority' };
 
-      await db.transaction(async (tx) => {
+      // For the re-time a deferral owes inside the transaction, read before it
+      // opens, and only on a decision in flight (`clockInputsIfInFlight`).
+      const clocks = await clockInputsIfInFlight(conversationId);
+      const written = await db.transaction(async (tx) => {
         await tx
           .update(conversations)
           .set({ priority: value })
@@ -233,11 +257,26 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
           createdAt: CHANGE_STAMP,
           data: { to: value },
         });
+        // A rule keyed on priority — "urgent goes to Escalations" — run by
+        // this edit beside a decision in flight moved the ticket after the
+        // router had handed it to somebody in Sales (`deferToRouter`).
+        const deferred = await deferToRouter(tx, conversationId);
+        if (!deferred || !clocks) return { deferred, retimed: false };
+        // Handed over, the clocks move in this transaction: the router's pass
+        // reads the ticket as soon as it commits, and a rule asking whether it
+        // is overdue must read the deadline this priority set, as it does when
+        // the pass is the edit's own, below.
+        await onPriorityChangedIn(tx, conversationId, clocks);
+        return { deferred, retimed: true };
       });
+      routingRunsRules = written.deferred;
 
       // The policy prices its targets per priority, so the deadline follows the
-      // badge rather than staying at whatever the ticket arrived as.
-      await onPriorityChanged(conversationId);
+      // badge rather than staying at whatever the ticket arrived as — before
+      // the observer rules below, which may ask whether it is overdue. After
+      // the commit unless it moved inside it: a deferral with no inputs to
+      // re-time with re-times here, its pass handed over all the same.
+      if (!written.retimed) await onPriorityChanged(conversationId);
       break;
     }
 
@@ -273,12 +312,20 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
           return { write: written, deferred: true, routing: null };
         }
         // Only for a category set: clearing one settles nothing, and the
-        // window runs on.
+        // window runs on. And not on a decision in flight, which the deferral
+        // above turned down only because nobody may work the ticket: the
+        // router gives its pass up there, and asked to route it now it would
+        // answer `in_flight`, which `routerDecidedOn` reads as the router's
+        // pass covering this edit. The edit's own pass is owed, as on any
+        // resolved ticket.
         const stage = written.to ? await undecidedRouting(tx, conversationId) : null;
         return {
           write: written,
           deferred: false,
-          routing: stage && written.to ? { ...stage, settled: written.to } : null,
+          routing:
+            stage && written.to && !stage.decisionInFlight
+              ? { ...stage, settled: written.to }
+              : null,
         };
       });
       if (write.outcome === 'unknown_category' || write.outcome === 'retired_category') {
@@ -351,7 +398,12 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
         ),
       ];
 
-      await db.update(conversations).set({ tags }).where(eq(conversations.id, conversationId));
+      // In a transaction now, only so the deferral is asked under the lock the
+      // write took: a rule keyed on a tag meets the same race a priority's does.
+      routingRunsRules = await db.transaction(async (tx) => {
+        await tx.update(conversations).set({ tags }).where(eq(conversations.id, conversationId));
+        return deferToRouter(tx, conversationId);
+      });
       break;
     }
 
@@ -391,7 +443,7 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
 
       const before = row.conversation.customFields[def.key] ?? null;
 
-      await db.transaction(async (tx) => {
+      routingRunsRules = await db.transaction(async (tx) => {
         const [updated] = await tx
           .update(conversations)
           .set({ customFields: patch })
@@ -412,6 +464,8 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
             to: updated?.customFields[def.key] ?? null,
           },
         });
+        // A rule keyed on the field, on a decision in flight (`deferToRouter`).
+        return deferToRouter(tx, conversationId);
       });
       break;
     }

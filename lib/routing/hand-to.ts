@@ -363,7 +363,15 @@ export async function handToRouteGroup(
       });
     }
 
-    const endedHold = await endHold(tx, conversationId, 'manual', { agentId: actor.agentId }, now);
+    // On a decision in flight a rule's pick kept for the hold's end spoke
+    // about the group the ticket has just left, and goes (`movedGroup`).
+    const endedHold = await endHold(
+      tx,
+      conversationId,
+      'manual',
+      { agentId: actor.agentId, movedGroup: true },
+      now,
+    );
     return {
       ok: true as const,
       groupId: decision.groupId,
