@@ -4,19 +4,12 @@ import { routingDecisions } from '@/db/schema';
 import type { RoutingOutcome } from './decide';
 
 type Executor = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 /** Where an undecided ticket's routing stands, as `undecidedRouting` answers it. */
 export type UndecidedRouting = {
   shadow: boolean;
   stage: 'pending' | 'holding';
-  /**
-   * Whether phase one has already written the router's decision, which some
-   * caller is finishing (`lib/routing/apply.ts`). That decision read the
-   * ticket before whatever the caller is about to do to it: a category the
-   * caller then writes is one the router never decided on, and its pass over
-   * the rules is not the router's to run (`routerDecidedOn`).
-   */
-  phaseOneWritten: boolean;
 };
 
 /**
@@ -34,11 +27,7 @@ export async function undecidedRouting(
   conversationId: string,
 ): Promise<UndecidedRouting | null> {
   const [row] = await executor
-    .select({
-      shadow: routingDecisions.shadow,
-      stage: routingDecisions.stage,
-      phaseOneAt: routingDecisions.phaseOneAt,
-    })
+    .select({ shadow: routingDecisions.shadow, stage: routingDecisions.stage })
     .from(routingDecisions)
     .where(
       and(
@@ -49,11 +38,66 @@ export async function undecidedRouting(
   if (!row) return null;
   // The WHERE has left `decided` out, so the row is one of the other two; the
   // column's type still carries all three, and the answer names only these.
-  return {
-    shadow: row.shadow,
-    stage: row.stage === 'pending' ? 'pending' : 'holding',
-    phaseOneWritten: row.phaseOneAt !== null,
-  };
+  return { shadow: row.shadow, stage: row.stage === 'pending' ? 'pending' : 'holding' };
+}
+
+/**
+ * Hands a writer's own `on_update` pass to the router, when the write lands
+ * while a decision is in flight: phase one has written it, and the router —
+ * or `settle_routing` after it — has still to end the hold
+ * (`lib/routing/apply.ts`). Answers true when it did, and the caller then runs
+ * no pass of its own, nor the policy's second look, nor `routeNow`: the
+ * router's pass runs again, on the ticket as this write left it, and the
+ * hold's end, the policy and the assignment follow it.
+ *
+ * Asked by every writer with a pass of its own that can land in that gap — the
+ * console's category, group and assignee cases, Hand to, and Jev's answer —
+ * in its write's own transaction, once the write holds the ticket's lock. Not
+ * by an agent's reply, which runs no pass; nor by a rule, whose pass is either
+ * the router's own or one that read the ticket before this decision existed.
+ *
+ * A pass of the writer's own here would be unordered with the router's end of
+ * the hold. The router assigns as soon as its last pass is over and phase
+ * three has committed, so the writer's rules could run after somebody was
+ * handed the ticket — and an `assign_group` among them, which never touches
+ * an assignee, then left a Sales agent holding a Merchant Care ticket. Nor was
+ * there a way to have the router simply wait for it: a pass the router claimed
+ * read the ticket at some point the writer could not see, so a write landing
+ * then was passed by both, or by neither.
+ *
+ * So the write re-arms the router's pass instead: its claim cleared, and its
+ * mark of done with it. Under the ticket's lock, which the write took first,
+ * and then the routing row's, the order every routing writer takes them in,
+ * this write is ordered against each of the router's steps that read the
+ * ticket or end the hold, both of which take the ticket's lock too:
+ *
+ * - **before the router's claim**, the pass the claim begins reads this write;
+ * - **after it**, the pass read the ticket before this write, and phase three,
+ *   finding the claim cleared, runs it again instead of ending the hold;
+ * - **after phase three**, the row is decided, this answers false, and the
+ *   writer's pass is a relabel's, like any write after the hold.
+ *
+ * A router that died meanwhile leaves the row undecided and the pass unclaimed,
+ * which `settle_routing` claims and runs when it completes the decision — never
+ * read as a claimant that died part-way, since a cleared claim is no claim.
+ */
+export async function deferToRouter(tx: Tx, conversationId: string): Promise<boolean> {
+  const [row] = await tx
+    .select({ id: routingDecisions.id, phaseOneAt: routingDecisions.phaseOneAt })
+    .from(routingDecisions)
+    .where(
+      and(
+        eq(routingDecisions.conversationId, conversationId),
+        ne(routingDecisions.stage, 'decided'),
+      ),
+    )
+    .for('update');
+  if (!row?.phaseOneAt) return false;
+  await tx
+    .update(routingDecisions)
+    .set({ rulesClaimedAt: null, rulesDoneAt: null })
+    .where(eq(routingDecisions.id, row.id));
+  return true;
 }
 
 /**
@@ -65,44 +109,37 @@ const NOT_THE_ROUTERS_PASS: ReadonlySet<RoutingOutcome> = new Set(['manual', 'ru
 
 /**
  * Whether the router's pass over the `on_update` rules covers a category
- * written on a held ticket — asked by the category's writer, the console's
- * edit or Jev's answer, once `routeNow` has answered `none` or `in_flight`:
- * somebody decided between the write's commit and the router's lock, or is
- * part-way through deciding. True, and the writer runs no pass of its own,
- * which would be a second: every rule keyed on the category fires twice, a
- * canned reply sent twice, a note written twice. False, and the pass is the
- * writer's, which on a ticket still held assigns nobody, and in which a rule's
- * move ends nothing.
+ * written on a held ticket before any phase one had — asked by the category's
+ * writer, the console's edit or Jev's answer, once `routeNow` has answered
+ * anything but `decided`. A writer that found phase one already written handed
+ * its pass to the router there and then (`deferToRouter`) and never asks; so
+ * whatever this finds was decided, or is being decided, after the write
+ * committed, in the moment before the writer's own call reached the router.
+ * True, and the writer runs no pass of its own, which would be a second: every
+ * rule keyed on the category fires twice, a canned reply sent twice, a note
+ * written twice. False, and the pass is the writer's.
  *
- * `written` is what the writer knows from under its own lock: the category it
- * wrote, and whether phase one had been written by then
- * (`UndecidedRouting.phaseOneWritten`).
- *
+ * - **Undecided** — a phase one written since, which some caller is finishing
+ *   (`in_flight`), or none yet, the writer's own `routeNow` having `failed`:
+ *   true. Phase one, then or at the window's end, reads the ticket after this
+ *   write, and the router's pass after it.
+ * - **Decided by the router** — its phase one read the ticket under the lock
+ *   after this write committed, and its pass ran on this category or on a
+ *   later writer's, whose pass it then is: true either way.
  * - **Not the router's decision** — `manual` or `rule`, or `not_open`: false.
  *   `endHold` decides without reading the category, and `not_open` ran no
  *   pass; a router owing nothing is not the edit's pass having run, and a
  *   person's edit on a ticket resolved in its window meets its rules as an
  *   edit on any resolved ticket does.
- * - **A phase one written after the write** — it read the ticket under the
- *   lock after the write committed: this category, whose pass the router runs,
- *   or a later writer's, whose pass the router runs instead. True either way.
- *   A pass here would run on whatever the ticket carries now, so after a later
- *   writer it is that writer's category a second time, not this one's a first.
- * - **A phase one written before the write** — it decided on the category this
- *   write replaced, and its pass ran on that one, or gives up on finding the
- *   ticket carrying another (`finish`): true only when it is this very
- *   category, which a write that changed the column cannot be but for a third
- *   writer putting the old one back in between.
+ * - **No row** — purged with its ticket in that moment: false, and the
+ *   writer's own pass finds no ticket.
  */
-export async function routerDecidedOn(
-  conversationId: string,
-  written: { categoryId: string; phaseOneWritten: boolean },
-): Promise<boolean> {
+export async function routerDecidedOn(conversationId: string): Promise<boolean> {
   const [row] = await db
-    .select({ outcome: routingDecisions.outcome, categoryId: routingDecisions.categoryId })
+    .select({ stage: routingDecisions.stage, outcome: routingDecisions.outcome })
     .from(routingDecisions)
     .where(eq(routingDecisions.conversationId, conversationId));
-  if (!row?.outcome || NOT_THE_ROUTERS_PASS.has(row.outcome)) return false;
-  if (!written.phaseOneWritten) return true;
-  return row.categoryId === written.categoryId;
+  if (!row) return false;
+  if (row.stage !== 'decided') return true;
+  return row.outcome !== null && !NOT_THE_ROUTERS_PASS.has(row.outcome);
 }

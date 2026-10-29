@@ -1,8 +1,10 @@
-import { and, eq, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, sql } from 'drizzle-orm';
+import postgres from 'postgres';
 import { describe, expect, it } from 'vitest';
 import { db } from '@/db/client';
 import { agents, contacts, conversationEvents, conversations, ticketStatuses } from '@/db/schema';
 import { withCleanDatabase } from '@/lib/testing/db';
+import { untilWaitingOnALock } from '@/lib/testing/hold-transaction';
 import { changeStatus, type StatusTarget } from './status';
 
 /**
@@ -10,7 +12,8 @@ import { changeStatus, type StatusTarget } from './status';
  * stamps each category writes and clears: a resolve records who resolved,
  * moving back to Open keeps that record for the reopen to read, and a close
  * keeps the resolve it follows — a ticket closed straight from Open gets none
- * (`resolveStamp`, docs/PROJECT-STATE.md §6.98).
+ * (`resolveStamp`, docs/PROJECT-STATE.md §6.98). And where its line sorts when
+ * the write waited on somebody else's.
  */
 
 withCleanDatabase();
@@ -205,5 +208,71 @@ describe('changeStatus', () => {
     expect(again).not.toBeNull();
     expect(again).not.toBe(first);
     expect((await stamps(id)).closedAt).toBeNull();
+  });
+});
+
+/**
+ * Runs `write` while another session holds the ticket's row, and lets that
+ * session change the priority — its line stamped when written, as every
+ * writer of the column stamps it — and commit once `write` waits on it.
+ */
+async function behindAWriter(id: string, write: () => Promise<unknown>): Promise<void> {
+  const other = postgres(process.env.TEST_DATABASE_URL!, {
+    max: 1,
+    prepare: false,
+    onnotice: () => {},
+  });
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  let locked!: () => void;
+  const isLocked = new Promise<void>((resolve) => (locked = resolve));
+  try {
+    const writer = other.begin(async (tx) => {
+      await tx`select id from conversations where id = ${id} for no key update`;
+      locked();
+      await gate;
+      await tx`update conversations set priority = 'urgent' where id = ${id}`;
+      await tx`insert into conversation_events (conversation_id, type, actor_label, data, created_at)
+               values (${id}, 'priority_changed', 'agent', '{"to":"urgent"}', clock_timestamp())`;
+    });
+    await isLocked;
+    const writing = write();
+    await untilWaitingOnALock(db);
+    release();
+    await writer;
+    await writing;
+  } finally {
+    await other.end();
+  }
+}
+
+/** The two lines as the ticket page draws them: by `created_at`, as Postgres holds it. */
+async function lineOrder(id: string) {
+  const lines = await db
+    .select({ type: conversationEvents.type })
+    .from(conversationEvents)
+    .where(
+      and(
+        eq(conversationEvents.conversationId, id),
+        inArray(conversationEvents.type, ['priority_changed', 'status_changed']),
+      ),
+    )
+    .orderBy(asc(conversationEvents.createdAt), asc(conversationEvents.id));
+  return lines.map((line) => line.type);
+}
+
+// The router's phase one, an agent's priority: another writer can hold the
+// ticket's row as the status change's transaction begins. Stamped with that
+// start, the change's line sorted before the one committed while it waited,
+// though the move could not be made until then (`CHANGE_STAMP`).
+describe('changeStatus after a wait on the ticket', () => {
+  it('sorts its line after the change it waited for', async () => {
+    const { id, agentId } = await openTicket();
+    const pending = await status('Pending');
+
+    await behindAWriter(id, () => changeStatus(agentId, id, pending));
+
+    expect(await stamps(id)).toMatchObject({ statusId: pending.id });
+    expect(await lineOrder(id)).toEqual(['priority_changed', 'status_changed']);
   });
 });

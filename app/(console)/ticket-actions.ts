@@ -22,7 +22,7 @@ import { routeNow } from '@/lib/routing/apply';
 import { afterHoldEnded } from '@/lib/routing/after-hold';
 import { endHold } from '@/lib/routing/end-hold';
 import { handToRouteGroup, type HandToResult } from '@/lib/routing/hand-to';
-import { routerDecidedOn, undecidedRouting } from '@/lib/routing/state';
+import { deferToRouter, routerDecidedOn, undecidedRouting } from '@/lib/routing/state';
 import { isBlank } from '@/lib/tickets/custom-fields';
 import { parseFieldValue } from '@/lib/tickets/custom-fields-parse';
 import { getTicketField } from '@/lib/tickets/lookups';
@@ -49,9 +49,12 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
   const field = String(formData.get('field') ?? '');
   const value = String(formData.get('value') ?? '');
 
-  // Set by the category case when routing owns the update pass this edit
-  // would have run: the router ran it, or is running it, on the category the
-  // edit wrote, or the creation pass's `beginRouting` routes on it.
+  // Set when routing owns the update pass this edit would have run: the
+  // router ran it, or is running it, on the ticket as the edit left it, or the
+  // creation pass's `beginRouting` routes on the category the edit wrote. On
+  // a decision in flight it is every edit below that writes and would run a
+  // pass (`deferToRouter`): the router's pass, run again, is the one owed, and
+  // the edit's own would be unordered with the router's end of the hold.
   let routingRunsRules = false;
   // Set when the edit ended a routing hold, whose assignment and held reply
   // are owed once the observer rules below have run (`afterHoldEnded`).
@@ -117,7 +120,7 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
         if (!assignee.isActive) return { error: 'That agent is deactivated' };
       }
 
-      endedHold = await db.transaction(async (tx) => {
+      const assigned = await db.transaction(async (tx) => {
         await tx
           .update(conversations)
           .set({ assigneeAgentId, assignedAt: assigneeAgentId ? new Date() : null })
@@ -127,6 +130,11 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
           conversationId,
           type: assigneeAgentId ? 'assigned' : 'unassigned',
           actorAgentId: agent.id,
+          // After the update above has the row lock (`CHANGE_STAMP`): an edit
+          // that waited on the router's phase one would otherwise be stamped
+          // when its transaction began, and sort before the decision it came
+          // after.
+          createdAt: CHANGE_STAMP,
           data: { to: assigneeAgentId },
         });
 
@@ -136,11 +144,16 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
         // nothing about where the ticket goes — on a held ticket, which has no
         // assignee, it is a no-op write — and ending the hold for it would
         // assign the ticket in its default group, the outcome the hold exists
-        // to prevent.
-        return assigneeAgentId
-          ? endHold(tx, conversationId, 'manual', { agentId: agent.id })
+        // to prevent. Either way a decision in flight runs its pass again on
+        // what this wrote, rather than the edit running one of its own
+        // (`deferToRouter`).
+        const ended = assigneeAgentId
+          ? await endHold(tx, conversationId, 'manual', { agentId: agent.id })
           : false;
+        return { ended, deferred: await deferToRouter(tx, conversationId) };
       });
+      endedHold = assigned.ended;
+      routingRunsRules = assigned.deferred;
       break;
     }
 
@@ -172,13 +185,21 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
           conversationId,
           type: 'group_changed',
           actorAgentId: agent.id,
+          // After the move has the row lock, as the assignee case's line is.
+          createdAt: CHANGE_STAMP,
           data: { to: groupId },
         });
         // A person moving a ticket held for the router has decided where it
-        // goes (`endHold`).
-        return { endedHold: await endHold(tx, conversationId, 'manual', { agentId: agent.id }) };
+        // goes (`endHold`); one whose decision is in flight leaves the router
+        // to finish it, its pass and the policy included (`deferToRouter`).
+        const ended = await endHold(tx, conversationId, 'manual', { agentId: agent.id });
+        return { endedHold: ended, deferred: await deferToRouter(tx, conversationId) };
       });
       if (!move) break;
+      if (move.deferred) {
+        routingRunsRules = true;
+        break;
+      }
 
       // Before anybody has answered, the policy itself may follow the new team
       // (a policy can be keyed on the group); after, it holds. Either way the
@@ -238,20 +259,36 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
       // after the commit, a router deciding in between on this category read
       // as a ticket routing had finished with, and the relabel below ran the
       // rules a second time after the router's pass.
-      const { write, routing } = await db.transaction(async (tx) => {
+      const { write, deferred, routing } = await db.transaction(async (tx) => {
         const written = await setConversationCategoryOn(tx, conversationId, categoryId, {
           agentId: agent.id,
         });
+        if (written.outcome !== 'changed') {
+          return { write: written, deferred: false, routing: null };
+        }
+        // A decision in flight takes the edit's pass over, a category cleared
+        // included: the router runs it again on the ticket as this left it
+        // (`deferToRouter`).
+        if (await deferToRouter(tx, conversationId)) {
+          return { write: written, deferred: true, routing: null };
+        }
         // Only for a category set: clearing one settles nothing, and the
         // window runs on.
-        const settled = written.outcome === 'changed' ? written.to : null;
-        const stage = settled ? await undecidedRouting(tx, conversationId) : null;
-        return { write: written, routing: stage && settled ? { ...stage, settled } : null };
+        const stage = written.to ? await undecidedRouting(tx, conversationId) : null;
+        return {
+          write: written,
+          deferred: false,
+          routing: stage && written.to ? { ...stage, settled: written.to } : null,
+        };
       });
       if (write.outcome === 'unknown_category' || write.outcome === 'retired_category') {
         return { error: CATEGORY_REFUSALS[write.outcome] };
       }
       if (write.outcome === 'no_ticket') return { error: 'Ticket not found' };
+      if (deferred) {
+        routingRunsRules = true;
+        break;
+      }
 
       // During a routing hold a person saying what the ticket is about is the
       // best signal there is, so it routes on it, as Jev's answer would: the
@@ -266,14 +303,14 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
       //   here, not even the policy, which both of those choose again: routed
       //   now, the ticket would be decided before its `on_create` rules ran,
       //   and a rule's `assign_group` there would end nothing.
-      // - **Live and `holding`** — routed now. The pass below is skipped where
-      //   the router owns the rules on the category this edit wrote: `decided`
-      //   ran them itself, and `failed` left the hold for `settle_routing`,
-      //   which runs them at the window's end. Otherwise somebody decided in
-      //   the moment between this commit and the router's lock — `none`, or
-      //   `in_flight` for a decision part-way through — and who it was, on
-      //   what, and whether before this write or after it, says whether the
-      //   pass is owed (`routerDecidedOn`, which Jev asks of its own write).
+      // - **Live and `holding`**, phase one not yet written (a decision in
+      //   flight took the pass over above) — routed now. The pass below is
+      //   skipped where the router owns it: `decided` ran it on this category.
+      //   Otherwise somebody decided, or began to, in the moment between this
+      //   commit and the router's lock — `none`, `in_flight` — or this call
+      //   `failed` and the window's job is still to come, and whether that
+      //   reads this write says whether the pass is owed (`routerDecidedOn`,
+      //   which Jev asks of its own write).
       // - **Shadow** — the rest as though routing did not exist, after the
       //   would-be decision is recorded once the creation pass has begun
       //   routing; while it is `pending`, `beginRouting` records it after the
@@ -284,14 +321,7 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
           break;
         }
         const routed = await routeNow(conversationId, { agentId: agent.id, label: 'agent' });
-        if (
-          routed === 'decided' ||
-          routed === 'failed' ||
-          (await routerDecidedOn(conversationId, {
-            categoryId: routing.settled,
-            phaseOneWritten: routing.phaseOneWritten,
-          }))
-        ) {
+        if (routed === 'decided' || (await routerDecidedOn(conversationId))) {
           routingRunsRules = true;
           break;
         }
@@ -389,8 +419,8 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
 
   // Observer rules see the ticket as the agent has just left it. Actions taken
   // by a rule write to the ticket directly and do not come back through here,
-  // so a rule cannot trigger itself. Not after a category edit whose routing
-  // runs them on the category it wrote.
+  // so a rule cannot trigger itself. Not where routing runs them on what the
+  // edit wrote: the router, on a decision in flight or one this edit made.
   if (!routingRunsRules) await afterTicketUpdate(conversationId);
   // After the rules, so the held reply is told the hours of the group they
   // left the ticket in.

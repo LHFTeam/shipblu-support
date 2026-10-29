@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import { PgDatabase } from 'drizzle-orm/pg-core';
 import { describe, expect, it, vi } from 'vitest';
@@ -20,7 +21,7 @@ import { assignConversation } from '@/lib/assignment';
 import { setConversationCategory } from '@/lib/categories/write';
 import { withCleanDatabase } from '@/lib/testing/db';
 import { holdNextTransaction } from '@/lib/testing/hold-transaction';
-import { routeNow, settleRouting } from './apply';
+import { routeNow, settleRouting, type RouteResult } from './apply';
 import { handToRouteGroup, type HandToResult } from './hand-to';
 import { ROUTING_GRACE_MS } from './hold';
 
@@ -515,11 +516,12 @@ describe('handToRouteGroup', () => {
   // A ticket somebody holds is offered the hand-over even while the router is
   // finishing a decision on it — phase one written, its rules still to run —
   // here one the router found `taken`. The move and the unassignment stand
-  // and end nothing (`endHold`): taken off its holder, the ticket is held
-  // again, so the hand-over's own assignment waits, and its answer names no
-  // queue. The router's end of the hold, after its rules, assigns it in the
-  // group it was handed to. Ending the hold itself, the hand-over assigned
-  // before the router's pass, which then ran on a ticket somebody held.
+  // and end nothing (`endHold`), and the rest is handed to the router whole
+  // (`deferToRouter`): no pass, policy or assignment of the hand-over's own,
+  // and an answer naming no holder and no queue. The router's end of the
+  // hold, after its pass, assigns it in the group it was handed to. Ending
+  // the hold itself, the hand-over assigned before the router's pass, which
+  // then ran on a ticket somebody held.
   it('on a decision in flight, moves and unassigns, and leaves the assignment to the router', async () => {
     const lina = await agent('Lina Care');
     const omar = await agent('Omar Sales');
@@ -572,6 +574,68 @@ describe('handToRouteGroup', () => {
       { type: 'group_changed', actorAgentId: mona, data: { to: sales, from: care } },
       { type: 'unassigned', actorAgentId: mona, data: { from: lina } },
       { type: 'assigned', data: { to: omar } },
+    ]);
+  });
+
+  // The hand-over lands once the router's pass has read the ticket — still
+  // Lina's, in Customer Care — and before its phase three, and what it does
+  // after its write lags the router. Run by the hand-over then, its pass
+  // moved the ticket on from Sales after the router's end of the hold had
+  // handed it to Omar there, and Omar held a Merchant Care ticket. Handed to
+  // the router, the pass runs again on Sales before anybody is assigned.
+  it('on a decision in flight, the router’s pass runs on the hand-over before it assigns', async () => {
+    const lina = await agent('Lina Care');
+    const omar = await agent('Omar Sales');
+    const mona = await agent('Mona Merchant');
+    const supervisor = await agent('Mona Supervisor', { role: 'supervisor' });
+    const care = await group('Customer Care', [lina]);
+    const sales = await group('Inbound Sales Team', [omar]);
+    const merchants = await group('Merchant Care', [mona]);
+    const salesCategory = await category('sales', sales);
+    await db.insert(automationRules).values({
+      name: 'Sales goes to Merchant Care',
+      trigger: 'on_update',
+      conditions: { field: 'group.id', op: 'eq', value: sales },
+      actions: [{ type: 'assign_group', groupId: merchants }],
+    });
+    const id = await heldTicket(await instagram(), care, new Date(Date.now() + 3 * MINUTE), {
+      assigneeAgentId: lina,
+    });
+    expect(
+      (await setConversationCategory(id, salesCategory, { label: 'jev:category' })).outcome,
+    ).toBe('changed');
+
+    // Phase one, then the claim that reads the ticket for the pass.
+    const { routed, handed } = await routeWithHandOverBetween({
+      afterRouterTransaction: 2,
+      route: () => routeNow(id, { label: 'jev:category' }),
+      handOver: () =>
+        handToRouteGroup(
+          id,
+          { agentId: supervisor },
+          { expectedGroupId: sales, expectedAssigneeId: lina },
+        ),
+    });
+
+    expect(routed).toBe('decided');
+    expect(await row(id)).toMatchObject({ groupId: merchants, assignee: mona });
+    expect(handed).toEqual({
+      ok: true,
+      groupName: 'Inbound Sales Team',
+      assignedTo: null,
+      skipped: 'awaiting_route',
+      waitsIn: null,
+    });
+    expect(
+      (await eventsOf(id, ['group_changed', 'unassigned', 'assigned'])).map((event) => ({
+        type: event.type,
+        to: event.data.to,
+      })),
+    ).toEqual([
+      { type: 'group_changed', to: sales },
+      { type: 'unassigned', to: null },
+      { type: 'group_changed', to: merchants },
+      { type: 'assigned', to: mona },
     ]);
   });
 
@@ -764,3 +828,66 @@ describe('handToRouteGroup', () => {
     });
   });
 });
+
+/** Who opened a transaction: the router's call, or the hand-over. */
+const opener = new AsyncLocalStorage<'router' | 'hand-over'>();
+
+/**
+ * Runs `route` with `handOver` landing once the router's
+ * `afterRouterTransaction`th transaction has committed, before the router
+ * goes on — the hand-over's write commits there — and holds every
+ * transaction the hand-over opens after its write until the router has
+ * finished: its follow-ups lagging the router, made certain. Transactions are
+ * told apart by who opened them.
+ */
+async function routeWithHandOverBetween({
+  afterRouterTransaction,
+  route,
+  handOver,
+}: {
+  afterRouterTransaction: number;
+  route: () => Promise<RouteResult>;
+  handOver: () => Promise<HandToResult>;
+}): Promise<{ routed: RouteResult; handed: HandToResult | undefined }> {
+  const real = PgDatabase.prototype.transaction;
+  let routerOpened = 0;
+  let handOverOpened = 0;
+  let handing: Promise<HandToResult> | undefined;
+  let release!: () => void;
+  const released = new Promise<void>((resolve) => (release = resolve));
+  let wrote!: () => void;
+  const written = new Promise<void>((resolve) => (wrote = resolve));
+
+  const spy = vi.spyOn(PgDatabase.prototype, 'transaction').mockImplementation(async function (
+    this: PgDatabase<never>,
+    run,
+    config,
+  ) {
+    const who = opener.getStore();
+    if (who === 'hand-over') {
+      const nth = ++handOverOpened;
+      if (nth > 1) await released;
+      const result: unknown = await real.call(this, run, config);
+      if (nth === 1) wrote();
+      return result as never;
+    }
+    if (who === 'router') {
+      const nth = ++routerOpened;
+      const result: unknown = await real.call(this, run, config);
+      if (nth === afterRouterTransaction) {
+        handing = opener.run('hand-over', handOver);
+        await Promise.race([written, handing]);
+      }
+      return result as never;
+    }
+    return real.call(this, run, config) as never;
+  });
+
+  try {
+    const routed = await opener.run('router', route);
+    release();
+    return { routed, handed: await handing };
+  } finally {
+    spy.mockRestore();
+  }
+}

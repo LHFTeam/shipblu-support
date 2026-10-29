@@ -2,6 +2,7 @@ import { eq } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { conversationEvents, conversations, type ticketStatuses } from '@/db/schema';
 import { onStatusChanged } from '@/lib/sla';
+import { CHANGE_STAMP } from '@/lib/tickets/change-stamp';
 import { afterTicketResolved } from '@/lib/tickets/lifecycle';
 import { reopenWithOwner } from '@/lib/whatsapp/number-owner';
 import { resolveStamp } from './resolve-stamp';
@@ -48,10 +49,16 @@ export async function changeStatus(
         })
         .where(eq(conversations.id, conversationId));
 
+      // Stamped once the update above holds the ticket's row lock, never at
+      // the transaction's start (`CHANGE_STAMP`): a status change that waited
+      // on another writer's lock — the router's decision, an agent's priority
+      // — would otherwise sort before the change it waited for, though it
+      // could not be made until that one had committed.
       await tx.insert(conversationEvents).values({
         conversationId,
         type: 'status_changed',
         actorAgentId: agentId,
+        createdAt: CHANGE_STAMP,
         data: { to: status.name, category: status.category, ...(via ? { via } : {}) },
       });
       return true;
