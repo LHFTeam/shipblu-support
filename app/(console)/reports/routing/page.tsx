@@ -11,7 +11,8 @@ import { formatDateTime } from '@/lib/format';
 import { dateIn, rangeIn, reportingZone, type ReportWindow } from '@/lib/reports/rollup';
 import { routingStartFor, type RoutingMode } from '@/lib/routing/mode';
 import {
-  idleRoutingSentence,
+  idleClassifierSentence,
+  noKeyRoutingSentence,
   ROUTING_MODE_LABELS,
   ROUTING_OUTCOME_LABELS,
 } from '@/lib/routing/mode-copy';
@@ -471,13 +472,6 @@ function StateNotice({
   keyConfigured: boolean;
   routingNow: RoutingChannel[];
 }) {
-  const idleSentences = [
-    ...new Set(
-      routingNow
-        .map((channel) => idleRoutingSentence(channel.mode, classifier))
-        .filter((sentence): sentence is string => sentence !== null),
-    ),
-  ];
   // Asked as ingest asks it, row by row: whether its tickets reach the
   // question of its mode at all (`files` — no other row files for it, no
   // active owner is stamped on them, as the readiness panel says), then
@@ -532,16 +526,16 @@ function StateNotice({
           </>
         )}
       </Notice>
-      {idleSentences.map((sentence) => (
-        <Notice key={sentence} tone="warning" icon>
-          {sentence}
-        </Notice>
-      ))}
-      {classifier === 'apply' && !keyConfigured ? (
+      {/* The readiness panel's two sentences, said where they are true: only
+          over a row whose tickets would reach routing, as the panel asks it. */}
+      {classifier !== 'apply' && filing.length > 0 ? (
         <Notice tone="warning" icon>
-          This environment has no TYPESAFE_API_KEY, so Jev is asked nothing: unless a person or a
-          rule files a ticket during its window, the window runs out and the ticket stays in its
-          default group.
+          {idleClassifierSentence(classifier)}
+        </Notice>
+      ) : null}
+      {classifier === 'apply' && !keyConfigured && filing.length > 0 ? (
+        <Notice tone="warning" icon>
+          {noKeyRoutingSentence(windowMinutes)}
         </Notice>
       ) : null}
     </>

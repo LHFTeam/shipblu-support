@@ -225,6 +225,8 @@ describe('routingReadiness', () => {
     expect(of(readiness, coexistence)).toMatchObject({
       column: 'category',
       mode: 'default_group',
+      // It files its own tickets, and still never routes: not idle, locked.
+      routesInApply: false,
       starts: null,
       warnings: [{ kind: 'never_routes', reason: 'coexistence' }],
     });
@@ -306,7 +308,18 @@ describe('routingReadiness', () => {
     await classifier('shadow');
     let readiness = await routingReadiness(NOW);
     expect(readiness.classifier).toMatchObject({ mode: 'shadow', keyConfigured: true });
-    expect(of(readiness, id)).toMatchObject({ starts: null, noKey: false, warnings: ownWarnings });
+    // Idle only for the classifier, so it keeps what Apply would meet, on
+    // purpose; the second row would not route in Apply either.
+    expect(of(readiness, id)).toMatchObject({
+      routesInApply: true,
+      starts: null,
+      noKey: false,
+      warnings: ownWarnings,
+    });
+    expect(of(readiness, second)).toMatchObject({
+      routesInApply: false,
+      warnings: [{ kind: 'not_filing_row', filingRow: 'Support mailbox' }],
+    });
 
     await classifier('apply');
     readiness = await routingReadiness(NOW);

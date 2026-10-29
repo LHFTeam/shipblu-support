@@ -65,6 +65,28 @@ export function routingLockReason(channel: { type: string; config: unknown }): s
 }
 
 /**
+ * The classifier's idleness said once for every channel, as the readiness
+ * panel on `/admin/channels` and the state notice on `/reports/routing` both
+ * say it: routing starts only in `apply`, so in either other mode no channel
+ * holds or records anything. `idleRoutingSentence` below is the same fact
+ * about one channel's mode, for `saveChannel`'s answer.
+ */
+export function idleClassifierSentence(classifier: Exclude<CategoryAiMode, 'apply'>): string {
+  const now = classifier === 'off' ? 'off' : 'in Shadow';
+  return `Idle until the category classifier is in Apply on /admin/categories: it is ${now}, so no channel holds or records a new ticket, and each starts in its default group as before.`;
+}
+
+/**
+ * What routing does with the classifier in Apply and no key to ask with, as
+ * the panel and the report both say it: Jev files nothing, so only a person
+ * or a rule files a category, and otherwise a held ticket waits out its window
+ * and a shadow record ends `fallback` ("Window ran out").
+ */
+export function noKeyRoutingSentence(windowMinutes: number): string {
+  return `This environment has no TYPESAFE_API_KEY, so the classifier asks nothing and files no category. Unless a person or a rule decides first, a channel routing by category holds each new ticket for the whole ${windowMinutes}-minute window and then leaves it in its default group, and one in shadow records it as “${ROUTING_OUTCOME_LABELS.fallback}”.`;
+}
+
+/**
  * The warning a category mode earns while the classifier cannot serve it:
  * routing starts only in `apply` (`routingStartFor`), so in either other mode
  * the channel's new tickets go on exactly as on `default_group`.

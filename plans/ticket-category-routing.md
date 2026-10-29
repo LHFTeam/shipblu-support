@@ -5611,10 +5611,17 @@ seeded (118 files, 1,584 tests); and every CI check.
      `dir="rtl"` the cue is off, and only the console draws `Table`.
    - **`Columns`' axis labels are HTML.** As SVG `<text>` in a 720-unit
      `viewBox` they rendered at about 4px at 390px. Each is now centred on
-     its slot and held inside the chart by `translate` against `cqw`, and
-     `axisTicks` (`lib/charts/scale.ts`) leaves out a label that would
-     crowd the last, and on a phone every other one where a step is under
-     a label's room (ninety days at every tenth).
+     its slot and held inside the chart by `translate` against `cqw`.
+     `axisTicks` (`lib/charts/scale.ts`) lays them out as drawn, at their
+     width in characters, and thins them evenly until none touches, once for
+     the narrowest `sm` chart and once for the narrowest phone (286px, a
+     360px window).
+   - **The two reviews of these, answered in the same pull request.** The
+     panel's idle and no-key notices are shared with `/reports/routing`
+     through `mode-copy.ts`, and drawn only over a row that would route; a
+     row idle only for the classifier keeps its warnings on purpose, as what
+     Apply would meet; and the scroll cue's shades are linear, so a tall
+     table's header has one.
 
    One is left, because it needs a decision first:
    - **A second web chat row cannot be edited.** `ChannelEditor` returns

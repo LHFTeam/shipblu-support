@@ -27,6 +27,7 @@ import {
   type RunQuestion,
 } from '@/lib/category-ai/report';
 import { readCategoryAiSettings } from '@/lib/category-ai/settings';
+import { jevStatus } from '@/lib/category-ai/status';
 import { allLimited } from '@/lib/concurrency';
 import { channelLabel, formatDateTime } from '@/lib/format';
 import { reportingZone } from '@/lib/reports/rollup';
@@ -67,6 +68,7 @@ export default async function CategoryAiReportPage({
     () => reportingZone(),
   ]);
   const keyConfigured = typesafeConfigured();
+  const status = jevStatus(settings.mode, keyConfigured, settings.minProbability);
 
   const asked = label !== undefined || q !== undefined || mode !== undefined;
   // A link names a run the list may have dropped past its limit: looked up
@@ -116,28 +118,11 @@ export default async function CategoryAiReportPage({
       />
 
       <div className="mb-6 max-w-3xl space-y-2">
-        {/* With no key the switch is a setting, not what Jev does: said as
-            "is filing tickets" over "it is asked nothing", the bold half was
-            the false one. */}
         <Notice tone="neutral">
-          Jev is{' '}
-          <b className="text-(--color-text-primary)">
-            {settings.mode === 'off'
-              ? 'switched off'
-              : !keyConfigured
-                ? settings.mode === 'shadow'
-                  ? 'set to shadow'
-                  : 'set to file tickets'
-                : settings.mode === 'shadow'
-                  ? 'in shadow: asked, and its answers recorded, with no ticket changed'
-                  : 'filing tickets'}
-          </b>
-          {settings.mode === 'off' ? '' : `, at a threshold of ${settings.minProbability}`}
-          {settings.mode === 'off' || keyConfigured
-            ? '.'
-            : `, but this environment has no TYPESAFE_API_KEY, so it is asked nothing and ${settings.mode === 'shadow' ? 'records' : 'files'} nothing.`}{' '}
-          A ticket counts as labelled when a person chose its category in the ticket&rsquo;s
-          Category select before anything else wrote it &mdash; Jev, a rule or a form.
+          Jev is <b className="text-(--color-text-primary)">{status.bold}</b>
+          {status.tail} A ticket counts as labelled when a person chose its category in the
+          ticket&rsquo;s Category select before anything else wrote it &mdash; Jev, a rule or a
+          form.
         </Notice>
         {dead.count > 0 && (chosen === null || chosen.runLabel === CATEGORY_AI_LIVE_LABEL) ? (
           <Notice tone="warning" icon>

@@ -72,42 +72,88 @@ export function split(band: Band, series: number, gap = 2): Band[] | null {
 /** An x label: which slot, its centre as a percentage of the width, and whether it stays on a narrow screen. */
 export type AxisTick = { index: number; at: number; narrow: boolean };
 
-/** A chart's width on a phone: 390px less the page's gutters and the card's padding. */
-const NARROW_WIDTH_PX = 300;
-/** Room for a date label at 11px and a gap beside it. */
-const LABEL_SPACING_PX = 40;
+/**
+ * The narrowest a chart is drawn, below `sm` and from it: a 360px phone and a
+ * 640px window, each less the 74px of gutters and card padding around a chart
+ * (a 390px window drew one 316px wide).
+ */
+const NARROW_CHART_PX = 286;
+const WIDE_CHART_PX = 566;
+/** A label's width per character at 11px: "22/10" measured 33px. */
+const CHAR_PX = 6.6;
+/** The least room between two labels that still reads as two. */
+const LABEL_GAP_PX = 6;
 
 /**
- * The x labels of a column chart: every `tickEvery`th slot and the last, at
- * each slot's centre across the width, for labels drawn in HTML under the
- * drawing, which keeps each one inside the chart (`Columns`).
+ * The x labels of a column chart, for labels drawn in HTML under the drawing:
+ * which slots carry one, each at its slot's centre, and which of those stay
+ * on a narrow screen.
  *
  * In HTML because an SVG's text shrinks with the drawing: at 390px a label
  * drawn at 10 units in a 720-unit box rendered at about 4px. A label in HTML
- * keeps its size, so its spacing is now the constraint, and two rules keep
- * neighbours apart. A regular label nearer the last than `tickEvery` slots is
- * left out: on a chart whose bars fill it, the last is held inside the edge,
- * up to half a label to the left of its centre, so the two would touch. And
- * where `tickEvery` slots come to less than a label's room on a phone —
- * ninety days at every tenth is about 33px there — a narrow screen keeps
- * every other regular label, and none within twice the spacing of the last.
- * "Left" here is the drawing's own, which is left to right in either
- * direction of text.
+ * keeps its size, so its room is the constraint, and it is laid out here as
+ * `Columns` draws it: centred on its slot, held inside the chart, as wide as
+ * its characters at 11px. The candidates are every `tickEvery`th slot and the
+ * last. At each width the fewest of them are thinned out — every second, then
+ * every third — until no two are nearer than a gap, and any still crowding
+ * the last, which always stays, are left out. A first pass at the narrowest
+ * `sm` chart decides which are drawn at all, and a second, over those, at the
+ * narrowest phone, which stay below `sm`. Rules in slot counts got the ends
+ * wrong: a two-bar chart lost its first label, two-digit hours were thinned
+ * as though they were dates, and between 66 and 75 days the first label,
+ * held inside the edge, touched the second. "Left" here is the drawing's
+ * own, which is left to right in either direction of text.
  */
-export function axisTicks(slots: readonly Band[], width: number, tickEvery = 1): AxisTick[] {
+export function axisTicks(
+  slots: readonly Band[],
+  width: number,
+  labels: readonly string[],
+  tickEvery = 1,
+): AxisTick[] {
   const last = slots.length - 1;
+  if (last < 0) return [];
   const every = Math.max(1, Math.floor(tickEvery));
-  const thin = slots.length > 0 && (every * NARROW_WIDTH_PX) / slots.length < LABEL_SPACING_PX;
-  const ticks: AxisTick[] = [];
-  slots.forEach((slot, index) => {
-    if (index !== last && (index % every !== 0 || last - index < every)) return;
-    ticks.push({
-      index,
-      at: ((slot.x + slot.width / 2) / width) * 100,
-      narrow: index === last || !thin || ((index / every) % 2 === 0 && last - index >= every * 2),
-    });
-  });
-  return ticks;
+  const centres = slots.map((slot) => (slot.x + slot.width / 2) / width);
+
+  // Where a label is drawn on a chart `chart` px wide.
+  const extent = (index: number, chart: number): [number, number] => {
+    const labelWidth = (labels[index]?.length ?? 0) * CHAR_PX;
+    const left = Math.min(
+      Math.max(centres[index]! * chart - labelWidth / 2, 0),
+      chart - labelWidth,
+    );
+    return [left, left + labelWidth];
+  };
+
+  const fit = (indices: readonly number[], chart: number): number[] => {
+    const [lastLeft] = extent(last, chart);
+    const regular = indices.filter((index) => index !== last);
+    for (let step = 1; step <= Math.max(1, regular.length); step++) {
+      const kept: number[] = [];
+      let edge = -Infinity;
+      let collided = false;
+      for (const index of regular.filter((_, ordinal) => ordinal % step === 0)) {
+        const [left, right] = extent(index, chart);
+        // Crowding the last is not a reason to thin the rest: only this one goes.
+        if (right + LABEL_GAP_PX > lastLeft) continue;
+        if (left < edge + LABEL_GAP_PX) {
+          collided = true;
+          break;
+        }
+        kept.push(index);
+        edge = right;
+      }
+      if (!collided) return [...kept, last];
+    }
+    return [last];
+  };
+
+  const candidates = centres.flatMap((_, index) =>
+    index % every === 0 || index === last ? [index] : [],
+  );
+  const drawn = fit(candidates, WIDE_CHART_PX);
+  const narrow = new Set(fit(drawn, NARROW_CHART_PX));
+  return drawn.map((index) => ({ index, at: centres[index]! * 100, narrow: narrow.has(index) }));
 }
 
 /**

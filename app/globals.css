@@ -521,8 +521,8 @@
   --elevation-overlay: var(--shadow-overlay);
   --elevation-launcher: var(--shadow-launcher);
   /* The shade on a sideways-scrolling box's edge with more beyond it
-     (`.scroll-cue`): neutral-950, as the elevation shadows are, and fainter, since
-     it only hints that something is there. */
+     (`.scroll-cue`): neutral-950, the card and float shadows' colour, at a
+     strength that reads as a hint across 14px rather than as an edge. */
   --color-scroll-cue: rgb(19 20 23 / 0.14);
 
   /* ── Legacy console names, pointed at the roles above. */
@@ -750,7 +750,9 @@ body {
    it. On a phone a table's last columns sat past the edge with nothing to say
    they were there, the SLA figures among them. Two covers in the surface's
    colour scroll with the content and two shades stay with the box, so at
-   either end that end's cover hides its shade, with no script. A row with a
+   either end that end's cover hides its shade, with no script. The shades
+   are linear, even from top to bottom: a radial one faded out towards both,
+   so a tall table's header row and its last rows had none. A row with a
    background of its own sits over the shade, which only a hovered row has,
    and that one only tints it. */
 .scroll-cue {
@@ -759,10 +761,10 @@ body {
       100% no-repeat local,
     linear-gradient(to left, var(--color-background-surface) 30%, transparent) right center / 2.5rem
       100% no-repeat local,
-    radial-gradient(farthest-side at 0 50%, var(--color-scroll-cue), transparent) left center /
-      0.875rem 100% no-repeat scroll,
-    radial-gradient(farthest-side at 100% 50%, var(--color-scroll-cue), transparent) right center /
-      0.875rem 100% no-repeat scroll,
+    linear-gradient(to right, var(--color-scroll-cue), transparent) left center / 0.875rem 100%
+      no-repeat scroll,
+    linear-gradient(to left, var(--color-scroll-cue), transparent) right center / 0.875rem 100%
+      no-repeat scroll,
     var(--color-background-surface);
 }
 

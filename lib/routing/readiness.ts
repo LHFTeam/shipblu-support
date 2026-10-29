@@ -112,6 +112,14 @@ export type ChannelRouting = {
   column: RoutingMode;
   /** What the router acts on (`routingModeOf`). */
   mode: RoutingMode;
+  /**
+   * Whether a new ticket on it would enter routing with the classifier in
+   * Apply: false for a row that never routes (a coexistence number, the bot)
+   * and one that files nothing routable (inactive, a second row of its type,
+   * an owned number), each of which carries its one reason alone. True with
+   * `starts` null is a row idle only for the classifier.
+   */
+  routesInApply: boolean;
   /** What a new ticket on it gets now: a hold, a record, or nothing. */
   starts: RoutingStart | null;
   /**
@@ -286,6 +294,7 @@ function assessReadiness(input: {
       isActive: channel.isActive,
       column: channel.routingMode,
       mode,
+      routesInApply: files && routingStartFor(mode, 'apply') !== null,
       starts,
       noKey: starts !== null && !classifier.keyConfigured,
     };
@@ -304,7 +313,10 @@ function assessReadiness(input: {
     if (owned !== null) warnings.push({ kind: 'owned', owner: owned });
     // A row that files nothing routable is that one reason and no more: what
     // follows describes tickets it never holds, and said under "nothing is
-    // held" it read as routing that cannot happen.
+    // held" it read as routing that cannot happen. A row that files tickets
+    // while the classifier is idle keeps what follows on purpose, as what
+    // Apply would meet there: the panel is read before routing is turned on,
+    // and its row says so.
     if (!files) return { ...base, warnings };
 
     // A route group that is the channel's own default group is where those

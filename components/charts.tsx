@@ -17,8 +17,9 @@ import {
  * Both are server-rendered SVG with no client JavaScript: a dashboard that
  * refreshes itself every fifteen seconds should not also be re-running a
  * charting library on every refresh. Hover detail comes from `<title>`, which
- * the browser shows as a tooltip and a screen reader reads out — one element
- * doing both jobs, with nothing to hydrate.
+ * the browser shows as a tooltip, with nothing to hydrate. A screen reader
+ * meets each drawing as one image named by its caption: `role="img"` makes
+ * everything inside it presentational, the titles included.
  *
  * Colour is assigned by series and never by rank, so a quiet day does not
  * repaint the chart. Values live in the accompanying table as well as on the
@@ -67,7 +68,10 @@ export function Columns({
   width?: number;
   /** Describes the chart for anyone who cannot see it. */
   caption: string;
-  /** Draw every nth x label — a 90-day chart cannot carry ninety of them. */
+  /**
+   * Label every nth slot, and the last — a 90-day chart cannot carry ninety
+   * labels — and fewer wherever they would not fit (`axisTicks`).
+   */
   tickEvery?: number;
 }) {
   // The drawing is the plot alone: `height` still counts 18 units for the
@@ -76,7 +80,7 @@ export function Columns({
   const peak = Math.max(0, ...series.flatMap((one) => one.values));
   const ceiling = niceCeiling(peak);
   const slots = bands(labels.length, width);
-  const ticks = axisTicks(slots, width, tickEvery);
+  const ticks = axisTicks(slots, width, labels, tickEvery);
 
   return (
     <figure className="m-0">
@@ -135,7 +139,7 @@ export function Columns({
 
       {/* The x labels, in HTML so they keep their size on a phone, where an
           SVG's text shrank with the drawing to about 4px (`axisTicks` says
-          which and where). Each is centred on its slot and held inside the
+          which and where, laid out as drawn here). Each is centred on its slot and held inside the
           chart: `translate` takes the smaller of half its own width (`%`)
           and its distance to either edge (`cqw`, the row's width), so only a
           label that would hang off an end moves, and only by the overhang.
@@ -310,9 +314,9 @@ const RATING_COLORS = [
  * wider would otherwise shrink its own track, and a bar's width is a share of
  * its track, so the bars would stop being comparable.
  *
- * HTML rather than SVG, unlike the charts above: the labels are words, and an
- * SVG's text shrinks with the drawing on a phone, where text in the page's own
- * flow stays the size it was set at.
+ * HTML rather than SVG, unlike `Columns`' drawing, though like its labels:
+ * the labels are words, and an SVG's text shrinks with the drawing on a
+ * phone, where text in the page's own flow stays the size it was set at.
  */
 export function RatingBars({
   counts,
