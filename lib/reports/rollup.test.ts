@@ -4,7 +4,6 @@ import {
   dateIn,
   emptyBucket,
   reconcileFailure,
-  reconciles,
   sliceAccumulator,
   slicesFor,
   totalsOf,
@@ -135,7 +134,7 @@ describe('sliceAccumulator', () => {
     expect(tally({ channel: 'email' })).toBe(4);
     expect(tally({ categoryId: 'sales' })).toBe(2);
     expect(tally({ categoryId: 'customer_support' })).toBe(1);
-    expect(reconciles(slices)).toBe(true);
+    expect(reconcileFailure(slices)).toBeNull();
   });
 });
 
@@ -145,7 +144,7 @@ describe('sliceAccumulator', () => {
  * And the two the category brought: a day has one totals row, and its category
  * rows never sum past it, since a ticket has one category or none.
  */
-describe('reconciles', () => {
+describe('reconcileFailure', () => {
   const slice = (channel: string | null, created: number): Slice => ({
     ...ALL,
     channel,
@@ -158,19 +157,21 @@ describe('reconciles', () => {
   });
 
   it('accepts a day whose totals equal the sum of its channel rows', () => {
-    expect(reconciles([slice(null, 5), slice('email', 3), slice('whatsapp', 2)])).toBe(true);
+    expect(reconcileFailure([slice(null, 5), slice('email', 3), slice('whatsapp', 2)])).toBeNull();
   });
 
   it('rejects the inflated totals the old slicing produced', () => {
     // Production's 2026-08-18: four tickets with neither group nor assignee
     // counted three times each, one with an assignee counted twice — a totals
     // row of 14 over five real tickets.
-    expect(reconciles([slice(null, 14), slice('email', 3), slice('whatsapp', 2)])).toBe(false);
+    expect(
+      reconcileFailure([slice(null, 14), slice('email', 3), slice('whatsapp', 2)]),
+    ).not.toBeNull();
   });
 
   it('accepts a day on which nothing happened', () => {
-    expect(reconciles([])).toBe(true);
-    expect(reconciles([slice(null, 0)])).toBe(true);
+    expect(reconcileFailure([])).toBeNull();
+    expect(reconcileFailure([slice(null, 0)])).toBeNull();
   });
 
   it('ignores the group and agent rows, which legitimately do not sum to the totals', () => {
@@ -181,7 +182,7 @@ describe('reconciles', () => {
       agentId: 'agent-1',
       bucket: { ...emptyBucket(), ticketsCreated: 1 },
     };
-    expect(reconciles([slice(null, 5), slice('email', 5), withAgent])).toBe(true);
+    expect(reconcileFailure([slice(null, 5), slice('email', 5), withAgent])).toBeNull();
   });
 
   it('checks the survey counts too, each step of the scale on its own', () => {
@@ -195,7 +196,7 @@ describe('reconciles', () => {
       surveys('email', { csatSentCount: 2, csatRating5: 2 }),
       surveys('webchat', { csatSentCount: 1, csatSkippedCount: 1, csatRating2: 1 }),
     ];
-    expect(reconciles(day)).toBe(true);
+    expect(reconcileFailure(day)).toBeNull();
 
     // A survey counted in the totals and in no channel — what a survey with no
     // channel of its own would do without the ticket's to fall back on.
@@ -206,7 +207,9 @@ describe('reconciles', () => {
       { csatRating5: 1 },
     ]) {
       const [totals, ...rest] = day;
-      expect(reconciles([surveys(null, { ...totals!.bucket, ...counts }), ...rest])).toBe(false);
+      expect(
+        reconcileFailure([surveys(null, { ...totals!.bucket, ...counts }), ...rest]),
+      ).not.toBeNull();
     }
   });
 
@@ -214,13 +217,13 @@ describe('reconciles', () => {
     // Five tickets, three of them filed: the category rows sum to three, the
     // channels to five, and the day agrees with itself.
     expect(
-      reconciles([
+      reconcileFailure([
         slice(null, 5),
         slice('email', 5),
         category('sales', { ticketsCreated: 2 }),
         category('customer_support', { ticketsCreated: 1 }),
       ]),
-    ).toBe(true);
+    ).toBeNull();
   });
 
   it('refuses a second totals row, which `totalsOf` would never compare with anything', () => {
@@ -229,7 +232,7 @@ describe('reconciles', () => {
     const day = [slice(null, 5), slice('email', 5), slice(null, 2)];
 
     expect(totalsOf(day).ticketsCreated).toBe(5);
-    expect(reconciles(day)).toBe(false);
+    expect(reconcileFailure(day)).not.toBeNull();
     expect(reconcileFailure(day)).toBe('each other: 2 slices name no dimension');
   });
 
@@ -241,7 +244,7 @@ describe('reconciles', () => {
       category('sales', { ticketsCreated: 1 }),
       category('customer_support', { ticketsCreated: 1 }),
     ];
-    expect(reconciles(twice)).toBe(false);
+    expect(reconcileFailure(twice)).not.toBeNull();
     expect(reconcileFailure(twice)).toBe(
       'the category slices, which sum past them in ticketsCreated',
     );
@@ -252,7 +255,9 @@ describe('reconciles', () => {
       { ...slice(null, 1), bucket: { ...emptyBucket(), ticketsCreated: 1, ...seconds } },
       { ...slice('email', 1), bucket: { ...emptyBucket(), ticketsCreated: 1, ...seconds } },
     ];
-    expect(reconciles([...day, category('sales', { firstResponseSecondsSum: 60 })])).toBe(true);
+    expect(
+      reconcileFailure([...day, category('sales', { firstResponseSecondsSum: 60 })]),
+    ).toBeNull();
     expect(reconcileFailure([...day, category('sales', { firstResponseSecondsSum: 61 })])).toBe(
       'the category slices, which sum past them in firstResponseSecondsSum',
     );
@@ -264,7 +269,7 @@ describe('reconciles', () => {
     const day = [category('sales', { ticketsCreated: 2 }), slice(null, 5), slice('email', 5)];
 
     expect(totalsOf(day).ticketsCreated).toBe(5);
-    expect(reconciles(day)).toBe(true);
+    expect(reconcileFailure(day)).toBeNull();
   });
 
   it('names the channel sum when that is what a day broke', () => {

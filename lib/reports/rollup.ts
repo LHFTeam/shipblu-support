@@ -321,7 +321,7 @@ export type SliceAccumulator = {
  * comes out is what went in. The dimensions used to be read back out of the
  * key with `key.split('|')`, and a split that names one segment fewer than the
  * key holds hands every category slice back as a second all-null slice: two
- * totals rows on the day, both summed by every reader, which `reconciles`
+ * totals rows on the day, both summed by every reader, which the reconcile
  * could not see while it compared only the first against the channels (it
  * counts them now, before the job writes, and `metrics_daily_slice_key`
  * refuses the second at insert besides).
@@ -554,7 +554,7 @@ export async function computeDay(
       // otherwise move a score from the channel it was asked on to the one
       // it was merged into. The ticket's only for the one row written before
       // the survey had a channel — without one, a fact would land in the
-      // totals and in no channel slice, and `reconciles` would refuse the day.
+      // totals and in no channel slice, and `reconcileFailure` would refuse the day.
       channel: sql<string>`coalesce(${csatSurveys.channel}, ${conversations.channel})`,
       // The ticket's, as it stands: a survey keeps no category of its own, and
       // the header says why the current one is what every figure reads — so a
@@ -650,8 +650,7 @@ export function surveyedConversation(ticket: TicketColumns = conversations) {
 
 /**
  * Why a day's slices disagree with each other, completing "totals do not match
- * …", or null when they agree. `reconciles` is the same question as a yes or
- * no. The nightly job asks this of a day's slices before it writes them, and
+ * …", or null when they agree. The nightly job asks this of a day's slices before it writes them, and
  * writes nothing for a day that fails, logging this so its one line says which
  * rule the day broke.
  *
@@ -707,11 +706,6 @@ export function reconcileFailure(slices: Slice[]): string | null {
   if (over) return `the category slices, which sum past them in ${over}`;
 
   return null;
-}
-
-/** Whether a day's slices agree with each other: `reconcileFailure` says how not. */
-export function reconciles(slices: Slice[]): boolean {
-  return reconcileFailure(slices) === null;
 }
 
 /** Every column of a bucket, from the one place that lists them all. */

@@ -86,7 +86,7 @@ function inRange(range: Range) {
  * a predicate that leaves a dimension out also matches that dimension's
  * slices. Leaving out the category is the one that would go unseen: every
  * categorised ticket counted twice in every headline figure — this page, the
- * CSAT page and its export, the dashboard's History — and `reconciles()`
+ * CSAT page and its export, the dashboard's History — and `reconcileFailure()`
  * cannot see it, since it checks what is written, not what is read. A fifth
  * dimension is added here once, in the commit that adds it to `DIMENSIONS`
  * (`lib/reports/rollup.ts`), the key and the CHECK.

@@ -4964,7 +4964,7 @@ branch, what was verified, and what is left, in order.
    four dimensions. `db/sql/003` adds `metrics_daily_one_dimension`
    (`num_nonnulls(group_id, agent_id, channel, category_id) <= 1`). A slice
    written twice, or a row naming two dimensions, would otherwise be summed
-   into another slice by every reader, and `reconciles()` cannot see it.
+   into another slice by every reader, and `reconcileFailure()` cannot see it.
    Production pre-flight, read-only, 2026-10-28: no duplicate slice, no row
    naming two dimensions, one totals row on each of the 67 days, Postgres
    17.6. So both build there.
@@ -4974,7 +4974,7 @@ branch, what was verified, and what is left, in order.
    (`sliceAccumulator`, exported for unit tests), where the old
    `key.split('|')` round trip could silently drop a fourth.
    - `slicesFor` adds the category slice only for a categorised ticket.
-   - `reconciles` keeps the channel-sum equality (category slices have
+   - `reconcileFailure` keeps the channel-sum equality (category slices have
      `channel = null`) and adds two invariants: at most one all-null slice,
      and per column the category slices sum to no more than the totals.
      `reconcileFailure()` names which one a day broke.

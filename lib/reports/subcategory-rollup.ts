@@ -116,7 +116,7 @@ export async function computeSubcategoryDay(
   `);
 
   return rows.map((row) => {
-    // Asserted rather than assumed, for the same reason `reconciles()` exists
+    // Asserted rather than assumed, for the same reason `reconcileFailure()` exists
     // next door: three `filter` clauses that are meant to partition a set are
     // one edited predicate away from overlapping or leaking, and the result is
     // invisible in the output — a column that is quietly too small reads as a

@@ -18,7 +18,7 @@ import { cairo } from '@/lib/testing/time';
 import {
   computeDay,
   emptyBucket,
-  reconciles,
+  reconcileFailure,
   reportingContext,
   totalsOf,
   type Bucket,
@@ -205,7 +205,7 @@ describe('computeDay, for surveys', () => {
         csatRatingSum: 12,
       }),
     );
-    expect(reconciles(thirteenth)).toBe(true);
+    expect(reconcileFailure(thirteenth)).toBeNull();
 
     const twelfth = await computeDay('2026-10-12', context);
     expect(surveyCounts({ ...twelfth[0]!, bucket: totalsOf(twelfth) })).toEqual(
@@ -399,7 +399,7 @@ describe('computeDay, for a ticket on a WhatsApp number with an owner', () => {
         slaResolutionBreached: 1,
       }),
     );
-    expect(reconciles(slices)).toBe(true);
+    expect(reconcileFailure(slices)).toBeNull();
   });
 
   // The nightly run rebuilds three days from current state. A handover on the
@@ -450,7 +450,7 @@ describe('computeDay, for a ticket on a WhatsApp number with an owner', () => {
       expected({ ticketsCreated: 1, firstResponseCount: 1, slaFirstResponseBreached: 1 }),
     );
     expect(agent(ali!.id)).toBeUndefined();
-    expect(reconciles(thirteenth)).toBe(true);
+    expect(reconcileFailure(thirteenth)).toBeNull();
   });
 });
 
@@ -614,7 +614,7 @@ describe('computeDay, by category', () => {
     for (const slice of categorySlices) {
       expect([slice.groupId, slice.agentId, slice.channel]).toEqual([null, null, null]);
     }
-    expect(reconciles(slices)).toBe(true);
+    expect(reconcileFailure(slices)).toBeNull();
 
     // "No category" is the totals less the category slices, column by column:
     // the unfiled ticket's figures exactly, its working-time seconds included.
@@ -699,6 +699,6 @@ describe('computeDay, by category', () => {
     );
     // Moved between categories, never lost: the totals are the day's still.
     expect(totalsOf(after)).toEqual(totalsOf(before));
-    expect(reconciles(after)).toBe(true);
+    expect(reconcileFailure(after)).toBeNull();
   });
 });

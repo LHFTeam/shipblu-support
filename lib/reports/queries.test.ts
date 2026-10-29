@@ -186,7 +186,7 @@ describe('uncategorised', () => {
   });
 
   it('leaves a figure past the totals negative, rather than hiding it as nothing', () => {
-    // `reconciles()` refuses a day whose categories sum past its totals, so this
+    // `reconcileFailure()` refuses a day whose categories sum past its totals, so this
     // is a bug if it is ever seen — and seen is the point.
     expect(
       uncategorised(row({ ticketsCreated: 2, csatRating5: 1 }), [
