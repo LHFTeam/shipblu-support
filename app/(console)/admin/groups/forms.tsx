@@ -373,8 +373,8 @@ export function GroupsTable({
           <>
             Agents{' '}
             <InfoTip label="Agents">
-              How many people are members of this group. Only members are ever assigned its tickets,
-              so a routing group with none is a queue nothing comes out of.
+              How many people are members of this group. Auto-assignment hands its tickets only to
+              members, so a routing group with none is a queue nothing comes out of.
             </InfoTip>
           </>,
           <>
