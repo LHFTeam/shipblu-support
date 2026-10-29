@@ -1,0 +1,1 @@
+CREATE INDEX "routing_decisions_started_idx" ON "routing_decisions" USING btree ("started_at");

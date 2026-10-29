@@ -710,7 +710,7 @@ _Built:_ the seven columns as tabled, from one read of a day's surveys in
 `computeDay`, each fact on its own timestamp. Every CSAT column, the two old
 ones included, now takes the survey's own `channel`, and the ticket's only
 for the one row written before surveys had one, which would otherwise sit in
-the totals and in no channel and fail `reconciles` — which now checks the new
+the totals and in no channel and fail `reconcileFailure` — which now checks the new
 counts too. A rating off the 1–5 scale counts nowhere, so the average and the
 bars describe the same answers.
 

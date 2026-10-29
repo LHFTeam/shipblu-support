@@ -29,6 +29,7 @@ import {
 import { readCategoryAiSettings } from '@/lib/category-ai/settings';
 import { allLimited } from '@/lib/concurrency';
 import { channelLabel, formatDateTime } from '@/lib/format';
+import { reportingZone } from '@/lib/reports/rollup';
 import { typesafeConfigured } from '@/lib/typesafe/client';
 import { Quiet, rate, Section } from '../report-parts';
 
@@ -56,11 +57,14 @@ export default async function CategoryAiReportPage({
   if (!can(agent, 'report.view')) notFound();
   const { label, q, mode } = await searchParams;
 
-  const [questions, settings, dead, categories] = await allLimited(2, [
+  // The reporting zone, which every report prints its instants in, so a run
+  // read here and the day it lands on in the other reports agree.
+  const [questions, settings, dead, categories, zone] = await allLimited(2, [
     () => runQuestions(),
     () => readCategoryAiSettings(),
     () => deadClassifyJobs(),
     () => listCategories(),
+    () => reportingZone(),
   ]);
   const keyConfigured = typesafeConfigured();
 
@@ -131,8 +135,8 @@ export default async function CategoryAiReportPage({
         {dead.count > 0 && (chosen === null || chosen.runLabel === CATEGORY_AI_LIVE_LABEL) ? (
           <Notice tone="warning" icon>
             {dead.count === 1
-              ? `One message has no live answer, in any mode or version of the question, because the job asking Jev about it failed for good, on ${formatDateTime(dead.first!)}.`
-              : `${dead.count} messages have no live answer, in any mode or version of the question, because the jobs asking Jev about them failed for good, the first on ${formatDateTime(dead.first!)} and the last on ${formatDateTime(dead.last!)}.`}{' '}
+              ? `One message has no live answer, in any mode or version of the question, because the job asking Jev about it failed for good, on ${formatDateTime(dead.first!, zone)}.`
+              : `${dead.count} messages have no live answer, in any mode or version of the question, because the jobs asking Jev about them failed for good, the first on ${formatDateTime(dead.first!, zone)} and the last on ${formatDateTime(dead.last!, zone)}.`}{' '}
             No figure below counts them.
           </Notice>
         ) : null}
@@ -164,6 +168,7 @@ export default async function CategoryAiReportPage({
                 key={`${question.runLabel}:${question.fingerprint}:${question.mode}`}
                 question={question}
                 current={question === chosen}
+                zone={zone}
               />
             ))}
           </Table>
@@ -493,7 +498,15 @@ export default async function CategoryAiReportPage({
   );
 }
 
-function QuestionRow({ question, current }: { question: RunQuestion; current: boolean }) {
+function QuestionRow({
+  question,
+  current,
+  zone,
+}: {
+  question: RunQuestion;
+  current: boolean;
+  zone: string;
+}) {
   const href = `/reports/category-ai?${new URLSearchParams({
     label: question.runLabel,
     q: question.fingerprint,
@@ -521,9 +534,10 @@ function QuestionRow({ question, current }: { question: RunQuestion; current: bo
       <Cell>{question.tickets}</Cell>
       <Cell>{question.rows}</Cell>
       <Cell className="whitespace-nowrap">
-        {formatDateTime(question.firstMessageAt)} – {formatDateTime(question.lastMessageAt)}
+        {formatDateTime(question.firstMessageAt, zone)} –{' '}
+        {formatDateTime(question.lastMessageAt, zone)}
       </Cell>
-      <Cell className="whitespace-nowrap">{formatDateTime(question.lastWrittenAt)}</Cell>
+      <Cell className="whitespace-nowrap">{formatDateTime(question.lastWrittenAt, zone)}</Cell>
     </Row>
   );
 }

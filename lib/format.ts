@@ -42,19 +42,30 @@ function joined<K extends Intl.DateTimeFormatPartTypes>(
   return needs.every((key) => part[key]) ? join(part as Record<K, string>) : format.format(at);
 }
 
-let dateTime: Intl.DateTimeFormat | undefined;
+const dateTimes = new Map<string, Intl.DateTimeFormat>();
 
-/** "14 Oct 2026, 09:05" — an instant in Cairo, to the minute. */
-export function formatDateTime(value: Date | string): string {
-  dateTime ??= new Intl.DateTimeFormat('en-GB', {
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    hourCycle: 'h23',
-    timeZone: TEAM_TIME_ZONE,
-  });
+/**
+ * "14 Oct 2026, 09:05" — an instant in Cairo, to the minute, or in `zone`.
+ *
+ * A report cuts its days in the reporting zone (`reportingZone()`, from the
+ * default business hours) and names it in its header, so an instant it prints
+ * beside those days is written in that zone too: in Cairo's, it read under a
+ * header naming another zone wherever the default hours were set elsewhere.
+ */
+export function formatDateTime(value: Date | string, zone: string = TEAM_TIME_ZONE): string {
+  let dateTime = dateTimes.get(zone);
+  if (!dateTime) {
+    dateTime = new Intl.DateTimeFormat('en-GB', {
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23',
+      timeZone: zone,
+    });
+    dateTimes.set(zone, dateTime);
+  }
   return joined(
     dateTime,
     new Date(value),

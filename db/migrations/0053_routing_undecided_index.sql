@@ -1,0 +1,1 @@
+CREATE INDEX "routing_decisions_undecided_idx" ON "routing_decisions" USING btree ("window_ends_at") WHERE "routing_decisions"."stage" <> 'decided';

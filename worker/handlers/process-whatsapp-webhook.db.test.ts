@@ -11,7 +11,7 @@ import {
   webhookEvents,
 } from '@/db/schema';
 import type { ClaimedJob } from '@/lib/queue';
-import { computeDay, earliestDay, reportingContext } from '@/lib/reports/rollup';
+import { computeDay, earliestDay, reportingContext, totalsOf } from '@/lib/reports/rollup';
 import { withCleanDatabase } from '@/lib/testing/db';
 import { ingestWhatsAppMessage } from '@/lib/tickets/ingest-whatsapp';
 import { parseCoexistence } from '@/lib/whatsapp/coexistence';
@@ -436,12 +436,10 @@ describe('processWhatsAppWebhook: a number on the WhatsApp Business app', () => 
       raw: { id: 'wamid.live' },
     });
 
+    // The all-dimensions row, through the one reader that names every
+    // dimension: one ticket, the live one.
     const slices = await computeDay(day.toISODate()!, context);
-    // The all-dimensions row: one ticket, the live one.
-    const total = slices.find(
-      (slice) => slice.channel === null && slice.groupId === null && slice.agentId === null,
-    );
-    expect(total?.bucket.ticketsCreated).toBe(1);
+    expect(totalsOf(slices).ticketsCreated).toBe(1);
 
     // And the archive is not said to start months early because of one.
     await deliver(

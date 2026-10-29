@@ -2,9 +2,18 @@ import { eq } from 'drizzle-orm';
 import { DateTime } from 'luxon';
 import { describe, expect, it } from 'vitest';
 import { db } from '@/db/client';
-import { metricsDaily, rollupDays } from '@/db/schema';
+import { agents, groups, metricsDaily, rollupDays, ticketCategories } from '@/db/schema';
 import { withCleanDatabase } from '@/lib/testing/db';
-import { byChannel, daily, lastWholeDay, rolledUpDays, totals } from './queries';
+import {
+  byCategory,
+  byChannel,
+  categoryFiling,
+  daily,
+  lastWholeDay,
+  rolledUpDays,
+  TOTALS_SLICE,
+  totals,
+} from './queries';
 
 /**
  * The reports overview's window. The queries used to turn a day count into a
@@ -139,5 +148,255 @@ describe('the survey columns', () => {
     expect(await byChannel({ from: '2026-10-12', to: '2026-10-13' })).toMatchObject([
       { label: 'email', csatSentCount: 4, csatRating5: 2 },
     ]);
+  });
+});
+
+/** The four starter categories the baseline seeds, by key. */
+async function categoryIds() {
+  const rows = await db
+    .select({ key: ticketCategories.key, id: ticketCategories.id })
+    .from(ticketCategories);
+  const id = (key: string) => rows.find((row) => row.key === key)!.id;
+  return {
+    sales: id('sales'),
+    customerSupport: id('customer_support'),
+    merchantSupport: id('merchant_support'),
+    courierJobs: id('courier_jobs'),
+  };
+}
+
+describe('the totals slice', () => {
+  // A category slice is the totals row with one more dimension filled in, so
+  // a totals reader naming only the other three nulls takes it for a second
+  // totals row and counts every categorised ticket twice.
+  it('leaves totals, the daily series and the history’s start as they were beside a category slice', async () => {
+    const { sales, courierJobs } = await categoryIds();
+    await db.insert(metricsDaily).values([
+      { day: '2026-10-12', ticketsCreated: 5, csatSentCount: 2, csatRating5: 1 },
+      { day: '2026-10-13', ticketsCreated: 4, firstResponseSecondsSum: 600, firstResponseCount: 2 },
+    ]);
+    const range = { from: '2026-10-11', to: '2026-10-13' };
+    const before = {
+      totals: await totals(range),
+      daily: await daily(range),
+      rolledUp: await rolledUpDays(range),
+    };
+    expect(before.totals.ticketsCreated).toBe(9);
+    expect(before.rolledUp).toEqual({ first: '2026-10-12', days: 2 });
+
+    await db.insert(metricsDaily).values([
+      { day: '2026-10-12', categoryId: sales, ticketsCreated: 3, csatSentCount: 1, csatRating5: 1 },
+      { day: '2026-10-13', categoryId: sales, ticketsCreated: 1, firstResponseSecondsSum: 300 },
+      { day: '2026-10-13', categoryId: courierJobs, ticketsCreated: 2, firstResponseCount: 1 },
+      // On a day with no totals row, which the rollup never writes — here only
+      // so the history's start and its count of days can see a reader that
+      // takes a category slice for a totals day.
+      { day: '2026-10-11', categoryId: sales, ticketsCreated: 7 },
+    ]);
+
+    expect(await totals(range)).toEqual(before.totals);
+    expect(await daily(range)).toEqual(before.daily);
+    expect(await rolledUpDays(range)).toEqual(before.rolledUp);
+  });
+
+  it('is one row a day: every single-dimension slice beside it is outside it', async () => {
+    const { sales } = await categoryIds();
+    const [group] = await db.select({ id: groups.id }).from(groups).limit(1);
+    const [agent] = await db
+      .insert(agents)
+      .values({ name: 'Omar', email: 'omar@shipblu.test' })
+      .returning({ id: agents.id });
+    const day = '2026-10-12';
+    const [total] = await db
+      .insert(metricsDaily)
+      .values({ day, ticketsCreated: 10 })
+      .returning({ id: metricsDaily.id });
+    await db.insert(metricsDaily).values([
+      { day, groupId: group!.id, ticketsCreated: 10 },
+      { day, agentId: agent!.id, ticketsCreated: 10 },
+      { day, channel: 'email', ticketsCreated: 10 },
+      { day, categoryId: sales, ticketsCreated: 10 },
+    ]);
+
+    expect(await db.select({ id: metricsDaily.id }).from(metricsDaily).where(TOTALS_SLICE)).toEqual(
+      [{ id: total!.id }],
+    );
+  });
+});
+
+describe('byCategory', () => {
+  it('sums each category over the window, in the registry’s order, a retired one included', async () => {
+    const { sales, customerSupport, merchantSupport, courierJobs } = await categoryIds();
+    // An order that is neither the seed's nor the figures': courier jobs
+    // first, then sales and merchant support tied on position and so by key,
+    // then customer support.
+    const position = (id: string, value: number) =>
+      db.update(ticketCategories).set({ position: value }).where(eq(ticketCategories.id, id));
+    await position(courierJobs, 0);
+    await position(sales, 1);
+    await position(merchantSupport, 1);
+    await position(customerSupport, 2);
+    // Retired since its tickets were rolled up: they still report under it.
+    await db
+      .update(ticketCategories)
+      .set({ isActive: false })
+      .where(eq(ticketCategories.id, merchantSupport));
+
+    await db.insert(metricsDaily).values([
+      { day: '2026-10-12', ticketsCreated: 30, ticketsResolved: 20 },
+      { day: '2026-10-12', categoryId: customerSupport, ticketsCreated: 9, ticketsResolved: 1 },
+      { day: '2026-10-13', categoryId: customerSupport, ticketsCreated: 1, ticketsResolved: 4 },
+      { day: '2026-10-12', categoryId: sales, ticketsCreated: 2, csatRatingSum: 9 },
+      { day: '2026-10-13', categoryId: sales, ticketsCreated: 3, csatRatingSum: 5 },
+      { day: '2026-10-13', categoryId: merchantSupport, ticketsCreated: 4 },
+      { day: '2026-10-13', categoryId: courierJobs, firstResponseCount: 1 },
+      // Outside the window.
+      { day: '2026-10-14', categoryId: sales, ticketsCreated: 100 },
+      { day: '2026-10-11', categoryId: customerSupport, ticketsCreated: 100 },
+    ]);
+
+    const { rows, rest } = await byCategory({ from: '2026-10-12', to: '2026-10-13' });
+
+    expect(
+      rows.map(({ label, isActive, ticketsCreated, ticketsResolved, csatRatingSum }) => ({
+        label,
+        isActive,
+        ticketsCreated,
+        ticketsResolved,
+        csatRatingSum,
+      })),
+    ).toEqual([
+      {
+        label: 'Courier jobs',
+        isActive: true,
+        ticketsCreated: 0,
+        ticketsResolved: 0,
+        csatRatingSum: 0,
+      },
+      {
+        label: 'Merchant support',
+        isActive: false,
+        ticketsCreated: 4,
+        ticketsResolved: 0,
+        csatRatingSum: 0,
+      },
+      { label: 'Sales', isActive: true, ticketsCreated: 5, ticketsResolved: 0, csatRatingSum: 14 },
+      {
+        label: 'Customer support',
+        isActive: true,
+        ticketsCreated: 10,
+        ticketsResolved: 5,
+        csatRatingSum: 0,
+      },
+    ]);
+    expect(rows[0]!.firstResponseCount).toBe(1);
+    // The window's totals less the four rows: 30 - 19 created, 20 - 5 resolved.
+    expect(rest).toMatchObject({ ticketsCreated: 11, ticketsResolved: 15 });
+  });
+
+  it('has no row for a category with no slice in the window, and leaves the totals as the rest', async () => {
+    await db.insert(metricsDaily).values({ day: '2026-10-12', ticketsCreated: 3 });
+    expect(await byCategory({ from: '2026-10-12', to: '2026-10-13' })).toEqual({
+      total: expect.objectContaining({ ticketsCreated: 3 }),
+      rows: [],
+      rest: expect.objectContaining({ ticketsCreated: 3 }),
+    });
+  });
+
+  // The rest is a subtraction, so its two halves are read in one statement:
+  // read apart, a rollup committing a day between them took that night's
+  // category figures off totals that did not yet hold it.
+  it('reads the rest of the totals in the statement that reads the categories', async () => {
+    const { sales, customerSupport } = await categoryIds();
+    const [group] = await db.insert(groups).values({ name: 'Sales team' }).returning();
+    await db.insert(metricsDaily).values([
+      { day: '2026-10-12', ticketsCreated: 10, csatRating5: 3 },
+      { day: '2026-10-12', categoryId: sales, ticketsCreated: 4, csatRating5: 1 },
+      { day: '2026-10-13', ticketsCreated: 5 },
+      { day: '2026-10-13', categoryId: customerSupport, ticketsCreated: 5 },
+      // Other cuts' slices, which are not the totals however many nulls they hold.
+      { day: '2026-10-12', channel: 'email', ticketsCreated: 10 },
+      { day: '2026-10-12', groupId: group!.id, ticketsCreated: 7 },
+      // Outside the window.
+      { day: '2026-10-14', ticketsCreated: 100 },
+    ]);
+
+    const window = { from: '2026-10-12', to: '2026-10-13' };
+    const { total, rows, rest } = await byCategory(window);
+
+    // The overview's tiles print `total`: the totals slice, read in the same
+    // statement, so the rows and the rest sum to it whatever commits between.
+    expect(total).toEqual(await totals(window));
+    expect(total).toMatchObject({ ticketsCreated: 15, csatRating5: 3 });
+    expect(rows.map((row) => [row.label, row.ticketsCreated])).toEqual(
+      expect.arrayContaining([
+        ['Sales', 4],
+        ['Customer support', 5],
+      ]),
+    );
+    expect(rows).toHaveLength(2);
+    expect(rest).toMatchObject({ ticketsCreated: 6, csatRating5: 2 });
+  });
+});
+
+describe('categoryFiling', () => {
+  it('counts the window’s days with figures that a run filing by category did not last roll up', async () => {
+    const { sales } = await categoryIds();
+    const range = { from: '2026-10-10', to: '2026-10-14' };
+    const at = (iso: string) => new Date(iso);
+    const totals = (day: string) => ({ day, ticketsCreated: 1 });
+    await db
+      .insert(metricsDaily)
+      .values([
+        totals('2026-10-09'),
+        totals('2026-10-10'),
+        totals('2026-10-11'),
+        totals('2026-10-12'),
+        totals('2026-10-13'),
+        { day: '2026-10-13', categoryId: sales, ticketsCreated: 1 },
+      ]);
+    await db.insert(rollupDays).values([
+      // Before the window: not counted, unfiled or not.
+      { day: '2026-10-09', computedAt: at('2026-10-10T00:00:05Z') },
+      // Filed, though nobody filed its ticket: no category slice, and filed.
+      {
+        day: '2026-10-10',
+        computedAt: at('2026-10-11T00:00:05Z'),
+        categoriesComputedAt: at('2026-10-11T00:00:05Z'),
+      },
+      // Filed once, then rebuilt by code that writes `computed_at` alone, as a
+      // rollback's nightly would: unfiled again.
+      {
+        day: '2026-10-12',
+        computedAt: at('2026-10-20T00:00:05Z'),
+        categoriesComputedAt: at('2026-10-13T00:00:05Z'),
+      },
+      // Filed, after an unfiled day: the first filed day does not cover it.
+      {
+        day: '2026-10-13',
+        computedAt: at('2026-10-14T00:00:05Z'),
+        categoriesComputedAt: at('2026-10-14T00:00:05Z'),
+      },
+      // An empty day, rolled up before categories: nothing on it to misfile.
+      { day: '2026-10-14', computedAt: at('2026-10-15T00:00:05Z') },
+    ]);
+    // 2026-10-11 has figures and no `rollup_days` row: rolled up before the
+    // table existed, so before categories.
+
+    expect(await categoryFiling(range)).toEqual({
+      days: 4,
+      unfiled: 2,
+      first: '2026-10-11',
+      last: '2026-10-12',
+    });
+  });
+
+  it('answers no days on a window with no figures', async () => {
+    expect(await categoryFiling({ from: '2026-10-10', to: '2026-10-14' })).toEqual({
+      days: 0,
+      unfiled: 0,
+      first: null,
+      last: null,
+    });
   });
 });

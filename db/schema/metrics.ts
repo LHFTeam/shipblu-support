@@ -13,6 +13,7 @@ import {
   uuid,
 } from 'drizzle-orm/pg-core';
 import { agents, groups } from './agents';
+import { ticketCategories } from './config';
 import { conversations, messages } from './conversations';
 import {
   channelEnum,
@@ -240,6 +241,16 @@ export const metricsDaily = pgTable(
     groupId: uuid('group_id').references(() => groups.id, { onDelete: 'cascade' }),
     agentId: uuid('agent_id').references(() => agents.id, { onDelete: 'cascade' }),
     channel: channelEnum('channel'),
+    /**
+     * The ticket's category as it stands when the day is rolled up, as the
+     * group is — `lib/reports/rollup.ts` says why not as of each figure's
+     * instant. `restrict`, as every reference to a category is: a category is
+     * retired, never deleted, so its history keeps reporting under it. Where
+     * the group and the agent cascade, a deleted one's slice goes with it.
+     */
+    categoryId: uuid('category_id').references(() => ticketCategories.id, {
+      onDelete: 'restrict',
+    }),
 
     ticketsCreated: integer('tickets_created').notNull().default(0),
     ticketsResolved: integer('tickets_resolved').notNull().default(0),
@@ -279,7 +290,18 @@ export const metricsDaily = pgTable(
     computedAt: timestamp('computed_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
-    uniqueIndex('metrics_daily_dimensions_idx').on(t.day, t.groupId, t.agentId, t.channel),
+    // One row per slice per day, as a fact rather than a convention. Every
+    // slice is mostly NULLs, so a plain unique index — NULLS DISTINCT, which is
+    // what `metrics_daily_dimensions_idx` was — enforced nothing on any of
+    // them: a slice written twice would be summed twice by every reader, and
+    // `reconciles()` cannot see it. A constraint rather than a unique index
+    // because `nullsNotDistinct` exists only on `unique()` here (as
+    // `csat_rules_scope_key`). The day's delete-and-insert in `rollup_metrics`
+    // stays: a slice whose figures vanished must vanish too, which an upsert
+    // would not do. `db/sql/003` holds the other half, one dimension per row.
+    unique('metrics_daily_slice_key')
+      .on(t.day, t.groupId, t.agentId, t.channel, t.categoryId)
+      .nullsNotDistinct(),
     index('metrics_daily_day_idx').on(t.day),
   ],
 );
@@ -305,6 +327,18 @@ export const metricsDaily = pgTable(
 export const rollupDays = pgTable('rollup_days', {
   day: date('day').primaryKey(),
   computedAt: timestamp('computed_at', { withTimezone: true }).notNull().defaultNow(),
+  /**
+   * The `computed_at` of the last run that filed this day's tickets by
+   * category. The day's rows are such a run's only while the two are equal.
+   *
+   * Not a boolean, because the code that came before it writes `computed_at`
+   * and nothing else: a day it rebuilds keeps this column, now older, and so
+   * reads as unfiled again. A flag would still say filed over rows with no
+   * category slice, once a rollback's nightly had rebuilt them. And not read
+   * off `metrics_daily`: a day whose tickets nobody filed has no category
+   * slice either, and is filed all the same.
+   */
+  categoriesComputedAt: timestamp('categories_computed_at', { withTimezone: true }),
 });
 
 /**
@@ -403,11 +437,12 @@ export const agentBacklogSnapshots = pgTable(
  * rather than about the ticket.
  *
  * Deliberately its own table rather than more columns on `metrics_daily`. That
- * table's contract is four slices with null meaning "all", and `reconciles()`
- * asserts the totals row equals the sum of the channel slices. A login time has
- * no channel, so it would either break that assertion or force three of every
- * four rows to carry meaningless zeros — and the assertion is the only thing
- * standing between a double-counting bug and a report that merely looks busy.
+ * table's contract is one slice per row — the totals, or one dimension named
+ * and null meaning "all" in the rest — and `reconcileFailure()` refuses a day
+ * whose totals row is not the sum of its channel slices. A login time has no
+ * channel, so it would either break that check or force every row but the
+ * agent's to carry meaningless zeros — and that check is what stands between
+ * a double-counting bug and a report that merely looks busy.
  *
  * It holds only what `metrics_daily` does not. Resolved counts, response times,
  * SLA attainment and CSAT are already computed per agent there, by the same
@@ -498,8 +533,9 @@ export const agentMetricsDaily = pgTable(
     computedAt: timestamp('computed_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
-    // Both dimensions are NOT NULL here, unlike `metrics_daily`, so a plain
-    // unique index really is unique and the rollup can upsert onto it.
+    // Both dimensions are NOT NULL here, so a plain unique index is unique as
+    // it stands; `metrics_daily`'s key, over columns that are mostly null,
+    // needs NULLS NOT DISTINCT to be (`metrics_daily_slice_key`).
     uniqueIndex('agent_metrics_daily_dimensions_idx').on(t.day, t.agentId),
     index('agent_metrics_daily_day_idx').on(t.day),
   ],
@@ -524,9 +560,9 @@ export const agentMetricsDaily = pgTable(
  *
  * `channel` is NOT NULL with no "all" slice — the opposite choice from
  * `metrics_daily`, deliberately. There is no totals row to reconcile against, so
- * nulls buy nothing, and NOT NULL makes the unique index actually unique, which
- * sidesteps the NULL-distinctness trap that forces the delete-and-insert rebuild
- * next door. The page sums whichever channels it is showing.
+ * nulls buy nothing, and NOT NULL makes a plain unique index unique, where
+ * `metrics_daily`'s key needs NULLS NOT DISTINCT to be. The page sums whichever
+ * channels it is showing.
  *
  * **Everything here is recomputable**, which is what makes a delete-and-insert
  * rebuild safe: `conversations.created_at` is immutable and

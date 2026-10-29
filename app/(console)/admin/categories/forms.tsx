@@ -21,6 +21,7 @@ import type { CategoryRow } from '@/lib/categories/queries';
 import type { RouteGroupSummary } from '@/lib/categories/route-groups';
 import { DangerAction, Disclosure, EditorForm, INITIAL } from '../forms-shared';
 import { restoreCategory, retireCategory, saveCategory } from './actions';
+import { STRATEGY_LABELS } from '@/lib/assignment/strategy-copy';
 
 /**
  * The category list, its editor, and the "New category" form.
@@ -38,12 +39,6 @@ import { restoreCategory, retireCategory, saveCategory } from './actions';
 type Category = CategoryRow & {
   /** Live tickets carrying it — what retiring it leaves behind. */
   tickets: number;
-};
-
-const STRATEGY_LABELS: Record<RouteGroupSummary['strategy'], string> = {
-  manual: 'Manual',
-  round_robin: 'Round robin',
-  load_balanced: 'Load balanced',
 };
 
 export function NewCategory({

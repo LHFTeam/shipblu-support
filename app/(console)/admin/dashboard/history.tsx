@@ -118,7 +118,7 @@ export function History({
 
           {canViewReports ? (
             <p className="mt-2 text-xs text-(--color-text-secondary)">
-              Cuts by agent, group and channel live in{' '}
+              Cuts by agent, group, channel and category live in{' '}
               <Link
                 href={`/reports?days=${days}`}
                 className="text-(--color-text-link) hover:text-(--color-text-link-hover) hover:underline"

@@ -131,9 +131,15 @@ Design decisions worth knowing before changing things:
   silently overwrites is worse than no switch at all. Eligibility also requires a fresh
   heartbeat, so an instance killed mid-stream stops receiving tickets in two minutes
   without a reaper.
-- **Reporting reads only `metrics_daily`.** The nightly rollup stores four slices per day
-  — totals, by group, by agent, by channel — so the reports page never aggregates over
-  the full message history, and today's figures appear tomorrow.
+- **Reporting reads only `metrics_daily`.** The nightly rollup stores five slices per day
+  — totals, by group, by agent, by channel, by category — so the reports page never
+  aggregates over the full message history, and today's figures appear tomorrow. One row
+  per slice and one dimension per row are constraints rather than habits, because a row
+  read into the wrong slice is counted twice and looks like a busy day. A ticket counts
+  under its group and its category as they stand when its day is rolled up.
+  `/reports/routing` reads `routing_decisions` live instead — one row per ticket that
+  entered routing, never the message history — per channel, with live and shadow never
+  added together.
 - **The live dashboard and the nightly rollup share one definition of a day.**
   `lib/reports/rollup` computes a day's figures; the worker stores what it returns and
   the dashboard runs it against today and throws the result away. "Resolved today" on

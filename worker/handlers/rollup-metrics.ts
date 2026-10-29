@@ -1,5 +1,5 @@
 import { DateTime } from 'luxon';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { db } from '@/db/client';
 import {
   agentMetricsDaily,
@@ -11,12 +11,13 @@ import {
 import type { ClaimedJob } from '@/lib/queue';
 import { parseJobPayload, type JobPayload } from '@/lib/queue/payloads';
 import { computeAgentDay, withActivity } from '@/lib/reports/agent-rollup';
+import { TOTALS_SLICE } from '@/lib/reports/queries';
 import { computeSubcategoryDay, computeRootCauseDay } from '@/lib/reports/subcategory-rollup';
 import {
   asRows,
   computeDay,
   earliestDay,
-  reconciles,
+  reconcileFailure,
   reportingContext,
 } from '@/lib/reports/rollup';
 import { logger } from '@/lib/log';
@@ -31,9 +32,11 @@ const log = logger('rollup_metrics');
  * dashboard also runs against today. This handler is only the storage half:
  * which days to recompute, and writing them.
  *
- * It writes two tables. `metrics_daily` measures tickets, sliced four ways;
- * `agent_metrics_daily` measures the people, one row per agent per day. They are
- * separate tables for reasons `db/schema/metrics.ts` sets out, but they are
+ * It writes four tables and a marker. `metrics_daily` measures tickets, sliced
+ * five ways; `agent_metrics_daily` measures the people, one row per agent per
+ * day; `subcategory_metrics_daily` and `root_cause_metrics_daily` what the
+ * tickets were about and why; and `rollup_days` records that the day was
+ * computed. They are separate tables for reasons `db/schema/metrics.ts` sets out, but they are
  * deliberately one job: two nightly jobs would be two answers to "which day is
  * this", and the first daylight-saving change or late-running cron would make
  * an agent's shift and the tickets they closed during it land on different
@@ -178,15 +181,78 @@ export async function rollupMetrics(job?: ClaimedJob): Promise<void> {
     // pass for one that read it whole.
     const startedAt = new Date();
     const slices = await computeDay(day, context);
+
+    // Asked before anything is written, on every run and not just on
+    // backfills. Each rule `reconcileFailure` checks is a bug that is invisible
+    // in the output — a totals row that reads high looks like a busy day, not
+    // like a bug, and category slices summing past it print the overview's
+    // "No category" negative — so a day that breaks one is not written at all:
+    // its transaction is never opened, and the day keeps the rows, the agent
+    // rows and the marker the last run to write it left. Checked after the
+    // write, as it was, the day was published and only the run failed, and
+    // the rule against a second totals row could never be reached:
+    // `metrics_daily_slice_key` refused that row first, as a duplicate key
+    // naming no slice. Counted and carried on rather than thrown, unlike a
+    // refused insert below: whether the older days agree is worth knowing from
+    // the same run, which still fails at the end.
+    // A day no run wrote before has nothing to keep, and that is the cost of
+    // refusing it: every report but the CSAT page reads up to today — the
+    // overview, the dashboard's History, agents, subcategories — and so reads
+    // it as a day with nothing in it from the night it is refused. The CSAT
+    // page stops short of it, at `countedThrough`, and only until a later day
+    // is written: that is the newest day computed whole, not the end of an
+    // unbroken run of them, so the day is then a gap there too, which only its
+    // `uncounted` names, and only for surveys. So the line says which of the
+    // two the day is. The nightly retries it while it is one of its three days;
+    // after that, `rollup_metrics day=<day>` once the cause is fixed is what
+    // writes it.
+    // Not extended to the subcategory and root-cause tables, and the absence
+    // is deliberate rather than an oversight: they have no totals row to
+    // reconcile against, because a ticket carrying three subcategories appears
+    // under three of them. That is also exactly why they are not a dimension on
+    // `metrics_daily` — see `db/schema/metrics.ts`.
+    const failure = reconcileFailure(slices);
+    if (failure) {
+      inconsistent += 1;
+      const kept = await db
+        .select({ day: metricsDaily.day })
+        .from(metricsDaily)
+        .where(and(eq(metricsDaily.day, day), TOTALS_SLICE))
+        .limit(1);
+      log.error(
+        `${day}: totals do not match ${failure}, so the day is not written and ${
+          kept.length > 0 ? 'keeps its previous rows' : 'has no rows until a run reconciles it'
+        }`,
+      );
+      continue;
+    }
+
     const rows = asRows(day, slices);
     const agentRows = withActivity(await computeAgentDay(day, context));
     const subcategoryRows = await computeSubcategoryDay(day, context);
     const causeRows = await computeRootCauseDay(day, context);
 
-    // Delete-then-insert rather than an upsert on the unique index: Postgres
-    // treats NULLs as distinct in a unique index, so the "all" slices — which
-    // are mostly NULLs — would never conflict and would accumulate a duplicate
-    // row on every recompute.
+    // Delete-then-insert rather than an upsert on the slice key. The key can
+    // be a conflict target now — `metrics_daily_slice_key` is NULLS NOT
+    // DISTINCT, where the index before it let every slice, mostly NULLs,
+    // conflict with nothing — but an upsert only ever adds and overwrites: a
+    // slice whose figures have gone since the last run (an agent who no longer
+    // answers for anything that day, a category nothing on the day is filed
+    // under any more) would keep its old row. Replacing the whole day is also
+    // what keeps an older build of this job and this one interchangeable
+    // during a deploy: whichever ran last, the day holds one run's rows.
+    //
+    // A refusal from that key or from the one-dimension CHECK
+    // (`metrics_daily_one_dimension`) is not caught per day, unlike a day that
+    // fails to reconcile above. `reconcileFailure` has already refused every
+    // shape it can name, a second totals row among them, so what reaches a
+    // constraint is a shape it cannot: a slice built twice, or a row naming two
+    // dimensions. Either refuses only rows this job's own code built wrong, so
+    // every day would fail the same way, and the run failing loudly is the
+    // point. The day's
+    // transaction rolls back whole, marker included, so it keeps the rows the
+    // last good run wrote; the newer days before it in the plan are already
+    // committed, and the older ones are left as they were.
     //
     // The agent rows are rebuilt the same way and in the same transaction, so a
     // failure halfway cannot leave a day whose ticket figures were recomputed
@@ -202,13 +268,17 @@ export async function rollupMetrics(job?: ClaimedJob): Promise<void> {
       // them. First, because its row lock is what puts two rebuilds of one
       // day in order: a second waits here until the first commits, and its
       // deletes then see the first's rows. Without it, both deletes miss the
-      // other's inserts — nothing unique stops a slice that is mostly NULLs —
-      // and the day keeps both runs' rows. The last to commit leaves its own
-      // instant beside its own rows.
+      // other's inserts, and the second's inserts meet the first's rows in
+      // every table's unique key — `metrics_daily_slice_key` among them — so
+      // the second run fails on a day it had every right to rebuild. The last
+      // to commit leaves its own instant beside its own rows, twice: this code
+      // files by category, and the overview reads a day whose two instants
+      // differ as one rolled up by code that did not.
+      const stamp = { computedAt: startedAt, categoriesComputedAt: startedAt };
       await tx
         .insert(rollupDays)
-        .values({ day, computedAt: startedAt })
-        .onConflictDoUpdate({ target: rollupDays.day, set: { computedAt: startedAt } });
+        .values({ day, ...stamp })
+        .onConflictDoUpdate({ target: rollupDays.day, set: stamp });
 
       await tx.delete(metricsDaily).where(eq(metricsDaily.day, day));
       if (rows.length) await tx.insert(metricsDaily).values(rows);
@@ -243,30 +313,26 @@ export async function rollupMetrics(job?: ClaimedJob): Promise<void> {
       if (causeRows.length) await tx.insert(rootCauseMetricsDaily).values(causeRows);
     });
 
-    // Asserted on every write, not just on backfills: a day whose totals do not
-    // equal the sum of its own channel slices is the exact shape of the bug
-    // this job once shipped, and it is invisible in the output.
-    // Not extended to the subcategory and root-cause tables, and the absence
-    // is deliberate rather than an oversight: they have no totals row to
-    // reconcile against, because a ticket carrying three subcategories appears
-    // under three of them. That is also exactly why they are not a dimension on
-    // `metrics_daily` — see `db/schema/metrics.ts`.
-    if (!reconciles(slices)) {
-      inconsistent += 1;
-      log.error(`${day}: totals do not match the sum of the channel slices`);
-    }
-
+    // The category rows counted on their own, because a night that writes
+    // none on a day that had categorised tickets is the failure no figure
+    // beside them would show.
+    const categoryRows = rows.filter((row) => row.categoryId).length;
     log.info(
-      `${day}: ${rows.length} rows, ${agentRows.length} agent-day(s), ` +
+      `${day}: ${rows.length} rows (${categoryRows} by category), ${agentRows.length} agent-day(s), ` +
         `${subcategoryRows.length} subcategory row(s), ${causeRows.length} cause row(s)`,
     );
   }
 
-  log.info(`rebuilt ${plan.days.length} day(s), ${plan.days.at(-1)} to ${plan.days[0]}`);
+  log.info(
+    `rebuilt ${plan.days.length - inconsistent} of ${plan.days.length} day(s), ` +
+      `${plan.days.at(-1)} to ${plan.days[0]}`,
+  );
 
   // Fail the run rather than reporting success over numbers that contradict
   // themselves: a green nightly job is the only signal anyone watches.
   if (inconsistent > 0) {
-    throw new Error(`[rollup_metrics] ${inconsistent} day(s) failed the totals reconciliation`);
+    throw new Error(
+      `[rollup_metrics] ${inconsistent} day(s) failed the totals reconciliation and were not written`,
+    );
   }
 }
