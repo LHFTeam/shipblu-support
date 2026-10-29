@@ -1,4 +1,4 @@
-import { eq, type SQL } from 'drizzle-orm';
+import { eq, sql, type SQL } from 'drizzle-orm';
 import { PgDialect } from 'drizzle-orm/pg-core';
 import { describe, expect, it } from 'vitest';
 import { db } from '@/db/client';
@@ -658,6 +658,20 @@ describe('routedStillUnassigned', () => {
 });
 
 describe('strandedRouting', () => {
+  // Read on every load whatever the range, so it must not grow with the table:
+  // the partial index holds only the undecided rows. An empty table is cheapest
+  // read whole, so the plan is asked with sequential scans forbidden, which
+  // makes it name the index that serves the statement, or none.
+  it('reads the stranded rows through the undecided index, whatever the table holds', async () => {
+    const plan = await db.transaction(async (tx) => {
+      await tx.execute(sql`set local enable_seqscan = off`);
+      return tx.execute<{ 'QUERY PLAN': string }>(sql`explain ${strandedStatement(NOW)}`);
+    });
+    expect(plan.map((row) => row['QUERY PLAN']).join('\n')).toContain(
+      'routing_decisions_undecided_idx',
+    );
+  });
+
   it('lists undecided rows past the grace, live and shadow apart, whenever they started', async () => {
     const id = await channel();
     const live = await decision({ channelId: id, startedAt: cairo('2026-09-01T10:00') });

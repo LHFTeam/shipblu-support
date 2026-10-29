@@ -1,3 +1,4 @@
+import { sql } from 'drizzle-orm';
 import {
   boolean,
   doublePrecision,
@@ -130,5 +131,14 @@ export const routingDecisions = pgTable(
     // The `set null` foreign key: a purge deleting a ticket's messages would
     // otherwise scan the whole table once for every message it deletes.
     index('routing_decisions_message_idx').on(t.messageId),
+    // The routing report's Stranded list and its warning, read on every load
+    // whatever the range: rows nothing decided, past their window. Partial,
+    // so it holds only the rows whose window is running or ran out undecided
+    // (a decided row leaves it), and the read stays that size however many
+    // tickets have routed. The channel index above cannot serve it: its
+    // leading column is unconstrained there.
+    index('routing_decisions_undecided_idx')
+      .on(t.windowEndsAt)
+      .where(sql`${t.stage} <> 'decided'`),
   ],
 );
