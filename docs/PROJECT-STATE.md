@@ -17,8 +17,12 @@ customer bot ticket is refused, by `automatedReplyBlocked` and again by
 anything is written. Until then an `on_update` rule's `send_reply` on a bot
 ticket was written and queued as an email; no rule in production sends a
 reply, so none was. Code only: web first, its preDeploy finding no migration
-and replaying the nine `db/sql` files, then the worker and the four crons. Its
-way back is `b63f96e` on each service.
+and replaying the nine `db/sql` files, then the worker and the four crons. The
+checks read clean: no service logged a warning or an error from 17:42 to 18:10,
+web served no 5xx, the 54 jobs created after 17:42 had all completed by 17:48,
+and the first runs on the new code were ok (`sla_sweep`, `presence_sweep` and
+`assign_sweep` at 17:51; `run_time_automations` at 18:01, one rule over 553
+tickets, nothing changed). Its way back is `b63f96e` on each service.
 
 **The Instagram Login token expired at 15:25:38 UTC on 2026-10-29.** Every
 `graph.instagram.com` call has failed since with code 190, "Session has
