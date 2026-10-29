@@ -1,5 +1,5 @@
 import { DateTime } from 'luxon';
-import { and, asc, between, eq, isNotNull, isNull, lt, lte, sql, type SQL } from 'drizzle-orm';
+import { and, asc, between, eq, isNotNull, isNull, lt, lte, or, sql, type SQL } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { share } from '@/lib/charts/scale';
 import { agents, groups, metricsDaily, rollupDays, ticketCategories } from '@/db/schema';
@@ -159,21 +159,51 @@ export async function byChannel(range: Range): Promise<Row[]> {
  * (`lib/reports/rollup.ts` says why). A retired category is not filtered out:
  * its days keep reporting under it, which is what retired-never-deleted is
  * for, and `isActive` comes back so the page names it as retired
- * (`categoryLabel`). The inner join loses nothing, because the foreign key is
- * `restrict` and a category is never deleted. The tickets nothing has filed
- * are in no row here; `uncategorised()` is the rest of the totals.
+ * (`categoryLabel`). The tickets nothing has filed are in no row here; `rest`
+ * is the rest of the totals (`uncategorised`).
+ *
+ * The totals come back from the same statement, because the rest is a
+ * subtraction and its two halves must be one moment's. Read apart — `totals()`
+ * and this, through `allLimited` — each statement took its own snapshot, and a
+ * rollup committing a day between them took one night's category slices off a
+ * total that did not yet hold that night, which printed "No category" short,
+ * or negative. The rows are `TOTALS_SLICE` or a category slice, which names
+ * nothing else (`metrics_daily_one_dimension`), and under the left join the
+ * totals are the one group with no registry row: the foreign key is
+ * `restrict`, so every category slice finds its row.
  */
-export async function byCategory(range: Range): Promise<(Row & { isActive: boolean })[]> {
+export async function byCategory(range: Range): Promise<CategoryBreakdown> {
   const rows = await db
-    .select({ label: ticketCategories.labelEn, isActive: ticketCategories.isActive, ...SUMS })
+    .select({
+      id: ticketCategories.id,
+      label: ticketCategories.labelEn,
+      isActive: ticketCategories.isActive,
+      ...SUMS,
+    })
     .from(metricsDaily)
-    .innerJoin(ticketCategories, eq(ticketCategories.id, metricsDaily.categoryId))
-    .where(and(inRange(range), isNotNull(metricsDaily.categoryId)))
+    .leftJoin(ticketCategories, eq(ticketCategories.id, metricsDaily.categoryId))
+    .where(and(inRange(range), or(TOTALS_SLICE, isNotNull(metricsDaily.categoryId))))
     .groupBy(ticketCategories.id)
     .orderBy(asc(ticketCategories.position), asc(ticketCategories.key));
 
-  return rows.map((row) => ({ ...normalise(row), label: row.label, isActive: row.isActive }));
+  const categories = rows.flatMap(({ id, label, isActive, ...sums }) =>
+    id === null || label === null
+      ? []
+      : [{ ...normalise(sums), label, isActive: isActive ?? false }],
+  );
+  return {
+    rows: categories,
+    rest: uncategorised(normalise(rows.find((row) => row.id === null)), categories),
+  };
 }
+
+/** The window's category rows, and what no category holds, from one snapshot. */
+export type CategoryBreakdown = {
+  /** One row per category with a slice in the window, in the registry's order. */
+  rows: (Row & { isActive: boolean })[];
+  /** The window's totals less every row above. */
+  rest: Totals;
+};
 
 /**
  * The window's figures that no category slice holds: the totals less every
@@ -183,9 +213,10 @@ export async function byCategory(range: Range): Promise<(Row & { isActive: boole
  *
  * Exact because a ticket has one category, so no figure is in two category
  * slices, and every column of `Totals` is a count or a sum. Not clamped at
- * zero: `reconciles()` refuses a day whose category slices sum past its
- * totals, so a negative here would be a bug, and one worth seeing rather than
- * printing as nothing.
+ * zero: the rollup writes no day whose category slices sum past its totals
+ * (`reconcileFailure`, asked before the write), and `byCategory` reads both
+ * halves in one statement, so a negative here would be a bug, and one worth
+ * seeing rather than printing as nothing.
  */
 export function uncategorised(total: Totals, rows: readonly Totals[]): Totals {
   return normalise(

@@ -255,7 +255,7 @@ describe('byCategory', () => {
       { day: '2026-10-11', categoryId: customerSupport, ticketsCreated: 100 },
     ]);
 
-    const rows = await byCategory({ from: '2026-10-12', to: '2026-10-13' });
+    const { rows, rest } = await byCategory({ from: '2026-10-12', to: '2026-10-13' });
 
     expect(
       rows.map(({ label, isActive, ticketsCreated, ticketsResolved, csatRatingSum }) => ({
@@ -290,11 +290,46 @@ describe('byCategory', () => {
       },
     ]);
     expect(rows[0]!.firstResponseCount).toBe(1);
+    // The window's totals less the four rows: 30 - 19 created, 20 - 5 resolved.
+    expect(rest).toMatchObject({ ticketsCreated: 11, ticketsResolved: 15 });
   });
 
-  it('has no row for a category with no slice in the window', async () => {
+  it('has no row for a category with no slice in the window, and leaves the totals as the rest', async () => {
     await db.insert(metricsDaily).values({ day: '2026-10-12', ticketsCreated: 3 });
-    expect(await byCategory({ from: '2026-10-12', to: '2026-10-13' })).toEqual([]);
+    expect(await byCategory({ from: '2026-10-12', to: '2026-10-13' })).toEqual({
+      rows: [],
+      rest: expect.objectContaining({ ticketsCreated: 3 }),
+    });
+  });
+
+  // The rest is a subtraction, so its two halves are read in one statement:
+  // read apart, a rollup committing a day between them took that night's
+  // category figures off totals that did not yet hold it.
+  it('reads the rest of the totals in the statement that reads the categories', async () => {
+    const { sales, customerSupport } = await categoryIds();
+    const [group] = await db.insert(groups).values({ name: 'Sales team' }).returning();
+    await db.insert(metricsDaily).values([
+      { day: '2026-10-12', ticketsCreated: 10, csatRating5: 3 },
+      { day: '2026-10-12', categoryId: sales, ticketsCreated: 4, csatRating5: 1 },
+      { day: '2026-10-13', ticketsCreated: 5 },
+      { day: '2026-10-13', categoryId: customerSupport, ticketsCreated: 5 },
+      // Other cuts' slices, which are not the totals however many nulls they hold.
+      { day: '2026-10-12', channel: 'email', ticketsCreated: 10 },
+      { day: '2026-10-12', groupId: group!.id, ticketsCreated: 7 },
+      // Outside the window.
+      { day: '2026-10-14', ticketsCreated: 100 },
+    ]);
+
+    const { rows, rest } = await byCategory({ from: '2026-10-12', to: '2026-10-13' });
+
+    expect(rows.map((row) => [row.label, row.ticketsCreated])).toEqual(
+      expect.arrayContaining([
+        ['Sales', 4],
+        ['Customer support', 5],
+      ]),
+    );
+    expect(rows).toHaveLength(2);
+    expect(rest).toMatchObject({ ticketsCreated: 6, csatRating5: 2 });
   });
 });
 

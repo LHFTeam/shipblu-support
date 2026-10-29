@@ -23,7 +23,6 @@ import {
   responsesHint,
   rolledUpDays,
   totals,
-  uncategorised,
   type Row as ReportRow,
 } from '@/lib/reports/queries';
 import { rangeIn, reportingContext } from '@/lib/reports/rollup';
@@ -68,7 +67,7 @@ export default async function ReportsPage({
     summary,
     agentRows,
     groupRows,
-    categoryRows,
+    categories,
     channelRows,
     series,
     rolledUp,
@@ -90,20 +89,22 @@ export default async function ReportsPage({
   // start, not the first row in the window, so a window opening on a quiet
   // day does not claim the history is younger than it is.
   const startsLate = rolledUp.first !== null && rolledUp.first > range.from;
-  // Every category in the window, then the rest of the totals. The remainder
-  // row is always there, so the section is drawn on every window with data —
-  // nothing categorised included, which is where production starts and where
-  // a table that vanished would read as a page not finished (§6.54).
+  // Every category in the window, then the rest of the totals, both from one
+  // statement (`byCategory`): the rest is a subtraction, and halves read apart
+  // could straddle a rollup's commit. The remainder row is always there, so
+  // the section is drawn on every window with data — nothing categorised
+  // included, which is where production starts and where a table that
+  // vanished would read as a page not finished (§6.54).
   const categoryBreakdown: ReportRow[] = [
-    ...categoryRows.map((row) => ({ ...row, label: categoryLabel(row.label, row.isActive) })),
-    { ...uncategorised(summary, categoryRows), label: 'No category' },
+    ...categories.rows.map((row) => ({ ...row, label: categoryLabel(row.label, row.isActive) })),
+    { ...categories.rest, label: 'No category' },
   ];
   // Measured from the history's first day when the window opens before it:
   // the notice above says that already, and a second "start" here would read
   // as a different one.
   const categoryNote = coverageNote(
     categoryCoverage(
-      categoryRows.length,
+      categories.rows.length,
       categorisedSince,
       startsLate ? rolledUp.first! : range.from,
     ),
