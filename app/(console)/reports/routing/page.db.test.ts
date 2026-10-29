@@ -4,6 +4,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { db } from '@/db/client';
 import {
+  agents,
   categoryAiSettings,
   channels,
   contacts,
@@ -143,6 +144,46 @@ describe('the routing report page', () => {
     const html = await render();
     expect(html).toContain('and no new ticket is held.');
     expect(html).not.toContain('is held for');
+  });
+
+  // Asked as ingest and the readiness panel ask it: an owned number's tickets
+  // are its owner's from the insert, and a second row of a kind files nothing.
+  it('says nothing is held where no ticket reaches its mode: an owned number, a second row of its kind', async () => {
+    await classifier('apply');
+    const [owner] = await db
+      .insert(agents)
+      .values({ name: 'Nayera', email: 'nayera@shipblu.test' })
+      .returning({ id: agents.id });
+    await channel({
+      type: 'whatsapp',
+      name: 'Nayera’s number',
+      routingMode: 'category',
+      config: { phoneNumberId: '106540352240000' },
+      ownerAgentId: owner!.id,
+    });
+    // The oldest active web chat row files every web chat ticket.
+    await channel({
+      name: 'Web chat',
+      routingMode: 'default_group',
+      createdAt: new Date('2026-01-01T00:00:00Z'),
+    });
+    await channel({
+      name: 'Second web chat',
+      routingMode: 'category',
+      createdAt: new Date('2026-02-01T00:00:00Z'),
+    });
+
+    let html = await render();
+    expect(html).toContain('and no new ticket is held.');
+    expect(html).not.toContain('is held for');
+    expect(html).toContain('Both are set, but no ticket on');
+    expect(html).not.toContain('so the next new ticket on');
+
+    // A deactivated owner counts as nobody, so that number holds again.
+    await db.update(agents).set({ isActive: false }).where(eq(agents.id, owner!.id));
+    html = await render();
+    expect(html).toContain('is held for');
+    expect(html).toContain('so the next new ticket on Nayera’s number enters routing.');
   });
 
   it('warns that a category mode is idle while the classifier is not in Apply', async () => {

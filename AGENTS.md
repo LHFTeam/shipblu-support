@@ -1678,7 +1678,9 @@ README says why it is a setting and not a rule. The rules:
   `routing_decided_at`, so moving the channel to `category` later starts
   clean.
 - **The readiness panel on `/admin/channels` reads what the code reads**
-  (`lib/routing/readiness.ts`): `routingModeOf`, `routingStartFor`,
+  (`lib/routing/readiness.ts`): `routingModeOf`, `routingStartFor` behind
+  `filesRoutableTickets` (`lib/routing/filing.ts` — the filing row and an
+  active owner, which `/reports/routing`'s "is held" sentence asks too),
   `routeGroupSummaries` (assignment's `filterCandidates`), a group's hours as
   assignment asks them, and the engine's own condition evaluator for the active
   rules that would end a hold on the channel. A panel that reasoned for itself

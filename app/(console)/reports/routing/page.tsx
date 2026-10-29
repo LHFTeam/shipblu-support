@@ -64,7 +64,8 @@ const CLASSIFIER_STATES: Record<CategoryAiMode, string> = {
  * tickets it lists open through the inbox, which applies the reader's own
  * visibility.
  *
- * Range-bound figures are filed on the Cairo day a ticket entered routing.
+ * Range-bound figures are filed on the day a ticket entered routing in the
+ * reporting zone (`reportingZone()`, the default business hours' zone).
  * The two sections under Now are not: a routed ticket left unassigned for
  * sixty days, or a record that never closed, matters most and would fall out
  * of a thirty-day window.
@@ -480,11 +481,17 @@ function StateNotice({
         .filter((sentence): sentence is string => sentence !== null),
     ),
   ];
-  // Asked as ingest asks it (`routingStartFor`): only a live start holds, so a
-  // shadow row holds nothing, and with the classifier off or in shadow nothing
-  // enters routing at all. Said whatever the modes, the sentence told an admin
-  // reading the page in the shadow week that new tickets were being kept back.
-  const holds = routingNow.some((channel) => routingStartFor(channel.mode, classifier) === 'live');
+  // Asked as ingest asks it: a row whose tickets reach the question of its
+  // mode (`files` — no other row files for it, no active owner is stamped on
+  // them, as the readiness panel says), then `routingStartFor`, where only a
+  // live start holds, so a shadow row holds nothing, and with the classifier
+  // off or in shadow nothing enters routing at all. Said whatever the modes,
+  // the sentence told an admin reading the page in the shadow week that new
+  // tickets were being kept back, and told one routing only an owned number
+  // what the panel beside it says never happens there.
+  const holds = routingNow.some(
+    (channel) => channel.files && routingStartFor(channel.mode, classifier) === 'live',
+  );
   return (
     <>
       <Notice tone="neutral">
@@ -532,7 +539,11 @@ function StateNotice({
   );
 }
 
-/** Which of the two things a ticket needs to enter routing is missing, in the forms' words. */
+/**
+ * Which of the two things a ticket needs to enter routing is missing, in the
+ * forms' words — and, when both are set, whether any channel set to route can
+ * hold a ticket at all (`files`), which only the readiness panel can explain.
+ */
 function neverRoutedHint(classifier: CategoryAiMode, routingNow: RoutingChannel[]): string {
   const rule = `A ticket enters routing when it arrives on a channel set to ${ROUTING_MODE_LABELS.category} or ${ROUTING_MODE_LABELS.category_shadow} under Admin › Channels, while the category classifier is in Apply under Admin › Categories.`;
   const missing = [
@@ -542,5 +553,9 @@ function neverRoutedHint(classifier: CategoryAiMode, routingNow: RoutingChannel[
       : null,
   ].filter(Boolean);
   if (missing.length > 0) return `${rule} ${missing.join(' ')}`;
-  return `${rule} Both are set, so the next new ticket on ${routingNow.map((channel) => channel.name).join(', ')} enters routing.`;
+  const entering = routingNow.filter((channel) => channel.files);
+  if (entering.length === 0) {
+    return `${rule} Both are set, but no ticket on ${routingNow.map((channel) => channel.name).join(', ')} can enter it: another row of its kind files its tickets, or its number’s owner is given them as they arrive. Admin › Channels says which.`;
+  }
+  return `${rule} Both are set, so the next new ticket on ${entering.map((channel) => channel.name).join(', ')} enters routing.`;
 }

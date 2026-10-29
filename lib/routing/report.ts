@@ -1,6 +1,6 @@
-import { asc, sql, type SQL } from 'drizzle-orm';
+import { asc, eq, sql, type SQL } from 'drizzle-orm';
 import { db } from '@/db/client';
-import { CATEGORY_AI_LIVE_LABEL, channels } from '@/db/schema';
+import { CATEGORY_AI_LIVE_LABEL, agents, channels } from '@/db/schema';
 import { CATEGORY_AI_ACTOR, type CategoryOutcome } from '@/lib/category-ai/decide';
 import type { AssignmentStrategy } from '@/lib/assignment';
 import { asDate } from '@/lib/reports/live';
@@ -8,6 +8,7 @@ import { within, type ReportWindow } from '@/lib/reports/rollup';
 import { openBacklog } from '@/lib/tickets/backlog';
 import { SETTLE_ACTOR } from './apply';
 import { ROUTING_OUTCOMES, type RoutingOutcome } from './decide';
+import { filesRoutableTickets } from './filing';
 import { ROUTING_GRACE_MS } from './hold';
 import { routingModeOf, type RoutingMode } from './mode';
 
@@ -821,12 +822,22 @@ export type RoutingChannel = {
   isActive: boolean;
   /** Through `routingModeOf`, never off the column: a coexistence number or the bot reads `default_group`. */
   mode: RoutingMode;
+  /**
+   * Whether a new ticket on the row reaches the question of its mode at all
+   * (`filesRoutableTickets`): false for a row another of its type files for,
+   * and for a number whose active owner is stamped on its tickets.
+   */
+  files: boolean;
 };
 
 /**
  * Every channel row and its routing mode now, for the state notice and for a
  * line saying a channel in a category mode had nothing enter routing in the
  * range. Configuration, not a figure, so it takes no `now`.
+ *
+ * By name, for the page; whether a row files is judged over the rows oldest
+ * first, ties by id, the order ingest picks the row of a type by, as the
+ * readiness panel judges it. The owner by a join, as the panel reads it.
  */
 export async function routingChannels(): Promise<RoutingChannel[]> {
   const rows = await db
@@ -837,11 +848,22 @@ export async function routingChannels(): Promise<RoutingChannel[]> {
       config: channels.config,
       routingMode: channels.routingMode,
       isActive: channels.isActive,
+      createdAt: channels.createdAt,
+      ownerActive: agents.isActive,
     })
     .from(channels)
+    .leftJoin(agents, eq(agents.id, channels.ownerAgentId))
     .orderBy(asc(channels.name));
-  return rows.map(({ config, routingMode, ...row }) => ({
-    ...row,
-    mode: routingModeOf({ type: row.type, config, routingMode }),
+  const oldestFirst = [...rows].sort(
+    (a, b) =>
+      a.createdAt.getTime() - b.createdAt.getTime() || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+  );
+  return rows.map((row) => ({
+    id: row.id,
+    name: row.name,
+    type: row.type,
+    isActive: row.isActive,
+    mode: routingModeOf(row),
+    files: filesRoutableTickets(row, oldestFirst),
   }));
 }

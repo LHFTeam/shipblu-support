@@ -17,6 +17,7 @@ import {
   type ConversationChannel,
 } from '@/lib/tickets/channel-policy';
 import { typesafeConfigured } from '@/lib/typesafe/client';
+import { filesRoutableTickets, filingRowFor, ownedByActiveAgent } from './filing';
 import { routingModeOf, routingStartFor, type RoutingMode, type RoutingStart } from './mode';
 import { routingLock, type RoutingLock } from './mode-copy';
 
@@ -264,8 +265,8 @@ function assessReadiness(input: {
   const routingChannels = input.channels.map((channel): ChannelRouting => {
     const mode = routingModeOf(channel);
     const filingRow = filingRowFor(channel, input.channels);
-    const owned = channel.type === 'whatsapp' && channel.ownerActive ? channel.ownerName : null;
-    const files = channel.isActive && filingRow === channel && !owned;
+    const owned = ownedByActiveAgent(channel) ? channel.ownerName : null;
+    const files = filesRoutableTickets(channel, input.channels);
     const starts = files ? routingStartFor(mode, classifier.mode) : null;
     const base = {
       id: channel.id,
@@ -366,18 +367,6 @@ function groupGaps(group: GroupFacts): GroupGap[] {
   if (group.acceptingNow === 0) gaps.push('nobody_accepting');
   if (group.assignWithinHoursOnly && !group.openNow) gaps.push('closed');
   return gaps;
-}
-
-/**
- * The row of `channel`'s kind new tickets are filed under, which is not
- * always `channel`: email, the Meta rows and web chat each file under the
- * oldest active row of their type, so a second one's mode does nothing.
- * A WhatsApp row is its number, and is its own. A comments row, while none
- * is active, is stood in for by its platform's row — that is not this one.
- */
-function filingRowFor(channel: ChannelInput, rows: ChannelInput[]): ChannelInput | null {
-  if (channel.type === 'whatsapp' || channel.type === 'whatsapp_bot') return channel;
-  return rows.find((row) => row.type === channel.type && row.isActive) ?? null;
 }
 
 /**
