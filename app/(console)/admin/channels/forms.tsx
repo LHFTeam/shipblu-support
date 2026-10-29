@@ -855,21 +855,27 @@ export function WebchatActiveSwitch({
       ? `Move the widget to “${plan.widgetMovesTo}”?`
       : 'Really switch off?';
 
+  // The notice outlives the form's place in the row, on a line of its own as
+  // the owner handover's does: it says where the widget went, which is the
+  // sentence the admin needs, and inside the form it squeezed the button off
+  // its line.
   return (
-    <form action={formAction} className="inline-flex flex-col items-end gap-1">
-      <input type="hidden" name="id" value={channelId} />
-      <input type="hidden" name="active" value={on ? 'on' : 'off'} />
-      <ConfirmSubmit label={on ? 'Switch on' : 'Switch off'} confirmLabel={confirmLabel} />
-      {state.error ? (
-        <span className="max-w-xs text-end">
-          <ErrorText inline>{state.error}</ErrorText>
-        </span>
-      ) : null}
+    <>
+      <form action={formAction} className="inline-flex flex-col items-end gap-1">
+        <input type="hidden" name="id" value={channelId} />
+        <input type="hidden" name="active" value={on ? 'on' : 'off'} />
+        <ConfirmSubmit label={on ? 'Switch on' : 'Switch off'} confirmLabel={confirmLabel} />
+        {state.error ? (
+          <span className="max-w-xs text-end">
+            <ErrorText inline>{state.error}</ErrorText>
+          </span>
+        ) : null}
+      </form>
       {state.notice ? (
-        <div className="max-w-xs text-end">
+        <div className="w-full">
           <SuccessText>{state.notice}</SuccessText>
         </div>
       ) : null}
-    </form>
+    </>
   );
 }
