@@ -14,6 +14,7 @@ import {
 import { RelativeTime } from '@/components/relative-time';
 import { InfoTip, Tooltip } from '@/components/tooltip';
 import { ago, sentenceCase } from '@/lib/format';
+import { MAX_AGENT_NAME } from '@/lib/admin/agent-name';
 import { EditorForm } from '../forms-shared';
 import type { AdminState } from '../settings-shared';
 import {
@@ -148,7 +149,7 @@ export function InviteForm({ groups }: { groups: Choice[] }) {
               the invitation email and reads back on the activation page. The
               admin knows who they are inviting; the invitee should not have to
               tell us who they are. */}
-          <Input id="name" name="name" required autoComplete="off" maxLength={120} />
+          <Input id="name" name="name" required autoComplete="off" maxLength={MAX_AGENT_NAME} />
         </div>
         <div className="sm:w-40">
           <Label htmlFor="role">Role</Label>
@@ -276,6 +277,12 @@ export function PendingInviteLink({
  * A set of group checkboxes under one name. A box drawn ticked also posts a
  * hidden `${name}Held`, so the save writes only the boxes somebody clicked
  * (`MembershipChoice`) — the invite draws none ticked, so posts none.
+ *
+ * The ticked set is read once, when the boxes mount. They are uncontrolled, so
+ * what a box shows is what it showed then plus the admin's clicks; a held set
+ * read from each render's props would move with any revalidation of the page
+ * — a cap saved on another row — and post a membership added elsewhere as held
+ * beside a box drawn without it, which the save reads as an untick.
  */
 function GroupCheckboxes({
   name,
@@ -286,7 +293,7 @@ function GroupCheckboxes({
   groups: Choice[];
   checked?: string[];
 }) {
-  const held = new Set(checked);
+  const [held] = useState(() => new Set(checked));
   return (
     <div className="mt-1 grid gap-1 sm:grid-cols-2">
       {groups.map((group) => (
@@ -332,10 +339,13 @@ type AgentSummary = {
 export function AgentList({
   agents,
   groups,
+  canEditGroups,
   selfId,
 }: {
   agents: AgentSummary[];
   groups: Choice[];
+  /** Holds `admin.groups`, without which the editor shows groups and offers no box. */
+  canEditGroups: boolean;
   selfId: string;
 }) {
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -347,6 +357,7 @@ export function AgentList({
           key={agent.id}
           agent={agent}
           groups={groups}
+          canEditGroups={canEditGroups}
           isSelf={agent.id === selfId}
           editing={editingId === agent.id}
           onEdit={() => setEditingId(editingId === agent.id ? null : agent.id)}
@@ -376,14 +387,24 @@ const ROLE_CHOICES: { value: AgentSummary['role']; label: string }[] = [
 function AgentEditor({
   agent,
   groups,
+  canEditGroups,
   isSelf,
   onClose,
 }: {
   agent: AgentSummary;
   groups: Choice[];
+  canEditGroups: boolean;
   isSelf: boolean;
   onClose: () => void;
 }) {
+  // The role the select was drawn with, read once at mount for the reason the
+  // group boxes are (`GroupCheckboxes`): `saveAgent` asks for a role change
+  // only where the select differs from it.
+  const [roleHeld] = useState(agent.role);
+  const groupNames = groups
+    .filter((group) => agent.groupIds.includes(group.value))
+    .map((group) => group.label);
+
   return (
     <div
       id={`agent-editor-${agent.id}`}
@@ -398,6 +419,7 @@ function AgentEditor({
 
       <EditorForm action={saveAgent} submitLabel="Save" onSaved={onClose}>
         <input type="hidden" name="agentId" value={agent.id} />
+        <input type="hidden" name="roleHeld" value={roleHeld} />
         <div className="grid gap-3 sm:grid-cols-2">
           {/* `autoComplete="off"` for the invite form's reason: a name and an
               address side by side is an address form to the browser, which
@@ -407,7 +429,7 @@ function AgentEditor({
               name="name"
               defaultValue={agent.name}
               required
-              maxLength={120}
+              maxLength={MAX_AGENT_NAME}
               autoComplete="off"
             />
           </Field>
@@ -436,7 +458,7 @@ function AgentEditor({
             {/* Named outright: `Field` puts its InfoTip button inside the label,
               and a label with no `for` names its first labelable descendant —
               the button — so the select would reach a screen reader unnamed. */}
-            <Select name="role" defaultValue={agent.role} disabled={isSelf} aria-label="Role">
+            <Select name="role" defaultValue={roleHeld} disabled={isSelf} aria-label="Role">
               {ROLE_CHOICES.map((role) => (
                 <option key={role.value} value={role.value}>
                   {role.label}
@@ -451,11 +473,21 @@ function AgentEditor({
           label="Groups"
           hint="An agent sees the tickets of every group they are in, and auto-assignment hands a group's tickets only to its members."
         >
-          {groups.length > 0 ? (
-            <GroupCheckboxes name="groupIds" groups={groups} checked={agent.groupIds} />
-          ) : (
+          {groups.length === 0 ? (
             <p className="mt-1 text-xs text-(--color-text-secondary)">
               No groups yet. Add one under Groups.
+            </p>
+          ) : canEditGroups ? (
+            <GroupCheckboxes name="groupIds" groups={groups} checked={agent.groupIds} />
+          ) : (
+            // Names, not disabled boxes: a box drawn ticked posts its held
+            // marker whether or not it can be clicked, and the save would read
+            // the disabled box as unticked.
+            <p className="mt-1 text-sm">
+              {groupNames.length > 0 ? groupNames.join(' · ') : 'In no group'}
+              <span className="block text-xs text-(--color-text-secondary)">
+                Changing them needs the Groups permission.
+              </span>
             </p>
           )}
         </Field>
@@ -469,6 +501,7 @@ function AgentEditor({
 function AgentRow({
   agent,
   groups,
+  canEditGroups,
   isSelf,
   editing,
   onEdit,
@@ -476,6 +509,7 @@ function AgentRow({
 }: {
   agent: AgentSummary;
   groups: Choice[];
+  canEditGroups: boolean;
   isSelf: boolean;
   editing: boolean;
   onEdit: () => void;
@@ -652,7 +686,13 @@ function AgentRow({
       </div>
 
       {editing ? (
-        <AgentEditor agent={agent} groups={groups} isSelf={isSelf} onClose={onClose} />
+        <AgentEditor
+          agent={agent}
+          groups={groups}
+          canEditGroups={canEditGroups}
+          isSelf={isSelf}
+          onClose={onClose}
+        />
       ) : null}
     </li>
   );

@@ -1,7 +1,7 @@
 import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { db } from '@/db/client';
-import { agents, groupMembers, groups, invites } from '@/db/schema';
+import { agentChanges, agents, groupMembers, groups, invites } from '@/db/schema';
 import { withCleanDatabase } from '@/lib/testing/db';
 import { untilWaitingOnALock } from '@/lib/testing/hold-transaction';
 import {
@@ -266,6 +266,111 @@ describe('saveAgentProfile', () => {
     if (typeof error === 'string') expect(refusal).toBe(error);
     else expect(refusal).toMatch(error);
     expect(await row(omar)).toEqual({ name: 'Omar', email: 'omar@shipblu.test', role: 'agent' });
+  });
+
+  it('records a role change and an address change, naming who made them', async () => {
+    const admin = await agent('Admin', { role: 'admin' });
+    const omar = await agent('Omar');
+
+    await saveAgentProfile(
+      admin,
+      omar,
+      input({ email: 'omar.adel@shipblu.test', role: 'supervisor' }),
+      NOW,
+    );
+
+    const rows = await db
+      .select({
+        field: agentChanges.field,
+        fromValue: agentChanges.fromValue,
+        toValue: agentChanges.toValue,
+        agentLabel: agentChanges.agentLabel,
+        changedByAgentId: agentChanges.changedByAgentId,
+        changedByLabel: agentChanges.changedByLabel,
+      })
+      .from(agentChanges)
+      .where(eq(agentChanges.agentId, omar));
+    expect(rows).toEqual(
+      expect.arrayContaining([
+        {
+          field: 'role',
+          fromValue: 'agent',
+          toValue: 'supervisor',
+          agentLabel: 'Omar',
+          changedByAgentId: admin,
+          changedByLabel: 'Admin',
+        },
+        {
+          field: 'email',
+          fromValue: 'omar@shipblu.test',
+          toValue: 'omar.adel@shipblu.test',
+          agentLabel: 'Omar',
+          changedByAgentId: admin,
+          changedByLabel: 'Admin',
+        },
+      ]),
+    );
+    expect(rows).toHaveLength(2);
+  });
+
+  it('records nothing for a save that changes neither role nor address', async () => {
+    // A name, the groups and a role the form left alone are not what this
+    // record is for; a row for every save would bury the ones that matter.
+    const admin = await agent('Admin', { role: 'admin' });
+    const omar = await agent('Omar');
+    const [sales] = await db.insert(groups).values({ name: 'Sales' }).returning({ id: groups.id });
+
+    await saveAgentProfile(
+      admin,
+      omar,
+      input({ name: 'Omar Adel', groups: { held: [], chosen: [sales!.id] } }),
+      NOW,
+    );
+
+    expect(await db.select().from(agentChanges)).toEqual([]);
+  });
+
+  it('records nothing when a refusal undoes the save', async () => {
+    const admin = await agent('Admin', { role: 'admin' });
+    const owner = await agent('Owner', { role: 'account_admin' });
+
+    await saveAgentProfile(
+      admin,
+      owner,
+      input({ name: 'Owner', email: 'owner@shipblu.test', role: 'admin' }),
+      NOW,
+    );
+
+    expect(await db.select().from(agentChanges)).toEqual([]);
+  });
+
+  it('does not wait on an account admin whose presence is being written', async () => {
+    // Every open console writes its agent's heartbeat every 25 seconds. A save
+    // that changes no role must not hold those writes up, nor be held by them:
+    // it used to lock every account admin's row for its whole transaction.
+    const admin = await agent('Admin', { role: 'admin' });
+    const owner = await agent('Owner', { role: 'account_admin' });
+    const omar = await agent('Omar');
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    let written!: () => void;
+    const heartbeat = new Promise<void>((resolve) => (written = resolve));
+
+    const presence = db.transaction(async (tx) => {
+      await tx.update(agents).set({ lastSeenAt: NOW }).where(eq(agents.id, owner));
+      written();
+      await held;
+    });
+    await heartbeat;
+
+    const saved = await Promise.race([
+      saveAgentProfile(admin, omar, input({ name: 'Omar Adel' }), NOW),
+      new Promise<string>((resolve) => setTimeout(() => resolve('still waiting'), 3_000)),
+    ]);
+    release();
+    await presence;
+
+    expect(saved).toBeNull();
   });
 
   it('says so when the agent does not exist', async () => {

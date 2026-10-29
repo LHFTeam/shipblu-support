@@ -94,7 +94,7 @@ describe('settings actions given an id no row can have', () => {
 
       const state = await actions.saveGroup(INITIAL, data);
 
-      expect(state.error).toMatch(/no longer exists/);
+      expect(state.error).toMatch(/never offered/);
       for (const fn of Object.values(db)) expect(fn).not.toHaveBeenCalled();
     },
   );

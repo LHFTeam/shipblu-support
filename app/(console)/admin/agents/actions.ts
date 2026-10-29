@@ -4,20 +4,16 @@ import { requirePermission } from '@/lib/auth/guard';
 import { ok } from '@/lib/http/action-state';
 import { validatePolicy } from '@/lib/presence/idle';
 import { savePresencePolicy } from '@/lib/presence/policy';
-import { GONE, refresh, type SettingsState, type AdminState } from '../settings-shared';
+import { MALFORMED, refresh, type SettingsState, type AdminState } from '../settings-shared';
 import { revalidatePath } from 'next/cache';
 import { and, eq, inArray, isNull } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { agents, groups, invites } from '@/db/schema';
-import {
-  GROUP_GONE,
-  MAX_AGENT_NAME,
-  lockAddress,
-  saveAgentProfile,
-} from '@/lib/admin/agent-profile';
-import { membershipChoice } from '@/lib/admin/group-members';
+import { MAX_AGENT_NAME } from '@/lib/admin/agent-name';
+import { GROUP_GONE, lockAddress, saveAgentProfile } from '@/lib/admin/agent-profile';
+import { changesMembership, membershipChoice } from '@/lib/admin/group-members';
 import { text, uuidList } from '@/lib/http/form-data';
-import { isAgentRole } from '@/lib/auth/permissions';
+import { can, isAgentRole } from '@/lib/auth/permissions';
 import { canonicalUuid } from '@/lib/http/uuid';
 import { looksLikeEmail, normaliseEmail } from '@/lib/auth/normalise';
 import { sealInviteToken } from '@/lib/auth/invite-token';
@@ -90,6 +86,8 @@ function minutesOrOff(formData: FormData, key: string): number | null | 'not_a_n
 
 const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
+const GROUPS_FORBIDDEN = "Changing somebody's groups needs the Groups permission";
+
 /**
  * Creates an invite, emails the invitee a link to activate it, and returns that
  * link to the admin as well.
@@ -134,7 +132,14 @@ export async function createInvite(_state: AdminState, formData: FormData): Prom
   // acceptance asks again, since the ids sit in jsonb with no foreign key for
   // the week the link is live (`joinGroups`).
   const groupIds = uuidList(formData, 'groupIds');
-  if (!groupIds) return { error: GONE };
+  if (!groupIds) return { error: MALFORMED };
+  // Joining a group is a change to its roster, which is `admin.groups`' to
+  // make: it decides who is handed the group's tickets and, for an agent, which
+  // tickets they can see at all. The form leaves the boxes out for an admin
+  // without it; this is for a request that sends them anyway.
+  if (groupIds.length > 0 && !can(admin, 'admin.groups')) {
+    return { error: GROUPS_FORBIDDEN };
+  }
   if (groupIds.length > 0) {
     const found = await db
       .select({ id: groups.id })
@@ -331,13 +336,24 @@ export async function saveAgent(_state: AdminState, formData: FormData): Promise
   const agentId = canonicalUuid(formData.get('agentId'));
   if (!agentId) return { error: 'Unknown agent' };
   const groupChoice = membershipChoice(formData, 'groupIds');
-  if (!groupChoice) return { error: GONE };
+  if (!groupChoice) return { error: MALFORMED };
+  // The roster is `admin.groups`' (see `createInvite`): an admin without it may
+  // still save a name or a role, but not a click on somebody's groups.
+  if (changesMembership(groupChoice) && !can(admin, 'admin.groups')) {
+    return { error: GROUPS_FORBIDDEN };
+  }
+
+  // The role asked for is the select's value only where it differs from the
+  // role it was drawn with (`roleHeld`), so a save that only fixes a name
+  // cannot put back a role a colleague changed while the editor was open.
   const role = formData.get('role');
+  const roleHeld = formData.get('roleHeld');
+  const askedRole = typeof role === 'string' && role !== roleHeld ? role : null;
 
   const refusal = await saveAgentProfile(admin.id, agentId, {
     name: text(formData, 'name'),
     email: text(formData, 'email'),
-    role: typeof role === 'string' ? role : null,
+    role: askedRole,
     groups: groupChoice,
   });
   if (refusal) return { error: refusal };

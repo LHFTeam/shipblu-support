@@ -103,6 +103,24 @@ describe('acceptInvite', () => {
     expect(pending!.acceptedAt).toBeNull();
   });
 
+  it('refuses a name longer than the agent editor would save back', async () => {
+    // The editor sends the name with every save and refuses one over the cap,
+    // so an agent created with a longer one could not have their groups or
+    // role changed until somebody rewrote it.
+    await invite('four');
+    const data = new FormData();
+    data.set('token', 'four');
+    data.set('password', PASSWORD);
+    data.set('name', 'x'.repeat(121));
+
+    expect(await acceptInvite(INITIAL, data)).toEqual({
+      error: 'A name cannot be longer than 120 characters',
+    });
+    expect(
+      await db.select({ id: agents.id }).from(agents).where(eq(agents.email, 'new@shipblu.test')),
+    ).toEqual([]);
+  });
+
   it('reactivates a deactivated agent at the address, keeping their history', async () => {
     await invite('three', { role: 'supervisor' });
     const [former] = await db

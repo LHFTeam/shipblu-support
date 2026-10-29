@@ -7,6 +7,7 @@ import {
   listOpenInvites,
 } from '@/lib/admin/settings';
 import { requirePermission } from '@/lib/auth/guard';
+import { can } from '@/lib/auth/permissions';
 import { unsealInviteToken } from '@/lib/auth/invite-token';
 import { appUrl, env } from '@/lib/env';
 import { formatDateTime } from '@/lib/format';
@@ -30,6 +31,15 @@ export default async function AgentsPage() {
 
   const groupChoices = groupRows.map((group) => ({ value: group.id, label: group.name }));
   const groupName = new Map(groupRows.map((group) => [group.id, group.name]));
+  const groupsOf = new Map<string, string[]>();
+  for (const { agentId, groupId } of memberships) {
+    const held = groupsOf.get(agentId);
+    if (held) held.push(groupId);
+    else groupsOf.set(agentId, [groupId]);
+  }
+  // A roster is `admin.groups`' to change, so an admin without it sees each
+  // agent's groups and the invite's without a box to tick (`saveAgent`).
+  const canEditGroups = can(admin, 'admin.groups');
 
   const hasStoredLinks = openInvites.some((invite) => invite.tokenCiphertext);
   let inviteBaseUrl: string | null = null;
@@ -76,12 +86,11 @@ export default async function AgentsPage() {
         <AgentList
           agents={agentList.map((agent) => ({
             ...agent,
-            groupIds: memberships
-              .filter((row) => row.agentId === agent.id)
-              .map((row) => row.groupId),
+            groupIds: groupsOf.get(agent.id) ?? [],
             ownsNumber: owners.has(agent.id),
           }))}
           groups={groupChoices}
+          canEditGroups={canEditGroups}
           selfId={admin.id}
         />
       </section>
@@ -104,7 +113,7 @@ export default async function AgentsPage() {
 
       <section>
         <h2 className="mb-3 text-lg font-semibold">Invite an agent</h2>
-        <InviteForm groups={groupChoices} />
+        <InviteForm groups={canEditGroups ? groupChoices : []} />
       </section>
 
       {pendingInvites.length > 0 ? (

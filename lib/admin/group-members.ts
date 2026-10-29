@@ -49,6 +49,16 @@ export function membershipChoice(formData: FormData, name: string): MembershipCh
   return { held, chosen };
 }
 
+/**
+ * Whether a choice changes any membership at all — the question the agent
+ * editor's permission check asks, since an admin may save a name without being
+ * allowed to touch anybody's groups.
+ */
+export function changesMembership(choice: MembershipChoice): boolean {
+  const { added, dropped } = changes(choice);
+  return added.length > 0 || dropped.length > 0;
+}
+
 /** The pairs a choice adds and the pairs it removes. */
 function changes(choice: MembershipChoice): { added: string[]; dropped: string[] } {
   return {

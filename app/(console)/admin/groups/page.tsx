@@ -43,10 +43,14 @@ export default async function GroupsPage() {
   }));
   const deactivatedChoices = deactivatedRows.map((agent) => ({
     value: agent.id,
-    label: agent.name,
+    label: agent.name || agent.email,
   }));
-  const memberIdsOf = (groupId: string) =>
-    memberships.filter((row) => row.groupId === groupId).map((row) => row.agentId);
+  const membersOf = new Map<string, string[]>();
+  for (const { groupId, agentId } of memberships) {
+    const members = membersOf.get(groupId);
+    if (members) members.push(agentId);
+    else membersOf.set(groupId, [agentId]);
+  }
 
   return (
     <>
@@ -62,7 +66,7 @@ export default async function GroupsPage() {
           scheduleName:
             schedules.find((schedule) => schedule.id === group.businessHoursId)?.name ?? null,
           members,
-          memberIds: memberIdsOf(group.id),
+          memberIds: membersOf.get(group.id) ?? [],
           tickets,
         }))}
         schedules={scheduleChoices}

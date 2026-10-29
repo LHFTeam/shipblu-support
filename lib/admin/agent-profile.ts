@@ -1,32 +1,27 @@
-import { and, asc, eq, gt, isNull, ne, or, sql } from 'drizzle-orm';
+import { and, eq, gt, isNull, ne, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
-import { agents, invites } from '@/db/schema';
+import { agentChanges, agents, invites } from '@/db/schema';
 import { looksLikeEmail, normaliseEmail } from '@/lib/auth/normalise';
 import { isAgentRole } from '@/lib/auth/permissions';
 import { logger } from '@/lib/log';
+import { MAX_AGENT_NAME } from './agent-name';
 import { applyAgentGroups, type MembershipChoice } from './group-members';
 
 const log = logger('agent_profile');
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
-/**
- * A cap on an agent's name, checked server-side because an action is reachable
- * without its form. Unbounded, a name reaches every inbox row and assignment
- * dropdown that renders an agent — one paste of a large clipboard buffer away.
- * The invite and the agent editor share it, so a name the invite accepted is
- * one the editor will save back.
- */
-export const MAX_AGENT_NAME = 120;
-
 export const EMAIL_TAKEN = 'Another agent already signs in with that address';
 
 export const GROUP_GONE = 'One of those groups no longer exists — reload the page and try again';
 
 /**
- * What the agent editor posts, read but not yet judged. `role` is null when
- * the form sent none: the select is disabled on your own row, and a disabled
- * control is left out of the submission.
+ * What the agent editor posts, read but not yet judged. `role` is the role the
+ * form asks for, or null when it asks for no change: the select still shows
+ * the role it was drawn with, or it is disabled on your own row, where a
+ * disabled control is left out of the submission. Only an asked-for change is
+ * a change — a form drawn before a colleague changed this person's role, and
+ * saved to fix their name, must not put the old role back.
  */
 export type AgentProfileInput = {
   name: string;
@@ -78,41 +73,40 @@ export async function saveAgentProfile(
 
   try {
     return await db.transaction(async (tx) => {
-      // The agent and every account admin, locked in one statement in id
-      // order. The count of the other account admins has to stay true until
-      // this commits — two admins each demoting a different one of the last two
-      // would otherwise both see one left. One statement in one order is what
-      // stops two such saves deadlocking on each other's rows. A row whose role
-      // changed while we waited is re-read and drops out of the set.
-      //
-      // `no key update`, not `update`: it still holds off another save, a role
-      // change or a deactivation of these rows until this commits, but not the
+      // Only a save that changes a role waits for another (`lockRoleChanges`),
+      // so the count of other account admins below stays true until it commits.
+      if (askedRole !== null) await lockRoleChanges(tx);
+
+      // `no key update`, not `update`: it still holds off another save of this
+      // agent, a role change or a deactivation until this commits, but not the
       // key-share lock a `group_members` insert's foreign key takes on an
       // agent. Under `update`, a group save adding this agent waited on this
       // lock while this save's insert of the same pair waited on that one's.
-      const rows = await tx
-        .select({
-          id: agents.id,
-          email: agents.email,
-          role: agents.role,
-          isActive: agents.isActive,
-        })
+      const [current] = await tx
+        .select({ email: agents.email, role: agents.role, isActive: agents.isActive })
         .from(agents)
-        .where(or(eq(agents.id, agentId), eq(agents.role, 'account_admin')))
-        .orderBy(asc(agents.id))
+        .where(eq(agents.id, agentId))
         .for('no key update');
-
-      const current = rows.find((row) => row.id === agentId);
       if (!current) return 'Unknown agent';
 
       const role = askedRole ?? current.role;
       if (role !== current.role) {
         if (agentId === editorId) return 'You cannot change your own role';
-        const otherOwners = rows.filter(
-          (row) => row.id !== agentId && row.role === 'account_admin' && row.isActive,
-        );
-        if (current.role === 'account_admin' && current.isActive && otherOwners.length === 0) {
-          return 'They are the only active account admin. Make somebody else one first.';
+        if (current.role === 'account_admin' && current.isActive) {
+          const others = await tx
+            .select({ id: agents.id })
+            .from(agents)
+            .where(
+              and(
+                eq(agents.role, 'account_admin'),
+                eq(agents.isActive, true),
+                ne(agents.id, agentId),
+              ),
+            )
+            .limit(1);
+          if (others.length === 0) {
+            return 'They are the only active account admin. Make somebody else one first.';
+          }
         }
       }
 
@@ -147,6 +141,31 @@ export async function saveAgentProfile(
         .set({ name, email, role, updatedAt: now })
         .where(eq(agents.id, agentId));
 
+      const changed = [
+        ...(role !== current.role
+          ? [{ field: 'role' as const, fromValue: current.role, toValue: role }]
+          : []),
+        ...(email !== current.email
+          ? [{ field: 'email' as const, fromValue: current.email, toValue: email }]
+          : []),
+      ];
+      if (changed.length > 0) {
+        const [editor] = await tx
+          .select({ name: agents.name })
+          .from(agents)
+          .where(eq(agents.id, editorId));
+        await tx.insert(agentChanges).values(
+          changed.map((change) => ({
+            agentId,
+            agentLabel: name,
+            ...change,
+            changedByAgentId: editor ? editorId : null,
+            changedByLabel: editor?.name ?? null,
+            createdAt: now,
+          })),
+        );
+      }
+
       if (role !== current.role) {
         log.info('role changed', { agent: agentId, from: current.role, to: role, by: editorId });
       }
@@ -154,11 +173,27 @@ export async function saveAgentProfile(
     });
   } catch (error) {
     // Another agent took the address between the check and the update — an
-    // invite accepted in that moment. The update is the transaction's last
-    // statement, so the whole save is undone and saying so is the answer.
+    // invite accepted in that moment. The violation aborts the transaction, so
+    // the whole save is undone and saying so is the answer.
     if (isUniqueViolation(error)) return EMAIL_TAKEN;
     throw error;
   }
+}
+
+/**
+ * Serialises the saves that change a role, so the "last active account admin"
+ * count each one takes stays true until it commits: two admins demoting the
+ * last two at once would otherwise each see the other still there.
+ *
+ * An advisory lock, not row locks on every account admin, which is what this
+ * replaced: those were taken by every save, held for its length, and so held
+ * each admin's presence heartbeat — a write every 25 seconds per open tab —
+ * behind a colleague fixing somebody's name. A deactivation does not take it,
+ * because a deactivation is not refused for the last account admin (the
+ * handbook's account-owner article says so).
+ */
+async function lockRoleChanges(tx: Tx): Promise<void> {
+  await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended('agent-roles'::text, 0))`);
 }
 
 /**

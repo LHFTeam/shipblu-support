@@ -4,6 +4,7 @@ import { redirect } from 'next/navigation';
 import { and, eq, gt, isNull } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { agents, invites } from '@/db/schema';
+import { MAX_AGENT_NAME } from '@/lib/admin/agent-name';
 import { lockAddress } from '@/lib/admin/agent-profile';
 import { joinGroups } from '@/lib/admin/group-members';
 import { needsBootstrap } from '@/lib/auth/guard';
@@ -71,6 +72,9 @@ export async function bootstrapAdmin(
   const password = String(formData.get('password') ?? '');
 
   if (!name || !email) return { error: 'Enter your name and email' };
+  if (name.length > MAX_AGENT_NAME) {
+    return { error: `A name cannot be longer than ${MAX_AGENT_NAME} characters` };
+  }
 
   const strength = validatePasswordStrength(password);
   if (!strength.ok) return { error: strength.reason };
@@ -102,6 +106,13 @@ export async function acceptInvite(
   const password = String(formData.get('password') ?? '');
 
   if (!token) return { error: 'This invite link is not valid' };
+
+  // The invite's name was held to the cap when it was sent; this is the one the
+  // invitee typed over it, and the editor would refuse every later change to
+  // an agent saved with a longer one (`MAX_AGENT_NAME`).
+  if (name.length > MAX_AGENT_NAME) {
+    return { error: `A name cannot be longer than ${MAX_AGENT_NAME} characters` };
+  }
 
   const strength = validatePasswordStrength(password);
   if (!strength.ok) return { error: strength.reason };

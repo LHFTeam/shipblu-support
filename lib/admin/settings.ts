@@ -97,10 +97,14 @@ export async function listActiveAgents() {
     .orderBy(asc(agents.name));
 }
 
-/** Deactivated agents, by name: never offered, but named where a condition still holds one. */
+/**
+ * Deactivated agents, by name: never offered, but named where a condition still
+ * holds one, and in a group editor while they are still a member. The address
+ * is there for a label to fall back on, as the active list's is.
+ */
 export async function listDeactivatedAgents() {
   return db
-    .select({ id: agents.id, name: agents.name })
+    .select({ id: agents.id, name: agents.name, email: agents.email })
     .from(agents)
     .where(eq(agents.isActive, false))
     .orderBy(asc(agents.name));

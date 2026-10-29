@@ -79,7 +79,10 @@ function MembersField({
   agents: Choice[];
   deactivatedAgents?: Choice[];
 }) {
-  const held = new Set(memberIds);
+  // Read once, when the editor mounts, for `GroupCheckboxes`' reason on the
+  // agents page: the boxes are uncontrolled, so a held set taken from each
+  // render's props would move with a revalidation the boxes never see.
+  const [held] = useState(() => new Set(memberIds));
   const choices = [
     ...agents.map((agent) => ({ ...agent, deactivated: false })),
     ...deactivatedAgents

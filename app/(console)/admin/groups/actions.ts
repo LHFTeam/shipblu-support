@@ -9,7 +9,7 @@ import { requirePermission } from '@/lib/auth/guard';
 import { ok } from '@/lib/http/action-state';
 import { optionalMinutes, text, uuidField } from '@/lib/http/form-data';
 import { forgetHoursCatalog } from '@/lib/hours/catalog';
-import { GONE, refresh, type SettingsState } from '../settings-shared';
+import { GONE, MALFORMED, refresh, type SettingsState } from '../settings-shared';
 
 // --- Groups -----------------------------------------------------------------
 
@@ -31,7 +31,7 @@ export async function saveGroup(_state: SettingsState, formData: FormData): Prom
   // ticked now, so the save changes only the boxes somebody clicked
   // (`MembershipChoice`).
   const members = membershipChoice(formData, 'memberIds');
-  if (!members) return { error: GONE };
+  if (!members) return { error: MALFORMED };
   if (!(await agentsExist(members))) {
     return { error: 'One of those agents no longer exists — reload the page and try again' };
   }
