@@ -5,19 +5,45 @@ it is designed; **this file is about the state of the work** — what is live,
 what is merely built, what is left, and the mistakes that have already cost us
 time. Read both. Do not re-derive settled decisions.
 
-Last updated: 2026-10-29, against `main` at `063e477`. The figures in §1 and §5
+Last updated: 2026-10-29, against `main` at `69a22b6`. The figures in §1 and §5
 were last re-measured as a whole against production on 2026-09-20, and a
 paragraph re-read since gives its own date; where a number here disagrees with
 an older paragraph elsewhere in the file, the older one has not been re-checked.
 
-**Production runs `063e477`, deployed by hand on 2026-10-29, all six services
-by 14:27:51 UTC:** release #439, which carries Stage 6's screenshot pass
+**Production runs `69a22b6`, deployed by hand on 2026-10-29, all six services
+by 17:47:16 UTC:** release #442, which carries #440: every automated reply on a
+customer bot ticket is refused, by `automatedReplyBlocked` and again by
+`writeAutomatedReply`, the door every automated sender writes through, before
+anything is written. Until then an `on_update` rule's `send_reply` on a bot
+ticket was written and queued as an email; no rule in production sends a
+reply, so none was. Code only: web first, its preDeploy finding no migration
+and replaying the nine `db/sql` files, then the worker and the four crons. Its
+way back is `b63f96e` on each service.
+
+**The Instagram Login token expired at 15:25:38 UTC on 2026-10-29.** Every
+`graph.instagram.com` call has failed since with code 190, "Session has
+expired": the first was a profile read at 17:07:43 for the first Instagram
+message after the expiry, whose `fetch_meta_profile` job went `dead` after five
+attempts. No Instagram reply had been sent since then, at the deploy's reads,
+so none has failed yet; the next goes out over `instagram_login`
+(`lib/meta/connection.ts`) and fails the same way until
+`INSTAGRAM_ACCESS_TOKEN` is renewed in Meta's app dashboard and set on Render.
+
+The release before it, `b63f96e`, was deployed by hand from another session on
+2026-10-29, all six services by 17:00:33 UTC: release #441, which carries #436,
+group membership in the console (a members picker, invite groups and an agent
+editor). Its web preDeploy applied `0056` (`agent_changes`, the record of a
+change to an agent's role or sign-in address, held to those two fields by
+`agent_changes_field_known` in `db/sql/003`).
+
+The release before that, `063e477`, was deployed by hand on 2026-10-29, all six
+services by 14:27:51 UTC: release #439, which carries Stage 6's screenshot pass
 (#438): what the reports, the dashboard, the channels page's readiness panel
 and the classifier report say is made true of their code, every console table
 shows when it scrolls sideways, and the column charts' labels are readable on
 a phone. Code and copy only, so its way back is `9b4bc5b` on each service.
 
-The release before it, `9b4bc5b`, was deployed by hand on 2026-10-29, all six
+Before it, `9b4bc5b` was deployed by hand on 2026-10-29, all six
 services by 11:29:28 UTC: release #437, which carries Stage 6 (#434) of
 `plans/ticket-category-routing.md`, reporting by category and
 `/reports/routing`. Web went first, and its preDeploy applied
