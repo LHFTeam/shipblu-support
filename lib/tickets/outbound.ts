@@ -341,9 +341,8 @@ export function carrierFor(
  * `carrierFor` answers `send_email` for two kinds of channel that do not send
  * by email, so they are excluded by name rather than by carrier. Web chat has no
  * carrier at all — writing its row is its delivery. A read-only channel
- * (`whatsapp_bot`) is not answered from the console, and the acknowledgement
- * and the survey refuse it before they ask; the `on_update` automation path
- * does not (`carrierFor` says what follows).
+ * (`whatsapp_bot`) is answered by nobody: the console offers no reply there,
+ * and `automatedReplyBlocked` refuses every automated sender before it writes.
  * Answering "email" for it would only be true by accident. `api` does go out by
  * email, and is written as email.
  */
