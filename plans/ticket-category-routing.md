@@ -4981,7 +4981,8 @@ gains another first, 0051 is regenerated rather than renumbered.
     by its move finding another writer had put it there since
     (`apply.db.test.ts`, both actions at each place the customer's move can
     land).
-  - **Why the handover was answered rather than changed.** A handover that
+  - **Why the handover was answered rather than changed — and is left so, by
+    decision (2026-10-29).** A handover that
     assigns a held ticket is what `decide()`'s `taken` outcome exists for: an
     assignee ends a hold whoever gave it (`isHeld`), and at the window's end the
     router records `taken`, moves nothing, writes its `routed` line ("kept the
