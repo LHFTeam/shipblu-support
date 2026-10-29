@@ -693,11 +693,13 @@ export function PageHeader({
  *
  * Admin tables get wide — an SLA policy has four targets and two escalations —
  * and a table that widens the page instead of scrolling itself takes the whole
- * layout with it.
+ * layout with it. `scroll-cue` is its background: the surface, shaded on an
+ * edge with columns beyond it, since on a phone nothing else said they were
+ * there.
  */
 export function Table({ head, children }: { head: ReactNode[]; children: ReactNode }) {
   return (
-    <div className="app-scroll overflow-x-auto rounded-xl border border-(--color-border-subtle) bg-(--color-background-surface)">
+    <div className="app-scroll scroll-cue overflow-x-auto rounded-xl border border-(--color-border-subtle)">
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b border-(--color-border-subtle) text-start">

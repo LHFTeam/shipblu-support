@@ -5,13 +5,30 @@ it is designed; **this file is about the state of the work** — what is live,
 what is merely built, what is left, and the mistakes that have already cost us
 time. Read both. Do not re-derive settled decisions.
 
-Last updated: 2026-10-29, against `main` at `1470902`. The figures in §1 and §5
+Last updated: 2026-10-29, against `main` at `9b4bc5b`. The figures in §1 and §5
 were last re-measured as a whole against production on 2026-09-20, and a
 paragraph re-read since gives its own date; where a number here disagrees with
 an older paragraph elsewhere in the file, the older one has not been re-checked.
 
-**Production runs `1470902`, deployed by hand on 2026-10-29, all six services
-by 06:35:36 UTC:** release #435, which carries Stage 5.1 (#432) of
+**Production runs `9b4bc5b`, deployed by hand on 2026-10-29, all six services
+by 11:29:28 UTC:** release #437, which carries Stage 6 (#434) of
+`plans/ticket-category-routing.md`, reporting by category and
+`/reports/routing`. Web went first, and its preDeploy applied
+`0052_metrics_category` (`metrics_daily.category_id` and the one-row-per-slice
+key `metrics_daily_slice_key`; `db/sql/003` adds the one-dimension CHECK),
+`0053_routing_undecided_index`, `0054_rollup_days_categories`
+(`rollup_days.categories_computed_at`, which tells a day rolled up with
+categories from one rolled up before them) and `0055_routing_started_index`;
+then the worker and the four crons. Production carries no category yet, so
+the overview's By category reads all No category, and names every day before
+the first Stage 6 nightly as rolled up before categories were filed. The
+`rollup_metrics from=2026-08-18` rebuild waits for 4.2's
+`backfill_category_ai mode=apply`. The rollback deletes the `metrics_daily`
+rows that carry a category before the old web returns (the plan's Stage 6
+deploy). The plan's status section has the deploy's reads.
+
+The release before it, `1470902`, was deployed by hand on 2026-10-29, all six
+services by 06:35:36 UTC: release #435, which carries Stage 5.1 (#432) of
 `plans/ticket-category-routing.md`, routing by category, shipped off. Web went
 first, and its preDeploy applied `0051_routing`; then the worker and the four
 crons. Every channel reads `default_group`, so nothing is held or routed until
@@ -22,10 +39,9 @@ a console group move running the rules before it assigns, and the transactions
 an agent's reply and a rule's assignment or move are now written in, with the
 rule's own timeline line inside them. The category classifier has been in
 Shadow since 06:00:32 UTC that day, after its archive record run: it records an
-answer for each message it judges and writes nothing to a ticket (§5.1). The
-plan's status section has the deploy's reads.
+answer for each message it judges and writes nothing to a ticket (§5.1).
 
-The release before it, `ad6a062`, was deployed by hand on 2026-10-27, all six
+The release before those, `ad6a062`, was deployed by hand on 2026-10-27, all six
 services by 21:49:08 UTC: release #431, which carries Stage 4.2 (#429), that is
 `/reports/category-ai` and the fixes to the category classifier's locked ticket
 read. Code only, web first, then the worker and the four crons. Earlier that
@@ -33,22 +49,7 @@ day, also by hand and web first: `dbf4376` (#430, Stage 4.1, the classifier
 shipped off, applying `0050_category_ai`) by 12:07:54 UTC, and `156004d` (#428,
 Stage 4.0, code only) by 07:45:42 UTC.
 
-**Stage 6 of that plan, reporting by category and `/reports/routing`, is built
-and in review as #434, against `dev`, not deployed.** It replaces #433, whose
-review it answers. Web migrates `0052_metrics_category` (`metrics_daily.category_id`
-and the one-row-per-slice key `metrics_daily_slice_key`; `db/sql/003` adds the
-one-dimension CHECK), `0053_routing_undecided_index`,
-`0054_rollup_days_categories` (`rollup_days.categories_computed_at`, which
-tells a day rolled up with categories from one rolled up before them) and
-`0055_routing_started_index`. Production carries no
-category yet, so the first Stage 6 nightly writes no category row and the
-overview's By category reads all No category; the `rollup_metrics
-from=2026-08-18` rebuild waits for 4.2's `backfill_category_ai mode=apply`. Web
-goes first — its totals reads name the category null before any writer stores a
-category slice — and the rollback deletes the `metrics_daily` rows that carry a
-category before the old web returns (the plan's Stage 6 deploy).
-
-The release before those, `f761e5e`, was deployed by hand on 2026-10-26, all
+The release before them, `f761e5e`, was deployed by hand on 2026-10-26, all
 six services by 23:32 UTC: release #426, which carries Stage 3.2 (#424) — a
 form's default category and the console's category chooser. Web went first,
 and its preDeploy applied `0049_form_default_category`; then the worker and the
@@ -1728,7 +1729,7 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
   channel, live and shadow never added together, time to decision against the
   window, the fallback and taken shares over the router's own decisions, and
   each would-be decision against the group a person later moved the ticket to.
-  Until it is deployed, `routing_decisions` answers by query. Rollback is the
+  It is deployed since 2026-10-29. Rollback is the
   channel's mode back to `default_group`, which holds no new ticket and lets
   held ones settle in their window.
 

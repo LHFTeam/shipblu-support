@@ -98,10 +98,6 @@ export type ChannelWarning =
   | { kind: 'not_filing_row'; filingRow: string }
   /** An owned number's tickets are its owner's from the insert, and never held. */
   | { kind: 'owned'; owner: string }
-  | { kind: 'classifier_idle'; classifier: CategoryAiMode }
-  /** In `apply` with no key, so nothing is asked and every window ends in `fallback`. */
-  | { kind: 'no_key' }
-  | { kind: 'no_route_group'; categories: string[] }
   | { kind: 'route_gaps'; categories: { label: string; group: string; gaps: GroupGap[] }[] }
   /** Where a ticket that settles no category, or one with no route group, stays. */
   | { kind: 'default_group'; group: GroupFacts | null; gaps: GroupGap[] }
@@ -116,9 +112,29 @@ export type ChannelRouting = {
   column: RoutingMode;
   /** What the router acts on (`routingModeOf`). */
   mode: RoutingMode;
+  /**
+   * Whether a new ticket on it would enter routing with the classifier in
+   * Apply: false for a row that never routes (a coexistence number, the bot)
+   * and one that files nothing routable (inactive, a second row of its type,
+   * an owned number), each of which carries its one reason alone. True with
+   * `starts` null is a row idle only for the classifier.
+   */
+  routesInApply: boolean;
   /** What a new ticket on it gets now: a hold, a record, or nothing. */
   starts: RoutingStart | null;
-  /** Empty for a row on `default_group`: there is nothing to warn about. */
+  /**
+   * It starts routing with no TypeSafe key, so nothing is asked and only a
+   * person or a rule files a category: otherwise a held ticket waits out its
+   * window and stays in its default group, and a shadow record ends
+   * `fallback`. A fact about the classifier, stated once above the rows, but
+   * each row's badge and status must not claim routing works without it.
+   */
+  noKey: boolean;
+  /**
+   * What differs by channel; empty for a row on `default_group`, where there
+   * is nothing to warn about. The classifier's state and a category with no
+   * route group are the same for every row, so the panel says them once.
+   */
   warnings: ChannelWarning[];
 };
 
@@ -278,7 +294,9 @@ function assessReadiness(input: {
       isActive: channel.isActive,
       column: channel.routingMode,
       mode,
+      routesInApply: files && routingStartFor(mode, 'apply') !== null,
       starts,
+      noKey: starts !== null && !classifier.keyConfigured,
     };
     if (channel.routingMode === 'default_group') return { ...base, warnings: [] };
 
@@ -293,19 +311,14 @@ function assessReadiness(input: {
       warnings.push({ kind: 'not_filing_row', filingRow: filingRow.name });
     }
     if (owned !== null) warnings.push({ kind: 'owned', owner: owned });
-    if (classifier.mode !== 'apply') {
-      warnings.push({ kind: 'classifier_idle', classifier: classifier.mode });
-    } else if (!classifier.keyConfigured) {
-      warnings.push({ kind: 'no_key' });
-    }
+    // A row that files nothing routable is that one reason and no more: what
+    // follows describes tickets it never holds, and said under "nothing is
+    // held" it read as routing that cannot happen. A row that files tickets
+    // while the classifier is idle keeps what follows on purpose, as what
+    // Apply would meet there: the panel is read before routing is turned on,
+    // and its row says so.
+    if (!files) return { ...base, warnings };
 
-    const unrouted = categories.filter((category) => !category.routeGroup);
-    if (unrouted.length > 0) {
-      warnings.push({
-        kind: 'no_route_group',
-        categories: unrouted.map((category) => category.labelEn),
-      });
-    }
     // A route group that is the channel's own default group is where those
     // tickets stay, and is judged as that below rather than twice.
     const gapped = categories.filter(

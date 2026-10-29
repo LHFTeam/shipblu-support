@@ -16,6 +16,7 @@ import {
 import { requireAgent } from '@/lib/auth/guard';
 import { can } from '@/lib/auth/permissions';
 import { allLimited } from '@/lib/concurrency';
+import { loadCsatSettings, type CsatSettings } from '@/lib/csat/settings';
 import { ratingLabels } from '@/lib/csat/wording';
 import { channelLabel, formatDateTime } from '@/lib/format';
 import {
@@ -160,6 +161,14 @@ export default async function CsatReportPage({
     answered: row?.csatResponseCount ?? 0,
   }));
   const surveyedDays = series.filter(hasSurveys);
+  // Nothing at all: not a send, an answer or a decision against. A window of
+  // skips alone is a page, whose "Why not surveyed" is the one section that
+  // explains why nothing went out.
+  const nothing =
+    firstSent === null && answered === 0 && summary.csatSkippedCount === 0 && reasons.length === 0;
+  // Read only for that, whose sentence is why nothing went out: with surveys
+  // off nothing is sent or skipped, so no other section can say it.
+  const surveySettings = nothing ? await loadCsatSettings() : null;
 
   return (
     <div className="app-scroll relative h-full overflow-y-auto p-4 sm:p-6">
@@ -236,17 +245,8 @@ export default async function CsatReportPage({
         ) : null}
       </div>
 
-      {/* Nothing at all: not a send, an answer or a decision against. A
-          window of skips alone is a page, whose "Why not surveyed" is the one
-          section that explains why nothing went out. */}
-      {firstSent === null &&
-      answered === 0 &&
-      summary.csatSkippedCount === 0 &&
-      reasons.length === 0 ? (
-        <EmptyState
-          title="No surveys yet"
-          hint="Nothing has been sent. Surveys are switched on, and their wording set, at Admin → Satisfaction surveys."
-        />
+      {nothing ? (
+        <EmptyState title="No surveys yet" hint={nothingSentSentence(surveySettings)} />
       ) : (
         <>
           {noFigures ? null : (
@@ -436,6 +436,24 @@ export default async function CsatReportPage({
       )}
     </div>
   );
+}
+
+/**
+ * Why no survey has ever gone out, from the switch the sends obey. The fixed
+ * sentence it replaces began "Surveys are switched on", which read as a status
+ * on a page whose surveys were off. Null, a settings read that failed, says
+ * only where they are set.
+ */
+function nothingSentSentence(settings: CsatSettings | null): string {
+  const where = 'under Admin → Satisfaction surveys';
+  if (!settings) return `Nothing has been sent. Whether surveys go out is set ${where}.`;
+  if (!settings.enabled) {
+    return `Surveys are switched off, so nothing has been sent. An admin turns them on ${where}.`;
+  }
+  if (!Object.values(settings.channels).some(Boolean)) {
+    return `Surveys are on for no channel, so nothing has been sent. An admin chooses the channels ${where}.`;
+  }
+  return 'Surveys are on, and none has gone out yet: one is sent once a ticket on a surveyed channel is resolved and the survey’s delay has passed.';
 }
 
 /** A day worth a line in the by-day table: something was sent, skipped or answered. */

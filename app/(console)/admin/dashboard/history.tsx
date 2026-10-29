@@ -98,7 +98,11 @@ export function History({
               value={percentage(
                 metPercentage(window.slaResolutionMet, window.slaResolutionBreached),
               )}
-              hint={`${percentage(firstResponseSla)} for first response`}
+              hint={
+                firstResponseSla === null
+                  ? 'No first response measured against an SLA'
+                  : `${percentage(firstResponseSla)} for first response`
+              }
             >
               <Meter
                 value={metPercentage(window.slaResolutionMet, window.slaResolutionBreached)}

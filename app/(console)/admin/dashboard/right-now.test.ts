@@ -65,7 +65,7 @@ describe('the Unassigned tile', () => {
   it('is not amber when every unassigned ticket is being routed', () => {
     const held = unassignedTile({ open: 3, unassigned: 3, routing: 3 });
 
-    expect(held.hint).toBe('Being routed — held until their category settles');
+    expect(held.hint).toBe('Being routed — held until their category settles or the window ends');
     expect(held.value).not.toContain(AMBER);
   });
 });
