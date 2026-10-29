@@ -796,6 +796,37 @@ describe('routingChannels', () => {
     expect(rows.find((row) => row.id === coexistence)!.mode).toBe('default_group');
     expect(rows.find((row) => row.type === 'whatsapp_bot')!.mode).toBe('default_group');
   });
+
+  it('files a kind under its oldest row to the microsecond, and lists the rows by name', async () => {
+    // A tenth of a millisecond apart is no time apart to a JavaScript Date,
+    // and the ids run the other way: judged on the Date with the id breaking
+    // the tie, the newer row would be the one its kind is filed under.
+    const older = await channel({
+      id: 'ffffffff-ffff-4fff-bfff-ffffffffffff',
+      name: 'Zed web chat',
+      routingMode: 'category',
+    });
+    const newer = await channel({
+      id: '00000000-0000-4000-8000-000000000000',
+      name: 'Ada web chat',
+      routingMode: 'category',
+    });
+    for (const [id, at] of [
+      [older, '2026-01-01 00:00:00.0001+00'],
+      [newer, '2026-01-01 00:00:00.0002+00'],
+    ] as const) {
+      await db
+        .update(channels)
+        .set({ createdAt: sql`${at}::timestamptz` })
+        .where(eq(channels.id, id));
+    }
+
+    const rows = (await routingChannels()).filter((row) => row.type === 'webchat');
+    expect(rows.map((row) => [row.name, row.files])).toEqual([
+      ['Ada web chat', false],
+      ['Zed web chat', true],
+    ]);
+  });
 });
 
 describe('the statements', () => {

@@ -835,12 +835,15 @@ export type RoutingChannel = {
  * line saying a channel in a category mode had nothing enter routing in the
  * range. Configuration, not a figure, so it takes no `now`.
  *
- * By name, for the page; whether a row files is judged over the rows oldest
- * first, ties by id, the order ingest picks the row of a type by, as the
- * readiness panel judges it. The owner by a join, as the panel reads it.
+ * Whether a row files is judged over the rows oldest first, ties by id — the
+ * order ingest picks the row of a type by, read as the readiness panel reads
+ * it — and the page's order, by name, rides along as a number. Postgres keeps
+ * both: `created_at` has microseconds a JavaScript `Date` drops, and its
+ * collation orders names as the page always has. The owner by a join, as the
+ * panel reads it.
  */
 export async function routingChannels(): Promise<RoutingChannel[]> {
-  const rows = await db
+  const oldestFirst = await db
     .select({
       id: channels.id,
       name: channels.name,
@@ -848,22 +851,24 @@ export async function routingChannels(): Promise<RoutingChannel[]> {
       config: channels.config,
       routingMode: channels.routingMode,
       isActive: channels.isActive,
-      createdAt: channels.createdAt,
       ownerActive: agents.isActive,
+      byName: sql<number>`(row_number() over (order by ${channels.name}, ${channels.id}))::int`,
     })
     .from(channels)
     .leftJoin(agents, eq(agents.id, channels.ownerAgentId))
-    .orderBy(asc(channels.name));
-  const oldestFirst = [...rows].sort(
-    (a, b) =>
-      a.createdAt.getTime() - b.createdAt.getTime() || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
-  );
-  return rows.map((row) => ({
-    id: row.id,
-    name: row.name,
-    type: row.type,
-    isActive: row.isActive,
-    mode: routingModeOf(row),
-    files: filesRoutableTickets(row, oldestFirst),
-  }));
+    .orderBy(asc(channels.createdAt), asc(channels.id));
+  return oldestFirst
+    .map((row) => ({
+      byName: row.byName,
+      channel: {
+        id: row.id,
+        name: row.name,
+        type: row.type,
+        isActive: row.isActive,
+        mode: routingModeOf(row),
+        files: filesRoutableTickets(row, oldestFirst),
+      },
+    }))
+    .sort((a, b) => a.byName - b.byName)
+    .map(({ channel }) => channel);
 }
