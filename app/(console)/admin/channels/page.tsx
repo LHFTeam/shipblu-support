@@ -60,7 +60,7 @@ export default async function ChannelsPage() {
   const canConnect = can(agent, 'admin.channels.connect');
 
   // One clock for every sentence on the page, so the badge on a row and the
-  // card above it cannot disagree about whether a window has closed — nor the
+  // progress card further down cannot disagree about whether a window has closed — nor the
   // routing panel about who is accepting tickets.
   const now = new Date();
 
@@ -323,6 +323,42 @@ export default async function ChannelsPage() {
         />
       </section>
 
+      <RoutingReadinessPanel
+        readiness={routing}
+        canEditCategories={can(agent, 'admin.categories')}
+        canViewReport={can(agent, 'report.view')}
+      />
+
+      {/* The groups that the default-group picker above chooses between, listed
+          so that "which group?" can be answered without leaving the page.
+          Creating and editing them is the Groups page's job — a group there
+          also carries a description and its own business hours, and a second
+          form that could only set the name would quietly make half a group. */}
+      <section>
+        <div className="mb-3 flex items-center gap-3">
+          <h2 className="text-lg font-semibold">Groups</h2>
+          {/* Groups is `admin.groups`' page, which this one's key does not open. */}
+          {can(agent, 'admin.groups') ? (
+            <Link
+              href="/admin/groups"
+              className="ms-auto text-sm text-(--color-text-link) hover:text-(--color-text-link-hover) hover:underline"
+            >
+              Manage groups
+            </Link>
+          ) : null}
+        </div>
+        <ul className="divide-y divide-(--color-border-subtle) rounded-xl border border-(--color-border-subtle) bg-(--color-background-surface) text-sm">
+          {groupList.length === 0 ? (
+            <li className="px-4 py-3 text-(--color-text-tertiary)">No groups yet.</li>
+          ) : null}
+          {groupList.map((group) => (
+            <li key={group.id} className="px-4 py-3">
+              {group.name}
+            </li>
+          ))}
+        </ul>
+      </section>
+
       <section>
         <PageHeader
           title="WhatsApp business accounts"
@@ -408,39 +444,6 @@ export default async function ChannelsPage() {
             })}
           </div>
         ) : null}
-      </section>
-
-      <RoutingReadinessPanel
-        readiness={routing}
-        canEditCategories={can(agent, 'admin.categories')}
-        canViewReport={can(agent, 'report.view')}
-      />
-
-      {/* The groups that the default-group picker above chooses between, listed
-          so that "which group?" can be answered without leaving the page.
-          Creating and editing them is the Groups page's job — a group there
-          also carries a description and its own business hours, and a second
-          form that could only set the name would quietly make half a group. */}
-      <section>
-        <div className="mb-3 flex items-center gap-3">
-          <h2 className="text-lg font-semibold">Groups</h2>
-          <Link
-            href="/admin/groups"
-            className="ms-auto text-sm text-(--color-text-link) hover:text-(--color-text-link-hover) hover:underline"
-          >
-            Manage groups
-          </Link>
-        </div>
-        <ul className="divide-y divide-(--color-border-subtle) rounded-xl border border-(--color-border-subtle) bg-(--color-background-surface) text-sm">
-          {groupList.length === 0 ? (
-            <li className="px-4 py-3 text-(--color-text-tertiary)">No groups yet.</li>
-          ) : null}
-          {groupList.map((group) => (
-            <li key={group.id} className="px-4 py-3">
-              {group.name}
-            </li>
-          ))}
-        </ul>
       </section>
     </div>
   );

@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { Notice, PageHeader } from '@/components/ui';
 import { configurationCounts } from '@/lib/admin/overview';
 import { requireAnyPermission } from '@/lib/auth/guard';
+import { can } from '@/lib/auth/permissions';
 import { SettingsDirectory, type DirectoryStatus } from './directory';
 import { SETTINGS_PERMISSIONS, sectionsFor } from './sections';
 
@@ -49,6 +50,20 @@ export default async function AdminIndexPage() {
       <PageHeader
         title="Settings"
         description="How work reaches your team, what it promises the customer, and what the customer sees."
+        actions={
+          // The live board moved to Reports, where it is read rather than
+          // configured, but it is still `admin.agents`' and not `report.view`'s:
+          // without this, somebody given the one key without the other would be
+          // let in by the page and shown no way to it.
+          can(agent, 'admin.agents') ? (
+            <Link
+              href="/reports/live"
+              className="text-sm text-(--color-text-link) hover:text-(--color-text-link-hover) hover:underline"
+            >
+              Live dashboard →
+            </Link>
+          ) : null
+        }
       />
 
       {todo.length > 0 ? (
@@ -147,11 +162,19 @@ function readiness(
 
   // Its own card now, where it used to turn the Groups check red and link to a
   // page that could not fix it: skills are held and granted on the Skills page.
+  // Only a warning while some group both assigns and matches on skills — with
+  // none, no ticket waits for anything, and saying it does would be false.
   if (orphanSkills > 0) {
-    statuses['/admin/skills'] = {
-      state: 'todo',
-      text: `${orphanSkills} skill(s) no active agent holds — tickets needing one wait for the skill timeout`,
-    };
+    statuses['/admin/skills'] =
+      n(counts?.skillGroups) > 0
+        ? {
+            state: 'todo',
+            text: `${orphanSkills} skill(s) no active agent holds — tickets needing one wait for the skill timeout`,
+          }
+        : {
+            state: 'optional',
+            text: `${orphanSkills} skill(s) no active agent holds — nothing waits on them while no group matches on skills`,
+          };
   }
 
   return statuses;

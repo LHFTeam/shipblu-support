@@ -60,6 +60,7 @@ describe('configurationCounts', () => {
       routingGroups: 0,
       allGroups: 1,
       orphanSkills: 0,
+      skillGroups: 0,
     });
   });
 
@@ -128,5 +129,15 @@ describe('configurationCounts', () => {
     ]);
 
     expect((await configurationCounts())?.orphanSkills).toBe(2);
+  });
+
+  it('counts a group as matching skills only while it also assigns automatically', async () => {
+    await db.insert(groups).values([
+      { name: 'Arabic desk', assignmentStrategy: 'round_robin', matchSkills: true },
+      { name: 'Picks by hand', assignmentStrategy: 'manual', matchSkills: true },
+      { name: 'Anybody', assignmentStrategy: 'load_balanced', matchSkills: false },
+    ]);
+
+    expect((await configurationCounts())?.skillGroups).toBe(1);
   });
 });

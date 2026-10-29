@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useState } from 'react';
 import { SearchInput } from '@/components/search-input';
 import { Badge } from '@/components/ui';
+import { fold, matchesQuery, queryWords } from './settings-search';
 
 /**
  * Every settings page, grouped as the sidebar groups them, with a search over
@@ -12,9 +13,10 @@ import { Badge } from '@/components/ui';
  *
  * The search runs in the browser over a list the server already filtered to
  * what this agent may open: twenty-odd entries need no index, and filtering as
- * you type is the point. Every word typed must appear somewhere in an entry, so
- * "out of office" finds the out-of-hours replies by their keywords and "sla
- * hours" narrows to the one page that is about both.
+ * you type is the point. Every word typed must start a word somewhere in an
+ * entry (`settings-search.ts`), so "out of office" finds the out-of-hours
+ * replies by their keywords and "sla hours" narrows to the one page that is
+ * about both.
  */
 
 export type DirectoryStatus = {
@@ -38,12 +40,14 @@ export type DirectorySection = {
 
 export function SettingsDirectory({ sections }: { sections: DirectorySection[] }) {
   const [query, setQuery] = useState('');
-  const words = fold(query).split(' ').filter(Boolean);
+  const words = queryWords(query);
 
   const shown = sections
     .map((section) => ({
       ...section,
-      entries: section.entries.filter((entry) => matches(words, section, entry)),
+      entries: section.entries.filter((entry) =>
+        matchesQuery(words, [section.title, entry.label, entry.description, ...entry.keywords]),
+      ),
     }))
     .filter((section) => section.entries.length > 0);
 
@@ -110,22 +114,6 @@ function StatusBadge({ status }: { status?: DirectoryStatus }) {
   if (status?.state === 'todo') return <Badge tone="warning">Needs setting up</Badge>;
   if (status?.state === 'optional') return <Badge tone="neutral">Optional</Badge>;
   return null;
-}
-
-function matches(words: string[], section: DirectorySection, entry: DirectoryEntry): boolean {
-  if (words.length === 0) return true;
-  const haystack = fold(
-    [section.title, entry.label, entry.description, ...entry.keywords].join(' '),
-  );
-  return words.every((word) => haystack.includes(word));
-}
-
-/** Lower case, and punctuation as spaces, so "auto-reply" finds "auto reply". */
-function fold(text: string): string {
-  return text
-    .toLowerCase()
-    .replace(/[^\p{L}\p{N}]+/gu, ' ')
-    .trim();
 }
 
 function sectionId(title: string): string {

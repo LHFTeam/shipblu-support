@@ -4,7 +4,9 @@ import { can, type Permission } from '@/lib/auth/permissions';
  * The settings area's map: every page, which group it belongs to, and the key
  * that opens it. The sidebar, the phone strip, the settings home and its search
  * are all drawn from this one list, so a page cannot be in the nav and missing
- * from the home, or findable by search and hidden from the sidebar.
+ * from the home, or findable by search and hidden from the sidebar. A child
+ * page has no card of its own: the home reaches it through its parent's card,
+ * whose keywords name it.
  *
  * The groups follow what the helpdesks our team already knows agree on —
  * Zendesk's Admin Center, Freshdesk's Admin, Intercom's Settings — rather than
@@ -83,6 +85,7 @@ export const ADMIN_SECTIONS: readonly AdminSection[] = [
           'staff',
           'invite',
           'role',
+          'permissions',
           'supervisor',
           'deactivate',
           'ticket cap',
@@ -106,6 +109,7 @@ export const ADMIN_SECTIONS: readonly AdminSection[] = [
           'auto assign',
           'round robin',
           'load balanced',
+          'load balancing',
           'routing',
           'reclaim',
           'escalation',
@@ -138,6 +142,8 @@ export const ADMIN_SECTIONS: readonly AdminSection[] = [
           'whatsapp',
           'waba',
           'business account',
+          'message templates',
+          'phone number',
           'coexistence',
           'embedded signup',
           'facebook',
@@ -195,7 +201,14 @@ export const ADMIN_SECTIONS: readonly AdminSection[] = [
         permission: 'admin.forms',
         description:
           'The questions that open a ticket, on the help centre or the console, and where it lands.',
-        keywords: ['ticket forms', 'web form', 'contact form', 'help centre', 'questions'],
+        keywords: [
+          'ticket forms',
+          'web form',
+          'contact form',
+          'help centre',
+          'help center',
+          'questions',
+        ],
       },
       {
         href: '/admin/categories',
@@ -280,6 +293,7 @@ export const ADMIN_SECTIONS: readonly AdminSection[] = [
           'due date',
           'breach',
           'escalation',
+          'priority',
         ],
       },
       {
@@ -305,6 +319,9 @@ export const ADMIN_SECTIONS: readonly AdminSection[] = [
         keywords: [
           'auto reply',
           'autoresponder',
+          'out of office',
+          'after hours',
+          'ooo',
           'away message',
           'closed',
           'holiday message',

@@ -7,6 +7,7 @@ import {
   listScheduleOptions,
 } from '@/lib/admin/settings';
 import { requirePermission } from '@/lib/auth/guard';
+import { can } from '@/lib/auth/permissions';
 import { AutoResponseEditor, NewAutoResponse } from './forms';
 
 export const dynamic = 'force-dynamic';
@@ -25,7 +26,11 @@ export const dynamic = 'force-dynamic';
  * rather than growing a second set of opening times that could disagree.
  */
 export default async function AutoResponsesPage() {
-  await requirePermission('admin.automations');
+  const agent = await requirePermission('admin.automations');
+  // Business hours is `admin.sla`'s. Since the settings area opens to any of
+  // its keys, somebody may hold this page's without that one, and a link that
+  // lands on "forbidden" is worse than the page's name alone.
+  const canEditHours = can(agent, 'admin.sla');
 
   const [rules, groupRows, schedules, anyHoliday] = await Promise.all([
     listAutoResponses(),
@@ -59,12 +64,16 @@ export default async function AutoResponsesPage() {
           <p>
             No schedule is marked as the company default, so no hour counts as out of hours and
             nothing on this page will send.{' '}
-            <Link
-              href="/admin/hours"
-              className="font-medium text-(--color-text-link) hover:text-(--color-text-link-hover) hover:underline"
-            >
-              Set one on Business hours
-            </Link>
+            {canEditHours ? (
+              <Link
+                href="/admin/hours"
+                className="font-medium text-(--color-text-link) hover:text-(--color-text-link-hover) hover:underline"
+              >
+                Set one on Business hours
+              </Link>
+            ) : (
+              <span className="font-medium">Set one on Business hours</span>
+            )}
             .
           </p>
         </Notice>
@@ -75,12 +84,16 @@ export default async function AutoResponsesPage() {
           <p>
             A holiday message is written, but no schedule has a single holiday on it — so the
             ordinary out-of-hours message is what will send on Eid.{' '}
-            <Link
-              href="/admin/hours"
-              className="font-medium text-(--color-text-link) hover:text-(--color-text-link-hover) hover:underline"
-            >
-              Add the dates on Business hours
-            </Link>
+            {canEditHours ? (
+              <Link
+                href="/admin/hours"
+                className="font-medium text-(--color-text-link) hover:text-(--color-text-link-hover) hover:underline"
+              >
+                Add the dates on Business hours
+              </Link>
+            ) : (
+              <span className="font-medium">Add the dates on Business hours</span>
+            )}
             .
           </p>
         </Notice>

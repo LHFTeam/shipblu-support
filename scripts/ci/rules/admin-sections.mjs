@@ -28,7 +28,10 @@ import { fail, lineOfNode, parseSource, requireAtLeast, scannable } from '../lib
  *    `can()` for its controls as well, and a control's key says nothing about
  *    who may open the page;
  *  - an href named twice, which draws the link twice, lights both, and lets the
- *    two entries disagree about the key.
+ *    two entries disagree about the key;
+ *  - a child opened by a key its parent is not. The sidebar draws a child only
+ *    under a parent its reader may open (`sectionsFor`), so whoever holds that
+ *    key alone is let into the child page and never shown the way to it.
  *
  * A page's route is read off its path: `app/` and `page.tsx` dropped, and every
  * route group — `(console)`, or an `(x)` a later change uses to sort files —
@@ -130,6 +133,18 @@ export function checkAdminSections() {
   }
 
   for (const entry of byHref.values()) {
+    const parent = entry.parent;
+    if (!parent || !entry.permission || !parent.permission) continue;
+    const uncovered = entry.permission.keys.filter((key) => !parent.permission.keys.includes(key));
+    if (uncovered.length === 0) continue;
+    fail(
+      rule,
+      `${REGISTRY}:${entry.line}`,
+      `${entry.href} opens to ${uncovered.map((key) => `'${key}'`).join(', ')}, which its parent ${parent.href} does not — the sidebar draws a child only under a parent its reader may open, so whoever holds that key alone is let in and never shown the way; give the parent the key too, or make the page an entry of its own`,
+    );
+  }
+
+  for (const entry of byHref.values()) {
     if (pages.has(entry.href)) continue;
     fail(
       rule,
@@ -194,6 +209,7 @@ function readRegistry(rule) {
   };
 
   const entries = [];
+  const entryOf = new Map();
   const readEntry = (object) => {
     const href = valueOf(object, 'href');
     const permission = valueOf(object, 'permission');
@@ -218,7 +234,15 @@ function readRegistry(rule) {
         );
       }
     }
-    entries.push({ href: path, permission: keys, line: lineOfNode(source, href) });
+    // The tree is walked parent first, so a child's parent is already read.
+    const read = {
+      href: path,
+      permission: keys,
+      line: lineOfNode(source, href),
+      parent: entryOf.get(parentEntryOf(object)) ?? null,
+    };
+    entryOf.set(object, read);
+    entries.push(read);
   };
 
   inlineList(initializer, 'ADMIN_SECTIONS');
@@ -291,6 +315,23 @@ function routeOf(file) {
     kept.push(segment);
   }
   return { route: `/${kept.join('/')}` };
+}
+
+/** The entry whose `children` list holds `object`, if it is a child. */
+function parentEntryOf(object) {
+  const list = outermost(object).parent;
+  if (!list || !ts.isArrayLiteralExpression(list)) return undefined;
+  const holder = outermost(list).parent;
+  return holder && ts.isPropertyAssignment(holder) && nameOf(holder) === 'children'
+    ? holder.parent
+    : undefined;
+}
+
+/** `node` with whatever `unwrap` would have looked through around it. */
+function outermost(node) {
+  let current = node;
+  while (current.parent && unwrap(current.parent) !== current.parent) current = current.parent;
+  return current;
 }
 
 function declarationOf(source, name) {

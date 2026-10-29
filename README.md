@@ -182,7 +182,7 @@ Design decisions worth knowing before changing things:
   Agent tools, AI or Data — the groups Zendesk, Freshdesk and Intercom agree on, rather
   than the tables the settings are stored in — and the sidebar, the phone strip, the
   settings home and its search are all drawn from it, so a page cannot be in one and
-  missing from another. URLs stay flat (`/admin/<page>`): a group is a heading, not a
+  missing from another (a child page is reached on the home through its parent's card). URLs stay flat (`/admin/<page>`): a group is a heading, not a
   path segment, so regrouping a page breaks no bookmark and no revalidated path. The
   area opens to whoever holds a key one of its pages requires and shows them only those
   pages. The live dashboard is read rather than configured, so it is a report, at

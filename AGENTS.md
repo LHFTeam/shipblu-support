@@ -233,7 +233,9 @@ settings page — its group, its label, the key its page requires, a line saying
 what it is for and the words other helpdesks use for it — and the sidebar, the
 phone strip, the settings home and the home's search are all drawn from it, so a
 page cannot be in the nav and missing from the home, or found by the search and
-hidden from the sidebar. The groups are Team, Channels, Tickets, Workflows,
+hidden from the sidebar — a child page (`children`, drawn under its parent in the
+sidebar) has no card of its own, and the home finds it through its parent's card,
+whose keywords name it. The groups are Team, Channels, Tickets, Workflows,
 Agent tools, AI and Data, modelled on Zendesk's Admin Center, Freshdesk's Admin
 and Intercom's Settings, because "where do I change the SLA?" is a question
 about what somebody wants to happen, not about which table holds it; the file's

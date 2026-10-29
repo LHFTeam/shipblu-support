@@ -257,6 +257,41 @@ describe('admin-sections', () => {
     }
   });
 
+  it('refuses a child opened by a key its parent is not', async () => {
+    const found = await run({
+      entries: [
+        entry(
+          '/admin/topics',
+          "'admin.topics'",
+          ", children: [{ href: '/admin/topics/review', label: 'Review', permission: 'admin.review' }]",
+        ),
+        entry(
+          '/admin/tags',
+          "['admin.tags', 'admin.topics']",
+          ", children: [{ href: '/admin/tags/merge', label: 'Merge', permission: 'admin.tags' }]",
+        ),
+      ],
+      pages: {
+        'app/(console)/admin/topics/page.tsx': page("requirePermission('admin.topics')"),
+        'app/(console)/admin/topics/review/page.tsx': page("requirePermission('admin.review')"),
+        'app/(console)/admin/tags/page.tsx': page(
+          "requireAnyPermission(['admin.tags', 'admin.topics'])",
+        ),
+        'app/(console)/admin/tags/merge/page.tsx': page("requirePermission('admin.tags')"),
+      },
+    });
+
+    // The second child's key is one of its parent's, so its holders see both.
+    expect(found).toEqual([
+      expect.objectContaining({
+        where: ADDED,
+        message: expect.stringMatching(
+          /\/admin\/topics\/review opens to 'admin\.review', which its parent \/admin\/topics does not/,
+        ),
+      }),
+    ]);
+  });
+
   it('refuses a dynamic segment by name rather than matching it literally', async () => {
     const found = await run({
       pages: {

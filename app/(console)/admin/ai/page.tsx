@@ -126,9 +126,10 @@ export default async function AiFeaturesPage() {
             <>
               A category a person, a rule, a form&rsquo;s default or an agent opening the ticket
               chose is never touched, and one Jev chose is changed like any other. Its backfill,
-              started by hand as <code>npm run job -- backfill_category_ai</code>, asks about older
-              tickets under a label of its own whatever the mode says, and in its <code>apply</code>{' '}
-              mode files open tickets from a recorded run&rsquo;s answers.
+              started by hand as{' '}
+              <code>npm run job -- backfill_category_ai mode=record runLabel=…</code>, asks about
+              older tickets under a label of its own whatever the mode says, and in its{' '}
+              <code>apply</code> mode files open tickets from a recorded run&rsquo;s answers.
             </>
           }
           rows={[
@@ -289,7 +290,7 @@ export default async function AiFeaturesPage() {
             {
               term: 'May change',
               detail:
-                'Nothing. Its answers go to a table of their own, which only the shadow runs page reads.',
+                'Nothing. Its answers go to a table of their own that no ticket, rollup or review queue reads — only the shadow runs page, and the run count on this card.',
             },
             {
               term: 'Sends',
