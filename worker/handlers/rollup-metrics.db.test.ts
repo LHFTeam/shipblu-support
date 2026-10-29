@@ -1,5 +1,5 @@
 import { eq } from 'drizzle-orm';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { db } from '@/db/client';
 import {
   contacts,
@@ -15,8 +15,10 @@ import { withCleanDatabase } from '@/lib/testing/db';
 import { cairo } from '@/lib/testing/time';
 import { rollupMetrics } from './rollup-metrics';
 
-// The real `computeDay`, which one test below replaces for a single call to
-// hand the job the slices a broken accumulator would.
+// The real `computeDay`, which the tests of a refused day below replace for
+// one call each, to hand the job the slices a broken accumulator or slice
+// builder would. Nothing resets a mock between tests here, so each test's run
+// must reach `computeDay` and use up its own replacement.
 vi.mock('@/lib/reports/rollup', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/reports/rollup')>();
   return { ...actual, computeDay: vi.fn(actual.computeDay) };
@@ -70,6 +72,13 @@ describe('rollup_metrics', () => {
  */
 describe('rollup_metrics, by category', () => {
   const DAY = '2026-10-14';
+
+  // The `console.error` spies of a refused day's tests. Restored by the test
+  // itself, a test failing before that line left its spy, calls and all, and
+  // the next test's `spyOn` got it back and could match a line it never logged.
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
 
   async function categorisedTicket(): Promise<string> {
     const [sales] = await db
@@ -167,12 +176,13 @@ describe('rollup_metrics, by category', () => {
       '1 day(s) failed the totals reconciliation and were not written',
     );
     expect(errors).toHaveBeenCalledWith(
-      expect.stringContaining(`${DAY}: totals do not match each other: 2 slices name no dimension`),
+      expect.stringContaining(
+        `${DAY}: totals do not match each other: 2 slices name no dimension, so the day is not written and keeps its previous rows`,
+      ),
     );
     expect(await slices()).toEqual(expect.arrayContaining(before));
     expect(await slices()).toHaveLength(before.length);
     expect(await db.select().from(rollupDays)).toEqual([marker]);
-    errors.mockRestore();
   });
 
   it('writes nothing for a day whose category slices sum past its totals, and goes on to the older days', async () => {
@@ -201,7 +211,7 @@ describe('rollup_metrics, by category', () => {
     );
     expect(errors).toHaveBeenCalledWith(
       expect.stringContaining(
-        `${DAY}: totals do not match the category slices, which sum past them in ticketsCreated`,
+        `${DAY}: totals do not match the category slices, which sum past them in ticketsCreated, so the day is not written and keeps its previous rows`,
       ),
     );
     expect(await slices()).toHaveLength(before.length);
@@ -209,7 +219,28 @@ describe('rollup_metrics, by category', () => {
     const markers = await db.select().from(rollupDays).orderBy(rollupDays.day);
     expect(markers.map((row) => row.day)).toEqual(['2026-10-13', DAY]);
     expect(markers[1]).toEqual(marker);
-    errors.mockRestore();
+  });
+
+  // A day no run wrote before has nothing to keep: no rows and no marker, so
+  // the line says so — once a later day is written it reads as a day with
+  // nothing in it, and only `rollup_metrics from=` after the fix writes it.
+  it('says a refused day no run wrote before has no rows, and leaves it without rows or a marker', async () => {
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.mocked(computeDay).mockResolvedValueOnce([
+      { ...all, bucket: bucket(1) },
+      { ...all, bucket: bucket(1) },
+    ]);
+
+    await expect(rollupMetrics(job({ day: DAY }))).rejects.toThrow(
+      '1 day(s) failed the totals reconciliation and were not written',
+    );
+    expect(errors).toHaveBeenCalledWith(
+      expect.stringContaining(
+        `${DAY}: totals do not match each other: 2 slices name no dimension, so the day is not written and has no rows until a run reconciles it`,
+      ),
+    );
+    expect(await slices()).toEqual([]);
+    expect(await db.select().from(rollupDays)).toEqual([]);
   });
 
   // Not caught per day: a slice a constraint refuses although it reconciles is

@@ -4909,7 +4909,12 @@ branch, what was verified, and what is left, in order.
    - `reconcileFailure` is asked of a day's slices before anything is
      written (#433's review): a day that fails is not written, keeps the rows
      and the marker the last run to write it left, and the run carries on to
-     the older days and then fails. Asked after the write, as it was, the day
+     the older days and then fails. A day no run wrote before has nothing to
+     keep, and once a later day is written it is a gap inside the counted
+     range (`countedThrough` is the newest day computed whole, a `max()`), so
+     its line says `has no rows until a run reconciles it` rather than
+     `keeps its previous rows`, and `rollup_metrics from=<day>` writes it once
+     the cause is fixed. Asked after the write, as it was, the day
      was published anyway and the one-totals-row rule could never fire, since
      `metrics_daily_slice_key` refused the second totals row first.
    - A constraint violation is not caught per day. It means the rollup's own
@@ -4936,7 +4941,8 @@ branch, what was verified, and what is left, in order.
    score under its ticket's category, so a category slice is one partition in
    every column and "No category" stays exact.
 6. **The live board** (`/admin/dashboard`) gains "Open work by category":
-   `categoryLoad()`, one scan of the open backlog full-joined to the registry.
+   `backlogCuts()`, one scan of the open backlog grouped by channel and by
+   category (`grouping sets`), its category cut full-joined to the registry.
    Active categories always show, retired ones only while they hold open work,
    and "No category" comes last. Each row links to `/inbox?category=<id>`.
    - The dashboard's reads go through `allLimited(3)`. It had put ten
@@ -4951,7 +4957,7 @@ branch, what was verified, and what is left, in order.
    page and `parts.tsx` under `app/(console)/reports/routing/`). Each read is
    one statement taking the page's `now`, run through `allLimited(2)`. Each
    line is per `routing_decisions.channel_id` and live or shadow, never mixed,
-   and filed on the Cairo day the ticket entered routing (`within` on
+   and filed on the reporting zone's day the ticket entered routing (`within` on
    `started_at`). The figures:
    - **Outcome counts.** Entered, decided (`stage = 'decided'`, never
      `outcome is not null`, which phase one writes while still holding),

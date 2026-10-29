@@ -1,5 +1,5 @@
 import { DateTime } from 'luxon';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { db } from '@/db/client';
 import {
   agentMetricsDaily,
@@ -11,6 +11,7 @@ import {
 import type { ClaimedJob } from '@/lib/queue';
 import { parseJobPayload, type JobPayload } from '@/lib/queue/payloads';
 import { computeAgentDay, withActivity } from '@/lib/reports/agent-rollup';
+import { TOTALS_SLICE } from '@/lib/reports/queries';
 import { computeSubcategoryDay, computeRootCauseDay } from '@/lib/reports/subcategory-rollup';
 import {
   asRows,
@@ -187,14 +188,22 @@ export async function rollupMetrics(job?: ClaimedJob): Promise<void> {
     // like a bug, and category slices summing past it print the overview's
     // "No category" negative — so a day that breaks one is not written at all:
     // its transaction is never opened, and the day keeps the rows, the agent
-    // rows and the marker the last run to write it left (none, if none did,
-    // and `countedThrough` then stops short of it, which is true). Checked
-    // after the write, as it was, the day was published and only the run
-    // failed, and the rule against a second totals row could never be reached:
+    // rows and the marker the last run to write it left. Checked after the
+    // write, as it was, the day was published and only the run failed, and
+    // the rule against a second totals row could never be reached:
     // `metrics_daily_slice_key` refused that row first, as a duplicate key
     // naming no slice. Counted and carried on rather than thrown, unlike a
     // refused insert below: whether the older days agree is worth knowing from
     // the same run, which still fails at the end.
+    // A day no run wrote before has nothing to keep, and that is the cost of
+    // refusing it. `countedThrough` is the newest day computed whole, not the
+    // end of an unbroken run of them, so once a later day is written this one
+    // is a gap inside the counted range, and every report reads it as a day
+    // with nothing in it; only the CSAT page's `uncounted` names what it is
+    // missing, and only its surveys. So the line says which of the two the day
+    // is. The run fails each night the day is in its plan; once it has left
+    // the nightly's three days, `rollup_metrics from=<day>` after the fix is
+    // what writes it.
     // Not extended to the subcategory and root-cause tables, and the absence
     // is deliberate rather than an oversight: they have no totals row to
     // reconcile against, because a ticket carrying three subcategories appears
@@ -203,7 +212,16 @@ export async function rollupMetrics(job?: ClaimedJob): Promise<void> {
     const failure = reconcileFailure(slices);
     if (failure) {
       inconsistent += 1;
-      log.error(`${day}: totals do not match ${failure}, so the day keeps its previous rows`);
+      const kept = await db
+        .select({ day: metricsDaily.day })
+        .from(metricsDaily)
+        .where(and(eq(metricsDaily.day, day), TOTALS_SLICE))
+        .limit(1);
+      log.error(
+        `${day}: totals do not match ${failure}, so the day is not written and ${
+          kept.length > 0 ? 'keeps its previous rows' : 'has no rows until a run reconciles it'
+        }`,
+      );
       continue;
     }
 
