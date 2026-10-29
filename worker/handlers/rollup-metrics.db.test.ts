@@ -17,8 +17,7 @@ import { rollupMetrics } from './rollup-metrics';
 
 // The real `computeDay`, which the tests of a refused day below replace for
 // one call each, to hand the job the slices a broken accumulator or slice
-// builder would. Nothing resets a mock between tests here, so each test's run
-// must reach `computeDay` and use up its own replacement.
+// builder would.
 vi.mock('@/lib/reports/rollup', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/reports/rollup')>();
   return { ...actual, computeDay: vi.fn(actual.computeDay) };
@@ -76,8 +75,12 @@ describe('rollup_metrics, by category', () => {
   // The `console.error` spies of a refused day's tests. Restored by the test
   // itself, a test failing before that line left its spy, calls and all, and
   // the next test's `spyOn` got it back and could match a line it never logged.
+  // And `computeDay`'s replacement: `restoreAllMocks` leaves a `vi.fn` alone,
+  // so a test failing before its run reached `computeDay` handed its slices to
+  // the next test's first day. `mockReset` puts back the real one it wraps.
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.mocked(computeDay).mockReset();
   });
 
   async function categorisedTicket(): Promise<string> {
