@@ -604,6 +604,20 @@ async function sendCannedReply(
     return;
   }
 
+  // A rule cannot reopen a closed messaging window on any of the three channels
+  // that have one, and skipping is the only honest option: attempting it would
+  // fail at Meta and leave a permanently failed message on the customer's
+  // timeline. This engine is the reason the guard has to exist at all — it runs
+  // from a cron every fifteen minutes, so a rule that chases silence reaches the
+  // customer days after they last wrote, which is exactly the far side of the
+  // window. Asked before the canned response is read, so that sweep spends no
+  // query on a reply it will not send.
+  const blocked = automatedReplyBlocked(conversation);
+  if (blocked) {
+    log.warn(`"${ruleName}" skipped a reply: ${blocked}`);
+    return;
+  }
+
   const rows = await db
     .select({
       bodyHtmlAr: cannedResponses.bodyHtmlAr,
@@ -618,19 +632,6 @@ async function sendCannedReply(
   const canned = rows[0];
   if (!canned) {
     log.warn(`"${ruleName}" references a canned response that is gone`);
-    return;
-  }
-
-  // A rule cannot reopen a closed messaging window on any of the three channels
-  // that have one, and skipping is the only honest option: attempting it would
-  // fail at Meta and leave a permanently failed message on the customer's
-  // timeline. This engine is the reason the guard has to exist at all — it runs
-  // from a cron every fifteen minutes, so a rule that chases silence reaches the
-  // customer days after they last wrote, which is exactly the far side of the
-  // window.
-  const blocked = automatedReplyBlocked(conversation);
-  if (blocked) {
-    log.warn(`"${ruleName}" skipped a reply: ${blocked}`);
     return;
   }
 

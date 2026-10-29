@@ -10,7 +10,7 @@ import {
   ticketStatuses,
 } from '@/db/schema';
 import { withCleanDatabase } from '@/lib/testing/db';
-import { deliverAutomatedReply } from './outbound';
+import { deliverAutomatedReply, enqueueAutomatedDelivery, writeAutomatedReply } from './outbound';
 
 /**
  * The write both automated senders share — the out-of-hours reply and an
@@ -26,7 +26,7 @@ import { deliverAutomatedReply } from './outbound';
 
 withCleanDatabase();
 
-async function emailTicket() {
+async function openTicket(channel: 'email' | 'whatsapp_bot' = 'email') {
   const [contact] = await db
     .insert(contacts)
     .values({ name: 'Amira', primaryEmail: 'amira@example.test' })
@@ -37,7 +37,7 @@ async function emailTicket() {
     .where(eq(ticketStatuses.name, 'Open'));
   const [row] = await db
     .insert(conversations)
-    .values({ channel: 'email', statusId: open!.id, requesterContactId: contact!.id })
+    .values({ channel, statusId: open!.id, requesterContactId: contact!.id })
     .returning({ id: conversations.id });
   return row!.id;
 }
@@ -56,7 +56,7 @@ function acknowledge(conversationId: string, bodyText: string) {
 
 describe('deliverAutomatedReply', () => {
   it('stores the reply, records the event and queues the send', async () => {
-    const conversationId = await emailTicket();
+    const conversationId = await openTicket();
 
     const messageId = await acknowledge(conversationId, 'We have your message.');
 
@@ -83,7 +83,7 @@ describe('deliverAutomatedReply', () => {
   });
 
   it('stamps the first auto-reply once and leaves it alone after that', async () => {
-    const conversationId = await emailTicket();
+    const conversationId = await openTicket();
     const stamp = async () => {
       const [row] = await db
         .select({ at: conversations.firstAutoRepliedAt })
@@ -98,5 +98,43 @@ describe('deliverAutomatedReply', () => {
 
     await acknowledge(conversationId, 'Still with us — an agent will be in touch.');
     expect(await stamp()).toEqual(first);
+  });
+
+  // Each sender turns the bot away first, in its own way (`writeAutomatedReply`
+  // says who refuses where), so the door refuses it too, before the row exists:
+  // no message on the timeline, no event, and no email queued for a
+  // conversation nobody answers. Both ways in: `deliverAutomatedReply` on the
+  // pool, as the acknowledgement and the engine write, and `writeAutomatedReply`
+  // inside a transaction of the caller's, as the survey and the thanks do.
+  it("refuses the customer bot's conversation before writing anything", async () => {
+    const conversationId = await openTicket('whatsapp_bot');
+    const reply = {
+      conversationId,
+      channel: 'whatsapp_bot' as const,
+      requesterEmail: 'amira@example.test',
+      bodyText: 'We have your message.',
+      bodyHtml: null,
+      actorLabel: 'automation:acknowledge',
+      eventType: 'auto_replied',
+    };
+
+    await expect(deliverAutomatedReply(reply)).rejects.toThrow('nobody on the team writes there');
+    await expect(
+      db.transaction(async (tx) => {
+        const messageId = await writeAutomatedReply(tx, reply, { stampFirstAutoReply: false });
+        await enqueueAutomatedDelivery(reply.channel, messageId, 50, tx);
+      }),
+    ).rejects.toThrow('nobody on the team writes there');
+
+    expect(
+      await db.select().from(messages).where(eq(messages.conversationId, conversationId)),
+    ).toEqual([]);
+    expect(
+      await db
+        .select()
+        .from(conversationEvents)
+        .where(eq(conversationEvents.conversationId, conversationId)),
+    ).toEqual([]);
+    expect(await db.select().from(jobs)).toEqual([]);
   });
 });

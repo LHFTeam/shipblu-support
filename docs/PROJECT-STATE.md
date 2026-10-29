@@ -5,13 +5,20 @@ it is designed; **this file is about the state of the work** — what is live,
 what is merely built, what is left, and the mistakes that have already cost us
 time. Read both. Do not re-derive settled decisions.
 
-Last updated: 2026-10-29, against `main` at `9b4bc5b`. The figures in §1 and §5
+Last updated: 2026-10-29, against `main` at `063e477`. The figures in §1 and §5
 were last re-measured as a whole against production on 2026-09-20, and a
 paragraph re-read since gives its own date; where a number here disagrees with
 an older paragraph elsewhere in the file, the older one has not been re-checked.
 
-**Production runs `9b4bc5b`, deployed by hand on 2026-10-29, all six services
-by 11:29:28 UTC:** release #437, which carries Stage 6 (#434) of
+**Production runs `063e477`, deployed by hand on 2026-10-29, all six services
+by 14:27:51 UTC:** release #439, which carries Stage 6's screenshot pass
+(#438): what the reports, the dashboard, the channels page's readiness panel
+and the classifier report say is made true of their code, every console table
+shows when it scrolls sideways, and the column charts' labels are readable on
+a phone. Code and copy only, so its way back is `9b4bc5b` on each service.
+
+The release before it, `9b4bc5b`, was deployed by hand on 2026-10-29, all six
+services by 11:29:28 UTC: release #437, which carries Stage 6 (#434) of
 `plans/ticket-category-routing.md`, reporting by category and
 `/reports/routing`. Web went first, and its preDeploy applied
 `0052_metrics_category` (`metrics_daily.category_id` and the one-row-per-slice
@@ -27,7 +34,7 @@ the first Stage 6 nightly as rolled up before categories were filed. The
 rows that carry a category before the old web returns (the plan's Stage 6
 deploy). The plan's status section has the deploy's reads.
 
-The release before it, `1470902`, was deployed by hand on 2026-10-29, all six
+The release before that, `1470902`, was deployed by hand on 2026-10-29, all six
 services by 06:35:36 UTC: release #435, which carries Stage 5.1 (#432) of
 `plans/ticket-category-routing.md`, routing by category, shipped off. Web went
 first, and its preDeploy applied `0051_routing`; then the worker and the four

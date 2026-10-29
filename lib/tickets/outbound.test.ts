@@ -213,6 +213,18 @@ describe('automatedReplyBlocked', () => {
       expect(automatedReplyBlocked(dm(channel, null), NOW)).toBeNull();
     }
   });
+
+  it('refuses the customer bot’s conversations whatever the clock says', () => {
+    // Nobody on the team writes there, and `carrierFor` would have queued the
+    // message as an email: an engine rule's reply on a bot ticket was both.
+    for (const at of [ago(1 * HOUR), ago(30 * DAY), null]) {
+      for (const kind of ['message', 'feedback_template'] as const) {
+        expect(automatedReplyBlocked(dm('whatsapp_bot', at), NOW, kind)).toBe(
+          'the whatsapp_bot channel is read-only, and nobody on the team writes to its conversations',
+        );
+      }
+    }
+  });
 });
 
 describe('carrierFor', () => {
