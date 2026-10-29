@@ -10,7 +10,7 @@ import { allLimited } from '@/lib/concurrency';
 import { formatDateTime } from '@/lib/format';
 import { dateIn, rangeIn, reportingZone, type ReportWindow } from '@/lib/reports/rollup';
 import { ROUTING_OUTCOMES, type RoutingOutcome } from '@/lib/routing/decide';
-import type { RoutingMode } from '@/lib/routing/mode';
+import { routingStartFor, type RoutingMode } from '@/lib/routing/mode';
 import { idleRoutingSentence, ROUTING_MODE_LABELS } from '@/lib/routing/mode-copy';
 import {
   decisionTiming,
@@ -480,11 +480,11 @@ function StateNotice({
         .filter((sentence): sentence is string => sentence !== null),
     ),
   ];
-  // Only a live mode holds, and only while the classifier is in Apply
-  // (`routingStartFor`): a shadow row holds nothing, and off or in shadow
-  // nothing enters routing. Said whatever the modes, it told an admin reading
-  // the page in the shadow week that new tickets were being kept back.
-  const holds = classifier === 'apply' && routingNow.some((channel) => channel.mode === 'category');
+  // Asked as ingest asks it (`routingStartFor`): only a live start holds, so a
+  // shadow row holds nothing, and with the classifier off or in shadow nothing
+  // enters routing at all. Said whatever the modes, the sentence told an admin
+  // reading the page in the shadow week that new tickets were being kept back.
+  const holds = routingNow.some((channel) => routingStartFor(channel.mode, classifier) === 'live');
   return (
     <>
       <Notice tone="neutral">
