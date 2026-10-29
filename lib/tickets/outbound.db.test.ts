@@ -26,7 +26,7 @@ import { deliverAutomatedReply } from './outbound';
 
 withCleanDatabase();
 
-async function emailTicket() {
+async function openTicket(channel: 'email' | 'whatsapp_bot' = 'email') {
   const [contact] = await db
     .insert(contacts)
     .values({ name: 'Amira', primaryEmail: 'amira@example.test' })
@@ -37,15 +37,19 @@ async function emailTicket() {
     .where(eq(ticketStatuses.name, 'Open'));
   const [row] = await db
     .insert(conversations)
-    .values({ channel: 'email', statusId: open!.id, requesterContactId: contact!.id })
+    .values({ channel, statusId: open!.id, requesterContactId: contact!.id })
     .returning({ id: conversations.id });
   return row!.id;
 }
 
-function acknowledge(conversationId: string, bodyText: string) {
+function acknowledge(
+  conversationId: string,
+  bodyText: string,
+  channel: 'email' | 'whatsapp_bot' = 'email',
+) {
   return deliverAutomatedReply({
     conversationId,
-    channel: 'email',
+    channel,
     requesterEmail: 'amira@example.test',
     bodyText,
     bodyHtml: `<p>${bodyText}</p>`,
@@ -56,7 +60,7 @@ function acknowledge(conversationId: string, bodyText: string) {
 
 describe('deliverAutomatedReply', () => {
   it('stores the reply, records the event and queues the send', async () => {
-    const conversationId = await emailTicket();
+    const conversationId = await openTicket();
 
     const messageId = await acknowledge(conversationId, 'We have your message.');
 
@@ -83,7 +87,7 @@ describe('deliverAutomatedReply', () => {
   });
 
   it('stamps the first auto-reply once and leaves it alone after that', async () => {
-    const conversationId = await emailTicket();
+    const conversationId = await openTicket();
     const stamp = async () => {
       const [row] = await db
         .select({ at: conversations.firstAutoRepliedAt })
@@ -98,5 +102,28 @@ describe('deliverAutomatedReply', () => {
 
     await acknowledge(conversationId, 'Still with us — an agent will be in touch.');
     expect(await stamp()).toEqual(first);
+  });
+
+  // Every sender refuses the bot before it gets here, but not all through
+  // `automatedReplyBlocked` — the survey turns it away in `decideSurvey` — so
+  // the door refuses it too, and before the row exists: no message on the
+  // timeline, no event, and no email queued for a conversation nobody answers.
+  it("refuses the customer bot's conversation before writing anything", async () => {
+    const conversationId = await openTicket('whatsapp_bot');
+
+    await expect(
+      acknowledge(conversationId, 'We have your message.', 'whatsapp_bot'),
+    ).rejects.toThrow('nobody on the team writes there');
+
+    expect(
+      await db.select().from(messages).where(eq(messages.conversationId, conversationId)),
+    ).toEqual([]);
+    expect(
+      await db
+        .select()
+        .from(conversationEvents)
+        .where(eq(conversationEvents.conversationId, conversationId)),
+    ).toEqual([]);
+    expect(await db.select().from(jobs)).toEqual([]);
   });
 });
