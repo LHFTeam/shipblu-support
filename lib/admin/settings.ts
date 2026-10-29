@@ -97,10 +97,14 @@ export async function listActiveAgents() {
     .orderBy(asc(agents.name));
 }
 
-/** Deactivated agents, by name: never offered, but named where a condition still holds one. */
+/**
+ * Deactivated agents, by name: never offered, but named where a condition still
+ * holds one, and in a group editor while they are still a member. The address
+ * is there for a label to fall back on, as the active list's is.
+ */
 export async function listDeactivatedAgents() {
   return db
-    .select({ id: agents.id, name: agents.name })
+    .select({ id: agents.id, name: agents.name, email: agents.email })
     .from(agents)
     .where(eq(agents.isActive, false))
     .orderBy(asc(agents.name));
@@ -157,6 +161,32 @@ export function listGroupsForAdmin() {
     })
     .from(groups)
     .orderBy(asc(groups.name));
+}
+
+/**
+ * Every group membership, as pairs. The groups page ticks each group's members
+ * from it and the agents page names each agent's groups, so neither asks once
+ * per row.
+ */
+export async function listGroupMemberships() {
+  return db
+    .select({ groupId: groupMembers.groupId, agentId: groupMembers.agentId })
+    .from(groupMembers);
+}
+
+/**
+ * The agents who own a WhatsApp number. The agents page leaves the "No group"
+ * warning off them: an owner sees and is assigned every ticket on their number
+ * whatever their groups (`heldByOrInGroupsOf`, `assignConversation`), so being
+ * in none is how an owner who answers only their own phone is meant to look.
+ * Any row naming them counts, as it does for `ownsANumber`.
+ */
+export async function listNumberOwnerIds(): Promise<string[]> {
+  const rows = await db
+    .selectDistinct({ id: channels.ownerAgentId })
+    .from(channels)
+    .where(isNotNull(channels.ownerAgentId));
+  return rows.flatMap((row) => (row.id ? [row.id] : []));
 }
 
 /** Business-hours schedules for the group editor's picker, by name. */
@@ -301,6 +331,7 @@ export function listOpenInvites(now: Date) {
       id: invites.id,
       email: invites.email,
       role: invites.role,
+      groupIds: invites.groupIds,
       expiresAt: invites.expiresAt,
       tokenCiphertext: invites.tokenCiphertext,
     })

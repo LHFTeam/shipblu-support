@@ -6,7 +6,7 @@ import {
   formData as form,
   refuseEveryQuery,
 } from '@/lib/testing/fake-db';
-import { GONE } from './settings-shared';
+import { GONE, MALFORMED } from './settings-shared';
 
 /**
  * The admin actions take an agent's, a channel's, a subcategory's, a cause's or
@@ -20,8 +20,15 @@ import { GONE } from './settings-shared';
 const ADMIN_ID = '0b6f3c2e-8a51-4d3e-9f0a-2c7d1e5b9a44';
 
 vi.mock('@/db/client', async () => ({ db: (await import('@/lib/testing/fake-db')).fakeDb }));
+// The admin's own overrides, which a case can set: `can()` reads them, and the
+// agent editor asks `admin.groups` of whoever saves a change to somebody's groups.
+const session = vi.hoisted(() => ({ permissions: {} as Record<string, boolean> }));
 vi.mock('@/lib/auth/guard', () => ({
-  requirePermission: async () => ({ id: '0b6f3c2e-8a51-4d3e-9f0a-2c7d1e5b9a44', role: 'admin' }),
+  requirePermission: async () => ({
+    id: '0b6f3c2e-8a51-4d3e-9f0a-2c7d1e5b9a44',
+    role: 'admin',
+    permissions: session.permissions,
+  }),
 }));
 vi.mock('@/lib/auth/session', () => ({ destroyAllSessionsForAgent: async () => {} }));
 vi.mock('next/cache', () => ({ revalidatePath: () => {} }));
@@ -35,44 +42,75 @@ const actions = {
 };
 
 const INITIAL = { error: null };
-const MALFORMED = 'not-a-uuid';
+const MALFORMED_ID = 'not-a-uuid';
 const NOBODY = '5d1c2b3a-4e5f-4a6b-8c7d-9e0f1a2b3c4d';
 
 beforeEach(() => {
   refuseEveryQuery();
+  session.permissions = {};
 });
 
 describe('admin actions given an id no row can have', () => {
   it.each([
-    ['setAgentActive', () => actions.setAgentActive(INITIAL, form({ agentId: MALFORMED }))],
+    ['setAgentActive', () => actions.setAgentActive(INITIAL, form({ agentId: MALFORMED_ID }))],
     [
       'setAgentCapacity',
-      () => actions.setAgentCapacity(INITIAL, form({ agentId: MALFORMED, maxOpenTickets: '5' })),
+      () => actions.setAgentCapacity(INITIAL, form({ agentId: MALFORMED_ID, maxOpenTickets: '5' })),
+    ],
+    [
+      'saveAgent',
+      () =>
+        actions.saveAgent(
+          INITIAL,
+          form({ agentId: MALFORMED_ID, name: 'Omar', email: 'omar@shipblu.test' }),
+        ),
     ],
   ])('%s refuses the agent id with a sentence, without querying', async (_name, run) => {
     await expect(run()).resolves.toEqual({ error: 'Unknown agent' });
     expectNoQuery();
   });
 
+  // One id per ticked box. Saving the rest without the malformed one would
+  // read as somebody having unticked it.
+  it.each(['groupIds', 'groupIdsHeld'])(
+    'saveAgent refuses a malformed %s whole, without querying',
+    async (field) => {
+      const data = form({ agentId: NOBODY, name: 'Omar', email: 'omar@shipblu.test' });
+      data.append(field, NOBODY);
+      data.append(field, MALFORMED_ID);
+
+      await expect(actions.saveAgent(INITIAL, data)).resolves.toEqual({ error: MALFORMED });
+      expectNoQuery();
+    },
+  );
+
+  it('createInvite refuses a malformed group id before it reads or writes anything', async () => {
+    const data = form({ email: 'new@shipblu.test', name: 'New', role: 'agent' });
+    data.append('groupIds', MALFORMED_ID);
+
+    await expect(actions.createInvite(INITIAL, data)).resolves.toEqual({ error: MALFORMED });
+    expectNoQuery();
+  });
   it.each([
     [
       'saveSubcategory',
-      () => actions.saveSubcategory(INITIAL, form({ id: MALFORMED, labelEn: 'A', labelAr: 'ا' })),
+      () =>
+        actions.saveSubcategory(INITIAL, form({ id: MALFORMED_ID, labelEn: 'A', labelAr: 'ا' })),
       'Unknown subcategory',
     ],
     [
       'setSubcategoryActive',
-      () => actions.setSubcategoryActive(INITIAL, form({ id: MALFORMED, active: 'true' })),
+      () => actions.setSubcategoryActive(INITIAL, form({ id: MALFORMED_ID, active: 'true' })),
       'Unknown subcategory',
     ],
     [
       'saveRootCause',
-      () => actions.saveRootCause(INITIAL, form({ id: MALFORMED, labelEn: 'A', labelAr: 'ا' })),
+      () => actions.saveRootCause(INITIAL, form({ id: MALFORMED_ID, labelEn: 'A', labelAr: 'ا' })),
       'Unknown cause',
     ],
     [
       'setRootCauseActive',
-      () => actions.setRootCauseActive(INITIAL, form({ id: MALFORMED, active: 'false' })),
+      () => actions.setRootCauseActive(INITIAL, form({ id: MALFORMED_ID, active: 'false' })),
       'Unknown cause',
     ],
   ])('%s refuses it with a sentence, without querying', async (_name, run, error) => {
@@ -83,10 +121,10 @@ describe('admin actions given an id no row can have', () => {
   it.each([
     [
       'saveCategory',
-      () => actions.saveCategory(INITIAL, form({ id: MALFORMED, labelEn: 'A', labelAr: 'ا' })),
+      () => actions.saveCategory(INITIAL, form({ id: MALFORMED_ID, labelEn: 'A', labelAr: 'ا' })),
     ],
-    ['retireCategory', () => actions.retireCategory(INITIAL, form({ id: MALFORMED }))],
-    ['restoreCategory', () => actions.restoreCategory(INITIAL, form({ id: MALFORMED }))],
+    ['retireCategory', () => actions.retireCategory(INITIAL, form({ id: MALFORMED_ID }))],
+    ['restoreCategory', () => actions.restoreCategory(INITIAL, form({ id: MALFORMED_ID }))],
   ])('%s refuses the category id with a sentence, without querying', async (_name, run) => {
     await expect(run()).resolves.toEqual({ error: GONE });
     expectNoQuery();
@@ -95,7 +133,12 @@ describe('admin actions given an id no row can have', () => {
   it('saveCategory refuses a malformed route group before reading anything', async () => {
     const state = await actions.saveCategory(
       INITIAL,
-      form({ key: 'wholesale', labelEn: 'Wholesale', labelAr: 'الجملة', routeGroupId: MALFORMED }),
+      form({
+        key: 'wholesale',
+        labelEn: 'Wholesale',
+        labelAr: 'الجملة',
+        routeGroupId: MALFORMED_ID,
+      }),
     );
 
     expect(state.error).toMatch(/group/i);
@@ -105,7 +148,7 @@ describe('admin actions given an id no row can have', () => {
   it('saveChannel refuses a malformed default group before writing the channel', async () => {
     const state = await actions.saveChannel(
       INITIAL,
-      form({ name: 'Support inbox', type: 'email', defaultGroupId: MALFORMED }),
+      form({ name: 'Support inbox', type: 'email', defaultGroupId: MALFORMED_ID }),
     );
 
     expect(state.error).toMatch(/group/i);
@@ -113,7 +156,7 @@ describe('admin actions given an id no row can have', () => {
   });
 
   it('saveChannel refuses an edit whose own id is malformed', async () => {
-    const state = await actions.saveChannel(INITIAL, form({ id: MALFORMED, name: 'Support' }));
+    const state = await actions.saveChannel(INITIAL, form({ id: MALFORMED_ID, name: 'Support' }));
 
     expect(state.error).toMatch(/out of date/);
     expectNoQuery();
@@ -138,7 +181,7 @@ describe('admin actions given an id no row can have', () => {
           nameEn: 'Delivery',
           slug: 'delivery',
           elements: JSON.stringify([{ kind: 'system', key: 'requester_email' }]),
-          [key]: MALFORMED,
+          [key]: MALFORMED_ID,
         }),
       );
 
@@ -146,6 +189,39 @@ describe('admin actions given an id no row can have', () => {
       expectNoQuery();
     },
   );
+});
+
+describe('group membership through the agents page, for an admin without admin.groups', () => {
+  /**
+   * A roster decides who is handed a group's tickets and which tickets an
+   * agent sees, and the group editor is `admin.groups`'. An admin whose
+   * override takes that away keeps `admin.agents`, and with it the agent
+   * editor and the invite — neither may become a way round it.
+   */
+  beforeEach(() => {
+    session.permissions = { 'admin.groups': false };
+  });
+
+  it.each([
+    ['ticking a group', { groupIds: NOBODY }],
+    ['unticking one', { groupIdsHeld: NOBODY }],
+  ])('saveAgent refuses %s before anything is read', async (_name, fields) => {
+    const data = form({ agentId: NOBODY, name: 'Omar', email: 'omar@shipblu.test', ...fields });
+
+    const state = await actions.saveAgent(INITIAL, data);
+
+    expect(state.error).toMatch(/Groups permission/);
+    expectNoQuery();
+  });
+
+  it('createInvite refuses to put the invitee in a group', async () => {
+    const data = form({ email: 'new@shipblu.test', name: 'New', role: 'agent', groupIds: NOBODY });
+
+    const state = await actions.createInvite(INITIAL, data);
+
+    expect(state.error).toMatch(/Groups permission/);
+    expectNoQuery();
+  });
 });
 
 describe('admin actions given an id that means the same row in another spelling', () => {

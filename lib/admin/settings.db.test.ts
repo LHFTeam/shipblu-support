@@ -7,6 +7,7 @@ import {
   automationRules,
   businessHours,
   cannedResponses,
+  channels,
   contacts,
   conversations,
   groupMembers,
@@ -32,7 +33,9 @@ import {
   listAnyHoliday,
   listAutomationRules,
   listCannedResponses,
+  listGroupMemberships,
   listGroupsForAdmin,
+  listNumberOwnerIds,
   listSkillHolders,
   listLocations,
   listOpenInvites,
@@ -161,6 +164,56 @@ describe('the admin settings lists', () => {
     ]);
   });
 
+  it('lists every membership as a pair, deactivated members included', async () => {
+    // Both pages draw from it: the group editor ticks a deactivated member so
+    // they can be taken off, and the agents page names a deactivated agent's
+    // groups so an admin can see where reactivating them puts them back.
+    const [support] = await db.select({ id: groups.id }).from(groups);
+    const [omar, former] = await db
+      .insert(agents)
+      .values([
+        { name: 'Omar', email: 'omar@shipblu.test' },
+        { name: 'Former', email: 'former@shipblu.test', isActive: false },
+      ])
+      .returning({ id: agents.id });
+    await db.insert(groupMembers).values([
+      { groupId: support!.id, agentId: omar!.id },
+      { groupId: support!.id, agentId: former!.id },
+    ]);
+
+    const rows = await listGroupMemberships();
+
+    expect(rows).toHaveLength(2);
+    expect(rows).toEqual(
+      expect.arrayContaining([
+        { groupId: support!.id, agentId: omar!.id },
+        { groupId: support!.id, agentId: former!.id },
+      ]),
+    );
+  });
+
+  it('names each agent who owns a WhatsApp number once, however many they own', async () => {
+    const [owner, other] = await db
+      .insert(agents)
+      .values([
+        { name: 'Nayera', email: 'nayera@shipblu.test' },
+        { name: 'Other', email: 'other@shipblu.test' },
+      ])
+      .returning({ id: agents.id });
+    const phone = (name: string, ownerAgentId: string | null) => ({
+      type: 'whatsapp' as const,
+      name,
+      ownerAgentId,
+      config: { phoneNumberId: `pn-${name}` },
+    });
+    await db
+      .insert(channels)
+      .values([phone('One', owner!.id), phone('Two', owner!.id), phone('Team', null)]);
+
+    expect(await listNumberOwnerIds()).toEqual([owner!.id]);
+    expect(await listNumberOwnerIds()).not.toContain(other!.id);
+  });
+
   it('asks nothing for no skills, and names each holder of the ones asked about', async () => {
     expect(await listSkillHolders([])).toEqual([]);
 
@@ -243,6 +296,8 @@ describe('the auto-response, automation and agent lists', () => {
       'new@shipblu.test',
       'old@shipblu.test',
     ]);
+    // The pending list names the groups each invite will add.
+    expect((await listOpenInvites(now)).map((row) => row.groupIds)).toEqual([[], []]);
   });
 });
 

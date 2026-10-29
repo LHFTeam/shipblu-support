@@ -1,5 +1,11 @@
 import { PageHeader } from '@/components/ui';
-import { listActiveAgents, listGroupsForAdmin, listScheduleOptions } from '@/lib/admin/settings';
+import {
+  listActiveAgents,
+  listDeactivatedAgents,
+  listGroupMemberships,
+  listGroupsForAdmin,
+  listScheduleOptions,
+} from '@/lib/admin/settings';
 import { requirePermission } from '@/lib/auth/guard';
 import { GroupsTable, NewGroup } from './forms';
 
@@ -18,10 +24,12 @@ export const dynamic = 'force-dynamic';
 export default async function GroupsPage() {
   await requirePermission('admin.groups');
 
-  const [rows, schedules, agentRows] = await Promise.all([
+  const [rows, schedules, agentRows, deactivatedRows, memberships] = await Promise.all([
     listGroupsForAdmin(),
     listScheduleOptions(),
     listActiveAgents(),
+    listDeactivatedAgents(),
+    listGroupMemberships(),
   ]);
 
   const scheduleChoices = schedules.map((schedule) => ({
@@ -33,12 +41,22 @@ export default async function GroupsPage() {
     value: agent.id,
     label: agent.name || agent.email,
   }));
+  const deactivatedChoices = deactivatedRows.map((agent) => ({
+    value: agent.id,
+    label: agent.name || agent.email,
+  }));
+  const membersOf = new Map<string, string[]>();
+  for (const { groupId, agentId } of memberships) {
+    const members = membersOf.get(groupId);
+    if (members) members.push(agentId);
+    else membersOf.set(groupId, [agentId]);
+  }
 
   return (
     <>
       <PageHeader
         title="Groups"
-        description="Teams that tickets are routed to. A channel, an automation or an SLA policy can all put a ticket into one. A group can also work its own hours, days and holidays, and hand its tickets out to its members automatically."
+        description="Teams that tickets are routed to. A channel, an automation or an SLA policy can all put a ticket into one. A group can also work its own hours, days and holidays, and hand its tickets out to its members automatically. Open a group to choose its members."
         actions={<NewGroup schedules={scheduleChoices} agents={agentChoices} />}
       />
 
@@ -48,10 +66,12 @@ export default async function GroupsPage() {
           scheduleName:
             schedules.find((schedule) => schedule.id === group.businessHoursId)?.name ?? null,
           members,
+          memberIds: membersOf.get(group.id) ?? [],
           tickets,
         }))}
         schedules={scheduleChoices}
         agents={agentChoices}
+        deactivatedAgents={deactivatedChoices}
         defaultScheduleName={defaultName}
       />
 

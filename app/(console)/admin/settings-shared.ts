@@ -72,3 +72,12 @@ export function refresh(path: string) {
  * where the form promises a sentence. An empty id on a save still means "create".
  */
 export const GONE = 'That no longer exists — reload the page and try again';
+
+/**
+ * What a save answers when a field that only ever carries ids the page drew —
+ * a set of checkboxes — holds something that is not one. A crafted request, or
+ * a page from a build that drew them differently: either way the form never
+ * offered it, so "no longer exists", `GONE`'s sentence, would misdescribe it.
+ */
+export const MALFORMED =
+  'That form sent something it never offered — reload the page and try again';
