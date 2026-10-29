@@ -30,7 +30,7 @@ before it assigns, and the transactions an agent's reply and a rule's assignment
 or move are now written in, with the rule's own timeline line inside them.
 
 **Stage 6 of that plan, reporting by category and `/reports/routing`, is built
-and in review, stacked on #432, not deployed.** It replaces #433, whose review
+and in review as #434, stacked on #432, not deployed.** It replaces #433, whose review
 it answers. Web migrates `0052_metrics_category` (`metrics_daily.category_id`
 and the one-row-per-slice key `metrics_daily_slice_key`; `db/sql/003` adds the
 one-dimension CHECK) and `0053_routing_undecided_index`. Production carries no

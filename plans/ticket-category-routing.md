@@ -89,7 +89,7 @@ update.
 | 4.2   | Merged: #429 (`c6eb1ac`), then `dev` → `main` in #431 (`ad6a062`). As built below                                                           | **Done.** All six services live on `ad6a062` by 21:49:08 UTC on 2026-10-27, web first; code only. Its checks read clean (below). Its operations wait for the user's go-ahead                                              |
 | 5.1   | In review as #432, branch `claude/jolly-noether-hxhez1-stage-5-1`. As built below                                                           | —                                                                                                                                                                                                                         |
 | 5.2   | Not started (operations: turning routing on)                                                                                                | —                                                                                                                                                                                                                         |
-| 6     | Draft #433, stacked on #432; unreviewed. As built so far below                                                                              | —                                                                                                                                                                                                                         |
+| 6     | In review as #434, stacked on #432; it replaces draft #433 and answers its review. As built below                                           | —                                                                                                                                                                                                                         |
 
 **4.2's deploy and checks, read on Render and production on 2026-10-27.**
 
@@ -4862,7 +4862,7 @@ Built on `claude/jolly-noether-hxhez1-stage-6` as draft #433, whose fourteen
 review threads were answered on `claude/epic-heisenberg-w60nbl`. That branch
 carries #433's three commits, rebased onto 5.1 at `357b25c` (#432, in review),
 and a fix for each thread, and replaces #433 as the stage's pull request,
-stacked on #432, whose base moves to `dev` once #432 merges. Four builders
+#434, stacked on #432, whose base moves to `dev` once #432 merges. Four builders
 worked from one written design, each piece with its own tests. The organisation's
 spend limit stopped the first session's screenshot pass, docs, full check and
 adversarial review on 2026-10-28; the review on #433 and the docs are answered
