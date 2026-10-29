@@ -1523,9 +1523,9 @@ preDeploy applied both at 19:43:50 UTC on 2026-10-25.
   An automation's `send_reply` on a `whatsapp_bot` ticket was queued as an
   email: the engine asked only `automatedReplyBlocked`, which knew nothing of
   the bot, and `carrierFor` answers `send_email` for it. The guard now refuses
-  the bot's tickets for every automated sender before anything is written. It
-  was found during 1.1; nothing reached it in production, where no rule sends
-  a reply.
+  the bot's tickets for every automated sender before anything is written
+  (#440). It was found during 1.1; nothing reached it in production, where no
+  rule sends a reply.
 - **Two more, found in #395's review and left out of its seam.**
   - _Closed, outside this plan, on 2026-10-23._ An agent's private reply on a
     comment thread was sent to the newest inbound comment's author, who can be
