@@ -178,6 +178,33 @@ export async function rollupMetrics(job?: ClaimedJob): Promise<void> {
     // pass for one that read it whole.
     const startedAt = new Date();
     const slices = await computeDay(day, context);
+
+    // Asked before anything is written, on every run and not just on
+    // backfills. Each rule `reconcileFailure` checks is a bug that is invisible
+    // in the output — a totals row that reads high looks like a busy day, not
+    // like a bug, and category slices summing past it print the overview's
+    // "No category" negative — so a day that breaks one is not written at all:
+    // its transaction is never opened, and the day keeps the rows, the agent
+    // rows and the marker the last run to write it left (none, if none did,
+    // and `countedThrough` then stops short of it, which is true). Checked
+    // after the write, as it was, the day was published and only the run
+    // failed, and the rule against a second totals row could never be reached:
+    // `metrics_daily_slice_key` refused that row first, as a duplicate key
+    // naming no slice. Counted and carried on rather than thrown, unlike a
+    // refused insert below: whether the older days agree is worth knowing from
+    // the same run, which still fails at the end.
+    // Not extended to the subcategory and root-cause tables, and the absence
+    // is deliberate rather than an oversight: they have no totals row to
+    // reconcile against, because a ticket carrying three subcategories appears
+    // under three of them. That is also exactly why they are not a dimension on
+    // `metrics_daily` — see `db/schema/metrics.ts`.
+    const failure = reconcileFailure(slices);
+    if (failure) {
+      inconsistent += 1;
+      log.error(`${day}: totals do not match ${failure}, so the day keeps its previous rows`);
+      continue;
+    }
+
     const rows = asRows(day, slices);
     const agentRows = withActivity(await computeAgentDay(day, context));
     const subcategoryRows = await computeSubcategoryDay(day, context);
@@ -195,9 +222,12 @@ export async function rollupMetrics(job?: ClaimedJob): Promise<void> {
     //
     // A refusal from that key or from the one-dimension CHECK
     // (`metrics_daily_one_dimension`) is not caught per day, unlike a day that
-    // fails to reconcile below. Either refuses only rows this job's own code
-    // built wrong, so every day would fail the same way, and the run failing
-    // loudly is the point. The day's
+    // fails to reconcile above. `reconcileFailure` has already refused every
+    // shape it can name, a second totals row among them, so what reaches a
+    // constraint is a shape it cannot: a slice built twice, or a row naming two
+    // dimensions. Either refuses only rows this job's own code built wrong, so
+    // every day would fail the same way, and the run failing loudly is the
+    // point. The day's
     // transaction rolls back whole, marker included, so it keeps the rows the
     // last good run wrote; the newer days before it in the plan are already
     // committed, and the older ones are left as they were.
@@ -258,24 +288,6 @@ export async function rollupMetrics(job?: ClaimedJob): Promise<void> {
       if (causeRows.length) await tx.insert(rootCauseMetricsDaily).values(causeRows);
     });
 
-    // Asserted on every write, not just on backfills: a day whose totals do not
-    // equal the sum of its own channel slices is the exact shape of the bug
-    // this job once shipped, and it is invisible in the output — as is a
-    // category slice above the totals, the other rule `reconcileFailure`
-    // checks. Counted and carried on rather than thrown, unlike a refused
-    // insert: the day's rows are written, and whether the days after it agree
-    // is worth knowing from the same run.
-    // Not extended to the subcategory and root-cause tables, and the absence
-    // is deliberate rather than an oversight: they have no totals row to
-    // reconcile against, because a ticket carrying three subcategories appears
-    // under three of them. That is also exactly why they are not a dimension on
-    // `metrics_daily` — see `db/schema/metrics.ts`.
-    const failure = reconcileFailure(slices);
-    if (failure) {
-      inconsistent += 1;
-      log.error(`${day}: totals do not match ${failure}`);
-    }
-
     // The category rows counted on their own, because a night that writes
     // none on a day that had categorised tickets is the failure no figure
     // beside them would show.
@@ -286,11 +298,16 @@ export async function rollupMetrics(job?: ClaimedJob): Promise<void> {
     );
   }
 
-  log.info(`rebuilt ${plan.days.length} day(s), ${plan.days.at(-1)} to ${plan.days[0]}`);
+  log.info(
+    `rebuilt ${plan.days.length - inconsistent} of ${plan.days.length} day(s), ` +
+      `${plan.days.at(-1)} to ${plan.days[0]}`,
+  );
 
   // Fail the run rather than reporting success over numbers that contradict
   // themselves: a green nightly job is the only signal anyone watches.
   if (inconsistent > 0) {
-    throw new Error(`[rollup_metrics] ${inconsistent} day(s) failed the totals reconciliation`);
+    throw new Error(
+      `[rollup_metrics] ${inconsistent} day(s) failed the totals reconciliation and were not written`,
+    );
   }
 }

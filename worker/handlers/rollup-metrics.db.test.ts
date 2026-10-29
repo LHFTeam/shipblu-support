@@ -140,30 +140,118 @@ describe('rollup_metrics, by category', () => {
     expect(second).toEqual(expect.arrayContaining(first));
   });
 
-  // Not caught per day: a slice the key refuses is this job's own code built
-  // wrong, so every day would fail alike, and the run should fail loudly. The
-  // day's transaction rolls back whole, so the day keeps what the last good
-  // run wrote, its marker included.
-  it('fails the run on a refused slice, and leaves the day as the last good run wrote it', async () => {
+  const all = { groupId: null, agentId: null, channel: null, categoryId: null };
+  const bucket = (ticketsCreated: number) => ({ ...emptyBucket(), ticketsCreated });
+
+  // Asked before the write: a day whose slices contradict each other is never
+  // written, so it keeps what the last run to write it left, its marker
+  // included, and the older days in the plan are still rebuilt.
+  it('refuses a second totals row before writing, says which rule, and leaves the day as it was', async () => {
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
     await categorisedTicket();
     await rollupMetrics(job({ day: DAY }));
     const before = await slices();
     const [marker] = await db.select().from(rollupDays);
 
     // What a round trip that dropped the category would hand back: the
-    // category's figures as a second all-null slice.
-    const all = { groupId: null, agentId: null, channel: null, categoryId: null };
+    // category's figures as a second all-null slice. Checked after the write,
+    // as it was, `metrics_daily_slice_key` refused it first, as a duplicate key
+    // naming no slice, and the rule saying so in words was never reached.
     const twice: Slice[] = [
-      { ...all, bucket: { ...emptyBucket(), ticketsCreated: 1 } },
-      { ...all, bucket: { ...emptyBucket(), ticketsCreated: 1 } },
+      { ...all, bucket: bucket(1) },
+      { ...all, bucket: bucket(1) },
     ];
     vi.mocked(computeDay).mockResolvedValueOnce(twice);
 
-    await expect(rollupMetrics(job({ day: DAY }))).rejects.toMatchObject({
-      cause: { code: '23505', constraint_name: 'metrics_daily_slice_key' },
-    });
+    await expect(rollupMetrics(job({ day: DAY }))).rejects.toThrow(
+      '1 day(s) failed the totals reconciliation and were not written',
+    );
+    expect(errors).toHaveBeenCalledWith(
+      expect.stringContaining(`${DAY}: totals do not match each other: 2 slices name no dimension`),
+    );
     expect(await slices()).toEqual(expect.arrayContaining(before));
     expect(await slices()).toHaveLength(before.length);
     expect(await db.select().from(rollupDays)).toEqual([marker]);
+    errors.mockRestore();
   });
+
+  it('writes nothing for a day whose category slices sum past its totals, and goes on to the older days', async () => {
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const sales = await categorisedTicket();
+    await rollupMetrics(job({ day: DAY }));
+    const before = await slices();
+    const [marker] = await db.select().from(rollupDays);
+    const [support] = await db
+      .select({ id: ticketCategories.id })
+      .from(ticketCategories)
+      .where(eq(ticketCategories.key, 'customer_support'));
+
+    // One ticket filed under two categories: one in the totals, two in the
+    // categories, which would print the report's "No category" as -1.
+    vi.mocked(computeDay).mockResolvedValueOnce([
+      { ...all, bucket: bucket(1) },
+      { ...all, channel: 'email', bucket: bucket(1) },
+      { ...all, categoryId: sales, bucket: bucket(1) },
+      { ...all, categoryId: support!.id, bucket: bucket(1) },
+    ]);
+
+    // Newest first: the refused day, then the day before it, computed for real.
+    await expect(rollupMetrics(job({ from: '2026-10-13', to: DAY }))).rejects.toThrow(
+      '1 day(s) failed the totals reconciliation',
+    );
+    expect(errors).toHaveBeenCalledWith(
+      expect.stringContaining(
+        `${DAY}: totals do not match the category slices, which sum past them in ticketsCreated`,
+      ),
+    );
+    expect(await slices()).toHaveLength(before.length);
+    expect(await slices()).toEqual(expect.arrayContaining(before));
+    const markers = await db.select().from(rollupDays).orderBy(rollupDays.day);
+    expect(markers.map((row) => row.day)).toEqual(['2026-10-13', DAY]);
+    expect(markers[1]).toEqual(marker);
+    errors.mockRestore();
+  });
+
+  // Not caught per day: a slice a constraint refuses although it reconciles is
+  // this job's own code built wrong, so every day would fail alike, and the
+  // run should fail loudly. The day's transaction rolls back whole, so the day
+  // keeps what the last good run wrote, its marker included.
+  it.each([
+    [
+      'metrics_daily_slice_key',
+      '23505',
+      // One email slice built twice: the totals still equal the channels' sum.
+      (): Slice[] => [
+        { ...all, bucket: bucket(2) },
+        { ...all, channel: 'email', bucket: bucket(1) },
+        { ...all, channel: 'email', bucket: bucket(1) },
+      ],
+    ],
+    [
+      'metrics_daily_one_dimension',
+      '23514',
+      // A row naming a channel and a category: the only channel slice, and the
+      // only category slice, so both sums agree with the totals.
+      (sales: string): Slice[] => [
+        { ...all, bucket: bucket(1) },
+        { ...all, channel: 'email', categoryId: sales, bucket: bucket(1) },
+      ],
+    ],
+  ])(
+    'fails the run when %s refuses what reconciles, and rolls the day back whole',
+    async (constraint, code, build) => {
+      const sales = await categorisedTicket();
+      await rollupMetrics(job({ day: DAY }));
+      const before = await slices();
+      const [marker] = await db.select().from(rollupDays);
+      vi.mocked(computeDay).mockResolvedValueOnce(build(sales));
+
+      await expect(rollupMetrics(job({ day: DAY }))).rejects.toMatchObject({
+        cause: { code, constraint_name: constraint },
+      });
+      expect(await slices()).toEqual(expect.arrayContaining(before));
+      expect(await slices()).toHaveLength(before.length);
+      expect(await db.select().from(rollupDays)).toEqual([marker]);
+    },
+  );
 });

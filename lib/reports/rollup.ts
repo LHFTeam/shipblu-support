@@ -79,7 +79,9 @@ const log = logger('rollup');
  * since the policy follows the category only until somebody answers. A ticket
  * nothing has filed is in the totals and in no category slice, so "no
  * category" is the totals less the category slices — never negative, because
- * `reconciles` refuses a day whose category slices sum past its totals.
+ * the nightly job writes no day whose category slices sum past its totals
+ * (`reconcileFailure`, asked before the write), and `byCategory` reads the
+ * totals and the categories in one statement.
  */
 
 /**
@@ -321,7 +323,8 @@ export type SliceAccumulator = {
  * key holds hands every category slice back as a second all-null slice: two
  * totals rows on the day, both summed by every reader, which `reconciles`
  * could not see while it compared only the first against the channels (it
- * counts them now, and `metrics_daily_slice_key` refuses the second at insert).
+ * counts them now, before the job writes, and `metrics_daily_slice_key`
+ * refuses the second at insert besides).
  * Exported so the round trip is tested without Postgres.
  */
 export function sliceAccumulator(): SliceAccumulator {
@@ -645,7 +648,9 @@ export function surveyedConversation(ticket: TicketColumns = conversations) {
 /**
  * Why a day's slices disagree with each other, completing "totals do not match
  * …", or null when they agree. `reconciles` is the same question as a yes or
- * no; the nightly job logs this, so its one line says which rule a day broke.
+ * no. The nightly job asks this of a day's slices before it writes them, and
+ * writes nothing for a day that fails, logging this so its one line says which
+ * rule the day broke.
  *
  * Three rules, each one a bug that is invisible in the output — a totals row
  * that reads high looks like a busy day, not like a bug — and each cheap
@@ -654,9 +659,10 @@ export function surveyedConversation(ticket: TicketColumns = conversations) {
  * - **One totals row.** `totalsOf` reads the first slice with every dimension
  *   null, so a second one — a category slice that lost its category on the
  *   way back out of the accumulator — is never compared with anything, and
- *   every reader sums both. `metrics_daily_slice_key` refuses it at insert,
- *   before this runs; here it is the same rule in code, so every test that
- *   asks this of `computeDay` holds the accumulator to it without a write.
+ *   every reader sums both. The nightly job asks this before it writes, so the
+ *   day is refused here, in words, and not written. `metrics_daily_slice_key`
+ *   would refuse the same rows at insert, but only as a duplicate key naming no
+ *   slice; it stays as the backstop for a writer that does not ask.
  * - **The totals are the sum of the channel slices.** Every countable fact
  *   carries a channel — `conversations.channel` is NOT NULL — so each one lands
  *   in exactly one channel slice. That equality is precisely what the
