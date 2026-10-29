@@ -63,7 +63,7 @@ records the answers, and the plan below already reflects them.
 
 ## Status and handoff
 
-As of 2026-10-29, 08:28 UTC. A session picking this plan up starts here.
+As of 2026-10-29, 11:56 UTC. A session picking this plan up starts here.
 Everything after this section is the design as it was reasoned and as each stage
 was built. This section says where the work stands, what comes next and how, and
 what has already bitten. Whoever moves any of it updates this section in the
@@ -89,7 +89,49 @@ update.
 | 4.2   | Merged: #429 (`c6eb1ac`), then `dev` → `main` in #431 (`ad6a062`). As built below                                                           | **Done.** All six services live on `ad6a062` by 21:49:08 UTC on 2026-10-27, web first; code only. Its checks read clean (below). Its first step is under way: the archive record run is done, and Shadow has run since 06:00:32 UTC on 2026-10-29, for two weeks at least, while a supervisor labels (below). Apply and the backlog wait for the user's go-ahead |
 | 5.1   | Merged: #432 (`9d5b4fb`), then `dev` → `main` in #435 (`1470902`). As built below                                                           | **Done.** All six services live on `1470902` by 06:35:36 UTC on 2026-10-29, web first, with `0051` applied. Shipped off: every channel on `default_group`. Its checks read clean (below); the signed-in one is left                                                                                                                                              |
 | 5.2   | Not started (operations: turning routing on)                                                                                                | —                                                                                                                                                                                                                                                                                                                                                                |
-| 6     | In review as #434, against `dev`; it replaces draft #433 and answers its review. As built below                                             | —                                                                                                                                                                                                                                                                                                                                                                |
+| 6     | Merged: #434 (`1daf6a5`), then `dev` → `main` in #437 (`9b4bc5b`). As built below                                                           | **Done.** All six services live on `9b4bc5b` by 11:29:28 UTC on 2026-10-29, web first, with `0052`–`0055` applied. Its checks read clean (below); the first Stage 6 nightly and the signed-in reads are left                                                                                                                                                     |
+
+**6's deploy and checks, read on Render and production on 2026-10-29.**
+
+- **Before** (read 11:16 UTC): 52 migrations; the duplicate-slice and
+  two-dimension queries both 0, over 341 `metrics_daily` rows and 61
+  `rollup_days`; no transaction older than a minute, none waiting on a lock or
+  idle in one, and no strong lock on `metrics_daily`, `rollup_days` or
+  `routing_decisions`; every job created in the hour before completed (2,515),
+  and the same one dead job. All six services ran `1470902`, and
+  `origin/main..origin/dev` held `1daf6a5` alone.
+- **The release and web.** #434 was squashed into `dev` as `1daf6a5`, its tree
+  identical to the reviewed head `13f977d`. #437 merged `dev` into `main` as
+  `9b4bc5b` once its nine checks were green. Web was deployed on it through
+  Render's API at 11:17:07. Its preDeploy logged `Applying drizzle
+migrations...` at 11:19:30.7 and was applying `001` by 11:19:30.9, so
+  `0052`–`0055` took under 0.3 s; all nine `db/sql` files were done at
+  11:19:31.7. Web was live at 11:20:15.
+- **Then the worker and the four crons.** The worker was triggered at 11:25:53
+  and live at 11:28:10. The crons were triggered at 11:28:37–43 and live at
+  11:29:14–28. The old worker took jobs until 11:30:32, about two and a half
+  minutes after Render reported the new one live.
+- **The checks** (read 11:25–11:56 UTC):
+  - 56 migrations; `metrics_daily.category_id`; `metrics_daily_slice_key` over
+    the day and the four dimensions, `NULLS NOT DISTINCT`;
+    `metrics_daily_one_dimension` present and validated;
+    `routing_decisions_started_idx` and `routing_decisions_undecided_idx`;
+    `rollup_days.categories_computed_at`, nullable, on no day yet;
+  - the Stage 6 verification rows: 0 duplicate slices, 0 rows naming two
+    dimensions, and no category row, since nothing in production carries a
+    category;
+  - all 2,615 jobs created since the migration completed, none overdue, and
+    the same one dead job;
+  - none of the six services logged a warning or an error, and web served no
+    5xx;
+  - every cron run since was successful: `shipblu-sla-sweep` from 11:32 and
+    `shipblu-time-automations` from 11:31;
+  - `/api/health` reports `9b4bc5b`; all nine channels still on
+    `default_group`, no `routing_decisions` row, the classifier in Shadow.
+
+  Left: the first Stage 6 nightly, at 00:00 UTC on 2026-10-30, which proves the
+  writer; and the signed-in reads of `/reports`, `/reports/routing` and
+  `/admin/dashboard`.
 
 **5.1's deploy and checks, read on Render and production on 2026-10-29.**
 
@@ -588,9 +630,28 @@ Every production write needs the user's go-ahead for that step, and the
    a transaction with `endHold`, as the console's assignee and group writes
    already were — one read and no lock on a ticket that never routed (fixed
    after the adversarial review, #0/#4).
-9. **Before Stage 5.2 turns routing on**, a person does 0.2's reorder and 0.6's
-   staffing, the support lead answers the questions still open (below), and the
-   classifier reaches `apply` by 4.2's sequence.
+9. **6 is deployed.** #434 was squashed into `dev` as `1daf6a5`, and #437
+   (`9b4bc5b`) took it to `main` on 2026-10-29; all six services were live on
+   it by 11:29:28 UTC, web first, with `0052`–`0055` applied, and its checks
+   read clean (above). The first Stage 6 nightly is left to read. The way back
+   is the plan's Stage 6 rollback: the nightly and the worker to `1470902`
+   first, then the category rows deleted, then web.
+10. **Before Stage 5.2 turns routing on**, a person does 0.2's reorder and 0.6's
+    staffing, the support lead answers the questions still open (below), and the
+    classifier reaches `apply` by 4.2's sequence. Read on 2026-10-29 at 11:20
+    UTC, none of 5.2's prerequisites holds yet:
+    - the SLA policies are still in 0.2's "Now" order, Live Support (Customer
+      Care) first and the default;
+    - Customer Care, Inbound Sales Team and Merchant Care have no members;
+      Support has three, one of them active and accepting, and 178 open
+      unassigned tickets (129 on 2026-10-21);
+    - six channels still default to Support: the mailbox, web chat, Instagram,
+      the Facebook Page, WhatsApp Support and ShipBlu Admin;
+    - no category has a route group;
+    - the only automatic assignments lately are a number's owner's hand-backs,
+      the last at 20:08 UTC on 2026-10-27; nothing from the rota or the sweep;
+    - no comment channel row exists (Q11);
+    - the classifier is in Shadow, until 2026-11-12 at the earliest.
 
 ### 1.3, as built
 
@@ -5081,8 +5142,7 @@ production on 2026-10-29, it is now as fixed as any other.
     than this plan.
   - **The widget's open/closed line** still reads the channel's default
     group's calendar (Risks).
-  - **`/reports/routing` is Stage 6's** (below); until it is deployed,
-    `routing_decisions` answers by query.
+  - **`/reports/routing` is Stage 6's** (below), deployed on 2026-10-29.
   - **`sendCannedReply` and the engine's `loadTicket` still act on a deleted
     or merged ticket** in general (review #3). Only the router's resume path
     is guarded, which is the one place 5.1 made reach such a ticket.
@@ -5539,9 +5599,10 @@ seeded (118 files, 1,584 tests); and every CI check.
    table, restructured mid-pass. There is no browser suite, so what it finds
    goes in the pull request.
 2. In production after the deploy, the verification rows added for Stage 6 to
-   the table below.
+   the table below. Read clean on 2026-10-29; the first nightly's rows are left.
 
-**Deploy, when it is time.**
+**Deploy.** Done on 2026-10-29 in this order, with these reads (6's deploy and
+checks, in the status section).
 
 - **Order.** Release after 5.1 and apart from it, so Stage 6's rollback has a
   commit that keeps 5.1. Web first: only web migrates, and the new readers
