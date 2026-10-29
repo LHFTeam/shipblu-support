@@ -269,6 +269,27 @@ export const conversations = pgTable(
      */
     autoRespondedAt: timestamp('auto_responded_at', { withTimezone: true }),
 
+    /**
+     * The end of the routing window, written in the insert transaction of a
+     * ticket whose channel routes by category (`startRouting`), and null on
+     * every other ticket. With `routingDecidedAt` it is what the hold is
+     * computed from (`isHeld` in `lib/routing/hold.ts`): on the row because
+     * `assignConversation` already reads the whole row, so the check costs the
+     * sweep nothing.
+     *
+     * Anchored on when ingest processed the message, not on `created_at`,
+     * which on email is our receipt: an email processed late after a worker
+     * pause still gets its whole window.
+     */
+    routingWindowEndsAt: timestamp('routing_window_ends_at', { withTimezone: true }),
+
+    /**
+     * When routing finished with this ticket — the router's last phase, or a
+     * person or rule deciding first (`endHold`). Set once and never moved
+     * (`coalesce`), so the hold, once over, never comes back.
+     */
+    routingDecidedAt: timestamp('routing_decided_at', { withTimezone: true }),
+
     /** Number of times the ticket has moved back out of a resolved status. */
     reopenCount: integer('reopen_count').notNull().default(0),
 

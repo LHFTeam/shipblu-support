@@ -100,7 +100,7 @@ export function ClassifierForm({
         </Field>
         <Field
           label="Routing window"
-          hint="Minutes a new ticket will wait for its category before it is routed without one. Nothing reads this until tickets are routed by category."
+          hint="Minutes a new ticket on a channel that routes by category waits for its category before it is routed without one. Copied onto each ticket as it arrives, so a change never moves a window already running."
         >
           <Input
             name="routingWindowMinutes"

@@ -16,6 +16,8 @@ import { purgeTicket } from '../../ticket-actions';
 import { PurgePanel } from '../../purge-panel';
 import type { PurgePreview } from '@/lib/admin/purge-summary';
 import { categoryLabel, categoryOptions, type CategoryChoice } from '@/lib/categories/choices';
+import type { HandToTarget } from '@/lib/routing/hand-to';
+import { HandToGroup, RoutingHint } from './hand-to-group';
 import { SideConversationsField } from './side-conversations';
 import { CustomFields, FieldSelect, SidebarField, TagField } from './ticket-fields';
 import { ShipmentsField, ShippingAccountsField } from './shipments-field';
@@ -55,6 +57,7 @@ export function Sidebar({
   purgeRefusal,
   currentAgentId,
   canViewContact,
+  handTo,
 }: {
   conversation: ConversationDetail;
   statuses: { id: string; name: string; category: string }[];
@@ -72,8 +75,16 @@ export function Sidebar({
   currentAgentId: string;
   /** Whether the Contact tab may link to the contact's page, which refuses everybody else. */
   canViewContact: boolean;
+  /** "Hand to <group>", when the page offers it (`handToTarget`). */
+  handTo: HandToTarget | null;
 }) {
   const { requester } = conversation;
+  // Whose work the hand-over would take away, which is what makes it two
+  // clicks: an agent's own ticket, or nobody's, is theirs to move in one.
+  const clears =
+    conversation.assigneeAgentId && conversation.assigneeAgentId !== currentAgentId
+      ? (conversation.assigneeName ?? 'its assignee')
+      : null;
   const linked = conversation.shipments.length + conversation.shippingAccounts.length > 0;
 
   const properties = (
@@ -150,6 +161,7 @@ export function Sidebar({
               })),
             ]}
           />
+          <RoutingHint hold={conversation} does="Assigning it now ends the route." />
         </SidebarField>
 
         <SidebarField label="Group">
@@ -163,6 +175,7 @@ export function Sidebar({
               ...groups.map((g) => ({ value: g.id, label: g.name })),
             ]}
           />
+          <RoutingHint hold={conversation} does="Moving it now ends the route." />
         </SidebarField>
 
         {/* Which team's work it is. Beside Group because from Stage 5 it is
@@ -187,6 +200,18 @@ export function Sidebar({
                 : 'None'}
             </p>
           )}
+          {/* During the hold a category edit routes the ticket; after it, the
+              edit relabels and the hand-over below is what moves it. */}
+          {canSetCategory ? (
+            <RoutingHint hold={conversation} does="Choosing its category now routes it." />
+          ) : null}
+          <HandToGroup
+            key={conversation.id}
+            conversationId={conversation.id}
+            target={handTo}
+            assigneeAgentId={conversation.assigneeAgentId}
+            clears={clears}
+          />
         </SidebarField>
 
         <SidebarField label="Priority">

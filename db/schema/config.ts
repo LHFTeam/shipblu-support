@@ -20,6 +20,7 @@ import {
   channelEnum,
   priorityEnum,
   rootCauseOwnerEnum,
+  routingModeEnum,
   slaHoursSourceEnum,
   statusCategoryEnum,
   ticketFieldTypeEnum,
@@ -1149,6 +1150,20 @@ export const channels = pgTable(
 
     /** Default group and status applied to tickets arriving on this channel. */
     defaultGroupId: uuid('default_group_id').references(() => groups.id, { onDelete: 'set null' }),
+
+    /**
+     * Whether this channel's new tickets stay in the default group or are
+     * routed by their category (`lib/routing/`). A column rather than a key in
+     * `config`, for `ownerAgentId`'s reason: `saveChannel` rebuilds `config`
+     * by type on every edit, and a mode kept there would be dropped by
+     * renaming the channel.
+     *
+     * Read only through `routingModeOf`, which answers `default_group` for a
+     * coexistence number and the bot whatever the column says: a coexistence
+     * number's replies are typed on the phone, so routing its tickets changes
+     * nothing about who answers them.
+     */
+    routingMode: routingModeEnum('routing_mode').notNull().default('default_group'),
 
     isActive: boolean('is_active').notNull().default(true),
 

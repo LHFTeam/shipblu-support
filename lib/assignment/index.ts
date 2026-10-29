@@ -12,17 +12,29 @@ import {
   ticketForms,
   ticketStatuses,
 } from '@/db/schema';
+import { gotNoAnswer } from '@/lib/errors';
 import { loadHoursCatalog } from '@/lib/hours/catalog';
 import { isWithinBusinessHours } from '@/lib/hours';
 import { groupHours } from '@/lib/hours/resolve';
+import { logger } from '@/lib/log';
+import { isWorkable } from '@/lib/routing/decide';
+import { endHold } from '@/lib/routing/end-hold';
+import { recordHeldAssignment } from '@/lib/routing/held-assignment';
+import { isHeld } from '@/lib/routing/hold';
 import { conversationFacts } from '@/lib/rules/facts';
 import { isReadOnlyChannel } from '@/lib/tickets/channel-policy';
 import { openBacklog } from '@/lib/tickets/backlog';
+import { CHANGE_STAMP } from '@/lib/tickets/change-stamp';
 import { moveToGroupIfElsewhere } from '@/lib/tickets/move-group';
+import { lockedStatusCategory, statusCategoryOf } from '@/lib/tickets/status-category';
 import { recordOwnerAssigned } from '@/lib/whatsapp/number-owner';
 import { filterCandidates, type CandidateRow } from './eligibility';
 import { pickLoadBalanced, pickRoundRobin } from './strategies';
 import { activeSkills, matchingSkills } from './skills';
+
+const log = logger('assignment');
+
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 /**
  * Handing a ticket to a person.
@@ -55,6 +67,15 @@ import { activeSkills, matchingSkills } from './skills';
  * moves the ticket there first, because a rule routing it is describing where
  * the work belongs whoever then holds it. A deactivated owner is nobody here,
  * and the ticket takes the rota like any other.
+ *
+ * And one kind of ticket waits: one held for the router
+ * (`plans/ticket-category-routing.md`, decision 5), whose group is not
+ * settled yet. Assigning it in the group it arrived in and then taking it back
+ * when it moved would break the first rule above, and show the ticket in one
+ * agent's queue before it vanished; so every path answers `awaiting_route`
+ * until the hold ends, and whatever ends it assigns it then — with the
+ * strategy a rule asked for meanwhile, which the hold keeps
+ * (`recordHeldAssignment`).
  */
 
 export type AssignmentStrategy = (typeof groups.$inferSelect)['assignmentStrategy'];
@@ -68,7 +89,15 @@ export type SkipReason =
   | 'no_group_members'
   | 'none_available'
   | 'all_at_capacity'
-  | 'no_skill_match';
+  | 'no_skill_match'
+  /**
+   * Held for the router (`lib/routing/hold.ts`): the ticket's group is not
+   * settled yet, and whatever ends the hold assigns it then. Never recorded —
+   * a timeline entry per skip once produced 1,432 rows for 137 tickets.
+   */
+  | 'awaiting_route'
+  /** The ticket left the group between the read and the lock. Whoever moved it assigns it. */
+  | 'moved';
 
 export type AssignmentOutcome = Picked & {
   /**
@@ -98,11 +127,37 @@ const WORTH_RECORDING: ReadonlySet<SkipReason> = new Set<SkipReason>([
   'no_skill_match',
 ]);
 
+/** What the routing half of `assignConversation` did, as it happens (`routed`). */
+export type Routed = {
+  /** This call moved the ticket into the group the caller named. */
+  moved: boolean;
+  /**
+   * The ticket is in the group the caller named once the routing half is over:
+   * moved there by this call, or found there — by this call's read, or by its
+   * move, another writer having put it there since that read. What a caller
+   * keeping track of where its own rules left the ticket takes (the engine's
+   * `Pass.groupId`), since a rule naming the group the ticket is already in has
+   * left it there as surely as one that moved it. Unset when the caller named
+   * no group, or the ticket stays elsewhere: held by somebody, no longer work,
+   * or the group gone.
+   */
+  inGroup?: boolean;
+  /** The move ended a routing hold (`endsHoldAs`), which owes the held reply. */
+  endedHold?: boolean;
+};
+
 export type AssignOptions = {
   /** Route into this group instead of the ticket's own. Also moves the ticket. */
   groupId?: string | null;
   /** Override the group's configured strategy for this one assignment. */
   strategy?: AssignmentStrategy;
+  /**
+   * The group the caller's rule matched the ticket in — the automation
+   * engine's snapshot, as the moves of its own pass left it. On a ticket held
+   * for the router, `strategy` is kept for the hold's end only while the ticket
+   * is still there (`keepForHold`); left out, the group this call read it in.
+   */
+  matchedInGroupId?: string | null;
   /** Names the rule or job that asked, for the timeline. */
   actorLabel?: string;
   now?: Date;
@@ -114,7 +169,14 @@ export type AssignOptions = {
    * ticket in the new group on the old one's policy and hours. A fresh
    * `{ moved: false }`; `movedGroup` reads the same answer once the call returns.
    */
-  routed?: { moved: boolean };
+  routed?: Routed;
+  /**
+   * Ends a routing hold (`endHold`), as this outcome, in the transaction that
+   * moves the ticket into `groupId` — and only when it does move it. A rule's
+   * `auto_assign` naming another group has decided where the ticket goes;
+   * one naming the group it is in has decided nothing, and stays held.
+   */
+  endsHoldAs?: 'rule' | 'manual';
 };
 
 /**
@@ -140,7 +202,7 @@ export async function assignConversation(
 async function routeAndPick(
   conversationId: string,
   options: AssignOptions,
-  routed: { moved: boolean },
+  routed: Routed,
 ): Promise<Picked> {
   const now = options.now ?? new Date();
 
@@ -166,15 +228,7 @@ async function routeAndPick(
 
   const conversation = ticket.conversation;
 
-  // A bot transcript is not work to hand out, and neither is a deleted, merged,
-  // spam or finished ticket. Same population the dashboard calls the backlog.
-  const assignable = !(
-    conversation.deletedAt ||
-    conversation.mergedIntoId ||
-    conversation.isSpam ||
-    isReadOnlyChannel(conversation.channel) ||
-    !['open', 'pending'].includes(ticket.statusCategory)
-  );
+  const assignable = isWorkToHandOut({ ...conversation, statusCategory: ticket.statusCategory });
 
   /*
    * The group a caller is routing the ticket to, decided once for every branch
@@ -190,6 +244,7 @@ async function routeAndPick(
    */
   const routeTo =
     options.groupId && options.groupId !== conversation.groupId ? options.groupId : null;
+  if (options.groupId && !routeTo) routed.inGroup = true;
 
   /*
    * The move, made once and here, so the one write is the one answer
@@ -202,13 +257,39 @@ async function routeAndPick(
    * purpose, and a rule has never moved their ticket.
    */
   const holder = conversation.assigneeAgentId;
+  let endedHold = false;
   if (routeTo && assignable && (!holder || holder === conversation.accountableAgentId)) {
-    await moveToGroup(conversationId, routeTo, options.actorLabel, routed);
+    endedHold = await moveToGroup(conversationId, routeTo, options, routed);
   }
 
   if (conversation.assigneeAgentId) return { assignedTo: null, reason: 'already_assigned' };
 
   if (!assignable) return { assignedTo: null, reason: 'not_assignable' };
+
+  // The group a strategy kept for the hold's end is about (`keepForHold`): the
+  // one the caller named, where the move above has put the ticket; else the
+  // one its rule matched the ticket in; else the one this call read it in.
+  const pickFor =
+    options.groupId ??
+    (options.matchedInGroupId === undefined ? conversation.groupId : options.matchedInGroupId);
+
+  /*
+   * Held for the router, ahead of the owner and the rota both: the hold is
+   * absolute, and whatever ends it assigns the ticket then (`afterHoldEnded`).
+   * Read off the snapshot, which is safe because only an unassigned snapshot
+   * gets here. A hold is born in the ticket's insert, and a decision, an
+   * assignee or the grace running out ends it. Only the assignee's end can be
+   * undone: taking it off a ticket nobody has decided, inside the grace, puts
+   * it back in the hold (`lib/routing/hand-to.ts` relies on that), while a
+   * decision is never undone and the window never reopens. So a ticket the
+   * snapshot read as unassigned and not held cannot have become held since,
+   * and a stale "held" costs a skip that whoever ended the hold makes good.
+   * Checked again under the lock below all the same. A move this call made
+   * for a rule has ended it.
+   */
+  if (!endedHold && isHeld(conversation, now)) {
+    return keepForHold(conversationId, options, pickFor);
+  }
 
   // The number's owner, ahead of everything the rota would ask — see the
   // module header for why none of it applies.
@@ -281,6 +362,54 @@ async function routeAndPick(
 
   const outcome = await db.transaction(async (tx) => {
     /*
+     * The ticket's row first, then the group's: the order the router, the
+     * console and every other writer that moves a ticket take them in, so an
+     * assignment never waits on a move that waits on it. And the re-read under
+     * it is the answer, not a guess: a ticket moved out of this group, picked
+     * up by hand, put on hold, resolved, merged, deleted or marked spam since
+     * the snapshot cannot be assigned here. Without the last four, an agent's
+     * resolve landing while the pick read its roster left the ticket resolved
+     * in somebody's name, the cursor moved past them for work they never got,
+     * and an `assigned` line after the resolve on the timeline. No join under
+     * the lock — under READ COMMITTED a locked read that waited re-checks the
+     * joined rows and can answer no row at all — so the status is a subquery
+     * (`statusCategoryOf`), the same rule `lib/tickets/status-category.ts`
+     * gives every locked read.
+     *
+     * NO KEY UPDATE, as every lock on a ticket's row is (`endHold` says why in
+     * full): it waits on every other writer of the row just the same, where
+     * FOR UPDATE would also stop every message inserted on the ticket — whose
+     * foreign key takes KEY SHARE — until the pick below had committed.
+     */
+    const [current] = await tx
+      .select({
+        assigneeAgentId: conversations.assigneeAgentId,
+        groupId: conversations.groupId,
+        routingWindowEndsAt: conversations.routingWindowEndsAt,
+        routingDecidedAt: conversations.routingDecidedAt,
+        channel: conversations.channel,
+        statusId: conversations.statusId,
+        statusCategory: statusCategoryOf(),
+        deletedAt: conversations.deletedAt,
+        isSpam: conversations.isSpam,
+        mergedIntoId: conversations.mergedIntoId,
+      })
+      .from(conversations)
+      .where(eq(conversations.id, conversationId))
+      .for('no key update');
+    if (!current) return { assignedTo: null, reason: 'not_assignable' as SkipReason };
+    // An agent may have picked the ticket up by hand since the check above.
+    if (current.assigneeAgentId) {
+      return { assignedTo: null, reason: 'already_assigned' as SkipReason };
+    }
+    const statusCategory = await lockedStatusCategory(tx, current);
+    if (!isWorkToHandOut({ ...current, statusCategory })) {
+      return { assignedTo: null, reason: 'not_assignable' as SkipReason };
+    }
+    if (current.groupId !== groupId) return { assignedTo: null, reason: 'moved' as SkipReason };
+    if (isHeld(current, now)) return { assignedTo: null, reason: 'awaiting_route' as SkipReason };
+
+    /*
      * Serialise this group's assignments against each other.
      *
      * Without the lock, two tickets arriving in the same second read the same
@@ -296,17 +425,6 @@ async function routeAndPick(
       .from(groups)
       .where(eq(groups.id, groupId))
       .for('update');
-
-    // Re-read the assignee inside the lock. Between the check above and here,
-    // an agent may have picked the ticket up by hand.
-    const current = await tx
-      .select({ assigneeAgentId: conversations.assigneeAgentId })
-      .from(conversations)
-      .where(eq(conversations.id, conversationId))
-      .limit(1);
-    if (current[0]?.assigneeAgentId) {
-      return { assignedTo: null, reason: 'already_assigned' as SkipReason };
-    }
 
     const roster = await loadRoster(tx, groupId);
     if (roster.length === 0) {
@@ -334,10 +452,15 @@ async function routeAndPick(
 
     if (!agentId) return { assignedTo: null, reason: 'none_available' as SkipReason };
 
-    await tx
+    // Still guarded, the module's one invariant, though the row is locked; and
+    // checked, so a write that matched nothing advances no cursor and records
+    // no assignment that did not happen.
+    const taken = await tx
       .update(conversations)
       .set({ assigneeAgentId: agentId, assignedAt: now })
-      .where(and(eq(conversations.id, conversationId), isNull(conversations.assigneeAgentId)));
+      .where(and(eq(conversations.id, conversationId), isNull(conversations.assigneeAgentId)))
+      .returning({ id: conversations.id });
+    if (taken.length === 0) return { assignedTo: null, reason: 'already_assigned' as SkipReason };
 
     await tx.update(groups).set({ lastAssignedAgentId: agentId }).where(eq(groups.id, groupId));
 
@@ -348,6 +471,10 @@ async function routeAndPick(
       // this mine?" answerable — it names the mechanism, and the rule when a
       // rule asked.
       actorLabel: options.actorLabel ?? 'auto_assign',
+      // Stamped under the lock this transaction may have waited for, never at
+      // its start: an edit committed while the pick waited would otherwise
+      // sort after the assignment that followed it (`CHANGE_STAMP`).
+      createdAt: CHANGE_STAMP,
       data: {
         to: agentId,
         strategy,
@@ -358,11 +485,72 @@ async function routeAndPick(
     return { assignedTo: agentId, reason: null };
   });
 
-  if (!outcome.assignedTo && outcome.reason) {
-    await recordSkip(conversationId, outcome.reason, options.actorLabel);
+  const answer =
+    outcome.reason === 'awaiting_route'
+      ? await keepForHold(conversationId, options, pickFor)
+      : outcome;
+  if (!answer.assignedTo && answer.reason) {
+    await recordSkip(conversationId, answer.reason, options.actorLabel);
   }
 
-  return outcome;
+  return answer;
+}
+
+/**
+ * Whether a ticket is work to hand out at all. A bot transcript is not, and
+ * neither is a deleted, merged, spam or finished ticket — the population the
+ * dashboard calls the backlog. Asked of the snapshot before anything is
+ * written, and again of the row under the pick's lock, so the two cannot come
+ * to disagree about what qualifies.
+ *
+ * All but the bot is the router's `isWorkable`, not a copy of it, so this,
+ * the router's `not_open`, the inbox's "Routing…" (`routingHold`) and the Hand
+ * to offer (`handToTarget`, which adds the same read-only check) read one rule
+ * of what work is, and a status category added later changes all four at
+ * once. The bot is this module's own question: the router never meets a bot
+ * ticket, since `routingModeOf` never routes one.
+ */
+function isWorkToHandOut(ticket: Parameters<typeof isWorkable>[0] & { channel: string }): boolean {
+  return isWorkable(ticket) && !isReadOnlyChannel(ticket.channel);
+}
+
+/**
+ * A strategy the caller asked for, kept for the end of the hold that made it
+ * wait: an `auto_assign` rule's, the only caller that names one. Without it
+ * the hold's end picks with the group's own, and a round-robin rule over a
+ * group left on `manual` assigns nobody (`recordHeldAssignment`).
+ *
+ * Kept only while the ticket is still in `groupId`, the group the pick is
+ * about, read under the ticket's lock: a pass that read the ticket before
+ * somebody else moved it — a person, or a rule in another pass — would
+ * otherwise keep, after the move, a pick about the group the ticket has left.
+ * Answered `moved` then, as the rota's own re-read answers a ticket that left
+ * its group, and whatever ends the hold assigns it in the group it is in. A
+ * move landing after the pick is kept, while the hold lasts, drops it
+ * (`endHold`'s `movedGroup`); one after the hold has ended does not.
+ *
+ * In a transaction of its own, never inside the pick's or any other, and
+ * best-effort: the skip is the answer either way, and a failure here costs the
+ * rule its strategy, not the caller its pass.
+ */
+async function keepForHold(
+  conversationId: string,
+  { strategy, actorLabel }: Pick<AssignOptions, 'strategy' | 'actorLabel'>,
+  groupId: string | null,
+): Promise<Picked> {
+  if (!strategy) return { assignedTo: null, reason: 'awaiting_route' };
+  try {
+    const kept = await recordHeldAssignment(
+      conversationId,
+      strategy,
+      actorLabel ?? 'auto_assign',
+      groupId,
+    );
+    if (kept === 'moved') return { assignedTo: null, reason: 'moved' };
+  } catch (error) {
+    log.error(`could not keep the held strategy on ${conversationId}`, error);
+  }
+  return { assignedTo: null, reason: 'awaiting_route' };
 }
 
 /**
@@ -384,30 +572,157 @@ async function routeAndPick(
 async function moveToGroup(
   conversationId: string,
   groupId: string,
-  actorLabel: string | undefined,
-  routed: { moved: boolean },
-): Promise<void> {
-  if (!(await moveToGroupIfElsewhere(conversationId, groupId, { groupMustExist: true }))) {
-    return;
-  }
+  { actorLabel, endsHoldAs }: Pick<AssignOptions, 'actorLabel' | 'endsHoldAs'>,
+  routed: Routed,
+): Promise<boolean> {
+  const label = actorLabel ?? 'auto_assign';
+  // The hold ends in the move's own transaction, so neither commits without
+  // the other: stamped first, the sweep could assign the ticket in the group it
+  // is about to leave; stamped after, a crash between would leave it in the
+  // rule's group still held, for the router to move away from the rule.
+  const result = await db.transaction(async (tx) => {
+    if (
+      !(await moveToGroupIfElsewhere(conversationId, groupId, {
+        executor: tx,
+        groupMustExist: true,
+      }))
+    ) {
+      // Not moved: the group is gone, or another writer put the ticket in it
+      // since this call's read — which `groupMustExist` answers alike, and
+      // which the caller is owed apart (`inGroup`). Read only on this path,
+      // which is that race or a rule naming a deleted group.
+      const [found] = await tx
+        .select({ groupId: conversations.groupId })
+        .from(conversations)
+        .where(eq(conversations.id, conversationId));
+      return { moved: false, endedHold: false, inGroup: found?.groupId === groupId };
+    }
+    // In the move's transaction and ahead of the hold's end, so the timeline
+    // reads the move before the `routed` line naming it, as the console's
+    // group case writes them: `endHold` stamps its line when it is written
+    // (`CHANGE_STAMP`), and this one, inserted after the commit as it was,
+    // sorted after the decision it was the reason for.
+    await recordGroupChanged(tx, conversationId, groupId, label);
+    // On a decision in flight, ending nothing, it drops a rule's pick kept for
+    // the group the ticket has just left (`movedGroup`).
+    const endedHold = endsHoldAs
+      ? await endHold(tx, conversationId, endsHoldAs, { label, movedGroup: true })
+      : false;
+    return { moved: true, endedHold, inGroup: true };
+  });
+  if (result.inGroup) routed.inGroup = true;
+  if (!result.moved) return false;
 
-  // Reported before the event is written: the move has committed, so a
-  // failure recording it must not also lose the follow-up it owes.
   routed.moved = true;
-  await db.insert(conversationEvents).values({
+  if (result.endedHold) routed.endedHold = true;
+  return result.endedHold;
+}
+
+/**
+ * The `group_changed` line for a move this call made, in the move's
+ * transaction and ahead of the hold's end, logged when refused
+ * (`recordLineIn`). The engine's `assign_group` writes its line the same way
+ * (`recordIn`).
+ */
+async function recordGroupChanged(
+  tx: Tx,
+  conversationId: string,
+  groupId: string,
+  actorLabel: string,
+): Promise<void> {
+  const refused = await recordLineIn(tx, {
     conversationId,
     type: 'group_changed',
-    actorLabel: actorLabel ?? 'auto_assign',
+    actorLabel,
     data: { to: groupId },
   });
+  if (refused) {
+    log.error(`could not record the move of ${conversationId} to group ${groupId}`, refused);
+  }
+}
+
+/**
+ * A timeline line written inside the transaction of the write it records — a
+ * rule's move or assignment, or this module's move for one — in a savepoint of
+ * its own (`tx.transaction`). Answers the refusal, for the caller to log in its
+ * own words, or null once the line is written.
+ *
+ * In the write's transaction, ahead of `endHold`, so the timeline reads the
+ * write before the `routed` line it caused; and stamped once the write holds
+ * the ticket's lock (`CHANGE_STAMP`), never at the transaction's start, which
+ * after a wait on that lock sorts the line before an event committed while it
+ * waited.
+ *
+ * In a savepoint because the line records the write and is not the write:
+ * refused by Postgres — a trigger, a constraint — it is rolled back to and
+ * answered, and the write, the hold's end and the follow-up they owe all
+ * stand, as they did while the line was written after the commit. Only a
+ * refusal. A statement that got no answer — `57014`, the admission gate giving
+ * it up as lost or a cancel Postgres answered — is thrown on, so the body fails
+ * and its transaction rolls back. A cancel is a statement that ran into its
+ * deadline, and is not tried again inside a write that has already waited that
+ * long: failing the write is the conservative answer. The gate's give-up, which
+ * this cannot tell from a cancel by its code, must fail it, since that is what
+ * `db/client.ts` relies on once it has told the caller the transaction failed:
+ * swallowed here, the body went on queueing `endHold` behind the stuck
+ * statement, and a connection that answered after all committed a move and a
+ * hold's end the caller had been told had failed, with nothing owed for either
+ * ever run.
+ */
+export async function recordLineIn(
+  tx: Tx,
+  line: Omit<typeof conversationEvents.$inferInsert, 'createdAt'>,
+): Promise<unknown> {
+  try {
+    await tx.transaction(async (savepoint) => {
+      await savepoint.insert(conversationEvents).values({ ...line, createdAt: CHANGE_STAMP });
+    });
+    return null;
+  } catch (error) {
+    if (refusedByPostgres(error)) return error;
+    throw error;
+  }
+}
+
+/**
+ * Whether Postgres itself answered a statement with an error, other than a
+ * cancel: postgres.js's `PostgresError`, which drizzle hands on as the `cause`
+ * of its own error for a statement it issued, and postgres.js throws bare for
+ * the savepoint statements it writes itself. Known by its name, because
+ * postgres.js is loaded as a value by `db/client.ts` alone
+ * (`pool-confinement`); the name is the class's own, and survives because
+ * neither the worker (`tsx`) nor Next (`serverExternalPackages`) bundles the
+ * package. The admission gate's own errors are plain ones carrying `57014`,
+ * and Postgres's answer to a cancel is a `PostgresError` carrying it too
+ * (`gotNoAnswer`, asked of the `PostgresError` itself).
+ */
+function refusedByPostgres(error: unknown): boolean {
+  const cause = error instanceof Error ? error.cause : undefined;
+  return [error, cause].some(
+    (candidate) =>
+      candidate instanceof Error && candidate.name === 'PostgresError' && !gotNoAnswer(candidate),
+  );
 }
 
 /**
  * Give an unassigned owned ticket back to its number's owner.
  *
- * Guarded on `assignee_agent_id IS NULL` in the write itself, like every other
- * entry point here: an agent may have picked the ticket up since it was read,
- * and they keep it. No group lock, because no cursor or roster is read.
+ * The ticket's row is locked and read again first, as the rota's pick reads it
+ * (`routeAndPick`), and for the same reason: the owner was chosen off a
+ * snapshot, and an agent resolving the ticket, a merge, a delete or a spam
+ * mark landing since left a finished ticket handed to the owner, with an
+ * `assigned` line after the resolve — the guarded write alone asks only
+ * whether somebody holds it. So is the owner it was chosen for: a handover
+ * since makes the ticket somebody else's to answer for, and deactivating the
+ * owner makes the number a team number (`effectiveOwnerId`). Either way this
+ * answers `not_assignable`, and the next pass reads the ticket as it now is.
+ * No join under the lock, so the status and the owner's activity are
+ * subqueries (`statusCategoryOf`, `lib/tickets/status-category.ts`); NO KEY
+ * UPDATE, as every lock on a ticket's row is.
+ *
+ * Still guarded on `assignee_agent_id IS NULL` in the write itself, like every
+ * other entry point here: an agent who picked the ticket up keeps it. No group
+ * lock, because no cursor or roster is read.
  */
 async function handBackToOwner(
   conversationId: string,
@@ -416,6 +731,35 @@ async function handBackToOwner(
   { actorLabel, now }: { actorLabel: string | undefined; now: Date },
 ): Promise<Picked> {
   return db.transaction(async (tx) => {
+    const [current] = await tx
+      .select({
+        assigneeAgentId: conversations.assigneeAgentId,
+        accountableAgentId: conversations.accountableAgentId,
+        accountableActive: sql<
+          boolean | null
+        >`(select ${agents.isActive} from ${agents} where ${agents.id} = ${conversations.accountableAgentId})`,
+        channel: conversations.channel,
+        statusId: conversations.statusId,
+        statusCategory: statusCategoryOf(),
+        deletedAt: conversations.deletedAt,
+        isSpam: conversations.isSpam,
+        mergedIntoId: conversations.mergedIntoId,
+      })
+      .from(conversations)
+      .where(eq(conversations.id, conversationId))
+      .for('no key update');
+    if (!current) return { assignedTo: null, reason: 'not_assignable' as SkipReason };
+    if (current.assigneeAgentId) {
+      return { assignedTo: null, reason: 'already_assigned' as SkipReason };
+    }
+    const statusCategory = await lockedStatusCategory(tx, current);
+    if (!isWorkToHandOut({ ...current, statusCategory })) {
+      return { assignedTo: null, reason: 'not_assignable' as SkipReason };
+    }
+    if (current.accountableAgentId !== ownerId || current.accountableActive !== true) {
+      return { assignedTo: null, reason: 'not_assignable' as SkipReason };
+    }
+
     const updated = await tx
       .update(conversations)
       .set({ assigneeAgentId: ownerId, assignedAt: now })

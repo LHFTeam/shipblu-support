@@ -13,7 +13,9 @@ import {
 } from '@/db/schema';
 import type { Permission } from '@/lib/auth/permissions';
 import { resetEnvCache } from '@/lib/env';
+import { saveCategoryAiSettings } from '@/lib/category-ai/settings';
 import { withCleanDatabase } from '@/lib/testing/db';
+import { untilWaitingOnALock } from '@/lib/testing/hold-transaction';
 import { stubFetch } from '@/lib/testing/fetch';
 import { parseCoexistence } from '@/lib/whatsapp/coexistence';
 import { credentialStatuses, storeBusinessToken } from '@/lib/whatsapp/credentials';
@@ -275,6 +277,260 @@ describe('saveChannel for a comments row', () => {
   it('still refuses a type nobody may create', async () => {
     const result = await saveChannel(INITIAL, form({ type: 'portal', name: 'Forged' }));
     expect(result.error).toBe('Unknown channel type');
+  });
+});
+
+describe('saveChannel routing mode', () => {
+  async function modeOf(id: string) {
+    const [row] = await db
+      .select({ routingMode: channels.routingMode, name: channels.name, config: channels.config })
+      .from(channels)
+      .where(eq(channels.id, id));
+    return row!;
+  }
+
+  async function plain(values: Partial<typeof channels.$inferInsert> = {}) {
+    const [row] = await db
+      .insert(channels)
+      .values({
+        type: 'email',
+        name: 'Support mailbox',
+        config: { address: 'help@shipblu.test' },
+        ...values,
+      })
+      .returning({ id: channels.id });
+    return row!.id;
+  }
+
+  const classifier = (mode: 'off' | 'shadow' | 'apply') =>
+    saveCategoryAiSettings({ mode, minProbability: 0.6, routingWindowMinutes: 5 }, signedIn.id);
+
+  it('adds a channel on its default group unless the form names a mode', async () => {
+    await classifier('apply');
+    expect(
+      await saveChannel(INITIAL, form({ type: 'email', name: 'Plain', address: 'a@shipblu.test' })),
+    ).toMatchObject({ error: null });
+    expect(
+      await saveChannel(
+        INITIAL,
+        form({ type: 'email', name: 'Routed', address: 'b@shipblu.test', routingMode: 'category' }),
+      ),
+    ).toEqual(expect.not.objectContaining({ notice: expect.anything() }));
+
+    const rows = await db
+      .select({ name: channels.name, routingMode: channels.routingMode })
+      .from(channels)
+      .where(eq(channels.type, 'email'));
+    expect(Object.fromEntries(rows.map((row) => [row.name, row.routingMode]))).toEqual({
+      Plain: 'default_group',
+      Routed: 'category',
+    });
+  });
+
+  // Three forms post here; the editor and the widget's settings both carry
+  // the field, and anything that does not — a forged post, a form from before
+  // this existed — must not take the channel off routing as a side effect.
+  it('leaves the mode as it is when the field is absent, on an edit and on the widget’s save', async () => {
+    const id = await plain({ routingMode: 'category' });
+    expect(
+      (await saveChannel(INITIAL, form({ id, name: 'Renamed', address: 'help@shipblu.test' })))
+        .error,
+    ).toBeNull();
+    expect(await modeOf(id)).toMatchObject({ name: 'Renamed', routingMode: 'category' });
+
+    const chat = await plain({
+      type: 'webchat',
+      name: 'Web chat',
+      config: { faqFolders: {} },
+      routingMode: 'category_shadow',
+    });
+    expect(
+      (await saveChannel(INITIAL, form({ id: chat, type: 'webchat', name: 'Web chat' }))).error,
+    ).toBeNull();
+    expect((await modeOf(chat)).routingMode).toBe('category_shadow');
+
+    expect(
+      (await saveChannel(INITIAL, form({ id, name: 'Renamed', routingMode: 'default_group' })))
+        .error,
+    ).toBeNull();
+    expect((await modeOf(id)).routingMode).toBe('default_group');
+  });
+
+  it('refuses a mode no form offers, and writes nothing', async () => {
+    const id = await plain();
+    expect(
+      await saveChannel(INITIAL, form({ id, name: 'Renamed', routingMode: 'everywhere' })),
+    ).toEqual({ error: 'Unknown routing mode — reload the page and try again' });
+    expect(await modeOf(id)).toMatchObject({
+      name: 'Support mailbox',
+      routingMode: 'default_group',
+    });
+  });
+
+  it('refuses a category mode on a number on the Business app, and on the bot', async () => {
+    const accountId = await account(WABA, 'ShipBlu');
+    const [connected] = await db
+      .insert(channels)
+      .values({
+        type: 'whatsapp',
+        name: 'Business app',
+        whatsappAccountId: accountId,
+        config: {
+          phoneNumberId: PHONE,
+          coexistence: {
+            onboardingId: null,
+            onboardedAt: '2026-10-08T10:00:00.000Z',
+            wabaId: WABA,
+            syncs: {},
+          },
+        },
+      })
+      .returning({ id: channels.id });
+    const [bot] = await db
+      .select({ id: channels.id, config: channels.config })
+      .from(channels)
+      .where(eq(channels.type, 'whatsapp_bot'));
+
+    const onConnected = await saveChannel(
+      INITIAL,
+      form({
+        id: connected!.id,
+        name: 'Business app',
+        whatsappAccountId: accountId,
+        routingMode: 'category',
+      }),
+    );
+    expect(onConnected.error).toMatch(/stays on its default group.*typed on the phone/);
+    expect((await modeOf(connected!.id)).routingMode).toBe('default_group');
+
+    const onBot = await saveChannel(
+      INITIAL,
+      form({
+        id: bot!.id,
+        name: 'WhatsApp Customer Bot',
+        phoneNumberId: String(bot!.config.phoneNumberId),
+        whatsappAccountId: accountId,
+        routingMode: 'category_shadow',
+      }),
+    );
+    expect(onBot.error).toMatch(/stays on its default group.*customer bot/);
+    expect((await modeOf(bot!.id)).routingMode).toBe('default_group');
+  });
+
+  // Saved, because the admin may be setting up ahead of switching the
+  // classifier on — and told, because until then it holds nothing.
+  it('saves a category mode while the classifier is not in Apply, and says it is idle', async () => {
+    const id = await plain();
+
+    await classifier('off');
+    expect(
+      await saveChannel(INITIAL, form({ id, name: 'Support', routingMode: 'category' })),
+    ).toMatchObject({
+      error: null,
+      notice: expect.stringMatching(/Idle until the category classifier is in Apply.*it is off/),
+    });
+    expect((await modeOf(id)).routingMode).toBe('category');
+    expect(revalidated).toContain('/admin/channels');
+
+    // Said on a rename too: the row is idle whoever saves it.
+    await classifier('shadow');
+    expect(await saveChannel(INITIAL, form({ id, name: 'Support desk' }))).toMatchObject({
+      notice: expect.stringMatching(/in Shadow, so nothing is recorded|in Shadow, so new tickets/),
+    });
+
+    await classifier('apply');
+    const live = await saveChannel(INITIAL, form({ id, name: 'Support desk' }));
+    expect(live.error).toBeNull();
+    expect(live.notice).toBeUndefined();
+  });
+
+  // The onboarding job adopts a plain number between this action's read and
+  // its write, resetting the mode in the transaction that writes the
+  // coexistence object. The UPDATE waits on that lock and decides the mode
+  // against the row it then finds, so the category the form named is not
+  // written over the reset.
+  it('keeps a number connected after the read on its default group', async () => {
+    const accountId = await account(WABA, 'ShipBlu');
+    const [number] = await db
+      .insert(channels)
+      .values({
+        type: 'whatsapp',
+        name: 'Sales line',
+        whatsappAccountId: accountId,
+        config: { phoneNumberId: PHONE },
+      })
+      .returning({ id: channels.id });
+
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    let adopted!: () => void;
+    const adopting = new Promise<void>((resolve) => (adopted = resolve));
+    const job = db.transaction(async (tx) => {
+      await tx
+        .update(channels)
+        .set({
+          routingMode: 'default_group',
+          config: {
+            phoneNumberId: PHONE,
+            coexistence: {
+              onboardingId: null,
+              onboardedAt: '2026-10-08T10:00:00.000Z',
+              wabaId: WABA,
+              syncs: {},
+            },
+          },
+        })
+        .where(eq(channels.id, number!.id));
+      adopted();
+      await held;
+    });
+    await adopting;
+
+    const saving = saveChannel(
+      INITIAL,
+      form({
+        id: number!.id,
+        name: 'Sales line',
+        phoneNumberId: PHONE,
+        whatsappAccountId: accountId,
+        routingMode: 'category',
+      }),
+    );
+    await untilWaitingOnALock(db);
+    release();
+    await job;
+
+    expect((await saving).error).toBeNull();
+    const row = await modeOf(number!.id);
+    expect(row.routingMode).toBe('default_group');
+    expect(parseCoexistence(row.config)).not.toBeNull();
+  });
+
+  it('writes the mode a plain number is given', async () => {
+    const accountId = await account(WABA, 'ShipBlu');
+    const [number] = await db
+      .insert(channels)
+      .values({
+        type: 'whatsapp',
+        name: 'Sales line',
+        whatsappAccountId: accountId,
+        config: { phoneNumberId: PHONE },
+      })
+      .returning({ id: channels.id });
+
+    const saved = await saveChannel(
+      INITIAL,
+      form({
+        id: number!.id,
+        name: 'Sales line',
+        phoneNumberId: PHONE,
+        whatsappAccountId: accountId,
+        routingMode: 'category_shadow',
+      }),
+    );
+
+    expect(saved.error).toBeNull();
+    expect((await modeOf(number!.id)).routingMode).toBe('category_shadow');
   });
 });
 

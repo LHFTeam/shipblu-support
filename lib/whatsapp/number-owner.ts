@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull, ne, sql, type SQL } from 'drizzle-orm';
 import { db } from '@/db/client';
 import {
   agents,
@@ -8,6 +8,7 @@ import {
   conversations,
   ticketStatuses,
 } from '@/db/schema';
+import { CHANGE_STAMP } from '@/lib/tickets/change-stamp';
 import type { StatusCategory } from '@/lib/tickets/vocabulary';
 import { parseCoexistence } from './coexistence';
 
@@ -120,6 +121,15 @@ export function ownerStamp(
  * insert `ownerStamp` filled, or where `assignConversation` hands an owned
  * ticket back. No actor agent, because nobody chose it; the label names the
  * mechanism, as the assignment module's events do.
+ *
+ * Stamped as it is written (`CHANGE_STAMP`), as the rota's `assigned` is.
+ * Every caller writes it after the write it records, which holds the ticket's
+ * row — the hand-back's guarded update and `alignAccountable`'s, each behind a
+ * locked read that may have waited for another writer — or created it, in
+ * ingest's insert. Stamped with the transaction's start, an owner handed a
+ * ticket after a wait sorted before the change committed while it waited,
+ * where the rota's pick in the same place sorted after it, so the order read
+ * off which branch had assigned the ticket.
  */
 export async function recordOwnerAssigned(
   tx: Pick<Tx, 'insert'>,
@@ -134,6 +144,7 @@ export async function recordOwnerAssigned(
     conversationId: input.conversationId,
     type: 'assigned',
     actorLabel: input.actorLabel ?? 'number_owner',
+    createdAt: CHANGE_STAMP,
     data: { to: input.ownerId, reason: 'number_owner', channelId: input.channelId },
   });
 }
@@ -267,6 +278,13 @@ export async function alignAccountable(
     })
     .where(eq(conversations.id, input.conversationId));
 
+  // The column default, the transaction's start, though the `assigned` below
+  // is stamped as it is written. The rollup files each figure by the
+  // accountability lines after its instant (`accountableOrAssigneeAt`), and a
+  // customer's reopen by its `reopened` line, written in this transaction with
+  // the same default: on one instant the reopen counts against the owner the
+  // ticket came back to, where a stamp a moment later would file it against
+  // the one it left.
   await tx.insert(conversationEvents).values({
     conversationId: input.conversationId,
     type: 'accountable_changed',
@@ -511,13 +529,24 @@ export async function handOverNumber(input: {
     // `by` names the admin where the actor column would have, for the reason
     // the module header gives; `changeId` ties each line on a ticket's
     // timeline to the one handover that wrote it.
+    //
+    // `assigned` is stamped as it is written (`CHANGE_STAMP`), as every
+    // assignment's line is: the tickets were locked above, a ticket another
+    // writer held made that wait, and `now` — taken before the transaction —
+    // sorted the new owner's assignment before the change committed meanwhile.
+    // `accountable_changed` keeps `now`, the instant the handover's record
+    // carries: the rollup reads it as when accountability moved
+    // (`accountableOrAssigneeAt`), so moving it is a question about what the
+    // reports say, not about the timeline's order.
     const stamp = {
       channelId: channel.id,
       reason: 'number_handover',
       by: input.actor.id,
       changeId: change!.id,
     };
-    const events: (typeof conversationEvents.$inferInsert)[] = [
+    const events: (Omit<typeof conversationEvents.$inferInsert, 'createdAt'> & {
+      createdAt: Date | SQL;
+    })[] = [
       ...moved.map((ticket) => ({
         conversationId: ticket.id,
         type: 'accountable_changed',
@@ -530,7 +559,7 @@ export async function handOverNumber(input: {
         type: 'assigned',
         actorLabel: 'number_handover',
         data: { to: to!.id, ...stamp },
-        createdAt: now,
+        createdAt: CHANGE_STAMP,
       })),
     ];
     if (events.length > 0) await tx.insert(conversationEvents).values(events);

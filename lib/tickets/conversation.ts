@@ -146,6 +146,13 @@ export type ConversationDetail = {
     displayNumber: string | null;
     owner: { id: string; name: string; active: boolean } | null;
   } | null;
+  /**
+   * The ticket's number was connected through coexistence, so its replies are
+   * typed on the phone: such a number never routes, and its tickets are not
+   * offered "Hand to <group>" (`lib/routing/hand-to.ts`). Read off the number's
+   * config, which `businessNumber` keeps out of the page.
+   */
+  onCoexistenceNumber: boolean;
   groupId: string | null;
   groupName: string | null;
   /**
@@ -163,6 +170,17 @@ export type ConversationDetail = {
     hasAvatar: boolean;
   };
   lastCustomerMessageAt: Date | null;
+  /**
+   * The routing hold's two columns (`lib/routing/hold.ts`), for the header's
+   * "Routing…" badge and the sidebar's hints while it lasts, and for whether
+   * "Hand to <group>" is offered once it has ended. Off the row the page
+   * already reads whole.
+   */
+  routingWindowEndsAt: Date | null;
+  routingDecidedAt: Date | null;
+  /** Spam, and merged into another ticket: neither is work to hand to a group. */
+  isSpam: boolean;
+  mergedIntoId: string | null;
   createdAt: Date;
   reopenCount: number;
   /** Who asked that this ticket not be surveyed, an agent or a rule; null when nobody did. */
@@ -525,6 +543,10 @@ export async function getConversation(
               : null,
           }
         : null,
+    // As `routingModeOf` reads it: only a WhatsApp ticket's number is answered
+    // from a phone; the bot's is read-only whatever its config says.
+    onCoexistenceNumber:
+      row.conversation.channel === 'whatsapp' && parseCoexistence(row.numberConfig) !== null,
     groupId: row.conversation.groupId,
     groupName: row.groupName,
     category: row.conversation.categoryId
@@ -542,6 +564,10 @@ export async function getConversation(
       hasAvatar: row.requesterAvatarPath !== null,
     },
     lastCustomerMessageAt: row.conversation.lastCustomerMessageAt,
+    routingWindowEndsAt: row.conversation.routingWindowEndsAt,
+    routingDecidedAt: row.conversation.routingDecidedAt,
+    isSpam: row.conversation.isSpam,
+    mergedIntoId: row.conversation.mergedIntoId,
     createdAt: row.conversation.createdAt,
     reopenCount: row.conversation.reopenCount,
     csatSuppressedBy: row.csatSuppressedBy,

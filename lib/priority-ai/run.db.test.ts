@@ -1,22 +1,33 @@
-import { and, asc, eq } from 'drizzle-orm';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { AsyncLocalStorage } from 'node:async_hooks';
+import { and, asc, eq, inArray, sql } from 'drizzle-orm';
+import { PgDatabase } from 'drizzle-orm/pg-core';
+import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 import { db } from '@/db/client';
 import {
   agents,
   aiPriorityRuns,
   automationRules,
+  channels,
   contacts,
   conversationEvents,
   conversations,
+  groupMembers,
+  groups,
   jobs,
   messages,
   slaPolicies,
+  ticketCategories,
   ticketForms,
   ticketStatuses,
 } from '@/db/schema';
 import { resetEnvCache } from '@/lib/env';
 import { runAutomations } from '@/lib/automations';
+import { setConversationCategory } from '@/lib/categories/write';
+import { forgetCategoryAiSettings } from '@/lib/category-ai/settings';
 import { createTicket } from '@/lib/portal/tickets';
+import { routeNow, type RouteResult } from '@/lib/routing/apply';
+import { beginRouting } from '@/lib/routing/begin';
+import { routingWindowValues, startRouting } from '@/lib/routing/start';
 import { applySlaOnCreate } from '@/lib/sla';
 import { stubFetch } from '@/lib/testing/fetch';
 import { withCleanDatabase } from '@/lib/testing/db';
@@ -34,6 +45,22 @@ import { PRIORITY_AI_ACTOR, classifyMessagePriority } from './run';
  * every statement here plans — `npm run test` runs no SQL, and this job is
  * skipped by CI's handler loop because it needs the provider.
  */
+
+/** How many of the next reads of the hours catalog fail, as a lost connection would fail them. */
+const catalog = vi.hoisted(() => ({ failing: 0 }));
+vi.mock('@/lib/hours/catalog', async (importOriginal) => {
+  const real = await importOriginal<typeof import('@/lib/hours/catalog')>();
+  return {
+    ...real,
+    loadHoursCatalog: async () => {
+      if (catalog.failing > 0) {
+        catalog.failing -= 1;
+        throw new Error('the hours catalog could not be read');
+      }
+      return real.loadHoursCatalog();
+    },
+  };
+});
 
 withCleanDatabase();
 
@@ -58,6 +85,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  catalog.failing = 0;
   vi.unstubAllEnvs();
   vi.restoreAllMocks();
   resetEnvCache();
@@ -217,6 +245,34 @@ describe('classifyMessagePriority: apply', () => {
     expect(recalculated.map((event) => event.data)).toEqual([
       expect.objectContaining({ reason: 'priority', priority: 'urgent' }),
     ]);
+  });
+
+  // The policies and the hours a deferral re-times with inside the write are
+  // read only on a decision in flight, and best-effort
+  // (`clockInputsIfInFlight`). Read before every applied answer, outside any
+  // try, a catalog that could not be read threw the classification away
+  // before it was written, and the job failed; the answer is written, and the
+  // re-time's failure logged after it, as for any priority change.
+  it('applies an answer whose clocks cannot be re-timed, and logs that they were not', async () => {
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    await defaultPolicy();
+    const id = await ticket();
+    await applySlaOnCreate(id);
+    const before = await firstResponseDue(id);
+    const messageId = await inbound(id, 'الشحنة اتفتحت ومش موجود فيها حاجة');
+    answers('urgent');
+
+    catalog.failing = Infinity;
+    const result = await classifyMessagePriority(messageId, { baseUrl: BASE });
+    catalog.failing = 0;
+
+    expect(result).toEqual({ status: 'recorded', outcome: 'applied', predicted: 'urgent' });
+    expect(await priorityOf(id)).toBe('urgent');
+    expect(await eventsOf(id, 'priority_changed')).toHaveLength(1);
+    expect(await firstResponseDue(id)).toEqual(before);
+    expect(errors.mock.calls.map((call) => String(call[0]))).toContainEqual(
+      `[sla] could not move the clocks on ${id}`,
+    );
   });
 
   it('sends the earlier inbound messages as context', async () => {
@@ -685,6 +741,269 @@ describe('classifyMessagePriority: the rules that watch priority', () => {
   });
 });
 
+/**
+ * Jev's answer landing while the router finishes a decision on the ticket:
+ * phase one written, its pass claimed and reading the ticket at medium, the
+ * hold not yet ended (`lib/routing/apply.ts`). The classifier's own pass, run
+ * after its commit, was unordered with the router's end of the hold, and a
+ * rule keyed on priority moved the ticket to Escalations after the router had
+ * handed it to Omar in Sales — `assign_group` never touches an assignee, so
+ * Omar held an Escalations ticket. Handed to the router (`deferToRouter`), the
+ * pass runs again on the urgent ticket before anybody is assigned.
+ *
+ * The router's calls and the classifier's are told apart by who opened each
+ * transaction (`routeWithAnswerBetween`), so the answer lands at a named point
+ * in the decision and its follow-ups lag the router — the order that made the
+ * difference, made certain.
+ */
+describe('classifyMessagePriority on a decision in flight', () => {
+  let people = 0;
+  // Every step after the commits is best-effort and logs rather than throws,
+  // so a step that failed shows only here.
+  let errors: MockInstance;
+
+  beforeEach(() => {
+    errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+  });
+
+  async function agentIn(groupName: string, name: string) {
+    people += 1;
+    const [agent] = await db
+      .insert(agents)
+      .values({
+        name,
+        email: `agent${people}@shipblu.test`,
+        presence: 'online',
+        lastSeenAt: new Date(),
+      })
+      .returning({ id: agents.id });
+    const [group] = await db
+      .insert(groups)
+      .values({ name: groupName, assignmentStrategy: 'round_robin', assignWithinHoursOnly: false })
+      .returning({ id: groups.id });
+    await db.insert(groupMembers).values({ groupId: group!.id, agentId: agent!.id });
+    return { agentId: agent!.id, groupId: group!.id };
+  }
+
+  /**
+   * An email ticket in `groupId` on a mailbox that routes by category, held as
+   * the insert holds one and begun as the creation pass begins it; and the
+   * customer's opening message, which the classifier answers.
+   */
+  async function heldTicket(groupId: string) {
+    await db.execute(sql`
+      insert into category_ai_settings (id, mode, min_probability, routing_window_minutes)
+      values (1, 'apply', 0.6, 5)
+      on conflict (id) do update set mode = excluded.mode`);
+    forgetCategoryAiSettings();
+    const [channel] = await db
+      .insert(channels)
+      .values({
+        type: 'email',
+        name: 'Support mail',
+        config: {},
+        defaultGroupId: groupId,
+        routingMode: 'category',
+      })
+      .returning({ id: channels.id });
+    const plan = { start: 'live', channelId: channel!.id, windowMinutes: 5 } as const;
+    const now = new Date();
+    const id = await ticket({
+      channel: 'email',
+      channelId: channel!.id,
+      groupId,
+      ...routingWindowValues(plan, {}, now),
+    });
+    const messageId = await inbound(id, 'هرفع قضية لو الفلوس موصلتش', { createdAt: now });
+    await db.transaction((tx) =>
+      startRouting(tx, plan, { conversationId: id, messageId, groupId }, now),
+    );
+    expect(await beginRouting(id)).toBe('continue');
+    return { id, messageId };
+  }
+
+  async function holder(id: string) {
+    const [row] = await db
+      .select({ groupId: conversations.groupId, assigneeAgentId: conversations.assigneeAgentId })
+      .from(conversations)
+      .where(eq(conversations.id, id));
+    return row!;
+  }
+
+  /** The lines the page draws, by `created_at`: whether the rules ran before the assignment. */
+  async function linesOf(id: string) {
+    const rows = await db
+      .select({ type: conversationEvents.type })
+      .from(conversationEvents)
+      .where(
+        and(
+          eq(conversationEvents.conversationId, id),
+          inArray(conversationEvents.type, ['routed', 'tagged', 'group_changed', 'assigned']),
+        ),
+      )
+      .orderBy(asc(conversationEvents.createdAt), asc(conversationEvents.id));
+    return rows.map((row) => row.type);
+  }
+
+  it('hands its rules to the router, which moves the urgent ticket before anybody is assigned', async () => {
+    const home = await agentIn('Home', 'Hana Home');
+    const sales = await agentIn('Sales', 'Omar Sales');
+    const escalations = await agentIn('Escalations', 'Ezz Escalations');
+    const [salesCategory] = await db
+      .update(ticketCategories)
+      .set({ routeGroupId: sales.groupId })
+      .where(eq(ticketCategories.key, 'sales'))
+      .returning({ id: ticketCategories.id });
+    const { id, messageId } = await heldTicket(home.groupId);
+    // Jev's category answer, which the router then decides on.
+    expect(
+      (await setConversationCategory(id, salesCategory!.id, { label: 'jev:category' })).outcome,
+    ).toBe('changed');
+    await db.insert(automationRules).values([
+      {
+        name: 'Count passes',
+        trigger: 'on_update',
+        conditions: { all: [] },
+        actions: [{ type: 'add_tags', tags: ['seen'] }],
+        position: 0,
+      },
+      {
+        name: 'Urgent goes to Escalations',
+        trigger: 'on_update',
+        conditions: { field: 'priority', op: 'eq', value: 'urgent' },
+        actions: [{ type: 'assign_group', groupId: escalations.groupId }],
+        position: 1,
+      },
+    ]);
+    answers('urgent');
+
+    // Phase one, then the claim that reads the ticket for the pass: the answer
+    // lands after that read and before the pass acts on it.
+    const { routed, answered } = await routeWithAnswerBetween({
+      route: () => routeNow(id, { label: 'jev:category' }),
+      afterRouterTransaction: 2,
+      answer: () => classifyMessagePriority(messageId, { baseUrl: BASE }),
+    });
+
+    expect(routed).toBe('decided');
+    expect(answered).toMatchObject({ status: 'recorded', outcome: 'applied' });
+    expect(await priorityOf(id)).toBe('urgent');
+    expect(await holder(id)).toEqual({
+      groupId: escalations.groupId,
+      assigneeAgentId: escalations.agentId,
+    });
+    // The pass that read medium, the one that read urgent and moved the ticket
+    // on, and only then the assignment — no pass of the classifier's own.
+    expect(await linesOf(id)).toEqual(['routed', 'tagged', 'tagged', 'group_changed', 'assigned']);
+    expect(errors).not.toHaveBeenCalled();
+  });
+
+  // Seventy minutes old: medium owes a first response at 120, urgent at 60, so
+  // the urgent answer makes the ticket overdue. Without routing the classifier
+  // re-times the clocks and then runs its pass, so a rule asking whether the
+  // ticket is overdue reads the urgent deadline. Handed to the router, the
+  // classifier runs no pass, and the router's runs again the moment the answer
+  // commits: re-timed after that commit, the pass read medium's deadline, the
+  // escalation never ran, and Omar was given the ticket in Sales.
+  it('re-times the clocks before the router’s pass reads them', async () => {
+    await defaultPolicy();
+    const home = await agentIn('Home', 'Hana Home');
+    const sales = await agentIn('Sales', 'Omar Sales');
+    const escalations = await agentIn('Escalations', 'Ezz Escalations');
+    const [salesCategory] = await db
+      .update(ticketCategories)
+      .set({ routeGroupId: sales.groupId })
+      .where(eq(ticketCategories.key, 'sales'))
+      .returning({ id: ticketCategories.id });
+    const { id, messageId } = await heldTicket(home.groupId);
+    await db
+      .update(conversations)
+      .set({ createdAt: new Date(Date.now() - 70 * MINUTE) })
+      .where(eq(conversations.id, id));
+    await applySlaOnCreate(id);
+    expect((await firstResponseDue(id))!.getTime()).toBeGreaterThan(Date.now());
+    expect(
+      (await setConversationCategory(id, salesCategory!.id, { label: 'jev:category' })).outcome,
+    ).toBe('changed');
+    await db.insert(automationRules).values({
+      name: 'Overdue escalates',
+      trigger: 'on_update',
+      conditions: { field: 'is_first_response_overdue', op: 'eq', value: true },
+      actions: [{ type: 'assign_group', groupId: escalations.groupId }],
+    });
+    answers('urgent');
+
+    const { routed, answered } = await routeWithAnswerBetween({
+      route: () => routeNow(id, { label: 'jev:category' }),
+      afterRouterTransaction: 2,
+      answer: () => classifyMessagePriority(messageId, { baseUrl: BASE }),
+    });
+
+    expect(routed).toBe('decided');
+    expect(answered).toMatchObject({ status: 'recorded', outcome: 'applied' });
+    expect((await firstResponseDue(id))!.getTime()).toBeLessThan(Date.now());
+    expect(await holder(id)).toEqual({
+      groupId: escalations.groupId,
+      assigneeAgentId: escalations.agentId,
+    });
+    expect(errors).not.toHaveBeenCalled();
+  });
+
+  // The answer lands on a ticket resolved once the decision was in flight —
+  // after phase one, before the router's pass is claimed. The router owes a
+  // ticket nobody may work no pass and gives its own up, so handed to it, the
+  // rules keyed on the urgent priority never ran; a resolved ticket that never
+  // routed runs them after the same answer. Not handed over, the classifier
+  // runs its own pass, and the router assigns nobody.
+  it('runs its own rules on a ticket resolved after phase one', async () => {
+    const home = await agentIn('Home', 'Hana Home');
+    const sales = await agentIn('Sales', 'Omar Sales');
+    const [salesCategory] = await db
+      .update(ticketCategories)
+      .set({ routeGroupId: sales.groupId })
+      .where(eq(ticketCategories.key, 'sales'))
+      .returning({ id: ticketCategories.id });
+    const [resolved] = await db
+      .select({ id: ticketStatuses.id })
+      .from(ticketStatuses)
+      .where(eq(ticketStatuses.name, 'Resolved'));
+    const { id, messageId } = await heldTicket(home.groupId);
+    expect(
+      (await setConversationCategory(id, salesCategory!.id, { label: 'jev:category' })).outcome,
+    ).toBe('changed');
+    await db.insert(automationRules).values({
+      name: 'Urgent is noted',
+      trigger: 'on_update',
+      conditions: { field: 'priority', op: 'eq', value: 'urgent' },
+      actions: [{ type: 'add_tags', tags: ['urgent-seen'] }],
+    });
+    answers('urgent');
+
+    const { routed, answered } = await routeWithAnswerBetween({
+      route: () => routeNow(id, { label: 'jev:category' }),
+      afterRouterTransaction: 1,
+      answer: async () => {
+        await db
+          .update(conversations)
+          .set({ statusId: resolved!.id, resolvedAt: new Date() })
+          .where(eq(conversations.id, id));
+        return classifyMessagePriority(messageId, { baseUrl: BASE });
+      },
+    });
+
+    expect(routed).toBe('decided');
+    expect(answered).toMatchObject({ status: 'recorded', outcome: 'applied' });
+    const [row] = await db
+      .select({ tags: conversations.tags, routingDecidedAt: conversations.routingDecidedAt })
+      .from(conversations)
+      .where(eq(conversations.id, id));
+    expect(row!.tags).toEqual(['urgent-seen']);
+    expect(row!.routingDecidedAt).not.toBeNull();
+    expect((await holder(id)).assigneeAgentId).toBeNull();
+    expect(errors).not.toHaveBeenCalled();
+  });
+});
+
 describe('classifyMessagePriority: shadow, skips and failures', () => {
   it('records what it would have done in shadow mode and changes nothing', async () => {
     vi.stubEnv('PRIORITY_AI', 'shadow');
@@ -985,3 +1304,68 @@ describe('enqueuePriorityClassification', () => {
     expect(await queued()).toEqual([]);
   });
 });
+
+/** Who opened a transaction: the router's call, or the classifier's answer. */
+const opener = new AsyncLocalStorage<'router' | 'answer'>();
+
+/**
+ * Runs `route` with `answer` landing once the router's `afterRouterTransaction`th
+ * transaction has committed (1 is phase one), before the router goes on — the
+ * classifier's write commits there. Every transaction the classifier opens
+ * after its write waits until the router has finished: its follow-ups lagging
+ * the router, made certain. Transactions are told apart by who opened them, so
+ * the router's own steps and the classifier's are counted apart however they
+ * interleave. `routeWithEditBetween` in `app/(console)/ticket-actions.db.test.ts`
+ * is the same harness, for a console edit.
+ */
+async function routeWithAnswerBetween({
+  route,
+  afterRouterTransaction,
+  answer,
+}: {
+  route: () => Promise<RouteResult>;
+  afterRouterTransaction: number;
+  answer: () => Promise<unknown>;
+}): Promise<{ routed: RouteResult; answered: unknown }> {
+  const real = PgDatabase.prototype.transaction;
+  let routerOpened = 0;
+  let answerOpened = 0;
+  let answered: Promise<unknown> | undefined;
+  let release!: () => void;
+  const released = new Promise<void>((resolve) => (release = resolve));
+  let wrote!: () => void;
+  const written = new Promise<void>((resolve) => (wrote = resolve));
+
+  const spy = vi.spyOn(PgDatabase.prototype, 'transaction').mockImplementation(async function (
+    this: PgDatabase<never>,
+    run,
+    config,
+  ) {
+    const who = opener.getStore();
+    if (who === 'answer') {
+      const nth = ++answerOpened;
+      if (nth > 1) await released;
+      const result: unknown = await real.call(this, run, config);
+      if (nth === 1) wrote();
+      return result as never;
+    }
+    if (who === 'router') {
+      const nth = ++routerOpened;
+      const result: unknown = await real.call(this, run, config);
+      if (nth === afterRouterTransaction) {
+        answered = opener.run('answer', answer);
+        await Promise.race([written, answered]);
+      }
+      return result as never;
+    }
+    return real.call(this, run, config) as never;
+  });
+
+  try {
+    const routed = await opener.run('router', route);
+    release();
+    return { routed, answered: await answered };
+  } finally {
+    spy.mockRestore();
+  }
+}

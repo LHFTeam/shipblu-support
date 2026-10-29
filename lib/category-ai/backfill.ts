@@ -30,6 +30,7 @@ import { fileBacklogCategory, type CategoryEventDetail } from '@/lib/categories/
 import { errorMessage } from '@/lib/errors';
 import { logger } from '@/lib/log';
 import { matches } from '@/lib/rules/conditions';
+import { undecidedRouting } from '@/lib/routing/state';
 import { conversationFacts, type FactSource } from '@/lib/rules/facts';
 import { earlierMessages } from '@/lib/subcategorise-ai/context';
 import {
@@ -89,6 +90,8 @@ import { readCategoryAiSettings } from './settings';
  *   label rather than mixing two questions' answers. It respects ownership
  *   under the row lock and fires nothing: no rule pass, no SLA hook, no
  *   router, so neither `on_update` rules nor the open backlog's deadlines move.
+ *   Nor does it file a ticket the router is still holding, which would route
+ *   on the filing at the window's end.
  *   Its report says which rules would now match, `time_based` ones included,
  *   since the sweep re-reads every live ticket every 15 minutes.
  */
@@ -825,6 +828,18 @@ async function fileTicket(
       filedByJev: writtenByJev(history),
     });
     if (refusal) return refusal;
+
+    // A ticket held for routing belongs to the router until its window ends:
+    // `settle_routing` routes on whatever category the ticket carries then, so
+    // filing it here would move it to a team on an archived answer — the
+    // retargeting this mode promises never to do. Only a live row: a shadow
+    // one holds nothing and moves nothing, and records what the ticket
+    // carries as Jev's live answer would be recorded. Read under the ticket's
+    // lock, which every routing writer takes before it moves the stage, so
+    // the answer cannot change before this commits. The window is minutes,
+    // and a later run files the ticket once it has closed, if nothing has.
+    const routing = await undecidedRouting(tx, conversationId);
+    if (routing && !routing.shadow) return 'held for routing';
 
     // The backfill labels a backlog and never retargets it: no rule pass, no
     // SLA policy chosen again, no router (plan 4.1, "It fires nothing"), so it

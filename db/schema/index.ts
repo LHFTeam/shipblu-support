@@ -14,3 +14,4 @@ export * from './subcategorise-ai';
 export * from './priority-ai';
 export * from './category-ai';
 export * from './canned-suggestions';
+export * from './routing';

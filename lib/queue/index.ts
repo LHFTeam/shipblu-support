@@ -36,6 +36,7 @@ export type JobType =
   | 'backfill_category_ai'
   | 'classify_priority'
   | 'classify_category'
+  | 'settle_routing'
   | 'normalise_kb_formatting'
   | 'restore_resolved_at'
   | 'seed_console_handbook'

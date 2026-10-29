@@ -1,5 +1,5 @@
 import { and, asc, eq, sql } from 'drizzle-orm';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { db } from '@/db/client';
 import {
   agents,
@@ -8,6 +8,7 @@ import {
   contacts,
   conversationEvents,
   conversations,
+  groupMembers,
   groups,
   slaPolicies,
   ticketCategories,
@@ -699,10 +700,14 @@ describe('the automation engine', () => {
     expect(await events(id, 'group_changed')).toEqual([]);
   });
 
-  // The move commits before the pick runs, so a failure after it — here the
-  // timeline line, refused by a trigger — still owes the clocks the new
-  // group's calendar. Read off the call's answer, the throw took it along.
-  it('re-times an auto_assign’s move when the call fails after it', async () => {
+  // The move commits before the pick runs, so a pick that fails after it —
+  // here its `assigned` line, refused by a trigger, which rolls the pick back
+  // and throws out of the call — still owes the clocks the new group's
+  // calendar. Read off the call's answer, the throw took it along; the engine
+  // reads the `routed` carrier, which the move sets the moment it commits.
+  // Not the move's own `group_changed` line: that is written in a savepoint
+  // whose failure is logged rather than thrown, so refusing it fails nothing.
+  it('re-times an auto_assign’s move when the pick fails after it', async () => {
     const [sundays] = await db
       .insert(businessHours)
       .values({
@@ -718,10 +723,28 @@ describe('the automation engine', () => {
         },
       })
       .returning({ id: businessHours.id });
+    // A rota at any hour, with somebody on it, so the pick gets as far as
+    // the line that records it.
     const [merchantCare] = await db
       .insert(groups)
-      .values({ name: 'Merchant Care', businessHoursId: sundays!.id })
+      .values({
+        name: 'Merchant Care',
+        businessHoursId: sundays!.id,
+        assignmentStrategy: 'round_robin',
+        assignWithinHoursOnly: false,
+      })
       .returning({ id: groups.id });
+    const [mona] = await db
+      .insert(agents)
+      .values({
+        name: 'Mona',
+        email: 'mona@shipblu.test',
+        role: 'agent',
+        presence: 'online',
+        lastSeenAt: new Date(),
+      })
+      .returning({ id: agents.id });
+    await db.insert(groupMembers).values({ groupId: merchantCare!.id, agentId: mona!.id });
     forgetHoursCatalog();
     await db.insert(slaPolicies).values({
       name: 'Standard',
@@ -739,25 +762,34 @@ describe('the automation engine', () => {
       actions: [{ type: 'auto_assign', groupId: merchantCare!.id, strategy: 'group_default' }],
     });
 
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    let logged: string[] = [];
     await db.execute(sql`
-      create function refuse_group_changed() returns trigger language plpgsql
+      create function refuse_assigned() returns trigger language plpgsql
       as $$ begin raise exception 'refused for the test'; end $$`);
     await db.execute(sql`
-      create trigger refuse_group_changed before insert on conversation_events
-      for each row when (new.type = 'group_changed') execute function refuse_group_changed()`);
+      create trigger refuse_assigned before insert on conversation_events
+      for each row when (new.type = 'assigned') execute function refuse_assigned()`);
     try {
       await runAutomations('on_update', id);
     } finally {
-      await db.execute(sql`drop trigger refuse_group_changed on conversation_events`);
-      await db.execute(sql`drop function refuse_group_changed()`);
+      await db.execute(sql`drop trigger refuse_assigned on conversation_events`);
+      await db.execute(sql`drop function refuse_assigned()`);
+      logged = errors.mock.calls.map((call) => String(call[0]));
+      errors.mockRestore();
     }
 
+    // The call threw — the engine logs a failed action and carries on — so
+    // what follows was owed by the carrier, not by an answer.
+    expect(logged).toEqual(['[automations] "Route to Merchant Care" could not apply auto_assign']);
+    // Moved and recorded as moved; the pick rolled back with its line.
     const [row] = await db
-      .select({ groupId: conversations.groupId })
+      .select({ groupId: conversations.groupId, assigneeAgentId: conversations.assigneeAgentId })
       .from(conversations)
       .where(eq(conversations.id, id));
-    expect(row!.groupId).toBe(merchantCare!.id);
-    expect(await events(id, 'group_changed')).toEqual([]);
+    expect(row).toEqual({ groupId: merchantCare!.id, assigneeAgentId: null });
+    expect(await events(id, 'assigned')).toEqual([]);
+    expect(await events(id, 'group_changed')).toHaveLength(1);
     expect((await sla(id)).firstResponseDueAt!.getTime()).toBeGreaterThan(
       before.firstResponseDueAt!.getTime(),
     );

@@ -27,9 +27,10 @@ export function isCategoryAiMode(value: unknown): value is CategoryAiMode {
 export const DEFAULT_MIN_PROBABILITY = 0.6;
 
 /**
- * How long Stage 5 holds a fresh ticket for its category before routing it
- * without one. Stored from 4.1 so one page sets everything the classifier and
- * the router read; nothing reads it before Stage 5.
+ * How long the router holds a fresh ticket for its category before routing it
+ * without one (`lib/routing/start.ts`). Stored here so one page sets everything
+ * the classifier and the router read, and copied onto each ticket at its
+ * insert, so a change never moves a window already running.
  */
 export const DEFAULT_ROUTING_WINDOW_MINUTES = 5;
 export const ROUTING_WINDOW_MINUTES = { min: 1, max: 30 } as const;

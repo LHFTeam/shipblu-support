@@ -1623,6 +1623,9 @@ describe('adopting a number connected in Meta’s own interface', () => {
     expect(after!.tokenEnvVar).toBe(VARIABLE);
   });
 
+  // Routed by category as a plain number, which a number on the Business app
+  // never is: the column goes back with the takeover, so it never contradicts
+  // what `routingModeOf` reads off the connected row.
   it('takes over a plain channel already made for the number by hand', async () => {
     const accountId = await account();
     const [plain] = await db
@@ -1632,6 +1635,7 @@ describe('adopting a number connected in Meta’s own interface', () => {
         name: 'Sales line',
         whatsappAccountId: accountId,
         config: { phoneNumberId: PHONE },
+        routingMode: 'category',
       })
       .returning({ id: channels.id });
     const id = await adopted(accountId);
@@ -1642,6 +1646,7 @@ describe('adopting a number connected in Meta’s own interface', () => {
     const channel = await channelFor();
     expect(channel!.id).toBe(plain!.id);
     expect(channel!.name).toBe('Sales line');
+    expect(channel!.routingMode).toBe('default_group');
     expect(parseCoexistence(channel!.config)).toMatchObject({ onboardingId: id, adopted: true });
   });
 

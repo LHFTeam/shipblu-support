@@ -35,6 +35,8 @@ import {
 } from './live-conversation';
 import { reopenResolved } from './reopen';
 import { requireDefaultOpenStatusId, requireResolvedStatusId } from './statuses';
+import { routingModeOf, type RoutingMode } from '@/lib/routing/mode';
+import { planRouting, routingWindowValues, startRouting } from '@/lib/routing/start';
 
 /**
  * Inbound WhatsApp → conversation.
@@ -82,16 +84,31 @@ export async function ingestWhatsAppMessage(
   const channel = await resolveWhatsAppChannel(message.phoneNumberId);
   noteUnnamedNumber(channel, message.phoneNumberId);
   const thread = threadKey(channel);
+  // Before the transaction, whether or not it opens a ticket: the insert
+  // transaction must read nothing on the pool, and a throw inside it loses the
+  // message rather than retrying it (`lib/routing/start.ts`).
+  const routing = await planRouting(
+    channel.id
+      ? { id: channel.id, type: channel.kind, config: null, routingMode: channel.routingMode }
+      : null,
+  );
 
   const result = await db.transaction(async (tx) => {
     let conversationId: string;
     let conversationNumber: number;
     let createdConversation = false;
+    // Who the insert stamped, which routing starts nothing for: the owner is
+    // outside the rota.
+    let ownerAtInsert: string | null = null;
 
     // Found inside the transaction, behind the thread's lock, so a second
     // delivery for this customer and number waits for this one to commit and
     // continues its ticket instead of opening another (`lockThread`).
     await lockThread(tx, contactId, thread);
+    // When the message was processed, behind the thread's lock: a new
+    // ticket's owner stamp and routing window count from it, never from
+    // Meta's `sentAt`, which is hours old for a delivery processed late.
+    const now = new Date();
     const existing = await findOrAdoptLive(tx, contactId, thread, message.phoneNumberId);
 
     if (existing) {
@@ -130,13 +147,18 @@ export async function ingestWhatsAppMessage(
           lastCustomerMessageAt: message.sentAt,
           // The number's owner's from the start, in the insert rather than by
           // the assignment that runs after it (`ownerStamp` says why).
-          ...ownerStamp(ownerId, new Date()),
+          ...ownerStamp(ownerId, now),
+          // Held for the router from the insert, unless the owner's stamp
+          // beside it already gives the ticket to somebody: the owner is
+          // outside the rota (`lib/routing/start.ts`).
+          ...routingWindowValues(routing, { assigneeAgentId: ownerId }, now),
         })
         .returning({ id: conversations.id, number: conversations.number });
 
       conversationId = inserted[0]!.id;
       conversationNumber = inserted[0]!.number;
       createdConversation = true;
+      ownerAtInsert = ownerId;
 
       if (ownerId) {
         await recordOwnerAssigned(tx, { conversationId, ownerId, channelId: channel.id });
@@ -149,6 +171,20 @@ export async function ingestWhatsAppMessage(
       .returning({ id: messages.id });
 
     const messageId = insertedMessage[0]!.id;
+
+    if (createdConversation) {
+      await startRouting(
+        tx,
+        routing,
+        {
+          conversationId,
+          messageId,
+          groupId: channel.defaultGroupId,
+          assigneeAgentId: ownerAtInsert,
+        },
+        now,
+      );
+    }
 
     // lastCustomerMessageAt is what opens the 24-hour window, so it must be the
     // customer's timestamp from Meta, not now(): a delayed webhook would
@@ -803,6 +839,13 @@ export type ResolvedChannel = {
    * and worth a warning on the paths that keep the event (`noteUnnamedNumber`).
    */
   named: boolean;
+  /**
+   * How the row's new tickets find their group, through `routingModeOf`, so a
+   * coexistence number and the bot read `default_group` whatever the column
+   * says. `default_group` for a number no row names, which borrows a group
+   * but has no mode the router could read again when it decides.
+   */
+  routingMode: RoutingMode;
 };
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -890,6 +933,7 @@ export async function resolveWhatsAppChannel(
       type: channels.type,
       defaultGroupId: channels.defaultGroupId,
       config: channels.config,
+      routingMode: channels.routingMode,
     })
     .from(channels)
     .where(and(inArray(channels.type, ['whatsapp', 'whatsapp_bot']), eq(channels.isActive, true)))
@@ -909,6 +953,7 @@ export async function resolveWhatsAppChannel(
       coexistence: byNumber.type === 'whatsapp' && parseCoexistence(byNumber.config) !== null,
       ownable: byNumber.type === 'whatsapp',
       named: true,
+      routingMode: routingModeOf(byNumber),
     };
   }
 
@@ -943,6 +988,7 @@ export async function resolveWhatsAppChannel(
     coexistence: false,
     ownable: false,
     named: false,
+    routingMode: 'default_group',
   };
 }
 

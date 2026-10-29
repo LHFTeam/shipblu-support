@@ -11,6 +11,7 @@ import {
   conversationShipments,
   conversations,
   messages,
+  routingDecisions,
   shipments,
   ticketCategories,
   ticketStatuses,
@@ -571,6 +572,45 @@ describe('applyCategoryRun', () => {
       spam: 1,
     });
     expect((await carried(tickets.jev.id)).categoryId).toBe(await categoryId('customer_support'));
+  });
+
+  // `settle_routing` routes on whatever category a held ticket carries when
+  // its window ends, so filing one would move it on an archived answer. A
+  // shadow row holds and moves nothing, and a decided one is past routing.
+  it('leaves a ticket the router is still holding, and files one it is only watching or has decided', async () => {
+    answersInTurn('sales');
+    const tickets = { held: await ticket(), watched: await ticket(), decided: await ticket() };
+    for (const t of Object.values(tickets)) await inbound(t, 'بكام الشحن؟', at(10));
+    await record();
+    const windowEndsAt = new Date(Date.now() + 5 * 60_000);
+    await db
+      .update(conversations)
+      .set({ routingWindowEndsAt: windowEndsAt })
+      .where(eq(conversations.id, tickets.held.id));
+    await db.insert(routingDecisions).values([
+      { conversationId: tickets.held.id, shadow: false, stage: 'holding', windowEndsAt },
+      { conversationId: tickets.watched.id, shadow: true, stage: 'holding', windowEndsAt },
+      {
+        conversationId: tickets.decided.id,
+        shadow: false,
+        stage: 'decided',
+        outcome: 'fallback',
+        windowEndsAt: at(5),
+        decidedAt: at(5),
+      },
+    ]);
+
+    const result = await apply();
+
+    expect(result).toMatchObject({ status: 'ran', candidates: 3, applied: 2 });
+    expect(result.status === 'ran' && Object.fromEntries(result.left)).toEqual({
+      'held for routing': 1,
+    });
+    const sales = await categoryId('sales');
+    expect((await carried(tickets.held.id)).categoryId).toBeNull();
+    expect(await eventsOf(tickets.held.id, 'category_changed')).toEqual([]);
+    expect((await carried(tickets.watched.id)).categoryId).toBe(sales);
+    expect((await carried(tickets.decided.id)).categoryId).toBe(sales);
   });
 
   // An agent setting the ticket pending as the backfill reaches it: the filing
