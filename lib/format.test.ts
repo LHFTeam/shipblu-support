@@ -129,6 +129,15 @@ describe('formatDay / formatTime', () => {
     }
   });
 
+  it('writes an instant in the zone it is given, Cairo when none is', () => {
+    // 09:05 in Cairo on 14 October 2026 (UTC+3): 10:05 in Dubai (UTC+4), and
+    // a report cut in Dubai's days prints its instants in Dubai's time.
+    const at = cairo({ year: 2026, month: 10, day: 14, hour: 9, minute: 5 });
+    expect(formatDateTime(at)).toBe('14 Oct 2026, 09:05');
+    expect(formatDateTime(at, 'Asia/Dubai')).toBe('14 Oct 2026, 10:05');
+    expect(formatDateTime(at)).toBe('14 Oct 2026, 09:05');
+  });
+
   it('writes midnight as 00:00, never 24:00, and pads the hour', () => {
     expect(formatTime(cairo({ year: 2026, month: 3, day: 1, hour: 0, minute: 0 }))).toBe('00:00');
     expect(formatTime(cairo({ year: 2026, month: 3, day: 1, hour: 9, minute: 5 }))).toBe('09:05');

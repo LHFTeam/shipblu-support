@@ -124,6 +124,27 @@ describe('the routing report page', () => {
     expect(html).not.toContain('Business app');
   });
 
+  it('says a ticket is held only while a live mode and Apply hold one', async () => {
+    await classifier('apply');
+    const shadow = await channel({ name: 'Web chat', routingMode: 'category_shadow' });
+    // Shadow records where a ticket would have gone and holds nothing.
+    expect(await render()).toContain('and no new ticket is held.');
+
+    await db.update(channels).set({ routingMode: 'category' }).where(eq(channels.id, shadow));
+    const html = await render();
+    expect(html).toContain('is held for');
+    expect(html).toContain('5 minutes');
+    expect(html).not.toContain('no new ticket is held');
+  });
+
+  it('says nothing is held while the classifier is not in Apply, a live mode notwithstanding', async () => {
+    await classifier('shadow');
+    await channel({ name: 'Web chat', routingMode: 'category' });
+    const html = await render();
+    expect(html).toContain('and no new ticket is held.');
+    expect(html).not.toContain('is held for');
+  });
+
   it('warns that a category mode is idle while the classifier is not in Apply', async () => {
     await classifier('shadow');
     await channel({ name: 'Web chat', routingMode: 'category' });

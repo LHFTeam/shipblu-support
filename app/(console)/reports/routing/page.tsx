@@ -364,7 +364,7 @@ export default async function RoutingReportPage({
 
       <h2 className="mb-1 text-base font-semibold">Now</h2>
       <p className="mb-4 max-w-3xl text-xs text-(--color-text-tertiary)">
-        As of when this page loaded, {formatDateTime(now)}, whatever the range above.
+        As of when this page loaded, {formatDateTime(now, zone)}, whatever the range above.
       </p>
 
       <Section
@@ -401,7 +401,7 @@ export default async function RoutingReportPage({
                   ) : (
                     <span dir="auto">{row.channelName}</span>
                   )}{' '}
-                  · window ended {formatDateTime(row.windowEndsAt)}
+                  · window ended {formatDateTime(row.windowEndsAt, zone)}
                 </span>
                 <code className="text-xs break-all">conversationId={row.conversationId}</code>
               </li>
@@ -480,13 +480,24 @@ function StateNotice({
         .filter((sentence): sentence is string => sentence !== null),
     ),
   ];
+  // Only a live mode holds, and only while the classifier is in Apply
+  // (`routingStartFor`): a shadow row holds nothing, and off or in shadow
+  // nothing enters routing. Said whatever the modes, it told an admin reading
+  // the page in the shadow week that new tickets were being kept back.
+  const holds = classifier === 'apply' && routingNow.some((channel) => channel.mode === 'category');
   return (
     <>
       <Notice tone="neutral">
         The category classifier is{' '}
-        <b className="text-(--color-text-primary)">{CLASSIFIER_STATES[classifier]}</b>, and a ticket
-        entering routing now is held for {windowMinutes}{' '}
-        {windowMinutes === 1 ? 'minute' : 'minutes'}.{' '}
+        <b className="text-(--color-text-primary)">{CLASSIFIER_STATES[classifier]}</b>
+        {holds ? (
+          <>
+            , and a new ticket on a channel set to {ROUTING_MODE_LABELS.category} is held for{' '}
+            {windowMinutes} {windowMinutes === 1 ? 'minute' : 'minutes'}.{' '}
+          </>
+        ) : (
+          <>, and no new ticket is held. </>
+        )}
         {routingNow.length === 0 ? (
           <>Every active channel starts its tickets in its default group.</>
         ) : (
