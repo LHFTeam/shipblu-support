@@ -128,6 +128,11 @@ export const routingDecisions = pgTable(
     uniqueIndex('routing_decisions_conversation_idx').on(t.conversationId),
     // The routing report, a channel at a time over a range.
     index('routing_decisions_channel_idx').on(t.channelId, t.startedAt),
+    // The routing report over a range of every channel, which is every one of
+    // its range-bound reads, and the history's first and last: the channel
+    // index leads on a column none of them constrains, so without this each
+    // read the whole table, which only grows (a row per ticket ever routed).
+    index('routing_decisions_started_idx').on(t.startedAt),
     // The `set null` foreign key: a purge deleting a ticket's messages would
     // otherwise scan the whole table once for every message it deletes.
     index('routing_decisions_message_idx').on(t.messageId),

@@ -5170,6 +5170,17 @@ fix has behaviour:
   since a migration runs in a transaction: a SHARE lock for the milliseconds
   the table takes to read, which is young and small in production. An ingest
   inserting a routing row on a channel in a category mode waits that long.
+  **`0055`** is the same shape on the same table: `routing_decisions(started_at)`,
+  which every range-bound read on `/reports/routing` and the history's first
+  and last use, where the channel index leads on a column none of them
+  constrains.
+- **`0054`** adds `rollup_days.categories_computed_at`, nullable with no
+  default, so a catalog change under an ACCESS EXCLUSIVE lock held for
+  milliseconds. Every existing row reads unfiled, which is the truth: each was
+  rolled up before categories. The overview then names those days in its By
+  category section until the history's rebuild files them; the first Stage 6
+  nightly files its three. A rollback's nightly writes `computed_at` alone, so
+  a day it rebuilds reads unfiled again once Stage 6 is back.
 - **Before web, read-only:**
   - the duplicate-slice query and the two-dimension query (both 0 on
     2026-10-28);

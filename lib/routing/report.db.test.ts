@@ -663,6 +663,59 @@ describe('routedStillUnassigned', () => {
   });
 });
 
+describe('the range-bound reads', () => {
+  // A year of decided rows, eight hours apart across three channels, and the
+  // statistics to go with them: an empty table is cheapest read whole, and
+  // one with no statistics is planned on guesses, so neither says what a page
+  // load costs once the table has grown.
+  async function aYearOfDecisions() {
+    const [contact] = await db
+      .insert(contacts)
+      .values({ name: 'Amira' })
+      .returning({ id: contacts.id });
+    const open = await statusId('Open');
+    const [first, second, third] = [await channel(), await channel(), await channel()];
+    await db.execute(sql`
+      with t as (
+        insert into conversations (requester_contact_id, status_id, channel)
+        select ${contact!.id}::uuid, ${open}::uuid, 'webchat'
+          from generate_series(1, 1000)
+        returning id
+      ), n as (
+        select id, row_number() over () as i from t
+      )
+      insert into routing_decisions
+             (conversation_id, channel_id, shadow, stage, outcome, started_at, window_ends_at, decided_at)
+      select n.id,
+             case n.i % 3 when 0 then ${first}::uuid when 1 then ${second}::uuid else ${third}::uuid end,
+             false, 'decided', 'category', s.at, s.at + interval '5 minutes', s.at + interval '5 minutes'
+        from n
+       cross join lateral (
+             select ${NOW.toISOString()}::timestamptz - n.i * interval '8 hours' as at
+           ) s`);
+    await db.execute(sql`analyze routing_decisions`);
+  }
+
+  // Each load reads the table six times, and it gains a row for every ticket
+  // ever routed, so none may read it whole: the plan, on a week of a year's
+  // rows, names the index on `started_at`. The channel index cannot serve a
+  // read across every channel without reading all of it.
+  it.each([
+    ['outcomes', () => outcomesStatement(WEEK, NOW)],
+    ['timing', () => timingStatement(WEEK, NOW)],
+    ['fallback', () => fallbackStatement(WEEK, NOW)],
+    ['taken', () => takenStatement(WEEK, NOW)],
+    ['shadow', () => shadowStatement(WEEK, NOW)],
+    ['history', () => historyStatement(NOW)],
+  ])('reads %s through the started index', async (_name, statement) => {
+    await aYearOfDecisions();
+    const plan = await db.execute<{ 'QUERY PLAN': string }>(sql`explain ${statement()}`);
+    expect(plan.map((row) => row['QUERY PLAN']).join('\n')).toContain(
+      'routing_decisions_started_idx',
+    );
+  });
+});
+
 describe('strandedRouting', () => {
   // Read on every load whatever the range, so it must not grow with the table:
   // the partial index holds only the undecided rows. An empty table is cheapest
