@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray } from 'drizzle-orm';
+import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { agents, automationRules, channels } from '@/db/schema';
 import { parseAction } from '@/lib/automations/actions';
@@ -204,7 +204,10 @@ function readChannels(): Promise<ChannelInput[]> {
       isActive: channels.isActive,
       createdAt: channels.createdAt,
       defaultGroupId: channels.defaultGroupId,
-      ownerName: agents.name,
+      // The owner's name, or their email where the name is blank, as every
+      // other place the console names an agent: the warning keyed on owning
+      // must have somebody to name.
+      ownerName: sql<string | null>`coalesce(nullif(${agents.name}, ''), ${agents.email})`,
       ownerActive: agents.isActive,
     })
     .from(channels)
@@ -265,7 +268,7 @@ function assessReadiness(input: {
   const routingChannels = input.channels.map((channel): ChannelRouting => {
     const mode = routingModeOf(channel);
     const filingRow = filingRowFor(channel, input.channels);
-    const owned = ownedByActiveAgent(channel) ? channel.ownerName : null;
+    const owned = ownedByActiveAgent(channel) ? (channel.ownerName ?? 'its owner') : null;
     const files = filesRoutableTickets(channel, input.channels);
     const starts = files ? routingStartFor(mode, classifier.mode) : null;
     const base = {
@@ -289,7 +292,7 @@ function assessReadiness(input: {
     else if (filingRow && filingRow !== channel) {
       warnings.push({ kind: 'not_filing_row', filingRow: filingRow.name });
     }
-    if (owned) warnings.push({ kind: 'owned', owner: owned });
+    if (owned !== null) warnings.push({ kind: 'owned', owner: owned });
     if (classifier.mode !== 'apply') {
       warnings.push({ kind: 'classifier_idle', classifier: classifier.mode });
     } else if (!classifier.keyConfigured) {
