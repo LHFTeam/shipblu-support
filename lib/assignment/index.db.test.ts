@@ -1,5 +1,6 @@
 import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import { PgDatabase } from 'drizzle-orm/pg-core';
+import postgres from 'postgres';
 import { describe, expect, it, vi } from 'vitest';
 import { db } from '@/db/client';
 import {
@@ -21,7 +22,7 @@ import { runAutomations } from '@/lib/automations';
 import { createTicket } from '@/lib/portal/tickets';
 import { ROUTING_GRACE_MS } from '@/lib/routing/hold';
 import { withCleanDatabase } from '@/lib/testing/db';
-import { holdNextTransaction } from '@/lib/testing/hold-transaction';
+import { holdNextTransaction, untilWaitingOnALock } from '@/lib/testing/hold-transaction';
 import { afterTicketUpdate } from '@/lib/tickets/lifecycle';
 import { assignConversation, recordLineIn } from './index';
 
@@ -898,6 +899,101 @@ describe('assignConversation on a ticket held for the router', () => {
 });
 
 /**
+ * Where an assignment's line sorts when its transaction waited on the ticket.
+ * Both paths lock the ticket's row before they write, and another writer — the
+ * console's priority, the router's phase one — can hold it as the transaction
+ * begins. Stamped with that start, the `assigned` line sorted before the change
+ * committed while it waited, though nobody could be assigned until then; so
+ * both stamp it as it is written (`CHANGE_STAMP`), the rota in this module and
+ * the owner's path in `recordOwnerAssigned`.
+ */
+describe('an assignment written after a wait on the ticket', () => {
+  /**
+   * Runs `assign` while another session holds the ticket's row, and lets that
+   * session change the priority — its line stamped when written, as every
+   * writer of the column stamps it — and commit once `assign` waits on it.
+   */
+  async function behindAWriter<T>(id: string, assign: () => Promise<T>): Promise<T> {
+    const other = postgres(process.env.TEST_DATABASE_URL!, {
+      max: 1,
+      prepare: false,
+      onnotice: () => {},
+    });
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    let locked!: () => void;
+    const isLocked = new Promise<void>((resolve) => (locked = resolve));
+    try {
+      const writer = other.begin(async (tx) => {
+        await tx`select id from conversations where id = ${id} for no key update`;
+        locked();
+        await gate;
+        await tx`update conversations set priority = 'urgent' where id = ${id}`;
+        await tx`insert into conversation_events (conversation_id, type, actor_label, data, created_at)
+                 values (${id}, 'priority_changed', 'agent', '{"to":"urgent"}', clock_timestamp())`;
+      });
+      await isLocked;
+      const assigning = assign();
+      await untilWaitingOnALock(db);
+      release();
+      await writer;
+      return await assigning;
+    } finally {
+      await other.end();
+    }
+  }
+
+  /** The assignment and that change, as the ticket page draws them: by `created_at`. */
+  async function lineOrder(id: string) {
+    const lines = await db
+      .select({ type: conversationEvents.type })
+      .from(conversationEvents)
+      .where(
+        and(
+          eq(conversationEvents.conversationId, id),
+          inArray(conversationEvents.type, ['assigned', 'priority_changed']),
+        ),
+      )
+      .orderBy(asc(conversationEvents.createdAt), asc(conversationEvents.id));
+    return lines.map((line) => line.type);
+  }
+
+  it('the rota’s pick sorts after the change it waited for', async () => {
+    const omar = await agent('Omar Agent', { presence: 'online', lastSeenAt: new Date() });
+    const support = await group('Merchant Care', { assignWithinHoursOnly: false });
+    await db.insert(groupMembers).values({ groupId: support, agentId: omar });
+    const [contact] = await db
+      .insert(contacts)
+      .values({ name: 'Amira' })
+      .returning({ id: contacts.id });
+    const [ticket] = await db
+      .insert(conversations)
+      .values({
+        channel: 'email',
+        groupId: support,
+        statusId: await statusId('Open'),
+        requesterContactId: contact!.id,
+      })
+      .returning({ id: conversations.id });
+
+    const outcome = await behindAWriter(ticket!.id, () => assignConversation(ticket!.id));
+
+    expect(outcome).toMatchObject({ assignedTo: omar, reason: null });
+    expect(await lineOrder(ticket!.id)).toEqual(['priority_changed', 'assigned']);
+  });
+
+  it('the hand-back to the number’s owner sorts after the change it waited for', async () => {
+    const nayera = await agent('Nayera Mohamed');
+    const ticket = await ownedTicket(nayera);
+
+    const outcome = await behindAWriter(ticket.id, () => assignConversation(ticket.id));
+
+    expect(outcome).toMatchObject({ assignedTo: nayera, reason: null });
+    expect(await lineOrder(ticket.id)).toEqual(['priority_changed', 'assigned']);
+  });
+});
+
+/**
  * The line a write records inside its own transaction, in a savepoint: a
  * refusal Postgres returned is answered and the write stands; anything else —
  * the admission gate giving a statement up as lost, a cancel — is thrown on,
@@ -937,6 +1033,41 @@ describe('recordLineIn', () => {
       await db.execute(sql`drop function refuse_line()`);
     }
     expect(await subjectOf(id)).toBe('After');
+  });
+
+  // A cancel as Postgres answers it — a statement `db/client.ts` cut off at its
+  // deadline, or a `statement_timeout` — is 57014 on the statement, which
+  // drizzle hands on as the cause of its own error. It is a `PostgresError`,
+  // as a refusal is, and only its code tells the two apart: read by name
+  // alone, it was answered as a refusal, and the write committed as though
+  // only its line had been refused.
+  it('throws a statement Postgres cancelled on, and the whole transaction rolls back', async () => {
+    const id = await ticketOnPhone();
+    await db.execute(sql`
+      create function slow_line() returns trigger language plpgsql
+      as $$ begin perform pg_sleep(2); return new; end $$`);
+    await db.execute(sql`
+      create trigger slow_line before insert on conversation_events
+      for each row when (new.type = 'group_changed') execute function slow_line()`);
+    let failure: unknown;
+    try {
+      failure = await db
+        .transaction(async (tx) => {
+          await tx.update(conversations).set({ subject: 'After' }).where(eq(conversations.id, id));
+          await tx.execute(sql`set local statement_timeout = '200ms'`);
+          await recordLineIn(tx, { conversationId: id, type: 'group_changed', data: {} });
+        })
+        .then(
+          () => null,
+          (error: unknown) => error,
+        );
+    } finally {
+      await db.execute(sql`drop trigger slow_line on conversation_events`);
+      await db.execute(sql`drop function slow_line()`);
+    }
+    const cause = (failure as { cause?: { name?: unknown; code?: unknown } } | null)?.cause;
+    expect([cause?.name, cause?.code]).toEqual(['PostgresError', '57014']);
+    expect(await subjectOf(id)).toBe('Before');
   });
 
   it('throws anything else on, and the whole transaction rolls back', async () => {

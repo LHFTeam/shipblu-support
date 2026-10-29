@@ -22,6 +22,7 @@ import { afterHoldEnded } from './after-hold';
 import { isWorkable } from './decide';
 import { endHold } from './end-hold';
 import { isHeld, type HoldColumns } from './hold';
+import { deferToRouter } from './state';
 
 const log = logger('routing');
 
@@ -172,10 +173,10 @@ export type HandToResult =
       /**
        * The assignment after the hand-over threw, so who the rota picked is
        * not known: `assignedTo`, `skipped` and `waitsIn` are then null. Not
-       * that nobody holds the ticket — the hold's end assigns again on its
-       * own (`afterHoldEnded`), the hand-over's when it ended one and the
-       * router's on a decision in flight — so the agent is told to look,
-       * rather than told where it waits.
+       * that nobody holds the ticket — the end of a hold the hand-over ended
+       * assigns again on its own (`afterHoldEnded`) — so the agent is told
+       * to look, rather than told where it waits. Never on a decision in
+       * flight, which the hand-over assigns no part of.
        */
       assignmentFailed?: true;
     };
@@ -218,10 +219,13 @@ const WAITING: ReadonlySet<SkipReason> = new Set<SkipReason>([
  * wrote anything: the agent has decided that one now. And it leaves alone one
  * whose decision is in flight — phase one written, which only the router
  * finishes (`endHold`) — offered because somebody holds it, or because its
- * grace ran out on a router that stalled. Taking it off its holder within the
- * grace puts it back in the hold, so the hand-over's own assignment answers
- * `awaiting_route`, and the router's end of the hold assigns it, after its
- * rules, in the group this moved it to or wherever they then sent it.
+ * grace ran out on a router that stalled. That one the hand-over hands to the
+ * router whole (`deferToRouter`): the router's pass runs again on the ticket
+ * in the group this moved it to, and its end of the hold assigns it there or
+ * wherever the rules then sent it, so the hand-over runs none of its
+ * follow-ups and answers `awaiting_route`. Its own assignment, the grace run
+ * out, would hand the ticket to the new group's rota before the router's pass
+ * had moved it on.
  * The two events are stamped as they are written (`CHANGE_STAMP`), because
  * both are in one transaction and `now()` would tie them.
  *
@@ -366,9 +370,24 @@ export async function handToRouteGroup(
       groupName: decision.groupName,
       moved,
       endedHold,
+      deferred: await deferToRouter(tx, conversationId),
     };
   });
   if (!write.ok) return write;
+
+  // A decision in flight finishes the hand-over: its pass runs again on the
+  // ticket as this left it, then the policy follows the move, and its end of
+  // the hold assigns in whatever group the rules leave the ticket in. Nothing
+  // of the router's is known yet, so the answer names no holder and no queue.
+  if (write.deferred) {
+    return {
+      ok: true,
+      groupName: write.groupName,
+      assignedTo: null,
+      skipped: 'awaiting_route',
+      waitsIn: null,
+    };
+  }
 
   // Best-effort from here, as every lifecycle step is: the hand-over has
   // committed, so a throw would answer the agent with a failure for a move and

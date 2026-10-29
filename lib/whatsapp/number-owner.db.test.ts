@@ -1,5 +1,6 @@
-import { asc, eq, inArray } from 'drizzle-orm';
+import { and, asc, eq, inArray } from 'drizzle-orm';
 import { DateTime } from 'luxon';
+import postgres from 'postgres';
 import { describe, expect, it } from 'vitest';
 import { db } from '@/db/client';
 import {
@@ -17,6 +18,7 @@ import { computeAgentDay } from '@/lib/reports/agent-rollup';
 import { changeStatus } from '@/lib/tickets/status';
 import { reportingContext } from '@/lib/reports/rollup';
 import { withCleanDatabase } from '@/lib/testing/db';
+import { untilWaitingOnALock } from '@/lib/testing/hold-transaction';
 import { alignAccountable, handOverNumber, numberOwnership, reopenWithOwner } from './number-owner';
 
 /**
@@ -109,6 +111,56 @@ async function eventsOf(id: string) {
     .from(conversationEvents)
     .where(eq(conversationEvents.conversationId, id))
     .orderBy(asc(conversationEvents.type));
+}
+
+/**
+ * Runs `write` while another session holds the ticket's row, and lets that
+ * session change the priority — its line stamped when written, as every
+ * writer of the column stamps it — and commit once `write` waits on it.
+ */
+async function behindAWriter(id: string, write: () => Promise<unknown>): Promise<void> {
+  const other = postgres(process.env.TEST_DATABASE_URL!, {
+    max: 1,
+    prepare: false,
+    onnotice: () => {},
+  });
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  let locked!: () => void;
+  const isLocked = new Promise<void>((resolve) => (locked = resolve));
+  try {
+    const writer = other.begin(async (tx) => {
+      await tx`select id from conversations where id = ${id} for no key update`;
+      locked();
+      await gate;
+      await tx`update conversations set priority = 'urgent' where id = ${id}`;
+      await tx`insert into conversation_events (conversation_id, type, actor_label, data, created_at)
+               values (${id}, 'priority_changed', 'agent', '{"to":"urgent"}', clock_timestamp())`;
+    });
+    await isLocked;
+    const writing = write();
+    await untilWaitingOnALock(db);
+    release();
+    await writer;
+    await writing;
+  } finally {
+    await other.end();
+  }
+}
+
+/** The owner's assignment and that change, as the ticket page draws them: by `created_at`. */
+async function lineOrder(id: string) {
+  const lines = await db
+    .select({ type: conversationEvents.type })
+    .from(conversationEvents)
+    .where(
+      and(
+        eq(conversationEvents.conversationId, id),
+        inArray(conversationEvents.type, ['assigned', 'priority_changed']),
+      ),
+    )
+    .orderBy(asc(conversationEvents.createdAt), asc(conversationEvents.id));
+  return lines.map((line) => line.type);
 }
 
 async function ownerOf(channelId: string) {
@@ -389,6 +441,24 @@ describe('handOverNumber', () => {
     expect(of(nayera).touchedCount).toBe(0);
     expect(of(nayera).assignedCount).toBe(3);
   });
+
+  // The handover locks the number's tickets before it writes their lines, and
+  // a ticket another writer holds makes it wait there. Stamped with `now`,
+  // taken before the transaction, the new owner's assignment sorted before the
+  // change committed while it waited (`CHANGE_STAMP`).
+  it('sorts the new owner’s assignment after a change it waited for', async () => {
+    const admin = await agent('Mona Admin', { role: 'admin' });
+    const nayera = await agent('Nayera Mohamed');
+    const number = await phone('Nayera Mohamed');
+    const open = await ticket(number, 'Open');
+
+    await behindAWriter(open, () =>
+      handOverNumber({ channelId: number, toAgentId: nayera, actor: { id: admin, label: 'M' } }),
+    );
+
+    expect(await holders(open)).toEqual({ accountable: nayera, assignee: nayera });
+    expect(await lineOrder(open)).toEqual(['priority_changed', 'assigned']);
+  });
 });
 
 describe('alignAccountable', () => {
@@ -440,6 +510,34 @@ describe('alignAccountable', () => {
     // The number gone to nobody: accountability clears, the holder keeps it.
     expect(await align(hers, null)).toEqual({ changed: true, reassigned: false });
     expect(await holders(hers)).toEqual({ accountable: null, assignee: ali });
+  });
+
+  // Its locked read can wait on another writer, and its `assigned` line is
+  // `recordOwnerAssigned`'s, stamped as it is written: with the
+  // transaction's start, the owner's assignment sorted before the change
+  // committed while it waited, where the rota's sorts after it.
+  it('sorts the owner’s assignment after a change it waited for', async () => {
+    const nayera = await agent('Nayera Mohamed');
+    const ali = await agent('Ali Nasser');
+    const number = await phone('Nayera Mohamed', ali);
+    const hers = await ticket(number, 'Open', {
+      accountableAgentId: nayera,
+      assigneeAgentId: nayera,
+    });
+
+    await behindAWriter(hers, () =>
+      db.transaction((tx) =>
+        alignAccountable(tx, {
+          conversationId: hers,
+          ownerId: ali,
+          channelId: number,
+          reason: 'reopened_after_handover',
+        }),
+      ),
+    );
+
+    expect(await holders(hers)).toEqual({ accountable: ali, assignee: ali });
+    expect(await lineOrder(hers)).toEqual(['priority_changed', 'assigned']);
   });
 });
 

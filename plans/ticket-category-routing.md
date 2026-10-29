@@ -1970,7 +1970,10 @@ If the process dies between phases 1 and 3, the hold lasts until
 `settle_routing`. That job completes a decision whose phase 1 is more than a
 minute old. A younger one belongs to a caller still in flight, and the job
 leaves it alone. As built, a phase 3 that fails is completed the same way, phase
-2 runs at most once however many callers finish the decision, and a ticket
+2 runs once for every write it is owed for however many callers finish the
+decision — a person's category edit, group move or assignment, Hand to or
+Jev's answer landing after phase 1 re-arms it (`deferToRouter`) rather than running a
+pass of its own, and phase 3 runs it again before the hold ends — and a ticket
 nobody may work by then is owed nothing ([5.1, as built](#51-as-built)).
 
 **`decide.ts`'s outcomes**, tested in this order under the lock:
@@ -4277,8 +4280,9 @@ gains another first, 0051 is regenerated rather than renumbered.
     whose `held_strategy` and `held_actor_label` keep a rule's pick for the
     hold's end (fixed after the adversarial review, #1), and whose
     `rules_claimed_at` and `rules_done_at` hold phase two to one run (fixed
-    after the PR review). 0051 was regenerated for the second, being deployed
-    nowhere.
+    after the PR review) — one for each write it is owed for, since the second
+    adversarial review of the fixes, as a write in the gap clears both to
+    re-arm it. 0051 was regenerated for the second, being deployed nowhere.
     `db/sql/001` adds both columns to `queue_relevant`. `db/sql/003` adds
     `routing_decisions_decided_complete`: a decided row carries its outcome and
     `decided_at`, the two things the routing report counts, so a hand-run
@@ -4433,10 +4437,13 @@ gains another first, 0051 is regenerated rather than renumbered.
     — and neither does a person: the decision is the router's to finish
     (after the PR review, below).
   - **The classifier's `holding` case checks who decided when the router
-    answers `none` or `in_flight`** (`routerDecidedOn`, shared with the
+    answers anything but `decided`** (`routerDecidedOn`, shared with the
     console's edit): after a person, a rule or a `not_open` the relabel is still
-    owed, and after the router on another category too; after the router on
-    this one it would fire every category rule twice.
+    owed; after the router, or with the row still undecided, the router's pass
+    reads the write, and a relabel would fire every category rule twice. A
+    write that finds a decision in flight, its phase one written, asks nothing:
+    it re-arms the router's pass in its own transaction (`deferToRouter`), since
+    the second adversarial review of the fixes.
   - **`saveChannel` decides a WhatsApp row's mode inside its UPDATE**, a
     `case` on the coexistence object, and `complete_coexistence_onboarding`
     resets the column in the statement that takes the row's lock. Either alone
@@ -4477,7 +4484,10 @@ gains another first, 0051 is regenerated rather than renumbered.
     `assigned`, then `afterHoldEnded` if a live hold ended. The spec's three
     events are there whenever each applies — `unassigned` only when somebody
     held the ticket, `assigned` only when somebody in the group could take it
-    — and the pass between is this build's.
+    — and the pass between is this build's. On a decision in flight the
+    transaction also re-arms the router's pass (`deferToRouter`), and none of
+    what follows it runs: the router's pass, end of the hold and assignment do
+    it instead, and the answer is `awaiting_route` (below).
   - **Nobody to assign is still a success**, with a sentence saying the ticket
     waits in the group's queue — only when the rota answered that nobody there
     could take it (`waitsIn`), and naming the group an `on_update` rule moved
@@ -4567,7 +4577,9 @@ gains another first, 0051 is regenerated rather than renumbered.
     its own update pass**, whose rules the router had run on the category the
     edit replaced. It now skips the pass only when `routeNow` answers `decided`
     or `failed` — and, since the PR review, when the router it met had decided
-    on the very category the edit wrote.
+    on the very category the edit wrote. Since the second adversarial review of
+    the fixes it runs none on a decision in flight, whose pass it re-arms
+    (`deferToRouter`), and `failed` asks `routerDecidedOn` too.
   - **#7: Hand to's two-click guard trusted the page.** The button posts the
     assignee it was drawn with, and the action refuses `reassigned` when the
     locked row says somebody else.
@@ -4633,9 +4645,16 @@ gains another first, 0051 is regenerated rather than renumbered.
   - **The router's pass ran on a ticket nobody may work, or on a category it
     never decided on** (the same review; `apply.ts`): the caller that wins the
     claim gives the pass up on a ticket resolved, deleted, merged or marked spam
-    since phase one, and on one whose category changed since — whose writer
-    runs that category's pass itself, so each category's rules run once in
-    every order of two writers (`claimRules`; `apply.db.test.ts`).
+    since phase one, and on one whose category changed since, whose writer ran
+    that category's pass itself (`claimRules`; `apply.db.test.ts`). That did
+    not make each category's rules run once in every order of two writers, as
+    this line said: an edit committed between the claim and the pass's read ran
+    them twice, and one whose writer lagged ran them after the router had
+    assigned. The second give-up is gone since the second review of the fixes
+    (below); what holds now is that each write in the gap is passed once,
+    before the assignment, whichever side of the claim it lands on — short of
+    the cap of five passes, and of a pass re-armed over a claimant that died
+    part-way, some of whose rules then run again.
   - **Phase one's `routed` line sorted before the `category_changed` it decided
     on** when phase one waited for that writer's lock (the same review;
     `apply.ts`): stamped `CHANGE_STAMP`, as `endHold`'s is (`apply.db.test.ts`).
@@ -4643,7 +4662,8 @@ gains another first, 0051 is regenerated rather than renumbered.
     (the same review; `lib/category-ai/run.ts`): an earlier message answered
     while a decision on another category was in flight returned without a
     relabel. It asks `routerDecidedOn` (`lib/routing/state.ts`), shared with
-    the console (`run.db.test.ts`).
+    the console (`run.db.test.ts`). Since the second review of the fixes that
+    answer re-arms the router's pass instead (below).
   - **A console category edit on a ticket resolved in its window ran no
     update rules** (the same review; `routerDecidedOn`): `not_open` counted as
     the router's pass; it answers false, as the router owed that ticket nothing
@@ -4665,7 +4685,8 @@ gains another first, 0051 is regenerated rather than renumbered.
     on the category the router had read** (`ticket-actions.ts`): it reads the
     routing stage in the write's own transaction, and skips its pass when the
     router decided on that very category (`routerDecidedOn`;
-    `ticket-actions.db.test.ts`).
+    `ticket-actions.db.test.ts`). Half fixed: queued behind phase one's lock,
+    the edit still ran the rules twice in about half of runs (below).
   - **The held reply answered only the opening message** (`after-hold.ts`),
     which on a comment thread a passer-by's reply opened is refused, so the
     customer's own comment was never acknowledged: once somebody else opened
@@ -4721,6 +4742,58 @@ gains another first, 0051 is regenerated rather than renumbered.
     routes. Nothing answers differently, so the Hand to, assignment and sweep
     tests already there are its test.
   - **A dead `decided` branch in `undecidedRouting`**: removed in `7c657ff`.
+  - **A writer's own pass in the gap was unordered with the router's end of
+    the hold** (found by a second adversarial review of the fixes;
+    `lib/routing/state.ts`, `apply.ts`, `hand-to.ts`, `ticket-actions.ts`,
+    `lib/category-ai/run.ts`): a console category edit, a console group move,
+    Hand to or Jev's late answer landing after phase one ran a pass of its own,
+    which could come after the router had assigned, and a rule's
+    `assign_group` in it left a Sales or Billing agent holding a Merchant Care
+    ticket. Each now calls
+    `deferToRouter` in its write's transaction, which clears the claim and the
+    mark, and runs no pass, policy or `routeNow` of its own; phase three,
+    finding the claim cleared, runs the pass again before it ends the hold, at
+    most five times (`MAX_PASSES`), and the router no longer gives its pass up
+    on a changed category. Hand to there assigns nobody and answers
+    `awaiting_route` (`ticket-actions.db.test.ts`, `apply.db.test.ts`,
+    `settle.db.test.ts`, `hand-to.db.test.ts`, `run.db.test.ts`).
+  - **The console's assignee case after phase one ran a second pass beside the
+    router's** (found while making that fix; `ticket-actions.ts`): it re-arms
+    the router's pass too, naming somebody or not, and the person's pick stands
+    (`ticket-actions.db.test.ts`).
+  - **A category edit queued behind phase one still ran its rules twice in
+    about half of runs** (the same review; `apply.ts`): the claim compared one
+    snapshot and the pass read a later one. The claim and the read of the
+    ticket the pass runs on are one transaction under the ticket's lock, and
+    the pass runs on that read (`applyRules`), so a write lands wholly before
+    the claim or wholly after it (`ticket-actions.db.test.ts`,
+    `apply.db.test.ts`).
+  - **A category write whose own `routeNow` failed lost its rules' pass** while
+    a decision on another category was in flight (the same review;
+    `ticket-actions.ts`, `run.ts`, `state.ts`): on `failed` both writers ask
+    `routerDecidedOn`, which now takes the ticket alone and counts an undecided
+    row as the router's pass to run (`ticket-actions.db.test.ts`).
+  - **The console's `group_changed` and `assigned`/`unassigned` and
+    `changeStatus`'s `status_changed` sorted before the `routed` line they
+    followed** when the edit waited on phase one's lock (the same review;
+    `ticket-actions.ts`, `lib/tickets/status.ts`): stamped `CHANGE_STAMP`
+    (`ticket-actions.db.test.ts`, `status.db.test.ts`).
+  - **The owner path's `assigned` sorted before a change it waited for**, where
+    the rota's pick sorted after it (the same review;
+    `lib/whatsapp/number-owner.ts`): `recordOwnerAssigned` and
+    `handOverNumber`'s `assigned` lines are stamped `CHANGE_STAMP`;
+    `accountable_changed` keeps its instant, which the rollup reads
+    (`number-owner.db.test.ts`, `lib/assignment/index.db.test.ts`).
+  - **No test held `recordLineIn` to a real cancel, nor the rota's `assigned`
+    to its stamp** (the same review): a `statement_timeout` cancel is thrown on
+    and the move rolls back, and the rota's pick sorts after a change it waited
+    for (`lib/assignment/index.db.test.ts`).
+  - **Two sentences said more than the code does** (the same review): AGENTS.md
+    had the owner's hand-back re-read the group and the hold, where it re-reads
+    the assignee, the work and whether the owner is still the active
+    accountable agent; and `routeAndPick`'s comment had a hold only ever end,
+    where losing an assignee before the window and its grace are over puts one
+    back (`lib/assignment/index.ts`).
   - **Why the handover was answered rather than changed.** A handover that
     assigns a held ticket is what `decide()`'s `taken` outcome exists for: an
     assignee ends a hold whoever gave it (`isHeld`), and at the window's end the

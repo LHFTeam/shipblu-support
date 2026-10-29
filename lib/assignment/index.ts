@@ -243,10 +243,16 @@ async function routeAndPick(
   /*
    * Held for the router, ahead of the owner and the rota both: the hold is
    * absolute, and whatever ends it assigns the ticket then (`afterHoldEnded`).
-   * Read off the snapshot, because a hold is born in the ticket's insert and
-   * afterwards only ends: a stale "held" costs a skip that whoever ended it
-   * makes good, and a stale "not held" cannot exist. Checked again under the
-   * lock below all the same. A move this call made for a rule has ended it.
+   * Read off the snapshot, which is safe because only an unassigned snapshot
+   * gets here. A hold is born in the ticket's insert, and a decision, an
+   * assignee or the grace running out ends it. Only the assignee's end can be
+   * undone: taking it off a ticket nobody has decided, inside the grace, puts
+   * it back in the hold (`lib/routing/hand-to.ts` relies on that), while a
+   * decision is never undone and the window never reopens. So a ticket the
+   * snapshot read as unassigned and not held cannot have become held since,
+   * and a stale "held" costs a skip that whoever ended the hold makes good.
+   * Checked again under the lock below all the same. A move this call made
+   * for a rule has ended it.
    */
   if (!endedHold && isHeld(conversation, now)) {
     await keepForHold(conversationId, options);

@@ -129,7 +129,10 @@ export async function endHold(
   // failed, leaves the hold to `settle_routing`, which completes the decision
   // once phase one is a minute old (`PHASE_ONE_RESUME_MS`): the window's job,
   // still to come, when the router was anything else, and the job retrying
-  // itself when it was the router (`settleRouting`).
+  // itself when it was the router (`settleRouting`). A person's write with an
+  // `on_update` pass of its own hands that to the router too, in this same
+  // transaction (`deferToRouter`): run beside the router's, it could follow
+  // the router's assignment, and the same holder followed.
   if (row.phaseOneAt) return false;
   if (row.shadow && actor.decidesShadow === false) return false;
 

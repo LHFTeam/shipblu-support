@@ -1,4 +1,6 @@
-import { and, eq, sql } from 'drizzle-orm';
+import { AsyncLocalStorage } from 'node:async_hooks';
+import { and, asc, eq, inArray, sql } from 'drizzle-orm';
+import { PgDatabase } from 'drizzle-orm/pg-core';
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 import { db } from '@/db/client';
 import {
@@ -22,7 +24,7 @@ import { assignConversation } from '@/lib/assignment';
 import { setConversationCategory } from '@/lib/categories/write';
 import { forgetCategoryAiSettings } from '@/lib/category-ai/settings';
 import { forgetHoursCatalog } from '@/lib/hours/catalog';
-import { routeNow, settleRouting } from '@/lib/routing/apply';
+import { routeNow, settleRouting, type RouteResult } from '@/lib/routing/apply';
 import { beginRouting } from '@/lib/routing/begin';
 import { endHold } from '@/lib/routing/end-hold';
 import { routingWindowValues, startRouting } from '@/lib/routing/start';
@@ -886,13 +888,13 @@ describe('updateTicket on a ticket held for routing', () => {
 
     // Jev's answer routed the ticket a moment ago, and its pass over the rules
     // read the ticket filed as Sales; the agent files it as merchant work
-    // while that pass is still going. The router is part-way through
-    // (`in_flight`), its pass will never see the new category, and nothing
-    // runs the rules again once it ends the hold — so the edit runs its own
-    // pass, or the rule keyed on merchant work never fires. The first rule's
-    // row is held from outside to stop the router's pass between its two
-    // rules.
-    it('runs its own pass when it meets a decision part-way through, whose rules read the old category', async () => {
+    // while that pass is still going. The router's pass will never see the
+    // new category, so the edit re-arms it (`deferToRouter`) and runs none of
+    // its own: the router's phase three finds the pass owed again and runs it
+    // on merchant work before it ends the hold — or the rule keyed on merchant
+    // work never fires. The first rule's row is held from outside to stop the
+    // router's pass between its two rules.
+    it('re-arms the router’s pass when it meets a decision part-way through, whose rules read the old category', async () => {
       const lina = await agent('Lina Care');
       const omar = await agent('Omar Sales');
       const care = await group('Customer Care', [lina]);
@@ -925,7 +927,8 @@ describe('updateTicket on a ticket held for routing', () => {
 
         let edited = false;
         editing = edit(id, 'category', merchantWork!.id).finally(() => (edited = true));
-        // The edit's own pass stops at the same rule; one that ran no pass returns.
+        // An edit running a pass of its own would stop at the same rule; one
+        // that hands its pass to the router returns.
         await untilWaitingOnLocks(2, () => edited);
       } finally {
         await rule.release();
@@ -934,6 +937,8 @@ describe('updateTicket on a ticket held for routing', () => {
       expect(await editing).toMatchObject({ error: null });
 
       expect(await tagsOf(id)).toEqual(expect.arrayContaining(['seen', 'merchant-work']));
+      // A pass for the decision and one for the edit, merchant work's in the second only.
+      expect(await linesOf(id, ['tagged'])).toEqual(['tagged', 'tagged', 'tagged']);
       // The router's decision stands: the agent relabelled a routed ticket.
       expect(await decisionOf(id)).toMatchObject({
         stage: 'decided',
@@ -945,6 +950,407 @@ describe('updateTicket on a ticket held for routing', () => {
     });
   });
 });
+
+/**
+ * A console edit landing while the router finishes a decision — phase one
+ * written, the hold not yet ended. The edit runs no `on_update` pass of its
+ * own: it re-arms the router's (`deferToRouter`), whose pass reads what the
+ * edit wrote before the router's end of the hold assigns anybody. Run beside
+ * the router's, the edit's pass was unordered with that assignment: when it
+ * came after, a rule in it moved the ticket away from the agent the router had
+ * just handed it to, and `assign_group` left them holding it.
+ *
+ * The router's calls and the edit's are told apart by who opened each
+ * transaction (`routeWithEditBetween`), so the edit lands at a named point in
+ * the decision, and anything it does after its write waits until the router
+ * has finished — the lag that made the order matter, made certain.
+ */
+describe('updateTicket on a decision in flight', () => {
+  beforeEach(async () => {
+    await classifierApplies();
+  });
+
+  /** Home, where the mailbox files new mail; Customer Care; and Sales, where sales routes. */
+  async function desk() {
+    const hana = await agent('Hana Home');
+    const lina = await agent('Lina Care');
+    const omar = await agent('Omar Sales');
+    const home = await group('Home', [hana]);
+    const care = await group('Customer Care', [lina]);
+    const sales = await group('Sales', [omar]);
+    const salesCategory = await routeTo('sales', sales);
+    const [support] = await db
+      .select({ id: ticketCategories.id })
+      .from(ticketCategories)
+      .where(eq(ticketCategories.key, 'customer_support'));
+    const id = await heldTicket(await mailbox(home, 'category'), home);
+    // Jev's answer, which the router then decides on.
+    expect(
+      (await setConversationCategory(id, salesCategory, { label: 'jev:category' })).outcome,
+    ).toBe('changed');
+    return { lina, omar, home, care, sales, salesCategory, support: support!.id, id };
+  }
+
+  const routeJev = (id: string) => () => routeNow(id, { label: 'jev:category' });
+
+  // The edit lands the moment phase one commits, and its follow-ups lag the
+  // router. Once, the router found the category changed, gave its pass up to
+  // the edit and assigned Omar in Sales; the edit's pass then moved the ticket
+  // to Customer Care with Omar still holding it.
+  it('a category edit after phase one: its rules move the ticket before anybody is assigned', async () => {
+    const d = await desk();
+    await onUpdate('Count passes', { all: [] }, [{ type: 'add_tags', tags: ['seen'] }], 0);
+    await onUpdate(
+      'Support goes to Customer Care',
+      { field: 'category.id', op: 'eq', value: d.support },
+      [{ type: 'assign_group', groupId: d.care }],
+      1,
+    );
+
+    const { routed, edited } = await routeWithEditBetween({
+      route: routeJev(d.id),
+      afterRouterTransaction: 1,
+      edit: () => edit(d.id, 'category', d.support),
+    });
+
+    expect(routed).toBe('decided');
+    expect(edited).toMatchObject({ error: null });
+    expect(await ticketRow(d.id)).toMatchObject({ groupId: d.care, assigneeAgentId: d.lina });
+    // One pass, the router's, on the person's category, before the assignment.
+    expect(await linesOf(d.id)).toEqual([
+      'category_changed',
+      'routed',
+      'category_changed',
+      'tagged',
+      'group_changed',
+      'assigned',
+    ]);
+  });
+
+  // The edit lands once the router's pass has read the ticket — on Sales —
+  // and before its phase three, with its follow-ups lagging the router. The
+  // pass did not see Billing; phase three finds it re-armed and runs it again
+  // there, so the rule moving Billing on is obeyed before anybody is handed
+  // the ticket. Run by the console after the router, it moved the ticket away
+  // from the Billing agent the router had just assigned.
+  it('a group move during the router’s pass: the pass runs again on the move, before the assignment', async () => {
+    const d = await desk();
+    const bilal = await agent('Bilal Billing');
+    const billing = await group('Billing', [bilal]);
+    await onUpdate('Count passes', { all: [] }, [{ type: 'add_tags', tags: ['seen'] }], 0);
+    await onUpdate(
+      'Billing goes to Customer Care',
+      inGroup(billing),
+      [{ type: 'assign_group', groupId: d.care }],
+      1,
+    );
+
+    // Phase one, then the claim that reads the ticket for the pass: the move
+    // lands after that read and before the pass acts on it.
+    const { routed, edited } = await routeWithEditBetween({
+      route: routeJev(d.id),
+      afterRouterTransaction: 2,
+      edit: () => edit(d.id, 'group', billing),
+    });
+
+    expect(routed).toBe('decided');
+    expect(edited).toMatchObject({ error: null });
+    expect(await ticketRow(d.id)).toMatchObject({ groupId: d.care, assigneeAgentId: d.lina });
+    // The person's move; the pass that read Sales, and the one that read
+    // Billing and moved the ticket on; and only then the assignment.
+    expect(await linesOf(d.id, ['routed', 'group_changed', 'tagged', 'assigned'])).toEqual([
+      'routed',
+      'group_changed',
+      'tagged',
+      'tagged',
+      'group_changed',
+      'assigned',
+    ]);
+    expect(await decisionOf(d.id)).toMatchObject({
+      stage: 'decided',
+      outcome: 'category',
+      toGroupId: d.sales,
+    });
+  });
+
+  // The same moment for a category edit: the pass that read Sales is not the
+  // person's, and the one that reads customer support runs once — not once
+  // by the router and again by the edit.
+  it('a category edit during the router’s pass: its rules run once, before the assignment', async () => {
+    const d = await desk();
+    await onUpdate('Count passes', { all: [] }, [{ type: 'add_tags', tags: ['seen'] }], 0);
+    await onUpdate(
+      'Support goes to Customer Care',
+      { field: 'category.id', op: 'eq', value: d.support },
+      [{ type: 'assign_group', groupId: d.care }],
+      1,
+    );
+
+    const { routed, edited } = await routeWithEditBetween({
+      route: routeJev(d.id),
+      afterRouterTransaction: 2,
+      edit: () => edit(d.id, 'category', d.support),
+    });
+
+    expect(routed).toBe('decided');
+    expect(edited).toMatchObject({ error: null });
+    expect(await ticketRow(d.id)).toMatchObject({ groupId: d.care, assigneeAgentId: d.lina });
+    expect(await linesOf(d.id, ['routed', 'group_changed', 'tagged', 'assigned'])).toEqual([
+      'routed',
+      'tagged',
+      'tagged',
+      'group_changed',
+      'assigned',
+    ]);
+  });
+
+  // Naming an assignee in the gap: the assignment stands, and the router's
+  // pass is the one the edit is owed — one pass, not the router's and then
+  // the edit's own over the same ticket.
+  it('naming an assignee after phase one: the router’s one pass, and the person’s pick stands', async () => {
+    const d = await desk();
+    const bilal = await agent('Bilal Billing');
+    await onUpdate('Count passes', { all: [] }, [{ type: 'add_tags', tags: ['seen'] }]);
+
+    const { routed, edited } = await routeWithEditBetween({
+      route: routeJev(d.id),
+      afterRouterTransaction: 1,
+      edit: () => edit(d.id, 'assignee', bilal),
+    });
+
+    expect(routed).toBe('decided');
+    expect(edited).toMatchObject({ error: null });
+    expect(await ticketRow(d.id)).toMatchObject({ groupId: d.sales, assigneeAgentId: bilal });
+    expect(await linesOf(d.id, ['routed', 'tagged', 'assigned'])).toEqual([
+      'routed',
+      'assigned',
+      'tagged',
+    ]);
+    expect(await decisionOf(d.id)).toMatchObject({ stage: 'decided', outcome: 'category' });
+  });
+
+  // The edit's own call into the router would fail — a lost connection — and
+  // that was once read as "the window's job runs the rules". With a decision
+  // on another category in flight, the router gave its pass up to the edit,
+  // decided the row, and the window's job found nothing to do: no rule keyed
+  // on what the person chose ever ran. Handed to the router under the edit's
+  // lock, the pass runs whatever the edit's later calls would have done.
+  it('a category edit whose own call into the router would fail: its rules still run, once', async () => {
+    const d = await desk();
+    await onUpdate('Tag support', { field: 'category.id', op: 'eq', value: d.support }, [
+      { type: 'add_tags', tags: ['support'] },
+    ]);
+
+    const { routed, edited } = await routeWithEditBetween({
+      route: routeJev(d.id),
+      afterRouterTransaction: 1,
+      edit: () => edit(d.id, 'category', d.support),
+      afterWrite: 'refused',
+    });
+
+    expect(routed).toBe('decided');
+    expect(edited).toMatchObject({ error: null });
+    // The window's job, at its end, finds the decision made.
+    expect(await settleRouting(d.id, new Date(Date.now() + 6 * 60_000))).toBe('none');
+    expect(await tagsOf(d.id)).toEqual(['support']);
+    expect(await linesOf(d.id, ['tagged'])).toEqual(['tagged']);
+  });
+
+  // No gate on the edit at all: phase one stops on its routing row, which
+  // another transaction holds, with the ticket's lock taken; the edit queues
+  // behind it, and both are let go. Which of the router's claim and the
+  // edit's write then comes first is the database's to decide, and every
+  // order gives one answer: a write before the claim is read by the one pass,
+  // and one after it re-arms a pass that did not read it. With the claim in a
+  // statement of its own and the pass reading the ticket a moment later, an
+  // edit committing in between was passed by both, in about half of runs.
+  it('a category edit queued behind phase one: its rules run once, before the assignment', async () => {
+    const d = await desk();
+    await onUpdate(
+      'Support goes to Customer Care',
+      { field: 'category.id', op: 'eq', value: d.support },
+      [
+        { type: 'assign_group', groupId: d.care },
+        { type: 'add_tags', tags: ['support-pass'] },
+      ],
+    );
+
+    const row = await holdRoutingRow(d.id);
+    let routing: Promise<RouteResult> = Promise.resolve('none');
+    let editing: Promise<unknown> = Promise.resolve();
+    try {
+      let done = false;
+      routing = routeNow(d.id, { label: 'jev:category' }).finally(() => (done = true));
+      await untilWaitingOnLocks(1, () => done);
+      editing = edit(d.id, 'category', d.support);
+      await untilWaitingOnLocks(2, () => done);
+    } finally {
+      await row.release();
+    }
+    expect(await routing).toBe('decided');
+    expect(await editing).toMatchObject({ error: null });
+
+    expect(await ticketRow(d.id)).toMatchObject({ groupId: d.care, assigneeAgentId: d.lina });
+    expect(await linesOf(d.id, ['tagged'])).toEqual(['tagged']);
+  });
+
+  // An edit whose transaction began while phase one held the ticket's lock,
+  // and wrote once phase one had committed. Stamped when its transaction
+  // began, its line sorted before the `routed` it came after, and the page
+  // read as the router overruling the person.
+  it.each(['group', 'assignee'] as const)(
+    'a %s edit that waited on phase one is drawn after the decision',
+    async (field) => {
+      const d = await desk();
+      const bilal = await agent('Bilal Billing');
+      const billing = await group('Billing', [bilal]);
+
+      const row = await holdRoutingRow(d.id);
+      let routing: Promise<RouteResult> = Promise.resolve('none');
+      let editing: Promise<unknown> = Promise.resolve();
+      try {
+        let done = false;
+        routing = routeNow(d.id, { label: 'jev:category' }).finally(() => (done = true));
+        await untilWaitingOnLocks(1, () => done);
+        editing = edit(d.id, field, field === 'group' ? billing : bilal);
+        await untilWaitingOnLocks(2, () => done);
+      } finally {
+        await row.release();
+      }
+      expect(await routing).toBe('decided');
+      expect(await editing).toMatchObject({ error: null });
+
+      const lines = await db
+        .select({ type: conversationEvents.type, actorAgentId: conversationEvents.actorAgentId })
+        .from(conversationEvents)
+        .where(
+          and(
+            eq(conversationEvents.conversationId, d.id),
+            inArray(conversationEvents.type, ['routed', 'group_changed', 'assigned']),
+          ),
+        )
+        .orderBy(asc(conversationEvents.createdAt), asc(conversationEvents.id));
+      const routedAt = lines.findIndex((line) => line.type === 'routed');
+      const personAt = lines.findIndex((line) => line.actorAgentId === signedIn.id);
+      expect(routedAt).toBeGreaterThanOrEqual(0);
+      expect(personAt).toBeGreaterThan(routedAt);
+    },
+  );
+});
+
+/** Who opened a transaction: the router's call, or the console's edit. */
+const opener = new AsyncLocalStorage<'router' | 'edit'>();
+
+/**
+ * Runs `route` with `edit` landing once the router's `afterRouterTransaction`th
+ * transaction has committed (1 is phase one), before the router goes on — the
+ * edit's write commits there, as `edit` is run in full then unless it opens a
+ * transaction after its write. Every transaction the edit opens after its
+ * write waits until the router has finished, or with `afterWrite: 'refused'`
+ * fails as a lost connection does: the edit's follow-ups lagging the router,
+ * made certain. Transactions are told apart by who opened them, so the
+ * router's own steps and the edit's are counted apart however they interleave.
+ */
+async function routeWithEditBetween({
+  route,
+  afterRouterTransaction,
+  edit: editing,
+  afterWrite = 'held',
+}: {
+  route: () => Promise<RouteResult>;
+  afterRouterTransaction: number;
+  edit: () => Promise<unknown>;
+  afterWrite?: 'held' | 'refused';
+}): Promise<{ routed: RouteResult; edited: unknown }> {
+  const real = PgDatabase.prototype.transaction;
+  let routerOpened = 0;
+  let editOpened = 0;
+  let edited: Promise<unknown> | undefined;
+  let release!: () => void;
+  const released = new Promise<void>((resolve) => (release = resolve));
+  let wrote!: () => void;
+  const written = new Promise<void>((resolve) => (wrote = resolve));
+
+  const spy = vi.spyOn(PgDatabase.prototype, 'transaction').mockImplementation(async function (
+    this: PgDatabase<never>,
+    run,
+    config,
+  ) {
+    const who = opener.getStore();
+    if (who === 'edit') {
+      const nth = ++editOpened;
+      if (nth > 1) {
+        if (afterWrite === 'refused') throw new Error('the connection was lost');
+        await released;
+      }
+      const result: unknown = await real.call(this, run, config);
+      if (nth === 1) wrote();
+      return result as never;
+    }
+    if (who === 'router') {
+      const nth = ++routerOpened;
+      const result: unknown = await real.call(this, run, config);
+      if (nth === afterRouterTransaction) {
+        edited = opener.run('edit', editing);
+        await Promise.race([written, edited]);
+      }
+      return result as never;
+    }
+    return real.call(this, run, config) as never;
+  });
+
+  try {
+    const routed = await opener.run('router', route);
+    release();
+    return { routed, edited: await edited };
+  } finally {
+    spy.mockRestore();
+  }
+}
+
+/**
+ * Holds the ticket's routing row from another transaction until released, so
+ * the router's phase one stops on it with the ticket's lock already taken —
+ * where an edit then queues behind it.
+ */
+async function holdRoutingRow(conversationId: string) {
+  let release!: () => void;
+  const released = new Promise<void>((resolve) => (release = resolve));
+  let locked!: () => void;
+  const isLocked = new Promise<void>((resolve) => (locked = resolve));
+  const holding = db.transaction(async (tx) => {
+    await tx
+      .select({ id: routingDecisions.id })
+      .from(routingDecisions)
+      .where(eq(routingDecisions.conversationId, conversationId))
+      .for('update');
+    locked();
+    await released;
+  });
+  await isLocked;
+  return {
+    release: async () => {
+      release();
+      await holding;
+    },
+  };
+}
+
+/**
+ * The ticket's lines of these types in the order the page draws them, by
+ * `created_at`: whether the rules ran before anybody was assigned.
+ */
+async function linesOf(
+  id: string,
+  types: string[] = ['routed', 'category_changed', 'group_changed', 'tagged', 'assigned'],
+) {
+  const rows = await db
+    .select({ type: conversationEvents.type })
+    .from(conversationEvents)
+    .where(and(eq(conversationEvents.conversationId, id), inArray(conversationEvents.type, types)))
+    .orderBy(asc(conversationEvents.createdAt), asc(conversationEvents.id));
+  return rows.map((row) => row.type);
+}
 
 // A held ticket resolved in its window meets a person's category edit as any
 // resolved ticket does. The router decides it `not_open` and runs no pass, so

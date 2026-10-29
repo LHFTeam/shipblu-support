@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import { PgDatabase } from 'drizzle-orm/pg-core';
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
@@ -1470,33 +1471,37 @@ describe('classifyMessageCategory, on a ticket routing by category', () => {
     });
 
     // The later message answered first: sales, routed, and its phase three lost
-    // (the transaction ending the hold fails), so the row stays holding with
-    // phase one written and the pass done.
+    // (the end of the hold refused), so the row stays holding with phase one
+    // written and the pass done.
     answers('sales');
-    const real = PgDatabase.prototype.transaction;
-    const spy = vi
-      .spyOn(PgDatabase.prototype, 'transaction')
-      .mockImplementationOnce(function (this: PgDatabase<never>, run, config) {
-        return real.call(this, run, config) as never;
-      })
-      .mockImplementationOnce(function (this: PgDatabase<never>, run, config) {
-        return real.call(this, run, config) as never;
-      })
-      .mockImplementationOnce(() => Promise.reject(new Error('the connection was lost')));
-    await classifyMessageCategory(later, { baseUrl: BASE });
-    spy.mockRestore();
+    await db.execute(sql`
+      create function refuse_hold_end() returns trigger language plpgsql
+      as $$ begin raise exception 'the connection was lost'; end $$`);
+    await db.execute(sql`
+      create trigger refuse_hold_end before update on conversations
+      for each row when (old.routing_decided_at is null and new.routing_decided_at is not null)
+      execute function refuse_hold_end()`);
+    try {
+      await classifyMessageCategory(later, { baseUrl: BASE });
+    } finally {
+      await db.execute(sql`drop trigger refuse_hold_end on conversations`);
+      await db.execute(sql`drop function refuse_hold_end()`);
+    }
     errors.mockClear();
     expect(await decisionOf(id)).toMatchObject({
       stage: 'holding',
       categoryId: await categoryId('sales'),
     });
+    expect((await decisionOf(id))!.rulesDoneAt).toBeInstanceOf(Date);
 
-    // The earlier message answered late takes the settle over.
+    // The earlier message answered late takes the settle over, and hands its
+    // pass to the decision in flight (`deferToRouter`): the pass is owed again.
     answers('customer_support');
     await expect(classifyMessageCategory(first, { baseUrl: BASE })).resolves.toMatchObject({
       outcome: 'applied',
     });
     expect(await carried(id)).toBe(cs);
+    expect(await decisionOf(id)).toMatchObject({ rulesClaimedAt: null, rulesDoneAt: null });
 
     // The window's job completes the decision, phase one a couple of minutes old.
     await db
@@ -1524,7 +1529,13 @@ describe('classifyMessageCategory, on a ticket routing by category', () => {
     answers('sales');
     const real = PgDatabase.prototype.transaction;
     let tookOver: unknown = null;
+    // The classifier's write, the router's phase one, and the claim that reads
+    // the ticket for the pass, which opens no transaction of its own: the
+    // fourth is phase three.
     vi.spyOn(PgDatabase.prototype, 'transaction')
+      .mockImplementationOnce(function (this: PgDatabase<never>, run, config) {
+        return real.call(this, run, config) as never;
+      })
       .mockImplementationOnce(function (this: PgDatabase<never>, run, config) {
         return real.call(this, run, config) as never;
       })
@@ -1550,6 +1561,53 @@ describe('classifyMessageCategory, on a ticket routing by category', () => {
     expect(tags.filter((t) => t.includes('"cs"')).length).toBe(1);
   });
 
+  // The late answer lands the moment the later message's phase one commits,
+  // and its follow-ups lag the router. Once, the router found the category
+  // changed, gave its pass up to the answer, and handed the ticket to the
+  // Sales agent; the answer's pass then moved it to Merchant Care with the
+  // Sales agent still holding it. Handed to the router under the answer's
+  // lock (`deferToRouter`), the pass runs on customer support before anybody
+  // is assigned.
+  it('moves a ticket a late answer files elsewhere before anybody is assigned', async () => {
+    const r = await routing();
+    const merchants = await staffed('Merchant Care');
+    const { id, message: first } = await mailTicket(r);
+    const later = await inbound(id, 'فين الشحنه', { createdAt: new Date(Date.now() + 1_000) });
+    const cs = await categoryId('customer_support');
+    await db.insert(automationRules).values({
+      name: 'Customer support goes to Merchant Care',
+      trigger: 'on_update',
+      conditions: { field: 'category.id', op: 'eq', value: cs },
+      actions: [{ type: 'assign_group', groupId: merchants.group }],
+      position: 1,
+    });
+
+    answers('sales');
+    const { routed, lateAnswer } = await classifyWithLateAnswerBetween({
+      // The classifier's write, then the router's phase one.
+      afterRouterTransaction: 2,
+      route: () => classifyMessageCategory(later, { baseUrl: BASE }),
+      late: () => {
+        answers('customer_support');
+        return classifyMessageCategory(first, { baseUrl: BASE });
+      },
+    });
+
+    expect(routed).toMatchObject({ outcome: 'applied' });
+    expect(lateAnswer).toMatchObject({ outcome: 'applied' });
+    expect(await carried(id)).toBe(cs);
+    expect(await where(id)).toMatchObject({
+      groupId: merchants.group,
+      assigneeAgentId: merchants.agent,
+    });
+    // One pass, the router's, on what the late answer wrote.
+    expect(await passes(id)).toBe(1);
+    expect(await decisionOf(id)).toMatchObject({
+      stage: 'decided',
+      categoryId: await categoryId('sales'),
+    });
+  });
+
   it('relabels a ticket that never entered routing, as before Stage 5', async () => {
     answers('sales');
     const r = await routing();
@@ -1562,3 +1620,65 @@ describe('classifyMessageCategory, on a ticket routing by category', () => {
     expect(await where(id)).toMatchObject({ groupId: r.home.group, assigneeAgentId: r.home.agent });
   });
 });
+
+/** Who opened a transaction: the job routing the ticket, or the late answer. */
+const opener = new AsyncLocalStorage<'router' | 'late'>();
+
+/**
+ * Runs `route` with `late` landing once the router's `afterRouterTransaction`th
+ * transaction has committed, before the router goes on — the late answer's
+ * write commits there — and holds every transaction the late answer opens
+ * after its write until the router has finished: its follow-ups lagging the
+ * router, made certain. Transactions are told apart by who opened them.
+ */
+async function classifyWithLateAnswerBetween<T>({
+  afterRouterTransaction,
+  route,
+  late,
+}: {
+  afterRouterTransaction: number;
+  route: () => Promise<T>;
+  late: () => Promise<unknown>;
+}): Promise<{ routed: T; lateAnswer: unknown }> {
+  const real = PgDatabase.prototype.transaction;
+  let routerOpened = 0;
+  let lateOpened = 0;
+  let answered: Promise<unknown> | undefined;
+  let release!: () => void;
+  const released = new Promise<void>((resolve) => (release = resolve));
+  let wrote!: () => void;
+  const written = new Promise<void>((resolve) => (wrote = resolve));
+
+  const spy = vi.spyOn(PgDatabase.prototype, 'transaction').mockImplementation(async function (
+    this: PgDatabase<never>,
+    run,
+    config,
+  ) {
+    const who = opener.getStore();
+    if (who === 'late') {
+      const nth = ++lateOpened;
+      if (nth > 1) await released;
+      const result: unknown = await real.call(this, run, config);
+      if (nth === 1) wrote();
+      return result as never;
+    }
+    if (who === 'router') {
+      const nth = ++routerOpened;
+      const result: unknown = await real.call(this, run, config);
+      if (nth === afterRouterTransaction) {
+        answered = opener.run('late', late);
+        await Promise.race([written, answered]);
+      }
+      return result as never;
+    }
+    return real.call(this, run, config) as never;
+  });
+
+  try {
+    const routed = await opener.run('router', route);
+    release();
+    return { routed, lateAnswer: await answered };
+  } finally {
+    spy.mockRestore();
+  }
+}

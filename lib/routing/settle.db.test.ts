@@ -22,7 +22,7 @@ import {
 } from '@/db/schema';
 import { assignConversation } from '@/lib/assignment';
 import { maybeSendAutoResponse } from '@/lib/auto-response';
-import { setConversationCategory } from '@/lib/categories/write';
+import { setConversationCategory, setConversationCategoryOn } from '@/lib/categories/write';
 import { classifyMessageCategory } from '@/lib/category-ai/run';
 import { forgetCategoryAiSettings } from '@/lib/category-ai/settings';
 import { resetEnvCache } from '@/lib/env';
@@ -38,6 +38,7 @@ import { PHASE_ONE_RESUME_MS, RULES_RUNNING_MS, routeNow, settleRouting } from '
 import { beginRouting } from './begin';
 import { endHold } from './end-hold';
 import { routingWindowValues, startRouting } from './start';
+import { deferToRouter } from './state';
 
 /**
  * The end of a routing window, and the decisions it completes, against
@@ -358,22 +359,51 @@ async function teams() {
 }
 
 /**
- * Route the ticket, and lose the connection before phase three commits: phase
- * one's transaction runs, and the one that ends the hold fails. In between,
- * the rules' pass is claimed, run and marked done in statements of their own;
- * with no rule that opens a transaction, phase three is `routeNow`'s second.
+ * Route the ticket, and lose the transaction that ends the hold: phase one
+ * commits, the rules' pass is claimed, run and marked done, and phase three
+ * fails (`refusingTheHoldsEnd`).
  */
 async function interruptedAfterPhaseOne(id: string): Promise<void> {
-  const transaction = PgDatabase.prototype.transaction;
-  const spy = vi
-    .spyOn(PgDatabase.prototype, 'transaction')
-    .mockImplementationOnce(function (this: PgDatabase<never>, run, config) {
-      return transaction.call(this, run, config) as never;
-    })
-    .mockImplementationOnce(() => Promise.reject(new Error('the connection was lost')));
-  expect(await routeNow(id, { label: 'jev:category' })).toBe('decided');
-  spy.mockRestore();
+  await refusingTheHoldsEnd(async () => {
+    expect(await routeNow(id, { label: 'jev:category' })).toBe('decided');
+  });
   expect(await decision(id)).toMatchObject({ stage: 'holding' });
+}
+
+/**
+ * Runs `meanwhile` with the end of every hold refused — `routing_decided_at`
+ * set, the one write only phase three makes on its way — so whatever ends a
+ * hold fails as a lost connection would, however many transactions the pass
+ * before it opened.
+ */
+async function refusingTheHoldsEnd(meanwhile: () => Promise<void>): Promise<void> {
+  await db.execute(sql`
+    create function refuse_hold_end() returns trigger language plpgsql
+    as $$ begin raise exception 'the connection was lost'; end $$`);
+  await db.execute(sql`
+    create trigger refuse_hold_end before update on conversations
+    for each row when (old.routing_decided_at is null and new.routing_decided_at is not null)
+    execute function refuse_hold_end()`);
+  try {
+    await meanwhile();
+  } finally {
+    await db.execute(sql`drop trigger refuse_hold_end on conversations`);
+    await db.execute(sql`drop function refuse_hold_end()`);
+  }
+}
+
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+/**
+ * A person's write in the gap, as the console's category and group cases make
+ * one: the write, and `deferToRouter` under the lock it holds — which re-arms
+ * the router's pass, and answers whether it did.
+ */
+async function rearmedBy(write: (tx: Tx) => Promise<void>, id: string): Promise<boolean> {
+  return db.transaction(async (tx) => {
+    await write(tx);
+    return deferToRouter(tx, id);
+  });
 }
 
 /**
@@ -690,16 +720,10 @@ describe('a decision interrupted between its phases', () => {
     await jevFiles(id, sales);
 
     // Phase one commits, the rules run, and the transaction ending the hold
-    // does not: `add_tags` opens none of its own.
-    const transaction = PgDatabase.prototype.transaction;
-    const spy = vi
-      .spyOn(PgDatabase.prototype, 'transaction')
-      .mockImplementationOnce(function (this: PgDatabase<never>, run, config) {
-        return transaction.call(this, run, config) as never;
-      })
-      .mockImplementationOnce(() => Promise.reject(new Error('the connection was lost')));
-    await expect(settleRoutingJob(claimed(id))).rejects.toThrow('did not end');
-    spy.mockRestore();
+    // does not.
+    await refusingTheHoldsEnd(async () => {
+      await expect(settleRoutingJob(claimed(id))).rejects.toThrow('did not end');
+    });
     expect(await tagged(id)).toBe(1);
     expect(await decision(id)).toMatchObject({ stage: 'holding' });
     expect((await decision(id)).rulesDoneAt).toBeInstanceOf(Date);
@@ -1153,6 +1177,95 @@ describe('a decision interrupted between its phases', () => {
     expect(row).toMatchObject({ decidedByLabel: 'jev:category', decidedByAgentId: null });
     expect(row.rulesClaimedAt).toBeInstanceOf(Date);
     expect(row.rulesDoneAt).toBeInstanceOf(Date);
+  });
+
+  // A claimant that died part-way leaves a pass nobody may run again, since
+  // which of its rules ran is written nowhere (above). A person's write after
+  // it is owed a pass of its own all the same, and has handed it to the
+  // router (`deferToRouter`): the re-arm clears the claim, and the window's
+  // job runs the pass on the ticket as the write left it rather than ending
+  // the hold without one.
+  it('runs a pass a writer re-armed, though the claim it cleared was a dead claimant’s', async () => {
+    errorsExpected = true;
+    const t = await teams();
+    const lead = await agent('Laila');
+    const sales = await routeTo('sales', t.sales.group);
+    const support = await routeTo('customer_support', null);
+    const { id } = await heldTicket(t.channel, t.home.group);
+    await jevFiles(id, sales);
+    await diedAfterPhaseOne(id);
+    await phaseOneWritten(id, 15 * MINUTE);
+    await rulesClaimed(id, RULES_RUNNING_MS + MINUTE);
+    await rule('on_update', 'Tag customer support', inCategory(support), [
+      { type: 'add_tags', tags: ['support'] },
+    ]);
+
+    expect(
+      await rearmedBy(async (tx) => {
+        await setConversationCategoryOn(tx, id, support, { agentId: lead });
+      }, id),
+    ).toBe(true);
+    expect(await decision(id)).toMatchObject({ rulesClaimedAt: null, rulesDoneAt: null });
+
+    expect(await settleRouting(id)).toBe('decided');
+
+    expect(await tagged(id)).toBe(1);
+    expect(await ticketRow(id)).toMatchObject({
+      groupId: t.sales.group,
+      assigneeAgentId: t.sales.agent,
+    });
+    const row = await expectDecided(id, 'category');
+    expect(row.rulesDoneAt).toBeInstanceOf(Date);
+    expect(warnings.mock.calls.map((call) => String(call[0]))).not.toContainEqual(
+      expect.stringContaining("without the rules' pass"),
+    );
+  });
+
+  // The router ran its pass, and its phase three failed. A person moving the
+  // ticket in the gap after that hands their pass to the router, which has
+  // gone: the window's job finds the pass re-armed, not done, and runs it on
+  // the ticket in the group the person chose — before it assigns anybody.
+  it('runs a pass a writer re-armed after the router’s phase three failed, before assigning', async () => {
+    errorsExpected = true;
+    const t = await teams();
+    const lead = await agent('Laila');
+    const billing = { agent: await agent('Bilal') };
+    const billingGroup = await group('Billing', [billing.agent]);
+    const sales = await routeTo('sales', t.sales.group);
+    await rule('on_update', 'Count passes', always, [{ type: 'add_tags', tags: ['seen'] }], 0);
+    await rule(
+      'on_update',
+      'Billing to Merchant Care',
+      { field: 'group.id', op: 'eq', value: billingGroup },
+      [{ type: 'assign_group', groupId: t.care.group }],
+      1,
+    );
+    const { id } = await heldTicket(t.channel, t.home.group);
+    await jevFiles(id, sales);
+    await interruptedAfterPhaseOne(id);
+    expect(await tagged(id)).toBe(1);
+    expect((await decision(id)).rulesDoneAt).toBeInstanceOf(Date);
+
+    expect(
+      await rearmedBy(async (tx) => {
+        await tx
+          .update(conversations)
+          .set({ groupId: billingGroup })
+          .where(eq(conversations.id, id));
+        expect(await endHold(tx, id, 'manual', { agentId: lead })).toBe(false);
+      }, id),
+    ).toBe(true);
+
+    await phaseOneWritten(id, 2 * MINUTE);
+    expect(await settleRouting(id)).toBe('decided');
+
+    // The pass the decision owed, and the one the move did.
+    expect(await tagged(id)).toBe(2);
+    expect(await ticketRow(id)).toMatchObject({
+      groupId: t.care.group,
+      assigneeAgentId: t.care.agent,
+    });
+    await expectDecided(id, 'category');
   });
 
   it('keeps the creation pass from assigning a ticket the router has taken', async () => {
