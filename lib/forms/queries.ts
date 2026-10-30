@@ -119,6 +119,16 @@ export async function getFormBySlug(slug: string): Promise<LoadedForm | null> {
  * outcome this exists to prevent.
  */
 export async function formsUsingField(key: string): Promise<string[]> {
+  return (await fieldPlacements()).get(key) ?? [];
+}
+
+/**
+ * Every custom field's forms at once, for the Fields page: each editor names
+ * the forms that place its field beside the Active box, since switching a field
+ * off makes every one of them stop asking it without a word. One read of a
+ * table of tens of rows, rather than one per field.
+ */
+export async function fieldPlacements(): Promise<Map<string, string[]>> {
   const rows = await db
     .select({
       slug: ticketForms.slug,
@@ -127,16 +137,27 @@ export async function formsUsingField(key: string): Promise<string[]> {
       elements: ticketForms.elements,
     })
     .from(ticketForms);
+  return placementsOf(rows);
+}
 
-  return rows
-    .filter((row) =>
-      row.elements.some(
-        (element) =>
-          element !== null &&
-          typeof element === 'object' &&
-          (element as Record<string, unknown>).kind === 'field' &&
-          (element as Record<string, unknown>).key === key,
-      ),
-    )
-    .map((row) => formName(row, 'en'));
+/** The scan itself, apart from the read, so a test can hold it to its answer. */
+export function placementsOf(
+  rows: readonly {
+    slug: string;
+    nameEn: string;
+    nameAr: string;
+    elements: readonly unknown[];
+  }[],
+): Map<string, string[]> {
+  const placed = new Map<string, string[]>();
+  for (const row of rows) {
+    const keys = new Set<string>();
+    for (const element of row.elements) {
+      if (element === null || typeof element !== 'object') continue;
+      const { kind, key } = element as Record<string, unknown>;
+      if (kind === 'field' && typeof key === 'string') keys.add(key);
+    }
+    for (const key of keys) placed.set(key, [...(placed.get(key) ?? []), formName(row, 'en')]);
+  }
+  return placed;
 }

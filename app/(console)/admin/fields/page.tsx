@@ -2,6 +2,7 @@ import { Badge, Cell, PageHeader, Row, Table } from '@/components/ui';
 import { InfoTip } from '@/components/tooltip';
 import { listTicketFields } from '@/lib/admin/settings';
 import { requirePermission } from '@/lib/auth/guard';
+import { fieldPlacements } from '@/lib/forms/queries';
 import { FieldEditor, NewField } from './forms';
 
 export const dynamic = 'force-dynamic';
@@ -16,7 +17,7 @@ export const dynamic = 'force-dynamic';
 export default async function FieldsPage() {
   await requirePermission('admin.fields');
 
-  const rows = await listTicketFields();
+  const [rows, placements] = await Promise.all([listTicketFields(), fieldPlacements()]);
 
   return (
     <>
@@ -57,7 +58,7 @@ export default async function FieldsPage() {
         {rows.map((field) => (
           <Row key={field.id}>
             <Cell>
-              <FieldEditor field={field} />
+              <FieldEditor field={field} placedOn={placements.get(field.key) ?? []} />
             </Cell>
             <Cell>
               <code className="text-xs text-(--color-text-secondary)">custom.{field.key}</code>
