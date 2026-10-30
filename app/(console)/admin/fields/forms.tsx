@@ -43,7 +43,28 @@ const TYPES = [
   'datetime',
 ];
 
-function Fields({ field }: { field?: TicketField }) {
+/**
+ * What switching the field off does, said where the box is.
+ *
+ * The forms that place it are named because each of them stops asking it the
+ * moment it is off, and quietly: `parseFormElements` drops a question whose
+ * field is inactive, and a form losing one without a word is what the delete
+ * refusal exists to prevent. Deactivating a placed field is still allowed —
+ * the form builder keeps such a question, so the form stays savable and asks
+ * it again once the field is back — so the editor says so before the save
+ * rather than refusing it.
+ */
+function activeHint(field: TicketField, placedOn: readonly string[]): string {
+  const effect =
+    'Off takes it off every form, the customer portal and the ticket sidebar, out of the check before resolving and out of what a new rule can pick. Answers already given stay stored, hidden from agents until it is on again, and a rule already naming it still reads them.';
+  if (placedOn.length === 0) return effect;
+  const forms = placedOn.join(', ');
+  return field.isActive
+    ? `${effect} Placed on ${forms}: switching it off stops ${placedOn.length === 1 ? 'that form' : 'those forms'} asking it.`
+    : `${effect} Placed on ${forms}, which ${placedOn.length === 1 ? 'asks' : 'ask'} it again once it is on.`;
+}
+
+function Fields({ field, placedOn = [] }: { field?: TicketField; placedOn?: readonly string[] }) {
   return (
     <>
       <div className="grid gap-3 sm:grid-cols-2">
@@ -222,6 +243,21 @@ function Fields({ field }: { field?: TicketField }) {
           hint="Needs “visible to customers” as well. The pair is what lets a customer answer this field; a form still has to place the question for it to be asked."
           defaultChecked={field?.editableByCustomer ?? false}
         />
+        {/* The action has always read `isActive`, and the Fields list and the
+            delete refusal both talk about deactivating, but no control posted
+            it — so every save wrote the field active again, and a field could
+            be retired only by deleting it and its answers' meaning with it.
+            Only on an existing field: one created switched off appears
+            nowhere, with nothing to say why, and the action reads a missing
+            box as on. */}
+        {field ? (
+          <Toggle
+            name="isActive"
+            label="Active"
+            hint={activeHint(field, placedOn)}
+            defaultChecked={field.isActive}
+          />
+        ) : null}
       </div>
     </>
   );
@@ -241,9 +277,12 @@ export function NewField() {
 
 export function FieldEditor({
   field,
+  placedOn = [],
   deleteOnly = false,
 }: {
   field: TicketField;
+  /** The forms that place this field, by name. */
+  placedOn?: readonly string[];
   deleteOnly?: boolean;
 }) {
   const [editing, setEditing] = useState(false);
@@ -264,7 +303,7 @@ export function FieldEditor({
   return (
     <EditorForm action={saveField} submitLabel="Save" onSaved={() => setEditing(false)}>
       <input type="hidden" name="id" value={field.id} />
-      <Fields field={field} />
+      <Fields field={field} placedOn={placedOn} />
     </EditorForm>
   );
 }
