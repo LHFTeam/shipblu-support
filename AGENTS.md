@@ -1061,7 +1061,10 @@ without one the widget files its chats under no row and no group.
 page and again by the action. Only the Chat widget card posts the FAQ folders,
 and only for the widget's row, which it alone edits; `saveChannel` leaves a
 row's folders as they are when none is posted, so the row editor and the add
-form keep what the widget lists.
+form keep what the widget lists. Which form may save a web chat row is decided
+under the switch's lock, in the save's own transaction (`webchatEditRefusal`):
+the card only the widget's row, the editor only another, since a switch can
+change which that is under an open page.
 
 **Explaining a control.** A label short enough to fit a dense table is rarely
 long enough to explain itself. `InfoTip` from `components/tooltip.tsx` is the
