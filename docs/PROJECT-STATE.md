@@ -5,13 +5,38 @@ it is designed; **this file is about the state of the work** — what is live,
 what is merely built, what is left, and the mistakes that have already cost us
 time. Read both. Do not re-derive settled decisions.
 
-Last updated: 2026-10-30, against `main` at `83f1889`. The figures in §1 and §5
+Last updated: 2026-10-30, against `main` at `eaf07ab`. The figures in §1 and §5
 were last re-measured as a whole against production on 2026-09-20, and a
 paragraph re-read since gives its own date; where a number here disagrees with
 an older paragraph elsewhere in the file, the older one has not been re-checked.
 
-**Production runs `83f1889`, deployed by hand on 2026-10-30, all six services
-by 12:03:38 UTC:** release #446, which carries #443 and #444. #443 makes every
+**Production runs `eaf07ab`, deployed by hand on 2026-10-30, all six services
+by 15:22:45 UTC:** release #450, which carries #448, and with it #445, which
+reached `main` in #447 and was not deployed until now. #445 gives the ticket
+field editor the Active switch its action always read, so a field can be
+deactivated again rather than reactivated by every save; the switch names the
+forms that place the field, and a rule already naming a deactivated field stays
+readable in the condition builder. #448 makes the status editor and the
+statuses page say what a customer sees: never the status's name, but its
+customer label while the status is shown, and otherwise the category's word in
+the reader's language ("In progress" for Pending, where the hint used to say a
+blank label reused the name). The page and the portal's badge read one rule,
+`lib/portal/status-words.ts`, which `lib/portal/tickets.db.test.ts` holds to the
+portal's SQL. Code only: web first, live at 15:19:50, its preDeploy finding no
+migration and replaying the nine `db/sql` files; then the four crons, live by
+15:21:51, and the worker at 15:22:45. The checks read clean: `/api/health`
+reports `eaf07ab`; no service logged an error from 15:17 to 22:05 and web served
+no 5xx, the one warning a 404 for `/favicon.ico`; the 773 jobs created after
+15:17 had all completed, and the four dead jobs all predate the deploy (the two
+below, and the two Instagram profile reads at 12:42 under the token paragraph);
+and the crons ran clean on the new code from their first runs (`sla_sweep`,
+`presence_sweep` and `assign_sweep` from 15:25, `run_time_automations`,
+`sync_whatsapp_templates` and `snapshot_backlog`). The nightly's first run on
+it is 00:00 UTC on 2026-10-31. Its way back is `83f1889` on each service, in any
+order.
+
+The release before it, `83f1889`, was deployed by hand on 2026-10-30, all six
+services by 12:03:38 UTC: release #446, which carries #443 and #444. #443 makes every
 web chat row editable and gives each an active switch that never leaves the
 widget without a row (`plans/ticket-category-routing.md`, Stage 6); production
 has one web chat row, so nothing changes there until somebody adds a second.
@@ -58,7 +83,7 @@ Jev's first filed ticket opened at 00:31 on the 30th in Cairo, the night the
 clocks went back. The second nightly, at 00:00 UTC on 2026-10-31, writes the
 first.
 
-The release before it, `69a22b6`, was deployed by hand on 2026-10-29, all six
+The release before that, `69a22b6`, was deployed by hand on 2026-10-29, all six
 services by 17:47:16 UTC: release #442, which carries #440: every automated reply on a
 customer bot ticket is refused, by `automatedReplyBlocked` and again by
 `writeAutomatedReply`, the door every automated sender writes through, before
