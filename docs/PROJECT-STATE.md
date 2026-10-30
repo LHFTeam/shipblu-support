@@ -37,6 +37,9 @@ attempts. No Instagram reply had been sent since then, at the deploy's reads,
 so none has failed yet; the next goes out over `instagram_login`
 (`lib/meta/connection.ts`) and fails the same way until
 `INSTAGRAM_ACCESS_TOKEN` is renewed in Meta's app dashboard and set on Render.
+A new Instagram ticket opened at 12:42 UTC on 2026-10-30 (filed
+`customer_support` by Jev, unassigned in Support), and both profile reads for
+its customer went `dead` the same way; a reply to it will fail until then.
 
 **Jev's category classifier has been in `apply` since 18:37:23 UTC on
 2026-10-29**, switched by the user on `/admin/categories` after twelve and a
@@ -1761,9 +1764,14 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
   2026-10-29), and a ticket is held, or
   a `settle_routing` job queued, only on a channel an admin has moved to a
   category mode _while the classifier is in `apply`_ — so nothing happens
-  until both, and the classifier is in Shadow today. `Hand to <group>` stays out of sight
-  too, since no category has a route group and no ticket carries a category
-  (read 10:31 UTC on 2026-10-28, and again 08:28 UTC on 2026-10-29). Four
+  until both. The classifier has been in `apply` since 18:37 UTC on
+  2026-10-29, and every channel is still on `default_group` (read 13:00 UTC on
+  2026-10-30). Since 14:10 UTC on 2026-10-30 three categories have route
+  groups (the plan's Q5: sales to Inbound Sales Team, customer support to
+  Customer Care, merchant support to Merchant Care), so `Hand to <group>` is
+  offered on an open ticket whose category routes somewhere other than its
+  group — three tickets in Support at the write, to groups with nobody
+  accepting. Four
   things changed on every ticket at the deploy:
   - **Assignment** locks the ticket (`FOR NO KEY UPDATE`) before the group,
     re-reads there its assignee, group and hold and whether the ticket is still
@@ -1802,7 +1810,10 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
   so every service ran it before any channel could leave `default_group`. Turning it on is the plan's Stage 5.2,
   channel by channel through `category_shadow`, and it needs what 5.2 lists: the
   plan's 0.2 SLA reorder, 0.6's staffing (the roster paragraph above), route
-  groups on the categories, and the classifier in `apply`. The readiness panel
+  groups on the categories, and the classifier in `apply`. The reorder and the
+  route groups were written at the user's go-ahead on 2026-10-30, and the
+  classifier has been in `apply` since the day before; staffing, the channel
+  defaults and the comment rows are what is left (the plan's Next, item 10). The readiness panel
   on `/admin/channels` names what would leave routed tickets unassigned, and the
   active rules that would decide before the router. Production has two (read
   10:06 UTC on 2026-10-28): "Route Account Web Chat to Merchant Care" and "Route
