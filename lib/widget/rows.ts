@@ -1,4 +1,5 @@
 import { filingRowOfType } from '@/lib/routing/filing';
+import { parseWidgetConfig } from './config';
 
 /**
  * Which web chat row the widget uses, and what switching one on or off does.
@@ -23,7 +24,7 @@ export type WebchatRow = { id: string; type: string; name: string; isActive: boo
 /**
  * The row the widget uses: the oldest active one, or none. Asked of the
  * routing panel's rule (`filingRowOfType`), which says which row files a
- * type's tickets, so the card and the panel's warnings name one row.
+ * type's tickets, so the card and the panel's warnings follow one rule.
  */
 export function widgetRow<T extends WebchatRow>(rows: readonly T[]): T | null {
   return filingRowOfType('webchat', rows);
@@ -70,6 +71,31 @@ export function webchatSwitch<T extends WebchatRow>(
 
 /** A row as the switch reports it: whether the widget would show its own questions. */
 export type ReportedRow = WebchatRow & { hasFaqFolders: boolean };
+
+/** A row read with its config, as the switch reports it. */
+export function reportedRow<T extends WebchatRow & { config: unknown }>({
+  config,
+  ...row
+}: T): Omit<T, 'config'> & ReportedRow {
+  return { ...row, hasFaqFolders: Object.keys(parseWidgetConfig(config).faqFolders).length > 0 };
+}
+
+/**
+ * The web chat rows as a switch's answer speaks about them: which are on, and
+ * whether each lists questions. The action answers with it as it left them, and
+ * the page draws it from its own rows, so a switch shows its answer only while
+ * the two agree. Each row's switch keeps its answer for the life of the page,
+ * and an answer about rows that have changed since is no longer true: "the
+ * widget now uses B" once another switch has moved it, "B lists no FAQ
+ * questions yet" once the card has chosen some, "the only active row" once
+ * another has been added. Order-free, since only the rows' states are compared.
+ */
+export function webchatStateKey(rows: readonly ReportedRow[]): string {
+  return rows
+    .map((row) => `${row.id}:${row.isActive ? 'on' : 'off'}:${row.hasFaqFolders ? 'q' : '-'}`)
+    .sort()
+    .join(',');
+}
 
 /**
  * What the admin is told once a row has been switched. `rows` are as they were

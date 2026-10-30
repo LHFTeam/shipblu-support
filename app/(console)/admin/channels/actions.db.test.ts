@@ -976,9 +976,9 @@ describe('web chat rows', () => {
     const state = await setWebchatActive(INITIAL, form({ id: first.toUpperCase(), active: 'off' }));
     expect(state.error).toBeNull();
     expect(state.notice).toContain('the widget now uses “Second chat”');
-    // The row the notice speaks about, which the page shows it beside only while
-    // the widget is still there.
-    expect(state.widgetId).toBe(second);
+    // The rows as the switch left them, which the page shows the notice beside
+    // only while it draws them so.
+    expect(state.stateKey).toBe([`${first}:off:-`, `${second}:on:-`].sort().join(','));
     expect((await configOf(first)).isActive).toBe(false);
     expect(revalidated).toEqual(['/admin/channels']);
   });
@@ -986,17 +986,22 @@ describe('web chat rows', () => {
   it('refuses the last active row and a form it cannot read, writing nothing', async () => {
     const only = await webchatRow('Web chat', {}, 0);
 
-    expect(await setWebchatActive(INITIAL, form({ id: only, active: 'off' }))).toEqual({
-      error: ONLY_WEBCHAT_ROW,
-    });
     expect(await setWebchatActive(INITIAL, form({ id: only, active: 'maybe' }))).toEqual({
       error: 'That form is out of date — reload the page and try again',
     });
     expect((await setWebchatActive(INITIAL, form({ id: 'not-a-uuid', active: 'off' }))).error).toBe(
       GONE,
     );
-    expect((await configOf(only)).isActive).toBe(true);
     expect(revalidated).toEqual([]);
+
+    // A page offering to switch the last row off drew another as on, so it is
+    // drawn again, and shows the refusal while its rows are the ones refused on.
+    expect(await setWebchatActive(INITIAL, form({ id: only, active: 'off' }))).toEqual({
+      error: ONLY_WEBCHAT_ROW,
+      stateKey: `${only}:on:-`,
+    });
+    expect(revalidated).toEqual(['/admin/channels']);
+    expect((await configOf(only)).isActive).toBe(true);
   });
 
   it('is refused without admin.channels', async () => {

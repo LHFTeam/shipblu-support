@@ -825,23 +825,27 @@ export type WebchatSwitchView =
  * `useActionForm`, though a reset moves nothing here, so an action that throws
  * is a sentence beside the button rather than the console's error page.
  *
- * Each row's switch keeps its own notice, and the notice is about where the
- * widget went, so it is shown only while the widget is still on the row it
- * names (`widgetId`): a later switch that moves the widget makes every earlier
- * notice untrue. A row the switch left as the only active one draws its line
- * saying why it stays on, with the notice under it all the same.
+ * Each row's switch keeps its own answer for the life of the page, and the
+ * answer is about the web chat rows — where the widget went, whether it lists
+ * questions there, that this is the only active row — so it is shown only
+ * while the page's rows are as the action left them (`stateKey`,
+ * `webchatStateKey`): a later switch, a card saving questions or a row added
+ * makes an earlier answer untrue. A row the switch left as the only active one
+ * draws its line saying why it stays on, with the notice under it all the same.
  */
 export function WebchatActiveSwitch({
   channelId,
   plan,
-  widgetId,
+  stateKey,
 }: {
   channelId: string;
   plan: WebchatSwitchView;
-  widgetId: string | null;
+  stateKey: string;
 }) {
   const { state, form } = useActionForm(setWebchatActive, SWITCH_INITIAL);
-  const notice = state.notice && state.widgetId === widgetId ? state.notice : null;
+  const current = state.stateKey === undefined || state.stateKey === stateKey;
+  const notice = current ? state.notice : null;
+  const error = current ? state.error : null;
 
   // The notice outlives the form's place in the row, on a line of its own as
   // the owner handover's does: it says where the widget went, which is the
@@ -853,16 +857,26 @@ export function WebchatActiveSwitch({
     </div>
   ) : null;
 
+  // A page drawn before another row went off is drawn again with the refusal
+  // its click earned, and the button that was pressed is then this line, so
+  // the sentence is drawn here too.
   if (plan.kind === 'only_row') {
     return (
       <>
-        <span className="inline-flex items-center gap-1 text-xs text-(--color-text-secondary)">
-          The only active web chat row
-          <InfoTip label="why this row stays on">
-            The widget needs an active web chat row: without one its chats are filed under no row
-            and no group, and it shows the default opening hours. Switch another web chat row on, or
-            add one, to switch this one off.
-          </InfoTip>
+        <span className="inline-flex flex-col items-end gap-1">
+          <span className="inline-flex items-center gap-1 text-xs text-(--color-text-secondary)">
+            The only active web chat row
+            <InfoTip label="why this row stays on">
+              The widget needs an active web chat row: without one its chats are filed under no row
+              and no group, and it shows the default opening hours. Switch another web chat row on,
+              or add one, to switch this one off.
+            </InfoTip>
+          </span>
+          {error ? (
+            <span className="max-w-xs text-end">
+              <ErrorText inline>{error}</ErrorText>
+            </span>
+          ) : null}
         </span>
         {noticeLine}
       </>
@@ -884,9 +898,9 @@ export function WebchatActiveSwitch({
         <input type="hidden" name="id" value={channelId} />
         <input type="hidden" name="active" value={on ? 'on' : 'off'} />
         <ConfirmSubmit label={on ? 'Switch on' : 'Switch off'} confirmLabel={confirmLabel} />
-        {state.error ? (
+        {error ? (
           <span className="max-w-xs text-end">
-            <ErrorText inline>{state.error}</ErrorText>
+            <ErrorText inline>{error}</ErrorText>
           </span>
         ) : null}
       </form>

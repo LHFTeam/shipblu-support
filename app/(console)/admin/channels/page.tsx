@@ -33,7 +33,7 @@ import {
   shownOnboardings,
 } from '@/lib/whatsapp/onboarding-view';
 import { offerableFaqFolders, parseWidgetConfig } from '@/lib/widget/config';
-import { webchatSwitch, widgetRow } from '@/lib/widget/rows';
+import { reportedRow, webchatStateKey, webchatSwitch, widgetRow } from '@/lib/widget/rows';
 import {
   CoexistenceBadges,
   ConnectBusinessAppNumber,
@@ -121,16 +121,20 @@ export default async function ChannelsPage() {
   // Only the order is taken from that read, which no write moves; the rows
   // themselves are the list's, so the Inactive badge, the switch and the card
   // are drawn from one read of each row, and a switch committed between the
-  // two reads cannot set them against each other. A row the routing read
-  // missed was added after it, so it is the newest and goes last. Each web
-  // chat row's switch is worded from these rows, by the rule the action
-  // applies again under its lock.
+  // two reads cannot set them against each other. (The routing badges and the
+  // readiness panel are still the routing read's, so for one render they can
+  // disagree with the list; the next draws them alike.) A row in the list
+  // that the routing read has not seen was added between the two reads, so it
+  // is the newest and goes last. Each web chat row's switch is worded from
+  // these rows, by the rule the action applies again under its lock, and shows
+  // its answer while these rows are as the action left them.
   const order = new Map(routing.channels.map((channel, index) => [channel.id, index]));
   const position = (id: string) => order.get(id) ?? Number.MAX_SAFE_INTEGER;
   const webchatRows = channelList
     .filter((channel) => channel.type === 'webchat')
     .sort((a, b) => position(a.id) - position(b.id));
   const webchat = widgetRow(webchatRows);
+  const webchatKey = webchatStateKey(webchatRows.map(reportedRow));
   const switchView = (channelId: string): WebchatSwitchView | null => {
     const plan = webchatSwitch(webchatRows, channelId);
     if (plan?.kind !== 'switch_off') return plan;
@@ -401,7 +405,7 @@ export default async function ChannelsPage() {
                   <WebchatActiveSwitch
                     channelId={channel.id}
                     plan={switchPlan}
-                    widgetId={webchat?.id ?? null}
+                    stateKey={webchatKey}
                   />
                 ) : null}
                 {reconnectable && canConnect ? (

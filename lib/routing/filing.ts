@@ -39,8 +39,8 @@ export function filingRowFor<T extends FilingInput>(channel: T, rows: readonly T
 /**
  * The row a type filed by kind rather than by row files under: the oldest
  * active one. The widget's row is this for `webchat` (`lib/widget/rows.ts`),
- * so the panel's "another row files them" and the Chat widget card cannot
- * name two rows. `rows` as `filingRowFor` takes them.
+ * so the panel's "another row files them" and the Chat widget card follow one
+ * rule. `rows` as `filingRowFor` takes them.
  */
 export function filingRowOfType<T extends Pick<FilingInput, 'type' | 'isActive'>>(
   type: string,

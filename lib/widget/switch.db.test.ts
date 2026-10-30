@@ -45,9 +45,15 @@ async function active(): Promise<string[]> {
 
 describe('switchWebchatRow', () => {
   it('refuses the only active web chat row, and leaves it on', async () => {
-    const [chat] = await webchatRows(['Web chat', true], ['Old copy', false]);
+    const [chat, old] = await webchatRows(['Web chat', true], ['Old copy', false]);
 
-    expect(await switchWebchatRow(chat!, false)).toEqual({ ok: false, error: ONLY_WEBCHAT_ROW });
+    // With the rows it refused on, so the page drawn again shows the refusal
+    // only while they are still so.
+    expect(await switchWebchatRow(chat!, false)).toEqual({
+      ok: false,
+      error: ONLY_WEBCHAT_ROW,
+      stateKey: [`${chat}:on:-`, `${old}:off:-`].sort().join(','),
+    });
     expect(await active()).toEqual(['Web chat']);
   });
 
@@ -56,13 +62,21 @@ describe('switchWebchatRow', () => {
   it('moves the widget with the switch, and says so', async () => {
     const [first, second] = await webchatRows(['First', true], ['Second', true]);
 
+    // The answer carries the rows as the switch left them, which the page
+    // compares with its own before showing it.
     const off = await switchWebchatRow(first!, false);
-    expect(off).toMatchObject({ ok: true, widgetId: second });
+    expect(off).toMatchObject({
+      ok: true,
+      stateKey: [`${first}:off:-`, `${second}:on:-`].sort().join(','),
+    });
     expect(off.ok && off.notice).toContain('the widget now uses “Second”');
     expect((await webchatChannel())?.id).toBe(second);
 
     const on = await switchWebchatRow(first!, true);
-    expect(on).toMatchObject({ ok: true, widgetId: first });
+    expect(on).toMatchObject({
+      ok: true,
+      stateKey: [`${first}:on:-`, `${second}:on:-`].sort().join(','),
+    });
     expect(on.ok && on.notice).toContain('the widget now uses it');
     expect((await webchatChannel())?.id).toBe(first);
   });
@@ -74,6 +88,7 @@ describe('switchWebchatRow', () => {
       .values({ type: 'whatsapp', name: 'Sales line', config: { phoneNumberId: '1' } })
       .returning({ id: channels.id });
 
+    // About no web chat row, so it carries none: nothing on the page drew it.
     expect(await switchWebchatRow(number!.id, false)).toEqual({
       ok: false,
       error: 'Only a web chat channel is switched on and off here',
@@ -95,7 +110,7 @@ describe('switchWebchatRow', () => {
     expect(await switchWebchatRow(chat!, true)).toEqual({
       ok: true,
       notice: '“Web chat” is already on.',
-      widgetId: chat,
+      stateKey: `${chat}:on:-`,
     });
     const [after] = await db
       .select({ updatedAt: channels.updatedAt })
@@ -119,7 +134,7 @@ describe('switchWebchatRow', () => {
     hold.release();
 
     expect(await firstSwitch).toMatchObject({ ok: true });
-    expect(await secondSwitch).toEqual({ ok: false, error: ONLY_WEBCHAT_ROW });
+    expect(await secondSwitch).toMatchObject({ ok: false, error: ONLY_WEBCHAT_ROW });
     expect(await active()).toEqual(['Second']);
   });
 });

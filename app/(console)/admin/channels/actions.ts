@@ -592,10 +592,17 @@ export async function setWebchatActive(
   }
 
   const outcome = await switchWebchatRow(id, active === 'on');
-  if (!outcome.ok) return { error: outcome.error };
+  // A refusal about the rows means the page drew them other than they are —
+  // another admin switched one, or removed it — so the page is drawn again with
+  // the answer, which it shows while its rows agree with the ones refused on.
+  if (!outcome.ok) {
+    if (outcome.stateKey === undefined) return { error: outcome.error };
+    revalidatePath('/admin/channels');
+    return { error: outcome.error, stateKey: outcome.stateKey };
+  }
 
   revalidatePath('/admin/channels');
-  return { ...ok(), notice: outcome.notice, widgetId: outcome.widgetId };
+  return { ...ok(), notice: outcome.notice, stateKey: outcome.stateKey };
 }
 
 // --- Numbers on the WhatsApp Business app -----------------------------------

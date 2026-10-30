@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { switchNotice, webchatSwitch, widgetRow, type ReportedRow } from './rows';
+import {
+  reportedRow,
+  switchNotice,
+  webchatStateKey,
+  webchatSwitch,
+  widgetRow,
+  type ReportedRow,
+} from './rows';
 
 /** Rows oldest first, as every caller passes them. */
 function rows(...spec: [string, boolean, boolean?][]): ReportedRow[] {
@@ -80,6 +87,44 @@ describe('switchNotice', () => {
   it('says when a row switched on took the widget over', () => {
     expect(switchNotice(rows(['Old', false, false], ['New', true]), 'old', true)).toBe(
       '“Old” is on, and the widget now uses it, as the oldest active web chat row. It lists no FAQ questions yet, so the widget shows the most-read articles until some are chosen under Chat widget.',
+    );
+  });
+});
+
+describe('webchatStateKey', () => {
+  // The page compares its own rows with the ones a switch answered about, so
+  // the key moves with everything an answer says, and with nothing else.
+  it('moves when a row goes on or off, gains questions, or is added', () => {
+    const before = webchatStateKey(rows(['Old', true], ['New', true, false]));
+    expect(webchatStateKey(rows(['Old', false], ['New', true, false]))).not.toBe(before);
+    expect(webchatStateKey(rows(['Old', true], ['New', true, true]))).not.toBe(before);
+    expect(webchatStateKey(rows(['Old', true], ['New', true, false], ['Third', true]))).not.toBe(
+      before,
+    );
+  });
+
+  it('is the same whatever order the rows come in, and whatever they are called', () => {
+    const list = rows(['Old', true], ['New', false]);
+    expect(webchatStateKey([...list].reverse())).toBe(webchatStateKey(list));
+    expect(webchatStateKey(list.map((row) => ({ ...row, name: 'Renamed' })))).toBe(
+      webchatStateKey(list),
+    );
+  });
+
+  // The page reads config off the list's rows and the switch off its own read;
+  // both come through here, so the two cannot judge "lists questions" apart.
+  it("reads questions off a row's config as the widget does", () => {
+    const row = { id: 'chat', type: 'webchat', name: 'Chat', isActive: true };
+    expect(reportedRow({ ...row, config: { faqFolders: {} } }).hasFaqFolders).toBe(false);
+    expect(
+      reportedRow({
+        ...row,
+        config: { faqFolders: { en: '6f1c1d2e-3b4a-4c5d-8e9f-0a1b2c3d4e5f' } },
+      }).hasFaqFolders,
+    ).toBe(true);
+    // Not a uuid, so the widget would not show it either.
+    expect(reportedRow({ ...row, config: { faqFolders: { en: 'shipping' } } }).hasFaqFolders).toBe(
+      false,
     );
   });
 });

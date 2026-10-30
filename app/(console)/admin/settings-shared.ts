@@ -62,11 +62,12 @@ export type AdminState = ActionState & {
 };
 
 /**
- * A web chat row's switch. `widgetId` is the row the widget used once the
- * switch was done, which its notice speaks about: each row's switch keeps its
- * own notice, and one whose widget has moved on since is no longer true.
+ * A web chat row's switch. `stateKey` is the web chat rows as the action left
+ * them (`webchatStateKey`), which its answer speaks about: each row's switch
+ * keeps its own answer, and one about rows that have changed since is no
+ * longer true. Absent on a refusal of the form itself, which is about no row.
  */
-export type WebchatSwitchState = AdminState & { widgetId?: string | null };
+export type WebchatSwitchState = AdminState & { stateKey?: string };
 
 export function refresh(path: string) {
   revalidatePath(path);

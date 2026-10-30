@@ -2,8 +2,14 @@ import { asc, eq, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { channels } from '@/db/schema';
 import { logger } from '@/lib/log';
-import { parseWidgetConfig } from './config';
-import { switchNotice, webchatSwitch, widgetRow, type ReportedRow } from './rows';
+import {
+  reportedRow,
+  switchNotice,
+  webchatStateKey,
+  webchatSwitch,
+  widgetRow,
+  type ReportedRow,
+} from './rows';
 
 const log = logger('webchat');
 
@@ -13,11 +19,13 @@ export const ONLY_WEBCHAT_ROW =
   'This is the only active web chat row, and the widget needs one: without it chats are filed under no row and no group. Switch another web chat row on, or add one, first.';
 
 /**
- * What a switch did, and the row the widget uses after it: the notice is about
- * that row, and the page shows it only while the widget is still there.
+ * What a switch did, or why it did nothing, with the web chat rows as it left
+ * them (`webchatStateKey`): the page shows the answer only while its rows
+ * agree. A refusal about rows the page drew wrongly carries them too, so the
+ * page can be drawn again; one for a row that is not web chat does not.
  */
 export type SwitchOutcome =
-  { ok: true; notice: string; widgetId: string | null } | { ok: false; error: string };
+  { ok: true; notice: string; stateKey: string } | { ok: false; error: string; stateKey?: string };
 
 /**
  * Serialise everything that decides by which web chat row the widget uses: a
@@ -57,10 +65,7 @@ async function webchatRowsIn(tx: Tx): Promise<ReportedRow[]> {
     .from(channels)
     .where(eq(channels.type, 'webchat'))
     .orderBy(asc(channels.createdAt), asc(channels.id));
-  return rows.map(({ config, ...row }) => ({
-    ...row,
-    hasFaqFolders: Object.keys(parseWidgetConfig(config).faqFolders).length > 0,
-  }));
+  return rows.map(reportedRow);
 }
 
 /**
@@ -116,24 +121,21 @@ export async function switchWebchatRow(id: string, active: boolean): Promise<Swi
       .from(channels)
       .where(eq(channels.id, id))
       .limit(1);
-    if (!target) return { ok: false, error: 'That channel no longer exists — reload the page' };
-    if (target.type !== 'webchat') {
+    if (target && target.type !== 'webchat') {
       return { ok: false, error: 'Only a web chat channel is switched on and off here' };
     }
 
     const rows = await webchatRowsIn(tx);
-
+    const stateKey = webchatStateKey(rows);
     const row = rows.find((candidate) => candidate.id === id);
-    if (!row) return { ok: false, error: 'That channel no longer exists — reload the page' };
+    if (!row) {
+      return { ok: false, error: 'That channel no longer exists — reload the page', stateKey };
+    }
     if (row.isActive === active) {
-      return {
-        ok: true,
-        notice: `“${row.name}” is already ${active ? 'on' : 'off'}.`,
-        widgetId: widgetRow(rows)?.id ?? null,
-      };
+      return { ok: true, notice: `“${row.name}” is already ${active ? 'on' : 'off'}.`, stateKey };
     }
     if (!active && webchatSwitch(rows, id)?.kind === 'only_row') {
-      return { ok: false, error: ONLY_WEBCHAT_ROW };
+      return { ok: false, error: ONLY_WEBCHAT_ROW, stateKey };
     }
 
     await tx
@@ -145,10 +147,6 @@ export async function switchWebchatRow(id: string, active: boolean): Promise<Swi
     const after = rows.map((candidate) =>
       candidate.id === id ? { ...candidate, isActive: active } : candidate,
     );
-    return {
-      ok: true,
-      notice: switchNotice(rows, id, active),
-      widgetId: widgetRow(after)?.id ?? null,
-    };
+    return { ok: true, notice: switchNotice(rows, id, active), stateKey: webchatStateKey(after) };
   });
 }
