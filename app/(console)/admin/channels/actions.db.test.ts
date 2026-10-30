@@ -17,11 +17,11 @@ import type { Permission } from '@/lib/auth/permissions';
 import { resetEnvCache } from '@/lib/env';
 import { saveCategoryAiSettings } from '@/lib/category-ai/settings';
 import { withCleanDatabase } from '@/lib/testing/db';
-import { untilWaitingOnALock } from '@/lib/testing/hold-transaction';
+import { holdNextTransaction, untilWaitingOnALock } from '@/lib/testing/hold-transaction';
 import { stubFetch } from '@/lib/testing/fetch';
 import { parseCoexistence } from '@/lib/whatsapp/coexistence';
 import { credentialStatuses, storeBusinessToken } from '@/lib/whatsapp/credentials';
-import { ONLY_WEBCHAT_ROW } from '@/lib/widget/switch';
+import { ONLY_WEBCHAT_ROW, switchWebchatRow } from '@/lib/widget/switch';
 import { GONE } from '../settings-shared';
 
 /**
@@ -354,7 +354,12 @@ describe('saveChannel routing mode', () => {
       routingMode: 'category_shadow',
     });
     expect(
-      (await saveChannel(INITIAL, form({ id: chat, type: 'webchat', name: 'Web chat' }))).error,
+      (
+        await saveChannel(
+          INITIAL,
+          form({ id: chat, type: 'webchat', name: 'Web chat', faqFolder_en: '', faqFolder_ar: '' }),
+        )
+      ).error,
     ).toBeNull();
     expect((await modeOf(chat)).routingMode).toBe('category_shadow');
 
@@ -858,13 +863,14 @@ describe('web chat rows', () => {
 
   it('keeps the folders when the row editor saves, which posts none', async () => {
     const chosen = await folders();
-    const chat = await webchatRow('Web chat', chosen);
+    const widget = await webchatRow('Web chat', chosen, 0);
+    const other = await webchatRow('Second chat', chosen, 1);
 
     expect(
-      (await saveChannel(INITIAL, form({ id: chat, type: 'webchat', name: 'Website chat' }))).error,
+      (await saveChannel(INITIAL, form({ id: other, type: 'webchat', name: 'Spare chat' }))).error,
     ).toBeNull();
-    expect(await configOf(chat)).toMatchObject({
-      name: 'Website chat',
+    expect(await configOf(other)).toMatchObject({
+      name: 'Spare chat',
       config: { faqFolders: chosen },
     });
 
@@ -874,16 +880,57 @@ describe('web chat rows', () => {
         await saveChannel(
           INITIAL,
           form({
-            id: chat,
+            id: widget,
             type: 'webchat',
-            name: 'Website chat',
+            name: 'Web chat',
             faqFolder_en: '',
             faqFolder_ar: chosen.ar!,
           }),
         )
       ).error,
     ).toBeNull();
-    expect((await configOf(chat)).config).toEqual({ faqFolders: { ar: chosen.ar } });
+    expect((await configOf(widget)).config).toEqual({ faqFolders: { ar: chosen.ar } });
+  });
+
+  // The editor is drawn only on a row the widget does not use. One drawn
+  // before a switch made its row the widget's would write the page's group
+  // and mode over what the card has saved on it since.
+  it("refuses the row editor on the row the widget uses, and keeps the card's settings", async () => {
+    const only = await webchatRow('Web chat', {}, 0);
+
+    expect(
+      await saveChannel(INITIAL, form({ id: only, type: 'webchat', name: 'Renamed chat' })),
+    ).toEqual({
+      error: 'The widget uses this row now — reload the page and edit it under Chat widget',
+    });
+    expect((await configOf(only)).name).toBe('Web chat');
+  });
+
+  // The card asks which row is the widget's and then writes. A switch held
+  // open after its write, moving the widget off the card's row, must not be
+  // read past: the save waits on the switch's lock, and then finds its row is
+  // no longer the widget's.
+  it("cannot be raced into saving the card's folders on a row the widget left", async () => {
+    const chosen = await folders();
+    const first = await webchatRow('Web chat', {}, 0);
+    await webchatRow('Second chat', {}, 1);
+
+    const hold = holdNextTransaction('after');
+    const switching = switchWebchatRow(first, false);
+    await hold.atHold;
+    const saving = saveChannel(
+      INITIAL,
+      form({ id: first, type: 'webchat', name: 'Web chat', faqFolder_en: chosen.en! }),
+    );
+    await untilWaitingOnALock(db);
+    hold.release();
+
+    expect(await switching).toMatchObject({ ok: true });
+    expect(await saving).toEqual({
+      error:
+        'This is no longer the web chat row the widget uses — reload the page to configure the one that is',
+    });
+    expect((await configOf(first)).config).toEqual({ faqFolders: {} });
   });
 
   // A card drawn before its row stopped being the widget's would otherwise
@@ -922,13 +969,16 @@ describe('web chat rows', () => {
 
   it('switches a row off and says where the widget went', async () => {
     const first = await webchatRow('Web chat', {}, 0);
-    await webchatRow('Second chat', {}, 1);
+    const second = await webchatRow('Second chat', {}, 1);
 
     // Upper-cased, which a uuid check accepts: the switch compares ids in code
     // against the lower-case ones Postgres returns, so the action canonicalises.
     const state = await setWebchatActive(INITIAL, form({ id: first.toUpperCase(), active: 'off' }));
     expect(state.error).toBeNull();
     expect(state.notice).toContain('the widget now uses “Second chat”');
+    // The row the notice speaks about, which the page shows it beside only while
+    // the widget is still there.
+    expect(state.widgetId).toBe(second);
     expect((await configOf(first)).isActive).toBe(false);
     expect(revalidated).toEqual(['/admin/channels']);
   });

@@ -61,6 +61,13 @@ export type AdminState = ActionState & {
   wait?: true;
 };
 
+/**
+ * A web chat row's switch. `widgetId` is the row the widget used once the
+ * switch was done, which its notice speaks about: each row's switch keeps its
+ * own notice, and one whose widget has moved on since is no longer true.
+ */
+export type WebchatSwitchState = AdminState & { widgetId?: string | null };
+
 export function refresh(path: string) {
   revalidatePath(path);
 }

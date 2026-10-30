@@ -118,11 +118,19 @@ export default async function ChannelsPage() {
   // different rule would let an admin configure one row while the widget read
   // another, and the setting would look saved and do nothing — sorting this
   // page's own list, ordered by name and timed to the millisecond, was one.
-  // Each web chat row's switch is worded from the same rows, by the rule the
-  // action applies again under its lock.
-  const webchatRows = routing.channels.filter((channel) => channel.type === 'webchat');
-  const widget = widgetRow(webchatRows);
-  const webchat = widget ? channelList.find((channel) => channel.id === widget.id) : undefined;
+  // Only the order is taken from that read, which no write moves; the rows
+  // themselves are the list's, so the Inactive badge, the switch and the card
+  // are drawn from one read of each row, and a switch committed between the
+  // two reads cannot set them against each other. A row the routing read
+  // missed was added after it, so it is the newest and goes last. Each web
+  // chat row's switch is worded from these rows, by the rule the action
+  // applies again under its lock.
+  const order = new Map(routing.channels.map((channel, index) => [channel.id, index]));
+  const position = (id: string) => order.get(id) ?? Number.MAX_SAFE_INTEGER;
+  const webchatRows = channelList
+    .filter((channel) => channel.type === 'webchat')
+    .sort((a, b) => position(a.id) - position(b.id));
+  const webchat = widgetRow(webchatRows);
   const switchView = (channelId: string): WebchatSwitchView | null => {
     const plan = webchatSwitch(webchatRows, channelId);
     if (plan?.kind !== 'switch_off') return plan;
@@ -354,7 +362,7 @@ export default async function ChannelsPage() {
                       : isMetaChannel(channel.type)
                         ? 'hardcoded in server environment variables'
                         : channel.type === 'webchat'
-                          ? channel.id === widget?.id
+                          ? channel.id === webchat?.id
                             ? 'the widget'
                             : 'not the widget’s row'
                           : (channel.config.address as string) || 'no address'}
@@ -377,7 +385,7 @@ export default async function ChannelsPage() {
                 {/* The widget's row is edited by the Chat widget card below,
                     which has its folders: two forms saving one row's group and
                     mode would each put the other's stale values back. */}
-                {channel.type === 'webchat' && channel.id === widget?.id ? (
+                {channel.type === 'webchat' && channel.id === webchat?.id ? (
                   <span className="text-xs text-(--color-text-secondary)">
                     Edited under Chat widget
                   </span>
@@ -390,7 +398,11 @@ export default async function ChannelsPage() {
                   />
                 )}
                 {switchPlan ? (
-                  <WebchatActiveSwitch channelId={channel.id} plan={switchPlan} />
+                  <WebchatActiveSwitch
+                    channelId={channel.id}
+                    plan={switchPlan}
+                    widgetId={webchat?.id ?? null}
+                  />
                 ) : null}
                 {reconnectable && canConnect ? (
                   <ConnectBusinessAppNumber

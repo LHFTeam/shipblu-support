@@ -57,11 +57,12 @@ describe('switchWebchatRow', () => {
     const [first, second] = await webchatRows(['First', true], ['Second', true]);
 
     const off = await switchWebchatRow(first!, false);
-    expect(off).toMatchObject({ ok: true });
+    expect(off).toMatchObject({ ok: true, widgetId: second });
     expect(off.ok && off.notice).toContain('the widget now uses “Second”');
     expect((await webchatChannel())?.id).toBe(second);
 
     const on = await switchWebchatRow(first!, true);
+    expect(on).toMatchObject({ ok: true, widgetId: first });
     expect(on.ok && on.notice).toContain('the widget now uses it');
     expect((await webchatChannel())?.id).toBe(first);
   });
@@ -94,6 +95,7 @@ describe('switchWebchatRow', () => {
     expect(await switchWebchatRow(chat!, true)).toEqual({
       ok: true,
       notice: '“Web chat” is already on.',
+      widgetId: chat,
     });
     const [after] = await db
       .select({ updatedAt: channels.updatedAt })

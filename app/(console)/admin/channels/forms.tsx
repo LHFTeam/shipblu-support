@@ -1,6 +1,6 @@
 'use client';
 
-import { useActionState, useState } from 'react';
+import { useState } from 'react';
 import {
   Badge,
   Button,
@@ -21,7 +21,7 @@ import {
   metaPlatformOf,
   type ConversationChannel,
 } from '@/lib/tickets/channel-policy';
-import type { AdminState } from '../settings-shared';
+import type { AdminState, WebchatSwitchState } from '../settings-shared';
 import { saveChannel, setNumberOwner, setWebchatActive } from './actions';
 import { ConfirmSubmit } from '@/components/confirm-submit';
 import { InfoTip } from '@/components/tooltip';
@@ -30,6 +30,7 @@ import { useActionForm } from '@/components/use-action-form';
 import { CHANNEL_TYPES, channelTypeLabel, isChannelType, type ChannelType } from './channel-types';
 
 const INITIAL: AdminState = { error: null };
+const SWITCH_INITIAL: WebchatSwitchState = { error: null };
 
 /**
  * A row as the column stores it, which is a wider set than a form can save.
@@ -154,10 +155,11 @@ export function ChannelEditor({
   const type = editableType(channel.type);
   // A web chat row is edited here too, but never the widget's own: the page
   // draws `WebchatSettings` for that one, since two forms saving the same
-  // group and mode would put each other's stale values back. This form posts
-  // no `faqFolder_*` field, and `saveChannel` leaves a row's folders as they
-  // are when none is posted, so a rename here keeps what the widget lists once
-  // the row becomes the widget's.
+  // group and mode would put each other's stale values back, and `saveChannel`
+  // refuses this form on a row a switch has made the widget's since the page
+  // was drawn. This form posts no `faqFolder_*` field, and `saveChannel` leaves
+  // a row's folders as they are when none is posted, so a rename here keeps
+  // what the widget lists once the row becomes the widget's.
   if (!type) return null;
   const connectedThroughMeta = type === 'whatsapp' && parseCoexistence(channel.config) !== null;
 
@@ -819,30 +821,51 @@ export type WebchatSwitchView =
  * click is the one that says where the widget goes, since a switch either way
  * can move it: off on the widget's own row, on for a row older than the
  * widget's. The page's wording is a forecast; the action decides again under
- * its lock and says what happened, which is what stays on screen.
+ * its lock and says what happened, which is what stays on screen. Through
+ * `useActionForm`, though a reset moves nothing here, so an action that throws
+ * is a sentence beside the button rather than the console's error page.
  *
- * Not drawn on the widget's only active row, which the action would refuse:
- * the line there says why.
+ * Each row's switch keeps its own notice, and the notice is about where the
+ * widget went, so it is shown only while the widget is still on the row it
+ * names (`widgetId`): a later switch that moves the widget makes every earlier
+ * notice untrue. A row the switch left as the only active one draws its line
+ * saying why it stays on, with the notice under it all the same.
  */
 export function WebchatActiveSwitch({
   channelId,
   plan,
+  widgetId,
 }: {
   channelId: string;
   plan: WebchatSwitchView;
+  widgetId: string | null;
 }) {
-  const [state, formAction] = useActionState(setWebchatActive, INITIAL);
+  const { state, form } = useActionForm(setWebchatActive, SWITCH_INITIAL);
+  const notice = state.notice && state.widgetId === widgetId ? state.notice : null;
+
+  // The notice outlives the form's place in the row, on a line of its own as
+  // the owner handover's does: it says where the widget went, which is the
+  // sentence the admin needs, and inside the form it squeezed the button off
+  // its line.
+  const noticeLine = notice ? (
+    <div className="w-full">
+      <SuccessText>{notice}</SuccessText>
+    </div>
+  ) : null;
 
   if (plan.kind === 'only_row') {
     return (
-      <span className="inline-flex items-center gap-1 text-xs text-(--color-text-secondary)">
-        The only active web chat row
-        <InfoTip label="why this row stays on">
-          The widget needs an active web chat row: without one its chats are filed under no row and
-          no group, and it shows the default opening hours. Switch another web chat row on, or add
-          one, to switch this one off.
-        </InfoTip>
-      </span>
+      <>
+        <span className="inline-flex items-center gap-1 text-xs text-(--color-text-secondary)">
+          The only active web chat row
+          <InfoTip label="why this row stays on">
+            The widget needs an active web chat row: without one its chats are filed under no row
+            and no group, and it shows the default opening hours. Switch another web chat row on, or
+            add one, to switch this one off.
+          </InfoTip>
+        </span>
+        {noticeLine}
+      </>
     );
   }
 
@@ -855,13 +878,9 @@ export function WebchatActiveSwitch({
       ? `Move the widget to “${plan.widgetMovesTo}”?`
       : 'Really switch off?';
 
-  // The notice outlives the form's place in the row, on a line of its own as
-  // the owner handover's does: it says where the widget went, which is the
-  // sentence the admin needs, and inside the form it squeezed the button off
-  // its line.
   return (
     <>
-      <form action={formAction} className="inline-flex flex-col items-end gap-1">
+      <form {...form} className="inline-flex flex-col items-end gap-1">
         <input type="hidden" name="id" value={channelId} />
         <input type="hidden" name="active" value={on ? 'on' : 'off'} />
         <ConfirmSubmit label={on ? 'Switch on' : 'Switch off'} confirmLabel={confirmLabel} />
@@ -871,11 +890,7 @@ export function WebchatActiveSwitch({
           </span>
         ) : null}
       </form>
-      {state.notice ? (
-        <div className="w-full">
-          <SuccessText>{state.notice}</SuccessText>
-        </div>
-      ) : null}
+      {noticeLine}
     </>
   );
 }

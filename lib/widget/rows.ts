@@ -1,3 +1,5 @@
+import { filingRowOfType } from '@/lib/routing/filing';
+
 /**
  * Which web chat row the widget uses, and what switching one on or off does.
  *
@@ -13,14 +15,18 @@
  * so both are tested without a database.
  *
  * Rows are passed oldest first, ties by id, the order `webchatChannel` reads
- * them in: `routingReadiness`'s channels on the page, the switch's own read in
- * the action.
+ * them in: on the page the list's rows in `routingReadiness`'s order, in the
+ * action the switch's own read.
  */
-export type WebchatRow = { id: string; name: string; isActive: boolean };
+export type WebchatRow = { id: string; type: string; name: string; isActive: boolean };
 
-/** The row the widget uses: the oldest active one, or none. */
+/**
+ * The row the widget uses: the oldest active one, or none. Asked of the
+ * routing panel's rule (`filingRowOfType`), which says which row files a
+ * type's tickets, so the card and the panel's warnings name one row.
+ */
 export function widgetRow<T extends WebchatRow>(rows: readonly T[]): T | null {
-  return rows.find((row) => row.isActive) ?? null;
+  return filingRowOfType('webchat', rows);
 }
 
 /** What switching one row would do. */

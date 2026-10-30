@@ -5,6 +5,7 @@ import { switchNotice, webchatSwitch, widgetRow, type ReportedRow } from './rows
 function rows(...spec: [string, boolean, boolean?][]): ReportedRow[] {
   return spec.map(([name, isActive, hasFaqFolders = true]) => ({
     id: name.toLowerCase(),
+    type: 'webchat',
     name,
     isActive,
     hasFaqFolders,

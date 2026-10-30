@@ -3,6 +3,7 @@
 import { and, eq, ne, sql, asc } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { channels, whatsappAccounts, groups } from '@/db/schema';
+import { isUniqueViolation } from '@/lib/db/errors';
 import { requirePermission } from '@/lib/auth/guard';
 import { can } from '@/lib/auth/permissions';
 import { readCategoryAiSettings } from '@/lib/category-ai/settings';
@@ -35,14 +36,19 @@ import {
   retryOnboarding,
 } from '@/lib/whatsapp/onboarding';
 import { copyRequestRefusal } from '@/lib/whatsapp/onboarding-reads';
-import { GONE, refresh, type SettingsState, type AdminState } from '../settings-shared';
+import {
+  GONE,
+  refresh,
+  type SettingsState,
+  type AdminState,
+  type WebchatSwitchState,
+} from '../settings-shared';
 import { revalidatePath } from 'next/cache';
 import { canonicalUuid } from '@/lib/http/uuid';
 import { listFolderOptions } from '@/lib/kb/admin';
 import { LOCALES } from '@/lib/kb/locale';
 import { resolveFaqFolders } from '@/lib/widget/config';
-import { webchatChannel } from '@/lib/widget/session';
-import { switchWebchatRow } from '@/lib/widget/switch';
+import { switchWebchatRow, webchatEditRefusal } from '@/lib/widget/switch';
 import { isChannelType } from './channel-types';
 
 const log = logger('admin_channels');
@@ -380,21 +386,13 @@ export async function saveChannel(_state: AdminState, formData: FormData): Promi
   // absent is "unchanged", as the routing mode's is, where `''` is the card's
   // "Most-read articles". The editor sending them back as hidden fields would
   // write the page's snapshot over a card saved since, and refuse a rename once
-  // a chosen folder stopped being public.
+  // a chosen folder stopped being public. So whether they were posted also says
+  // which form this is, and the UPDATE below lets the card save only the
+  // widget's row and the editor only another (`webchatEditRefusal`).
   const foldersPosted = LOCALES.some((locale) => formData.get(`faqFolder_${locale}`) !== null);
   let faqFolders: Record<string, string> = {};
 
   if (type === 'webchat' && foldersPosted) {
-    // The card configures the row the widget reads. One drawn before that row
-    // was switched off, or before an older one was switched on, would save
-    // questions nobody is shown and say they were saved.
-    if (id && (await webchatChannel())?.id !== id) {
-      return {
-        error:
-          'This is no longer the web chat row the widget uses — reload the page to configure the one that is',
-      };
-    }
-
     const chosen = Object.fromEntries(
       LOCALES.map((locale) => [locale, String(formData.get(`faqFolder_${locale}`) ?? '')]),
     );
@@ -442,13 +440,24 @@ export async function saveChannel(_state: AdminState, formData: FormData): Promi
             whatsappAccountId: account,
             ...(routingMode === undefined ? {} : { routingMode }),
           };
+    const values = { name, defaultGroupId, ...columns, updatedAt: new Date() };
     try {
-      await db
-        .update(channels)
-        .set({ name, defaultGroupId, ...columns, updatedAt: new Date() })
-        .where(eq(channels.id, id));
+      if (type === 'webchat') {
+        // The Chat widget card saves the widget's row and the row editor any
+        // other, and a switch can make a row the widget's, or stop it being
+        // that, under an open page. So the save asks which it is under the
+        // switch's lock and writes in the same transaction.
+        const refusal = await db.transaction(async (tx) => {
+          const refused = await webchatEditRefusal(tx, id, foldersPosted);
+          if (!refused) await tx.update(channels).set(values).where(eq(channels.id, id));
+          return refused;
+        });
+        if (refusal) return { error: refusal };
+      } else {
+        await db.update(channels).set(values).where(eq(channels.id, id));
+      }
     } catch (error) {
-      if (isNameTaken(error)) return { error: nameTaken(name) };
+      if (isUniqueViolation(error, NAME_INDEX)) return { error: nameTaken(name) };
       throw error;
     }
   } else {
@@ -463,7 +472,7 @@ export async function saveChannel(_state: AdminState, formData: FormData): Promi
         ...(routingMode ? { routingMode } : {}),
       });
     } catch (error) {
-      if (isNameTaken(error)) return { error: nameTaken(name) };
+      if (isUniqueViolation(error, NAME_INDEX)) return { error: nameTaken(name) };
       throw error;
     }
   }
@@ -480,20 +489,13 @@ export async function saveChannel(_state: AdminState, formData: FormData): Promi
 }
 
 /**
- * Whether a write was refused because another channel holds the name.
- * `channels_name_idx` is unique, and nothing above reads for a clash first:
- * a read could not see a rename committed beside it, and the index answers
- * every case. Without the catch the clash was a throw, which the form turns
- * into its "no answer came back" sentence about a connection that was fine.
- * The constraint by name, so no other unique violation is reported as this.
+ * The unique index a channel's name is held to. Nothing above reads for a
+ * clash first: a read could not see a rename committed beside it, and the
+ * index answers every case. Without the catch the clash was a throw, which the
+ * form turns into its "no answer came back" sentence about a connection that
+ * was fine. By name, so no other unique violation is reported as this.
  */
-function isNameTaken(error: unknown): boolean {
-  const fields = (value: unknown) =>
-    value as { code?: unknown; constraint_name?: unknown } | null | undefined;
-  return [fields(error), fields((error as { cause?: unknown } | null)?.cause)].some(
-    (candidate) => candidate?.code === '23505' && candidate.constraint_name === 'channels_name_idx',
-  );
-}
+const NAME_INDEX = 'channels_name_idx';
 
 function nameTaken(name: string): string {
   return `Another channel is already called “${name}” — choose a different name`;
@@ -575,9 +577,9 @@ export async function setNumberOwner(_state: AdminState, formData: FormData): Pr
  * active row.
  */
 export async function setWebchatActive(
-  _state: AdminState,
+  _state: WebchatSwitchState,
   formData: FormData,
-): Promise<AdminState> {
+): Promise<WebchatSwitchState> {
   await requirePermission('admin.channels');
 
   // Canonical, not as given: the switch finds its row among the ones it reads
@@ -593,7 +595,7 @@ export async function setWebchatActive(
   if (!outcome.ok) return { error: outcome.error };
 
   revalidatePath('/admin/channels');
-  return { ...ok(), notice: outcome.notice };
+  return { ...ok(), notice: outcome.notice, widgetId: outcome.widgetId };
 }
 
 // --- Numbers on the WhatsApp Business app -----------------------------------
