@@ -76,7 +76,7 @@ update.
 
 | Stage | Code                                                                                                                                              | Production                                                                                                                                                                                                                                                                                                                                  |
 | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 0     | Merged: #386 (`01488c9`)                                                                                                                          | Live since 2026-10-20. Its two operational steps were never done (below)                                                                                                                                                                                                                                                                    |
+| 0     | Merged: #386 (`01488c9`)                                                                                                                          | Live since 2026-10-20. Of its two operational steps, 0.2's SLA reorder was done on 2026-10-30 and 0.6's staffing is left (below)                                                                                                                                                                                                            |
 | 1.1   | Merged: #387, then `dev` → `main` in #389 (`1f89219`)                                                                                             | Live since 2026-10-21 10:13 UTC                                                                                                                                                                                                                                                                                                             |
 | 1.2   | Merged: #391 (`31f7379`) and follow-up #392 (`7b7d276`), then `dev` → `main` in #393 (`634a28d`), which also carried another session's #390       | **Done.** All six services live on `634a28d` by 17:38 UTC on 2026-10-21, worker first. The user ran the backfill and the rollup from a shell, leaving no `jobs` row. Every check below reads clean                                                                                                                                          |
 | 1.3   | Merged: #395 (`58c5ed9`), then `dev` → `main` in #397 (`447d8be`), which also carried #394, #396 and #398. As built below                         | **Done.** All six services live on `447d8be` by 18:36 UTC, web first. Its checks read clean (below), though no comment has arrived since                                                                                                                                                                                                    |
@@ -626,7 +626,8 @@ web's deploy, which precedes the preDeploy that added the CHECK.
   both completed, and no job has failed since 17:25. Deploy rule 7 below
   exists because of this.
 
-**Stage 0's operational steps were never done.** Read on 2026-10-21:
+**Stage 0's operational steps: 0.2 done on 2026-10-30, 0.6 left.** First read on
+2026-10-21:
 
 - _Done on 2026-10-30._ **0.2's SLA reorder.** Until then the policies were
   in the "Now" order of 0.2's table, Live Support (Customer Care) at position 1
@@ -635,8 +636,9 @@ web's deploy, which precedes the preDeploy that added the CHECK.
   `group.id` to a group's name, so none matched. At the user's go-ahead it was
   written at 14:11 UTC as 0.2's "New" table, with the group conditions naming
   the uuids (Merchant Care `b080b5d9…`, Customer Care `0861a48b…`), in one
-  statement guarded on the four rows being unchanged since 2026-09-20 (the
-  support lead approved it, Q15). Live Support (Customer Care) stays the
+  statement guarded on each row's `updated_at` still being 07:04:08 UTC on
+  2026-09-20, their last edit, as the 14:08 read returned it (the support lead
+  approved it, Q15). Live Support (Customer Care) stays the
   default, now last. Only the order, the conditions and `updated_at` moved:
   targets, escalations and hours are as they were. The app's own
   `parseCondition` accepts all four, and `selectPolicy` over them picks, for a
@@ -651,12 +653,13 @@ web's deploy, which precedes the preDeploy that added the CHECK.
   the old table typed back in: positions 1–4 as Live Support (Customer Care),
   Offline Support (Customer Care), Offline Support (Merchant Care), Live
   Support (Merchant Care), with the group names back in the conditions.
-- **0.6's staffing.** Customer Care, Inbound Sales Team and Merchant Care have
-  no members. Support has three, none of whom `assign_sweep` may pick, and holds
-  129 open unassigned tickets. Every channel defaults to Support except
-  "Nayera Mohamed", which defaults to Merchant Care, and the bot, which has no
-  group. `assign_sweep` last assigned anything on 2026-10-07. This is
-  operations, not code, and it blocks Stage 5.
+- **0.6's staffing.** Left, and it blocks Stage 5; operations, not code. As read
+  on 2026-10-21, Customer Care, Inbound Sales Team and Merchant Care had no
+  members, Support had three, none of whom `assign_sweep` could pick, and held
+  129 open unassigned tickets, and every channel defaulted to Support but
+  "Nayera Mohamed" (Merchant Care) and the bot (no group). The groups have
+  gained members since, none of them taking tickets: the current figures are
+  under Next, item 10, read on 2026-10-30.
 
 ### Next, in order
 
@@ -741,7 +744,8 @@ Every production write needs the user's go-ahead for that step, and the
     support lead answers the questions still open (below). Read on 2026-10-30
     at 13:00 UTC, two of 5.2's prerequisites hold, and two more were written at
     the user's go-ahead at 14:10–14:11 (above and below); the rest do not:
-    - **done:** all six services run 5.1 (and Stage 6, `83f1889`);
+    - **done:** all six services run 5.1, and since 12:03:38 UTC on 2026-10-30
+      release #446 (`83f1889`, #443 and #444), which carries it;
     - **done:** the classifier is in `apply`, switched by the user at 18:37 UTC
       on 2026-10-29 (4.2's Apply);
     - **done on 2026-10-30:** route groups on the categories, as Q5 decided —
@@ -749,12 +753,18 @@ Every production write needs the user's go-ahead for that step, and the
       `merchant_support` → Merchant Care, and `courier_jobs` none — written at
       14:10:40 UTC as `updateCategory` writes them, the groups key-share locked
       first. With every channel on `default_group` they route nothing; what
-      they change today is that a ticket whose category routes elsewhere is
-      offered **Hand to <group>** (`handToTarget`): at the write, three open
-      unassigned tickets in Support, two `sales` (Hand to Inbound Sales Team)
-      and one `customer_support` (Hand to Customer Care). Neither group has
-      anybody accepting, so a hand-over there leaves the ticket in that
-      group's queue. The way back is clearing the three on `/admin/categories`;
+      they change today is **Hand to <group>** (`handToTarget`), offered to an
+      agent holding `ticket.assign` on any open or pending ticket, assigned or
+      not and in any group, whose category's route group is not its group —
+      unless it is held, on the customer bot, on a coexistence number, or on a
+      number whose active owner answers for it. Only three tickets carried a
+      category at all when it was written, and all three qualify, read with
+      that predicate at 14:47 UTC: open and unassigned in Support, two `sales`
+      (Hand to Inbound Sales Team) and one `customer_support` (Hand to
+      Customer Care). Neither group has anybody accepting, so a hand-over there
+      leaves the ticket in that group's queue. Every ticket Jev files from now
+      on in Support is offered it too. The way back is clearing the three on
+      `/admin/categories`;
     - **done on 2026-10-30:** 0.2's SLA reorder (above);
     - **not yet:** staffing. Customer Care has three members and Merchant Care
       two, none accepting and none with any input in the last seven days;

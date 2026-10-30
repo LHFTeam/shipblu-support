@@ -22,7 +22,8 @@ preDeploy finding no migration and replaying the nine `db/sql` files; then the
 four crons, live by 12:02:00, and the worker at 12:03:38. The checks read
 clean: `/api/health` reports `83f1889`; no service logged a warning or an error
 from 11:56 to 12:19, and web served no 5xx; the 91 jobs created after 11:56 had
-all completed, none overdue, with the same two dead; and the first runs on the
+all completed, none overdue, and the only dead jobs were the two from before the
+deploy (2026-09-21 and 2026-10-29); and the first runs on the
 new code were ok (`sla_sweep`, `presence_sweep` and `assign_sweep` at 12:05,
 12:11 and 12:15; `run_time_automations` at 12:02 and 12:16, one rule over 555
 tickets, nothing changed). Its way back is `69a22b6` on each service, in any
@@ -1309,14 +1310,18 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
   agent-role user in no group carries a `No group` badge on `/admin/agents`,
   unless they own a WhatsApp number, whose tickets reach them whatever their
   groups; on 2026-10-29 that was all five of them, and Customer Care, Merchant
-  Care and Inbound Sales Team had nobody.
+  Care and Inbound Sales Team had nobody. By 13:00 UTC on 2026-10-30 Customer
+  Care had three members and Merchant Care two, none of them taking tickets,
+  and Inbound Sales Team still none (the plan's Next, item 10).
 - ~~**Assignment is configured but off.**~~ **Switched on for `Support` on
   2026-09-02**, round robin; 161 conversations now carry an assignee. **The
   roster is still 3 of 11 agents**, though, which is the thing to fix next here —
   eight of the people who now have accounts are in no group, and auto-assignment
   only ever considers members of the ticket's group. `Customer Care` and
-  `Merchant Care` still have empty rosters and no channel points at them, so they
-  route nothing until somebody decides what belongs in them.
+  `Merchant Care` had empty rosters and no channel pointing at them when this
+  was written (2026-09); on 2026-10-30 they had three and two members, none
+  accepting, and both coexistence numbers default to Merchant Care (the plan's
+  Next, item 10).
 
   Two things were in the way and are worth knowing about, because both made the
   feature look broken rather than unconfigured:
@@ -1763,15 +1768,17 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
   nothing yet: every channel reads `default_group` (read 07:59 UTC on
   2026-10-29), and a ticket is held, or
   a `settle_routing` job queued, only on a channel an admin has moved to a
-  category mode _while the classifier is in `apply`_ — so nothing happens
-  until both. The classifier has been in `apply` since 18:37 UTC on
-  2026-10-29, and every channel is still on `default_group` (read 13:00 UTC on
-  2026-10-30). Since 14:10 UTC on 2026-10-30 three categories have route
-  groups (the plan's Q5: sales to Inbound Sales Team, customer support to
-  Customer Care, merchant support to Merchant Care), so `Hand to <group>` is
-  offered on an open ticket whose category routes somewhere other than its
-  group — three tickets in Support at the write, to groups with nobody
-  accepting. Four
+  category mode _while the classifier is in `apply`_. The classifier has been
+  in `apply` since 18:37 UTC on 2026-10-29, so what is left is an admin moving
+  a channel to a category mode: every channel is still on `default_group`
+  (read 13:00 UTC on 2026-10-30). Since 14:10 UTC on 2026-10-30 three
+  categories have route groups (the plan's Q5: sales to Inbound Sales Team,
+  customer support to Customer Care, merchant support to Merchant Care), so
+  `Hand to <group>` is offered on any open or pending ticket whose category's
+  route group is not its group, unless it is held, on the bot, on a
+  coexistence number or on an owned number whose owner answers for it
+  (`handToTarget`) — three tickets at the write, all in Support, the only
+  three carrying a category, to groups with nobody accepting. Four
   things changed on every ticket at the deploy:
   - **Assignment** locks the ticket (`FOR NO KEY UPDATE`) before the group,
     re-reads there its assignee, group and hold and whether the ticket is still
@@ -1809,7 +1816,8 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
   crons — `shipblu-sla-sweep` and `shipblu-time-automations` both assign (§2) —
   so every service ran it before any channel could leave `default_group`. Turning it on is the plan's Stage 5.2,
   channel by channel through `category_shadow`, and it needs what 5.2 lists: the
-  plan's 0.2 SLA reorder, 0.6's staffing (the roster paragraph above), route
+  plan's 0.2 SLA reorder, 0.6's staffing (the plan's Next, item 10, has the
+  roster as read on 2026-10-30; the roster paragraph above is older), route
   groups on the categories, and the classifier in `apply`. The reorder and the
   route groups were written at the user's go-ahead on 2026-10-30, and the
   classifier has been in `apply` since the day before; staffing, the channel
