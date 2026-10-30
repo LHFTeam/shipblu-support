@@ -275,3 +275,49 @@ function hiddenValue(html: string): string {
 function inputFor(html: string, value: string): string {
   return html.match(new RegExp(`<input[^>]*value="${value}"[^>]*>`))?.[0] ?? '';
 }
+
+describe('a condition on a deactivated field', () => {
+  const withRetiredField: FieldOption[] = [
+    ...fields,
+    {
+      value: 'custom.reason',
+      label: 'Reason (deactivated)',
+      kind: 'choice',
+      choices: [
+        { value: 'late', label: 'Late' },
+        { value: 'damaged', label: 'Damaged' },
+      ],
+      deactivated: true,
+    },
+  ];
+
+  // Before deactivated fields were handed over, this row was drawn as Priority:
+  // its operators, its choices, and an edit shaped for it.
+  it("is drawn as the field it names, with that field's own choices", () => {
+    const html = renderToStaticMarkup(
+      createElement(ConditionBuilder, {
+        name: 'conditions',
+        fields: withRetiredField,
+        initial: { field: 'custom.reason', op: 'eq', value: 'damaged' },
+      }),
+    );
+
+    expect(html).toContain(
+      '<option value="custom.reason" selected="">Reason (deactivated)</option>',
+    );
+    expect(html).toContain('<option value="damaged" selected="">Damaged</option>');
+    expect(html).not.toContain('<option value="urgent"');
+  });
+
+  it('is not offered to a row that does not already name it', () => {
+    const html = renderToStaticMarkup(
+      createElement(ConditionBuilder, {
+        name: 'conditions',
+        fields: withRetiredField,
+        initial: { field: 'priority', op: 'eq', value: 'high' },
+      }),
+    );
+
+    expect(html).not.toContain('custom.reason');
+  });
+});

@@ -29,7 +29,7 @@ import {
   countTemplatesByAccount,
   listAccountsForAdmin,
   listActiveAgents,
-  listActiveTicketFields,
+  listConditionFields,
   listAnyHoliday,
   listAutomationRules,
   listCannedResponses,
@@ -340,15 +340,20 @@ describe('the channel and condition-builder lists', () => {
     );
   });
 
-  // A rule condition naming a retired field would always read it as absent.
-  it('offers the condition builder only the active fields, by position', async () => {
+  // A deactivated field is still named by the rules written before it was
+  // switched off, so the builder needs it, and needs to know it is off.
+  it('hands the condition builder every field, by position, saying which are off', async () => {
     await db.insert(ticketFields).values([
       { key: 'warehouse', label: 'Warehouse', type: 'text', position: 2 },
       { key: 'reason', label: 'Reason', type: 'text', position: 1, isActive: false },
       { key: 'area', label: 'Area', type: 'text', position: 1 },
     ]);
 
-    expect((await listActiveTicketFields()).map((row) => row.key)).toEqual(['area', 'warehouse']);
+    expect((await listConditionFields()).map((row) => [row.key, row.isActive] as const)).toEqual([
+      ['area', true],
+      ['reason', false],
+      ['warehouse', true],
+    ]);
   });
 });
 

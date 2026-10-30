@@ -419,13 +419,18 @@ export function countTemplatesByAccount() {
     .groupBy(whatsappTemplates.whatsappAccountId);
 }
 
-/** Active custom fields, by position: the ones a rule condition can name. */
-export function listActiveTicketFields() {
+/**
+ * Every custom field, by position, for the condition builder: the active ones
+ * to offer, and the deactivated ones because a rule written before a field was
+ * switched off still names it, and still reads the answers tickets hold. Left
+ * out, that row was drawn as whichever field came first in the list — its
+ * operators and its choices — and an edit to it was shaped for that field.
+ */
+export function listConditionFields() {
   return db
     .select()
     .from(ticketFields)
-    .where(eq(ticketFields.isActive, true))
-    .orderBy(asc(ticketFields.position));
+    .orderBy(asc(ticketFields.position), asc(ticketFields.label));
 }
 
 /** Form slugs and names for the condition builder's "submitted through form". */

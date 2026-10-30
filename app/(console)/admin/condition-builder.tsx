@@ -36,6 +36,12 @@ export type FieldOption = {
    * so a condition holding one says who, not "Unknown: <uuid>" (`shownChoices`).
    */
   retired?: { value: string; label: string }[];
+  /**
+   * A field no longer offered for a new condition — a deactivated custom field —
+   * drawn only on a row that already names it, so that row says which field it
+   * reads rather than borrowing the first field's operators and choices.
+   */
+  deactivated?: boolean;
 };
 
 const OPERATORS: {
@@ -136,11 +142,13 @@ export function ConditionBuilder({
                   onChange={(event) => update(index, rowForField(row, event.target.value, fields))}
                   className="w-48!"
                 >
-                  {fields.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
+                  {fields
+                    .filter((option) => !option.deactivated || option.value === row.field)
+                    .map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
                 </Select>
 
                 <Select

@@ -17,7 +17,7 @@ vi.mock('next/navigation', () => ({
 }));
 vi.mock('./actions', () => ({ saveField: vi.fn(), deleteField: vi.fn() }));
 
-const { FieldEditor } = await import('./forms');
+const { FieldEditor, NewField } = await import('./forms');
 
 beforeAll(() => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -48,11 +48,11 @@ const FIELD = {
 };
 
 /** Opens the editor for `field` and answers its form and its Active box. */
-function openEditor(field: typeof FIELD) {
+function openEditor(field: typeof FIELD, placedOn: string[] = []) {
   const container = document.createElement('div');
   document.body.append(container);
   root = createRoot(container);
-  act(() => root!.render(createElement(FieldEditor, { field })));
+  act(() => root!.render(createElement(FieldEditor, { field, placedOn })));
   act(() => container.querySelector('button')!.click());
 
   const form = container.querySelector('form')!;
@@ -81,5 +81,30 @@ describe('the field editor', () => {
 
     expect(box?.checked).toBe(false);
     expect(new FormData(form).get('isActive')).toBe('off');
+  });
+
+  // Each of them stops asking the question the moment the field is off, and
+  // nothing else on the screen would say so.
+  it('names the forms that place the field beside the box', () => {
+    const { form } = openEditor(FIELD, ['Damaged parcel', 'COD question']);
+
+    expect(form.textContent).toContain(
+      'Placed on Damaged parcel, COD question: switching it off stops those forms asking it.',
+    );
+  });
+});
+
+describe('the new field form', () => {
+  // A field created switched off would appear nowhere, with nothing to say why.
+  it('offers no Active box, so a new field is created active', () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    root = createRoot(container);
+    act(() => root!.render(createElement(NewField)));
+    act(() => container.querySelector('button')!.click());
+
+    const form = container.querySelector('form');
+    expect(form).not.toBeNull();
+    expect(form!.querySelector('input[name="isActive"]')).toBeNull();
   });
 });
