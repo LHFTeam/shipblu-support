@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { Badge, Field, Input, Select, Toggle } from '@/components/ui';
 import { sentenceCase } from '@/lib/format';
-import { CATEGORY_WORDS } from '@/lib/portal/status-words';
+import { categoryWord } from '@/lib/portal/status-words';
 import { STATUS_CATEGORIES } from '@/lib/tickets/vocabulary';
 import { DangerAction, Disclosure, EditorForm } from '../forms-shared';
 import { deleteStatus, saveStatus } from './actions';
@@ -24,12 +24,12 @@ type Status = {
  * The English words a customer reads for a status with no label to show, taken
  * from the list the portal draws them from, so the hint cannot name a word the
  * portal does not. A word that is not its category's name says which category
- * it stands for: the select above says "Pending", and the portal says "In
- * progress".
+ * it stands for, by the name the Category select gives it: the select says
+ * "Pending", and the portal says "In progress".
  */
 const CATEGORY_WORD_LIST = (() => {
   const words = STATUS_CATEGORIES.map((category) => {
-    const word = CATEGORY_WORDS[category].en;
+    const word = categoryWord(category, 'en');
     return word.toLowerCase() === category ? word : `${word} (for ${sentenceCase(category)})`;
   });
   return `${words.slice(0, -1).join(', ')} and ${words.at(-1)}`;
@@ -51,11 +51,14 @@ function Fields({ status }: { status?: Status }) {
           label="Category"
           hint="Reporting and SLA group every status by this, so pick the one that matches what the ticket really is."
         >
+          {/* From the vocabulary, with the name the hint below calls each
+              category by, so the two cannot name different ones. */}
           <Select name="category" defaultValue={status?.category ?? 'open'}>
-            <option value="open">Open</option>
-            <option value="pending">Pending</option>
-            <option value="resolved">Resolved</option>
-            <option value="closed">Closed</option>
+            {STATUS_CATEGORIES.map((category) => (
+              <option key={category} value={category}>
+                {sentenceCase(category)}
+              </option>
+            ))}
           </Select>
         </Field>
         <Field label="Position" hint="Lower sorts first in the console.">

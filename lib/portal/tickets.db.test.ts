@@ -14,7 +14,8 @@ import {
   ticketStatuses,
 } from '@/db/schema';
 import { withCleanDatabase } from '@/lib/testing/db';
-import { appendReply, createTicket, getTicket } from './tickets';
+import { shownLabel } from './status-words';
+import { appendReply, createTicket, getTicket, listTickets } from './tickets';
 
 /**
  * What the portal's two ingest paths write today, quirks included, so the
@@ -395,6 +396,42 @@ describe('getTicket', () => {
       { from: 'customer', body: 'Where is it?' },
       { from: 'agent', body: 'Today.' },
     ]);
+  });
+});
+
+describe('the status label a customer sees', () => {
+  // The statuses page says what a customer sees through `shownLabel`, and the
+  // portal decides it in SQL; each would otherwise be free to drift from the
+  // other, and the page would describe a portal that no longer exists. The
+  // empty label cannot be saved through the console, which stores blank as
+  // null, but a row edited by hand can hold one, and the two must still agree.
+  it('is decided by the portal’s SQL exactly as `shownLabel` decides it', async () => {
+    const contactId = await customer();
+    const cases = [true, false].flatMap((visibleToCustomer) =>
+      [null, 'Being checked', ''].map((customerLabel) => ({ visibleToCustomer, customerLabel })),
+    );
+
+    const expected = new Map<number, string | null>();
+    for (const [index, shape] of cases.entries()) {
+      const [status] = await db
+        .insert(ticketStatuses)
+        .values({ name: `Case ${index}`, category: 'pending', position: 10 + index, ...shape })
+        .returning({ id: ticketStatuses.id });
+      const [ticket] = await db
+        .insert(conversations)
+        .values({ channel: 'email', statusId: status!.id, requesterContactId: contactId })
+        .returning({ number: conversations.number });
+      expected.set(ticket!.number, shownLabel(shape));
+    }
+
+    const listed = await listTickets(contactId);
+    expect(new Map(listed.map((row) => [row.number, row.statusLabel]))).toEqual(expected);
+
+    for (const [number, label] of expected) {
+      expect((await getTicket(contactId, number))?.statusLabel).toBe(label);
+    }
+    // Every shape the rule can answer is covered, not six copies of one.
+    expect(new Set(expected.values())).toEqual(new Set([null, 'Being checked', '']));
   });
 });
 

@@ -1,11 +1,12 @@
-import { Badge } from '@/components/ui';
+import { Badge, type BadgeTone } from '@/components/ui';
 import { type Locale } from '@/lib/kb/locale';
-import { CATEGORY_WORDS } from '@/lib/portal/status-words';
+import { categoryWord } from '@/lib/portal/status-words';
+import type { StatusCategory } from '@/lib/tickets/vocabulary';
 
 /**
  * A ticket's state as the customer should see it.
  *
- * Falls back to a plain word for the status *category* (`CATEGORY_WORDS`)
+ * Falls back to a plain word for the status *category* (`categoryWord`)
  * whenever the configured status has no customer label or is marked
  * internal-only — `listTickets` and `getTicket` send null for both, and never
  * the status's name. Agents name statuses for themselves — "Waiting on ops",
@@ -13,12 +14,14 @@ import { CATEGORY_WORDS } from '@/lib/portal/status-words';
  * operations that no customer asked for. The category still tells them the one
  * thing they want to know: is anyone still on this.
  */
-const TONES = {
+// Keyed by the vocabulary, as the words are, so a category added there fails
+// to compile here until it has a tone, rather than drawing without one.
+const TONES: Record<StatusCategory, BadgeTone> = {
   open: 'open',
   pending: 'pending',
   resolved: 'resolved',
   closed: 'closed',
-} as const;
+};
 
 export function StatusBadge({
   locale,
@@ -27,7 +30,7 @@ export function StatusBadge({
 }: {
   locale: Locale;
   label: string | null;
-  category: keyof typeof TONES;
+  category: StatusCategory;
 }) {
-  return <Badge tone={TONES[category]}>{label ?? CATEGORY_WORDS[category][locale]}</Badge>;
+  return <Badge tone={TONES[category]}>{label ?? categoryWord(category, locale)}</Badge>;
 }
