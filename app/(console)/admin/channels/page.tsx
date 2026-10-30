@@ -11,6 +11,7 @@ import {
 } from '@/lib/admin/settings';
 import { requirePermission } from '@/lib/auth/guard';
 import { can } from '@/lib/auth/permissions';
+import { canOpen } from '../sections';
 import { allLimited } from '@/lib/concurrency';
 import { env } from '@/lib/env';
 import { formatDateTime } from '@/lib/format';
@@ -63,7 +64,7 @@ export default async function ChannelsPage() {
   const canConnect = can(agent, 'admin.channels.connect');
 
   // One clock for every sentence on the page, so the badge on a row and the
-  // card above it cannot disagree about whether a window has closed — nor the
+  // progress card further down cannot disagree about whether a window has closed — nor the
   // routing panel about who is accepting tickets.
   const now = new Date();
 
@@ -216,91 +217,9 @@ export default async function ChannelsPage() {
     <div className="flex flex-col gap-8">
       <section>
         <PageHeader
-          title="WhatsApp business accounts"
-          description="One connection per WABA. Numbers, templates and media are all scoped to a business account by Meta, so which one a number belongs to decides which credential it sends with and which templates an agent may pick."
-          actions={
-            <>
-              {canConnect ? <ConnectBusinessAppNumber {...connectProps} mode="connect" /> : null}
-              <NewWhatsAppAccount suggestedWabaId={unadopted} isFirst={accountList.length === 0} />
-            </>
-          }
-        />
-
-        {/* Said once, here, because it is the limit people hit second: adding a
-            WABA from a different Meta app looks like it works — the row saves —
-            and then every inbound message from it is answered 403 by the webhook
-            and stored unverified, which reads as a forgery rather than as a
-            second app secret nobody can configure. */}
-        <p className="mb-3 text-xs text-(--color-text-secondary)">
-          Every account here must sit under the same Meta app: one app secret verifies every inbound
-          webhook and one verify token answers every handshake. A number connected through
-          Meta&rsquo;s window is under this app by construction — the window is opened as it, and
-          the credential it mints is stored sealed. An account added by its ids sends with the
-          shared token, or with a variable it names — and a Business-app number connected in
-          WhatsApp Manager or Business Suite instead is added from its account&rsquo;s row, where it
-          sends with that account&rsquo;s credential or variable, never the shared token.
-        </p>
-
-        <div className="flex flex-col gap-2">
-          {accounts.map((account) => (
-            <Card key={account.id}>
-              <WhatsAppAccountEditor
-                account={account}
-                connect={connectProps}
-                canConnect={canConnect}
-                now={now}
-              />
-            </Card>
-          ))}
-        </div>
-
-        {accounts.length === 0 ? (
-          <p className="rounded-xl border border-dashed border-(--color-border-default) px-4 py-6 text-center text-xs text-(--color-text-secondary)">
-            {unadopted
-              ? `None connected yet. WHATSAPP_WABA_ID names ${unadopted}; connect it above, or leave it and the hourly template sync will.`
-              : 'None connected. WhatsApp numbers fall back to META_PAGE_ACCESS_TOKEN and WHATSAPP_WABA_ID from the environment.'}
-          </p>
-        ) : null}
-      </section>
-
-      <section>
-        <PageHeader
           title="Channels"
-          description="Addresses and routing only. Credentials live in the environment — or, for a number connected through Meta, sealed in the database under a key the database never sees — so a dump never contains a usable token."
+          description="Addresses and routing only. Credentials live in the environment — or, for a number connected through Meta, sealed in the database under a key the database never sees — so a dump never contains a usable token. WhatsApp business accounts, and connecting a number through Meta, are below the list."
         />
-
-        <OnboardingPolling intervalMs={pollMs} version={progressVersionNow} />
-        {progressCards.length > 0 ? (
-          <div className="mb-4 flex flex-col gap-2">
-            {progressCards.map((onboarding) => {
-              const channel = onboarding.channelId
-                ? channelList.find((row) => row.id === onboarding.channelId)
-                : undefined;
-              const account = accountList.find((row) => row.wabaId === onboarding.wabaId);
-              return (
-                <OnboardingProgress
-                  key={onboarding.id}
-                  onboarding={onboarding}
-                  coexistence={channel ? parseCoexistence(channel.config) : null}
-                  channelName={channel?.name ?? null}
-                  accountName={account?.name ?? null}
-                  credential={account ? (credentials.get(account.id) ?? null) : null}
-                  tokenEnvVar={account?.tokenEnvVar ?? null}
-                  canConnect={canConnect}
-                  // A failed attempt's new sign-in: an attempt that reached a
-                  // channel suggests that channel's group, as the row's own
-                  // reconnect does.
-                  connect={
-                    channel
-                      ? { ...connectProps, suggestedGroupId: channel.defaultGroupId }
-                      : connectProps
-                  }
-                  now={now}
-                />
-              );
-            })}
-          </div>
-        ) : null}
 
         <ul className="mb-4 divide-y divide-(--color-border-subtle) rounded-xl border border-(--color-border-subtle) bg-(--color-background-surface) text-sm">
           {channelList.length === 0 ? (
@@ -468,12 +387,15 @@ export default async function ChannelsPage() {
       <section>
         <div className="mb-3 flex items-center gap-3">
           <h2 className="text-lg font-semibold">Groups</h2>
-          <Link
-            href="/admin/groups"
-            className="ms-auto text-sm text-(--color-text-link) hover:text-(--color-text-link-hover) hover:underline"
-          >
-            Manage groups
-          </Link>
+          {/* Groups is `admin.groups`' page, which this one's key does not open. */}
+          {canOpen(agent, '/admin/groups') ? (
+            <Link
+              href="/admin/groups"
+              className="ms-auto text-sm text-(--color-text-link) hover:text-(--color-text-link-hover) hover:underline"
+            >
+              Manage groups
+            </Link>
+          ) : null}
         </div>
         <ul className="divide-y divide-(--color-border-subtle) rounded-xl border border-(--color-border-subtle) bg-(--color-background-surface) text-sm">
           {groupList.length === 0 ? (
@@ -485,6 +407,93 @@ export default async function ChannelsPage() {
             </li>
           ))}
         </ul>
+      </section>
+
+      <section>
+        <PageHeader
+          title="WhatsApp business accounts"
+          description="One connection per WABA. Numbers, templates and media are all scoped to a business account by Meta, so which one a number belongs to decides which credential it sends with and which templates an agent may pick."
+          actions={
+            <>
+              {canConnect ? <ConnectBusinessAppNumber {...connectProps} mode="connect" /> : null}
+              <NewWhatsAppAccount suggestedWabaId={unadopted} isFirst={accountList.length === 0} />
+            </>
+          }
+        />
+
+        {/* Said once, here, because it is the limit people hit second: adding a
+            WABA from a different Meta app looks like it works — the row saves —
+            and then every inbound message from it is answered 403 by the webhook
+            and stored unverified, which reads as a forgery rather than as a
+            second app secret nobody can configure. */}
+        <p className="mb-3 text-xs text-(--color-text-secondary)">
+          Every account here must sit under the same Meta app: one app secret verifies every inbound
+          webhook and one verify token answers every handshake. A number connected through
+          Meta&rsquo;s window is under this app by construction — the window is opened as it, and
+          the credential it mints is stored sealed. An account added by its ids sends with the
+          shared token, or with a variable it names — and a Business-app number connected in
+          WhatsApp Manager or Business Suite instead is added from its account&rsquo;s row, where it
+          sends with that account&rsquo;s credential or variable, never the shared token.
+        </p>
+
+        <div className="flex flex-col gap-2">
+          {accounts.map((account) => (
+            <Card key={account.id}>
+              <WhatsAppAccountEditor
+                account={account}
+                connect={connectProps}
+                canConnect={canConnect}
+                now={now}
+              />
+            </Card>
+          ))}
+        </div>
+
+        {accounts.length === 0 ? (
+          <p className="rounded-xl border border-dashed border-(--color-border-default) px-4 py-6 text-center text-xs text-(--color-text-secondary)">
+            {unadopted
+              ? `None connected yet. WHATSAPP_WABA_ID names ${unadopted}; connect it above, or leave it and the hourly template sync will.`
+              : 'None connected. WhatsApp numbers fall back to META_PAGE_ACCESS_TOKEN and WHATSAPP_WABA_ID from the environment.'}
+          </p>
+        ) : null}
+
+        {/* Below the account rows and the button that starts a connection,
+            because the sentences around them say so: the connect card's "the
+            progress below", a progress card's "the account's row above". It
+            used to open the Channels list, which put a connection's progress
+            above the button that began it once the list came first. */}
+        <OnboardingPolling intervalMs={pollMs} version={progressVersionNow} />
+        {progressCards.length > 0 ? (
+          <div className="mt-4 flex flex-col gap-2">
+            {progressCards.map((onboarding) => {
+              const channel = onboarding.channelId
+                ? channelList.find((row) => row.id === onboarding.channelId)
+                : undefined;
+              const account = accountList.find((row) => row.wabaId === onboarding.wabaId);
+              return (
+                <OnboardingProgress
+                  key={onboarding.id}
+                  onboarding={onboarding}
+                  coexistence={channel ? parseCoexistence(channel.config) : null}
+                  channelName={channel?.name ?? null}
+                  accountName={account?.name ?? null}
+                  credential={account ? (credentials.get(account.id) ?? null) : null}
+                  tokenEnvVar={account?.tokenEnvVar ?? null}
+                  canConnect={canConnect}
+                  // A failed attempt's new sign-in: an attempt that reached a
+                  // channel suggests that channel's group, as the row's own
+                  // reconnect does.
+                  connect={
+                    channel
+                      ? { ...connectProps, suggestedGroupId: channel.defaultGroupId }
+                      : connectProps
+                  }
+                  now={now}
+                />
+              );
+            })}
+          </div>
+        ) : null}
       </section>
     </div>
   );

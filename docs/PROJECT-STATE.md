@@ -149,9 +149,10 @@ Every phase of the original plan except migration importers is **built and
 merged**: email ticketing, WhatsApp, Facebook and Instagram, the agent console,
 the bilingual knowledge base with its Freshdesk importer, the chat widget, SLA
 policies, automation rules, CSAT and reporting, and a live dashboard for admins
-at `/admin/dashboard`. Since then the **customer portal** has landed too — the
-bare domain now opens the Arabic help centre, and one Sign in button
-authenticates customers and agents alike.
+at `/reports/live` (`/admin/dashboard` until the settings reorganisation of
+2026-10-29, §5.5, and redirected there since). Since then the **customer
+portal** has landed too — the bare domain now opens the Arabic help centre, and
+one Sign in button authenticates customers and agents alike.
 
 Since then, **shipments**: tickets link to parcels and to shipping accounts,
 tracking numbers and SBIDs are detected in message text as it arrives, the inbox
@@ -688,7 +689,7 @@ CI job exercises that distinction against Postgres with transaction-rolled-back
 fixtures.
 
 And now **WhatsApp coexistence**: a number that lives on the WhatsApp Business
-_app_ on a phone can be connected from Admin → Channels in one button, through
+_app_ on a phone can be connected from Settings → Channels in one button, through
 Meta's Embedded Signup — the business token Meta mints is stored sealed, the
 number subscribes itself, six months of the phone's chats and its address book
 are copied in as resolved tickets and contacts, and a reply typed on the phone
@@ -1399,9 +1400,10 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
 
      What to expect: her inbox gains Unassigned and All open; the number's
      tickets stop collecting `assignment_skipped`, since an owned ticket skips
-     the rota; and her Breached on `/admin/dashboard` opens at the open tickets
-     that had already breached, because a figure is filed under whoever is
-     accountable on the day it is measured. If the team wants her figures to
+     the rota; and her Breached on the live dashboard (`/reports/live`, or
+     `/admin/dashboard` on a release from before the settings reorganisation,
+     §5.5) opens at the open tickets that had already breached, because a
+     figure is filed under whoever is accountable on the day it is measured. If the team wants her figures to
      start from the handover, triage those first. To undo it, hand the number
      to "Nobody — team number": accountability clears, and the tickets stay with
      her until somebody reassigns them.
@@ -2426,6 +2428,39 @@ message bodies — the same reasoning as the deliberately tiny `pg_notify` paylo
 
 ### 5.5 Loose ends
 
+- **The settings area was reorganised on 2026-10-29, and three questions were
+  left open.** Every settings page is an entry in
+  `app/(console)/admin/sections.ts`, grouped Team, Channels, Tickets,
+  Workflows, Agent tools, AI and Data, and the sidebar, the phone strip and a
+  searchable settings home are drawn from it (AGENTS.md, Layout). The rail item
+  is called Settings and shows for anybody holding a key one of its pages
+  requires, where the whole area used to need `admin.agents`, and a new
+  `/admin/ai` lists every place Jev is asked a question and links to the page
+  each switch is on. The live dashboard moved to `/reports/live`, keeping
+  `admin.agents`, and `/admin/dashboard` redirects there (temporary,
+  `next.config.ts`). Production serves the old area until the release carrying
+  this is deployed; `/api/health` names the commit. The handbook's three
+  sentences naming the area (`lib/kb/handbook.ts`) reach production's knowledge
+  base by an edit in the console or by
+  `npm run job -- seed_console_handbook overwrite=true` after that deploy —
+  `dryRun=true` first, since it replaces every handbook article whose text
+  differs, console edits included, cutting a version of each. Left open:
+  - **There is no Roles & permissions page, and nothing in the console writes
+    `agents.permissions`.** So the per-page keys still move together by role —
+    admins and account admins hold every one, nobody below holds any — and the
+    any-key gate and the per-page sidebar change what somebody sees only once
+    an override is written by hand in SQL. That is also the only way to do
+    what the handbook tells an admin to do for a single permission
+    (`lib/kb/handbook.ts`, the `people` and `signing-in` articles).
+  - **Whether supervisors see the live dashboard** (`report.view` rather than
+    `admin.agents`) is a decision nobody has taken. It kept its key with the
+    move; its page says why widening it is a choice about who watches the
+    worker's health and every agent's load by name.
+  - **`/admin/channels` still holds every channel on one page**: WhatsApp
+    business accounts, every channel type, the chat widget and the
+    routing-readiness panel. Splitting it per channel, as Zendesk, Freshdesk
+    and Intercom do, is the next step if the page keeps growing.
+
 - **"WhatsApp Support" has no reply path at all, by decision.** The console
   stopped replying on every WhatsApp number (LHFTeam/shipblu-support#357,
   `consoleReplyReason`), and that number is plain Cloud API, not linked to the
@@ -2495,7 +2530,8 @@ message bodies — the same reasoning as the deliberately tiny `pg_notify` paylo
     Graph refusal itself.
 
   The lesson worth keeping is the shape: nothing surfaces a dead job to a human.
-  The count is on `/api/health` and on `/admin`, and both are places you have to
+  The count is on `/api/health` and on the live dashboard (`/reports/live`,
+  `/admin/dashboard` when this was written), and both are places you have to
   already suspect something to look at. The eleven days of an unmoving `dead: 56`
   is the demonstration — it took somebody querying the table for any of it to be
   read, and three of the four populations are still unactioned.

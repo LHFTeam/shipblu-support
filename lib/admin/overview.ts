@@ -50,6 +50,11 @@ export async function configurationCounts() {
             where a.skill_id = s.id
           )
       )`,
+      // Whether an orphaned skill costs anything yet: skills only narrow a
+      // group's automatic assignment, so with no group both assigning and
+      // matching on skills, nothing waits for the skill timeout and a skill
+      // nobody holds is a gap to fill, not a ticket stuck.
+      skillGroups: sql<number>`(select count(*)::int from ${groups} where match_skills and assignment_strategy <> 'manual')`,
     })
     .from(sql`(select 1) as one`);
 

@@ -135,7 +135,7 @@ export default async function CannedSuggestionsReportPage({
           title="No suggestions in this window"
           hint={
             !settings.enabled
-              ? 'Suggestions are switched off. An admin turns them on under Admin › Canned responses.'
+              ? 'Suggestions are switched off. An admin turns them on under Settings → Canned responses.'
               : `A suggestion is asked for when an agent clicks into an empty reply box on a ticket the customer has written on. ${
                   seen.lastAgentReplyAt
                     ? `An agent last sent a reply on ${formatDateTime(seen.lastAgentReplyAt, zone)}.`

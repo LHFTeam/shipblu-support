@@ -10,7 +10,7 @@ import {
   type totals,
 } from '@/lib/reports/queries';
 
-import { RangeNav } from '../../reports/range-nav';
+import { RangeNav } from '../range-nav';
 import { Section, TableView, slaTone, type Point } from './section';
 
 export const RANGES = [7, 30, 90] as const;
@@ -29,9 +29,9 @@ export function History({
   window: Awaited<ReturnType<typeof totals>>;
   firstResponseSla: number | null;
   /**
-   * The dashboard is `admin.agents`, the reports `report.view`, and the two
-   * part company on an account given one by hand without the other: no link
-   * to a page that answers 404.
+   * The dashboard is `admin.agents` although it sits under Reports, the
+   * reports are `report.view`, and the two part company on an account given
+   * one by hand without the other: no link to a page that answers 404.
    */
   canViewReports: boolean;
 }) {
@@ -40,7 +40,7 @@ export function History({
       title={`The last ${days} days`}
       hint="From the nightly rollup, which is what Reports reads. Complete days only — today is above."
       actions={
-        <RangeNav ranges={RANGES} current={days} href={(each) => `/admin/dashboard?days=${each}`} />
+        <RangeNav ranges={RANGES} current={days} href={(each) => `/reports/live?days=${each}`} />
       }
     >
       {!hasHistory ? (

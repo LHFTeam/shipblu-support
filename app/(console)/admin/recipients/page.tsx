@@ -1,5 +1,7 @@
+import Link from 'next/link';
 import { Card, EmptyState, PageHeader } from '@/components/ui';
 import { requirePermission } from '@/lib/auth/guard';
+import { canOpen } from '../sections';
 import { listInternalRecipients } from '@/lib/side-conversations/queries';
 import { NewRecipient, RecipientEditor } from './forms';
 
@@ -22,22 +24,46 @@ export const dynamic = 'force-dynamic';
  * the company instead of the outside.
  */
 export default async function RecipientsPage() {
-  await requirePermission('admin.channels');
+  const agent = await requirePermission('admin.channels');
 
   const recipients = await listInternalRecipients();
+
+  // The other half of the directory is a link only for somebody its page
+  // admits: `admin.locations` is a key of its own, and a link that lands on
+  // "forbidden" is worse than the name alone, which still says where hubs are.
+  const locations = canOpen(agent, '/admin/locations') ? (
+    <Link
+      href="/admin/locations"
+      className="font-medium text-(--color-text-link) hover:text-(--color-text-link-hover) hover:underline"
+    >
+      Locations
+    </Link>
+  ) : (
+    'Locations'
+  );
 
   return (
     <>
       <PageHeader
         title="Internal recipients"
-        description="Teams and vendors an agent can start a side conversation with — Finance, a courier partner. Hubs and warehouses come from Locations instead, and the picker shows both. A side conversation hangs off a ticket, and the customer never sees it."
+        description="Teams and vendors an agent can start a side conversation with — Finance, a courier partner. A side conversation hangs off a ticket, and the customer never sees it."
         actions={<NewRecipient />}
       />
+
+      <p className="mb-4 max-w-2xl text-sm text-(--color-text-secondary)">
+        Hubs and warehouses come from {locations} instead, and the picker shows both.
+      </p>
 
       {recipients.length === 0 ? (
         <EmptyState
           title="No teams or vendors yet"
-          hint="Only needed for parties that are not places — Finance, a courier partner. If you are looking for the hubs, they live under Locations and already appear in the picker."
+          hint="Only needed for parties that are not places — Finance, a courier partner."
+          action={
+            <p className="max-w-sm text-xs text-(--color-text-secondary)">
+              If you are looking for the hubs, they live under {locations} and already appear in the
+              picker.
+            </p>
+          }
         />
       ) : (
         <div className="flex flex-col gap-4">

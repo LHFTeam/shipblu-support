@@ -38,7 +38,7 @@ export function ShipmentBackfillForm({
   return (
     <div className="flex flex-col gap-6">
       <section>
-        <h1 className="mb-1 text-lg font-semibold">Shipment link backfill</h1>
+        <h2 className="mb-1 text-lg font-semibold">Shipment link backfill</h2>
         <p className="text-sm text-(--color-text-secondary)">
           Reads every message already in the archive and links the tracking numbers and SBIDs it
           finds. New messages are linked as they arrive; this is for everything that came before —
@@ -52,9 +52,9 @@ export function ShipmentBackfillForm({
 
       {counts ? (
         <section className="rounded-xl border border-(--color-border-subtle) bg-(--color-background-surface) p-(--density-card-pad)">
-          <h2 className="mb-2 text-xs font-semibold text-(--color-text-secondary)">
+          <h3 className="mb-2 text-xs font-semibold text-(--color-text-secondary)">
             Linked so far
-          </h2>
+          </h3>
           <dl className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
             {[
               ['Shipments', counts.shipments],

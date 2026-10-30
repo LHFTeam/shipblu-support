@@ -127,7 +127,7 @@ export async function copyRequestRefusal(onboardingId: string): Promise<string |
   if (row.status === 'exchanged') {
     return (
       "This number's connection has not finished yet, and asking the phone for the copy is " +
-      'one of its steps — the progress card above shows where it is. Once it has finished, ' +
+      'one of its steps — the progress card below shows where it is. Once it has finished, ' +
       'the copy buttons on this row are for whatever that step could not get.'
     );
   }

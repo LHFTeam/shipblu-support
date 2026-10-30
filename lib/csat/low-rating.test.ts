@@ -113,6 +113,16 @@ describe('lowRatingEmail', () => {
     expect(email.textBody).toContain('https://console.shipblu.test/inbox/1234');
   });
 
+  it('says where to turn the emails off, in the words the console’s sidebar uses', () => {
+    // Read in a mail client, away from the console, so this path is the only
+    // way back to the switch: the area is called Settings and the page
+    // Satisfaction surveys, and a recipient looking for "Admin" finds neither.
+    const email = lowRatingEmail(alert);
+    for (const body of [email.textBody, email.htmlBody]) {
+      expect(body).toContain('under Settings → Satisfaction surveys.');
+    }
+  });
+
   it('says no agent is on record rather than printing null, or guessing why', () => {
     const email = lowRatingEmail({ ...alert, agentName: null, groupName: null });
     // Null is nobody assigned, or an agent since removed: the row cannot say

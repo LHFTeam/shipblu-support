@@ -211,7 +211,7 @@ describe('viewHref', () => {
 describe('activeViewId', () => {
   const sections = inboxViews(everything);
 
-  it('reads the bare inbox, and the admin dashboard’s explicit link to it, as All open', () => {
+  it('reads the bare inbox, and the live dashboard’s explicit link to it, as All open', () => {
     expect(activeViewId(sections, parseFilters({}), everything)).toBe('all');
     expect(activeViewId(sections, parseFilters({ status: 'unresolved' }), everything)).toBe('all');
   });

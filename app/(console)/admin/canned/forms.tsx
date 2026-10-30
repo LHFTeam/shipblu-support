@@ -169,6 +169,10 @@ export function SuggestionSwitchForm({
         <Link href="/reports/canned-suggestions" className="underline">
           How the suggestions are doing
         </Link>
+        {' · '}
+        <Link href="/admin/ai" className="underline">
+          All AI features
+        </Link>
       </p>
 
       <ErrorText>{state.error}</ErrorText>

@@ -26,6 +26,7 @@ import {
   type Row as ReportRow,
 } from '@/lib/reports/queries';
 import { RECOMPUTE_DAYS, rangeIn, reportingContext } from '@/lib/reports/rollup';
+import { LIVE_DASHBOARD_PERMISSION } from './live/access';
 import { RangeNav } from './range-nav';
 import { Quiet } from './report-parts';
 
@@ -105,6 +106,19 @@ export default async function ReportsPage({
         actions={
           <>
             <RangeNav ranges={RANGES} current={days} href={(each) => `/reports?days=${each}`} />
+            {/*
+              `admin.agents`, the key the live dashboard kept when it moved here
+              from Settings — its page says why it did not take `report.view`
+              with the move — so it is offered only to whoever holds both.
+            */}
+            {can(agent, LIVE_DASHBOARD_PERMISSION) ? (
+              <Link
+                href={`/reports/live?days=${days}`}
+                className={buttonClass({ variant: 'secondary', size: 'sm' })}
+              >
+                Live dashboard
+              </Link>
+            ) : null}
             {can(agent, 'report.agents') ? (
               <Link
                 href={`/reports/agents?days=${days}`}
