@@ -5714,7 +5714,7 @@ seeded (118 files, 1,584 tests); and every CI check.
      table's header has one.
 
    One was left, decided, and is now built (below):
-   - _Built on 2026-10-29._ **A second web chat row cannot be edited.** `ChannelEditor` returns
+   - _Built on 2026-10-29, live on 2026-10-30 in `83f1889`._ **A second web chat row cannot be edited.** `ChannelEditor` returns
      null for every `webchat` row, and the Chat widget card configures only
      the oldest active one. So a second row's saved mode, name, default group
      and active switch are unreachable. The readiness panel says truly that
@@ -5738,7 +5738,14 @@ seeded (118 files, 1,584 tests); and every CI check.
      says why it stays on, and the action refuses it under a transaction
      lock. The card also refuses to save folders onto a row the widget no
      longer uses, and a name another channel holds is now a sentence
-     rather than a throw.
+     rather than a throw. A second review moved both forms' saves under
+     the switch's lock, so each saves only the row it is for
+     (`webchatEditRefusal`), and shows each switch's answer only while the
+     rows are as the switch left them. Squashed into `dev` as #443
+     (`3c15981`), released in #446 (`83f1889`), and live on all six
+     services by 12:03:38 UTC on 2026-10-30, web first, its checks clean
+     (`docs/PROJECT-STATE.md`, top). Production has one web chat row, so
+     nothing changes there until somebody adds a second.
 
 2. In production after the deploy, the verification rows added for Stage 6 to
    the table below. Read clean on 2026-10-29, and on the first nightly's rows on

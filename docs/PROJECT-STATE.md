@@ -5,24 +5,29 @@ it is designed; **this file is about the state of the work** — what is live,
 what is merely built, what is left, and the mistakes that have already cost us
 time. Read both. Do not re-derive settled decisions.
 
-Last updated: 2026-10-30, against `main` at `69a22b6`. The figures in §1 and §5
+Last updated: 2026-10-30, against `main` at `83f1889`. The figures in §1 and §5
 were last re-measured as a whole against production on 2026-09-20, and a
 paragraph re-read since gives its own date; where a number here disagrees with
 an older paragraph elsewhere in the file, the older one has not been re-checked.
 
-**Production runs `69a22b6`, deployed by hand on 2026-10-29, all six services
-by 17:47:16 UTC:** release #442, which carries #440: every automated reply on a
-customer bot ticket is refused, by `automatedReplyBlocked` and again by
-`writeAutomatedReply`, the door every automated sender writes through, before
-anything is written. Until then an `on_update` rule's `send_reply` on a bot
-ticket was written and queued as an email; no rule in production sends a
-reply, so none was. Code only: web first, its preDeploy finding no migration
-and replaying the nine `db/sql` files, then the worker and the four crons. The
-checks read clean: no service logged a warning or an error from 17:42 to 18:10,
-web served no 5xx, the 54 jobs created after 17:42 had all completed by 17:48,
-and the first runs on the new code were ok (`sla_sweep`, `presence_sweep` and
-`assign_sweep` at 17:51; `run_time_automations` at 18:01, one rule over 553
-tickets, nothing changed). Its way back is `b63f96e` on each service.
+**Production runs `83f1889`, deployed by hand on 2026-10-30, all six services
+by 12:03:38 UTC:** release #446, which carries #443 and #444. #443 makes every
+web chat row editable and gives each an active switch that never leaves the
+widget without a row (`plans/ticket-category-routing.md`, Stage 6); production
+has one web chat row, so nothing changes there until somebody adds a second.
+#444 is the settings reorganisation (§5.5): one map of the settings area, a
+settings home, `/admin/ai`, and the live dashboard at `/reports/live`, to which
+`/admin/dashboard` now redirects. Code only: web first, live at 11:59:30, its
+preDeploy finding no migration and replaying the nine `db/sql` files; then the
+four crons, live by 12:02:00, and the worker at 12:03:38. The checks read
+clean: `/api/health` reports `83f1889`; no service logged a warning or an error
+from 11:56 to 12:19, and web served no 5xx; the 91 jobs created after 11:56 had
+all completed, none overdue, with the same two dead; and the first runs on the
+new code were ok (`sla_sweep`, `presence_sweep` and `assign_sweep` at 12:05,
+12:11 and 12:15; `run_time_automations` at 12:02 and 12:16, one rule over 555
+tickets, nothing changed). Its way back is `69a22b6` on each service, in any
+order. #444's handbook wording reaches the knowledge base only by a console edit
+or `seed_console_handbook overwrite=true` (§5.5).
 
 **The Instagram Login token expired at 15:25:38 UTC on 2026-10-29.** Every
 `graph.instagram.com` call has failed since with code 190, "Session has
@@ -49,7 +54,21 @@ Jev's first filed ticket opened at 00:31 on the 30th in Cairo, the night the
 clocks went back. The second nightly, at 00:00 UTC on 2026-10-31, writes the
 first.
 
-The release before it, `b63f96e`, was deployed by hand from another session on
+The release before it, `69a22b6`, was deployed by hand on 2026-10-29, all six
+services by 17:47:16 UTC: release #442, which carries #440: every automated reply on a
+customer bot ticket is refused, by `automatedReplyBlocked` and again by
+`writeAutomatedReply`, the door every automated sender writes through, before
+anything is written. Until then an `on_update` rule's `send_reply` on a bot
+ticket was written and queued as an email; no rule in production sends a
+reply, so none was. Code only: web first, its preDeploy finding no migration
+and replaying the nine `db/sql` files, then the worker and the four crons. The
+checks read clean: no service logged a warning or an error from 17:42 to 18:10,
+web served no 5xx, the 54 jobs created after 17:42 had all completed by 17:48,
+and the first runs on the new code were ok (`sla_sweep`, `presence_sweep` and
+`assign_sweep` at 17:51; `run_time_automations` at 18:01, one rule over 553
+tickets, nothing changed). Its way back is `b63f96e` on each service.
+
+The release before that, `b63f96e`, was deployed by hand from another session on
 2026-10-29, all six services by 17:00:33 UTC: release #441, which carries #436,
 group membership in the console (a members picker, invite groups and an agent
 editor). Its web preDeploy applied `0056` (`agent_changes`, the record of a
@@ -2438,8 +2457,8 @@ message bodies — the same reasoning as the deliberately tiny `pg_notify` paylo
   `/admin/ai` lists every place Jev is asked a question and links to the page
   each switch is on. The live dashboard moved to `/reports/live`, keeping
   `admin.agents`, and `/admin/dashboard` redirects there (temporary,
-  `next.config.ts`). Production serves the old area until the release carrying
-  this is deployed; `/api/health` names the commit. The handbook's three
+  `next.config.ts`). Production has served it since `83f1889`, deployed on
+  2026-10-30. The handbook's three
   sentences naming the area (`lib/kb/handbook.ts`) reach production's knowledge
   base by an edit in the console or by
   `npm run job -- seed_console_handbook overwrite=true` after that deploy —
