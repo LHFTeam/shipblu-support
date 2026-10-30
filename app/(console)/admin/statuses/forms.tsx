@@ -43,7 +43,16 @@ function Fields({ status }: { status?: Status }) {
         <Field label="Position" hint="Lower sorts first in the console.">
           <Input name="position" type="number" defaultValue={status?.position ?? 0} />
         </Field>
-        <Field label="Label for customers" hint="Leave blank to reuse the name.">
+        {/* This used to say a blank label reuses the name, which is the
+            opposite of what happens: `listTickets` never sends a customer the
+            status's name, and a blank label falls back to the category's word
+            in `portal/status.tsx` — so the built-in Pending reads "In
+            progress", not "Pending". */}
+        <Field
+          label="Label for customers"
+          hint="Blank, customers see a plain word for the category in their own language instead: Open, In progress, Resolved or Closed. The name above is never shown to them."
+          explain="What the customer portal shows beside their ticket while it is in this status. It is one text for Arabic and English readers alike, so write it in the language your customers read. It is shown only while “Show this status to customers” is on."
+        >
           <Input name="customerLabel" defaultValue={status?.customerLabel ?? ''} />
         </Field>
       </div>
@@ -57,6 +66,7 @@ function Fields({ status }: { status?: Status }) {
       <Toggle
         name="visibleToCustomer"
         label="Show this status to customers"
+        hint="Off, customers see the category word in place of the label above. Their ticket stays in the portal either way."
         defaultChecked={status?.visibleToCustomer ?? true}
       />
       <Toggle

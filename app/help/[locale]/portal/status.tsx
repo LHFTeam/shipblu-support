@@ -5,10 +5,12 @@ import { type Locale } from '@/lib/kb/locale';
  * A ticket's state as the customer should see it.
  *
  * Falls back to a plain word for the status *category* whenever the configured
- * status is marked internal-only. Agents name statuses for themselves — "Waiting
- * on ops", "Escalated tier 2" — and those names are a running commentary on our
- * own operations that no customer asked for. The category still tells them the
- * one thing they want to know: is anyone still on this.
+ * status has no customer label or is marked internal-only — `listTickets` sends
+ * null for both, and never the status's name. Agents name statuses for
+ * themselves — "Waiting on ops", "Escalated tier 2" — and those names are a
+ * running commentary on our own operations that no customer asked for. The
+ * category still tells them the one thing they want to know: is anyone still on
+ * this.
  */
 const CATEGORY_LABELS: Record<string, Record<Locale, string>> = {
   open: { en: 'Open', ar: 'مفتوحة' },

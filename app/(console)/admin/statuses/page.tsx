@@ -53,8 +53,8 @@ export default async function StatusesPage() {
             <InfoTip label="Customer sees">
               What the portal shows. Agents name statuses for themselves — &ldquo;Waiting on
               ops&rdquo;, &ldquo;Escalated tier 2&rdquo; — so a customer is never shown the
-              status&rsquo;s own name: they see the label set here, and with none set, a plain word
-              for the category in their own language.
+              status&rsquo;s own name: they see the label set here, and with none set or the status
+              not shown to customers, a plain word for the category in their own language.
             </InfoTip>
           </>,
           '',
@@ -75,11 +75,17 @@ export default async function StatusesPage() {
                 <span className="text-xs">running</span>
               )}
             </Cell>
+            {/* Decided as `listTickets` decides it: the label only while the
+                status is shown and has one, and the category word otherwise.
+                "hidden" stood here for a status not shown, which read as the
+                customer seeing no status at all. */}
             <Cell className="text-xs text-(--color-text-secondary)">
-              {status.visibleToCustomer ? (
-                (status.customerLabel ?? <span className="italic">the category word</span>)
+              {status.visibleToCustomer && status.customerLabel ? (
+                status.customerLabel
               ) : (
-                <span>hidden</span>
+                <span className="italic">
+                  the category word{status.customerLabel ? ' (label hidden)' : ''}
+                </span>
               )}
             </Cell>
             <Cell className="text-end">
