@@ -5,7 +5,7 @@ it is designed; **this file is about the state of the work** — what is live,
 what is merely built, what is left, and the mistakes that have already cost us
 time. Read both. Do not re-derive settled decisions.
 
-Last updated: 2026-10-29, against `main` at `69a22b6`. The figures in §1 and §5
+Last updated: 2026-10-30, against `main` at `69a22b6`. The figures in §1 and §5
 were last re-measured as a whole against production on 2026-09-20, and a
 paragraph re-read since gives its own date; where a number here disagrees with
 an older paragraph elsewhere in the file, the older one has not been re-checked.
@@ -33,6 +33,22 @@ so none has failed yet; the next goes out over `instagram_login`
 (`lib/meta/connection.ts`) and fails the same way until
 `INSTAGRAM_ACCESS_TOKEN` is renewed in Meta's app dashboard and set on Render.
 
+**Jev's category classifier has been in `apply` since 18:37:23 UTC on
+2026-10-29**, switched by the user on `/admin/categories` after twelve and a
+half hours of Shadow and before any ticket carried a person's label, so 4.2's
+criteria were not read. By 09:40 UTC on 2026-10-30 it had filed two tickets,
+both Facebook and both `sales`; nothing routes, since every channel is still on
+`default_group`. The backlog (`backfill_category_ai mode=apply`) waits for the
+user's go-ahead. The plan's status section has the reads (4.2's Apply).
+
+**The first Stage 6 nightly read clean** (00:00 UTC on 2026-10-30): it rebuilt
+2026-10-27 to 2026-10-29 with categories, so `rollup_days` stamps
+`categories_computed_at` on those three days, and `metrics_daily` holds no
+duplicate slice and no row naming two dimensions. It wrote no category row:
+Jev's first filed ticket opened at 00:31 on the 30th in Cairo, the night the
+clocks went back. The second nightly, at 00:00 UTC on 2026-10-31, writes the
+first.
+
 The release before it, `b63f96e`, was deployed by hand from another session on
 2026-10-29, all six services by 17:00:33 UTC: release #441, which carries #436,
 group membership in the console (a members picker, invite groups and an agent
@@ -56,9 +72,10 @@ key `metrics_daily_slice_key`; `db/sql/003` adds the one-dimension CHECK),
 `0053_routing_undecided_index`, `0054_rollup_days_categories`
 (`rollup_days.categories_computed_at`, which tells a day rolled up with
 categories from one rolled up before them) and `0055_routing_started_index`;
-then the worker and the four crons. Production carries no category yet, so
-the overview's By category reads all No category, and names every day before
-the first Stage 6 nightly as rolled up before categories were filed. The
+then the worker and the four crons. Production carried no category then, so
+the overview's By category read all No category, and named every day before
+the first Stage 6 nightly (2026-10-27) as rolled up before categories were
+filed. The
 `rollup_metrics from=2026-08-18` rebuild waits for 4.2's
 `backfill_category_ai mode=apply`. The rollback deletes the `metrics_daily`
 rows that carry a category before the old web returns (the plan's Stage 6
@@ -74,9 +91,10 @@ changed on every ticket at once (§5.1): the out-of-hours acknowledgement's
 guards, assignment's locks, what it re-reads under them and its checked update,
 a console group move running the rules before it assigns, and the transactions
 an agent's reply and a rule's assignment or move are now written in, with the
-rule's own timeline line inside them. The category classifier has been in
-Shadow since 06:00:32 UTC that day, after its archive record run: it records an
-answer for each message it judges and writes nothing to a ticket (§5.1).
+rule's own timeline line inside them. The category classifier was put in
+Shadow at 06:00:32 UTC that day, after its archive record run, recording an
+answer for each message it judged and writing nothing to a ticket (§5.1), until
+the user switched it to `apply` at 18:37:23.
 
 The release before those, `ad6a062`, was deployed by hand on 2026-10-27, all six
 services by 21:49:08 UTC: release #431, which carries Stage 4.2 (#429), that is
@@ -1676,8 +1694,8 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
   second, by analogy with the 647 shadow subcategorisation calls (p50 234 ms) — and
   every row stores both.
 
-- **Jev's category classifier is deployed, and in Shadow since 06:00:32 UTC on
-  2026-10-29** (Stages 4.1 and 4.2 of `plans/ticket-category-routing.md`;
+- **Jev's category classifier is deployed, and in `apply` since 18:37:23 UTC on
+  2026-10-29**, after Shadow from 06:00:32 that day (Stages 4.1 and 4.2 of `plans/ticket-category-routing.md`;
   `lib/category-ai/`): live since 2026-10-27 12:07 UTC, with `0050`'s two
   tables in production. #429, which fixed the locked ticket read that lost a
   ticket whose status changed under the lock and sent the job to `dead`, has
@@ -1686,18 +1704,21 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
   509 tickets, 923 of them asked (590 `unknown`, 257 `would_apply`, 76
   `below_threshold`) and none failed. In Shadow each message the live job
   decides about is a `live` row and nothing is written to a ticket; the first
-  came at 07:55:50 UTC, `unknown`. Each step after Shadow waits for the user's
-  go-ahead. In Shadow and under `apply` alike it asks which team's work each
+  came at 07:55:50 UTC, `unknown`. The user switched it to `apply` at
+  18:37:23 that day, after 17 `live` rows and before any ticket carried a
+  person's label; under `apply` it filed its first ticket at 22:31:33. In
+  Shadow and under `apply` alike it asks which team's work each
   of the first five customer messages on an unanswered ticket is; only under
   `apply` does it file the ticket — never over a category a person, a rule, a
   form's default or an agent opening the ticket chose. Its
   switch is on `/admin/categories` (`category_ai_settings`, no row = off), not
   the key, which production already holds; the threshold beside it defaults to
-  0.6 and every answer records the one it met. Taking it to `apply` is 4.2's
-  sequence, whose first step is under way: `backfill_category_ai mode=record runLabel=<label>`
-  over the archive, then `shadow` for at least two weeks while a supervisor labels a sample from
+  0.6 and every answer records the one it met. 4.2's sequence was
+  `backfill_category_ai mode=record runLabel=<label>` over the archive, then
+  `shadow` for at least two weeks while a supervisor labels a sample from
   `/reports/category-ai` (4.2), whose figures decide the switch, then
-  `apply`, then `backfill_category_ai mode=record` again under a fresh label with
+  `apply`. With `apply` taken early, what is left of it waits for the user's
+  go-ahead: `backfill_category_ai mode=record` again under a fresh label with
   no `since=` — it has no status scope, and must reach the oldest open ticket —
   and `mode=apply fromLabel=<that label>`, which files only the open ones. Read
   apply's dry run first: it names every rule filing would wake. The record
