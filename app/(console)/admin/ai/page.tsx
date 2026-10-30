@@ -3,8 +3,7 @@ import type { ReactNode } from 'react';
 import { Badge, Card, PageHeader, type BadgeTone } from '@/components/ui';
 import { InfoTip } from '@/components/tooltip';
 import { requireAnyPermission } from '@/lib/auth/guard';
-import { can, type Permission } from '@/lib/auth/permissions';
-import type { SessionAgent } from '@/lib/auth/session';
+import { can } from '@/lib/auth/permissions';
 import { loadSuggestionSettings } from '@/lib/canned-suggest/settings';
 import type { CategoryAiMode } from '@/lib/category-ai/modes';
 import { readCategoryAiSettings } from '@/lib/category-ai/settings';
@@ -18,6 +17,7 @@ import {
 import { runLabels, type RunLabelRow } from '@/lib/subcategorise-ai/report';
 import { CONVERSATION_CHANNELS, hiddenChannels } from '@/lib/tickets/channel-policy';
 import { typesafeConfigured, typesafeModel } from '@/lib/typesafe/client';
+import { canOpen } from '../sections';
 
 export const dynamic = 'force-dynamic';
 
@@ -55,7 +55,7 @@ export default async function AiFeaturesPage() {
   ]);
 
   const keyConfigured = typesafeConfigured();
-  const mayReadRuns = can(agent, 'admin.subcategories');
+  const mayReadRuns = canOpen(agent, '/admin/subcategories/shadow');
 
   // `hiddenChannels` is the shadow page's own gate: every run row joins a
   // ticket, so without it the latest run's count includes bot transcripts an
@@ -151,7 +151,7 @@ export default async function AiFeaturesPage() {
             {
               term: 'Switched',
               detail: (
-                <PageLink agent={agent} permission="admin.categories" href="/admin/categories">
+                <PageLink open={canOpen(agent, '/admin/categories')} href="/admin/categories">
                   Categories
                 </PageLink>
               ),
@@ -159,7 +159,7 @@ export default async function AiFeaturesPage() {
             {
               term: 'Graded',
               detail: (
-                <PageLink agent={agent} permission="report.view" href="/reports/category-ai">
+                <PageLink open={can(agent, 'report.view')} href="/reports/category-ai">
                   Category classifier report
                 </PageLink>
               ),
@@ -193,7 +193,7 @@ export default async function AiFeaturesPage() {
             {
               term: 'Switched',
               detail: (
-                <PageLink agent={agent} permission="admin.fields" href="/admin/canned">
+                <PageLink open={canOpen(agent, '/admin/canned')} href="/admin/canned">
                   Canned responses
                 </PageLink>
               ),
@@ -201,7 +201,7 @@ export default async function AiFeaturesPage() {
             {
               term: 'Graded',
               detail: (
-                <PageLink agent={agent} permission="report.view" href="/reports/canned-suggestions">
+                <PageLink open={can(agent, 'report.view')} href="/reports/canned-suggestions">
                   Reply suggestions report
                 </PageLink>
               ),
@@ -311,8 +311,7 @@ export default async function AiFeaturesPage() {
               term: 'Graded',
               detail: (
                 <PageLink
-                  agent={agent}
-                  permission="admin.subcategories"
+                  open={canOpen(agent, '/admin/subcategories/shadow')}
                   href="/admin/subcategories/shadow"
                 >
                   Shadow runs
@@ -378,19 +377,11 @@ function Feature({
  * would refuse, its name and the reason there is no link: a link the page then
  * answers with "forbidden" is a dead end, and leaving the name out would hide
  * where the thing is from somebody who can ask the person who holds the key.
+ * Whether it opens is the caller's to say — `canOpen` for a settings page,
+ * which reads the key off the map, and the report's own key for a report.
  */
-function PageLink({
-  agent,
-  permission,
-  href,
-  children,
-}: {
-  agent: SessionAgent;
-  permission: Permission;
-  href: string;
-  children: string;
-}) {
-  if (can(agent, permission)) {
+function PageLink({ open, href, children }: { open: boolean; href: string; children: string }) {
+  if (open) {
     return (
       <Link href={href} className="font-medium text-(--color-text-link) underline">
         {children}

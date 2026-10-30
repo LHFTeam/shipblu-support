@@ -346,6 +346,19 @@ export function can(
   return ROLE_PERMISSIONS[agent.role].includes(permission);
 }
 
+/**
+ * Any one of several keys — for whatever several of them each open, like the
+ * settings area. One copy, because the area's gate, the rail item that leads to
+ * it and the sidebar's filter must give one answer, and three spellings of
+ * "some key matches" were three places for that to drift.
+ */
+export function canAny(
+  agent: { role: AgentRole; permissions: Record<string, boolean> },
+  permissions: readonly Permission[],
+): boolean {
+  return permissions.some((permission) => can(agent, permission));
+}
+
 export function permissionsForRole(role: AgentRole): Permission[] {
   return [...ROLE_PERMISSIONS[role]];
 }

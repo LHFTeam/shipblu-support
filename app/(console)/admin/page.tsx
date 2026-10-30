@@ -3,6 +3,7 @@ import { Notice, PageHeader } from '@/components/ui';
 import { configurationCounts } from '@/lib/admin/overview';
 import { requireAnyPermission } from '@/lib/auth/guard';
 import { can } from '@/lib/auth/permissions';
+import { LIVE_DASHBOARD_PERMISSION } from '../reports/live/access';
 import { SettingsDirectory, type DirectoryStatus } from './directory';
 import { SETTINGS_PERMISSIONS, sectionsFor } from './sections';
 
@@ -55,7 +56,7 @@ export default async function AdminIndexPage() {
           // configured, but it is still `admin.agents`' and not `report.view`'s:
           // without this, somebody given the one key without the other would be
           // let in by the page and shown no way to it.
-          can(agent, 'admin.agents') ? (
+          can(agent, LIVE_DASHBOARD_PERMISSION) ? (
             <Link
               href="/reports/live"
               className="text-sm text-(--color-text-link) hover:text-(--color-text-link-hover) hover:underline"

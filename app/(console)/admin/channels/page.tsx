@@ -11,6 +11,7 @@ import {
 } from '@/lib/admin/settings';
 import { requirePermission } from '@/lib/auth/guard';
 import { can } from '@/lib/auth/permissions';
+import { canOpen } from '../sections';
 import { allLimited } from '@/lib/concurrency';
 import { env } from '@/lib/env';
 import { formatDateTime } from '@/lib/format';
@@ -338,7 +339,7 @@ export default async function ChannelsPage() {
         <div className="mb-3 flex items-center gap-3">
           <h2 className="text-lg font-semibold">Groups</h2>
           {/* Groups is `admin.groups`' page, which this one's key does not open. */}
-          {can(agent, 'admin.groups') ? (
+          {canOpen(agent, '/admin/groups') ? (
             <Link
               href="/admin/groups"
               className="ms-auto text-sm text-(--color-text-link) hover:text-(--color-text-link-hover) hover:underline"

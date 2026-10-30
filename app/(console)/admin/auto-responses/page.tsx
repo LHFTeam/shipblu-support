@@ -7,7 +7,7 @@ import {
   listScheduleOptions,
 } from '@/lib/admin/settings';
 import { requirePermission } from '@/lib/auth/guard';
-import { can } from '@/lib/auth/permissions';
+import { canOpen } from '../sections';
 import { AutoResponseEditor, NewAutoResponse } from './forms';
 
 export const dynamic = 'force-dynamic';
@@ -30,7 +30,7 @@ export default async function AutoResponsesPage() {
   // Business hours is `admin.sla`'s. Since the settings area opens to any of
   // its keys, somebody may hold this page's without that one, and a link that
   // lands on "forbidden" is worse than the page's name alone.
-  const canEditHours = can(agent, 'admin.sla');
+  const canEditHours = canOpen(agent, '/admin/hours');
 
   const [rules, groupRows, schedules, anyHoliday] = await Promise.all([
     listAutoResponses(),

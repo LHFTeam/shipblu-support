@@ -1,4 +1,4 @@
-import { can, type Permission } from '@/lib/auth/permissions';
+import { canAny, type Permission } from '@/lib/auth/permissions';
 
 /**
  * The settings area's map: every page, which group it belongs to, and the key
@@ -421,13 +421,10 @@ export const ADMIN_SECTIONS: readonly AdminSection[] = [
   },
 ];
 
-function permitted(
-  agent: Parameters<typeof can>[0],
-  permission: Permission | readonly Permission[],
-): boolean {
-  return typeof permission === 'string'
-    ? can(agent, permission)
-    : permission.some((key) => can(agent, key));
+type Agent = Parameters<typeof canAny>[0];
+
+function permitted(agent: Agent, permission: Permission | readonly Permission[]): boolean {
+  return canAny(agent, typeof permission === 'string' ? [permission] : permission);
 }
 
 /**
@@ -451,37 +448,43 @@ export const SETTINGS_PERMISSIONS: readonly Permission[] = [
  * hides what a role cannot reach. The page still checks its own key; this only
  * keeps the nav from offering a door that answers "forbidden".
  */
-export function sectionsFor(agent: Parameters<typeof can>[0]): AdminSection[] {
-  return ADMIN_SECTIONS.map((section) => ({
-    ...section,
-    pages: section.pages
-      .filter((page) => permitted(agent, page.permission))
-      .map((page) => ({
-        ...page,
-        children: page.children?.filter((child) => permitted(agent, child.permission)),
-      })),
-  })).filter((section) => section.pages.length > 0);
+export function sectionsFor(
+  agent: Agent,
+  sections: readonly AdminSection[] = ADMIN_SECTIONS,
+): AdminSection[] {
+  return sections
+    .map((section) => ({
+      ...section,
+      pages: section.pages
+        .filter((page) => permitted(agent, page.permission))
+        .map((page) => ({
+          ...page,
+          children: page.children?.filter((child) => permitted(agent, child.permission)),
+        })),
+    }))
+    .filter((section) => section.pages.length > 0);
+}
+
+/** Whether this agent may enter the settings area at all: the layout's gate, and the rail's. */
+export function canOpenSettings(agent: Agent): boolean {
+  return canAny(agent, SETTINGS_PERMISSIONS);
 }
 
 /**
- * The one link that is "here": the longest whose path the current one is or
- * sits under, compared by whole segment. Prefix matching alone lit
- * Subcategories and Review queue together on the review page, and
- * `/admin/sla` must not light up for a page at `/admin/slack`.
+ * Whether this agent may open the settings page at `href`, read off the map.
+ *
+ * For a link from one settings page to another. Written as the target's own key
+ * at each link, a page that changed its key left every link to it answering
+ * "forbidden" to whoever the new key turned away, the dead end the map exists to
+ * remove — and nothing held those copies to the page, where the
+ * `admin-sections` rule holds the map. An href the map does not name is a page
+ * nobody may be sent to from here, so it answers no.
  */
-export function currentHref(
-  pathname: string,
-  sections: readonly {
-    links: readonly { href: string; children: readonly { href: string }[] }[];
-  }[],
-): string | null {
-  if (pathname === '/admin') return '/admin';
-  let best: string | null = null;
-  for (const section of sections) {
-    for (const link of section.links.flatMap((item) => [item, ...item.children])) {
-      const inside = pathname === link.href || pathname.startsWith(`${link.href}/`);
-      if (inside && (best === null || link.href.length > best.length)) best = link.href;
+export function canOpen(agent: Agent, href: string): boolean {
+  for (const section of ADMIN_SECTIONS) {
+    for (const link of section.pages.flatMap((page) => [page, ...(page.children ?? [])])) {
+      if (link.href === href) return permitted(agent, link.permission);
     }
   }
-  return best;
+  return false;
 }

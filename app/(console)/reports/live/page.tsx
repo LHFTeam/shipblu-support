@@ -13,6 +13,7 @@ import {
 } from '@/lib/reports/live';
 import { reportingContext } from '@/lib/reports/rollup';
 import { averageSeconds, daily, metPercentage, perDay, totals } from '@/lib/reports/queries';
+import { LIVE_DASHBOARD_PERMISSION } from './access';
 import { LiveTicker } from './live';
 import { AgentLoad } from './agents';
 import { CategoryLoad } from './categories';
@@ -62,7 +63,7 @@ export default async function DashboardPage({
 }: {
   searchParams: Promise<{ days?: string }>;
 }) {
-  const agent = await requirePermission('admin.agents');
+  const agent = await requirePermission(LIVE_DASHBOARD_PERMISSION);
 
   const { days: requested } = await searchParams;
   const days = RANGES.includes(Number(requested) as (typeof RANGES)[number])

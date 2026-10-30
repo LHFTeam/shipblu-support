@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { Fragment, useEffect, useRef } from 'react';
-import { currentHref } from './sections';
+import { currentHref } from './current-href';
 
 /**
  * The settings sidebar, drawn from `sections.ts` by the layout, which has

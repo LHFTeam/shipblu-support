@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { permissionsForRole } from '@/lib/auth/permissions';
-import { ADMIN_SECTIONS, currentHref, SETTINGS_PERMISSIONS, sectionsFor } from './sections';
+import { currentHref } from './current-href';
+import {
+  ADMIN_SECTIONS,
+  canOpen,
+  canOpenSettings,
+  SETTINGS_PERMISSIONS,
+  sectionsFor,
+  type AdminSection,
+} from './sections';
 
 /**
  * The settings map decides what the sidebar offers, so what is pinned here is
@@ -68,15 +76,63 @@ describe('the settings map', () => {
   });
 
   it('drops a child page its key does not open, and keeps the parent', () => {
-    const [tickets] = sectionsFor({
-      ...supervisor,
-      permissions: { 'admin.subcategories': true },
-    });
+    // Every child on the real map shares its parent's key, so a fixture: a
+    // parent either key opens, a child only one of them does, and an agent
+    // holding the other.
+    const map: AdminSection[] = [
+      {
+        title: 'Tickets',
+        description: '',
+        pages: [
+          {
+            href: '/admin/topics',
+            label: 'Topics',
+            permission: ['admin.fields', 'admin.sla'],
+            description: '',
+            keywords: [],
+            children: [
+              { href: '/admin/topics/review', label: 'Review', permission: 'admin.fields' },
+              { href: '/admin/topics/hours', label: 'Hours', permission: 'admin.sla' },
+            ],
+          },
+        ],
+      },
+    ];
 
-    expect(tickets?.pages[0]?.children?.map((child) => child.label)).toEqual([
-      'Review queue',
-      'Shadow runs',
+    const [tickets] = sectionsFor({ ...supervisor, permissions: { 'admin.sla': true } }, map);
+
+    expect(tickets?.pages.map((page) => page.href)).toEqual(['/admin/topics']);
+    expect(tickets?.pages[0]?.children?.map((child) => child.href)).toEqual([
+      '/admin/topics/hours',
     ]);
+  });
+});
+
+describe('canOpen', () => {
+  it('reads the key off the map, for a page or a child', () => {
+    const slaOnly = { ...supervisor, permissions: { 'admin.sla': true } };
+
+    expect(canOpen(slaOnly, '/admin/hours')).toBe(true);
+    expect(canOpen(slaOnly, '/admin/groups')).toBe(false);
+    expect(canOpen(admin, '/admin/subcategories/review')).toBe(true);
+    expect(canOpen(supervisor, '/admin/subcategories/review')).toBe(false);
+  });
+
+  it('opens an any-of page to whoever holds one of its keys', () => {
+    expect(canOpen({ ...supervisor, permissions: { 'admin.fields': true } }, '/admin/ai')).toBe(
+      true,
+    );
+  });
+
+  it('answers no for a page the map does not name', () => {
+    expect(canOpen(admin, '/admin/nowhere')).toBe(false);
+    expect(canOpen(admin, '/reports/live')).toBe(false);
+  });
+
+  it('lets in exactly whoever holds a key some page opens to', () => {
+    expect(canOpenSettings(admin)).toBe(true);
+    expect(canOpenSettings(supervisor)).toBe(false);
+    expect(canOpenSettings({ ...supervisor, permissions: { 'admin.csat': true } })).toBe(true);
   });
 });
 

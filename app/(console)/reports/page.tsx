@@ -26,6 +26,7 @@ import {
   type Row as ReportRow,
 } from '@/lib/reports/queries';
 import { RECOMPUTE_DAYS, rangeIn, reportingContext } from '@/lib/reports/rollup';
+import { LIVE_DASHBOARD_PERMISSION } from './live/access';
 import { RangeNav } from './range-nav';
 import { Quiet } from './report-parts';
 
@@ -110,7 +111,7 @@ export default async function ReportsPage({
               from Settings — its page says why it did not take `report.view`
               with the move — so it is offered only to whoever holds both.
             */}
-            {can(agent, 'admin.agents') ? (
+            {can(agent, LIVE_DASHBOARD_PERMISSION) ? (
               <Link
                 href={`/reports/live?days=${days}`}
                 className={buttonClass({ variant: 'secondary', size: 'sm' })}

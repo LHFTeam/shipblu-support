@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { Card, EmptyState, PageHeader } from '@/components/ui';
 import { requirePermission } from '@/lib/auth/guard';
-import { can } from '@/lib/auth/permissions';
+import { canOpen } from '../sections';
 import { listInternalRecipients } from '@/lib/side-conversations/queries';
 import { NewRecipient, RecipientEditor } from './forms';
 
@@ -31,7 +31,7 @@ export default async function RecipientsPage() {
   // The other half of the directory is a link only for somebody its page
   // admits: `admin.locations` is a key of its own, and a link that lands on
   // "forbidden" is worse than the name alone, which still says where hubs are.
-  const locations = can(agent, 'admin.locations') ? (
+  const locations = canOpen(agent, '/admin/locations') ? (
     <Link
       href="/admin/locations"
       className="font-medium text-(--color-text-link) hover:text-(--color-text-link-hover) hover:underline"

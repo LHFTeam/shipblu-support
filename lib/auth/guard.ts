@@ -2,7 +2,7 @@ import { redirect } from 'next/navigation';
 import { count } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { agents } from '@/db/schema';
-import { can, type Permission } from './permissions';
+import { can, canAny, type Permission } from './permissions';
 import { currentSessionHash, getSessionAgent, type SessionAgent } from './session';
 
 /**
@@ -45,7 +45,7 @@ export async function requireAnyPermission(
   permissions: readonly Permission[],
 ): Promise<SessionAgent> {
   const agent = await requireAgent();
-  if (!permissions.some((permission) => can(agent, permission))) {
+  if (!canAny(agent, permissions)) {
     redirect('/inbox?error=forbidden');
   }
   return agent;
