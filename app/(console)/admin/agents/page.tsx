@@ -80,74 +80,80 @@ export default async function AgentsPage() {
   });
 
   return (
-    <div className="flex flex-col gap-8">
-      <section>
-        <PageHeader title="Agents" />
-        <AgentList
-          agents={agentList.map((agent) => ({
-            ...agent,
-            groupIds: groupsOf.get(agent.id) ?? [],
-            ownsNumber: owners.has(agent.id),
-          }))}
-          groups={groupChoices}
-          canEditGroups={canEditGroups}
-          selfId={admin.id}
-        />
-      </section>
+    <>
+      <PageHeader
+        title="Agents"
+        description="Everyone on the team, deactivated agents included: their role, groups and ticket cap. Invite somebody new here, and set how long an agent can go without a key or a click before they stop getting new tickets or are signed out."
+      />
 
-      <section>
-        <h2 className="mb-1 text-lg font-semibold">Idle agents</h2>
-        {/* Above the invite form because it governs the list directly above it,
-            and because "why is she away when she is clearly here?" is asked
-            about that list rather than about anything else on this page. */}
-        <p className="mb-3 text-sm text-(--color-text-secondary)">
-          Measured from the last key or click in the console, not from being connected — a console
-          left open on an empty desk stays connected all day. Supervisors can set anyone&rsquo;s
-          availability by hand under Reports → Team availability.
-        </p>
-        <IdlePolicyForm
-          autoAwayAfterMins={policy.autoAwayAfterMins}
-          autoSignoutAfterMins={policy.autoSignoutAfterMins}
-        />
-      </section>
-
-      <section>
-        <h2 className="mb-3 text-lg font-semibold">Invite an agent</h2>
-        <InviteForm groups={canEditGroups ? groupChoices : []} />
-      </section>
-
-      {pendingInvites.length > 0 ? (
+      <div className="flex flex-col gap-8">
         <section>
-          <h2 className="mb-3 text-sm font-semibold text-(--color-text-secondary)">
-            Pending invites
-          </h2>
-          <ul className="divide-y divide-(--color-border-subtle) rounded-xl border border-(--color-border-subtle) bg-(--color-background-surface) text-sm">
-            {pendingInvites.map((invite) => (
-              <li key={invite.id} className="flex flex-col gap-2 px-4 py-3">
-                <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                  <span className="min-w-0 break-all">{invite.email}</span>
-                  <span className="text-(--color-text-tertiary)">{invite.role}</span>
-                  {/* What they join on accepting. A group deleted since is
-                      skipped then, so it is left out here too. */}
-                  {invite.groupIds.some((id) => groupName.has(id)) ? (
-                    <span className="text-(--color-text-tertiary)">
-                      {invite.groupIds.flatMap((id) => groupName.get(id) ?? []).join(' · ')}
-                    </span>
-                  ) : null}
-                  <span className="ms-auto text-xs text-(--color-text-tertiary)">
-                    expires {formatDateTime(invite.expiresAt)}
-                  </span>
-                </div>
-                <PendingInviteLink
-                  email={invite.email}
-                  inviteUrl={invite.inviteUrl}
-                  unavailableMessage={invite.unavailableMessage}
-                />
-              </li>
-            ))}
-          </ul>
+          <AgentList
+            agents={agentList.map((agent) => ({
+              ...agent,
+              groupIds: groupsOf.get(agent.id) ?? [],
+              ownsNumber: owners.has(agent.id),
+            }))}
+            groups={groupChoices}
+            canEditGroups={canEditGroups}
+            selfId={admin.id}
+          />
         </section>
-      ) : null}
-    </div>
+
+        <section>
+          <h2 className="mb-1 text-lg font-semibold">Idle agents</h2>
+          {/* Above the invite form because it governs the list directly above it,
+              and because "why is she away when she is clearly here?" is asked
+              about that list rather than about anything else on this page. */}
+          <p className="mb-3 text-sm text-(--color-text-secondary)">
+            Measured from the last key or click in the console, not from being connected — a console
+            left open on an empty desk stays connected all day. Supervisors can set anyone&rsquo;s
+            availability by hand under Reports → Team availability.
+          </p>
+          <IdlePolicyForm
+            autoAwayAfterMins={policy.autoAwayAfterMins}
+            autoSignoutAfterMins={policy.autoSignoutAfterMins}
+          />
+        </section>
+
+        <section>
+          <h2 className="mb-3 text-lg font-semibold">Invite an agent</h2>
+          <InviteForm groups={canEditGroups ? groupChoices : []} />
+        </section>
+
+        {pendingInvites.length > 0 ? (
+          <section>
+            <h2 className="mb-3 text-sm font-semibold text-(--color-text-secondary)">
+              Pending invites
+            </h2>
+            <ul className="divide-y divide-(--color-border-subtle) rounded-xl border border-(--color-border-subtle) bg-(--color-background-surface) text-sm">
+              {pendingInvites.map((invite) => (
+                <li key={invite.id} className="flex flex-col gap-2 px-4 py-3">
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                    <span className="min-w-0 break-all">{invite.email}</span>
+                    <span className="text-(--color-text-tertiary)">{invite.role}</span>
+                    {/* What they join on accepting. A group deleted since is
+                        skipped then, so it is left out here too. */}
+                    {invite.groupIds.some((id) => groupName.has(id)) ? (
+                      <span className="text-(--color-text-tertiary)">
+                        {invite.groupIds.flatMap((id) => groupName.get(id) ?? []).join(' · ')}
+                      </span>
+                    ) : null}
+                    <span className="ms-auto text-xs text-(--color-text-tertiary)">
+                      expires {formatDateTime(invite.expiresAt)}
+                    </span>
+                  </div>
+                  <PendingInviteLink
+                    email={invite.email}
+                    inviteUrl={invite.inviteUrl}
+                    unavailableMessage={invite.unavailableMessage}
+                  />
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
+      </div>
+    </>
   );
 }

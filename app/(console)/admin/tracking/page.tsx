@@ -54,8 +54,8 @@ export default async function TrackingWordingPage() {
   return (
     <>
       <PageHeader
-        title="Tracking wording"
-        description="What the Arabic tracking page calls each delivery status. Leave a box empty to use the wording ShipBlu Support ships with."
+        title="Tracking page wording"
+        description="What the help centre’s tracking page says to an Arabic reader for each delivery status, return status and courier reason. Leave a box empty to use the wording ShipBlu Support ships with."
       />
 
       {PHRASE_GROUPS.map((group) => (

@@ -45,6 +45,7 @@ import { checkClientDatesJoinTheirFields } from './rules/client-dates.mjs';
 import { checkLuxonNamesItsZone } from './rules/luxon-zone.mjs';
 import { checkNoDeadExports } from './rules/dead-exports.mjs';
 import { checkPagesDoNotImportTheDatabase } from './rules/page-db.mjs';
+import { checkAdminSections } from './rules/admin-sections.mjs';
 import { checkFormsDoNotReset } from './rules/form-reset.mjs';
 import { checkActionsRevalidate } from './rules/action-revalidates.mjs';
 import { checkButtonTypeIsFixed } from './rules/button-type.mjs';
@@ -87,6 +88,7 @@ export const RULES = [
   ['button-type', checkButtonTypeIsFixed],
   ['routing-result', checkRoutingResultKept],
   ['page-db', checkPagesDoNotImportTheDatabase],
+  ['admin-sections', checkAdminSections],
   ['light-only', checkLightOnly],
   ['framing', checkFramingHeaders],
   ['next-agent-rules', checkNextAgentRulesOff],

@@ -6,8 +6,8 @@ Facebook and Instagram, a web chat widget, and a bilingual knowledge base.
 **Status: phases 0–4 complete, plus the customer portal.** Foundation and job queue;
 email ticketing; WhatsApp; the agent console; the bilingual knowledge base, Freshdesk
 import and chat widget; SLA policies, automation rules, CSAT and reporting; Facebook and
-Instagram — direct messages and public comments — with admin screens for every piece of
-configuration and a live dashboard at `/admin/dashboard`; a signed-in customer portal
+Instagram — direct messages and public comments — with settings screens for every piece
+of configuration and a live dashboard at `/reports/live`; a signed-in customer portal
 behind one sign-in shared with the console; and automatic ticket assignment, which is the
 first thing in this system to put a ticket in front of a named person rather than a team.
 
@@ -123,7 +123,7 @@ Design decisions worth knowing before changing things:
   See `plans/whatsapp-number-ownership.md`.
 - **Presence has exactly one writer.** `agents.presence` is set by the lightweight SSE
   stream at `/api/presence` and nothing else — a stream is open or it is not. Inbox
-  invalidations are separate, so viewing Contacts or Admin still counts as present and
+  invalidations are separate, so viewing Contacts or Settings still counts as present and
   those pages never refresh on ticket traffic. Their rail badge still re-counts through a
   lightweight endpoint, so open work remains visible without re-rendering the page. The
   agent's own away switch is a separate column, `is_accepting_tickets`, because a manual
@@ -177,6 +177,16 @@ Design decisions worth knowing before changing things:
 - **Configuration is validated by the engines that consume it.** The admin screens parse
   conditions and actions with `lib/rules` and `lib/automations` before storing them, so a
   rule that saves is a rule that will run rather than one the sweep silently ignores.
+- **Settings are one map, grouped by what you want to happen.** Every settings page is an
+  entry in `app/(console)/admin/sections.ts`, under Team, Channels, Tickets, Workflows,
+  Agent tools, AI or Data — the groups Zendesk, Freshdesk and Intercom agree on, rather
+  than the tables the settings are stored in — and the sidebar, the phone strip, the
+  settings home and its search are all drawn from it, so a page cannot be in one and
+  missing from another (a child page is reached on the home through its parent's card). URLs stay flat (`/admin/<page>`): a group is a heading, not a
+  path segment, so regrouping a page breaks no bookmark and no revalidated path. The
+  area opens to whoever holds a key one of its pages requires and shows them only those
+  pages. The live dashboard is read rather than configured, so it is a report, at
+  `/reports/live`.
 - **One `conversations` table** with a `channel` discriminator backs both the
   Freshdesk-style ticket list and the Freshchat-style inbox. `contact_identities` maps
   one customer across email, WhatsApp and the social platforms.

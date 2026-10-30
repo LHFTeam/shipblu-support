@@ -445,7 +445,7 @@ export default async function CsatReportPage({
  * only where they are set.
  */
 function nothingSentSentence(settings: CsatSettings | null): string {
-  const where = 'under Admin → Satisfaction surveys';
+  const where = 'under Settings → Satisfaction surveys';
   if (!settings) return `Nothing has been sent. Whether surveys go out is set ${where}.`;
   if (!settings.enabled) {
     return `Surveys are switched off, so nothing has been sent. An admin turns them on ${where}.`;

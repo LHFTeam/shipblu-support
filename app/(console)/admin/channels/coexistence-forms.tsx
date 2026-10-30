@@ -1382,7 +1382,7 @@ export function RequestSyncAgain({
  * number the business connected to Cloud API in WhatsApp Manager or Business
  * Suite instead of through Meta's window here. Nothing opens at Meta; the
  * action queues the same job the window does, which connects the number with
- * this account's own credential, and the progress card above the accounts
+ * this account's own credential, and the progress card below the accounts
  * follows it like any other.
  *
  * The form is mounted only while it is open, so Cancel and a success both

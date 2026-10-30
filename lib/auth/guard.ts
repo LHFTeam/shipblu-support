@@ -2,7 +2,7 @@ import { redirect } from 'next/navigation';
 import { count } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { agents } from '@/db/schema';
-import { can, type Permission } from './permissions';
+import { can, canAny, type Permission } from './permissions';
 import { currentSessionHash, getSessionAgent, type SessionAgent } from './session';
 
 /**
@@ -33,6 +33,21 @@ export async function requireAgent(): Promise<SessionAgent> {
 export async function requirePermission(permission: Permission): Promise<SessionAgent> {
   const agent = await requireAgent();
   if (!can(agent, permission)) redirect('/inbox?error=forbidden');
+  return agent;
+}
+
+/**
+ * Any one of several keys — for a page that gathers what several of them own,
+ * like the settings area as a whole, which anybody holding one of its pages'
+ * keys may enter. Each control on such a page still asks `can()` for its own.
+ */
+export async function requireAnyPermission(
+  permissions: readonly Permission[],
+): Promise<SessionAgent> {
+  const agent = await requireAgent();
+  if (!canAny(agent, permissions)) {
+    redirect('/inbox?error=forbidden');
+  }
   return agent;
 }
 
