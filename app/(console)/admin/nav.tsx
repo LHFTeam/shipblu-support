@@ -43,11 +43,21 @@ export function AdminNav({ sections }: { sections: NavSection[] }) {
   const strip = useRef<HTMLElement>(null);
 
   // The strip is wider than any phone, and the page you are on is as likely to
-  // be its twentieth chip as its first.
+  // be its twentieth chip as its first. The strip alone is scrolled, by the
+  // distance between the chip's centre and its own: `scrollIntoView` scrolls
+  // every ancestor it may, and the console shell is `overflow-hidden`, which a
+  // script can still scroll — the §6.81 way the whole console moves. A
+  // relative `scrollBy` also reads the same in a right-to-left page, where
+  // `scrollLeft` counts the other way.
   useEffect(() => {
-    strip.current
-      ?.querySelector('[aria-current="page"]')
-      ?.scrollIntoView({ block: 'nearest', inline: 'center' });
+    const bar = strip.current;
+    const chip = bar?.querySelector<HTMLElement>('[aria-current="page"]');
+    if (!bar || !chip) return;
+    const barBox = bar.getBoundingClientRect();
+    const chipBox = chip.getBoundingClientRect();
+    bar.scrollBy({
+      left: chipBox.left + chipBox.width / 2 - (barBox.left + barBox.width / 2),
+    });
   }, [current]);
 
   const mark = (href: string) => (href === current ? ('page' as const) : undefined);

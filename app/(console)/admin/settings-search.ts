@@ -30,11 +30,25 @@ export function queryWords(query: string): string[] {
     .filter((word) => word !== '' && !STOP_WORDS.has(word));
 }
 
-/** "policies" and "policy", "roles" and "role": one word for matching. */
-function singular(word: string): string {
-  if (word.length > 4 && word.endsWith('ies')) return `${word.slice(0, -3)}y`;
-  if (word.length > 3 && word.endsWith('s') && !word.endsWith('ss')) return word.slice(0, -1);
-  return word;
+/**
+ * The forms a word might have had before a plural ending: "policies" may be
+ * "policy", "roles" "role", "addresses" "address" and "mailboxes" "mailbox".
+ * Every reading is offered rather than one chosen, since no rule short of a
+ * dictionary tells "cases" (case) from "addresses" (address), and two words are
+ * one when any of their readings meet. A reading shorter than three letters is
+ * dropped, so "bus" is not read as "bu".
+ */
+function readings(word: string): string[] {
+  const forms = [word];
+  if (word.endsWith('ies')) forms.push(`${word.slice(0, -3)}y`);
+  if (word.endsWith('es')) forms.push(word.slice(0, -2));
+  if (word.endsWith('s') && !word.endsWith('ss')) forms.push(word.slice(0, -1));
+  return forms.filter((form) => form.length >= 3 || form === word);
+}
+
+function sameWord(a: string, b: string): boolean {
+  const left = readings(a);
+  return readings(b).some((form) => left.includes(form));
 }
 
 /** Whether every query word is a word, or the start of one, in `texts`. */
@@ -42,8 +56,6 @@ export function matchesQuery(words: readonly string[], texts: readonly string[])
   if (words.length === 0) return true;
   const haystack = fold(texts.join(' ')).split(' ');
   return words.every((word) =>
-    haystack.some(
-      (candidate) => candidate.startsWith(word) || singular(candidate) === singular(word),
-    ),
+    haystack.some((candidate) => candidate.startsWith(word) || sameWord(candidate, word)),
   );
 }

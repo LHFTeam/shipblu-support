@@ -18,7 +18,7 @@ import { fail, lineOfNode, parseSource, requireAtLeast, scannable } from '../lib
  *
  * So it fails on:
  *
- *  - a `page.tsx` under `app/(console)/admin/` that no entry names, page or
+ *  - a page file under `app/(console)/admin/` that no entry names, page or
  *    child. The settings home (`/admin`) is the exception: it is the map's own
  *    page, and it opens on any key the map names (`SETTINGS_PERMISSIONS`);
  *  - an entry whose href no page serves — a link to a 404;
@@ -33,7 +33,7 @@ import { fail, lineOfNode, parseSource, requireAtLeast, scannable } from '../lib
  *    under a parent its reader may open (`sectionsFor`), so whoever holds that
  *    key alone is let into the child page and never shown the way to it.
  *
- * A page's route is read off its path: `app/` and `page.tsx` dropped, and every
+ * A page's route is read off its path: `app/` and the page file dropped, and every
  * route group — `(console)`, or an `(x)` a later change uses to sort files —
  * since a group in parentheses is not in the URL. The route is then held to an
  * href exactly. That works only because URLs stay flat (see `sections.ts`): a
@@ -60,7 +60,12 @@ import { fail, lineOfNode, parseSource, requireAtLeast, scannable } from '../lib
  */
 
 const REGISTRY = 'app/(console)/admin/sections.ts';
-const PAGE = /^app\/\(console\)\/admin\/(?:.*\/)?page\.tsx$/;
+/**
+ * Every name Next serves a page under, not only the `.tsx` this codebase
+ * writes: a settings page saved as `page.ts` or `page.jsx` would otherwise pass
+ * unregistered and unguarded, and fall outside the floor's count.
+ */
+const PAGE = /^app\/\(console\)\/admin\/(?:.*\/)?page\.(?:tsx|ts|jsx|js)$/;
 const HOME = '/admin';
 
 /** The guards a page opens with, and the shape of key each takes. */
@@ -100,7 +105,7 @@ export function checkAdminSections() {
   }
 
   const files = scannable.filter((f) => PAGE.test(f));
-  if (!requireAtLeast(rule, 'app/(console)/admin/', files.length, 15, 'settings page.tsx files')) {
+  if (!requireAtLeast(rule, 'app/(console)/admin/', files.length, 15, 'settings page files')) {
     return;
   }
 
@@ -149,7 +154,7 @@ export function checkAdminSections() {
     fail(
       rule,
       `${REGISTRY}:${entry.line}`,
-      `${entry.href} has no page — no app/(console)/admin/**/page.tsx serves it, so the sidebar and the settings home link to a 404; remove the entry, or give it the page's new path`,
+      `${entry.href} has no page — no page file under app/(console)/admin/ serves it, so the sidebar and the settings home link to a 404; remove the entry, or give it the page's new path`,
     );
   }
 

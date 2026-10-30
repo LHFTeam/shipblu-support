@@ -39,6 +39,9 @@ describe('settings search', () => {
     ['message templates', '/admin/channels'],
     ['freshdesk', '/admin/import'],
     ['review queue', '/admin/subcategories'],
+    ['email addresses', '/admin/channels'],
+    ['mailboxes', '/admin/channels'],
+    ['statuses', '/admin/statuses'],
   ])('leads "%s" to %s', (query, href) => {
     expect(search(query)).toContain(href);
   });

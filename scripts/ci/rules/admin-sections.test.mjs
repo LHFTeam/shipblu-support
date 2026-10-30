@@ -94,6 +94,26 @@ describe('admin-sections', () => {
     ]);
   });
 
+  it('reads a page saved under any name Next serves, not only page.tsx', async () => {
+    const found = await run({
+      pages: {
+        'app/(console)/admin/unlisted/page.ts': page("requirePermission('admin.area0')"),
+        'app/(console)/admin/also/page.jsx': page("requirePermission('admin.area0')"),
+      },
+    });
+
+    expect(found).toEqual([
+      expect.objectContaining({
+        where: 'app/(console)/admin/also/page.jsx',
+        message: expect.stringMatching(/\/admin\/also is not on the settings map/),
+      }),
+      expect.objectContaining({
+        where: 'app/(console)/admin/unlisted/page.ts',
+        message: expect.stringMatching(/\/admin\/unlisted is not on the settings map/),
+      }),
+    ]);
+  });
+
   it('refuses an entry no page serves', async () => {
     const found = await run({ entries: [entry('/admin/ghost', "'admin.ghost'")] });
 
