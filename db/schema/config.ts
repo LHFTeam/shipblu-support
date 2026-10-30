@@ -123,7 +123,11 @@ export const ticketStatuses = pgTable(
     name: text('name').notNull(),
     category: statusCategoryEnum('category').notNull(),
     stopsSlaClock: boolean('stops_sla_clock').notNull().default(false),
-    /** Shown to customers in the portal; internal-only statuses are hidden. */
+    /**
+     * Whether `customerLabel` reaches the portal. Off, the customer sees the
+     * category's word instead (`lib/portal/status-words.ts`); it never hides
+     * the ticket, and the status's own name is never shown either way.
+     */
     visibleToCustomer: boolean('visible_to_customer').notNull().default(true),
     customerLabel: text('customer_label'),
     position: integer('position').notNull().default(0),

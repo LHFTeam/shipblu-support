@@ -1,6 +1,6 @@
 import {
   listActiveAgents,
-  listActiveTicketFields,
+  listConditionFields,
   listDeactivatedAgents,
   listFormNames,
   listGroupNames,
@@ -55,7 +55,7 @@ export async function ticketFieldOptions(
   } = {},
 ): Promise<FieldOption[]> {
   const [custom, forms, groupNames, agentNames, deactivated, categories] = await Promise.all([
-    listActiveTicketFields(),
+    listConditionFields(),
     listFormNames(),
     given.groups ?? listGroupNames(),
     given.agents ?? listActiveAgents(),
@@ -191,7 +191,8 @@ export async function ticketFieldOptions(
 
   const customOptions: FieldOption[] = custom.map((field) => ({
     value: `custom.${field.key}`,
-    label: field.label,
+    label: field.isActive ? field.label : `${field.label} (deactivated)`,
+    deactivated: !field.isActive || undefined,
     kind:
       field.type === 'number' || field.type === 'decimal'
         ? 'number'
