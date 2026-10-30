@@ -4,6 +4,7 @@ import { listTicketStatuses } from '@/lib/admin/settings';
 import { requirePermission } from '@/lib/auth/guard';
 import { NewStatus, StatusEditor } from './forms';
 import { sentenceCase } from '@/lib/format';
+import { CATEGORY_WORDS } from '@/lib/portal/status-words';
 
 export const dynamic = 'force-dynamic';
 
@@ -75,17 +76,25 @@ export default async function StatusesPage() {
                 <span className="text-xs">running</span>
               )}
             </Cell>
-            {/* Decided as `listTickets` decides it: the label only while the
-                status is shown and has one, and the category word otherwise.
+            {/* What the portal draws, decided as it decides: `listTickets` and
+                `getTicket` send the label only while the status is shown, and
+                `StatusBadge` falls back to the category's word when they send
+                none. Both languages' words, since the reader picks the language.
                 "hidden" stood here for a status not shown, which read as the
-                customer seeing no status at all. */}
+                customer seeing no status at all, and "the category word" beside
+                a Pending badge read as "Pending" where the portal says "In
+                progress". */}
             <Cell className="text-xs text-(--color-text-secondary)">
-              {status.visibleToCustomer && status.customerLabel ? (
+              {status.visibleToCustomer && status.customerLabel !== null ? (
                 status.customerLabel
               ) : (
-                <span className="italic">
-                  the category word{status.customerLabel ? ' (label hidden)' : ''}
-                </span>
+                <>
+                  {CATEGORY_WORDS[status.category].en} ·{' '}
+                  <bdi lang="ar">{CATEGORY_WORDS[status.category].ar}</bdi>{' '}
+                  <span className="italic">
+                    ({status.customerLabel ? 'category word, label hidden' : 'category word'})
+                  </span>
+                </>
               )}
             </Cell>
             <Cell className="text-end">
