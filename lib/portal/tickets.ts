@@ -32,6 +32,21 @@ const log = logger('create_ticket');
  * than filtered in the renderer, so they are not in the payload to leak.
  */
 
+/**
+ * The *customer* label only, never the status's own name. Null here means the
+ * page falls back to a plain word for the category in the reader's language —
+ * which is both safer ("Escalated to ops — tier 2" never reaches a customer)
+ * and, on an Arabic help centre, more likely to be readable, since
+ * `customer_label` is a single field with no translation.
+ *
+ * `shownLabel` in `lib/portal/status-words.ts` is the same rule over a row in
+ * hand, which the statuses page uses to say what a customer sees;
+ * `tickets.db.test.ts` holds the two to one answer.
+ */
+const shownLabelSql = sql<
+  string | null
+>`case when ${ticketStatuses.visibleToCustomer} then ${ticketStatuses.customerLabel} else null end`;
+
 export type PortalTicket = {
   number: number;
   subject: string | null;
@@ -57,14 +72,7 @@ export async function listTickets(contactId: string, limit = 100): Promise<Porta
     .select({
       number: conversations.number,
       subject: conversations.subject,
-      // The *customer* label only, never the status's own name. Null here means
-      // the page falls back to a plain word for the category in the reader's
-      // language — which is both safer ("Escalated to ops — tier 2" never
-      // reaches a customer) and, on an Arabic help centre, more likely to be
-      // readable, since `customer_label` is a single field with no translation.
-      statusLabel: sql<
-        string | null
-      >`case when ${ticketStatuses.visibleToCustomer} then ${ticketStatuses.customerLabel} else null end`,
+      statusLabel: shownLabelSql,
       statusCategory: ticketStatuses.category,
       channel: conversations.channel,
       lastMessageAt: conversations.lastMessageAt,
@@ -109,9 +117,7 @@ export async function getTicket(
       id: conversations.id,
       number: conversations.number,
       subject: conversations.subject,
-      statusLabel: sql<
-        string | null
-      >`case when ${ticketStatuses.visibleToCustomer} then ${ticketStatuses.customerLabel} else null end`,
+      statusLabel: shownLabelSql,
       statusCategory: ticketStatuses.category,
       channel: conversations.channel,
       lastMessageAt: conversations.lastMessageAt,
