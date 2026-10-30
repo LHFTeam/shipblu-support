@@ -222,6 +222,16 @@ function Fields({ field }: { field?: TicketField }) {
           hint="Needs “visible to customers” as well. The pair is what lets a customer answer this field; a form still has to place the question for it to be asked."
           defaultChecked={field?.editableByCustomer ?? false}
         />
+        {/* The action has always read `isActive`, and the Fields list and the
+            delete refusal both talk about deactivating, but no control posted
+            it — so every save wrote the field active again, and a field could
+            be retired only by deleting it and its answers' meaning with it. */}
+        <Toggle
+          name="isActive"
+          label="Active"
+          hint="Off takes it off every form, the customer portal and the ticket sidebar, out of the check before resolving and out of what a new rule can pick. Every answer already given is kept, and a rule already naming it still reads them. On brings it all back."
+          defaultChecked={field?.isActive ?? true}
+        />
       </div>
     </>
   );
