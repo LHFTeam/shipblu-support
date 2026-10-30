@@ -3,6 +3,7 @@
 import { and, eq, ne, sql, asc } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { channels, whatsappAccounts, groups } from '@/db/schema';
+import { isUniqueViolation } from '@/lib/db/errors';
 import { requirePermission } from '@/lib/auth/guard';
 import { can } from '@/lib/auth/permissions';
 import { readCategoryAiSettings } from '@/lib/category-ai/settings';
@@ -35,12 +36,19 @@ import {
   retryOnboarding,
 } from '@/lib/whatsapp/onboarding';
 import { copyRequestRefusal } from '@/lib/whatsapp/onboarding-reads';
-import { GONE, refresh, type SettingsState, type AdminState } from '../settings-shared';
+import {
+  GONE,
+  refresh,
+  type SettingsState,
+  type AdminState,
+  type WebchatSwitchState,
+} from '../settings-shared';
 import { revalidatePath } from 'next/cache';
 import { canonicalUuid } from '@/lib/http/uuid';
 import { listFolderOptions } from '@/lib/kb/admin';
 import { LOCALES } from '@/lib/kb/locale';
 import { resolveFaqFolders } from '@/lib/widget/config';
+import { switchWebchatRow, webchatEditRefusal } from '@/lib/widget/switch';
 import { isChannelType } from './channel-types';
 
 const log = logger('admin_channels');
@@ -373,9 +381,18 @@ export async function saveChannel(_state: AdminState, formData: FormData): Promi
 
   // Which knowledge base folder the chat widget lists, per locale. The rule
   // lives in `lib/widget/config.ts`, shared with the picker that offers them.
+  // Only the Chat widget card posts them. A web chat row's own editor does not,
+  // and its save leaves the folders as the row holds them (the UPDATE below):
+  // absent is "unchanged", as the routing mode's is, where `''` is the card's
+  // "Most-read articles". The editor sending them back as hidden fields would
+  // write the page's snapshot over a card saved since, and refuse a rename once
+  // a chosen folder stopped being public. So whether they were posted also says
+  // which form this is, and the UPDATE below lets the card save only the
+  // widget's row and the editor only another (`webchatEditRefusal`).
+  const foldersPosted = LOCALES.some((locale) => formData.get(`faqFolder_${locale}`) !== null);
   let faqFolders: Record<string, string> = {};
 
-  if (type === 'webchat') {
+  if (type === 'webchat' && foldersPosted) {
     const chosen = Object.fromEntries(
       LOCALES.map((locale) => [locale, String(formData.get(`faqFolder_${locale}`) ?? '')]),
     );
@@ -419,24 +436,45 @@ export async function saveChannel(_state: AdminState, formData: FormData): Promi
       type === 'whatsapp'
         ? whatsappEditColumns({ phoneNumberId, whatsappAccountId: account, routingMode })
         : {
-            config,
+            ...(type === 'webchat' && !foldersPosted ? {} : { config }),
             whatsappAccountId: account,
             ...(routingMode === undefined ? {} : { routingMode }),
           };
-    await db
-      .update(channels)
-      .set({ name, defaultGroupId, ...columns, updatedAt: new Date() })
-      .where(eq(channels.id, id));
+    const values = { name, defaultGroupId, ...columns, updatedAt: new Date() };
+    try {
+      if (type === 'webchat') {
+        // The Chat widget card saves the widget's row and the row editor any
+        // other, and a switch can make a row the widget's, or stop it being
+        // that, under an open page. So the save asks which it is under the
+        // switch's lock and writes in the same transaction.
+        const refusal = await db.transaction(async (tx) => {
+          const refused = await webchatEditRefusal(tx, id, foldersPosted);
+          if (!refused) await tx.update(channels).set(values).where(eq(channels.id, id));
+          return refused;
+        });
+        if (refusal) return { error: refusal };
+      } else {
+        await db.update(channels).set(values).where(eq(channels.id, id));
+      }
+    } catch (error) {
+      if (isUniqueViolation(error, NAME_INDEX)) return { error: nameTaken(name) };
+      throw error;
+    }
   } else {
-    await db.insert(channels).values({
-      type: type as (typeof channels.$inferInsert)['type'],
-      name,
-      defaultGroupId,
-      config,
-      whatsappAccountId: account,
-      // Absent: the column's default, `default_group`.
-      ...(routingMode ? { routingMode } : {}),
-    });
+    try {
+      await db.insert(channels).values({
+        type: type as (typeof channels.$inferInsert)['type'],
+        name,
+        defaultGroupId,
+        config,
+        whatsappAccountId: account,
+        // Absent: the column's default, `default_group`.
+        ...(routingMode ? { routingMode } : {}),
+      });
+    } catch (error) {
+      if (isUniqueViolation(error, NAME_INDEX)) return { error: nameTaken(name) };
+      throw error;
+    }
   }
 
   revalidatePath('/admin/channels');
@@ -448,6 +486,19 @@ export async function saveChannel(_state: AdminState, formData: FormData): Promi
     }),
   );
   return notice ? { ...ok(), notice } : ok();
+}
+
+/**
+ * The unique index a channel's name is held to. Nothing above reads for a
+ * clash first: a read could not see a rename committed beside it, and the
+ * index answers every case. Without the catch the clash was a throw, which the
+ * form turns into its "no answer came back" sentence about a connection that
+ * was fine. By name, so no other unique violation is reported as this.
+ */
+const NAME_INDEX = 'channels_name_idx';
+
+function nameTaken(name: string): string {
+  return `Another channel is already called “${name}” — choose a different name`;
 }
 
 /**
@@ -509,6 +560,49 @@ export async function setNumberOwner(_state: AdminState, formData: FormData): Pr
 
   revalidatePath('/admin/channels');
   return { ...ok(), notice: handoverNotice(handover) };
+}
+
+// --- Which web chat row the widget uses ---------------------------------------
+
+/**
+ * Switch a web chat row on or off.
+ *
+ * Its own action and its own form, as `setNumberOwner` is, and for the same
+ * reason: three forms post to `saveChannel`, and an `isActive` field there
+ * would be one any of them could leave out. The switch is a button behind a
+ * second click, `ConfirmSubmit`, whose confirmation names where the widget
+ * goes; it cannot share the row editor's form, which holds a text box.
+ * `switchWebchatRow` decides the rest under its lock, from the stored type:
+ * other channels have no switch, and the one it refuses is the widget's last
+ * active row.
+ */
+export async function setWebchatActive(
+  _state: WebchatSwitchState,
+  formData: FormData,
+): Promise<WebchatSwitchState> {
+  await requirePermission('admin.channels');
+
+  // Canonical, not as given: the switch finds its row among the ones it reads
+  // back by comparing ids in code, which Postgres prints lower-case.
+  const id = canonicalUuid(text(formData, 'id'));
+  if (!id) return { error: GONE };
+  const active = formData.get('active');
+  if (active !== 'on' && active !== 'off') {
+    return { error: 'That form is out of date — reload the page and try again' };
+  }
+
+  const outcome = await switchWebchatRow(id, active === 'on');
+  // A refusal about the rows means the page drew them other than they are —
+  // another admin switched one, or removed it — so the page is drawn again with
+  // the answer, which it shows while its rows agree with the ones refused on.
+  if (!outcome.ok) {
+    if (outcome.stateKey === undefined) return { error: outcome.error };
+    revalidatePath('/admin/channels');
+    return { error: outcome.error, stateKey: outcome.stateKey };
+  }
+
+  revalidatePath('/admin/channels');
+  return { ...ok(), notice: outcome.notice, stateKey: outcome.stateKey };
 }
 
 // --- Numbers on the WhatsApp Business app -----------------------------------

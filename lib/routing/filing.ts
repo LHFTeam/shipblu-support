@@ -33,7 +33,20 @@ export type FilingInput = {
  */
 export function filingRowFor<T extends FilingInput>(channel: T, rows: readonly T[]): T | null {
   if (channel.type === 'whatsapp' || channel.type === 'whatsapp_bot') return channel;
-  return rows.find((row) => row.type === channel.type && row.isActive) ?? null;
+  return filingRowOfType(channel.type, rows);
+}
+
+/**
+ * The row a type filed by kind rather than by row files under: the oldest
+ * active one. The widget's row is this for `webchat` (`lib/widget/rows.ts`),
+ * so the panel's "another row files them" and the Chat widget card follow one
+ * rule. `rows` as `filingRowFor` takes them.
+ */
+export function filingRowOfType<T extends Pick<FilingInput, 'type' | 'isActive'>>(
+  type: string,
+  rows: readonly T[],
+): T | null {
+  return rows.find((row) => row.type === type && row.isActive) ?? null;
 }
 
 /** Only a `whatsapp` row may have an owner (`channels_owner_only_whatsapp`). A deactivated one counts as nobody. */

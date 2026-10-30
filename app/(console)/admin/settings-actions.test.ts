@@ -76,6 +76,16 @@ describe('settings actions given an id no row can have', () => {
     for (const fn of Object.values(db)) expect(fn).not.toHaveBeenCalled();
   });
 
+  it('a web chat switch that names one is told the row is gone, without querying', async () => {
+    const state = await actions.setWebchatActive(
+      INITIAL,
+      form({ id: 'not-a-uuid', active: 'off' }),
+    );
+
+    expect(state.error).toMatch(/no longer exists/);
+    for (const fn of Object.values(db)) expect(fn).not.toHaveBeenCalled();
+  });
+
   it('a save that names one is told the row is gone, not handed a crash', async () => {
     const state = await actions.saveGroup(INITIAL, form({ id: 'not-a-uuid', name: 'Hubs' }));
 

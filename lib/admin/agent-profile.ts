@@ -1,6 +1,7 @@
 import { and, eq, gt, isNull, ne, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { agentChanges, agents, invites } from '@/db/schema';
+import { isUniqueViolation } from '@/lib/db/errors';
 import { looksLikeEmail, normaliseEmail } from '@/lib/auth/normalise';
 import { isAgentRole } from '@/lib/auth/permissions';
 import { logger } from '@/lib/log';
@@ -211,13 +212,5 @@ async function lockRoleChanges(tx: Tx): Promise<void> {
 export async function lockAddress(tx: Tx, email: string): Promise<void> {
   await tx.execute(
     sql`select pg_advisory_xact_lock(hashtextextended(${`agent-address:${email}`}::text, 0))`,
-  );
-}
-
-function isUniqueViolation(error: unknown): boolean {
-  const cause = (error as { cause?: { code?: unknown } } | null)?.cause;
-  return (
-    (error as { code?: unknown } | null)?.code === '23505' ||
-    (typeof cause === 'object' && cause !== null && cause.code === '23505')
   );
 }

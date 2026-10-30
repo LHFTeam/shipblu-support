@@ -34,6 +34,7 @@ import {
   shownOnboardings,
 } from '@/lib/whatsapp/onboarding-view';
 import { offerableFaqFolders, parseWidgetConfig } from '@/lib/widget/config';
+import { reportedRow, webchatStateKey, webchatSwitch, widgetRow } from '@/lib/widget/rows';
 import {
   CoexistenceBadges,
   ConnectBusinessAppNumber,
@@ -45,8 +46,10 @@ import {
   ChannelEditor,
   ChannelForm,
   OwnerEditor,
+  WebchatActiveSwitch,
   WebchatSettings,
   type OwnerChoice,
+  type WebchatSwitchView,
 } from './forms';
 import { RoutingBadge, RoutingReadinessPanel } from './routing-readiness';
 import { NewWhatsAppAccount, WhatsAppAccountEditor, type WhatsAppAccountRow } from './waba-forms';
@@ -111,12 +114,33 @@ export default async function ChannelsPage() {
     }),
   );
 
-  // The same row `webchatChannel()` reads — oldest active first. Picking by a
+  // The same row `webchatChannel()` reads: oldest active first, ties by id,
+  // which is the order `routingReadiness` read every row in. Picking by a
   // different rule would let an admin configure one row while the widget read
-  // another, and the setting would look saved and do nothing.
-  const webchat = channelList
-    .filter((channel) => channel.type === 'webchat' && channel.isActive)
-    .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())[0];
+  // another, and the setting would look saved and do nothing — sorting this
+  // page's own list, ordered by name and timed to the millisecond, was one.
+  // Only the order is taken from that read, which no write moves; the rows
+  // themselves are the list's, so the Inactive badge, the switch and the card
+  // are drawn from one read of each row, and a switch committed between the
+  // two reads cannot set them against each other. (The routing badges and the
+  // readiness panel are still the routing read's, so for one render they can
+  // disagree with the list; the next draws them alike.) A row in the list
+  // that the routing read has not seen was added between the two reads, so it
+  // is the newest and goes last. Each web chat row's switch is worded from
+  // these rows, by the rule the action applies again under its lock, and shows
+  // its answer while these rows are as the action left them.
+  const order = new Map(routing.channels.map((channel, index) => [channel.id, index]));
+  const position = (id: string) => order.get(id) ?? Number.MAX_SAFE_INTEGER;
+  const webchatRows = channelList
+    .filter((channel) => channel.type === 'webchat')
+    .sort((a, b) => position(a.id) - position(b.id));
+  const webchat = widgetRow(webchatRows);
+  const webchatKey = webchatStateKey(webchatRows.map(reportedRow));
+  const switchView = (channelId: string): WebchatSwitchView | null => {
+    const plan = webchatSwitch(webchatRows, channelId);
+    if (plan?.kind !== 'switch_off') return plan;
+    return { kind: 'switch_off', widgetMovesTo: plan.widgetMovesTo?.name ?? null };
+  };
 
   const accountChoices = accountList.map((account) => ({ id: account.id, name: account.name }));
   const ownerChoices: OwnerChoice[] = agentList.map(({ id, name, email }) => ({ id, name, email }));
@@ -231,6 +255,7 @@ export default async function ChannelsPage() {
               ? onboardings.find((onboarding) => onboarding.id === coexistence.onboardingId)
               : undefined;
             const stillConnecting = attempt?.status === 'exchanged';
+            const switchPlan = channel.type === 'webchat' ? switchView(channel.id) : null;
 
             return (
               <li key={channel.id} className="flex flex-wrap items-center gap-3 px-4 py-3">
@@ -260,7 +285,9 @@ export default async function ChannelsPage() {
                       : isMetaChannel(channel.type)
                         ? 'hardcoded in server environment variables'
                         : channel.type === 'webchat'
-                          ? 'the widget'
+                          ? channel.id === webchat?.id
+                            ? 'the widget'
+                            : 'not the widget’s row'
                           : (channel.config.address as string) || 'no address'}
                 </span>
                 {coexistence && canConnect && channel.isActive && !stillConnecting
@@ -278,12 +305,28 @@ export default async function ChannelsPage() {
                       );
                     })
                   : null}
-                <ChannelEditor
-                  channel={{ ...channel, routingMode: savedRoutingMode(channel.id) }}
-                  groups={groupList}
-                  whatsappAccounts={accountChoices}
-                  classifierMode={classifierMode}
-                />
+                {/* The widget's row is edited by the Chat widget card below,
+                    which has its folders: two forms saving one row's group and
+                    mode would each put the other's stale values back. */}
+                {channel.type === 'webchat' && channel.id === webchat?.id ? (
+                  <span className="text-xs text-(--color-text-secondary)">
+                    Edited under Chat widget
+                  </span>
+                ) : (
+                  <ChannelEditor
+                    channel={{ ...channel, routingMode: savedRoutingMode(channel.id) }}
+                    groups={groupList}
+                    whatsappAccounts={accountChoices}
+                    classifierMode={classifierMode}
+                  />
+                )}
+                {switchPlan ? (
+                  <WebchatActiveSwitch
+                    channelId={channel.id}
+                    plan={switchPlan}
+                    stateKey={webchatKey}
+                  />
+                ) : null}
                 {reconnectable && canConnect ? (
                   <ConnectBusinessAppNumber
                     {...connectProps}
@@ -302,7 +345,13 @@ export default async function ChannelsPage() {
             the one channel whose configuration a customer sees directly. */}
         {webchat ? (
           <Card className="mb-4">
+            {/* Keyed on the row, because a switch can hand the widget to
+                another one while the card is open: reused, its hidden id
+                followed the new row while its selects kept the old row's
+                group, mode and folders, and saving wrote those over the new
+                row's own. */}
             <WebchatSettings
+              key={webchat.id}
               channel={{
                 id: webchat.id,
                 name: webchat.name,

@@ -309,13 +309,22 @@ function WarningText({ warning }: { warning: ChannelWarning }) {
     case 'never_routes':
       return <>{`${ROUTING_LOCK_REASONS[warning.reason]} Its saved mode does nothing.`}</>;
     case 'inactive':
-      return <>Inactive: nothing is filed under it, so its mode does nothing until it is on.</>;
+      // New tickets only: one held under the row before it went off is still
+      // decided by this mode, which the router reads off the ticket's own row
+      // whether or not it is active.
+      return (
+        <>
+          Inactive: no new ticket is filed under it, so its mode does nothing for them. A ticket
+          held under it before it went off is still decided by this mode.
+        </>
+      );
     case 'not_filing_row':
       return (
         <>
           New tickets of this type are filed under &ldquo;
           <span dir="auto">{warning.filingRow}</span>
-          &rdquo;, the oldest active row of it, so this row&rsquo;s mode does nothing.
+          &rdquo;, the oldest active row of it, so this row&rsquo;s mode does nothing for them. A
+          ticket held under this row before then is still decided by its mode.
         </>
       );
     case 'owned':

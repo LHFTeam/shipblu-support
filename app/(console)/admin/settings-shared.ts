@@ -61,6 +61,14 @@ export type AdminState = ActionState & {
   wait?: true;
 };
 
+/**
+ * A web chat row's switch. `stateKey` is the web chat rows as the action left
+ * them (`webchatStateKey`), which its answer speaks about: each row's switch
+ * keeps its own answer, and one about rows that have changed since is no
+ * longer true. Absent on a refusal of the form itself, which is about no row.
+ */
+export type WebchatSwitchState = AdminState & { stateKey?: string };
+
 export function refresh(path: string) {
   revalidatePath(path);
 }
