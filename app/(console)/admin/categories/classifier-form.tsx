@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { RelativeTime } from '@/components/relative-time';
 import { ErrorText, Field, Input, Notice, Select, SuccessText } from '@/components/ui';
 import { InfoTip } from '@/components/tooltip';
@@ -129,7 +130,10 @@ export function ClassifierForm({
           </RelativeTime>
         ) : (
           'Never switched on.'
-        )}
+        )}{' '}
+        <Link href="/admin/ai" className="underline">
+          All AI features
+        </Link>
       </p>
 
       <ErrorText>{state.error}</ErrorText>

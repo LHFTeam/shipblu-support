@@ -5,19 +5,65 @@ it is designed; **this file is about the state of the work** — what is live,
 what is merely built, what is left, and the mistakes that have already cost us
 time. Read both. Do not re-derive settled decisions.
 
-Last updated: 2026-10-29, against `main` at `063e477`. The figures in §1 and §5
+Last updated: 2026-10-30, against `main` at `69a22b6`. The figures in §1 and §5
 were last re-measured as a whole against production on 2026-09-20, and a
 paragraph re-read since gives its own date; where a number here disagrees with
 an older paragraph elsewhere in the file, the older one has not been re-checked.
 
-**Production runs `063e477`, deployed by hand on 2026-10-29, all six services
-by 14:27:51 UTC:** release #439, which carries Stage 6's screenshot pass
+**Production runs `69a22b6`, deployed by hand on 2026-10-29, all six services
+by 17:47:16 UTC:** release #442, which carries #440: every automated reply on a
+customer bot ticket is refused, by `automatedReplyBlocked` and again by
+`writeAutomatedReply`, the door every automated sender writes through, before
+anything is written. Until then an `on_update` rule's `send_reply` on a bot
+ticket was written and queued as an email; no rule in production sends a
+reply, so none was. Code only: web first, its preDeploy finding no migration
+and replaying the nine `db/sql` files, then the worker and the four crons. The
+checks read clean: no service logged a warning or an error from 17:42 to 18:10,
+web served no 5xx, the 54 jobs created after 17:42 had all completed by 17:48,
+and the first runs on the new code were ok (`sla_sweep`, `presence_sweep` and
+`assign_sweep` at 17:51; `run_time_automations` at 18:01, one rule over 553
+tickets, nothing changed). Its way back is `b63f96e` on each service.
+
+**The Instagram Login token expired at 15:25:38 UTC on 2026-10-29.** Every
+`graph.instagram.com` call has failed since with code 190, "Session has
+expired": the first was a profile read at 17:07:43 for the first Instagram
+message after the expiry, whose `fetch_meta_profile` job went `dead` after five
+attempts. No Instagram reply had been sent since then, at the deploy's reads,
+so none has failed yet; the next goes out over `instagram_login`
+(`lib/meta/connection.ts`) and fails the same way until
+`INSTAGRAM_ACCESS_TOKEN` is renewed in Meta's app dashboard and set on Render.
+
+**Jev's category classifier has been in `apply` since 18:37:23 UTC on
+2026-10-29**, switched by the user on `/admin/categories` after twelve and a
+half hours of Shadow and before any ticket carried a person's label, so 4.2's
+criteria were not read. By 09:40 UTC on 2026-10-30 it had filed two tickets,
+both Facebook and both `sales`; nothing routes, since every channel is still on
+`default_group`. The backlog (`backfill_category_ai mode=apply`) waits for the
+user's go-ahead. The plan's status section has the reads (4.2's Apply).
+
+**The first Stage 6 nightly read clean** (00:00 UTC on 2026-10-30): it rebuilt
+2026-10-27 to 2026-10-29 with categories, so `rollup_days` stamps
+`categories_computed_at` on those three days, and `metrics_daily` holds no
+duplicate slice and no row naming two dimensions. It wrote no category row:
+Jev's first filed ticket opened at 00:31 on the 30th in Cairo, the night the
+clocks went back. The second nightly, at 00:00 UTC on 2026-10-31, writes the
+first.
+
+The release before it, `b63f96e`, was deployed by hand from another session on
+2026-10-29, all six services by 17:00:33 UTC: release #441, which carries #436,
+group membership in the console (a members picker, invite groups and an agent
+editor). Its web preDeploy applied `0056` (`agent_changes`, the record of a
+change to an agent's role or sign-in address, held to those two fields by
+`agent_changes_field_known` in `db/sql/003`).
+
+The release before that, `063e477`, was deployed by hand on 2026-10-29, all six
+services by 14:27:51 UTC: release #439, which carries Stage 6's screenshot pass
 (#438): what the reports, the dashboard, the channels page's readiness panel
 and the classifier report say is made true of their code, every console table
 shows when it scrolls sideways, and the column charts' labels are readable on
 a phone. Code and copy only, so its way back is `9b4bc5b` on each service.
 
-The release before it, `9b4bc5b`, was deployed by hand on 2026-10-29, all six
+Before it, `9b4bc5b` was deployed by hand on 2026-10-29, all six
 services by 11:29:28 UTC: release #437, which carries Stage 6 (#434) of
 `plans/ticket-category-routing.md`, reporting by category and
 `/reports/routing`. Web went first, and its preDeploy applied
@@ -26,9 +72,10 @@ key `metrics_daily_slice_key`; `db/sql/003` adds the one-dimension CHECK),
 `0053_routing_undecided_index`, `0054_rollup_days_categories`
 (`rollup_days.categories_computed_at`, which tells a day rolled up with
 categories from one rolled up before them) and `0055_routing_started_index`;
-then the worker and the four crons. Production carries no category yet, so
-the overview's By category reads all No category, and names every day before
-the first Stage 6 nightly as rolled up before categories were filed. The
+then the worker and the four crons. Production carried no category then, so
+the overview's By category read all No category, and named every day before
+the first Stage 6 nightly (2026-10-27) as rolled up before categories were
+filed. The
 `rollup_metrics from=2026-08-18` rebuild waits for 4.2's
 `backfill_category_ai mode=apply`. The rollback deletes the `metrics_daily`
 rows that carry a category before the old web returns (the plan's Stage 6
@@ -44,9 +91,10 @@ changed on every ticket at once (§5.1): the out-of-hours acknowledgement's
 guards, assignment's locks, what it re-reads under them and its checked update,
 a console group move running the rules before it assigns, and the transactions
 an agent's reply and a rule's assignment or move are now written in, with the
-rule's own timeline line inside them. The category classifier has been in
-Shadow since 06:00:32 UTC that day, after its archive record run: it records an
-answer for each message it judges and writes nothing to a ticket (§5.1).
+rule's own timeline line inside them. The category classifier was put in
+Shadow at 06:00:32 UTC that day, after its archive record run, recording an
+answer for each message it judged and writing nothing to a ticket (§5.1), until
+the user switched it to `apply` at 18:37:23.
 
 The release before those, `ad6a062`, was deployed by hand on 2026-10-27, all six
 services by 21:49:08 UTC: release #431, which carries Stage 4.2 (#429), that is
@@ -101,9 +149,10 @@ Every phase of the original plan except migration importers is **built and
 merged**: email ticketing, WhatsApp, Facebook and Instagram, the agent console,
 the bilingual knowledge base with its Freshdesk importer, the chat widget, SLA
 policies, automation rules, CSAT and reporting, and a live dashboard for admins
-at `/admin/dashboard`. Since then the **customer portal** has landed too — the
-bare domain now opens the Arabic help centre, and one Sign in button
-authenticates customers and agents alike.
+at `/reports/live` (`/admin/dashboard` until the settings reorganisation of
+2026-10-29, §5.5, and redirected there since). Since then the **customer
+portal** has landed too — the bare domain now opens the Arabic help centre, and
+one Sign in button authenticates customers and agents alike.
 
 Since then, **shipments**: tickets link to parcels and to shipping accounts,
 tracking numbers and SBIDs are detected in message text as it arrives, the inbox
@@ -640,7 +689,7 @@ CI job exercises that distinction against Postgres with transaction-rolled-back
 fixtures.
 
 And now **WhatsApp coexistence**: a number that lives on the WhatsApp Business
-_app_ on a phone can be connected from Admin → Channels in one button, through
+_app_ on a phone can be connected from Settings → Channels in one button, through
 Meta's Embedded Signup — the business token Meta mints is stored sealed, the
 number subscribes itself, six months of the phone's chats and its address book
 are copied in as resolved tickets and contacts, and a reply typed on the phone
@@ -1351,9 +1400,10 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
 
      What to expect: her inbox gains Unassigned and All open; the number's
      tickets stop collecting `assignment_skipped`, since an owned ticket skips
-     the rota; and her Breached on `/admin/dashboard` opens at the open tickets
-     that had already breached, because a figure is filed under whoever is
-     accountable on the day it is measured. If the team wants her figures to
+     the rota; and her Breached on the live dashboard (`/reports/live`, or
+     `/admin/dashboard` on a release from before the settings reorganisation,
+     §5.5) opens at the open tickets that had already breached, because a
+     figure is filed under whoever is accountable on the day it is measured. If the team wants her figures to
      start from the handover, triage those first. To undo it, hand the number
      to "Nobody — team number": accountability clears, and the tickets stay with
      her until somebody reassigns them.
@@ -1646,8 +1696,8 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
   second, by analogy with the 647 shadow subcategorisation calls (p50 234 ms) — and
   every row stores both.
 
-- **Jev's category classifier is deployed, and in Shadow since 06:00:32 UTC on
-  2026-10-29** (Stages 4.1 and 4.2 of `plans/ticket-category-routing.md`;
+- **Jev's category classifier is deployed, and in `apply` since 18:37:23 UTC on
+  2026-10-29**, after Shadow from 06:00:32 that day (Stages 4.1 and 4.2 of `plans/ticket-category-routing.md`;
   `lib/category-ai/`): live since 2026-10-27 12:07 UTC, with `0050`'s two
   tables in production. #429, which fixed the locked ticket read that lost a
   ticket whose status changed under the lock and sent the job to `dead`, has
@@ -1656,18 +1706,21 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
   509 tickets, 923 of them asked (590 `unknown`, 257 `would_apply`, 76
   `below_threshold`) and none failed. In Shadow each message the live job
   decides about is a `live` row and nothing is written to a ticket; the first
-  came at 07:55:50 UTC, `unknown`. Each step after Shadow waits for the user's
-  go-ahead. In Shadow and under `apply` alike it asks which team's work each
+  came at 07:55:50 UTC, `unknown`. The user switched it to `apply` at
+  18:37:23 that day, after 17 `live` rows and before any ticket carried a
+  person's label; under `apply` it filed its first ticket at 22:31:33. In
+  Shadow and under `apply` alike it asks which team's work each
   of the first five customer messages on an unanswered ticket is; only under
   `apply` does it file the ticket — never over a category a person, a rule, a
   form's default or an agent opening the ticket chose. Its
   switch is on `/admin/categories` (`category_ai_settings`, no row = off), not
   the key, which production already holds; the threshold beside it defaults to
-  0.6 and every answer records the one it met. Taking it to `apply` is 4.2's
-  sequence, whose first step is under way: `backfill_category_ai mode=record runLabel=<label>`
-  over the archive, then `shadow` for at least two weeks while a supervisor labels a sample from
+  0.6 and every answer records the one it met. 4.2's sequence was
+  `backfill_category_ai mode=record runLabel=<label>` over the archive, then
+  `shadow` for at least two weeks while a supervisor labels a sample from
   `/reports/category-ai` (4.2), whose figures decide the switch, then
-  `apply`, then `backfill_category_ai mode=record` again under a fresh label with
+  `apply`. With `apply` taken early, what is left of it waits for the user's
+  go-ahead: `backfill_category_ai mode=record` again under a fresh label with
   no `since=` — it has no status scope, and must reach the oldest open ticket —
   and `mode=apply fromLabel=<that label>`, which files only the open ones. Read
   apply's dry run first: it names every rule filing would wake. The record
@@ -2375,6 +2428,39 @@ message bodies — the same reasoning as the deliberately tiny `pg_notify` paylo
 
 ### 5.5 Loose ends
 
+- **The settings area was reorganised on 2026-10-29, and three questions were
+  left open.** Every settings page is an entry in
+  `app/(console)/admin/sections.ts`, grouped Team, Channels, Tickets,
+  Workflows, Agent tools, AI and Data, and the sidebar, the phone strip and a
+  searchable settings home are drawn from it (AGENTS.md, Layout). The rail item
+  is called Settings and shows for anybody holding a key one of its pages
+  requires, where the whole area used to need `admin.agents`, and a new
+  `/admin/ai` lists every place Jev is asked a question and links to the page
+  each switch is on. The live dashboard moved to `/reports/live`, keeping
+  `admin.agents`, and `/admin/dashboard` redirects there (temporary,
+  `next.config.ts`). Production serves the old area until the release carrying
+  this is deployed; `/api/health` names the commit. The handbook's three
+  sentences naming the area (`lib/kb/handbook.ts`) reach production's knowledge
+  base by an edit in the console or by
+  `npm run job -- seed_console_handbook overwrite=true` after that deploy —
+  `dryRun=true` first, since it replaces every handbook article whose text
+  differs, console edits included, cutting a version of each. Left open:
+  - **There is no Roles & permissions page, and nothing in the console writes
+    `agents.permissions`.** So the per-page keys still move together by role —
+    admins and account admins hold every one, nobody below holds any — and the
+    any-key gate and the per-page sidebar change what somebody sees only once
+    an override is written by hand in SQL. That is also the only way to do
+    what the handbook tells an admin to do for a single permission
+    (`lib/kb/handbook.ts`, the `people` and `signing-in` articles).
+  - **Whether supervisors see the live dashboard** (`report.view` rather than
+    `admin.agents`) is a decision nobody has taken. It kept its key with the
+    move; its page says why widening it is a choice about who watches the
+    worker's health and every agent's load by name.
+  - **`/admin/channels` still holds every channel on one page**: WhatsApp
+    business accounts, every channel type, the chat widget and the
+    routing-readiness panel. Splitting it per channel, as Zendesk, Freshdesk
+    and Intercom do, is the next step if the page keeps growing.
+
 - **"WhatsApp Support" has no reply path at all, by decision.** The console
   stopped replying on every WhatsApp number (LHFTeam/shipblu-support#357,
   `consoleReplyReason`), and that number is plain Cloud API, not linked to the
@@ -2444,7 +2530,8 @@ message bodies — the same reasoning as the deliberately tiny `pg_notify` paylo
     Graph refusal itself.
 
   The lesson worth keeping is the shape: nothing surfaces a dead job to a human.
-  The count is on `/api/health` and on `/admin`, and both are places you have to
+  The count is on `/api/health` and on the live dashboard (`/reports/live`,
+  `/admin/dashboard` when this was written), and both are places you have to
   already suspect something to look at. The eleven days of an unmoving `dead: 56`
   is the demonstration — it took somebody querying the table for any of it to be
   read, and three of the four populations are still unactioned.

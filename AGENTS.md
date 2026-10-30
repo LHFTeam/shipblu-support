@@ -175,7 +175,7 @@ Three things CI still cannot check, so they remain yours:
 ## Layout
 
 ```
-app/(console)/   agent console: inbox, contacts, kb, reports, admin
+app/(console)/   agent console: inbox, contacts, kb, reports, settings (admin/)
 app/(auth)/      login, first-admin setup, invites
 app/help/        public help centre and customer portal (served on its own host)
 app/api/         webhooks, SSE, widget, attachments, health
@@ -227,6 +227,39 @@ whole console (§6.81, twice). CI refuses a class list that scrolls vertically
 unless a position applies wherever it scrolls — unprefixed or under the scroll's
 own variant, on every branch of the expression, with no `static` to take it
 back (`scroll-positioned`).
+
+**The settings area is one map.** `app/(console)/admin/sections.ts` lists every
+settings page — its group, its label, the key its page requires, a line saying
+what it is for and the words other helpdesks use for it — and the sidebar, the
+phone strip, the settings home and the home's search are all drawn from it, so a
+page cannot be in the nav and missing from the home, or found by the search and
+hidden from the sidebar — a child page (`children`, drawn under its parent in the
+sidebar) has no card of its own, and the home finds it through its parent's card,
+whose keywords name it. The groups are Team, Channels, Tickets, Workflows,
+Agent tools, AI and Data, modelled on Zendesk's Admin Center, Freshdesk's Admin
+and Intercom's Settings, because "where do I change the SLA?" is a question
+about what somebody wants to happen, not about which table holds it; the file's
+header says why each group holds what it does. URLs stay flat,
+`/admin/<page>`: a group is a heading, not a path segment, so regrouping a page
+breaks no bookmark, no `revalidatePath` and no sentence in these docs. A new
+settings page goes into the map with the key its `page.tsx` requires — an array
+where `requireAnyPermission` lets any of several in — and the `admin-sections`
+repo rule refuses a settings page the map does not list, an `href` no page
+answers, a key that disagrees with the one the page requires, and an `href`
+listed twice: a link shown to somebody the page refuses is a dead end, and a page
+hidden from somebody it admits is lost. The area's gate is any key that opens
+one of its pages (`SETTINGS_PERMISSIONS`, through `requireAnyPermission` in
+`admin/layout.tsx`, and the same test for the rail's Settings item), not
+`admin.agents`, which made "may manage agents" the same thing as "may open
+settings"; the sidebar shows each person only the pages their keys open, and
+every page still checks its own. Two placements are deliberate. The live
+dashboard is read rather than configured, so it is `/reports/live`, still
+behind `admin.agents` — its page says why it did not take `report.view` with the
+move — and `/admin/dashboard` redirects there for the wallboards bookmarked on
+it. And `/admin/ai` is a read-only hub: each AI switch stays beside what it
+acts on — Jev's category classifier on `/admin/categories`, the reply
+suggestion on `/admin/canned`, priority in the environment — because a second
+copy of a switch would be two forms saving one row, and the stale one would win.
 
 ## Do not edit
 
@@ -286,8 +319,8 @@ The inbox's action files — `reply-`, `ticket-`, `meta-`, `shipment-`,
 `side-conversation-` and `subcategory-actions.ts` — answer with
 `app/(console)/action-state.ts`, the same state plus a `message`, kept outside
 every `'use server'` file so a component can name the type without importing an
-action module. Admin settings actions answer with `SettingsState` / `AdminState`
-from `admin/settings-shared.ts`, a plain module for the same reason. `contacts/`
+action module. The settings area's actions answer with `SettingsState` /
+`AdminState` from `admin/settings-shared.ts`, a plain module for the same reason. `contacts/`
 and `kb/` build theirs on `lib/http`'s `ActionState`. The sign-in, availability
 and new-ticket forms and the three help-centre forms have shapes of their own,
 and the help centre's are not a mistake to tidy: its `error` is a `StringKey`
@@ -1049,6 +1082,22 @@ changes hands through its own action, `setNumberOwner`, behind a two-click
 confirm that states how many tickets go with it, and never through
 `saveChannel`, which three forms post to. See
 `plans/whatsapp-number-ownership.md`.
+
+**The widget uses the oldest active web chat row** (`webchatChannel`): its
+default group, and so the hours the widget and the help centre's home page
+show, its FAQ folders and its routing mode. Every other web chat row files
+nothing. So a web chat row's switch on `/admin/channels` (`setWebchatActive`,
+`switchWebchatRow`) can move the widget either way, and its confirmation says
+where; the last active row is refused, under a transaction lock, because
+without one the widget files its chats under no row and no group.
+`lib/widget/rows.ts` is the one statement of what a switch does, asked by the
+page and again by the action. Only the Chat widget card posts the FAQ folders,
+and only for the widget's row, which it alone edits; `saveChannel` leaves a
+row's folders as they are when none is posted, so the row editor and the add
+form keep what the widget lists. Which form may save a web chat row is decided
+under the switch's lock, in the save's own transaction (`webchatEditRefusal`):
+the card only the widget's row, the editor only another, since a switch can
+change which that is under an open page.
 
 **Explaining a control.** A label short enough to fit a dense table is rarely
 long enough to explain itself. `InfoTip` from `components/tooltip.tsx` is the

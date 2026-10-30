@@ -1,6 +1,7 @@
 import { and, eq, gt, ne, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { groups, jobs, whatsappOnboardings } from '@/db/schema';
+import { isUniqueViolation } from '@/lib/db/errors';
 import { env, metaAppSecret } from '@/lib/env';
 import { errorMessage } from '@/lib/errors';
 import { isTimeout } from '@/lib/http/deadline';
@@ -904,12 +905,4 @@ export async function retryOnboarding(
   // still dead or failed in the table stays there as its record.
   await enqueue('complete_coexistence_onboarding', { onboardingId }, { priority: 10 });
   return { ok: true };
-}
-
-function isUniqueViolation(error: unknown): boolean {
-  const cause = (error as { cause?: { code?: unknown } } | null)?.cause;
-  return (
-    (error as { code?: unknown } | null)?.code === '23505' ||
-    (typeof cause === 'object' && cause !== null && cause.code === '23505')
-  );
 }

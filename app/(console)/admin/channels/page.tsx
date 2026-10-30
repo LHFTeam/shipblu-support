@@ -11,6 +11,7 @@ import {
 } from '@/lib/admin/settings';
 import { requirePermission } from '@/lib/auth/guard';
 import { can } from '@/lib/auth/permissions';
+import { canOpen } from '../sections';
 import { allLimited } from '@/lib/concurrency';
 import { env } from '@/lib/env';
 import { formatDateTime } from '@/lib/format';
@@ -33,6 +34,7 @@ import {
   shownOnboardings,
 } from '@/lib/whatsapp/onboarding-view';
 import { offerableFaqFolders, parseWidgetConfig } from '@/lib/widget/config';
+import { reportedRow, webchatStateKey, webchatSwitch, widgetRow } from '@/lib/widget/rows';
 import {
   CoexistenceBadges,
   ConnectBusinessAppNumber,
@@ -44,8 +46,10 @@ import {
   ChannelEditor,
   ChannelForm,
   OwnerEditor,
+  WebchatActiveSwitch,
   WebchatSettings,
   type OwnerChoice,
+  type WebchatSwitchView,
 } from './forms';
 import { RoutingBadge, RoutingReadinessPanel } from './routing-readiness';
 import { NewWhatsAppAccount, WhatsAppAccountEditor, type WhatsAppAccountRow } from './waba-forms';
@@ -60,7 +64,7 @@ export default async function ChannelsPage() {
   const canConnect = can(agent, 'admin.channels.connect');
 
   // One clock for every sentence on the page, so the badge on a row and the
-  // card above it cannot disagree about whether a window has closed — nor the
+  // progress card further down cannot disagree about whether a window has closed — nor the
   // routing panel about who is accepting tickets.
   const now = new Date();
 
@@ -110,12 +114,33 @@ export default async function ChannelsPage() {
     }),
   );
 
-  // The same row `webchatChannel()` reads — oldest active first. Picking by a
+  // The same row `webchatChannel()` reads: oldest active first, ties by id,
+  // which is the order `routingReadiness` read every row in. Picking by a
   // different rule would let an admin configure one row while the widget read
-  // another, and the setting would look saved and do nothing.
-  const webchat = channelList
-    .filter((channel) => channel.type === 'webchat' && channel.isActive)
-    .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())[0];
+  // another, and the setting would look saved and do nothing — sorting this
+  // page's own list, ordered by name and timed to the millisecond, was one.
+  // Only the order is taken from that read, which no write moves; the rows
+  // themselves are the list's, so the Inactive badge, the switch and the card
+  // are drawn from one read of each row, and a switch committed between the
+  // two reads cannot set them against each other. (The routing badges and the
+  // readiness panel are still the routing read's, so for one render they can
+  // disagree with the list; the next draws them alike.) A row in the list
+  // that the routing read has not seen was added between the two reads, so it
+  // is the newest and goes last. Each web chat row's switch is worded from
+  // these rows, by the rule the action applies again under its lock, and shows
+  // its answer while these rows are as the action left them.
+  const order = new Map(routing.channels.map((channel, index) => [channel.id, index]));
+  const position = (id: string) => order.get(id) ?? Number.MAX_SAFE_INTEGER;
+  const webchatRows = channelList
+    .filter((channel) => channel.type === 'webchat')
+    .sort((a, b) => position(a.id) - position(b.id));
+  const webchat = widgetRow(webchatRows);
+  const webchatKey = webchatStateKey(webchatRows.map(reportedRow));
+  const switchView = (channelId: string): WebchatSwitchView | null => {
+    const plan = webchatSwitch(webchatRows, channelId);
+    if (plan?.kind !== 'switch_off') return plan;
+    return { kind: 'switch_off', widgetMovesTo: plan.widgetMovesTo?.name ?? null };
+  };
 
   const accountChoices = accountList.map((account) => ({ id: account.id, name: account.name }));
   const ownerChoices: OwnerChoice[] = agentList.map(({ id, name, email }) => ({ id, name, email }));
@@ -192,6 +217,200 @@ export default async function ChannelsPage() {
     <div className="flex flex-col gap-8">
       <section>
         <PageHeader
+          title="Channels"
+          description="Addresses and routing only. Credentials live in the environment — or, for a number connected through Meta, sealed in the database under a key the database never sees — so a dump never contains a usable token. WhatsApp business accounts, and connecting a number through Meta, are below the list."
+        />
+
+        <ul className="mb-4 divide-y divide-(--color-border-subtle) rounded-xl border border-(--color-border-subtle) bg-(--color-background-surface) text-sm">
+          {channelList.length === 0 ? (
+            <li className="px-4 py-3 text-(--color-text-secondary)">
+              No channels configured yet. Tickets still arrive; they just have no default group.
+            </li>
+          ) : null}
+          {channelList.map((channel) => {
+            const account = accounts.find((row) => row.id === channel.whatsappAccountId);
+            const isWhatsApp = channel.type === 'whatsapp' || channel.type === 'whatsapp_bot';
+            const coexistence =
+              channel.type === 'whatsapp' ? parseCoexistence(channel.config) : null;
+
+            // A number that was disconnected on the phone, whose copy window
+            // closed with a copy never made, whose history the phone declined,
+            // or whose history copy stalled part-way, is reconnected through
+            // the same window it was connected through — `needsReconnect`,
+            // drawn from the same facts as the badge that says which.
+            const reconnectable = coexistence !== null && needsReconnect(coexistence, now);
+            // Every WhatsApp number, plain or coexistence, and nothing else: the bot and the
+            // shared inboxes are the whole team's, and the database refuses an
+            // owner on them (`channels_owner_only_whatsapp`).
+            const ownership =
+              channel.type === 'whatsapp' ? ownershipById.get(channel.id) : undefined;
+            // The copy buttons wait for the attempt that wrote this object to
+            // finish connecting: until then the copy is one of its own steps,
+            // shown on its progress card, and the job would skip a run of the
+            // copy alone. Keyed on the attempt the channel names, not on the
+            // latest per number — a newer attempt that failed early leaves
+            // this one connected and its buttons working. The action asks
+            // again, since this render can be stale.
+            const attempt = coexistence?.onboardingId
+              ? onboardings.find((onboarding) => onboarding.id === coexistence.onboardingId)
+              : undefined;
+            const stillConnecting = attempt?.status === 'exchanged';
+            const switchPlan = channel.type === 'webchat' ? switchView(channel.id) : null;
+
+            return (
+              <li key={channel.id} className="flex flex-wrap items-center gap-3 px-4 py-3">
+                <ChannelBadge channel={channel.type} />
+                <span className="font-medium">{channel.name}</span>
+                {!channel.isActive ? <Badge tone="neutral">Inactive</Badge> : null}
+                {coexistence ? <CoexistenceBadges config={channel.config} now={now} /> : null}
+                <RoutingBadge channel={routingById.get(channel.id)} />
+                {/* A number with no account sends with the default one's
+                    credential. Fine while there is exactly one account, and a
+                    real hazard once there are two — so it is only called out
+                    when there is something to be wrong about. Edit, beside it,
+                    is what clears it: the badge used to name a problem the
+                    console had no way to fix. */}
+                {isWhatsApp && !account && accounts.length > 1 ? (
+                  <Badge tone="warning">No business account</Badge>
+                ) : null}
+                <span className="ms-auto text-xs text-(--color-text-secondary)">
+                  {coexistence
+                    ? `${coexistence.displayPhoneNumber ?? (channel.config.phoneNumberId as string)}${
+                        coexistence.verifiedName ? ` · ${coexistence.verifiedName}` : ''
+                      }${account ? ` · ${account.name}` : ''}`
+                    : isWhatsApp
+                      ? `${(channel.config.phoneNumberId as string) || 'no phone number id'}${
+                          account ? ` · ${account.name}` : ''
+                        }`
+                      : isMetaChannel(channel.type)
+                        ? 'hardcoded in server environment variables'
+                        : channel.type === 'webchat'
+                          ? channel.id === webchat?.id
+                            ? 'the widget'
+                            : 'not the widget’s row'
+                          : (channel.config.address as string) || 'no address'}
+                </span>
+                {coexistence && canConnect && channel.isActive && !stillConnecting
+                  ? SYNC_TYPES.map((type) => {
+                      if (!canRequestSync(coexistence, type, now).ok) return null;
+                      const slot = coexistence.syncs[type];
+                      return (
+                        <RequestSyncAgain
+                          key={type}
+                          channelId={channel.id}
+                          type={type}
+                          again={Boolean(slot && 'error' in slot)}
+                          version={progressVersionNow}
+                        />
+                      );
+                    })
+                  : null}
+                {/* The widget's row is edited by the Chat widget card below,
+                    which has its folders: two forms saving one row's group and
+                    mode would each put the other's stale values back. */}
+                {channel.type === 'webchat' && channel.id === webchat?.id ? (
+                  <span className="text-xs text-(--color-text-secondary)">
+                    Edited under Chat widget
+                  </span>
+                ) : (
+                  <ChannelEditor
+                    channel={{ ...channel, routingMode: savedRoutingMode(channel.id) }}
+                    groups={groupList}
+                    whatsappAccounts={accountChoices}
+                    classifierMode={classifierMode}
+                  />
+                )}
+                {switchPlan ? (
+                  <WebchatActiveSwitch
+                    channelId={channel.id}
+                    plan={switchPlan}
+                    stateKey={webchatKey}
+                  />
+                ) : null}
+                {reconnectable && canConnect ? (
+                  <ConnectBusinessAppNumber
+                    {...connectProps}
+                    suggestedGroupId={channel.defaultGroupId}
+                    mode="reconnect"
+                  />
+                ) : null}
+                {ownership ? <NumberOwnerLine ownership={ownership} agents={ownerChoices} /> : null}
+              </li>
+            );
+          })}
+        </ul>
+
+        {/* Above the "add a channel" form because it is a setting on a row that
+            already exists, not another row to create — and because the widget is
+            the one channel whose configuration a customer sees directly. */}
+        {webchat ? (
+          <Card className="mb-4">
+            {/* Keyed on the row, because a switch can hand the widget to
+                another one while the card is open: reused, its hidden id
+                followed the new row while its selects kept the old row's
+                group, mode and folders, and saving wrote those over the new
+                row's own. */}
+            <WebchatSettings
+              key={webchat.id}
+              channel={{
+                id: webchat.id,
+                name: webchat.name,
+                defaultGroupId: webchat.defaultGroupId,
+                faqFolders: parseWidgetConfig(webchat.config).faqFolders,
+                routingMode: savedRoutingMode(webchat.id),
+              }}
+              groups={groupList}
+              folders={faqFolders}
+              classifierMode={classifierMode}
+            />
+          </Card>
+        ) : null}
+
+        <ChannelForm
+          groups={groupList}
+          whatsappAccounts={accountChoices}
+          classifierMode={classifierMode}
+        />
+      </section>
+
+      <RoutingReadinessPanel
+        readiness={routing}
+        canEditCategories={can(agent, 'admin.categories')}
+        canViewReport={can(agent, 'report.view')}
+      />
+
+      {/* The groups that the default-group picker above chooses between, listed
+          so that "which group?" can be answered without leaving the page.
+          Creating and editing them is the Groups page's job — a group there
+          also carries a description and its own business hours, and a second
+          form that could only set the name would quietly make half a group. */}
+      <section>
+        <div className="mb-3 flex items-center gap-3">
+          <h2 className="text-lg font-semibold">Groups</h2>
+          {/* Groups is `admin.groups`' page, which this one's key does not open. */}
+          {canOpen(agent, '/admin/groups') ? (
+            <Link
+              href="/admin/groups"
+              className="ms-auto text-sm text-(--color-text-link) hover:text-(--color-text-link-hover) hover:underline"
+            >
+              Manage groups
+            </Link>
+          ) : null}
+        </div>
+        <ul className="divide-y divide-(--color-border-subtle) rounded-xl border border-(--color-border-subtle) bg-(--color-background-surface) text-sm">
+          {groupList.length === 0 ? (
+            <li className="px-4 py-3 text-(--color-text-tertiary)">No groups yet.</li>
+          ) : null}
+          {groupList.map((group) => (
+            <li key={group.id} className="px-4 py-3">
+              {group.name}
+            </li>
+          ))}
+        </ul>
+      </section>
+
+      <section>
+        <PageHeader
           title="WhatsApp business accounts"
           description="One connection per WABA. Numbers, templates and media are all scoped to a business account by Meta, so which one a number belongs to decides which credential it sends with and which templates an agent may pick."
           actions={
@@ -237,17 +456,15 @@ export default async function ChannelsPage() {
               : 'None connected. WhatsApp numbers fall back to META_PAGE_ACCESS_TOKEN and WHATSAPP_WABA_ID from the environment.'}
           </p>
         ) : null}
-      </section>
 
-      <section>
-        <PageHeader
-          title="Channels"
-          description="Addresses and routing only. Credentials live in the environment — or, for a number connected through Meta, sealed in the database under a key the database never sees — so a dump never contains a usable token."
-        />
-
+        {/* Below the account rows and the button that starts a connection,
+            because the sentences around them say so: the connect card's "the
+            progress below", a progress card's "the account's row above". It
+            used to open the Channels list, which put a connection's progress
+            above the button that began it once the list came first. */}
         <OnboardingPolling intervalMs={pollMs} version={progressVersionNow} />
         {progressCards.length > 0 ? (
-          <div className="mb-4 flex flex-col gap-2">
+          <div className="mt-4 flex flex-col gap-2">
             {progressCards.map((onboarding) => {
               const channel = onboarding.channelId
                 ? channelList.find((row) => row.id === onboarding.channelId)
@@ -277,165 +494,6 @@ export default async function ChannelsPage() {
             })}
           </div>
         ) : null}
-
-        <ul className="mb-4 divide-y divide-(--color-border-subtle) rounded-xl border border-(--color-border-subtle) bg-(--color-background-surface) text-sm">
-          {channelList.length === 0 ? (
-            <li className="px-4 py-3 text-(--color-text-secondary)">
-              No channels configured yet. Tickets still arrive; they just have no default group.
-            </li>
-          ) : null}
-          {channelList.map((channel) => {
-            const account = accounts.find((row) => row.id === channel.whatsappAccountId);
-            const isWhatsApp = channel.type === 'whatsapp' || channel.type === 'whatsapp_bot';
-            const coexistence =
-              channel.type === 'whatsapp' ? parseCoexistence(channel.config) : null;
-
-            // A number that was disconnected on the phone, whose copy window
-            // closed with a copy never made, whose history the phone declined,
-            // or whose history copy stalled part-way, is reconnected through
-            // the same window it was connected through — `needsReconnect`,
-            // drawn from the same facts as the badge that says which.
-            const reconnectable = coexistence !== null && needsReconnect(coexistence, now);
-            // Every WhatsApp number, plain or coexistence, and nothing else: the bot and the
-            // shared inboxes are the whole team's, and the database refuses an
-            // owner on them (`channels_owner_only_whatsapp`).
-            const ownership =
-              channel.type === 'whatsapp' ? ownershipById.get(channel.id) : undefined;
-            // The copy buttons wait for the attempt that wrote this object to
-            // finish connecting: until then the copy is one of its own steps,
-            // shown on its progress card, and the job would skip a run of the
-            // copy alone. Keyed on the attempt the channel names, not on the
-            // latest per number — a newer attempt that failed early leaves
-            // this one connected and its buttons working. The action asks
-            // again, since this render can be stale.
-            const attempt = coexistence?.onboardingId
-              ? onboardings.find((onboarding) => onboarding.id === coexistence.onboardingId)
-              : undefined;
-            const stillConnecting = attempt?.status === 'exchanged';
-
-            return (
-              <li key={channel.id} className="flex flex-wrap items-center gap-3 px-4 py-3">
-                <ChannelBadge channel={channel.type} />
-                <span className="font-medium">{channel.name}</span>
-                {!channel.isActive ? <Badge tone="neutral">Inactive</Badge> : null}
-                {coexistence ? <CoexistenceBadges config={channel.config} now={now} /> : null}
-                <RoutingBadge channel={routingById.get(channel.id)} />
-                {/* A number with no account sends with the default one's
-                    credential. Fine while there is exactly one account, and a
-                    real hazard once there are two — so it is only called out
-                    when there is something to be wrong about. Edit, beside it,
-                    is what clears it: the badge used to name a problem the
-                    console had no way to fix. */}
-                {isWhatsApp && !account && accounts.length > 1 ? (
-                  <Badge tone="warning">No business account</Badge>
-                ) : null}
-                <span className="ms-auto text-xs text-(--color-text-secondary)">
-                  {coexistence
-                    ? `${coexistence.displayPhoneNumber ?? (channel.config.phoneNumberId as string)}${
-                        coexistence.verifiedName ? ` · ${coexistence.verifiedName}` : ''
-                      }${account ? ` · ${account.name}` : ''}`
-                    : isWhatsApp
-                      ? `${(channel.config.phoneNumberId as string) || 'no phone number id'}${
-                          account ? ` · ${account.name}` : ''
-                        }`
-                      : isMetaChannel(channel.type)
-                        ? 'hardcoded in server environment variables'
-                        : channel.type === 'webchat'
-                          ? 'the widget'
-                          : (channel.config.address as string) || 'no address'}
-                </span>
-                {coexistence && canConnect && channel.isActive && !stillConnecting
-                  ? SYNC_TYPES.map((type) => {
-                      if (!canRequestSync(coexistence, type, now).ok) return null;
-                      const slot = coexistence.syncs[type];
-                      return (
-                        <RequestSyncAgain
-                          key={type}
-                          channelId={channel.id}
-                          type={type}
-                          again={Boolean(slot && 'error' in slot)}
-                          version={progressVersionNow}
-                        />
-                      );
-                    })
-                  : null}
-                <ChannelEditor
-                  channel={{ ...channel, routingMode: savedRoutingMode(channel.id) }}
-                  groups={groupList}
-                  whatsappAccounts={accountChoices}
-                  classifierMode={classifierMode}
-                />
-                {reconnectable && canConnect ? (
-                  <ConnectBusinessAppNumber
-                    {...connectProps}
-                    suggestedGroupId={channel.defaultGroupId}
-                    mode="reconnect"
-                  />
-                ) : null}
-                {ownership ? <NumberOwnerLine ownership={ownership} agents={ownerChoices} /> : null}
-              </li>
-            );
-          })}
-        </ul>
-
-        {/* Above the "add a channel" form because it is a setting on a row that
-            already exists, not another row to create — and because the widget is
-            the one channel whose configuration a customer sees directly. */}
-        {webchat ? (
-          <Card className="mb-4">
-            <WebchatSettings
-              channel={{
-                id: webchat.id,
-                name: webchat.name,
-                defaultGroupId: webchat.defaultGroupId,
-                faqFolders: parseWidgetConfig(webchat.config).faqFolders,
-                routingMode: savedRoutingMode(webchat.id),
-              }}
-              groups={groupList}
-              folders={faqFolders}
-              classifierMode={classifierMode}
-            />
-          </Card>
-        ) : null}
-
-        <ChannelForm
-          groups={groupList}
-          whatsappAccounts={accountChoices}
-          classifierMode={classifierMode}
-        />
-      </section>
-
-      <RoutingReadinessPanel
-        readiness={routing}
-        canEditCategories={can(agent, 'admin.categories')}
-        canViewReport={can(agent, 'report.view')}
-      />
-
-      {/* The groups that the default-group picker above chooses between, listed
-          so that "which group?" can be answered without leaving the page.
-          Creating and editing them is the Groups page's job — a group there
-          also carries a description and its own business hours, and a second
-          form that could only set the name would quietly make half a group. */}
-      <section>
-        <div className="mb-3 flex items-center gap-3">
-          <h2 className="text-lg font-semibold">Groups</h2>
-          <Link
-            href="/admin/groups"
-            className="ms-auto text-sm text-(--color-text-link) hover:text-(--color-text-link-hover) hover:underline"
-          >
-            Manage groups
-          </Link>
-        </div>
-        <ul className="divide-y divide-(--color-border-subtle) rounded-xl border border-(--color-border-subtle) bg-(--color-background-surface) text-sm">
-          {groupList.length === 0 ? (
-            <li className="px-4 py-3 text-(--color-text-tertiary)">No groups yet.</li>
-          ) : null}
-          {groupList.map((group) => (
-            <li key={group.id} className="px-4 py-3">
-              {group.name}
-            </li>
-          ))}
-        </ul>
       </section>
     </div>
   );

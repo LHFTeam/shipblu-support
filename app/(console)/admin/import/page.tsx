@@ -1,3 +1,4 @@
+import { PageHeader } from '@/components/ui';
 import {
   knowledgeBaseCounts,
   locationCounts,
@@ -24,10 +25,17 @@ export default async function ImportPage() {
   ]);
 
   return (
-    <div className="flex flex-col gap-10">
-      <ImportForm runs={runs} counts={counts} />
-      <ShipmentBackfillForm runs={backfillRuns} counts={shipmentRow} />
-      <LocationBackfillForm runs={locationRuns} counts={locationRow} />
-    </div>
+    <>
+      <PageHeader
+        title="Imports & backfills"
+        description="Bring the Freshdesk knowledge base in, and go back over the archive: link the tracking numbers and SBIDs older messages mention, and recover the map pins that reached us only as text. Each runs on the worker and is safe to run again."
+      />
+
+      <div className="flex flex-col gap-10">
+        <ImportForm runs={runs} counts={counts} />
+        <ShipmentBackfillForm runs={backfillRuns} counts={shipmentRow} />
+        <LocationBackfillForm runs={locationRuns} counts={locationRow} />
+      </div>
+    </>
   );
 }

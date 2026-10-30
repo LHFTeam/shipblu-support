@@ -95,10 +95,18 @@ const nextConfig: NextConfig = {
    * `shadow` pages. Stage 3 removed all three when the category field's admin
    * page took the path, `review` and `shadow` included, so a child page of its
    * own named either way is not hidden behind one.
+   *
+   * The live dashboard moved from `/admin/dashboard` to `/reports/live` when
+   * the settings area was reorganised, since it is read rather than configured,
+   * and the wallboards left open on it are bookmarks nobody will think to
+   * update. Its `?days=` carries over the same way, and the same three rules
+   * hold for the same reasons: temporary, exact, and deleted by the PR that
+   * puts a page back on the old path.
    */
   async redirects() {
     return [
       { source: '/reports/categories', destination: '/reports/subcategories', permanent: false },
+      { source: '/admin/dashboard', destination: '/reports/live', permanent: false },
     ];
   },
 

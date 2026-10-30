@@ -22,9 +22,9 @@ export const dynamic = 'force-dynamic';
  * did and changing where the next ticket goes are different things to hand out
  * — see `agent.availability`.
  *
- * Everything here comes from `agentLoad()`, the same function the admin
- * dashboard renders, so the two cannot disagree about who is available. This
- * page adds why, and what to do about it.
+ * Everything here comes from `agentLoad()`, the same function the live
+ * dashboard (`/reports/live`) renders, so the two cannot disagree about who is
+ * available. This page adds why, and what to do about it.
  */
 export default async function TeamAvailabilityPage() {
   await requirePermission('agent.availability');

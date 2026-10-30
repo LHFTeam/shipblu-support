@@ -49,7 +49,7 @@ export function useRefreshWhileRunning(runs: BackfillRun[]): void {
 export function BackfillRuns({ runs, empty }: { runs: BackfillRun[]; empty: string }) {
   return (
     <section>
-      <h2 className="mb-2 text-sm font-semibold text-(--color-text-secondary)">Recent runs</h2>
+      <h3 className="mb-2 text-sm font-semibold text-(--color-text-secondary)">Recent runs</h3>
 
       {runs.length === 0 ? (
         <p className="text-sm text-(--color-text-tertiary)">{empty}</p>

@@ -732,7 +732,7 @@ export type ProgressRows = {
 export function progressVersion(rows: ProgressRows, now: Date): string {
   // By id, so the page and the endpoint may read the rows in any order. The
   // order the cards are drawn in moves only with `startedAt`, which is in the
-  // rows already; the rows below the cards are drawn by name, which only an
+  // rows already; the channel rows are drawn by name, which only an
   // action changes, and an action re-renders the page by itself.
   const byId = <T extends { id: string }>(list: readonly T[]) =>
     [...list].sort((a, b) => a.id.localeCompare(b.id));

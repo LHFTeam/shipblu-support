@@ -2,67 +2,25 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { Fragment, useEffect, useRef } from 'react';
+import { currentHref } from './current-href';
 
 /**
- * Admin sections.
+ * The settings sidebar, drawn from `sections.ts` by the layout, which has
+ * already left out what this agent cannot open.
  *
- * Grouped by intent — the team, how work is routed, what the customer sees —
- * because "where do I change the SLA?" is a question about what you want to
- * happen, not about which table it is stored in.
- *
- * On a phone this becomes a horizontally scrolling strip rather than a menu
- * behind a button: there are only a dozen destinations and hiding them behind
- * a tap makes finding a setting a two-step search.
+ * On a phone it becomes a horizontally scrolling strip rather than a menu
+ * behind a button: hiding the destinations behind a tap makes finding a
+ * setting a two-step search. There are twenty-odd of them now, so the strip
+ * keeps a hairline between groups and scrolls the current page into view,
+ * where it would otherwise start off the edge of the screen.
  */
 
-const SECTIONS: { title: string; links: { href: string; label: string }[] }[] = [
-  {
-    title: 'Overview',
-    links: [{ href: '/admin/dashboard', label: 'Dashboard' }],
-  },
-  {
-    title: 'Team',
-    links: [
-      { href: '/admin/agents', label: 'Agents' },
-      { href: '/admin/groups', label: 'Groups' },
-      { href: '/admin/skills', label: 'Skills' },
-      { href: '/admin/locations', label: 'Locations' },
-    ],
-  },
-  {
-    title: 'Routing',
-    links: [
-      { href: '/admin/sla', label: 'SLA policies' },
-      { href: '/admin/automations', label: 'Automations' },
-      { href: '/admin/hours', label: 'Business hours' },
-      { href: '/admin/auto-responses', label: 'Out-of-hours replies' },
-      { href: '/admin/csat', label: 'Satisfaction surveys' },
-    ],
-  },
-  {
-    title: 'Tickets',
-    links: [
-      { href: '/admin/statuses', label: 'Statuses' },
-      { href: '/admin/categories', label: 'Categories' },
-      { href: '/admin/subcategories', label: 'Subcategories' },
-      { href: '/admin/fields', label: 'Fields' },
-      { href: '/admin/forms', label: 'Forms' },
-      { href: '/admin/canned', label: 'Canned responses' },
-    ],
-  },
-  {
-    title: 'Help centre',
-    links: [{ href: '/admin/tracking', label: 'Tracking wording' }],
-  },
-  {
-    title: 'Channels',
-    links: [
-      { href: '/admin/channels', label: 'Channels' },
-      { href: '/admin/recipients', label: 'Internal recipients' },
-      { href: '/admin/import', label: 'Freshdesk import' },
-    ],
-  },
-];
+export type NavLink = { href: string; label: string };
+export type NavSection = {
+  title: string;
+  links: (NavLink & { children: NavLink[] })[];
+};
 
 /*
  * The design system's views-panel item: the section you are in wears the
@@ -73,42 +31,69 @@ const SECTIONS: { title: string; links: { href: string; label: string }[] }[] = 
 const ITEM =
   'flex min-h-9 items-center rounded-md px-2 text-sm text-(--color-text-primary) transition-colors hover:bg-(--color-background-hover) aria-[current=page]:bg-(--color-background-selected) aria-[current=page]:font-semibold aria-[current=page]:text-(--color-text-brand)';
 
+const CHILD =
+  'flex min-h-8 items-center rounded-md ps-5 pe-2 text-xs text-(--color-text-secondary) transition-colors hover:bg-(--color-background-hover) aria-[current=page]:bg-(--color-background-selected) aria-[current=page]:font-semibold aria-[current=page]:text-(--color-text-brand)';
+
 const CHIP =
   'rounded-full bg-(--color-background-surface-sunken) px-3 py-1 text-xs whitespace-nowrap text-(--color-text-secondary) aria-[current=page]:bg-(--color-background-selected) aria-[current=page]:font-semibold aria-[current=page]:text-(--color-text-brand)';
 
-export function AdminNav() {
+export function AdminNav({ sections }: { sections: NavSection[] }) {
   const pathname = usePathname();
-  const isActive = (href: string) => pathname === href || pathname.startsWith(`${href}/`);
+  const current = currentHref(pathname, sections);
+  const strip = useRef<HTMLElement>(null);
+
+  // The strip is wider than any phone, and the page you are on is as likely to
+  // be its twentieth chip as its first. The strip alone is scrolled, by the
+  // distance between the chip's centre and its own: `scrollIntoView` scrolls
+  // every ancestor it may, and the console shell is `overflow-hidden`, which a
+  // script can still scroll — the §6.81 way the whole console moves. A
+  // relative `scrollBy` also reads the same in a right-to-left page, where
+  // `scrollLeft` counts the other way.
+  useEffect(() => {
+    const bar = strip.current;
+    const chip = bar?.querySelector<HTMLElement>('[aria-current="page"]');
+    if (!bar || !chip) return;
+    const barBox = bar.getBoundingClientRect();
+    const chipBox = chip.getBoundingClientRect();
+    bar.scrollBy({
+      left: chipBox.left + chipBox.width / 2 - (barBox.left + barBox.width / 2),
+    });
+  }, [current]);
+
+  const mark = (href: string) => (href === current ? ('page' as const) : undefined);
 
   return (
     <>
       <nav
-        aria-label="Admin sections"
+        aria-label="Settings sections"
         className="app-scroll relative hidden w-(--views-width) shrink-0 flex-col gap-4.5 overflow-y-auto border-e border-(--color-border-subtle) bg-(--color-background-surface) px-2.5 py-4 lg:flex"
       >
-        <Link
-          href="/admin"
-          aria-current={pathname === '/admin' ? 'page' : undefined}
-          className={`${ITEM} font-semibold`}
-        >
+        <Link href="/admin" aria-current={mark('/admin')} className={`${ITEM} font-semibold`}>
           Settings
         </Link>
 
-        {SECTIONS.map((section) => (
-          <div key={section.title}>
+        {sections.map((section) => (
+          <div key={section.title} role="group" aria-label={section.title}>
             <p className="mb-1 px-2 text-xs font-semibold text-(--color-text-secondary)">
               {section.title}
             </p>
             <ul className="flex flex-col gap-0.5">
               {section.links.map((link) => (
                 <li key={link.href}>
-                  <Link
-                    href={link.href}
-                    aria-current={isActive(link.href) ? 'page' : undefined}
-                    className={ITEM}
-                  >
+                  <Link href={link.href} aria-current={mark(link.href)} className={ITEM}>
                     {link.label}
                   </Link>
+                  {link.children.length > 0 ? (
+                    <ul className="mt-0.5 flex flex-col gap-0.5">
+                      {link.children.map((child) => (
+                        <li key={child.href}>
+                          <Link href={child.href} aria-current={mark(child.href)} className={CHILD}>
+                            {child.label}
+                          </Link>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
                 </li>
               ))}
             </ul>
@@ -119,18 +104,29 @@ export function AdminNav() {
       {/* Pinned under the console header, and clear of the rail from `md`,
           where the rail appears and this strip is still showing. */}
       <nav
-        aria-label="Admin sections"
-        className="app-scroll fixed inset-x-0 top-(--header-height) z-20 flex gap-1 overflow-x-auto border-b border-(--color-border-subtle) bg-(--color-background-surface) px-3 py-2 md:start-(--rail-width) lg:hidden"
+        ref={strip}
+        aria-label="Settings sections"
+        className="app-scroll fixed inset-x-0 top-(--header-height) z-20 flex items-center gap-1 overflow-x-auto border-b border-(--color-border-subtle) bg-(--color-background-surface) px-3 py-2 md:start-(--rail-width) lg:hidden"
       >
-        {SECTIONS.flatMap((section) => section.links).map((link) => (
-          <Link
-            key={link.href}
-            href={link.href}
-            aria-current={isActive(link.href) ? 'page' : undefined}
-            className={CHIP}
-          >
-            {link.label}
-          </Link>
+        <Link href="/admin" aria-current={mark('/admin')} className={`${CHIP} font-semibold`}>
+          Settings
+        </Link>
+        {sections.map((section) => (
+          <Fragment key={section.title}>
+            <span aria-hidden className="mx-1 h-4 w-px shrink-0 bg-(--color-border-subtle)" />
+            {section.links
+              .flatMap((link) => [link, ...link.children])
+              .map((link) => (
+                <Link
+                  key={link.href}
+                  href={link.href}
+                  aria-current={mark(link.href)}
+                  className={CHIP}
+                >
+                  {link.label}
+                </Link>
+              ))}
+          </Fragment>
         ))}
       </nav>
     </>
