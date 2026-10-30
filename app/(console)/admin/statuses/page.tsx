@@ -4,6 +4,7 @@ import { listTicketStatuses } from '@/lib/admin/settings';
 import { requirePermission } from '@/lib/auth/guard';
 import { NewStatus, StatusEditor } from './forms';
 import { sentenceCase } from '@/lib/format';
+import { categoryWord, shownLabel } from '@/lib/portal/status-words';
 
 export const dynamic = 'force-dynamic';
 
@@ -53,8 +54,8 @@ export default async function StatusesPage() {
             <InfoTip label="Customer sees">
               What the portal shows. Agents name statuses for themselves — &ldquo;Waiting on
               ops&rdquo;, &ldquo;Escalated tier 2&rdquo; — so a customer is never shown the
-              status&rsquo;s own name: they see the label set here, and with none set, a plain word
-              for the category in their own language.
+              status&rsquo;s own name: they see the label set here, and with none set or the status
+              not shown to customers, a plain word for the category in their own language.
             </InfoTip>
           </>,
           '',
@@ -75,12 +76,14 @@ export default async function StatusesPage() {
                 <span className="text-xs">running</span>
               )}
             </Cell>
+            {/* What the portal draws, through the portal's own rule
+                (`shownLabel`, `categoryWord`), with both languages' words since
+                the reader picks the language. "hidden" stood here for a status
+                not shown, which read as the customer seeing no status at all,
+                and "the category word" beside a Pending badge read as "Pending"
+                where the portal says "In progress". */}
             <Cell className="text-xs text-(--color-text-secondary)">
-              {status.visibleToCustomer ? (
-                (status.customerLabel ?? <span className="italic">the category word</span>)
-              ) : (
-                <span>hidden</span>
-              )}
+              <CustomerSees status={status} />
             </Cell>
             <Cell className="text-end">
               <StatusEditor status={status} deleteOnly />
@@ -88,6 +91,28 @@ export default async function StatusesPage() {
           </Row>
         ))}
       </Table>
+    </>
+  );
+}
+
+function CustomerSees({
+  status,
+}: {
+  status: {
+    category: string;
+    visibleToCustomer: boolean;
+    customerLabel: string | null;
+  };
+}) {
+  const label = shownLabel(status);
+  if (label !== null) return <>{label}</>;
+  return (
+    <>
+      {categoryWord(status.category, 'en')} ·{' '}
+      <bdi lang="ar">{categoryWord(status.category, 'ar')}</bdi>{' '}
+      <span className="italic">
+        ({status.customerLabel ? 'category word, label hidden' : 'category word'})
+      </span>
     </>
   );
 }
