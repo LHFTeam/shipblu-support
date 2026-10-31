@@ -270,9 +270,11 @@ migrations...` at 06:28:24.4, and all nine `db/sql` files were done at
   No `classify_category` job is dead. Of the 85 tickets opened since the
   switch, 83 are on the customer bot, which the classifier skips by design;
   the other two are those two.
-- **Nothing routes.** Every channel is still on `default_group`, so nothing is
-  held and there is no `routing_decisions` row (5.2 is operations, not
-  started).
+- **Nothing has routed yet.** Web Chat has been in `category` mode since 14:45
+  UTC on 2026-10-30 (Next, item 10), and every other channel is on
+  `default_group`. The widget has opened no ticket since 2026-10-20, so at
+  18:04 UTC on 2026-10-31 nothing had been held and there was no
+  `routing_decisions` row.
 - **Next**: the backlog (step 5), after a week of `apply` and the user's
   go-ahead, then the `rollup_metrics from=2026-08-18` rebuild. The way back
   is the switch: `shadow` or `off` on `/admin/categories`, effective within
@@ -768,8 +770,8 @@ Every production write needs the user's go-ahead for that step, and the
     support lead answers the questions still open (below). Read on 2026-10-30
     at 13:00 UTC, two of 5.2's prerequisites hold, and two more were written at
     the user's go-ahead at 14:10–14:11 (above and below); the rest do not:
-    - **done:** all six services run 5.1, and since 12:03:38 UTC on 2026-10-30
-      release #446 (`83f1889`, #443 and #444), which carries it;
+    - **done:** all six services run 5.1, and since 15:22:45 UTC on 2026-10-30
+      release #450 (`eaf07ab`, with #445 and #448), which carries it;
     - **done:** the classifier is in `apply`, switched by the user at 18:37 UTC
       on 2026-10-29 (4.2's Apply);
     - **done on 2026-10-30:** route groups on the categories, as Q5 decided —
