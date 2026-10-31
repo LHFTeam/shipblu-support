@@ -55,8 +55,10 @@ user's go-ahead. The plan's status section has the reads (4.2's Apply).
 `categories_computed_at` on those three days, and `metrics_daily` holds no
 duplicate slice and no row naming two dimensions. It wrote no category row:
 Jev's first filed ticket opened at 00:31 on the 30th in Cairo, the night the
-clocks went back. The second nightly, at 00:00 UTC on 2026-10-31, writes the
-first.
+clocks went back. The second nightly, at 00:00 UTC on 2026-10-31, wrote the
+first and read clean: the 30th's `sales` row counts 2 tickets created and its
+`customer_support` row 1, exactly the tickets created that Cairo day carrying
+each, with still no duplicate slice and no row naming two dimensions.
 
 The release before it, `69a22b6`, was deployed by hand on 2026-10-29, all six
 services by 17:47:16 UTC: release #442, which carries #440: every automated reply on a
@@ -1769,9 +1771,10 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
   2026-10-29), and a ticket is held, or
   a `settle_routing` job queued, only on a channel an admin has moved to a
   category mode _while the classifier is in `apply`_. The classifier has been
-  in `apply` since 18:37 UTC on 2026-10-29, so what is left is an admin moving
-  a channel to a category mode: every channel is still on `default_group`
-  (read 13:00 UTC on 2026-10-30). Since 14:10 UTC on 2026-10-30 three
+  in `apply` since 18:37 UTC on 2026-10-29, and Web Chat has been in
+  `category` mode since 14:45 UTC on 2026-10-30, the first channel to route;
+  every other channel is on `default_group` (read 22:09 UTC). Since 14:10 UTC
+  on 2026-10-30 three
   categories have route groups (the plan's Q5: sales to Inbound Sales Team,
   customer support to Customer Care, merchant support to Merchant Care), so
   `Hand to <group>` is offered on any open or pending ticket whose category's
@@ -1820,17 +1823,24 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
   roster as read on 2026-10-30; the roster paragraph above is older), route
   groups on the categories, and the classifier in `apply`. The reorder and the
   route groups were written at the user's go-ahead on 2026-10-30, and the
-  classifier has been in `apply` since the day before; staffing, the channel
-  defaults and the comment rows are what is left (the plan's Next, item 10). The readiness panel
+  classifier has been in `apply` since the day before. Later that day, also at
+  the user's go-ahead, every channel that defaulted to Support was moved to
+  Customer Care, with Support's 183 open unassigned tickets, once Support had
+  no members; staffing and the comment rows are what is left (the plan's Next,
+  item 10). The readiness panel
   on `/admin/channels` names what would leave routed tickets unassigned, and the
   active rules that would decide before the router. Production has two (read
   10:06 UTC on 2026-10-28): "Route Account Web Chat to Merchant Care" and "Route
   Public Web Chat to Customer Care", `on_create` `assign_group` on
-  `channel eq webchat`, one for a requester with an email and one without. The
-  Web Chat row defaults to Support, so between them they move every new web chat
-  ticket at creation, and on that row in `category` mode every hold ends there
-  as `rule` and the router decides nothing. That is by design — rules decide —
-  and it means web chat routes by category only once those two are changed.
+  `channel eq webchat`, one for a requester with an email and one without.
+  While the Web Chat row defaulted to Support, between them they moved every
+  new web chat ticket at creation, and in `category` mode every hold would have
+  ended there as `rule`, the router deciding nothing — by design: rules decide.
+  Since 14:45 UTC on 2026-10-30 the row defaults to Customer Care and is in
+  `category` mode, so the public rule names the group a visitor's chat is
+  already in, which changes nothing and ends no hold, and a public chat routes
+  by category; the account rule still moves a signed-in visitor's chat to
+  Merchant Care at creation, which ends its hold as `rule`.
   A channel's shadow week is read on `/reports/routing` (Stage 6): outcomes per
   channel, live and shadow never added together, time to decision against the
   window, the fallback and taken shares over the router's own decisions, and
