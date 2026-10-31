@@ -91,6 +91,30 @@ update.
 | 5.2   | Operations: turning routing on                                                                                                                    | Under way: Web Chat routes by category since 2026-10-30 (set from the console); route groups, 0.2's SLA reorder, the channel defaults off Support and Support's backlog moved to Customer Care were written on 2026-10-30 at the user's go-ahead. Staffing and the comment rows are left (Next, item 10)                                    |
 | 6     | Merged: #434 (`1daf6a5`), then `dev` → `main` in #437 (`9b4bc5b`); its screenshot pass in #438 (`b237858`), then #439 (`063e477`). As built below | **Done.** All six services live on `9b4bc5b` by 11:29:28 UTC on 2026-10-29, web first, with `0052`–`0055` applied, and on the screenshot pass's `063e477` by 14:27:51. Both sets of checks and the first Stage 6 nightly read clean (below); the signed-in reads are left                                                                   |
 
+**The second Stage 6 nightly, read on Render and production on 2026-10-31**
+(16:27 UTC). The first to write category rows, so it proves the writer's
+category half as the first proved the rest.
+
+- **The run.** `shipblu-nightly` started at 00:02:03 UTC and ended successful
+  at 00:03:56. `cleanup` was ok (27,062 webhook events and 1,455 jobs
+  removed). `rollup_metrics` logged `rebuilt 3 of 3 day(s), 2026-10-28 to
+2026-10-30` and ok in 4,196 ms: 6 rows for the 30th, **2 of them by
+  category**, 7 for the 29th and 4 for the 28th, neither with any, and no
+  refusal or reconcile error.
+- **The rows.** The 30th's category rows are `sales` with 2 tickets created
+  and `customer_support` with 1, exactly the tickets created that Cairo day
+  (22:00 UTC on the 29th to 22:00 UTC on the 30th) carrying each category:
+  Jev's two Facebook `sales` filings and its Instagram `customer_support` one
+  at 12:42 UTC. The day's totals row says 4 created, the fourth with no
+  category. `rollup_days` for the 28th to the 30th carries
+  `categories_computed_at` equal to `computed_at` (00:03:50–53). Over the
+  whole of `metrics_daily`: 0 duplicate slices and 0 rows naming two
+  dimensions.
+- **The group slices for these three days follow the move.** The nightly
+  rolls a figure up under the ticket's group as it stands, so the 183 tickets
+  moved from Support to Customer Care at 22:17 UTC on the 30th (Next, item 10) count under Customer Care for the days it rebuilt; older days keep
+  Support until a `rollup_metrics from=` rebuild.
+
 **The first Stage 6 nightly, read on Render and production on 2026-10-30.**
 It proves the writer with no hand write, as the deploy said it would.
 
@@ -112,7 +136,7 @@ It proves the writer with no hand write, as the deploy said it would.
   on the 30th (Apply, under 4.2's operations, below).
 
   Left: the second nightly, at 00:00 UTC on 2026-10-31, which rolls up the
-  30th and so writes the first category rows, both of them `sales`; and the
+  30th and so writes the first category rows (read clean, above); and the
   signed-in reads.
 
 **The screenshot pass's deploy and checks, read on Render and production on

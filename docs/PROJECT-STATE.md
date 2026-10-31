@@ -55,8 +55,10 @@ user's go-ahead. The plan's status section has the reads (4.2's Apply).
 `categories_computed_at` on those three days, and `metrics_daily` holds no
 duplicate slice and no row naming two dimensions. It wrote no category row:
 Jev's first filed ticket opened at 00:31 on the 30th in Cairo, the night the
-clocks went back. The second nightly, at 00:00 UTC on 2026-10-31, writes the
-first.
+clocks went back. The second nightly, at 00:00 UTC on 2026-10-31, wrote the
+first and read clean: the 30th's `sales` row counts 2 tickets created and its
+`customer_support` row 1, exactly the tickets created that Cairo day carrying
+each, with still no duplicate slice and no row naming two dimensions.
 
 The release before it, `69a22b6`, was deployed by hand on 2026-10-29, all six
 services by 17:47:16 UTC: release #442, which carries #440: every automated reply on a
