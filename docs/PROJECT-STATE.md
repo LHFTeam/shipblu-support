@@ -5,7 +5,7 @@ it is designed; **this file is about the state of the work** — what is live,
 what is merely built, what is left, and the mistakes that have already cost us
 time. Read both. Do not re-derive settled decisions.
 
-Last updated: 2026-10-30, against `main` at `eaf07ab`. The figures in §1 and §5
+Last updated: 2026-10-31, against `main` at `eaf07ab`. The figures in §1 and §5
 were last re-measured as a whole against production on 2026-09-20, and a
 paragraph re-read since gives its own date; where a number here disagrees with
 an older paragraph elsewhere in the file, the older one has not been re-checked.
@@ -44,17 +44,17 @@ first field in its list, as it did before #445.
 The release before it, `83f1889`, was deployed by hand on 2026-10-30, all six
 services by 12:03:38 UTC: release #446, which carries #443 and #444. #443 makes
 every web chat row editable and gives each an active switch that never leaves
-the widget without a row (`plans/ticket-category-routing.md`, Stage 6); production
-has one web chat row, so nothing changes there until somebody adds a second.
-#444 is the settings reorganisation (§5.5): one map of the settings area, a
-settings home, `/admin/ai`, and the live dashboard at `/reports/live`, to which
-`/admin/dashboard` now redirects. Code only: web first, live at 11:59:30, its
-preDeploy finding no migration and replaying the nine `db/sql` files; then the
-four crons, live by 12:02:00, and the worker at 12:03:38. The checks read
-clean: `/api/health` reports `83f1889`; no service logged a warning or an error
-from 11:56 to 12:19, and web served no 5xx; the 91 jobs created after 11:56 had
-all completed, none overdue, and the only dead jobs were the two from before the
-deploy (2026-09-21 and 2026-10-29); and the first runs on the
+the widget without a row (`plans/ticket-category-routing.md`, Stage 6);
+production has one web chat row, so nothing changes there until somebody adds a
+second. #444 is the settings reorganisation (§5.5): one map of the settings
+area, a settings home, `/admin/ai`, and the live dashboard at `/reports/live`,
+to which `/admin/dashboard` now redirects. Code only: web first, live at
+11:59:30, its preDeploy finding no migration and replaying the nine `db/sql`
+files; then the four crons, live by 12:02:00, and the worker at 12:03:38. The
+checks read clean: `/api/health` reports `83f1889`; no service logged a warning
+or an error from 11:56 to 12:19, and web served no 5xx; the 91 jobs created
+after 11:56 had all completed, none overdue, and the only dead jobs were the two
+from before the deploy (2026-09-21 and 2026-10-29); and the first runs on the
 new code were ok (`sla_sweep`, `presence_sweep` and `assign_sweep` at 12:05,
 12:11 and 12:15; `run_time_automations` at 12:02 and 12:16, one rule over 555
 tickets, nothing changed). Its way back is `69a22b6` on each service, in any
@@ -81,12 +81,12 @@ Instagram message's profile read will say.
 2026-10-29**, switched by the user on `/admin/categories` after twelve and a
 half hours of Shadow and before any ticket carried a person's label, so 4.2's
 criteria were not read. By 09:40 UTC on 2026-10-30 it had filed two tickets,
-both Facebook and both `sales`. Nothing has routed. Every channel was on
-`default_group` at 13:00 UTC on 2026-10-30; at 18:04 UTC on 2026-10-31 the web
-chat row reads `category` (the row last written at 14:45:45 UTC on 2026-10-30),
-but the widget has opened no ticket since 2026-10-20, so `routing_decisions`
-holds no row. The widget's next ticket is held for the routing window and then
-routed, into the staffing the plan's item 10 describes. The backlog (`backfill_category_ai mode=apply`) waits for the
+both Facebook and both `sales`. Nothing has routed yet: Web Chat has been in
+`category` mode since 14:45 UTC on 2026-10-30, set from the console, the first
+channel to route, and every other channel is on `default_group`; the widget has
+opened no ticket since 2026-10-20, so at 18:04 UTC on 2026-10-31
+`routing_decisions` held no row (the plan's item 10 has the staffing a routed
+chat lands on). The backlog (`backfill_category_ai mode=apply`) waits for the
 user's go-ahead. The plan's status section has the reads (4.2's Apply).
 
 **The first Stage 6 nightly read clean** (00:00 UTC on 2026-10-30): it rebuilt
@@ -94,8 +94,10 @@ user's go-ahead. The plan's status section has the reads (4.2's Apply).
 `categories_computed_at` on those three days, and `metrics_daily` holds no
 duplicate slice and no row naming two dimensions. It wrote no category row:
 Jev's first filed ticket opened at 00:31 on the 30th in Cairo, the night the
-clocks went back. The second nightly, at 00:00 UTC on 2026-10-31, writes the
-first.
+clocks went back. The second nightly, at 00:00 UTC on 2026-10-31, wrote the
+first and read clean: the 30th's `sales` row counts 2 tickets created and its
+`customer_support` row 1, exactly the tickets created that Cairo day carrying
+each, with still no duplicate slice and no row naming two dimensions.
 
 The release before that, `69a22b6`, was deployed by hand on 2026-10-29, all six
 services by 17:47:16 UTC: release #442, which carries #440: every automated reply on a
@@ -1808,11 +1810,10 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
   2026-10-29), and a ticket is held, or
   a `settle_routing` job queued, only on a channel an admin has moved to a
   category mode _while the classifier is in `apply`_. The classifier has been
-  in `apply` since 18:37 UTC on 2026-10-29, so what is left is an admin moving
-  a channel to a category mode: every channel was on `default_group` at 13:00
-  UTC on 2026-10-30, and at 18:04 UTC on 2026-10-31 the web chat row reads
-  `category` (last written 14:45:45 UTC on 2026-10-30), with nothing routed yet
-  because the widget has opened no ticket since 2026-10-20. Since 14:10 UTC on 2026-10-30 three
+  in `apply` since 18:37 UTC on 2026-10-29, and Web Chat has been in
+  `category` mode since 14:45 UTC on 2026-10-30, the first channel to route;
+  every other channel is on `default_group` (read 22:09 UTC). Since 14:10 UTC
+  on 2026-10-30 three
   categories have route groups (the plan's Q5: sales to Inbound Sales Team,
   customer support to Customer Care, merchant support to Merchant Care), so
   `Hand to <group>` is offered on any open or pending ticket whose category's
@@ -1861,17 +1862,24 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
   roster as read on 2026-10-30; the roster paragraph above is older), route
   groups on the categories, and the classifier in `apply`. The reorder and the
   route groups were written at the user's go-ahead on 2026-10-30, and the
-  classifier has been in `apply` since the day before; staffing, the channel
-  defaults and the comment rows are what is left (the plan's Next, item 10). The readiness panel
+  classifier has been in `apply` since the day before. Later that day, also at
+  the user's go-ahead, every channel that defaulted to Support was moved to
+  Customer Care, with Support's 183 open unassigned tickets, once Support had
+  no members; staffing and the comment rows are what is left (the plan's Next,
+  item 10). The readiness panel
   on `/admin/channels` names what would leave routed tickets unassigned, and the
   active rules that would decide before the router. Production has two (read
   10:06 UTC on 2026-10-28): "Route Account Web Chat to Merchant Care" and "Route
   Public Web Chat to Customer Care", `on_create` `assign_group` on
-  `channel eq webchat`, one for a requester with an email and one without. The
-  Web Chat row defaults to Support, so between them they move every new web chat
-  ticket at creation, and on that row in `category` mode every hold ends there
-  as `rule` and the router decides nothing. That is by design — rules decide —
-  and it means web chat routes by category only once those two are changed.
+  `channel eq webchat`, one for a requester with an email and one without.
+  While the Web Chat row defaulted to Support, between them they moved every
+  new web chat ticket at creation, and in `category` mode every hold would have
+  ended there as `rule`, the router deciding nothing — by design: rules decide.
+  Since 14:45 UTC on 2026-10-30 the row defaults to Customer Care and is in
+  `category` mode, so the public rule names the group a visitor's chat is
+  already in, which changes nothing and ends no hold, and a public chat routes
+  by category; the account rule still moves a signed-in visitor's chat to
+  Merchant Care at creation, which ends its hold as `rule`.
   A channel's shadow week is read on `/reports/routing` (Stage 6): outcomes per
   channel, live and shadow never added together, time to decision against the
   window, the fallback and taken shares over the router's own decisions, and
