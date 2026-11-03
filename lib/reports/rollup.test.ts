@@ -4,6 +4,7 @@ import {
   dateIn,
   emptyBucket,
   reconcileFailure,
+  reportsStartDate,
   sliceAccumulator,
   slicesFor,
   totalsOf,
@@ -331,5 +332,26 @@ describe('dateIn', () => {
     // The reporting zone is `business_hours.timezone`, checked only by the
     // hours form; a row edited in the database reaches here unchecked.
     expect(() => dateIn(cairo('2026-10-14T02:59'), 'Africa/Kairo')).toThrow(/Africa\/Kairo/);
+  });
+});
+
+describe('reportsStartDate', () => {
+  const zone = 'Africa/Cairo';
+
+  it('reads unset or blank as no start', () => {
+    expect(reportsStartDate(undefined, zone)).toBeNull();
+    expect(reportsStartDate('  ', zone)).toBeNull();
+  });
+
+  it('reads a real date, trimmed', () => {
+    expect(reportsStartDate(' 2026-11-03 ', zone)).toBe('2026-11-03');
+    // Cairo springs forward at midnight that day; the date is still the date.
+    expect(reportsStartDate('2026-04-24', zone)).toBe('2026-04-24');
+  });
+
+  it('throws on anything else, rather than planning the days it keeps out', () => {
+    for (const value of ['2026-11-3', '03/11/2026', '2026-02-30', '2026-11-03T00:00', 'launch']) {
+      expect(() => reportsStartDate(value, zone)).toThrow('REPORTS_START_DATE');
+    }
   });
 });

@@ -396,6 +396,31 @@ const schema = z.object({
   PRIORITY_AI: z.string().optional(),
   PRIORITY_AI_MIN_PROBABILITY: z.string().optional(),
 
+  /**
+   * The first day the reports count, as `YYYY-MM-DD` in the reporting zone:
+   * `rollup_metrics` plans no earlier day, on any path — the nightly's three,
+   * `day=`, `from=`, `days=` and a `to=` that starts at the oldest ticket.
+   * Unset, every day is planned, as before. Set in production to the launch
+   * day, so the rollup rows deleted for the days before it stay deleted;
+   * staging, tests and CI leave it unset, since their history is their own.
+   *
+   * It also floors what a day counts: through `reportingContext()`, a ticket
+   * opened before it adds no first response, resolution, SLA verdict,
+   * reopening or survey to any day, the live dashboard's today included, so a
+   * pre-launch ticket answered after the launch does not put a response time
+   * counted from weeks before onto a launch-week day.
+   *
+   * Read through `reportsStartDate` (`lib/reports/rollup.ts`), which refuses a
+   * value that is not a real date: the run then fails rather than rebuilding
+   * the history this keeps out, and a page counts from no floor rather than
+   * failing to load. A
+   * plain string here for the reason `LOG_ALL_INCOMING_WEBHOOKS` below gives:
+   * `env()` parses the whole schema for every page, and a format rule would
+   * turn a typo into a console that does not load. The way back is to unset
+   * it and run `rollup_metrics from=<the first day wanted>`.
+   */
+  REPORTS_START_DATE: z.string().optional(),
+
   /** Worker tuning. */
   /**
    * `true` prints every inbound webhook delivery — headers and raw body — before

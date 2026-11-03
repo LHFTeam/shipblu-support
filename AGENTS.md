@@ -2406,6 +2406,22 @@ The subcategory report (`/reports/categories` at the time,
 report with a range control therefore prints the window it selected and, when
 the figures start after the window opens, says where they start and why (§6.54).
 
+**The reports can start on a day, and nothing before it is counted or
+rebuilt.** `REPORTS_START_DATE` (a `YYYY-MM-DD` in the reporting zone, unset
+everywhere but production) does two things, and both are needed. `planDays`
+plans no earlier day on any path — the nightly's three, `day=`, `from=`,
+`days=`, and a `to=` that would start at the oldest ticket — so rollup rows
+deleted for the days before it stay deleted. And `computeDay`, through
+`reportingContext()`, counts nothing a ticket opened before it carries onto a
+later day — a first response, a resolution, an SLA verdict, a reopening, a
+survey — the live dashboard's today included: deleting the old days alone
+leaves a pre-launch ticket answered after the start putting a response time
+counted from weeks before onto a launch-week day. It exists for the launch
+reset, which closed every pre-launch ticket and deleted the rollup rows before
+the launch day. The pages' existing "begins on" notes then name the start with
+no copy of their own. The way back is to unset it and run
+`rollup_metrics from=<the first day wanted>`.
+
 ## Tests
 
 Vitest, `*.test.ts` next to the code, node environment, no database — a test

@@ -141,7 +141,10 @@ the overview's By category read all No category, and named every day before
 the first Stage 6 nightly (2026-10-27) as rolled up before categories were
 filed. The
 `rollup_metrics from=2026-08-18` rebuild waits for 4.2's
-`backfill_category_ai mode=apply`. The rollback deletes the `metrics_daily`
+`backfill_category_ai mode=apply` — and is retired by the launch reset, if
+it runs: with `REPORTS_START_DATE` set, the reports start on the launch day,
+the rows before it are deleted, and no rebuild plans an earlier day (AGENTS.md,
+"The reports can start on a day"). The rollback deletes the `metrics_daily`
 rows that carry a category before the old web returns (the plan's Stage 6
 deploy). The plan's status section has the deploy's reads.
 

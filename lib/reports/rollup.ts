@@ -17,6 +17,7 @@ import {
 import type { AnyPgColumn } from 'drizzle-orm/pg-core';
 import { db } from '@/db/client';
 import { conversationEvents, conversations, csatSurveys, metricsDaily } from '@/db/schema';
+import { env } from '@/lib/env';
 import { businessMinutesBetween, type HoursConfig } from '@/lib/hours';
 import { loadHoursCatalog } from '@/lib/hours/catalog';
 import { defaultHours, ticketHours, type HoursCatalog } from '@/lib/hours/resolve';
@@ -114,7 +115,17 @@ export const RECOMPUTE_DAYS = 3;
 /** The schedule a ticket is measured against, given its policy and its group. */
 export type HoursFor = (policyId: string | null, groupId: string | null) => HoursConfig | null;
 
-export type ReportingContext = { zone: string; hoursFor: HoursFor };
+export type ReportingContext = {
+  zone: string;
+  hoursFor: HoursFor;
+  /**
+   * The midnight `REPORTS_START_DATE` names, or null. A ticket opened before
+   * it adds no first response, resolution, SLA verdict, reopening or survey to
+   * any day: answered after the launch, it would put a response time counted
+   * from weeks before onto a launch-week day.
+   */
+  startsAt?: Date | null;
+};
 
 /**
  * The zone and calendars every day in a run is measured against, read once.
@@ -127,7 +138,24 @@ export type ReportingContext = { zone: string; hoursFor: HoursFor };
 export async function reportingContext(): Promise<ReportingContext> {
   const [catalog, policies] = await Promise.all([loadHoursCatalog(), loadPolicies()]);
 
-  return { zone: zoneOf(catalog), hoursFor: hoursResolver(catalog, policies) };
+  const zone = zoneOf(catalog);
+  return { zone, hoursFor: hoursResolver(catalog, policies), startsAt: startsAtIn(zone) };
+}
+
+/**
+ * Where the reports start, for a page as well as the job. Unreadable, a page
+ * starts nowhere rather than throwing: the nightly refuses the value loudly
+ * (`reportsStartDate`), and every report failing beside it would be the
+ * `env()` lesson `lib/env.ts` gives for `LOG_ALL_INCOMING_WEBHOOKS`.
+ */
+function startsAtIn(zone: string): Date | null {
+  try {
+    const day = reportsStartDate(env().REPORTS_START_DATE, zone);
+    return day ? (dayWindow(day, zone)?.start ?? null) : null;
+  } catch (error) {
+    log.warn('REPORTS_START_DATE is unreadable, so the figures start nowhere', error);
+    return null;
+  }
 }
 
 /**
@@ -244,6 +272,24 @@ export async function earliestDay(zone: string): Promise<string | null> {
   if (!first) return null;
 
   return dateIn(new Date(first), zone);
+}
+
+/**
+ * `REPORTS_START_DATE` as the run reads it: null when unset or blank, the date
+ * when it is a real `YYYY-MM-DD`, and a throw otherwise. A run that cannot read
+ * the floor fails rather than guessing: ignored, the nightly would rebuild the
+ * deleted days, and it is the one job whose failure anybody watches.
+ */
+export function reportsStartDate(value: string | undefined, zone: string): string | null {
+  const text = value?.trim() ?? '';
+  if (text === '') return null;
+  const day = /^\d{4}-\d{2}-\d{2}$/.test(text) ? DateTime.fromISO(text, { zone }) : null;
+  if (!day?.isValid || day.toISODate() !== text) {
+    throw new Error(
+      `[rollup_metrics] REPORTS_START_DATE is "${text}", not a YYYY-MM-DD date, so no day is planned`,
+    );
+  }
+  return text;
 }
 
 /**
@@ -428,7 +474,7 @@ export function emptyBucket(): Bucket {
  */
 export async function computeDay(
   day: string,
-  { zone, hoursFor }: ReportingContext,
+  { zone, hoursFor, startsAt = null }: ReportingContext,
   until?: Date,
 ): Promise<Slice[]> {
   const window = dayWindow(day, zone);
@@ -442,7 +488,10 @@ export async function computeDay(
 
   const { add, slices } = sliceAccumulator();
 
-  const worked = workedConversation();
+  // And opened since the reports start, for every fact a ticket carries
+  // past its creation, which is keyed on `created_at` already.
+  const opened = startsAt ? gte(conversations.createdAt, startsAt) : undefined;
+  const worked = and(workedConversation(), opened)!;
 
   // --- Created --------------------------------------------------------------
   const created = await db
@@ -618,6 +667,7 @@ export async function computeDay(
           during(csatSurveys.respondedAt),
         ),
         surveyedConversation(),
+        opened,
       ),
     );
 

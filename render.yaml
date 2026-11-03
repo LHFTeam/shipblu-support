@@ -192,6 +192,12 @@ projects:
             #                              switch is on (category_ai_settings) or
             #                              its backfill is started by hand
             #
+            #   REPORTS_START_DATE         YYYY-MM-DD, the first day
+            #                              rollup_metrics may write: the launch
+            #                              day, 2026-11-03. Unset plans every
+            #                              day. Production's alone, since
+            #                              staging's history is its own
+            #
             # Present, and read by nothing in this repo:
             #
             #   WHATSAPP_APP_SECRET        retired WhatsApp-specific names;

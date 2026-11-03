@@ -702,3 +702,93 @@ describe('computeDay, by category', () => {
     expect(reconcileFailure(after)).toBeNull();
   });
 });
+
+/**
+ * `REPORTS_START_DATE`, as `reportingContext()` hands it to `computeDay`. The
+ * launch closed every ticket opened before it, and one of those answered,
+ * resolved, reopened or surveyed afterwards would put a figure counted from
+ * weeks before onto a launch-week day — so a ticket opened before the start
+ * adds nothing to any day, while one opened after it counts as it always did.
+ */
+describe('computeDay, from a reports start date', () => {
+  it('counts nothing a ticket opened before the start carries onto a later day', async () => {
+    const [mona] = await db
+      .insert(agents)
+      .values({ name: 'Mona', email: 'mona@shipblu.test', role: 'agent' })
+      .returning({ id: agents.id });
+    const [contact] = await db.insert(contacts).values({ name: 'Amira' }).returning();
+    const [resolved] = await db
+      .select({ id: ticketStatuses.id })
+      .from(ticketStatuses)
+      .where(eq(ticketStatuses.name, 'Resolved'));
+    const base = {
+      channel: 'email' as const,
+      statusId: resolved!.id,
+      requesterContactId: contact!.id,
+      assigneeAgentId: mona!.id,
+    };
+    // Opened an hour before the start, and answered, resolved, reopened and
+    // surveyed on the day under test.
+    const [before] = await db
+      .insert(conversations)
+      .values({
+        ...base,
+        createdAt: at('2026-10-12T23:00'),
+        firstRespondedAt: at('2026-10-13T10:00'),
+        firstResponseDueAt: at('2026-10-13T00:00'),
+        resolvedAt: at('2026-10-13T12:00'),
+        resolutionDueAt: at('2026-10-13T08:00'),
+      })
+      .returning({ id: conversations.id });
+    // Opened an hour after it, with the same figures.
+    const [after] = await db
+      .insert(conversations)
+      .values({
+        ...base,
+        createdAt: at('2026-10-13T01:00'),
+        firstRespondedAt: at('2026-10-13T10:00'),
+        firstResponseDueAt: at('2026-10-13T02:00'),
+        resolvedAt: at('2026-10-13T12:00'),
+        resolutionDueAt: at('2026-10-13T08:00'),
+      })
+      .returning({ id: conversations.id });
+    for (const id of [before!.id, after!.id]) {
+      await db.insert(conversationEvents).values({
+        conversationId: id,
+        type: 'reopened',
+        createdAt: at('2026-10-13T11:00'),
+      });
+      await db.insert(csatSurveys).values({
+        conversationId: id,
+        status: 'answered',
+        channel: 'email',
+        agentId: mona!.id,
+        sentAt: at('2026-10-13T12:30'),
+        createdAt: at('2026-10-13T12:30'),
+        respondedAt: at('2026-10-13T13:00'),
+        rating: 5,
+      });
+    }
+
+    const context = await reportingContext();
+    const unfloored = totalsOf(await computeDay('2026-10-13', context));
+    const floored = await computeDay('2026-10-13', {
+      ...context,
+      startsAt: at('2026-10-13T00:00'),
+    });
+    const totals = totalsOf(floored);
+
+    // Without a start, both tickets count; with one, only the later ticket.
+    expect(unfloored.firstResponseCount).toBe(2);
+    expect(totals.ticketsCreated).toBe(1);
+    expect(totals.firstResponseCount).toBe(1);
+    expect(totals.slaFirstResponseBreached).toBe(1);
+    expect(totals.ticketsResolved).toBe(1);
+    expect(totals.resolutionCount).toBe(1);
+    expect(totals.slaResolutionBreached).toBe(1);
+    expect(totals.ticketsReopened).toBe(1);
+    expect(totals.csatSentCount).toBe(1);
+    expect(totals.csatResponseCount).toBe(1);
+    expect(reconcileFailure(floored)).toBeNull();
+  });
+});

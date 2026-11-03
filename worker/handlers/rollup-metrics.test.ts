@@ -126,6 +126,52 @@ describe('planDays', () => {
     });
   });
 
+  // The launch reset deleted every rollup row before 2026-11-03. Each path
+  // that could plan a day is a way to write one back from the same tickets.
+  describe('a start date', () => {
+    const launch = (today: string) => ({ today, earliest: '2026-08-18', startsOn: '2026-11-03' });
+
+    it('lets the first nightlies after it rebuild only the days since', () => {
+      expect(planDays({}, launch('2026-11-03'), zone).days).toEqual([]);
+      expect(planDays({}, launch('2026-11-04'), zone).days).toEqual(['2026-11-03']);
+      expect(planDays({}, launch('2026-11-05'), zone).days).toEqual(['2026-11-04', '2026-11-03']);
+      expect(planDays({}, launch('2026-11-06'), zone).days).toEqual([
+        '2026-11-05',
+        '2026-11-04',
+        '2026-11-03',
+      ]);
+    });
+
+    it('refuses a named day before it and keeps one on or after it', () => {
+      expect(planDays({ day: '2026-11-02' }, launch('2026-11-10'), zone).days).toEqual([]);
+      expect(planDays({ day: '2026-11-03' }, launch('2026-11-10'), zone).days).toEqual([
+        '2026-11-03',
+      ]);
+    });
+
+    it('starts a range that opens before it on it, and skips nothing for that', () => {
+      for (const payload of [{ from: '2026-08-18' }, { to: '2026-11-05' }, { days: 90 }]) {
+        expect(planDays(payload, launch('2026-11-06'), zone)).toEqual({
+          days: ['2026-11-05', '2026-11-04', '2026-11-03'],
+          skipped: 0,
+        });
+      }
+      expect(planDays({ from: '2020-01-01' }, launch('2026-11-06'), zone).skipped).toBe(0);
+    });
+
+    it('plans nothing for a range that ends before it', () => {
+      expect(
+        planDays({ from: '2026-10-01', to: '2026-11-02' }, launch('2026-11-10'), zone).days,
+      ).toEqual([]);
+    });
+
+    it('changes nothing when unset', () => {
+      const unset = { today: '2026-11-04', earliest: '2026-08-18', startsOn: null };
+      expect(planDays({}, unset, zone).days).toEqual(['2026-11-03', '2026-11-02', '2026-11-01']);
+      expect(planDays({ day: '2026-10-14' }, unset, zone).days).toEqual(['2026-10-14']);
+    });
+  });
+
   it("gives every two-day range in a decade of Cairo's calendar both of its days", () => {
     // Every changeover Egypt has had or has scheduled, without naming one, so a
     // change to its rules moves the days under test rather than defeating it.

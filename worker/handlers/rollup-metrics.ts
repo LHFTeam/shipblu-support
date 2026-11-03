@@ -8,6 +8,7 @@ import {
   rollupDays,
   rootCauseMetricsDaily,
 } from '@/db/schema';
+import { env } from '@/lib/env';
 import type { ClaimedJob } from '@/lib/queue';
 import { parseJobPayload, type JobPayload } from '@/lib/queue/payloads';
 import { computeAgentDay, withActivity } from '@/lib/reports/agent-rollup';
@@ -20,6 +21,7 @@ import {
   RECOMPUTE_DAYS,
   reconcileFailure,
   reportingContext,
+  reportsStartDate,
 } from '@/lib/reports/rollup';
 import { logger } from '@/lib/log';
 
@@ -70,15 +72,24 @@ export type DayPlan = { days: string[]; skipped: number };
  * `to` is clamped to yesterday for that second reason. The dashboard already
  * shows today live, computed from the same code, so there is nothing to gain by
  * storing a partial day and a real report to lose.
+ *
+ * And nothing is planned before `startsOn` (`REPORTS_START_DATE`), on any
+ * path: the rows of the days before it were deleted at launch, and a nightly
+ * that rebuilt its three days, or a `rollup_metrics days=90` from §5's repair,
+ * would write them back from the same tickets. Dropped, not counted in
+ * `skipped`, which says what a rerun with an earlier `to` would still owe.
  */
 export function planDays(
   payload: RollupPayload,
-  bounds: { today: string; earliest: string | null },
+  bounds: { today: string; earliest: string | null; startsOn?: string | null },
   zone: string,
 ): DayPlan {
   const yesterday = DateTime.fromISO(bounds.today, { zone }).minus({ days: 1 });
+  // `YYYY-MM-DD` text orders as the dates do.
+  const startsOn = bounds.startsOn ?? null;
+  const counted = (day: string) => startsOn === null || day >= startsOn;
 
-  if (payload.day) return { days: [payload.day], skipped: 0 };
+  if (payload.day) return { days: counted(payload.day) ? [payload.day] : [], skipped: 0 };
 
   const wantsRange =
     payload.from !== undefined || payload.to !== undefined || payload.days !== undefined;
@@ -88,7 +99,7 @@ export function planDays(
     return {
       days: Array.from({ length: RECOMPUTE_DAYS }, (_, offset) =>
         yesterday.minus({ days: offset }).toISODate()!,
-      ),
+      ).filter(counted),
       skipped: 0,
     };
   }
@@ -96,7 +107,7 @@ export function planDays(
   const requestedEnd = payload.to ? DateTime.fromISO(payload.to, { zone }) : yesterday;
   const end = requestedEnd > yesterday ? yesterday : requestedEnd;
 
-  const start = payload.days
+  const requested = payload.days
     ? end.minus({ days: Math.max(1, Math.floor(payload.days)) - 1 })
     : payload.from
       ? DateTime.fromISO(payload.from, { zone })
@@ -105,6 +116,10 @@ export function planDays(
         bounds.earliest
         ? DateTime.fromISO(bounds.earliest, { zone })
         : end.minus({ days: RECOMPUTE_DAYS - 1 });
+  const start =
+    requested.isValid && !counted(requested.toISODate()!)
+      ? DateTime.fromISO(startsOn!, { zone })
+      : requested;
 
   if (!start.isValid || !end.isValid || start > end) return { days: [], skipped: 0 };
 
@@ -144,12 +159,15 @@ export async function rollupMetrics(job?: ClaimedJob): Promise<void> {
   // run rather than once per day: they are a dozen rows that every ticket in
   // every day of the window is measured against.
   const context = await reportingContext();
+  const startsOn = reportsStartDate(env().REPORTS_START_DATE, context.zone);
+  if (startsOn) log.info(`reports start on ${startsOn}: no earlier day is planned`);
 
   const plan = planDays(
     payload,
     {
       today: DateTime.now().setZone(context.zone).toISODate()!,
       earliest: await earliestDay(context.zone),
+      startsOn,
     },
     context.zone,
   );
