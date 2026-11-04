@@ -48,6 +48,25 @@ export const COPY = {
 
     surveyClosed: 'This survey has closed.',
     surveyFailed: 'That did not go through. Try again.',
+
+    /*
+     * The composer's two buttons are named by these, and the sentences under
+     * it say what went wrong with a file. `{name}` is the visitor's own file
+     * name, drawn isolated from the sentence round it (`fillName`), since a
+     * Latin name inside Arabic would otherwise reorder its neighbours.
+     */
+    attach: 'Attach a photo, video, voice recording or PDF',
+    emoji: 'Add an emoji',
+    emojiPanel: 'Emoji',
+    removeFile: 'Remove {name}',
+    sendFailed: 'That did not go through. Try again.',
+    fileType: '{name} cannot be sent here. Photos, videos, voice recordings and PDFs can.',
+    fileTooLarge: '{name} is larger than {limit}.',
+    filesTooLarge: 'These files add up to more than {limit}.',
+    filesTooMany: 'Up to {count} files can go in one message.',
+    filesSlowDown: 'That is a lot of files for now. Try again in a little while.',
+    fileSending: 'Sending…',
+    megabytes: 'MB',
   },
   ar: {
     heading: 'دعم شيب بلو',
@@ -79,6 +98,20 @@ export const COPY = {
 
     surveyClosed: 'تم إغلاق هذا الاستطلاع.',
     surveyFailed: 'لم يتم الإرسال. يمكن لحضرتك المحاولة مرة أخرى.',
+
+    attach: 'إرفاق صورة أو فيديو أو تسجيل صوتي أو ملف PDF',
+    emoji: 'إضافة رمز تعبيري',
+    emojiPanel: 'الرموز التعبيرية',
+    removeFile: 'إزالة {name}',
+    sendFailed: 'لم يتم الإرسال. يمكن لحضرتك المحاولة مرة أخرى.',
+    fileType:
+      'لا يمكن إرسال {name} هنا. يمكن إرسال الصور والفيديوهات والتسجيلات الصوتية وملفات PDF.',
+    fileTooLarge: 'حجم {name} أكبر من {limit}.',
+    filesTooLarge: 'حجم الملفات معًا أكبر من {limit}.',
+    filesTooMany: 'يمكن إرسال {count} ملفات بحد أقصى في الرسالة الواحدة.',
+    filesSlowDown: 'تم إرسال ملفات كثيرة الآن. يمكن لحضرتك المحاولة بعد قليل.',
+    fileSending: 'جارٍ الإرسال…',
+    megabytes: 'ميجابايت',
   },
 } as const;
 

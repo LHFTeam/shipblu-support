@@ -24,17 +24,24 @@ const buckets = new Map<string, Bucket>();
 /** Bounded so a long-lived instance under spray does not grow without limit. */
 const MAX_BUCKETS = 20_000;
 
-export function allow(key: string, limit: number, windowMs: number): boolean {
+/**
+ * Whether one more request fits in `key`'s window.
+ *
+ * `cost` is for a budget counted in something other than requests — the
+ * widget's uploads spend one per megabyte — so a request can cost more than
+ * one. It is spent whether or not it fits, as a refused request always was.
+ */
+export function allow(key: string, limit: number, windowMs: number, cost = 1): boolean {
   const now = Date.now();
   const bucket = buckets.get(key);
 
   if (!bucket || bucket.resetAt <= now) {
     if (buckets.size >= MAX_BUCKETS) prune(now);
-    buckets.set(key, { count: 1, resetAt: now + windowMs });
-    return true;
+    buckets.set(key, { count: cost, resetAt: now + windowMs });
+    return cost <= limit;
   }
 
-  bucket.count += 1;
+  bucket.count += cost;
   return bucket.count <= limit;
 }
 

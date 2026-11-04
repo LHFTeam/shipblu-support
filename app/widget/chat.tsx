@@ -9,8 +9,8 @@ import { WidgetArticle } from './article';
 import { copyFor } from './copy';
 import { WidgetHome } from './home';
 import type { SurveyResult } from './survey-card';
-import { WidgetThread, type OfflineDetails } from './thread';
-import type { ArticleLink, Message, WidgetView } from '@/lib/widget/types';
+import { WidgetThread, type OfflineDetails, type SendOutcome, type SendRefusal } from './thread';
+import type { ArticleLink, Message, WidgetAttachment, WidgetView } from '@/lib/widget/types';
 import { formatOpens } from '@/lib/format';
 import { postToHost, useHostBridge } from './use-host-bridge';
 import { useMessageStream } from './use-message-stream';
@@ -235,29 +235,53 @@ export function WidgetChat({
     [setDetailsSaved],
   );
 
-  async function send(body: string, details: OfflineDetails | null): Promise<boolean> {
+  /**
+   * Where a stored file is fetched from: the visitor's token rides along,
+   * because an image or a player cannot send a header
+   * (`/api/widget/attachments/[id]`). The transcript is the token's, so a new
+   * token comes with a new transcript and no file is asked for under the wrong one.
+   */
+  const fileUrl = useCallback(
+    (file: WidgetAttachment) =>
+      `/api/widget/attachments/${encodeURIComponent(file.id)}?token=${encodeURIComponent(token ?? '')}`,
+    [token],
+  );
+
+  async function send(
+    body: string,
+    files: File[],
+    details: OfflineDetails | null,
+  ): Promise<SendOutcome> {
     const active = await ensureSession();
-    if (!active) return false;
+    if (!active) return FAILED;
 
     // Shown immediately with a temporary id, then replaced by the server's
     // canonical list. Waiting for the round trip makes the widget feel broken
-    // on a slow connection.
+    // on a slow connection — and a photo or a video takes longer than words.
+    const pendingId = `pending-${Date.now()}`;
     const optimistic: Message = {
-      id: `pending-${Date.now()}`,
+      id: pendingId,
       from: 'visitor',
       authorName: null,
       body,
       createdAt: new Date().toISOString(),
       survey: null,
+      attachments: files.map((file, index) => ({
+        id: `${pendingId}-${index}`,
+        filename: file.name,
+        contentType: file.type,
+        sizeBytes: file.size,
+        pending: true,
+      })),
     };
     setMessages((current) => [...current, optimistic]);
 
     try {
-      const response = await fetch('/api/widget/message', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token: active, body, pageUrl: document.referrer || null }),
-      });
+      const pageUrl = document.referrer || null;
+      const response = await fetch(
+        '/api/widget/message',
+        messageRequest(active, body, pageUrl, files),
+      );
 
       /*
        * The session was replaced while this was on the wire — a sign-out on the
@@ -266,11 +290,11 @@ export function WidgetChat({
        * the previous one's half-typed sentence, so this reports success it did
        * not have rather than restoring it.
        */
-      if (activeToken.current !== active) return true;
+      if (activeToken.current !== active) return { ok: true };
 
       if (!response.ok) {
         setMessages((current) => current.filter((m) => m.id !== optimistic.id));
-        return false;
+        return { ok: false, refusal: await refusalOf(response) };
       }
 
       const data = (await response.json()) as { conversationId: string; messages: Message[] };
@@ -291,10 +315,10 @@ export function WidgetChat({
        */
       if (details) await saveDetails(active, details);
 
-      return true;
+      return { ok: true };
     } catch {
       setMessages((current) => current.filter((m) => m.id !== optimistic.id));
-      return false;
+      return FAILED;
     }
   }
 
@@ -415,6 +439,7 @@ export function WidgetChat({
             active={view === 'thread'}
             detailsSaved={detailsSaved}
             prefill={prefill}
+            fileUrl={fileUrl}
             onSend={send}
             onSaveDetails={async (details) => {
               const active = await ensureSession();
@@ -427,6 +452,67 @@ export function WidgetChat({
       ) : null}
     </div>
   );
+}
+
+const FAILED: SendOutcome = { ok: false, refusal: { reason: 'failed' } };
+
+/**
+ * A text message as the JSON it has always been, and one with files as a
+ * multipart body: the files ride in the message's own request, so a file can
+ * never be stored without the message it came with. The browser writes the
+ * multipart boundary into the `Content-Type` itself, which is why none is set.
+ */
+function messageRequest(
+  token: string,
+  body: string,
+  pageUrl: string | null,
+  files: readonly File[],
+): RequestInit {
+  if (files.length === 0) {
+    return {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token, body, pageUrl }),
+    };
+  }
+
+  const form = new FormData();
+  form.set('token', token);
+  form.set('body', body);
+  if (pageUrl) form.set('pageUrl', pageUrl);
+  for (const file of files) form.append('files', file, file.name);
+  return { method: 'POST', body: form };
+}
+
+/**
+ * What a refused send was refused for, in the reasons the composer has words
+ * for. A file's reason is the route's reading of the same rules the composer
+ * applies (`lib/widget/files.ts`), so it only arrives here when the bytes
+ * disagreed with the label; anything unrecognised — a dropped connection, the
+ * per-minute message limit, a storage outage — is the plain "try again".
+ */
+async function refusalOf(response: Response): Promise<SendRefusal> {
+  const data = (await response.json().catch(() => null)) as {
+    error?: unknown;
+    filename?: unknown;
+  } | null;
+  const filename = typeof data?.filename === 'string' ? data.filename : '';
+
+  switch (data?.error) {
+    case 'type':
+      return { reason: 'type', filename };
+    case 'too_large':
+      return { reason: 'too_large', filename };
+    case 'too_large_total':
+      return { reason: 'too_large_total' };
+    case 'too_many':
+      return { reason: 'too_many' };
+    case 'slow_down':
+      return { reason: 'slow_down' };
+  }
+  // A body over the limit can be refused before the route reads it, with
+  // whatever a proxy in front of it says.
+  return response.status === 413 ? { reason: 'too_large_total' } : { reason: 'failed' };
 }
 
 /* The design system's small ghost button, square: 32px around an 18px glyph. */

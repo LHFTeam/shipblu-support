@@ -894,7 +894,8 @@ and the language automated replies went out in.
 **A media message's text can be a stand-in nobody wrote.** A file sent without
 a caption is stored with the words ingest wrote for it — `[image]`,
 `[voice note]`, `[document: awb.pdf]`, `[2 attachments]` (`displayText` in
-`lib/whatsapp/parse.ts` and `lib/meta/parse.ts`) — and they stay stored,
+`lib/whatsapp/parse.ts` and `lib/meta/parse.ts`, and `webchatFilesStandIn` for a
+file attached in the widget) — and they stay stored,
 because the inbox card, the subject and search need something to show. A chat's
 thread leaves one out only where `isMediaStandIn` (`lib/tickets/message-media.ts`)
 rebuilds it from the row's own type, voice flag and filename and the file is
@@ -1098,6 +1099,26 @@ form keep what the widget lists. Which form may save a web chat row is decided
 under the switch's lock, in the save's own transaction (`webchatEditRefusal`):
 the card only the widget's row, the editor only another, since a switch can
 change which that is under an open page.
+
+**The widget carries files, and their type is read from the bytes.** A
+visitor's photo, PDF, video or voice recording rides in the message's own POST
+(`/api/widget/message`, multipart where the text-only body stays JSON), never
+through an upload endpoint of its own, so no file exists without the message it
+came with — a ticket form's argument (`lib/forms/files.ts`). The composer and
+the route judge count, size and the declared type with the same functions
+(`lib/widget/files.ts`); the route then reads each file's first bytes
+(`sniffWidgetFile`), and `attachments.content_type` is that reading from the
+widget's own list, never the browser's label, because it is what Storage serves
+the object as and what both threads draw from. The order is the opposite of a
+form's: the files go to Storage first, under ids named before anything is
+written, and the message and its attachment rows are one transaction, so a
+failure anywhere stores nothing, removes what was uploaded, and gives the
+visitor — still there — their words and files back to try again. A visitor
+opens a file through `/api/widget/attachments/[id]`, where
+`visitorAttachmentPath` reaches only a `reply` on one of their own web chats.
+The 25 MB ceiling sits under `proxyClientMaxBodySize`, which truncates a body
+rather than refusing it, so the route checks `Content-Length` before reading,
+and one is raised only with the other.
 
 **Explaining a control.** A label short enough to fit a dense table is rarely
 long enough to explain itself. `InfoTip` from `components/tooltip.tsx` is the

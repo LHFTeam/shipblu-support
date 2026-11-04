@@ -32,6 +32,7 @@ vi.mock('@/lib/widget/conversation', () => ({
   attachVisitorDetails,
   answerSurvey,
   listMessages: async () => [],
+  VisitorUploadFailed: class VisitorUploadFailed extends Error {},
 }));
 vi.mock('@/lib/widget/identify', () => ({
   applyVisitorIdentity,
@@ -110,10 +111,12 @@ describe('a usable widget body', () => {
     const response = await message.POST(post(JSON.stringify({ token: 'known', body: ' hi ' })));
 
     expect(response.status).toBe(200);
-    expect(appendVisitorMessage).toHaveBeenCalledWith('contact-1', 'hi', {
-      pageUrl: null,
-      userAgent: null,
-    });
+    expect(appendVisitorMessage).toHaveBeenCalledWith(
+      'contact-1',
+      'hi',
+      { pageUrl: null, userAgent: null },
+      [],
+    );
   });
 
   it('passes the identity object through untouched', async () => {
@@ -208,5 +211,112 @@ describe('POST /api/widget/session', () => {
 
     expect(((await response.json()) as { token: string }).token).toBe('known');
     expect(registerVisitor).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * A message with files, which the widget sends as a multipart body. The files
+ * are judged by the composer's own rules and then by their bytes, and only a
+ * message whose every file passes reaches `appendVisitorMessage`.
+ */
+describe('POST /api/widget/message with files', () => {
+  const JPEG = new Uint8Array([
+    0xff, 0xd8, 0xff, 0xe0, 0, 0x10, 0x4a, 0x46, 0x49, 0x46, 0, 1, 1, 0,
+  ]);
+
+  function multipart(fields: Record<string, string>, files: File[] = []): Request {
+    address += 1;
+    const form = new FormData();
+    for (const [name, value] of Object.entries(fields)) form.set(name, value);
+    for (const file of files) form.append('files', file, file.name);
+    return new Request('https://support.example/api/widget/message', {
+      method: 'POST',
+      body: form,
+      headers: { 'x-forwarded-for': `203.0.${Math.floor(address / 250)}.${address % 250}` },
+    });
+  }
+
+  it('stores a photo sent with no words, typed by its bytes', async () => {
+    const photo = new File([JPEG], 'parcel.jpeg', { type: 'image/jpeg' });
+    const response = await message.POST(multipart({ token: 'known', body: '' }, [photo]));
+
+    expect(response.status).toBe(200);
+    expect(appendVisitorMessage).toHaveBeenCalledWith(
+      'contact-1',
+      '',
+      expect.objectContaining({ pageUrl: null }),
+      [
+        expect.objectContaining({
+          filename: 'parcel.jpeg',
+          contentType: 'image/jpeg',
+          kind: 'image',
+          extension: 'jpg',
+        }),
+      ],
+    );
+  });
+
+  it('refuses a file whose bytes are not what its label says, by name', async () => {
+    const page = new File(['<html><script>alert(1)</script></html>'], 'parcel.jpg', {
+      type: 'image/jpeg',
+    });
+    const response = await message.POST(multipart({ token: 'known', body: 'look' }, [page]));
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: 'type', filename: 'parcel.jpg' });
+    expect(appendVisitorMessage).not.toHaveBeenCalled();
+  });
+
+  it('refuses a type the widget does not carry before reading it', async () => {
+    const sheet = new File(['a,b'], 'orders.csv', { type: 'text/csv' });
+    const response = await message.POST(multipart({ token: 'known', body: '' }, [sheet]));
+
+    expect(await response.json()).toEqual({ error: 'type', filename: 'orders.csv' });
+    expect(appendVisitorMessage).not.toHaveBeenCalled();
+  });
+
+  it('refuses more files than one message carries', async () => {
+    const photos = Array.from(
+      { length: 6 },
+      (_, index) => new File([JPEG], `photo-${index}.jpg`, { type: 'image/jpeg' }),
+    );
+    const response = await message.POST(multipart({ token: 'known', body: '' }, photos));
+
+    expect(await response.json()).toEqual({ error: 'too_many', filename: null });
+    expect(appendVisitorMessage).not.toHaveBeenCalled();
+  });
+
+  it('refuses a body longer than the limit before reading it', async () => {
+    address += 1;
+    const response = await message.POST(
+      new Request('https://support.example/api/widget/message', {
+        method: 'POST',
+        body: 'x',
+        headers: {
+          'content-type': 'multipart/form-data; boundary=x',
+          'content-length': String(40 * 1024 * 1024),
+          'x-forwarded-for': `192.0.2.${address % 250}`,
+        },
+      }),
+    );
+
+    expect(response.status).toBe(413);
+    expect(await response.json()).toEqual({ error: 'too_large_total' });
+    expect(resolveVisitor).not.toHaveBeenCalled();
+  });
+
+  it('refuses a multipart body that holds neither words nor a file', async () => {
+    const response = await message.POST(multipart({ token: 'known', body: '   ' }));
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: 'empty message' });
+  });
+
+  it('asks who the visitor is before judging the files', async () => {
+    const photo = new File([JPEG], 'parcel.jpg', { type: 'image/jpeg' });
+    const response = await message.POST(multipart({ token: 'stranger', body: '' }, [photo]));
+
+    expect(response.status).toBe(401);
+    expect(appendVisitorMessage).not.toHaveBeenCalled();
   });
 });
