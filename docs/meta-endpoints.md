@@ -1,10 +1,10 @@
 # Meta endpoints — what this system calls, from where, and why
 
 Every HTTP request this codebase makes to Meta, and every request Meta makes to
-it. One file because the surface is spread across five clients that share a
+it. One file because the surface is spread across six clients that share a
 host and nothing else: a question like "what does the Page token actually do
 here?" otherwise takes a grep across `lib/meta/`, `lib/whatsapp/`, the worker's
-handlers and two server actions.
+handlers, two server actions and two route handlers.
 
 **Scope.** This describes the _code_: the call, its route, its caller and the
 reason it exists. It deliberately says nothing about whether a given call
@@ -15,17 +15,18 @@ rather than by a bug, §8 names the gate and cites the file that holds the
 evidence.
 
 Every Graph path below addresses **v23.0**, declared once in
-`lib/meta/graph.ts` beside the two hosts it is addressed on. The five clients —
+`lib/meta/graph.ts` beside the two hosts it is addressed on. The six clients —
 `lib/meta/client.ts`, `lib/meta/subscriptions.ts`, `lib/whatsapp/client.ts`,
-`lib/meta/debug-token.ts` (shared by `check_meta_permissions` and the WhatsApp
-onboarding) and the one bare `fetch` in `lib/whatsapp/onboarding.ts` that
-exchanges a signup code — stay separate, each with its own credential and error
-handling, and import the address from there, so a version bump is one edit and
-cannot land on some of them only.
+`lib/meta/debug-token.ts` (shared by `check_meta_permissions`, the WhatsApp
+onboarding and the Unified Login callback) and the two bare `fetch`es that
+exchange a code, `lib/whatsapp/onboarding.ts` for a signup code and
+`lib/meta/unified-login.ts` for a login code — stay separate, each with its own
+credential and error handling, and import the address from there, so a version
+bump is one edit and cannot land on some of them only.
 
 ## Contents
 
-1. [The routes: two hosts, four credentials](#1-the-routes-two-hosts-four-credentials)
+1. [The routes: two hosts, five credentials](#1-the-routes-two-hosts-five-credentials)
 2. [Messenger and Instagram — `lib/meta/client.ts`](#2-messenger-and-instagram--libmetaclientts)
 3. [Webhook subscriptions — `lib/meta/subscriptions.ts`](#3-webhook-subscriptions--libmetasubscriptionsts)
 4. [Diagnostics — `check_meta_permissions`](#4-diagnostics--check_meta_permissions)
@@ -34,32 +35,51 @@ cannot land on some of them only.
 7. [Endpoints deliberately not used](#7-endpoints-deliberately-not-used)
 8. [What each call needs, and what currently gates one](#8-what-each-call-needs-and-what-currently-gates-one)
 
-## 1. The routes: two hosts, four credentials
+## 1. The routes: two hosts, five credentials
 
-One Meta app serves four products, the Instagram account is connected to it
-**twice**, and a WhatsApp number on the WhatsApp Business app brings a
-credential of its own. Which host and which credential a call goes out with is
-a property of the _connection_, not of the platform — `lib/meta/connection.ts`
-is the only place that decides, and `metaConnection()` decides it from
-configuration alone so that "can this ticket be answered?" cannot depend on
-which webhook delivery reached the worker first.
+One Meta app serves four products, the Instagram account can be connected to it
+**three ways** — and has been connected two of them at once since 2026-08-30 —
+and a WhatsApp number on the WhatsApp Business app brings a credential of its
+own. Which host and which credential a call goes out with is a property of the
+_connection_, not of the platform — `lib/meta/connection.ts` is the only place
+that decides, and `metaConnection()` decides it from configuration alone so
+that "can this ticket be answered?" cannot depend on which webhook delivery
+reached the worker first.
 
-| Connection           | Host                  | Credential                         | Signs webhooks with    | Permission vocabulary                                         |
-| -------------------- | --------------------- | ---------------------------------- | ---------------------- | ------------------------------------------------------------- |
-| Facebook Page        | `graph.facebook.com`  | `META_PAGE_ACCESS_TOKEN`           | `META_APP_SECRET`      | `pages_*`, `instagram_basic`, `instagram_manage_*`            |
-| Instagram Login      | `graph.instagram.com` | `INSTAGRAM_ACCESS_TOKEN`           | `INSTAGRAM_APP_SECRET` | `instagram_business_*`                                        |
-| App-level (webhooks) | `graph.facebook.com`  | `{META_APP_ID}\|{META_APP_SECRET}` | n/a                    | none — an app token carries no scopes                         |
-| Embedded Signup      | `graph.facebook.com`  | a business token, stored sealed    | `META_APP_SECRET`      | `whatsapp_business_management`, `whatsapp_business_messaging` |
+| Connection           | Host                  | Credential                                           | Signs webhooks with    | Permission vocabulary                                                       |
+| -------------------- | --------------------- | ---------------------------------------------------- | ---------------------- | --------------------------------------------------------------------------- |
+| Facebook Page        | `graph.facebook.com`  | `META_PAGE_ACCESS_TOKEN`                             | `META_APP_SECRET`      | `pages_*`, `instagram_basic`, `instagram_manage_*`                          |
+| Instagram Login      | `graph.instagram.com` | `INSTAGRAM_ACCESS_TOKEN`                             | `INSTAGRAM_APP_SECRET` | `instagram_business_*`                                                      |
+| Unified Login        | `graph.facebook.com`  | `INSTAGRAM_UNIFIED_LOGIN_TOKEN`, a system-user token | `META_APP_SECRET`      | `instagram_basic`, `instagram_manage_messages`, `instagram_manage_comments` |
+| App-level (webhooks) | `graph.facebook.com`  | `{META_APP_ID}\|{META_APP_SECRET}`                   | n/a                    | none — an app token carries no scopes                                       |
+| Embedded Signup      | `graph.facebook.com`  | a business token, stored sealed                      | `META_APP_SECRET`      | `whatsapp_business_management`, `whatsapp_business_messaging`               |
 
 Facebook is always the Page connection; there is no second way to reach a Page.
-Instagram takes the direct connection whenever `INSTAGRAM_ACCESS_TOKEN` is set,
-and falls back to the Page connection when it is not — so unsetting that
-variable silently reroutes every call in §2 to a different host with a different
-token. The third subscription write in §3 is the one thing that does not fall
-back: it refuses outright, because a Page token addressed to
-`graph.instagram.com` is refused with a sentence naming neither credential.
+Instagram takes **Unified Login whenever `INSTAGRAM_UNIFIED_LOGIN_TOKEN` is
+set, then the direct connection whenever `INSTAGRAM_ACCESS_TOKEN` is, and the
+Page connection otherwise** — so unsetting either token silently reroutes every
+call in §2 to the next connection down, which for the direct one is a different
+host with a different token. The account-level subscription writes in §3 are
+the one thing that does not fall back: each refuses outright without its own
+connection's token, because a Page token addressed to `graph.instagram.com` is
+refused with a sentence naming neither credential.
 
-**The fourth credential is the one the database holds.** A number that lives on
+**Unified Login is the Page's host with a credential of its own.** The token is
+a Business Integration System User token, minted by Meta when an admin of the
+business portfolio finishes the login the "Connect Instagram" control on
+`/admin/channels` opens (§2.9), set to never expire by the Facebook Login for
+Business configuration it was minted through, and set on Render by hand — the
+callback page shows it once and nothing stores it. It is addressed to
+`INSTAGRAM_ACCOUNT_ID` like the Page token, never to `/me`, which on that token
+is the system user and not the account. Its webhooks are signed with
+`META_APP_SECRET`, so a delivery it sent is labelled `facebook_page` at the
+endpoint (§6), and its permissions are the Page's `instagram_*` spelling — the
+pair App Review granted at Advanced Access on 2026-09-19 — without the
+`pages_*` names, because no Page is involved. `plans/instagram-unified-login.md`
+has the dashboard steps, the activation order and what the first live send has
+still to prove.
+
+**The fifth credential is the one the database holds.** A number that lives on
 the WhatsApp Business app is connected through Meta's Embedded Signup, which
 hands the browser a one-use code; `lib/whatsapp/onboarding.ts` exchanges it for
 a business token Meta mints for that WABA, proves the token reads the WABA, and
@@ -73,16 +93,16 @@ construction — the popup is opened as it — so its deliveries verify with
 `META_APP_SECRET` like every other WhatsApp delivery.
 
 **Where the credential travels.** `lib/meta/client.ts` puts it in the query
-string (`?access_token=`); the other three clients put it in an
+string (`?access_token=`); the other clients put it in an
 `Authorization: Bearer` header. That is not an oversight in the second group: an
 app access token contains the app secret verbatim, and a URL is the part of a
-request that reaches logs and error messages. Two requests cannot keep a secret
-out of the URL — the signup-code exchange takes the app secret and the code as
-query parameters, and `debug_token` takes the token it inspects as
-`input_token` — so both go out with a `fetch` of their own rather than through a
+request that reaches logs and error messages. Three requests cannot keep a
+secret out of the URL — the two code exchanges take the app secret and the code
+as query parameters, and `debug_token` takes the token it inspects as
+`input_token` — so each goes out with a `fetch` of its own rather than through a
 client that would put the request into its error messages, and every sentence
 they build names host and path, never the URL (`lib/whatsapp/onboarding.ts`,
-`lib/meta/debug-token.ts`).
+`lib/meta/unified-login.ts`, `lib/meta/debug-token.ts`).
 
 ## 2. Messenger and Instagram — `lib/meta/client.ts`
 
@@ -122,6 +142,14 @@ professional account id for Instagram. Body from `directMessageRequest()`
 This is the channel's whole outbound path: an agent's reply, an automation's
 canned reply, the out-of-hours acknowledgement and the CSAT survey all end up
 here through `send_meta`.
+
+Over Unified Login the request is addressed the same way, on the same host as
+the Page's — `POST graph.facebook.com/{ig-account-id}/messages` with
+`INSTAGRAM_UNIFIED_LOGIN_TOKEN` where the Page token would be. The account id
+is `INSTAGRAM_ACCOUNT_ID` on every connection; it is never `/me`, which on a
+system-user token is the system user and not the account. The worker's log
+line says which route carried a send: `[send_meta] … on instagram via
+unified_login`.
 
 Two things about the body are decided rather than copied:
 
@@ -182,9 +210,11 @@ answer and never as a message (`recordMetaFeedback`, `lib/csat/meta-feedback.ts`
 
 **Facebook Page only.** Handover is a property of the Page connection — an
 Instagram account reached through Instagram Login is not installed on anything
-and has no primary receiver to take control from — so `takeThreadControl()`
+and has no primary receiver to take control from, and Meta's migration guide
+lists the protocol as not supported on Unified Login — so `takeThreadControl()`
 asserts the connection before calling, rather than sending a request to an edge
-that does not exist on `graph.instagram.com`.
+that does not exist on `graph.instagram.com` or means nothing for a
+system-user token.
 
 It exists because a customer's message arriving in the webhook's `standby` array
 means another app owns that inbox and Meta will refuse a send from this one. An
@@ -316,6 +346,37 @@ exists to bound has been allocated by the time the check runs. The declared
 aborted mid-read where there is not. The avatar path passes a 2 MB ceiling; the
 message-attachment path passes none.
 
+### 2.9 Connecting the account through Unified Login — `lib/meta/unified-login.ts`
+
+Not through `graph()`, and not a job: the login hands the browser a code that is
+single-use and short-lived, and the admin is waiting on the one sentence the
+exchange answers, the same two reasons `lib/whatsapp/onboarding.ts` gives for
+the signup exchange. `GET /api/meta/unified-login/start` sets a `state` cookie
+and opens Meta's dialog on `www.facebook.com/{version}/dialog/oauth` with the
+configuration's `config_id` in place of `scope` and `response_type=code`;
+`GET /api/meta/unified-login/callback` checks the state, makes the three calls
+below, and renders the token once — in a page sent `Cache-Control: no-store`
+and `Referrer-Policy: no-referrer`, behind `admin.channels.connect` — for the
+admin to set as `INSTAGRAM_UNIFIED_LOGIN_TOKEN` on Render. Nothing stores it.
+
+| Graph request                                                       | Credential                        | What it does                                                                                                      | Called from                                                                      |
+| ------------------------------------------------------------------- | --------------------------------- | ----------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| `GET /oauth/access_token?client_id&client_secret&redirect_uri&code` | `META_APP_ID` + `META_APP_SECRET` | Exchange the login code for the system-user token                                                                 | `lib/meta/unified-login.ts` (`exchangeCode`, own `fetch`) via the callback route |
+| `GET /debug_token?input_token=`                                     | app token (header)                | Type, validity, expiry and scopes of the new token; refused if invalid or minted for another app                  | `lib/meta/debug-token.ts` (`inspectToken`) via the callback route                |
+| `GET /me/assigned_instagram_accounts?fields=id,username`            | the new token                     | **The proof** the token reaches an Instagram account, and a warning when `INSTAGRAM_ACCOUNT_ID` is not among them | `lib/meta/unified-login.ts` (`connectedAccounts`, through `readGraph`)           |
+| `GET /me?fields=client_business_id`                                 | the new token                     | The business portfolio, as metadata — never a reason to fail                                                      | `lib/meta/unified-login.ts` (`clientBusinessId`, through `readGraph`)            |
+
+The exchange is a `GET` with the app secret and the code in the query string
+because that is the only shape Meta documents, so `tokenExchangeUrl` builds the
+URL and nothing else, the route sends it with its own `fetch`, and anything Meta
+or the network says back has the code and the secret cut out before it is
+repeated. `redirect_uri` must match the dialog's byte for byte, and both are
+built from `APP_URL` — which is why the callback path, and not the site root,
+is the URL registered on the configuration. `/me/assigned_instagram_accounts`
+is the proof rather than `debug_token`, as the WABA read is for a business token
+(§5.1): `granular_scopes` need list no target, and the account read says what
+the token can actually address.
+
 ## 3. Webhook subscriptions — `lib/meta/subscriptions.ts`
 
 Configuration, not traffic: run by hand as `npm run job --
@@ -326,22 +387,28 @@ retry that hides which half of a two-step change landed.
 **A webhook has two subscriptions, not one.** Meta's own sentence is that "only
 fields with subscriptions at both the page and app levels will get Webhooks", so
 there is an app-level write _and_ an account-level one — and because the account
-level is where the two Instagram connections part company, there are three
-writes rather than two:
+level is where the Instagram connections part company, there are four writes
+rather than two:
 
 | Level           | Graph request                                             | Credential                          | Helper                                                               |
 | --------------- | --------------------------------------------------------- | ----------------------------------- | -------------------------------------------------------------------- |
 | App             | `GET`/`POST graph.facebook.com/{app-id}/subscriptions`    | app token, `{app-id}\|{app-secret}` | `readSubscription` / `applyFieldSubscription`                        |
 | Facebook Page   | `GET`/`POST graph.facebook.com/{page-id}/subscribed_apps` | `META_PAGE_ACCESS_TOKEN`            | `readPageSubscription` / `applyPageSubscription`                     |
 | Instagram Login | `GET`/`POST graph.instagram.com/{ig-id}/subscribed_apps`  | `INSTAGRAM_ACCESS_TOKEN`            | `readInstagramLoginSubscription` / `applyInstagramLoginSubscription` |
+| Unified Login   | `GET`/`POST graph.facebook.com/{ig-id}/subscribed_apps`   | `INSTAGRAM_UNIFIED_LOGIN_TOKEN`     | `readUnifiedLoginSubscription` / `applyUnifiedLoginSubscription`     |
 | WhatsApp WABA   | `POST`/`GET graph.facebook.com/{waba-id}/subscribed_apps` | the stored business token           | `subscribeAppRequest` / `subscribedAppsRequest`                      |
 
 The app level is shared — one app, one `instagram` object subscription serving
-both connections. Each connection then owns its account-level half, on a
-different host, with a different credential and, for the Page, a different field
-vocabulary.
+every Instagram connection. Each connection then owns its account-level half:
+the direct connection's on its own host with its own credential, Unified
+Login's on the Page's host with its own token and the `instagram` object's own
+field list, and the Page's with a different field vocabulary again. The Unified
+Login write is `subscribed_fields=<comma list>` with the token in the header,
+answered `{"success": true}`, and `GET` on the same edge reads it back; without
+it the connection is authorised and silent, which is why it is a step of the
+activation in `plans/instagram-unified-login.md` and not an afterthought.
 
-The fourth row is the account-level half for a WABA connected through Embedded
+The fifth row is the account-level half for a WABA connected through Embedded
 Signup, and it is the one write in this table that is not hand-run: it is the
 `subscribe` step of `complete_coexistence_onboarding`
 (`lib/whatsapp/onboarding-complete.ts`, shapes in
@@ -360,7 +427,7 @@ the floor.
 **Every one of these writes replaces the field list rather than adding to it.**
 A request naming only `account_alerts` silently unsubscribes `messages`, and
 Meta reports that as success. So `mergeFields()` is the safety-critical part of
-the job, is shared by all three levels, and throws rather than producing a list
+the job, is shared by every level, and throws rather than producing a list
 that drops a field. The Page and Instagram POSTs are not _documented_ as
 replacing; writing the merged list is correct under either reading, and assuming
 "adds" is the assumption that costs a channel.
@@ -401,12 +468,15 @@ that reason, since one bad name fails the whole write.
 ## 4. Diagnostics — `check_meta_permissions`
 
 Read-only, `npm run job -- check_meta_permissions`, safe against production.
-Two calls, one per connection:
+Four calls across the three connections, each made only while its connection's
+token is set:
 
-| Graph request                                                 | Credential               | What it settles                                             |
-| ------------------------------------------------------------- | ------------------------ | ----------------------------------------------------------- |
-| `GET graph.facebook.com/debug_token?input_token={page-token}` | app token (header)       | token `type`, `scopes`, `granular_scopes`, validity, expiry |
-| `GET graph.instagram.com/me?fields=user_id,username`          | `INSTAGRAM_ACCESS_TOKEN` | whether the token works, and which account it belongs to    |
+| Graph request                                                              | Credential                      | What it settles                                             |
+| -------------------------------------------------------------------------- | ------------------------------- | ----------------------------------------------------------- |
+| `GET graph.facebook.com/debug_token?input_token={page-token}`              | app token (header)              | token `type`, `scopes`, `granular_scopes`, validity, expiry |
+| `GET graph.instagram.com/me?fields=user_id,username`                       | `INSTAGRAM_ACCESS_TOKEN`        | whether the token works, and which account it belongs to    |
+| `GET graph.facebook.com/debug_token?input_token={unified-token}`           | app token (header)              | the same as the Page's, for the Unified Login token         |
+| `GET graph.facebook.com/me/assigned_instagram_accounts?fields=id,username` | `INSTAGRAM_UNIFIED_LOGIN_TOKEN` | whether the token reaches `INSTAGRAM_ACCOUNT_ID`            |
 
 `debug_token` rather than `/me/permissions`: the latter needs a _user_ token and
 this deployment sends with a Page one, where `/me` is the Page and the edge does
@@ -429,6 +499,16 @@ Instagram side of the app, which publishes no scope list — so this asks the on
 question that host will answer. That is still worth asking: both Instagram
 outages this system has had were a credential in the wrong place, and the
 account-id mismatch check here would have named either in one line.
+
+The Unified Login half answers fully, because its token is a
+`graph.facebook.com` token like the Page's: `debug_token` reports its type,
+validity, expiry (`expires_at: 0`, never, when the configuration was set up as
+the plan asks) and scopes, and the capabilities under `unified_login` in
+`lib/meta/capabilities.ts` are diagnosed against them. `/me` on that token is
+the business integration system user, not the account, so the question the
+direct connection asks of `/me` is asked here of `/me/assigned_instagram_accounts`
+instead: the account every send is addressed to must be in the list, or every
+reply fails with a token Meta calls valid.
 
 The job then prints the App Review **features** it could not check (`FEATURES`
 in `lib/meta/capabilities.ts`). A feature is granted to the app, appears in no
@@ -539,11 +619,11 @@ touches storage or calls Graph: Meta expects a 200 within seconds, retries the
 entire batch on anything else, and eventually disables a subscription that keeps
 failing.
 
-| Route                    | Objects delivered           | Signature checked against                                                          |
-| ------------------------ | --------------------------- | ---------------------------------------------------------------------------------- |
-| `/api/webhooks/meta`     | `page`                      | `META_APP_SECRET`                                                                  |
-| `/api/webhooks/meta`     | `instagram`                 | `INSTAGRAM_APP_SECRET`, its legacy name, then `META_APP_SECRET` — first match wins |
-| `/api/webhooks/whatsapp` | `whatsapp_business_account` | `META_APP_SECRET`                                                                  |
+| Route                    | Objects delivered           | Signature checked against                                                                                                                                  |
+| ------------------------ | --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/api/webhooks/meta`     | `page`                      | `META_APP_SECRET`                                                                                                                                          |
+| `/api/webhooks/meta`     | `instagram`                 | `INSTAGRAM_APP_SECRET`, its legacy name, then `META_APP_SECRET` — first match wins; `META_APP_SECRET` signs both the Page's and Unified Login's deliveries |
+| `/api/webhooks/whatsapp` | `whatsapp_business_account` | `META_APP_SECRET`                                                                                                                                          |
 
 `GET` on each answers Meta's subscription handshake with the bare challenge
 string (not JSON), checked against `META_VERIFY_TOKEN`. `POST` reads the body as
@@ -552,15 +632,23 @@ Meta sent, and re-serialising a parsed object produces a different string.
 
 One endpoint serves both Meta objects because Meta delivers them through one app
 subscription and distinguishes them only by `object`. One endpoint does not mean
-one credential, though: the twice-connected Instagram account signs
+one credential, though: an Instagram account connected more than one way signs
 byte-identical bodies with two different app secrets, so `lib/meta/signing.ts`
 decides which secrets _could_ have signed a delivery from the object in the
 body, and **which one actually did is the only thing that says which connection
 the delivery came in on**. It is recorded on the row because it is knowable
-there and nowhere downstream. `INSTAGRAM_APP_SECRET` is also read under its
-older name `META_INSTAGRAM_APP_SECRET`, and neither app secret can be removed
-while both connections are live — unsetting one resumes 403s for that half of
-the traffic (`docs/PROJECT-STATE.md` §6.26, §6.29).
+there and nowhere downstream. It cannot separate the Page's deliveries from
+Unified Login's, which are signed with the same `META_APP_SECRET`, so both are
+labelled `facebook_page`; nothing downstream needs more, since the one reader
+of the label (`lib/meta/thread.ts`) asks only whether a `standby` should stop a
+send, and Unified Login has no handover protocol for one to be about. The
+envelope — `messaging` or `standby` — is what tells the two apart in the table,
+and the plan's verification queries read it off the payload.
+`INSTAGRAM_APP_SECRET` is also read under its older name
+`META_INSTAGRAM_APP_SECRET`, and neither app secret can be removed while the
+direct connection is live — unsetting one resumes 403s for that half of the
+traffic (`docs/PROJECT-STATE.md` §6.26, §6.29); the plan's activation order
+disconnects it in the dashboard first and unsets the variables last.
 
 A number connected through coexistence adds four fields to the WhatsApp route,
 parsed by `lib/whatsapp/parse.ts` and handed out by
@@ -629,6 +717,8 @@ Credentials, all optional in the schema (`lib/env.ts`) and declared in
 | `FACEBOOK_PAGE_ID` / `INSTAGRAM_ACCOUNT_ID`                 | The node every send, private reply and subscription write is addressed to                                                                                                    |
 | `INSTAGRAM_ACCESS_TOKEN`                                    | Everything in §2 and §3 routed over the direct Instagram connection                                                                                                          |
 | `INSTAGRAM_APP_SECRET` (a.k.a. `META_INSTAGRAM_APP_SECRET`) | Verifies deliveries signed by the Instagram Login connection                                                                                                                 |
+| `INSTAGRAM_UNIFIED_LOGIN_TOKEN`                             | Everything in §2 and §3 routed over Unified Login, ahead of the two connections above while it is set; a system-user token the callback page (§2.9) shows once               |
+| `INSTAGRAM_UNIFIED_LOGIN_CONFIG_ID`                         | The Facebook Login for Business configuration "Connect Instagram" opens Meta's login with — created under Instagram → API setup with Unified login; an id, per environment   |
 | `WHATSAPP_PHONE_NUMBER_ID` / `WHATSAPP_WABA_ID`             | The default send number and the template listing                                                                                                                             |
 | `WHATSAPP_TOKEN_*`                                          | A second business account's own token, named by a database row — after a stored credential, before the shared                                                                |
 | `META_EMBEDDED_SIGNUP_CONFIG_ID`                            | The Facebook Login for Business configuration the browser opens Embedded Signup with; an id, but per environment, and a v4 one (products selected): v2 and v3 end 2026-10-15 |
@@ -665,9 +755,9 @@ rest of what the first live onboarding waits on.
 
 **Keeping this current.** Add a row when you add a call, and put the reasoning
 next to the code rather than only here — `lib/meta/send.ts`,
-`lib/meta/comments.ts`, `lib/meta/handover.ts` and
-`lib/whatsapp/onboarding-requests.ts` are the request shapes, and their headers
-are the evidence. When adding or changing a Graph request, read
+`lib/meta/comments.ts`, `lib/meta/handover.ts`,
+`lib/whatsapp/onboarding-requests.ts` and `lib/meta/unified-login.ts` are the
+request shapes, and their headers are the evidence. When adding or changing a Graph request, read
 the node reference **for v23.0 specifically**: an edge missing from it is a
 finding rather than an omission by the doc, and removal notices sit on a
 separate legacy page that a search for the working endpoint will not surface
