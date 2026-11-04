@@ -93,7 +93,7 @@ export function explainMetaSendError(error: MetaApiError, context: MetaSendConte
   // An expired token fails every send on every channel identically, so say that
   // rather than letting an agent read it as something they or the customer did.
   if (error.code === ACCESS_TOKEN_CODE)
-    return withReference(explainAuthError(error.code, base), error, context.connection);
+    return withReference(metaAuthExplanation(base, context.connection), error, context.connection);
 
   if (context.sendKind === 'dm' && context.tag === 'HUMAN_AGENT' && isHumanAgentRefusal(error)) {
     return withReference(`${base}\n\n${humanAgentExplanation(context)}`, error, context.connection);
@@ -598,15 +598,28 @@ export function explainTakeControlError(error: MetaApiError, platform: MetaPlatf
  * feature turned out never to have been approved (`docs/PROJECT-STATE.md` §5.2);
  * the diagnosis cost eight failed sends and a guess.
  */
-export function explainMetaProfileError(error: MetaApiError, platform: MetaPlatform): string {
+export function explainMetaProfileError(
+  error: MetaApiError,
+  platform: MetaPlatform,
+  /**
+   * The connection the read went out over — `metaConnection(platform)` at the
+   * caller. Required rather than defaulted, because the first step of the
+   * explanation below names the credential, and the Page token is the wrong
+   * name on two of the three connections.
+   */
+  connection: MetaConnection,
+): string {
   const base = error.userMessage ?? error.message;
 
   if (error.code === ACCESS_TOKEN_CODE)
-    return withReference(explainAuthError(error.code, base), error);
+    return withReference(metaAuthExplanation(base, connection), error, connection);
 
   // Checked before the permission branch, because this one is not App Review at
   // all and sending somebody to that dashboard would cost them the afternoon.
-  if (isInstagramLinkageRefusal(error, platform)) {
+  // Only the Page token can be refused this way: the sentence is about a
+  // Page's route to an Instagram id, and the other two connections send no
+  // Page token.
+  if (connection === 'facebook_page' && isInstagramLinkageRefusal(error, platform)) {
     return withReference(
       `${base}\n\nThis is not an App Review problem: Graph is saying the Page token has no ` +
         `route to this Instagram-scoped id, which is what it answers when the professional ` +
@@ -627,24 +640,93 @@ export function explainMetaProfileError(error: MetaApiError, platform: MetaPlatf
   if (isProfilePermissionRefusal(error)) {
     const product = platform === 'instagram' ? 'Instagram' : 'Messenger';
 
+    /*
+      The first step is about the credential, and which credential depends on
+      the route. Over the Page it is the 2026-08-27 lesson — a System User
+      token where a Page token was needed. Over Unified Login a system-user
+      token is the design, so that step would send somebody to check a variable
+      the call never used; what fails there is the permission on the
+      configuration, in Meta's own words for this setup. Over the direct
+      connection the token is an Instagram User token, and the question is the
+      grant on graph.instagram.com.
+    */
+    const credentialStep =
+      connection === 'unified_login'
+        ? `**1. The permission on the token.** This read went out over Unified Login with ` +
+          `INSTAGRAM_UNIFIED_LOGIN_TOKEN — a system-user token by design, so its type is not ` +
+          `the question and META_PAGE_ACCESS_TOKEN was not used. Meta's own sentence for this ` +
+          `setup is "(#10) App is missing the instagram_manage_messages permission to access ` +
+          `Instagram user information": check that the configuration carries ` +
+          `instagram_basic and instagram_manage_messages and that ` +
+          `\`npm run job -- check_meta_permissions\` shows both on the token; if not, connect ` +
+          `again under Settings → Channels with them ticked.`
+        : connection === 'instagram_login'
+          ? `**1. The grant on the direct connection.** This read went out over ` +
+            `graph.instagram.com with INSTAGRAM_ACCESS_TOKEN, so the Page token's type is not ` +
+            `the question. The grant to check is instagram_business_basic and ` +
+            `instagram_business_manage_messages under Instagram → API setup with Instagram ` +
+            `login, and that the token is not expired (it lasts sixty days).`
+          : `**1. The token type.** A page-scoped id can only be resolved by that Page's own ` +
+            `token. A System User or User token is refused exactly this way, whatever its ` +
+            `scopes say — and on 2026-08-27 that was the cause, after a day spent reading it as ` +
+            `a missing approval. Paste META_PAGE_ACCESS_TOKEN into Meta's Access Token ` +
+            `Debugger: it must say Type: Page.`;
+
     return withReference(
       `${base}\n\nGraph refused a ${product} profile read. Three different faults produce this ` +
         `and they need three different fixes, so check them in this order.\n\n` +
-        `**1. The token type.** A page-scoped id can only be resolved by that Page's own token. ` +
-        `A System User or User token is refused exactly this way, whatever its scopes say — and ` +
-        `on 2026-08-27 that was the cause, after a day spent reading it as a missing approval. ` +
-        `Paste META_PAGE_ACCESS_TOKEN into Meta's Access Token Debugger: it must say Type: Page.` +
-        `\n\n**2. The approval.** If the token is a Page token, this is **Business Asset User ` +
+        credentialStep +
+        `\n\n**2. The approval.** If the credential is right, this is **Business Asset User ` +
         `Profile Access** at Advanced Access. The tell is decisive: people with a role on the ` +
         `Meta app are exempt, so if your own account resolves and a customer does not, it is ` +
         `this and only App Review fixes it.\n\n**3. The customer.** Graph says the same thing ` +
         `for somebody who has deleted their account. Only conclude this once the first two are ` +
         `ruled out, because it is the one that looks like nothing is wrong.`,
       error,
+      connection,
     );
   }
 
-  return withReference(base, error);
+  return withReference(base, error, connection);
+}
+
+/**
+ * What a code 190 means, by the credential the call went out with.
+ *
+ * `explainAuthError`'s shared sentence names META_PAGE_ACCESS_TOKEN and says
+ * every Meta call is failing, which is true only when the Page token was the
+ * credential. Over Unified Login it is the system-user token that has stopped
+ * working — Meta's eligibility page: the app was removed from the business
+ * portfolio or the account moved to another one, and the remedy is to connect
+ * again, not to retry — and over the direct connection it is the sixty-day
+ * Instagram User token, which ran out on 2026-10-29 while Messenger and
+ * WhatsApp kept sending. Naming the Page token for either sends the operator to
+ * rotate a credential the call never used, with every other channel working
+ * as the proof that something else is wrong.
+ */
+function metaAuthExplanation(base: string, connection: MetaConnection): string {
+  if (connection === 'unified_login') {
+    return (
+      `${base}\n\nINSTAGRAM_UNIFIED_LOGIN_TOKEN, the Unified Login connection's system-user ` +
+      `token, is expired or revoked, so every Instagram send, profile read and comment action ` +
+      `fails until it is replaced — Messenger and WhatsApp are unaffected, since they send with ` +
+      `other credentials. A token configured never to expire stops working when the app is ` +
+      `removed from the business portfolio or the account is moved to another one; Meta's ` +
+      `advice is to stop retrying and connect again. Press Connect Instagram under Settings → ` +
+      `Channels and set the token it shows in the environment group.`
+    );
+  }
+  if (connection === 'instagram_login') {
+    return (
+      `${base}\n\nINSTAGRAM_ACCESS_TOKEN, the direct Instagram connection's token, is expired ` +
+      `or revoked, so every Instagram send, profile read and comment action fails until it is ` +
+      `replaced — Messenger and WhatsApp are unaffected. It is an Instagram User token that ` +
+      `lasts sixty days; renew it under Instagram → API setup with Instagram login, or connect ` +
+      `the account through Unified Login (Settings → Channels), whose token never expires and ` +
+      `takes every Instagram call ahead of this one.`
+    );
+  }
+  return explainAuthError(ACCESS_TOKEN_CODE, base);
 }
 
 /**
@@ -702,12 +784,12 @@ export function explainMetaModerationError(
   if (!cameFromGraph(error)) return base;
 
   if (error.code === ACCESS_TOKEN_CODE)
-    return withReference(explainAuthError(error.code, base), error, context.connection);
+    return withReference(metaAuthExplanation(base, context.connection), error, context.connection);
 
   if (isProfilePermissionRefusal(error)) {
     // Named for the connection the call actually went out over rather than
     // offering both and letting the reader pick. Both spellings exist on this
-    // app because both connections are live, and handing somebody two
+    // app because more than one connection is live, and handing somebody two
     // permission names for one refusal is how an approval gets requested on the
     // flow that was not being used.
     const permission =
@@ -757,7 +839,7 @@ function humanAgentExplanation(context: MetaSendContext): string {
     cannot work out from Meta's sentence.
 
     Human Agent is one feature name in the App Dashboard, but the app is
-    connected to Instagram twice and a grant is a property of the connection —
+    connected to Instagram more than once and a grant is a property of the connection —
     so an approval sitting on the Page connection does nothing for a send that
     went out over `graph.instagram.com`. §6.35's rule, applied to App Review
     rather than to a doc example.

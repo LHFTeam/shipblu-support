@@ -599,7 +599,7 @@ ${warnings}
 <li>Once the deploy is live, run <code>npm run job -- subscribe_meta_webhooks object=instagram</code> so the account's webhooks are subscribed through this connection.</li>
 <li>Then <code>npm run job -- check_meta_permissions</code>, which inspects the token the services actually hold.</li>
 </ol>
-<p class="muted">From the moment the token is set, every Instagram reply, profile read and comment action goes out over graph.facebook.com with it, ahead of the direct connection and the Page. <code>plans/instagram-unified-login.md</code> has the order for disconnecting the other two.</p>
+<p class="muted">From the moment the token is set, every Instagram reply, profile read and comment action goes out over graph.facebook.com with it, ahead of the direct connection and the Page. <code>plans/instagram-unified-login.md</code> has the order for retiring the direct connection; the Page stays, as the fallback.</p>
 <script>
 document.getElementById('copy').addEventListener('click', function () {
   var token = document.getElementById('token').value;

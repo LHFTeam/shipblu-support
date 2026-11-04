@@ -9,6 +9,7 @@ import {
   MetaApiError,
   MetaContentTooLargeError,
 } from '@/lib/meta/client';
+import { metaConnection } from '@/lib/meta/connection';
 import { explainMetaProfileError, isProfilePermissionRefusal } from '@/lib/meta/errors';
 import { normaliseGender } from '@/lib/meta/profile';
 import type { MetaPlatform } from '@/lib/meta/types';
@@ -132,7 +133,10 @@ export async function refreshChannelProfile(input: {
       */
       return {
         kind: 'refused',
-        reason: explainMetaProfileError(error, platform),
+        // The same decision `fetchProfile` made, read again rather than
+        // carried out of the client: it is configuration, and the sentence
+        // names the credential that configuration chose.
+        reason: explainMetaProfileError(error, platform, metaConnection(platform)),
         permission: isProfilePermissionRefusal(error),
       };
     }

@@ -408,6 +408,36 @@ describe('a reply to a comment Graph will not accept', () => {
     expect(unified).toContain('via graph.facebook.com');
   });
 
+  it('names the Unified Login token, not the Page token, on an expired-token refusal', () => {
+    // Code 190 over Unified Login is the system-user token stopping — the app
+    // removed from the portfolio, the account moved — and Messenger keeps
+    // working. Blaming META_PAGE_ACCESS_TOKEN sends the operator to rotate a
+    // credential the call never used.
+    const explained = explainMetaSendError(
+      new MetaApiError('Error validating access token', 400, 190, null, true, null, 'AaBb'),
+      { platform: 'instagram', connection: 'unified_login', sendKind: 'dm', tag: 'RESPONSE' },
+    );
+
+    expect(explained).toContain('INSTAGRAM_UNIFIED_LOGIN_TOKEN');
+    expect(explained).toContain('Connect Instagram');
+    expect(explained).not.toContain('META_PAGE_ACCESS_TOKEN');
+
+    const direct = explainMetaSendError(
+      new MetaApiError('Error validating access token', 400, 190, null, true, null, 'AaBb'),
+      { platform: 'instagram', connection: 'instagram_login', sendKind: 'dm', tag: 'RESPONSE' },
+    );
+    expect(direct).toContain('INSTAGRAM_ACCESS_TOKEN');
+    expect(direct).not.toContain('META_PAGE_ACCESS_TOKEN');
+
+    // The Page keeps the shared sentence: there the token really is the one
+    // every channel sends with.
+    const page = explainMetaSendError(
+      new MetaApiError('Error validating access token', 400, 190, null, true, null, 'AaBb'),
+      { platform: 'facebook', connection: 'facebook_page', sendKind: 'dm', tag: 'RESPONSE' },
+    );
+    expect(page).toContain('META_PAGE_ACCESS_TOKEN');
+  });
+
   it('sends a Human Agent refusal over Unified Login to the instagram_* submission', () => {
     // A feature grant is a property of the connection it was requested for,
     // and Meta's Unified Login guide says to request it again for this setup.

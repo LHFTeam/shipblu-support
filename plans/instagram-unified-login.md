@@ -80,7 +80,9 @@ Three facts carry the design:
 
 - **The ids do not change.** The account id and the IGSIDs are the Page's
   (Unified Login's payloads follow the Facebook Login format, and
-  `/me/assigned_instagram_accounts` lists the same `17841448759001625`), so a
+  `/me/assigned_instagram_accounts` is expected to list the same
+  `17841448759001625` — the callback page checks exactly that, and §5.2 of
+  `docs/PROJECT-STATE.md` records it once a token has been minted), so a
   contact, a ticket and a 24-hour window mean the same thing on every
   connection and this is a routing change, not a data migration — the same
   property §6.29 verified from traffic for the first two. Meta does say the
@@ -196,7 +198,10 @@ steps against its own URL). Labels are quoted as the dashboard shows them on
 - **The app is owned by a business portfolio.** The "API setup with Unified
   login" tab appears only on an app a business portfolio owns; if the tab is
   missing, that is the reason. App settings → Basic → "Business portfolio"
-  names it. Business verification is already done for the September review.
+  names it. Business verification is a prerequisite of the September
+  approvals and so should already be in place, but `docs/PROJECT-STATE.md`
+  §5.2 records it as never checked for either app: Business settings →
+  Security Centre says, and a missing tab is the first place it would show.
 - **Facebook Login for Business is a product on the app.** Unified Login's
   configurations are Facebook Login for Business configurations; the WhatsApp
   Embedded Signup one (`META_EMBEDDED_SIGNUP_CONFIG_ID`) lives in the same
@@ -275,8 +280,9 @@ https://www.facebook.com/v23.0/dialog/oauth
 `config_id` stands where `scope` would on an ordinary login; `response_type`
 is `code` because a system-user token is minted only through the
 authorisation-code grant; `state` is the console's own, set in a cookie by the
-start route and compared on the way back. The dashboard's generated URL has no
-`state`, which is fine for a test by hand and not for the console. Do not add
+start route and compared on the way back. The dashboard's generated URL is
+not expected to carry a `state` — it is a link for a test by hand, not for the
+console — and if it does, ours still generates its own. Do not add
 `prompt=login` by default: it shows both login options even to somebody already
 signed in to Facebook, which is a second screen for every admin for the sake of
 the rare one signed in as the wrong person.
@@ -374,7 +380,9 @@ object=instagram` — on the worker, through Render's shell — writes the
    `unified login account 17841448759001625 subscribed now: …` (or warns that
    the account has no subscription on this connection yet, which is the
    expected first answer) and ends with `unified-login-level done — subscribed:
-messages, comments, …`. The app-level half it reads and leaves alone.
+messages, comments, …`. The app-level half it reads first and writes only when
+   one of the five fields is missing from it, which the September runs already
+   put right.
 5. **Check the token.** `npm run job -- check_meta_permissions` inspects the
    Unified token with `debug_token` — which answers fully, because it is a
    `graph.facebook.com` token — and reads `/me/assigned_instagram_accounts`.
@@ -385,23 +393,28 @@ messages, comments, …`. The app-level half it reads and leaves alone.
 6. **One reply, from a role holder's own DM.** Somebody with a role on the app
    writes to the account from their own Instagram, and an agent answers from
    the console inside 24 hours. The worker log must show
-   `[send_meta] <message id> sent as reply on instagram via unified_login`,
+   `[send_meta] <message id> sent as dm on instagram via unified_login`,
    and the reply must arrive on the phone. A `(#10)`, `(#200)` or 190 here is
    one of the troubleshooting strings below, and the token is reconnected
    rather than retried.
 7. **Watch for an hour.** The customer's next message is now delivered up to
    three times — Page (`standby`), Instagram Login (`messaging`,
    `INSTAGRAM_APP_SECRET`) and Unified Login (`messaging`, `META_APP_SECRET`).
-   Ingest dedupes on the `mid`, and Meta says Unified Login's message ids
-   differ in format from Instagram Login's, so this is the hour that proves a
-   message is one timeline line and not two. The queries are below; a ticket
-   showing the same words twice, seconds apart, stops the plan here.
+   The endpoint stores all three — the Page's and Unified Login's copies
+   share the `facebook_page` label, so `lib/meta/delivery.ts` keys them apart
+   by envelope — and ingest dedupes on the `mid`. Meta says Unified Login's
+   message ids differ in format from Instagram Login's, so this is the hour
+   that proves a message is one timeline line and not two. The queries are
+   below; a ticket showing the same words twice, seconds apart, stops the
+   plan here.
 8. **Disconnect Instagram Login — in the dashboard first.** Instagram → "API
    setup with Instagram login" → disconnect the account. This is the step that
    stops `INSTAGRAM_APP_SECRET` signing anything. Then wait until
    `webhook_events` shows no `instagram_login` delivery for an hour (the first
-   query below) and the web log has stopped saying
-   `instagram messaging deliveries are verifying with INSTAGRAM_APP_SECRET`.
+   query below). The web log's
+   `instagram messaging deliveries are verifying with INSTAGRAM_APP_SECRET` line
+   prints once per process, so its silence proves nothing; the query is the
+   reading.
 9. **Unset `INSTAGRAM_ACCESS_TOKEN`.** It is expired and second in line, so
    this changes no routing; it is removed so the card and the diagnostic stop
    describing a connection that no longer exists.
@@ -455,7 +468,8 @@ group by 1, 2 having count(*) > 1;
 
 Whether the reply went out over the new route — the worker's log, filtered on
 `[send_meta]`, carries `via unified_login`; and in the database the message row
-the agent sent has no `error` and a `channel_message_id` Meta assigned.
+the agent sent has a null `delivery_error` and a `channel_message_id` Meta
+assigned.
 
 ### Rollback
 
@@ -466,8 +480,10 @@ at any step: no table, no row, no migration — the connection is configuration,
 and `webhook_events.connection` never learned the new name. The account-level
 subscription written in step 4 stays on Meta's side and is harmless; a
 disconnected account under "API setup with Unified login" removes it. A token
-that must be revoked is revoked in Business settings → System users, or by
-removing the app from the portfolio, which invalidates every token it minted.
+that must be revoked: Meta's eligibility page says removing the app from the
+business portfolio stops it working, and Business settings → Integrations →
+Connected apps is where Facebook Login for Business says a client does that;
+whether the System users page offers a narrower revocation is not confirmed.
 
 ## Not known yet
 

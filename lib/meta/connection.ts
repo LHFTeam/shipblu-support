@@ -23,9 +23,10 @@ import type { MetaPlatform } from './types';
  * Meta's docs (`docs/PROJECT-STATE.md` §6.29). So a contact, a ticket and a
  * 24-hour window mean the same thing on either, and a connection is purely a
  * *route* — which host, which credential, which App Review permissions. The
- * third is addressed by the same account id (`/me/assigned_instagram_accounts`
- * lists it) and its payloads follow the Facebook Login format, so its IGSIDs
- * are the Page's; Meta does say its **message ids** differ in format from the
+ * third is addressed by the same account id — `/me/assigned_instagram_accounts`
+ * is expected to list it, and the callback page warns until it does — and its
+ * payloads follow the Facebook Login format, so its IGSIDs are the Page's;
+ * Meta does say its **message ids** differ in format from the
  * Instagram Login connection's, which is why `plans/instagram-unified-login.md`
  * has the first live hour check for a duplicated timeline before the Instagram
  * Login connection is disconnected.

@@ -24,13 +24,15 @@ export const dynamic = 'force-dynamic';
  * them would mean two URLs to register and the same code twice.
  *
  * One endpoint does not mean one credential, though, and that is the trap. This
- * Instagram account is connected **twice** — through its Facebook Page and
- * directly through Instagram Login — and the two setups sign with different app
- * secrets while sending byte-identical bodies. Which secrets can have signed a
- * delivery is decided by `lib/meta/signing.ts` from the object in the body, and
- * *which one actually did* is the only thing that says which connection a
- * delivery came in on. It is recorded on the row, because it is knowable here
- * and nowhere downstream.
+ * Instagram account is connected more than one way — through its Facebook
+ * Page, directly through Instagram Login, and through Unified Login — and the
+ * direct connection signs with a different app secret from the other two while
+ * sending byte-identical bodies. Which secrets can have signed a delivery is
+ * decided by `lib/meta/signing.ts` from the object in the body, and *which one
+ * actually did* is the only thing that says which connection a delivery came in
+ * on. It is recorded on the row, because it is knowable here and nowhere
+ * downstream; the Page and Unified Login sign alike and share the label, and
+ * `lib/meta/delivery.ts` keeps their copies apart by the envelope.
  *
  * Same discipline as the WhatsApp endpoint: persist the raw payload, enqueue,
  * return 200 fast. Nothing here parses a message or calls the Graph API — Meta

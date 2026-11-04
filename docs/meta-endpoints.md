@@ -107,8 +107,8 @@ they build names host and path, never the URL (`lib/whatsapp/onboarding.ts`,
 ## 2. Messenger and Instagram — `lib/meta/client.ts`
 
 Eight Graph calls and one plain download. The eight route through the single
-`graph()` helper at `lib/meta/client.ts:170`, which chooses the host and token
-via `endpoint()` (`lib/meta/client.ts:108`) and normalises failures into
+`graph()` helper in `lib/meta/client.ts`, which chooses the host and token
+via `endpoint()` in the same file and normalises failures into
 `MetaApiError`; the ninth (§2.8) is a bare `fetch` of a URL Meta already handed
 us.
 
@@ -333,7 +333,7 @@ forever.
 
 ### 2.8 Attachment and avatar downloads
 
-Not Graph. `downloadAttachment()` (`lib/meta/client.ts:694`) fetches a URL Meta
+Not Graph. `downloadAttachment()` (`lib/meta/client.ts`) fetches a URL Meta
 already handed us in the webhook payload (`lib/meta/parse.ts:258`) or in a
 profile's `profile_pic`, with **no credential** — the link is signed and
 short-lived, which is why media is copied by a job rather than lazily when an
@@ -354,7 +354,7 @@ exchange answers, the same two reasons `lib/whatsapp/onboarding.ts` gives for
 the signup exchange. `GET /api/meta/unified-login/start` sets a `state` cookie
 and opens Meta's dialog on `www.facebook.com/{version}/dialog/oauth` with the
 configuration's `config_id` in place of `scope` and `response_type=code`;
-`GET /api/meta/unified-login/callback` checks the state, makes the three calls
+`GET /api/meta/unified-login/callback` checks the state, makes the four calls
 below, and renders the token once — in a page sent `Cache-Control: no-store`
 and `Referrer-Policy: no-referrer`, behind `admin.channels.connect` — for the
 admin to set as `INSTAGRAM_UNIFIED_LOGIN_TOKEN` on Render. Nothing stores it.
@@ -712,7 +712,7 @@ Credentials, all optional in the schema (`lib/env.ts`) and declared in
 | ----------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `META_PAGE_ACCESS_TOKEN`                                    | §2 over the Page connection, the Page subscription write, `debug_token`'s input, and the WhatsApp default token                                                              |
 | `META_APP_ID` + `META_APP_SECRET`                           | The app token for `/{app-id}/subscriptions` and `debug_token`'s authorisation                                                                                                |
-| `META_APP_SECRET`                                           | Also verifies X-Hub-Signature-256 on `page` and WhatsApp deliveries                                                                                                          |
+| `META_APP_SECRET`                                           | Also verifies X-Hub-Signature-256 on `page` and WhatsApp deliveries, and on the `instagram` deliveries of the Page connection and Unified Login                              |
 | `META_VERIFY_TOKEN`                                         | Answers the subscription handshake, on both webhook routes and on every write                                                                                                |
 | `FACEBOOK_PAGE_ID` / `INSTAGRAM_ACCOUNT_ID`                 | The node every send, private reply and subscription write is addressed to                                                                                                    |
 | `INSTAGRAM_ACCESS_TOKEN`                                    | Everything in §2 and §3 routed over the direct Instagram connection                                                                                                          |
@@ -737,6 +737,10 @@ the file to re-read rather than this one:
   `graph.instagram.com` (§5.2). Replies inside 24 hours still send.
 - **Business Asset User Profile Access** — the profile read in §2.7. Refused
   `(#3) Application does not have the capability to make this API call.`
+  before the 2026-09-19 review, which approved it
+  (`plans/meta-app-review-submission.md`); whether the grant reaches a read
+  made over Unified Login is one of the readings
+  `plans/instagram-unified-login.md` leaves to the first live run.
 - **Advanced Access for the Instagram `comments` webhook** — not a call here but
   the reason one never arrives: Meta requires an approved App Review submission
   to deliver `comments` at all, and Standard Access does not cover it even for

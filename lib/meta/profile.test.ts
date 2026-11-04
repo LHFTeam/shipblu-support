@@ -279,10 +279,28 @@ describe('isProfilePermissionRefusal', () => {
     expect(isProfilePermissionRefusal(error(null))).toBe(false);
   });
 
+  it('over Unified Login, blames the permission on the token and never the Page token', () => {
+    // The route sends a system-user token by design, so "must say Type: Page"
+    // would send the operator after a variable the call never used. Meta's own
+    // sentence for this setup names the permission, and so does the step.
+    const explained = explainMetaProfileError(
+      error(10, null, 'App is missing the instagram_manage_messages permission'),
+      'instagram',
+      'unified_login',
+    );
+
+    expect(explained).toContain('INSTAGRAM_UNIFIED_LOGIN_TOKEN');
+    expect(explained).toContain('instagram_manage_messages');
+    expect(explained).not.toContain('Type: Page');
+    expect(explained).toContain('Business Asset User Profile Access');
+    expect(explained).toContain('via graph.facebook.com');
+  });
+
   it('names the feature on the refusal that carries no hint of it', () => {
     const explained = explainMetaProfileError(
       error(3, null, 'Application does not have the capability to make this API call.'),
       'facebook',
+      'facebook_page',
     );
 
     expect(explained).toContain('Business Asset User Profile Access');
@@ -310,9 +328,11 @@ describe('isProfilePermissionRefusal', () => {
           'not professional account',
       ),
       'instagram',
+      'facebook_page',
     );
 
     expect(explained).toContain('INSTAGRAM_ACCESS_TOKEN');
+    expect(explained).toContain('INSTAGRAM_UNIFIED_LOGIN_TOKEN');
     expect(explained).toContain('graph.instagram.com');
     expect(explained).not.toContain('App Review for the Meta app');
 
@@ -325,6 +345,7 @@ describe('isProfilePermissionRefusal', () => {
     const explained = explainMetaProfileError(
       error(100, null, 'The page is not linked to an Instagram account'),
       'facebook',
+      'facebook_page',
     );
 
     expect(explained).not.toContain('INSTAGRAM_ACCESS_TOKEN');
