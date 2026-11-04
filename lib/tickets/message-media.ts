@@ -9,7 +9,11 @@
  */
 
 import { mediaFamily } from '@/lib/attachments/preview';
-import { metaAttachmentsStandIn, whatsAppMediaStandIn } from '@/lib/chat/stand-ins';
+import {
+  metaAttachmentsStandIn,
+  webchatFilesStandIn,
+  whatsAppMediaStandIn,
+} from '@/lib/chat/stand-ins';
 import { isRecord } from '@/lib/whatsapp/parse';
 
 /** The fields of a timeline message these answers read. */
@@ -28,7 +32,8 @@ type MediaMessage = {
  * text, and ingest writes one for it — `[image]`, `[voice note]`,
  * `[document: awb.pdf]`, `[2 attachments]` — because the inbox card, the
  * ticket's subject and search need something to show (`displayText` in
- * `lib/whatsapp/parse.ts` and `lib/meta/parse.ts`). In the thread the file
+ * `lib/whatsapp/parse.ts` and `lib/meta/parse.ts`, and the widget's
+ * `appendVisitorMessage` for a file attached in the chat). In the thread the file
  * itself is drawn right below, so the stand-in was a line saying what the next
  * line showed. Only the thread leaves it out: the stored text stays, because
  * every other reader depends on it.
@@ -53,7 +58,8 @@ export function isMediaStandIn(message: MediaMessage): boolean {
   const meta = message.meta ?? {};
   return (
     text === whatsAppStandIn(meta, message.attachments) ||
-    text === metaStandIn(meta, message.attachments.length)
+    text === metaStandIn(meta, message.attachments.length) ||
+    text === webchatStandIn(meta, message.attachments.length)
   );
 }
 
@@ -143,6 +149,32 @@ function metaStandIn(meta: Record<string, unknown>, files: number): string | nul
   // never downloaded leaves the number as the only sign it was sent.
   if (sent.length > 1 && files !== sent.length) return null;
   return metaAttachmentsStandIn(types) || null;
+}
+
+const WEBCHAT_KINDS = ['image', 'video', 'audio', 'document'] as const;
+
+/**
+ * What `appendVisitorMessage` in `lib/widget/conversation.ts` wrote for a web
+ * chat message sent with files and no words, from the files it recorded in
+ * `meta.webchatFiles`.
+ *
+ * The widget stores a message and its files in one transaction, so every file
+ * recorded there is drawn; the count is compared anyway, as Meta's is, so a
+ * file purged on its own would leave the number as the only sign it was sent.
+ * A document's name needs no exception here, unlike WhatsApp's: a widget's
+ * document is a PDF, drawn as a link under the very name the words carry.
+ */
+function webchatStandIn(meta: Record<string, unknown>, files: number): string | null {
+  if (!Array.isArray(meta.webchatFiles)) return null;
+  const sent = meta.webchatFiles.map((entry: unknown) => {
+    const record = isRecord(entry) ? entry : {};
+    const kind = WEBCHAT_KINDS.find((known) => known === record.kind);
+    return kind
+      ? { kind, filename: typeof record.filename === 'string' ? record.filename : null }
+      : null;
+  });
+  if (sent.length === 0 || sent.length !== files || sent.includes(null)) return null;
+  return webchatFilesStandIn(sent.filter((entry) => entry !== null)) || null;
 }
 
 /** A Facebook or Instagram direct message's attachments as stored, in order. */

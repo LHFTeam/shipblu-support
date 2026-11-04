@@ -377,6 +377,17 @@ export function PaperclipIcon(props: IconProps) {
   );
 }
 
+/** The emoji picker's button: a face, drawn, because an emoji as its own icon renders differently everywhere. */
+export function SmileIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="M8.6 14.2a4.4 4.4 0 0 0 6.8 0" />
+      <path d="M9.2 9.8h.01M14.8 9.8h.01" strokeWidth={2.4} />
+    </Icon>
+  );
+}
+
 export function XIcon(props: IconProps) {
   return (
     <Icon {...props}>

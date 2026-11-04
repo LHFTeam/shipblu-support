@@ -14,3 +14,16 @@
  */
 export const WIDGET_FIELD =
   'w-full min-w-0 rounded-md border border-(--color-border-subtle) bg-(--color-background-surface) text-base text-(--color-text-primary) outline-none transition-colors placeholder:text-(--color-text-tertiary) hover:border-(--color-border-default) focus:border-(--color-border-focus) focus:ring-2 focus:ring-(--color-border-focus)/20 aria-invalid:border-(--color-feedback-danger-fg) aria-invalid:focus:ring-(--color-feedback-danger-fg)/20';
+
+/**
+ * The composer's box: the field's border, surface and focus ring, drawn around
+ * the textarea and the two buttons inside it — the emoji at its start and the
+ * clip at its end — so they read as one control. Focus is shown on the box
+ * whenever anything in it holds focus, the buttons included, which is what a
+ * single bordered field looks like to the person using it.
+ *
+ * The textarea inside carries no border of its own, and keeps the 16px text
+ * `WIDGET_FIELD` gives for Safari's zoom.
+ */
+export const WIDGET_COMPOSER_BOX =
+  'flex min-w-0 flex-1 items-end rounded-md border border-(--color-border-subtle) bg-(--color-background-surface) transition-colors hover:border-(--color-border-default) focus-within:border-(--color-border-focus) focus-within:ring-2 focus-within:ring-(--color-border-focus)/20';

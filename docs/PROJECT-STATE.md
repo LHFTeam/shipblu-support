@@ -5,13 +5,102 @@ it is designed; **this file is about the state of the work** — what is live,
 what is merely built, what is left, and the mistakes that have already cost us
 time. Read both. Do not re-derive settled decisions.
 
-Last updated: 2026-10-30, against `main` at `69a22b6`. The figures in §1 and §5
+Last updated: 2026-10-31, against `main` at `eaf07ab`. The figures in §1 and §5
 were last re-measured as a whole against production on 2026-09-20, and a
 paragraph re-read since gives its own date; where a number here disagrees with
 an older paragraph elsewhere in the file, the older one has not been re-checked.
 
-**Production runs `69a22b6`, deployed by hand on 2026-10-29, all six services
-by 17:47:16 UTC:** release #442, which carries #440: every automated reply on a
+**Production runs `eaf07ab`, deployed by hand on 2026-10-30, all six services by
+15:22:45 UTC:** release #450, which carries #448, and with it #445, which
+reached `main` in #447 and was first deployed in this release. #445 gives the
+ticket field editor the Active switch its action always read, so a field can be
+deactivated again rather than reactivated by every save; the switch names the
+forms that place the field, and a rule already naming a deactivated field stays
+readable in the condition builder. #448 makes the status editor and the statuses
+page say what a customer sees: never the status's name, but its customer label
+while the status is shown, and otherwise the category's word in the reader's
+language ("In progress" for Pending, where the hint used to say a blank label
+reused the name). The page and the portal's badge read one rule,
+`lib/portal/status-words.ts`, which `lib/portal/tickets.db.test.ts` holds to the
+portal's SQL. Code only: web first, live at 15:19:50, its preDeploy finding no
+migration and replaying the nine `db/sql` files; then the four crons, live by
+15:21:51, and the worker at 15:22:45. The checks read clean: `/api/health`
+reports `eaf07ab`; no service logged an error from 15:17 to 22:05 and web served
+no 5xx, the one warning a 404 for `/favicon.ico`; the 773 jobs created after
+15:17 had all completed, and the four dead jobs all predate the deploy (the two
+below, and the two Instagram profile reads at 12:42 under the token paragraph);
+and the crons ran clean on the new code from their first runs (`sla_sweep`,
+`presence_sweep` and `assign_sweep` from 15:25, `run_time_automations`,
+`sync_whatsapp_templates` and `snapshot_backlog`). The nightly's first run on
+it, at 00:00 UTC on 2026-10-31, was clean: `cleanup`, then `rollup_metrics`
+rebuilding 2026-10-28 to 2026-10-30, the 30th with the first two rows by
+category; and no service logged an error from 22:05 to 18:04 UTC on 2026-10-31.
+Its way back is `83f1889` on each service, in any order, at one cost: that
+release's field editor posts no Active switch and `saveField` reads a missing
+one as on, so a field deactivated since comes back on at its next save there,
+its forms ask it again, and the condition builder draws a rule naming it as the
+first field in its list, as it did before #445.
+
+The release before it, `83f1889`, was deployed by hand on 2026-10-30, all six
+services by 12:03:38 UTC: release #446, which carries #443 and #444. #443 makes
+every web chat row editable and gives each an active switch that never leaves
+the widget without a row (`plans/ticket-category-routing.md`, Stage 6);
+production has one web chat row, so nothing changes there until somebody adds a
+second. #444 is the settings reorganisation (§5.5): one map of the settings
+area, a settings home, `/admin/ai`, and the live dashboard at `/reports/live`,
+to which `/admin/dashboard` now redirects. Code only: web first, live at
+11:59:30, its preDeploy finding no migration and replaying the nine `db/sql`
+files; then the four crons, live by 12:02:00, and the worker at 12:03:38. The
+checks read clean: `/api/health` reports `83f1889`; no service logged a warning
+or an error from 11:56 to 12:19, and web served no 5xx; the 91 jobs created
+after 11:56 had all completed, none overdue, and the only dead jobs were the two
+from before the deploy (2026-09-21 and 2026-10-29); and the first runs on the
+new code were ok (`sla_sweep`, `presence_sweep` and `assign_sweep` at 12:05,
+12:11 and 12:15; `run_time_automations` at 12:02 and 12:16, one rule over 555
+tickets, nothing changed). Its way back is `69a22b6` on each service, in any
+order. #444's handbook wording reaches the knowledge base only by a console edit
+or `seed_console_handbook overwrite=true` (§5.5).
+
+**The Instagram Login token expired at 15:25:38 UTC on 2026-10-29.** Every
+`graph.instagram.com` call has failed since with code 190, "Session has
+expired": the first was a profile read at 17:07:43 for the first Instagram
+message after the expiry, whose `fetch_meta_profile` job went `dead` after five
+attempts. No Instagram reply had been sent since then, at the deploy's reads,
+so none has failed yet; the next goes out over `instagram_login`
+(`lib/meta/connection.ts`) and fails the same way until
+`INSTAGRAM_ACCESS_TOKEN` is renewed in Meta's app dashboard and set on Render.
+A new Instagram ticket opened at 12:42 UTC on 2026-10-30 (filed
+`customer_support` by Jev, unassigned in Support), and both profile reads for
+its customer went `dead` the same way; a reply to it will fail until then. At
+18:04 UTC on 2026-10-31 nothing had called `graph.instagram.com` since those
+reads, no Instagram reply had been sent since the expiry and no Instagram ticket
+had opened since, so whether the token has been renewed is in no log: the next
+Instagram message's profile read will say.
+
+**Jev's category classifier has been in `apply` since 18:37:23 UTC on
+2026-10-29**, switched by the user on `/admin/categories` after twelve and a
+half hours of Shadow and before any ticket carried a person's label, so 4.2's
+criteria were not read. By 09:40 UTC on 2026-10-30 it had filed two tickets,
+both Facebook and both `sales`. Nothing has routed yet: Web Chat has been in
+`category` mode since 14:45 UTC on 2026-10-30, set from the console, the first
+channel to route, and every other channel is on `default_group`; the widget has
+opened no ticket since 2026-10-20, so at 18:04 UTC on 2026-10-31
+`routing_decisions` held no row (the plan's item 10 has the staffing a routed
+chat lands on). The backlog (`backfill_category_ai mode=apply`) waits for the
+user's go-ahead. The plan's status section has the reads (4.2's Apply).
+
+**The first Stage 6 nightly read clean** (00:00 UTC on 2026-10-30): it rebuilt
+2026-10-27 to 2026-10-29 with categories, so `rollup_days` stamps
+`categories_computed_at` on those three days, and `metrics_daily` holds no
+duplicate slice and no row naming two dimensions. It wrote no category row:
+Jev's first filed ticket opened at 00:31 on the 30th in Cairo, the night the
+clocks went back. The second nightly, at 00:00 UTC on 2026-10-31, wrote the
+first and read clean: the 30th's `sales` row counts 2 tickets created and its
+`customer_support` row 1, exactly the tickets created that Cairo day carrying
+each, with still no duplicate slice and no row naming two dimensions.
+
+The release before that, `69a22b6`, was deployed by hand on 2026-10-29, all six
+services by 17:47:16 UTC: release #442, which carries #440: every automated reply on a
 customer bot ticket is refused, by `automatedReplyBlocked` and again by
 `writeAutomatedReply`, the door every automated sender writes through, before
 anything is written. Until then an `on_update` rule's `send_reply` on a bot
@@ -24,32 +113,7 @@ and the first runs on the new code were ok (`sla_sweep`, `presence_sweep` and
 `assign_sweep` at 17:51; `run_time_automations` at 18:01, one rule over 553
 tickets, nothing changed). Its way back is `b63f96e` on each service.
 
-**The Instagram Login token expired at 15:25:38 UTC on 2026-10-29.** Every
-`graph.instagram.com` call has failed since with code 190, "Session has
-expired": the first was a profile read at 17:07:43 for the first Instagram
-message after the expiry, whose `fetch_meta_profile` job went `dead` after five
-attempts. No Instagram reply had been sent since then, at the deploy's reads,
-so none has failed yet; the next goes out over `instagram_login`
-(`lib/meta/connection.ts`) and fails the same way until
-`INSTAGRAM_ACCESS_TOKEN` is renewed in Meta's app dashboard and set on Render.
-
-**Jev's category classifier has been in `apply` since 18:37:23 UTC on
-2026-10-29**, switched by the user on `/admin/categories` after twelve and a
-half hours of Shadow and before any ticket carried a person's label, so 4.2's
-criteria were not read. By 09:40 UTC on 2026-10-30 it had filed two tickets,
-both Facebook and both `sales`; nothing routes, since every channel is still on
-`default_group`. The backlog (`backfill_category_ai mode=apply`) waits for the
-user's go-ahead. The plan's status section has the reads (4.2's Apply).
-
-**The first Stage 6 nightly read clean** (00:00 UTC on 2026-10-30): it rebuilt
-2026-10-27 to 2026-10-29 with categories, so `rollup_days` stamps
-`categories_computed_at` on those three days, and `metrics_daily` holds no
-duplicate slice and no row naming two dimensions. It wrote no category row:
-Jev's first filed ticket opened at 00:31 on the 30th in Cairo, the night the
-clocks went back. The second nightly, at 00:00 UTC on 2026-10-31, writes the
-first.
-
-The release before it, `b63f96e`, was deployed by hand from another session on
+The release before that, `b63f96e`, was deployed by hand from another session on
 2026-10-29, all six services by 17:00:33 UTC: release #441, which carries #436,
 group membership in the console (a members picker, invite groups and an agent
 editor). Its web preDeploy applied `0056` (`agent_changes`, the record of a
@@ -506,6 +570,17 @@ opening screen now offers the five most-read articles in the visitor's locale
 through the same `popularArticles()` the help centre's front page uses — server
 rendered with the frame, so they are on screen when it paints, gone the moment
 there is a conversation, and empty is a normal state that hides the section.
+
+And **the widget's composer takes files and emoji.** A paperclip at the end of
+the box attaches photos, PDFs, videos and voice recordings — five a message, 25
+MB together — and a smile at its start opens a short grid of emoji under it,
+the WhatsApp layout most visitors type into every day. The files ride in the
+message's own request and are typed by their bytes, stored with the message or
+not at all, and drawn in both threads as what they are (AGENTS.md, "The widget
+carries files"). Recording a voice note inside the widget is not built: it needs
+the microphone, which a host page must grant the frame (`allow="microphone"`
+on the iframe `/widget/embed.js` writes, and the page's own Permissions-Policy),
+so a recording is attached as a file the phone's recorder made.
 
 And now **ticket categorisation**, which answers the first question anybody asks
 of a helpdesk and which this one could not answer at all: what are customers
@@ -1287,14 +1362,18 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
   agent-role user in no group carries a `No group` badge on `/admin/agents`,
   unless they own a WhatsApp number, whose tickets reach them whatever their
   groups; on 2026-10-29 that was all five of them, and Customer Care, Merchant
-  Care and Inbound Sales Team had nobody.
+  Care and Inbound Sales Team had nobody. By 13:00 UTC on 2026-10-30 Customer
+  Care had three members and Merchant Care two, none of them taking tickets,
+  and Inbound Sales Team still none (the plan's Next, item 10).
 - ~~**Assignment is configured but off.**~~ **Switched on for `Support` on
   2026-09-02**, round robin; 161 conversations now carry an assignee. **The
   roster is still 3 of 11 agents**, though, which is the thing to fix next here —
   eight of the people who now have accounts are in no group, and auto-assignment
   only ever considers members of the ticket's group. `Customer Care` and
-  `Merchant Care` still have empty rosters and no channel points at them, so they
-  route nothing until somebody decides what belongs in them.
+  `Merchant Care` had empty rosters and no channel pointing at them when this
+  was written (2026-09); on 2026-10-30 they had three and two members, none
+  accepting, and both coexistence numbers default to Merchant Care (the plan's
+  Next, item 10).
 
   Two things were in the way and are worth knowing about, because both made the
   feature look broken rather than unconfigured:
@@ -1741,10 +1820,18 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
   nothing yet: every channel reads `default_group` (read 07:59 UTC on
   2026-10-29), and a ticket is held, or
   a `settle_routing` job queued, only on a channel an admin has moved to a
-  category mode _while the classifier is in `apply`_ — so nothing happens
-  until both, and the classifier is in Shadow today. `Hand to <group>` stays out of sight
-  too, since no category has a route group and no ticket carries a category
-  (read 10:31 UTC on 2026-10-28, and again 08:28 UTC on 2026-10-29). Four
+  category mode _while the classifier is in `apply`_. The classifier has been
+  in `apply` since 18:37 UTC on 2026-10-29, and Web Chat has been in
+  `category` mode since 14:45 UTC on 2026-10-30, the first channel to route;
+  every other channel is on `default_group` (read 22:09 UTC). Since 14:10 UTC
+  on 2026-10-30 three
+  categories have route groups (the plan's Q5: sales to Inbound Sales Team,
+  customer support to Customer Care, merchant support to Merchant Care), so
+  `Hand to <group>` is offered on any open or pending ticket whose category's
+  route group is not its group, unless it is held, on the bot, on a
+  coexistence number or on an owned number whose owner answers for it
+  (`handToTarget`) — three tickets at the write, all in Support, the only
+  three carrying a category, to groups with nobody accepting. Four
   things changed on every ticket at the deploy:
   - **Assignment** locks the ticket (`FOR NO KEY UPDATE`) before the group,
     re-reads there its assignee, group and hold and whether the ticket is still
@@ -1782,17 +1869,28 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
   crons — `shipblu-sla-sweep` and `shipblu-time-automations` both assign (§2) —
   so every service ran it before any channel could leave `default_group`. Turning it on is the plan's Stage 5.2,
   channel by channel through `category_shadow`, and it needs what 5.2 lists: the
-  plan's 0.2 SLA reorder, 0.6's staffing (the roster paragraph above), route
-  groups on the categories, and the classifier in `apply`. The readiness panel
+  plan's 0.2 SLA reorder, 0.6's staffing (the plan's Next, item 10, has the
+  roster as read on 2026-10-30; the roster paragraph above is older), route
+  groups on the categories, and the classifier in `apply`. The reorder and the
+  route groups were written at the user's go-ahead on 2026-10-30, and the
+  classifier has been in `apply` since the day before. Later that day, also at
+  the user's go-ahead, every channel that defaulted to Support was moved to
+  Customer Care, with Support's 183 open unassigned tickets, once Support had
+  no members; staffing and the comment rows are what is left (the plan's Next,
+  item 10). The readiness panel
   on `/admin/channels` names what would leave routed tickets unassigned, and the
   active rules that would decide before the router. Production has two (read
   10:06 UTC on 2026-10-28): "Route Account Web Chat to Merchant Care" and "Route
   Public Web Chat to Customer Care", `on_create` `assign_group` on
-  `channel eq webchat`, one for a requester with an email and one without. The
-  Web Chat row defaults to Support, so between them they move every new web chat
-  ticket at creation, and on that row in `category` mode every hold ends there
-  as `rule` and the router decides nothing. That is by design — rules decide —
-  and it means web chat routes by category only once those two are changed.
+  `channel eq webchat`, one for a requester with an email and one without.
+  While the Web Chat row defaulted to Support, between them they moved every
+  new web chat ticket at creation, and in `category` mode every hold would have
+  ended there as `rule`, the router deciding nothing — by design: rules decide.
+  Since 14:45 UTC on 2026-10-30 the row defaults to Customer Care and is in
+  `category` mode, so the public rule names the group a visitor's chat is
+  already in, which changes nothing and ends no hold, and a public chat routes
+  by category; the account rule still moves a signed-in visitor's chat to
+  Merchant Care at creation, which ends its hold as `rule`.
   A channel's shadow week is read on `/reports/routing` (Stage 6): outcomes per
   channel, live and shadow never added together, time to decision against the
   window, the fallback and taken shares over the router's own decisions, and
@@ -2438,8 +2536,8 @@ message bodies — the same reasoning as the deliberately tiny `pg_notify` paylo
   `/admin/ai` lists every place Jev is asked a question and links to the page
   each switch is on. The live dashboard moved to `/reports/live`, keeping
   `admin.agents`, and `/admin/dashboard` redirects there (temporary,
-  `next.config.ts`). Production serves the old area until the release carrying
-  this is deployed; `/api/health` names the commit. The handbook's three
+  `next.config.ts`). Production has served it since `83f1889`, deployed on
+  2026-10-30. The handbook's three
   sentences naming the area (`lib/kb/handbook.ts`) reach production's knowledge
   base by an edit in the console or by
   `npm run job -- seed_console_handbook overwrite=true` after that deploy —

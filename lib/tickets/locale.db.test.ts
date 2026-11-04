@@ -13,7 +13,7 @@ import { requesterLocale } from './locale';
 withCleanDatabase();
 
 async function ticket(
-  channel: 'whatsapp' | 'facebook' | 'facebook_comment' | 'email',
+  channel: 'whatsapp' | 'facebook' | 'facebook_comment' | 'email' | 'webchat',
 ): Promise<string> {
   const [contact] = await db.insert(contacts).values({ name: 'Amira' }).returning();
   const [open] = await db
@@ -290,6 +290,45 @@ describe('requesterLocale', () => {
     });
 
     expect(await requesterLocale(id)).toBe('ar');
+  });
+
+  // A widget photo sent with no caption is stored as our `[image]`, and the
+  // contact's locale reads `en` because nothing writes it: the panel the
+  // visitor sent it from is the only sign of their language.
+  it('answers a web chat with no words in the language of the widget’s panel', async () => {
+    const id = await ticket('webchat');
+    await db.insert(messages).values({
+      conversationId: id,
+      direction: 'inbound',
+      bodyText: '[image]',
+      meta: { webchatFiles: [{ kind: 'image', filename: 'box.jpg' }], locale: 'ar' },
+    });
+
+    expect(await requesterLocale(id)).toBe('ar');
+  });
+
+  it('reads a web chat’s words before its panel, as everywhere else', async () => {
+    const id = await ticket('webchat');
+    await db.insert(messages).values({
+      conversationId: id,
+      direction: 'inbound',
+      bodyText: 'Where is my parcel?',
+      meta: { locale: 'ar' },
+    });
+
+    expect(await requesterLocale(id)).toBe('en');
+  });
+
+  it('reads no panel off a message that names none, nor a value that is not a language', async () => {
+    const id = await ticket('webchat');
+    await db.insert(messages).values({
+      conversationId: id,
+      direction: 'inbound',
+      bodyText: '[image]',
+      meta: { webchatFiles: [{ kind: 'image', filename: 'box.jpg' }], locale: 'fr' },
+    });
+
+    expect(await requesterLocale(id)).toBe('en');
   });
 });
 

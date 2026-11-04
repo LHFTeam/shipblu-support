@@ -24,18 +24,41 @@ const buckets = new Map<string, Bucket>();
 /** Bounded so a long-lived instance under spray does not grow without limit. */
 const MAX_BUCKETS = 20_000;
 
-export function allow(key: string, limit: number, windowMs: number): boolean {
+/**
+ * Whether one more request fits in `key`'s window.
+ *
+ * `cost` is for a budget counted in something other than requests — the
+ * widget's uploads spend one per megabyte — so a request can cost more than
+ * one. It is spent whether or not it fits, as a refused request always was.
+ */
+export function allow(key: string, limit: number, windowMs: number, cost = 1): boolean {
   const now = Date.now();
   const bucket = buckets.get(key);
 
   if (!bucket || bucket.resetAt <= now) {
     if (buckets.size >= MAX_BUCKETS) prune(now);
-    buckets.set(key, { count: 1, resetAt: now + windowMs });
-    return true;
+    buckets.set(key, { count: cost, resetAt: now + windowMs });
+    return cost <= limit;
   }
 
-  bucket.count += 1;
+  bucket.count += cost;
   return bucket.count <= limit;
+}
+
+/**
+ * Whether `cost` more would still fit in `key`'s window, spending nothing.
+ *
+ * For a budget that should be charged only for work that happened: the widget
+ * asks before it stores a visitor's files and spends (`allow`) only once they
+ * are stored, so a send that failed — and said "try again" — costs nothing. Two
+ * requests can both fit and then both spend; in-memory and per instance, as
+ * this whole module is, that is the price of not holding a lock across a
+ * multi-second upload.
+ */
+export function fits(key: string, limit: number, cost = 1): boolean {
+  const bucket = buckets.get(key);
+  const used = bucket && bucket.resetAt > Date.now() ? bucket.count : 0;
+  return used + cost <= limit;
 }
 
 function prune(now: number): void {
