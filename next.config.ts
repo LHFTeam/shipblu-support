@@ -56,6 +56,10 @@ const nextConfig: NextConfig = {
      *
      * Bytes, not a string: this one is compared numerically against the default
      * of 10485760.
+     *
+     * The chat widget's uploads ride under it too: `MAX_WIDGET_REQUEST_BYTES` in
+     * `lib/widget/files.ts` must stay below it, which its test reads from here,
+     * so lowering this fails that test rather than a visitor's send.
      */
     proxyClientMaxBodySize: 27 * 1024 * 1024,
   },

@@ -449,7 +449,7 @@ returns a full instant whose **time component is an artifact of when you asked**
 `YYYY-MM-DD` and never convert through a `Date` — the value carries `+03:00`, so
 a call answered after 21:00 UTC reads as the previous day in UTC.
 
-**Background work.** Anything slow, external or retryable is a job — with two
+**Background work.** Anything slow, external or retryable is a job — with three
 narrow exceptions, written down because they look like violations. The first: a
 control an agent presses and _waits on_, whose entire output is the provider's
 answer, calls the provider in the action instead. `refreshRequesterProfile`,
@@ -479,7 +479,13 @@ forces happens in the action — exchange it, prove the token reads the WABA the
 browser named, seal it, record the attempt — and everything after the exchange
 is the `complete_coexistence_onboarding` job, run with the stored credential, so
 a closed tab abandons nothing and the first run, a retry and a later "copy the
-history again" cannot differ. Everything else is a job: add the type
+history again" cannot differ. The third is the widget's upload of a visitor's
+files (`storeVisitorFiles`, **The widget carries files**), in the visitor's own
+request: they are still there to try again, and a message stored before its
+files would leave an agent reading about a photo that is not there, so a
+failure refuses the send and gives the files back rather than queueing
+anything. Each upload has its own deadline (`sizedTimeout`). Everything else is
+a job: add the type
 to `JobType` in `lib/queue/index.ts`, a handler under `worker/handlers/`, and
 register it in `worker/handlers/index.ts`. CI checks that the three agree, and
 that every cron in `render.yaml` names a type that exists. Use `dedupeKey` for anything a webhook retry could
@@ -894,7 +900,8 @@ and the language automated replies went out in.
 **A media message's text can be a stand-in nobody wrote.** A file sent without
 a caption is stored with the words ingest wrote for it — `[image]`,
 `[voice note]`, `[document: awb.pdf]`, `[2 attachments]` (`displayText` in
-`lib/whatsapp/parse.ts` and `lib/meta/parse.ts`) — and they stay stored,
+`lib/whatsapp/parse.ts` and `lib/meta/parse.ts`, and `webchatFilesStandIn` for a
+file attached in the widget) — and they stay stored,
 because the inbox card, the subject and search need something to show. A chat's
 thread leaves one out only where `isMediaStandIn` (`lib/tickets/message-media.ts`)
 rebuilds it from the row's own type, voice flag and filename and the file is
@@ -1098,6 +1105,31 @@ form keep what the widget lists. Which form may save a web chat row is decided
 under the switch's lock, in the save's own transaction (`webchatEditRefusal`):
 the card only the widget's row, the editor only another, since a switch can
 change which that is under an open page.
+
+**The widget carries files, and their type is read from the bytes.** A
+visitor's photo, PDF, video or voice recording rides in the message's own POST
+(`/api/widget/message`, multipart where the text-only body stays JSON), never
+through an upload endpoint of its own, so no file exists without the message it
+came with — a ticket form's argument (`lib/forms/files.ts`). The composer and
+the route judge count, size and the declared type with the same functions
+(`lib/widget/files.ts`); the route then reads each file's first bytes
+(`sniffWidgetFile`), and `attachments.content_type` is that reading from the
+widget's own list, never the browser's label, because it is what Storage serves
+the object as and what both threads draw from. The order is the opposite of a
+form's: the files go to Storage first, under ids named before anything is
+written, and the message and its attachment rows are one transaction, so a
+failure anywhere stores nothing, removes what was uploaded, and gives the
+visitor — still there — their words and files back to try again. A widget
+draws a file from a link the transcript signs for that one file
+(`widgetFileUrl`, a purpose-labelled HMAC under `APP_SECRET`, six to twelve
+hours, the same string across a window so a push re-fetches nothing), and
+`/api/widget/attachments/[id]` asks only the signature and `widgetAttachmentPath`
+(a `reply` on a web chat not deleted). Never the visitor's token in a URL the
+widget draws: an image's or a link's address is copied and shared, and the
+token is the whole chat, read and written, which nothing on the server
+expires. The 25 MB ceiling sits under `proxyClientMaxBodySize`, which truncates a body
+rather than refusing it, so the route checks `Content-Length` before reading,
+and one is raised only with the other.
 
 **Explaining a control.** A label short enough to fit a dense table is rarely
 long enough to explain itself. `InfoTip` from `components/tooltip.tsx` is the
@@ -2218,7 +2250,10 @@ we write when a form attachment fails, a photo sent without a caption is
 stored as our own English `[image]`, and on a comment thread the newest words
 can be a passer-by's reply under the customer's comment. Only there: an
 email's CC'd colleague still speaks for the conversation, or a requester whose
-own mail carried no words would fall to `contacts.locale`. A sender that reads the language off a
+own mail carried no words would fall to `contacts.locale`. A web chat whose
+messages carry no words at all — a photo sent with no caption — reads the
+language of the panel it was sent from, which the widget records on each
+message (`meta.locale`), before that fallback. A sender that reads the language off a
 message it already happens to be holding is how the two came to disagree, so do
 not reintroduce that shortcut — one indexed query is the price of the invariant.
 

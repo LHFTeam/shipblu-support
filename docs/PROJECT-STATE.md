@@ -571,6 +571,17 @@ through the same `popularArticles()` the help centre's front page uses — serve
 rendered with the frame, so they are on screen when it paints, gone the moment
 there is a conversation, and empty is a normal state that hides the section.
 
+And **the widget's composer takes files and emoji.** A paperclip at the end of
+the box attaches photos, PDFs, videos and voice recordings — five a message, 25
+MB together — and a smile at its start opens a short grid of emoji under it,
+the WhatsApp layout most visitors type into every day. The files ride in the
+message's own request and are typed by their bytes, stored with the message or
+not at all, and drawn in both threads as what they are (AGENTS.md, "The widget
+carries files"). Recording a voice note inside the widget is not built: it needs
+the microphone, which a host page must grant the frame (`allow="microphone"`
+on the iframe `/widget/embed.js` writes, and the page's own Permissions-Policy),
+so a recording is attached as a file the phone's recorder made.
+
 And now **ticket categorisation**, which answers the first question anybody asks
 of a helpdesk and which this one could not answer at all: what are customers
 contacting us about, and why does it keep happening. Both dimensions existed and

@@ -10,15 +10,9 @@ import {
   useReducer,
   useRef,
   useState,
-  useSyncExternalStore,
 } from 'react';
 import { ChevronDownIcon, ChevronUpIcon, ImageIcon, PaperclipIcon } from '@/components/icons';
-import {
-  isPreviewableImage,
-  mediaFamily,
-  type PlayableMedia,
-  playableMedia,
-} from '@/lib/attachments/preview';
+import { isPreviewableImage, mediaFamily, playableMedia } from '@/lib/attachments/preview';
 import {
   initialPreviewState,
   type Load,
@@ -28,6 +22,7 @@ import {
   previewReducer,
 } from '@/lib/attachments/previews';
 import { type MediaTrigger, shouldRefresh } from '@/lib/attachments/signed-url';
+import { canPlay, useOnClient } from '@/components/use-can-play';
 import { formatBytes } from '@/lib/format';
 import type { MediaLook } from '@/lib/tickets/message-media';
 
@@ -49,35 +44,6 @@ const fileUrl = (file: Attachment) => `/api/attachments/${file.id}`;
 */
 const previewIdFor = (baseId: string, fileId: string) => `${baseId}-${fileId}`;
 const chipIdFor = (baseId: string, fileId: string) => `${baseId}-${fileId}-chip`;
-
-/*
-  Whether this browser plays a media type is only known in the browser, and a
-  WhatsApp voice note is the case that varies: Ogg Opus plays on an iPhone from
-  iOS 18.4, and before it a player shows a duration and then plays nothing. So
-  the server draws every media file as the link it always was, and the client
-  draws the player once it has asked. `useSyncExternalStore` with a server
-  snapshot is what lets the first client render match the server's, as
-  `components/use-now.ts` does for the clock.
-*/
-const subscribeToNothing = () => () => {};
-const useOnClient = () =>
-  useSyncExternalStore(
-    subscribeToNothing,
-    () => true,
-    () => false,
-  );
-
-const verdicts = new Map<string, boolean>();
-
-function canPlay(media: PlayableMedia): boolean {
-  const key = `${media.kind} ${media.probe}`;
-  let verdict = verdicts.get(key);
-  if (verdict === undefined) {
-    verdict = document.createElement(media.kind).canPlayType(media.probe) !== '';
-    verdicts.set(key, verdict);
-  }
-  return verdict;
-}
 
 /** A file in a row of chips, at the size the thread draws them. */
 const CHIP =

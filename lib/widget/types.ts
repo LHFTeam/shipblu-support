@@ -14,6 +14,31 @@ export type Message = {
   createdAt: string;
   /** Set on the message that carries a satisfaction survey, which the thread draws as a card. */
   survey: WidgetSurvey | null;
+  /**
+   * The files on the message, in the order they were attached. A message sent
+   * with files and no words has an empty `body`: the words stored for it are a
+   * stand-in for the inbox card (`isMediaStandIn`), and the files are drawn in
+   * their place. Absent from a payload served before files existed, so a reader
+   * treats a missing list as an empty one.
+   */
+  attachments?: WidgetAttachment[];
+};
+
+/**
+ * A file on a widget message, as the thread draws it.
+ *
+ * `contentType` is the server's reading of the bytes, never the browser's label
+ * (`lib/widget/sniff.ts`), so the thread can decide on it. `url` is a link
+ * signed for this one file (`lib/widget/file-links.ts`), never one carrying the
+ * visitor's token; null on the visitor's own message before the server has
+ * answered, which has no stored copy to fetch yet.
+ */
+export type WidgetAttachment = {
+  id: string;
+  filename: string;
+  contentType: string;
+  sizeBytes: number;
+  url: string | null;
 };
 
 /**

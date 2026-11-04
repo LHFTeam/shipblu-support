@@ -1,14 +1,36 @@
 'use client';
 
-import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
+import {
+  type ChangeEvent,
+  type MouseEvent,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
 import { ChatBubble } from '@/components/chat';
-import { SendIcon } from '@/components/icons';
-import { Button, SuccessText } from '@/components/ui';
+import { DocumentIcon, PaperclipIcon, SendIcon, SmileIcon, XIcon } from '@/components/icons';
+import { Button, ErrorText, SuccessText } from '@/components/ui';
+import { isPreviewableImage, mediaFamily } from '@/lib/attachments/preview';
 import { runPositions } from '@/lib/chat/runs';
-import type { Locale } from '@/lib/kb/locale';
+import { formatBytes } from '@/lib/format';
+import { direction, type Locale } from '@/lib/kb/locale';
 import { parseVisitorDetails } from '@/lib/widget/contact';
+import {
+  admitWidgetFiles,
+  MAX_WIDGET_FILE_BYTES,
+  MAX_WIDGET_FILES,
+  MAX_WIDGET_MESSAGE_CHARS,
+  WIDGET_ACCEPT,
+  type WidgetFileRefusal,
+} from '@/lib/widget/files';
 import type { WidgetCopy } from './copy';
-import { WIDGET_FIELD } from './field';
+import { EmojiPicker, type PickedWith } from './emoji-picker';
+import { WIDGET_COMPOSER_BOX, WIDGET_FIELD } from './field';
+import { WidgetFiles } from './message-files';
 import { SurveyCard, type SurveyResult } from './survey-card';
 import type { ArticleLink, Message } from '@/lib/widget/types';
 
@@ -42,7 +64,7 @@ export function WidgetThread({
   detailsSaved: boolean;
   /** A draft the host page asked us to start the visitor off with, or null. */
   prefill: { text: string; seq: number } | null;
-  onSend: (body: string, details: OfflineDetails | null) => Promise<boolean>;
+  onSend: (body: string, files: File[], details: OfflineDetails | null) => Promise<SendOutcome>;
   onSaveDetails: (details: OfflineDetails) => Promise<boolean>;
   onOpenArticle: (article: ArticleLink) => void;
   onAnswerSurvey: (
@@ -52,6 +74,13 @@ export function WidgetThread({
   ) => Promise<SurveyResult>;
 }) {
   const [draft, setDraft] = useState('');
+  /** The files chosen for the next message, in the order they were picked. */
+  const [files, setFiles] = useState<File[]>([]);
+  /** What went wrong with the last file chosen or the last send, until the next try. */
+  const [notice, setNotice] = useState<SendRefusal | null>(null);
+  const [emojiOpen, setEmojiOpen] = useState(false);
+  /** Whether the panel opened from the keyboard, and so takes focus. */
+  const [emojiTakesFocus, setEmojiTakesFocus] = useState(false);
   const [sending, setSending] = useState(false);
   const [suggestions, setSuggestions] = useState<ArticleLink[]>([]);
   const [details, setDetails] = useState<OfflineDetails>({ name: '', email: '', phone: '' });
@@ -63,10 +92,29 @@ export function WidgetThread({
 
   const bottom = useRef<HTMLDivElement>(null);
   const composer = useRef<HTMLTextAreaElement>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const attachButton = useRef<HTMLButtonElement>(null);
+  const emojiButton = useRef<HTMLButtonElement>(null);
+  const pickerId = useId();
   /** The last prefill actually put in the box, so a repaint does not redo it. */
   const applied = useRef(0);
   /** A caret waiting for the value it is meant to sit at the end of. */
   const caretPending = useRef(false);
+  /** A caret waiting to sit after an emoji just put in the focused box. */
+  const caretAt = useRef<number | null>(null);
+  /**
+   * Where the next emoji goes while the box is not focused — picked from the
+   * keyboard, or tapped on a phone. Setting a controlled value moves an
+   * unfocused field's own selection to its end, so the field cannot remember
+   * this itself; and it is put back when the box is focused again.
+   */
+  const insertAt = useRef<number | null>(null);
+  /** The kind of pointer that last pressed the emoji button. */
+  const lastPointer = useRef<'mouse' | 'touch'>('mouse');
+  /** A press on the box is placing its own caret, which `insertAt` must not move. */
+  const pressingBox = useRef(false);
+  /** What last pressed the box, read when its click arrives. */
+  const boxPointer = useRef<string | null>(null);
 
   /*
    * A draft handed over by the host page.
@@ -91,10 +139,17 @@ export function WidgetThread({
   }, [prefill]);
 
   useEffect(() => {
+    const field = composer.current;
+    if (caretAt.current !== null) {
+      const at = caretAt.current;
+      caretAt.current = null;
+      // Only on the focused box: some engines focus a field to select in it,
+      // which on a phone brings the keyboard back up over the panel.
+      if (field && document.activeElement === field) field.setSelectionRange(at, at);
+    }
+
     if (!caretPending.current) return;
     caretPending.current = false;
-
-    const field = composer.current;
     if (!field) return;
 
     field.focus();
@@ -211,7 +266,8 @@ export function WidgetThread({
     event.preventDefault();
 
     const body = draft.trim();
-    if (!body || sending) return;
+    const attached = files;
+    if ((!body && attached.length === 0) || sending) return;
 
     /*
      * The details are asked for, never required.
@@ -229,20 +285,127 @@ export function WidgetThread({
     // with its own button so an unusable number can be corrected.
     setDetailsError(askForDetails && supplied && !usable ? 'invalid' : null);
     setDraft('');
+    setFiles([]);
+    setNotice(null);
     setSuggestions([]);
+    insertAt.current = null;
 
-    const sent = await onSend(body, askForDetails && !started && usable ? details : null);
-    // Put the text back rather than losing it.
-    if (!sent) setDraft(body);
+    const outcome = await onSend(
+      body,
+      attached,
+      askForDetails && !started && usable ? details : null,
+    );
+    if (!outcome.ok) {
+      // Put the words and the files back rather than losing them, and say why.
+      // A send with files can take a minute, and the box stays open while it
+      // does: words typed meanwhile follow the ones put back, never replaced
+      // by them. Files cannot be added meanwhile (the clip waits for the send),
+      // so the ones put back are all there are.
+      setDraft((typed) => withinLimit(typed.trim() ? `${body}\n${typed}` : body));
+      setFiles(attached);
+      setNotice(outcome.refusal);
+    }
     setSending(false);
   }
+
+  // --- Files ----------------------------------------------------------------
+
+  function pickFiles(event: ChangeEvent<HTMLInputElement>) {
+    const picked = Array.from(event.target.files ?? []);
+    // Emptied, so choosing the same file again — after removing it — is a
+    // change the browser reports.
+    event.target.value = '';
+    if (picked.length === 0) return;
+
+    const { admitted, refusal } = admitWidgetFiles(files, picked);
+    setFiles(admitted);
+    setNotice(refusal);
+  }
+
+  function removeFile(index: number, event: MouseEvent<HTMLButtonElement>) {
+    setFiles((chosen) => chosen.filter((_, at) => at !== index));
+    setNotice(null);
+    // The button pressed is about to go, and focus with it; from the keyboard
+    // it lands on the button that adds files, where the chips are about.
+    if (event.detail === 0) attachButton.current?.focus();
+  }
+
+  // --- Emoji ----------------------------------------------------------------
+
+  function toggleEmoji(event: MouseEvent<HTMLButtonElement>) {
+    if (emojiOpen) {
+      setEmojiOpen(false);
+      return;
+    }
+    setEmojiTakesFocus(event.detail === 0);
+    setEmojiOpen(true);
+    // A phone's keyboard gives way to the panel, as its own emoji keyboard
+    // does, so the conversation is not squeezed between the two.
+    if (lastPointer.current === 'touch') composer.current?.blur();
+  }
+
+  const closeEmoji = useCallback(() => {
+    setEmojiOpen(false);
+    // Escape pressed inside the panel, whose focus is about to go with it.
+    emojiButton.current?.focus();
+  }, []);
+
+  /**
+   * Puts an emoji where the caret is, or over what is selected, as typing it
+   * would. Into the focused box at its own selection; into an unfocused one at
+   * the place the last emoji left (`insertAt`), or where the caret was when
+   * it lost focus — which a field keeps until its value is set again.
+   */
+  function insertEmoji(emoji: string, pickedWith: PickedWith) {
+    const field = composer.current;
+    const focused = field !== null && document.activeElement === field;
+    const start =
+      !focused && insertAt.current !== null
+        ? insertAt.current
+        : (field?.selectionStart ?? draft.length);
+    const end = !focused && insertAt.current !== null ? start : (field?.selectionEnd ?? start);
+    const next = draft.slice(0, start) + emoji + draft.slice(end);
+    // A value set from code is not held to `maxLength`, so this is.
+    if (next.length > MAX_WIDGET_MESSAGE_CHARS) return;
+
+    setDraft(next);
+    const after = start + emoji.length;
+    if (focused) {
+      caretAt.current = after;
+    } else if (pickedWith === 'mouse' && field) {
+      // A click on a desktop goes back to the box, to carry on typing; a press
+      // there never left it (`EmojiPicker`), so this is a box that had no
+      // focus to begin with. A tap leaves a phone's keyboard down, and a key
+      // leaves focus in the grid, where the arrows are.
+      insertAt.current = null;
+      field.focus();
+      caretAt.current = after;
+    } else {
+      insertAt.current = after;
+    }
+  }
+
+  /*
+   * What each message is drawn as: a survey as its card, and a message with
+   * files as the files and then its words, each a part of its own — a photo
+   * does not sit inside a blue bubble — unless the words were only the
+   * stand-in for the files, which the server sends as an empty body.
+   */
+  const parts = messages.flatMap((message): Part[] => {
+    if (message.survey) return [{ message, part: 'survey' }];
+    const attached = message.attachments ?? [];
+    return [
+      ...(attached.length > 0 ? [{ message, part: 'files' as const }] : []),
+      ...(message.body.trim() || attached.length === 0 ? [{ message, part: 'text' as const }] : []),
+    ];
+  });
 
   /*
    * A run is one sender saying several things in a row. The author's name is
    * part of the key, so two agents answering back to back are two blocks, each
    * with its own name over it.
    */
-  const runs = runPositions(messages, (message) => `${message.from}:${message.authorName ?? ''}`);
+  const runs = runPositions(parts, ({ message }) => `${message.from}:${message.authorName ?? ''}`);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -268,11 +431,11 @@ export function WidgetThread({
           replaces. `attachment` because the card is a surface of its own.
         */}
         <ol className="flex flex-col">
-          {messages.map((message, index) => (
+          {parts.map(({ message, part }, index) => (
             <ChatBubble
-              key={message.id}
+              key={`${message.id}:${part}`}
               from={message.from === 'visitor' ? 'out' : 'in'}
-              kind={message.survey ? 'attachment' : message.from === 'system' ? 'bot' : 'message'}
+              kind={part !== 'text' ? 'attachment' : message.from === 'system' ? 'bot' : 'message'}
               automated={message.from === 'system'}
               group={runs[index]}
               author={
@@ -283,8 +446,15 @@ export function WidgetThread({
                     : undefined
               }
             >
-              {message.survey ? (
+              {part === 'survey' && message.survey ? (
                 <SurveyCard survey={message.survey} onAnswer={onAnswerSurvey} />
+              ) : part === 'files' ? (
+                <WidgetFiles
+                  files={message.attachments ?? []}
+                  sendingLabel={copy.fileSending}
+                  dir={direction(locale)}
+                  align={message.from === 'visitor' ? 'end' : 'start'}
+                />
               ) : (
                 <p className="whitespace-pre-wrap">{message.body}</p>
               )}
@@ -387,57 +557,343 @@ export function WidgetThread({
 
       <form
         onSubmit={submit}
-        className="flex shrink-0 items-end gap-2 border-t border-(--color-border-subtle) p-2.5"
+        className="flex shrink-0 flex-col border-t border-(--color-border-subtle) p-2.5"
       >
-        <textarea
-          ref={composer}
-          value={draft}
-          onChange={(event) => setDraft(event.target.value)}
-          onKeyDown={(event) => {
-            // Enter sends, Shift+Enter breaks the line — what every chat does,
-            // and what a visitor will try without thinking.
-            if (event.key === 'Enter' && !event.shiftKey) {
-              event.preventDefault();
-              void submit(event);
-            }
-          }}
-          /* The floor, and what the box is before the effect above has
-             measured it. */
-          rows={2}
-          maxLength={5000}
-          placeholder={copy.placeholder}
-          dir="auto"
-          /*
-            16px, not the 14px the rest of the widget reads at. Safari zooms
-            the page in on any field smaller than that the moment it is
-            focused, and a zoomed page is a scrolled page — which on iOS is
-            what parts a caret from the field it belongs to. Sizing the field
-            up is the fix that does not also disable pinch-zoom for the
-            visitor.
-          */
-          className={`${WIDGET_FIELD} flex-1 resize-none px-3 py-2 font-conversation`}
-        />
         {/*
-          The word is the button's name rather than its face: a 380px panel
-          spends its width on what the visitor is typing. `!` on the box because
-          the shared button's height and padding are set per size, and a second
-          utility on the same property wins or loses by Tailwind's order, not
-          this one's.
+          Polite rather than an alert: it answers what the visitor just did. On
+          the page while empty, so it is in place to announce, and spaced by its
+          sentence's margin rather than the column's gap, which an empty child
+          still gets.
         */}
-        <Button
-          type="submit"
-          disabled={sending || !draft.trim()}
-          loading={sending}
-          aria-label={copy.send}
-          icon={<SendIcon size={18} />}
-          className="min-h-(--tap-min)! min-w-(--tap-min) px-0!"
-        />
+        <div aria-live="polite">
+          {notice ? (
+            <p className="mb-2">
+              <ErrorText inline>{noticeText(notice, copy)}</ErrorText>
+            </p>
+          ) : null}
+        </div>
+
+        {files.length > 0 ? (
+          <ul className="mb-2 flex flex-wrap gap-1.5">
+            {files.map((file, index) => (
+              <SelectedFile
+                key={keyOf(file)}
+                file={file}
+                removeLabel={fill(copy.removeFile, { name: file.name })}
+                onRemove={(event) => removeFile(index, event)}
+              />
+            ))}
+          </ul>
+        ) : null}
+
+        <div className="flex items-end gap-2">
+          {/*
+            The two buttons sit inside the box, the smile at its start and the
+            clip at its end, as the messenger most visitors here use every day
+            has them — and so the panel's width still goes to what is being
+            typed.
+          */}
+          <div className={WIDGET_COMPOSER_BOX}>
+            <button
+              ref={emojiButton}
+              type="button"
+              aria-label={copy.emoji}
+              aria-expanded={emojiOpen}
+              aria-controls={emojiOpen ? pickerId : undefined}
+              onPointerDown={(event) => {
+                lastPointer.current = event.pointerType === 'touch' ? 'touch' : 'mouse';
+                // On a desktop, leaves the caret in the box where the emoji will go.
+                if (event.pointerType !== 'touch') event.preventDefault();
+              }}
+              onClick={toggleEmoji}
+              className={COMPOSER_BUTTON}
+            >
+              <SmileIcon size={20} />
+            </button>
+
+            <textarea
+              ref={composer}
+              value={draft}
+              onChange={(event) => {
+                insertAt.current = null;
+                setDraft(event.target.value);
+              }}
+              onFocus={(event) => {
+                // Back from the keyboard after emoji picked elsewhere: the caret
+                // goes after the last of them, not to the end the value change
+                // put it at. A click or a tap places its own, where it landed.
+                const at = insertAt.current;
+                insertAt.current = null;
+                if (at !== null && !pressingBox.current)
+                  event.currentTarget.setSelectionRange(at, at);
+              }}
+              onPointerDown={(event) => {
+                pressingBox.current = true;
+                boxPointer.current = event.pointerType;
+              }}
+              onPointerUp={() => (pressingBox.current = false)}
+              onPointerCancel={() => (pressingBox.current = false)}
+              onClick={() => {
+                // Touching the box brings a phone's keyboard back, which takes
+                // the panel's place. On the click, once the tap has landed and
+                // placed its caret: closed on the press, the panel went before
+                // the tap was delivered, the box moved down from under the
+                // finger, and the tap fell on whatever was there instead.
+                if (boxPointer.current === 'touch' && emojiOpen) setEmojiOpen(false);
+                boxPointer.current = null;
+              }}
+              onKeyDown={(event) => {
+                if (event.key === 'Escape' && emojiOpen) {
+                  event.preventDefault();
+                  setEmojiOpen(false);
+                  return;
+                }
+                // Enter sends, Shift+Enter breaks the line — what every chat does,
+                // and what a visitor will try without thinking.
+                if (event.key === 'Enter' && !event.shiftKey) {
+                  event.preventDefault();
+                  void submit(event);
+                }
+              }}
+              /* The floor, and what the box is before the effect above has
+                 measured it. */
+              rows={2}
+              maxLength={MAX_WIDGET_MESSAGE_CHARS}
+              placeholder={copy.placeholder}
+              dir="auto"
+              /*
+                16px, not the 14px the rest of the widget reads at. Safari zooms
+                the page in on any field smaller than that the moment it is
+                focused, and a zoomed page is a scrolled page — which on iOS is
+                what parts a caret from the field it belongs to. Sizing the field
+                up is the fix that does not also disable pinch-zoom for the
+                visitor.
+
+                No outline of its own, `!` because the shared focus outline is
+                unlayered CSS and so outranks any utility: the box round it
+                draws the focus ring for everything inside it.
+              */
+              className="min-w-0 flex-1 resize-none bg-transparent px-1 py-2.5 font-conversation text-base text-(--color-text-primary) outline-none! placeholder:text-(--color-text-tertiary)"
+            />
+
+            <button
+              ref={attachButton}
+              type="button"
+              aria-label={copy.attach}
+              onClick={() => fileInput.current?.click()}
+              // While a send is on the wire: what it carries comes back if it
+              // fails, and a file added meanwhile would have nowhere to go.
+              disabled={sending}
+              className={COMPOSER_BUTTON}
+            >
+              <PaperclipIcon size={20} />
+            </button>
+            {/*
+              Hidden rather than visually hidden: `sr-only` is positioned
+              against the nearest positioned box, and the button above is what
+              a person reaches. A hidden input still opens its picker when the
+              button clicks it, in every engine.
+            */}
+            <input
+              ref={fileInput}
+              type="file"
+              multiple
+              accept={WIDGET_ACCEPT}
+              onChange={pickFiles}
+              tabIndex={-1}
+              aria-hidden
+              className="hidden"
+            />
+          </div>
+
+          {/*
+            The word is the button's name rather than its face: a 380px panel
+            spends its width on what the visitor is typing. `!` on the box because
+            the shared button's height and padding are set per size, and a second
+            utility on the same property wins or loses by Tailwind's order, not
+            this one's.
+          */}
+          <Button
+            type="submit"
+            disabled={sending || (!draft.trim() && files.length === 0)}
+            loading={sending}
+            aria-label={copy.send}
+            icon={<SendIcon size={18} />}
+            className="min-h-(--tap-min)! min-w-(--tap-min) px-0!"
+          />
+        </div>
+
+        {emojiOpen ? (
+          <div className="mt-2">
+            <EmojiPicker
+              id={pickerId}
+              label={copy.emojiPanel}
+              takeFocus={emojiTakesFocus}
+              onPick={insertEmoji}
+              onClose={closeEmoji}
+            />
+          </div>
+        ) : null}
       </form>
     </div>
   );
 }
 
 export type OfflineDetails = { name: string; email: string; phone: string };
+
+/** Why a send or a file was refused: a file's own reason, the upload budget, or anything else. */
+export type SendRefusal = WidgetFileRefusal | { reason: 'slow_down' } | { reason: 'failed' };
+
+/** What a send came to. A refusal puts the words and the files back. */
+export type SendOutcome = { ok: true } | { ok: false; refusal: SendRefusal };
+
+type Part = { message: Message; part: 'survey' | 'files' | 'text' };
+
+/*
+  A chosen file has no id until it is stored, and its place in the list moves
+  when one before it is removed, so each `File` gets a key of its own: keyed by
+  place, removing the first photo remounted every chip after it and made each
+  thumbnail again.
+*/
+const fileKeys = new WeakMap<File, number>();
+let lastFileKey = 0;
+
+function keyOf(file: File): number {
+  let key = fileKeys.get(file);
+  if (key === undefined) {
+    key = ++lastFileKey;
+    fileKeys.set(file, key);
+  }
+  return key;
+}
+
+/**
+ * Words put back after a failed send, joined to those typed while it was on the
+ * wire, held to the limit the box keeps while typing — a value set from code is
+ * not — so the visitor sees in the box what the route would keep, rather than
+ * the route cutting the end off unseen. Never through the middle of an emoji
+ * or another character written as two code units.
+ */
+function withinLimit(text: string): string {
+  if (text.length <= MAX_WIDGET_MESSAGE_CHARS) return text;
+  const cut = text.slice(0, MAX_WIDGET_MESSAGE_CHARS);
+  return /[\uD800-\uDBFF]$/.test(cut) ? cut.slice(0, -1) : cut;
+}
+
+/** A ghost button inside the composer's box, a full tap target around a 20px glyph. */
+const COMPOSER_BUTTON =
+  'inline-flex size-(--tap-min) shrink-0 items-center justify-center rounded-md text-(--color-text-secondary) transition-colors hover:bg-(--color-background-hover) hover:text-(--color-text-primary) active:bg-(--color-background-pressed) aria-expanded:text-(--color-text-brand)';
+
+const MEGABYTE = 1024 * 1024;
+
+/** The sentence a refusal is told in, with the visitor's file name isolated inside it. */
+function noticeText(notice: SendRefusal, copy: WidgetCopy): ReactNode {
+  const limit = `${MAX_WIDGET_FILE_BYTES / MEGABYTE} ${copy.megabytes}`;
+  switch (notice.reason) {
+    case 'type':
+      return fill(copy.fileType, { name: notice.filename });
+    case 'empty':
+      return fill(copy.fileEmpty, { name: notice.filename });
+    case 'too_large':
+      return fill(copy.fileTooLarge, { name: notice.filename, limit });
+    case 'too_large_total':
+      return fill(copy.filesTooLarge, { limit });
+    case 'too_many':
+      return fill(copy.filesTooMany, { count: String(MAX_WIDGET_FILES) });
+    case 'slow_down':
+      return copy.filesSlowDown;
+    case 'failed':
+      return copy.sendFailed;
+  }
+}
+
+/**
+ * A sentence from the copy with its `{placeholders}` filled in. The file name
+ * is drawn in a `<bdi>`, so a Latin name inside an Arabic sentence — or an
+ * Arabic one inside English — keeps its own order without reordering the
+ * words around it.
+ */
+function fill(template: string, values: { name?: string; limit?: string; count?: string }) {
+  const text = template
+    .replaceAll('{limit}', values.limit ?? '')
+    .replaceAll('{count}', values.count ?? '');
+  if (values.name === undefined) return text;
+  const [before, ...after] = text.split('{name}');
+  return (
+    <>
+      {before}
+      <bdi>{values.name}</bdi>
+      {after.join(values.name)}
+    </>
+  );
+}
+
+/**
+ * A file chosen for the next message: a thumbnail for a photo the browser can
+ * draw, its kind's glyph for anything else, its name and size, and the button
+ * that takes it out again.
+ *
+ * The thumbnail is the file itself through an object URL, which holds the file
+ * in memory until it is revoked, so the URL is made and revoked by the image's
+ * own ref: React calls the cleanup when the image goes, and calls the callback
+ * again — with a new URL — if the file changes.
+ */
+function SelectedFile({
+  file,
+  removeLabel,
+  onRemove,
+}: {
+  file: File;
+  removeLabel: ReactNode;
+  onRemove: (event: MouseEvent<HTMLButtonElement>) => void;
+}) {
+  const thumbnail = useCallback(
+    (image: HTMLImageElement | null) => {
+      if (!image) return;
+      const url = URL.createObjectURL(file);
+      image.src = url;
+      return () => URL.revokeObjectURL(url);
+    },
+    [file],
+  );
+  const family = mediaFamily(file.type);
+  const labelId = useId();
+
+  return (
+    <li className="flex max-w-full min-w-0 items-center gap-2 rounded-lg border border-(--color-border-subtle) bg-(--color-background-surface) py-1 ps-1 pe-0.5 text-xs">
+      {isPreviewableImage(file.type) ? (
+        // eslint-disable-next-line @next/next/no-img-element -- an object URL for a file still on the visitor's device
+        <img
+          ref={thumbnail}
+          alt=""
+          className="size-8 shrink-0 rounded-md bg-(--color-background-surface-sunken) object-cover"
+        />
+      ) : (
+        <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-(--color-background-surface-sunken) text-(--color-text-tertiary)">
+          {family ? <PaperclipIcon size={16} /> : <DocumentIcon size={16} />}
+        </span>
+      )}
+      <span className="flex min-w-0 flex-col">
+        <bdi className="truncate text-(--color-text-primary)">{file.name}</bdi>
+        {/* Left to right in either language: "125 B", not "B 125". */}
+        <span dir="ltr" className="self-start text-(--color-text-tertiary) tabular-nums">
+          {formatBytes(file.size)}
+        </span>
+      </span>
+      <span id={labelId} hidden>
+        {removeLabel}
+      </span>
+      <button
+        type="button"
+        aria-labelledby={labelId}
+        onClick={onRemove}
+        className="inline-flex size-8 shrink-0 items-center justify-center rounded-md text-(--color-text-secondary) transition-colors hover:bg-(--color-background-hover) hover:text-(--color-text-primary)"
+      >
+        <XIcon size={16} />
+      </button>
+    </li>
+  );
+}
 
 /* Roughly six lines. Past that the composer would be eating the transcript,
    which is the half of the panel that carries the agent's answer. */

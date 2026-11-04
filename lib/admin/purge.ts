@@ -203,11 +203,16 @@ async function countFor(tx: typeof db, conversationIds: string[]): Promise<Purge
  * are deleted.
  *
  * Every attachment in the system — ticket and side conversation alike — is
- * written under `conversations/<id>/` by `buildAttachmentPath()`, so a prefix
- * delete would also work. Exact keys are used instead because the column is the
- * authority on what we actually wrote: a path convention that changes later
- * would silently orphan everything stored under the old one, and this way the
- * only thing that can go stale is a row we are deleting anyway.
+ * written under some `conversations/<id>/` by `buildAttachmentPath()`, but **not
+ * always its own ticket's**, so a prefix delete would be wrong, not merely a
+ * second way. The widget stores a visitor's files before the transaction that
+ * decides which ticket their message lands on (`appendVisitorMessage`): a
+ * ticket closed during the upload leaves the new ticket's files under the old
+ * one's prefix, where purging the old one by prefix would delete them, and a
+ * send that lost the race to open a chat leaves them under an id no row holds.
+ * So exact keys, read off the rows: the column is the authority on what we
+ * actually wrote, and the only thing that can go stale is a row we are
+ * deleting anyway.
  */
 async function storagePathsFor(tx: typeof db, conversationIds: string[]): Promise<string[]> {
   if (conversationIds.length === 0) return [];

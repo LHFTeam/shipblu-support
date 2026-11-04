@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { webchatFilesStandIn } from '@/lib/chat/stand-ins';
 import { parseMetaWebhook } from '@/lib/meta/parse';
 import { parseWebhook } from '@/lib/whatsapp/parse';
 import { isMediaStandIn, mediaLooks, metaIndex } from './message-media';
@@ -263,6 +264,85 @@ describe('isMediaStandIn', () => {
         attachments: [FILE],
       }),
     ).toBe(false);
+  });
+});
+
+/**
+ * A web chat message as `appendVisitorMessage` stores it: the stand-in built
+ * by the same function, from the files it records in `meta.webchatFiles`, and
+ * one attachment row per file, written in the same transaction.
+ */
+function webchatRow(
+  files: { kind: 'image' | 'video' | 'audio' | 'document'; filename: string }[],
+  caption = '',
+  stored: StoredFile[] = files.map((_, index) => ({
+    id: `file-${index}`,
+    contentType: 'image/jpeg',
+  })),
+) {
+  return {
+    bodyText: caption || webchatFilesStandIn(files),
+    bodyHtml: null,
+    meta: { pageUrl: null, userAgent: null, webchatFiles: files },
+    attachments: stored,
+  };
+}
+
+describe('isMediaStandIn on a web chat message', () => {
+  it.each([
+    ['a photo', [{ kind: 'image' as const, filename: 'box.jpg' }], '[image]'],
+    ['a video', [{ kind: 'video' as const, filename: 'door.mov' }], '[video]'],
+    ['a voice recording', [{ kind: 'audio' as const, filename: 'memo.m4a' }], '[audio]'],
+    ['a PDF', [{ kind: 'document' as const, filename: 'invoice.pdf' }], '[document: invoice.pdf]'],
+    [
+      'several files',
+      [
+        { kind: 'image' as const, filename: 'a.jpg' },
+        { kind: 'document' as const, filename: 'b.pdf' },
+      ],
+      '[2 attachments]',
+    ],
+  ])('recognises the stand-in for %s', (_, files, text) => {
+    const row = webchatRow(files);
+    expect(row.bodyText).toBe(text);
+    expect(isMediaStandIn(row)).toBe(true);
+  });
+
+  it('keeps a caption, which is the visitor speaking', () => {
+    expect(
+      isMediaStandIn(webchatRow([{ kind: 'image', filename: 'a.jpg' }], 'the box is crushed')),
+    ).toBe(false);
+  });
+
+  it('keeps a count when a file it counts is no longer there', () => {
+    const files = [
+      { kind: 'image' as const, filename: 'a.jpg' },
+      { kind: 'image' as const, filename: 'b.jpg' },
+    ];
+    expect(isMediaStandIn(webchatRow(files, '', [FILE]))).toBe(false);
+  });
+
+  it('keeps the words of a message whose files are not recorded as the widget records them', () => {
+    expect(
+      isMediaStandIn({
+        bodyText: '[image]',
+        bodyHtml: null,
+        meta: { webchatFiles: [{ kind: 'spreadsheet', filename: 'a.xlsx' }] },
+        attachments: [FILE],
+      }),
+    ).toBe(false);
+    expect(
+      isMediaStandIn({
+        bodyText: '[image]',
+        bodyHtml: null,
+        meta: { webchatFiles: 'image' },
+        attachments: [FILE],
+      }),
+    ).toBe(false);
+  });
+
+  it('never reads a typed "[image]" with no files as a stand-in', () => {
+    expect(isMediaStandIn(webchatRow([], '[image]', []))).toBe(false);
   });
 });
 

@@ -12,7 +12,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
  * as invalid JSON, and is the one answer here that changed on purpose.
  */
 
-const resolveVisitor = vi.fn(async (token: string) => (token === 'known' ? 'contact-1' : null));
+const resolveVisitor = vi.fn(async (token: string) =>
+  token === 'known' ? 'contact-1' : token === 'second' ? 'contact-2' : null,
+);
 const registerVisitor = vi.fn(async () => ({ contactId: 'contact-new' }));
 const appendVisitorMessage = vi.fn(async () => ({ conversationId: 'conversation-1' }));
 const attachVisitorDetails = vi.fn(async () => undefined);
@@ -32,7 +34,18 @@ vi.mock('@/lib/widget/conversation', () => ({
   attachVisitorDetails,
   answerSurvey,
   listMessages: async () => [],
+  VisitorUploadFailed: class VisitorUploadFailed extends Error {},
 }));
+/* What `megabytesOf` answers, when a test needs a send to weigh more than its bytes. */
+const weighs = vi.hoisted(() => ({ megabytes: null as number | null }));
+vi.mock('@/lib/widget/uploads', async (importOriginal) => {
+  const real = await importOriginal<typeof import('@/lib/widget/uploads')>();
+  return {
+    ...real,
+    megabytesOf: (uploads: Parameters<typeof real.megabytesOf>[0]) =>
+      weighs.megabytes ?? real.megabytesOf(uploads),
+  };
+});
 vi.mock('@/lib/widget/identify', () => ({
   applyVisitorIdentity,
   recordIdentityOnConversation: async () => undefined,
@@ -110,10 +123,22 @@ describe('a usable widget body', () => {
     const response = await message.POST(post(JSON.stringify({ token: 'known', body: ' hi ' })));
 
     expect(response.status).toBe(200);
-    expect(appendVisitorMessage).toHaveBeenCalledWith('contact-1', 'hi', {
-      pageUrl: null,
-      userAgent: null,
-    });
+    expect(appendVisitorMessage).toHaveBeenCalledWith(
+      'contact-1',
+      'hi',
+      { pageUrl: null, userAgent: null, locale: null },
+      [],
+    );
+  });
+
+  it('carries the panel’s language, and nothing that is not one', async () => {
+    await message.POST(post(JSON.stringify({ token: 'known', body: 'hi', locale: 'ar' })));
+    await message.POST(post(JSON.stringify({ token: 'known', body: 'hi', locale: 'fr' })));
+
+    expect(appendVisitorMessage.mock.calls.map((call) => (call as unknown[])[2])).toEqual([
+      expect.objectContaining({ locale: 'ar' }),
+      expect.objectContaining({ locale: null }),
+    ]);
   });
 
   it('passes the identity object through untouched', async () => {
@@ -208,5 +233,213 @@ describe('POST /api/widget/session', () => {
 
     expect(((await response.json()) as { token: string }).token).toBe('known');
     expect(registerVisitor).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * A message with files, which the widget sends as a multipart body. The files
+ * are judged by the composer's own rules and then by their bytes, and only a
+ * message whose every file passes reaches `appendVisitorMessage`.
+ */
+describe('POST /api/widget/message with files', () => {
+  const JPEG = new Uint8Array([
+    0xff, 0xd8, 0xff, 0xe0, 0, 0x10, 0x4a, 0x46, 0x49, 0x46, 0, 1, 1, 0,
+  ]);
+
+  function multipart(fields: Record<string, string>, files: File[] = []): Request {
+    address += 1;
+    const form = new FormData();
+    for (const [name, value] of Object.entries(fields)) form.set(name, value);
+    for (const file of files) form.append('files', file, file.name);
+    return new Request('https://support.example/api/widget/message', {
+      method: 'POST',
+      body: form,
+      headers: { 'x-forwarded-for': `203.0.${Math.floor(address / 250)}.${address % 250}` },
+    });
+  }
+
+  it('stores a photo sent with no words, typed by its bytes', async () => {
+    const photo = new File([JPEG], 'parcel.jpeg', { type: 'image/jpeg' });
+    const response = await message.POST(multipart({ token: 'known', body: '' }, [photo]));
+
+    expect(response.status).toBe(200);
+    expect(appendVisitorMessage).toHaveBeenCalledWith(
+      'contact-1',
+      '',
+      expect.objectContaining({ pageUrl: null }),
+      [
+        expect.objectContaining({
+          filename: 'parcel.jpeg',
+          contentType: 'image/jpeg',
+          kind: 'image',
+          extension: 'jpg',
+        }),
+      ],
+    );
+  });
+
+  it('refuses a file whose bytes are not what its label says, by name', async () => {
+    const page = new File(['<html><script>alert(1)</script></html>'], 'parcel.jpg', {
+      type: 'image/jpeg',
+    });
+    const response = await message.POST(multipart({ token: 'known', body: 'look' }, [page]));
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: 'type', filename: 'parcel.jpg' });
+    expect(appendVisitorMessage).not.toHaveBeenCalled();
+  });
+
+  it('refuses a type the widget does not carry before reading it', async () => {
+    const sheet = new File(['a,b'], 'orders.csv', { type: 'text/csv' });
+    const response = await message.POST(multipart({ token: 'known', body: '' }, [sheet]));
+
+    expect(await response.json()).toEqual({ error: 'type', filename: 'orders.csv' });
+    expect(appendVisitorMessage).not.toHaveBeenCalled();
+  });
+
+  it('refuses more files than one message carries', async () => {
+    const photos = Array.from(
+      { length: 6 },
+      (_, index) => new File([JPEG], `photo-${index}.jpg`, { type: 'image/jpeg' }),
+    );
+    const response = await message.POST(multipart({ token: 'known', body: '' }, photos));
+
+    expect(await response.json()).toEqual({ error: 'too_many', filename: null });
+    expect(appendVisitorMessage).not.toHaveBeenCalled();
+  });
+
+  it('refuses a body longer than the limit before reading it', async () => {
+    address += 1;
+    const response = await message.POST(
+      new Request('https://support.example/api/widget/message', {
+        method: 'POST',
+        body: 'x',
+        headers: {
+          'content-type': 'multipart/form-data; boundary=x',
+          'content-length': String(40 * 1024 * 1024),
+          'x-forwarded-for': `192.0.2.${address % 250}`,
+        },
+      }),
+    );
+
+    expect(response.status).toBe(413);
+    expect(await response.json()).toEqual({ error: 'too_large_total' });
+    expect(resolveVisitor).not.toHaveBeenCalled();
+  });
+
+  it('refuses a multipart body that holds neither words nor a file', async () => {
+    const response = await message.POST(multipart({ token: 'known', body: '   ' }));
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: 'empty message' });
+  });
+
+  it('refuses an empty file by name, rather than storing the words without it', async () => {
+    const empty = new File([], 'memo.m4a', { type: 'audio/x-m4a' });
+    const response = await message.POST(
+      multipart({ token: 'known', body: 'here is the recording' }, [empty]),
+    );
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: 'empty', filename: 'memo.m4a' });
+    expect(appendVisitorMessage).not.toHaveBeenCalled();
+  });
+
+  it('answers a file Storage would not take with upload_failed, which the widget offers to retry', async () => {
+    const { VisitorUploadFailed } = await import('@/lib/widget/conversation');
+    appendVisitorMessage.mockRejectedValueOnce(new VisitorUploadFailed('no'));
+    const photo = new File([JPEG], 'parcel.jpg', { type: 'image/jpeg' });
+
+    const response = await message.POST(multipart({ token: 'known', body: '' }, [photo]));
+
+    expect(response.status).toBe(502);
+    expect(await response.json()).toEqual({ error: 'upload_failed' });
+  });
+
+  it('asks who the visitor is before judging the files', async () => {
+    const photo = new File([JPEG], 'parcel.jpg', { type: 'image/jpeg' });
+    const response = await message.POST(multipart({ token: 'stranger', body: '' }, [photo]));
+
+    expect(response.status).toBe(401);
+    expect(appendVisitorMessage).not.toHaveBeenCalled();
+  });
+});
+
+/*
+  Last in the file: it fills the known visitor's hourly budget, which every
+  send with files from that token after it would then meet.
+*/
+describe('the hourly upload budget', () => {
+  it('spends nothing on a send whose files could not be stored', async () => {
+    const { VisitorUploadFailed } = await import('@/lib/widget/conversation');
+    const send = () => {
+      address += 1;
+      const form = new FormData();
+      form.set('token', 'second');
+      form.set('body', '');
+      form.append(
+        'files',
+        new File([new Uint8Array([0xff, 0xd8, 0xff, 0xe0, ...new Array(12).fill(0)])], 'v.jpg', {
+          type: 'image/jpeg',
+        }),
+        'v.jpg',
+      );
+      return message.POST(
+        new Request('https://support.example/api/widget/message', {
+          method: 'POST',
+          body: form,
+          headers: { 'x-forwarded-for': `192.0.2.${address % 250}` },
+        }),
+      );
+    };
+
+    weighs.megabytes = 60;
+    try {
+      // Storage down twice: answered "try again", and charged nothing.
+      appendVisitorMessage.mockRejectedValueOnce(new VisitorUploadFailed('no'));
+      appendVisitorMessage.mockRejectedValueOnce(new VisitorUploadFailed('no'));
+      expect((await send()).status).toBe(502);
+      expect((await send()).status).toBe(502);
+
+      // Back, and the visitor's hour is still theirs: charged here, once.
+      expect((await send()).status).toBe(200);
+      expect((await send()).status).toBe(429);
+    } finally {
+      weighs.megabytes = null;
+    }
+  });
+
+  it('refuses a visitor’s send past it with slow_down, and stores nothing', async () => {
+    const photo = () =>
+      new File([new Uint8Array([0xff, 0xd8, 0xff, 0xe0, ...new Array(12).fill(0)])], 'p.jpg', {
+        type: 'image/jpeg',
+      });
+    const send = () => {
+      address += 1;
+      const form = new FormData();
+      form.set('token', 'known');
+      form.set('body', '');
+      form.append('files', photo(), 'p.jpg');
+      return message.POST(
+        new Request('https://support.example/api/widget/message', {
+          method: 'POST',
+          body: form,
+          headers: { 'x-forwarded-for': `192.0.2.${address % 250}` },
+        }),
+      );
+    };
+
+    weighs.megabytes = 60;
+    try {
+      expect((await send()).status).toBe(200);
+      appendVisitorMessage.mockClear();
+
+      const refused = await send();
+      expect(refused.status).toBe(429);
+      expect(await refused.json()).toEqual({ error: 'slow_down' });
+      expect(appendVisitorMessage).not.toHaveBeenCalled();
+    } finally {
+      weighs.megabytes = null;
+    }
   });
 });
