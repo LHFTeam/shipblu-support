@@ -1,73 +1,79 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { withTestEnv } from '@/lib/testing/env';
+import { widgetFileUrl } from '@/lib/widget/file-links';
 
 /**
- * What the visitor's file route answers, around the query that decides which
- * files a token reaches (`visitorAttachmentPath`, tested against Postgres in
+ * What a widget's file link answers, around the signature (`file-links.ts`,
+ * tested beside it) and the query that asks what changed since it was signed
+ * (`widgetAttachmentPath`, tested against Postgres in
  * `lib/widget/conversation.db.test.ts`).
  */
 
-const resolveVisitor = vi.fn(async (token: string) => (token === 'known' ? 'contact-1' : null));
-const visitorAttachmentPath = vi.fn(async (_contact: string, id: string) =>
+withTestEnv();
+
+const OWN = '6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b';
+const GONE = '0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d';
+
+const widgetAttachmentPath = vi.fn(async (id: string) =>
   id === OWN ? 'conversations/c/m-0.jpg' : null,
 );
 const signedUrl = vi.fn(async (path: string) => `https://storage.example/signed/${path}`);
-
-vi.mock('@/lib/widget/session', () => ({ resolveVisitor }));
-vi.mock('@/lib/widget/conversation', () => ({ visitorAttachmentPath }));
+vi.mock('@/lib/widget/conversation', () => ({ widgetAttachmentPath }));
 vi.mock('@/lib/storage', () => ({ signedUrl }));
-
-const OWN = '6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b';
-const OTHER = '0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d';
 
 const { GET } = await import('./route');
 
 let address = 0;
-function get(id: string, token: string | null) {
+function get(path: string, id = path.split('/').at(-1)!.split('?')[0]!) {
   address += 1;
-  const query = token === null ? '' : `?token=${encodeURIComponent(token)}`;
   return GET(
-    new Request(`https://support.example/api/widget/attachments/${id}${query}`, {
+    new Request(new URL(path, 'https://support.example'), {
       headers: { 'x-forwarded-for': `198.18.0.${address % 250}` },
     }),
-    { params: Promise.resolve({ id }) },
+    { params: Promise.resolve({ id: decodeURIComponent(id) }) },
   );
 }
 
 beforeEach(() => {
-  resolveVisitor.mockClear();
-  visitorAttachmentPath.mockClear();
+  widgetAttachmentPath.mockClear();
   signedUrl.mockClear();
 });
 
 describe('GET /api/widget/attachments/[id]', () => {
-  it('redirects to a fresh signed URL for the visitor’s own file, and says not to keep it', async () => {
-    const response = await get(OWN, 'known');
+  it('redirects a link the transcript signed to a fresh Storage URL, and says not to keep it', async () => {
+    const response = await get(widgetFileUrl(OWN, new Date()));
 
     expect(response.status).toBe(307);
     expect(response.headers.get('location')).toBe(
       'https://storage.example/signed/conversations/c/m-0.jpg',
     );
     expect(response.headers.get('cache-control')).toBe('no-store');
-    expect(visitorAttachmentPath).toHaveBeenCalledWith('contact-1', OWN);
+    expect(widgetAttachmentPath).toHaveBeenCalledWith(OWN);
   });
 
-  it('answers a file the token does not reach as one that does not exist', async () => {
-    const response = await get(OTHER, 'known');
+  it('answers a signed link to a file that is no longer reachable as one that does not exist', async () => {
+    const response = await get(widgetFileUrl(GONE, new Date()));
 
     expect(response.status).toBe(404);
     expect(signedUrl).not.toHaveBeenCalled();
   });
 
-  it('refuses without a session it knows', async () => {
-    expect((await get(OWN, 'stranger')).status).toBe(401);
-    expect((await get(OWN, null)).status).toBe(401);
-    expect(visitorAttachmentPath).not.toHaveBeenCalled();
+  it('refuses another file’s signature, an expired link and a bare id, before asking anything', async () => {
+    const signedForOther = widgetFileUrl(GONE, new Date()).replace(GONE, OWN);
+    const expired = widgetFileUrl(OWN, new Date('2026-01-01T00:00:00Z'));
+
+    for (const path of [signedForOther, expired, `/api/widget/attachments/${OWN}`]) {
+      expect((await get(path)).status).toBe(404);
+    }
+    expect(widgetAttachmentPath).not.toHaveBeenCalled();
   });
 
-  it('answers a malformed id as a link to nothing, before asking anything', async () => {
-    const response = await get('not-a-uuid', 'known');
+  it('no longer takes the visitor’s token', async () => {
+    expect((await get(`/api/widget/attachments/${OWN}?token=anything`)).status).toBe(404);
+  });
 
-    expect(response.status).toBe(404);
-    expect(resolveVisitor).not.toHaveBeenCalled();
+  it('answers a malformed id as a link to nothing', async () => {
+    expect((await get('/api/widget/attachments/not-a-uuid')).status).toBe(404);
+    expect(widgetAttachmentPath).not.toHaveBeenCalled();
   });
 });

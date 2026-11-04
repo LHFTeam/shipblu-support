@@ -25,6 +25,7 @@ import { afterInboundMessage, afterMessageStored } from '@/lib/tickets/lifecycle
 import { reopenResolved } from '@/lib/tickets/reopen';
 import { requireDefaultOpenStatusId } from '@/lib/tickets/statuses';
 import type { VisitorDetails } from './contact';
+import { widgetFileUrl } from './file-links';
 import type { WidgetFileKind } from './files';
 import type { Message, WidgetAttachment, WidgetSurvey } from './types';
 import { recordIdentityOnConversation } from './identify';
@@ -105,9 +106,11 @@ export async function listMessages(conversationId: string): Promise<WidgetMessag
 
   const ruleIds = [...new Set(rows.flatMap((row) => (row.surveyRuleId ? [row.surveyRuleId] : [])))];
   const rules = await wordingRulesById(ruleIds);
+  // One instant for every link in the transcript, so they share one expiry.
+  const now = new Date();
 
   return rows.map((row) => {
-    const files = row.files ?? [];
+    const files = (row.files ?? []).map((file) => ({ ...file, url: widgetFileUrl(file.id, now) }));
     return {
       id: row.id,
       from: row.direction === 'inbound' ? 'visitor' : row.agentName ? 'agent' : 'system',
@@ -139,13 +142,13 @@ export async function listMessages(conversationId: string): Promise<WidgetMessag
  * a second statement, because this runs on every push to every open widget.
  * Null for a message with none, which the reader takes as an empty list.
  *
- * In the order the visitor attached them: one transaction writes a message's
- * files, so they share a `created_at`, and the stored key ends in each one's
- * place in the selection (`storeVisitorFiles`) — one digit, since a message
- * carries at most five. An inline image, an email's `cid:` part, is part of
- * a body the widget never draws, so it is left out.
+ * In the order the visitor attached them, which `appendVisitorMessage` writes
+ * as each file's `created_at` — the order the console's thread reads too. The
+ * stored key, which ends in the file's place, breaks a tie anything else left.
+ * An inline image, an email's `cid:` part, is part of a body the widget never
+ * draws, so it is left out.
  */
-const messageFiles = sql<WidgetAttachment[] | null>`(
+const messageFiles = sql<Omit<WidgetAttachment, 'url'>[] | null>`(
   select json_agg(
     json_build_object(
       'id', ${attachments.id},
@@ -167,7 +170,7 @@ const messageFiles = sql<WidgetAttachment[] | null>`(
  */
 function standsIn(
   row: { direction: string; bodyText: string; meta: Record<string, unknown> },
-  files: readonly WidgetAttachment[],
+  files: readonly { id: string; contentType: string }[],
 ): boolean {
   return (
     row.direction === 'inbound' &&
@@ -177,20 +180,18 @@ function standsIn(
 }
 
 /**
- * The stored key of a file the visitor may open, or null.
+ * The stored key of a file a widget link may still open, or null.
  *
- * Their session is the credential, as it is for reading the chat: the file
- * must hang off a message on one of the web chat conversations of the contact
- * their token resolved to, so an attachment id from anywhere else — a guess,
- * another visitor's, a file on an email — opens nothing. And only off a
- * `reply`: a note's file is the team's, and the transcript leaves notes out
- * (`listMessages`), so an id that leaked could otherwise reach one. A side
- * conversation's file has no `message_id` and is never matched.
+ * Which file a visitor may open is decided when the link is signed: only the
+ * transcript signs one (`widgetFileUrl`), and only for the files of the
+ * visitor's own chat. This is what can have changed since. The file must still
+ * hang off a `reply` on a web chat conversation that is not deleted — so a
+ * deleted ticket's links stop working before they expire, and a note's file,
+ * which the transcript leaves out with the note, is never reachable even
+ * through a link signed for it some other way. A side conversation's file has
+ * no `message_id` and is never matched.
  */
-export async function visitorAttachmentPath(
-  contactId: string,
-  attachmentId: string,
-): Promise<string | null> {
+export async function widgetAttachmentPath(attachmentId: string): Promise<string | null> {
   const [row] = await db
     .select({ path: attachments.storagePath })
     .from(attachments)
@@ -200,7 +201,6 @@ export async function visitorAttachmentPath(
       and(
         eq(attachments.id, attachmentId),
         eq(messages.kind, 'reply'),
-        eq(conversations.requesterContactId, contactId),
         eq(conversations.channel, 'webchat'),
         isNull(conversations.deletedAt),
       ),
@@ -333,6 +333,16 @@ type StoredUpload = Omit<VisitorUpload, 'bytes' | 'extension'> & {
  * have referenced. A file sent with no words gets the stand-in every chat's
  * media gets (`webchatFilesStandIn`), so the subject, the inbox card and search
  * have something to read; the threads leave it out (`isMediaStandIn`).
+ *
+ * **Everything about the message is read once the files are stored**: which
+ * conversation is live, and the instant the message happened. An upload of a
+ * video takes seconds, and an instant taken before it put the message behind
+ * an agent's reply that landed during it — `last_customer_message_at` older
+ * than `last_agent_message_at`, so no reply clock started, and both threads
+ * drawing the video above the answer to it. A conversation closed meanwhile
+ * gets a new one beside it, as a message arriving a moment later would. The
+ * keys already written name the conversation looked for first, which nothing
+ * reads them by: the rows hold the key.
  */
 export async function appendVisitorMessage(
   contactId: string,
@@ -340,18 +350,27 @@ export async function appendVisitorMessage(
   meta: { pageUrl?: string | null; userAgent?: string | null } = {},
   files: readonly VisitorUpload[] = [],
 ): Promise<AppendResult> {
-  const existing = await findLiveConversation(contactId);
-  const channel = await webchatChannel();
-  const now = new Date();
-  // Before the transaction, which must read nothing on the pool (`lib/routing/start.ts`).
-  const routing = existing ? null : await planRouting(channel);
-
-  // Named here rather than by the inserts, because the stored keys need both
-  // before the rows exist.
-  const conversationId = existing ?? randomUUID();
   const messageId = randomUUID();
   const text = body || webchatFilesStandIn(files);
-  const stored = await storeVisitorFiles(conversationId, messageId, files);
+
+  let stored: StoredUpload[] = [];
+  /** The conversation the keys name, and whether it was a new id, not a live ticket's. */
+  let storedUnder: { id: string; fresh: boolean } | null = null;
+  if (files.length > 0) {
+    const live = await findLiveConversation(contactId);
+    storedUnder = live ? { id: live, fresh: false } : { id: randomUUID(), fresh: true };
+    stored = await storeVisitorFiles(storedUnder.id, messageId, files);
+  }
+
+  const existing = await findLiveConversation(contactId);
+  const channel = await webchatChannel();
+  // Before the transaction, which must read nothing on the pool (`lib/routing/start.ts`).
+  const routing = existing ? null : await planRouting(channel);
+  // A new conversation takes the id its files were stored under when that was
+  // a new id too, so a photo-first chat's keys name its own ticket. One that
+  // was a live ticket's, closed during the upload, is that ticket's id still.
+  const conversationId = existing ?? (storedUnder?.fresh ? storedUnder.id : randomUUID());
+  const now = new Date();
 
   let result: AppendResult;
   try {
@@ -400,7 +419,7 @@ export async function appendVisitorMessage(
 
       if (stored.length > 0) {
         await tx.insert(attachments).values(
-          stored.map((file) => ({
+          stored.map((file, index) => ({
             messageId,
             storagePath: file.path,
             // Display only, never a path segment — the key is derived from ids.
@@ -408,6 +427,11 @@ export async function appendVisitorMessage(
             contentType: file.contentType,
             sizeBytes: file.sizeBytes,
             checksum: file.checksum,
+            // A millisecond apart, in the order attached: one statement would
+            // give them one `now()`, and the console's thread breaks that tie
+            // by a random id, so an agent read "the first shows the box" under
+            // whichever photo sorted first.
+            createdAt: new Date(now.getTime() + index),
           })),
         );
       }
@@ -429,8 +453,28 @@ export async function appendVisitorMessage(
       return { conversationId, messageId, createdConversation: !existing };
     });
   } catch (error) {
-    await discardStored(stored, conversationId);
-    throw error;
+    if (stored.length === 0) throw error;
+    // A transaction can fail after its COMMIT was sent — the connection lost
+    // before the answer — and then it may have committed (`db/client.ts`). Its
+    // files are then on a stored message, and removing them would leave the
+    // ticket with links to nothing. So the message is looked for by the id it
+    // was given; found, the send succeeded, and the rest of it runs.
+    const outcome = await messageExists(messageId).catch(() => 'unknown' as const);
+    if (outcome === true) {
+      log.warn(`a transaction answered with an error after storing ${messageId}; kept its files`);
+      result = { conversationId, messageId, createdConversation: !existing };
+    } else {
+      // Unknown is kept as well: an object nothing references costs bytes,
+      // one a stored message references and that is gone is a broken file.
+      if (outcome === false)
+        await discardPaths(
+          stored.map((file) => file.path),
+          conversationId,
+        );
+      else
+        log.warn(`could not tell whether ${messageId} was stored; kept ${stored.length} objects`);
+      throw error;
+    }
   }
 
   /*
@@ -458,6 +502,15 @@ export async function appendVisitorMessage(
   return result;
 }
 
+async function messageExists(messageId: string): Promise<boolean> {
+  const [row] = await db
+    .select({ id: messages.id })
+    .from(messages)
+    .where(eq(messages.id, messageId))
+    .limit(1);
+  return row !== undefined;
+}
+
 /**
  * Puts a message's files in Storage, all at once, and either every one is
  * there afterwards or none is.
@@ -466,19 +519,25 @@ export async function appendVisitorMessage(
  * the same object (`buildAttachmentPath` keys on one id), as it is for a form's.
  * The extension comes from the type the bytes were read as, never from the
  * name the visitor's file had.
+ *
+ * On a failure every key is removed, the failed ones included: an upload that
+ * timed out, or answered with a gateway's error, may still have been written,
+ * and its key — under a conversation id no row may ever hold — would otherwise
+ * be customer content that no purge could find. Removing a key that was never
+ * written succeeds. One written after the removal is not caught here, which is
+ * why the failure's line names every key.
  */
 async function storeVisitorFiles(
   conversationId: string,
   messageId: string,
   files: readonly VisitorUpload[],
 ): Promise<StoredUpload[]> {
+  const paths = files.map((file, index) =>
+    buildAttachmentPath(conversationId, `${messageId}-${index}`, `file.${file.extension}`),
+  );
   const settled = await Promise.allSettled(
     files.map(async (file, index) => {
-      const object = await uploadObject(
-        buildAttachmentPath(conversationId, `${messageId}-${index}`, `file.${file.extension}`),
-        file.bytes,
-        file.contentType,
-      );
+      const object = await uploadObject(paths[index]!, file.bytes, file.contentType);
       return {
         path: object.path,
         checksum: object.checksum,
@@ -490,16 +549,16 @@ async function storeVisitorFiles(
     }),
   );
 
-  const stored = settled.flatMap((outcome) =>
-    outcome.status === 'fulfilled' ? [outcome.value] : [],
-  );
   const failure = settled.find((outcome) => outcome.status === 'rejected');
   if (failure) {
-    log.error(`could not store a visitor's file on ${conversationId}`, failure.reason);
-    await discardStored(stored, conversationId);
+    log.error(
+      `could not store a visitor's file on ${conversationId}, removing ${paths.join(', ')}`,
+      failure.reason,
+    );
+    await discardPaths(paths, conversationId);
     throw new VisitorUploadFailed('a file could not be stored', { cause: failure.reason });
   }
-  return stored;
+  return settled.flatMap((outcome) => (outcome.status === 'fulfilled' ? [outcome.value] : []));
 }
 
 /**
@@ -507,9 +566,9 @@ async function storeVisitorFiles(
  * not — because the caller is already answering a failure, and a leftover is
  * bytes in a private bucket nobody can reach, which the log names.
  */
-async function discardStored(stored: readonly StoredUpload[], conversationId: string) {
-  if (stored.length === 0) return;
-  const { failed } = await removeObjects(stored.map((file) => file.path));
+async function discardPaths(paths: readonly string[], conversationId: string) {
+  if (paths.length === 0) return;
+  const { failed } = await removeObjects([...paths]);
   if (failed.length > 0) {
     log.warn(
       `left ${failed.length} unreferenced objects on ${conversationId}: ${failed.join(', ')}`,

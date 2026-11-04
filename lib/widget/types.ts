@@ -28,16 +28,17 @@ export type Message = {
  * A file on a widget message, as the thread draws it.
  *
  * `contentType` is the server's reading of the bytes, never the browser's label
- * (`lib/widget/sniff.ts`), so the thread can decide on it. `pending` marks a
- * file on the visitor's own message before the server has answered: it has no
- * stored copy yet, so nothing is fetched for it.
+ * (`lib/widget/sniff.ts`), so the thread can decide on it. `url` is a link
+ * signed for this one file (`lib/widget/file-links.ts`), never one carrying the
+ * visitor's token; null on the visitor's own message before the server has
+ * answered, which has no stored copy to fetch yet.
  */
 export type WidgetAttachment = {
   id: string;
   filename: string;
   contentType: string;
   sizeBytes: number;
-  pending?: boolean;
+  url: string | null;
 };
 
 /**

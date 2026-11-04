@@ -1113,10 +1113,15 @@ the object as and what both threads draw from. The order is the opposite of a
 form's: the files go to Storage first, under ids named before anything is
 written, and the message and its attachment rows are one transaction, so a
 failure anywhere stores nothing, removes what was uploaded, and gives the
-visitor — still there — their words and files back to try again. A visitor
-opens a file through `/api/widget/attachments/[id]`, where
-`visitorAttachmentPath` reaches only a `reply` on one of their own web chats.
-The 25 MB ceiling sits under `proxyClientMaxBodySize`, which truncates a body
+visitor — still there — their words and files back to try again. A widget
+draws a file from a link the transcript signs for that one file
+(`widgetFileUrl`, a purpose-labelled HMAC under `APP_SECRET`, six to twelve
+hours, the same string across a window so a push re-fetches nothing), and
+`/api/widget/attachments/[id]` asks only the signature and `widgetAttachmentPath`
+(a `reply` on a web chat not deleted). Never the visitor's token in a URL the
+widget draws: an image's or a link's address is copied and shared, and the
+token is the whole chat, read and written, which nothing on the server
+expires. The 25 MB ceiling sits under `proxyClientMaxBodySize`, which truncates a body
 rather than refusing it, so the route checks `Content-Length` before reading,
 and one is raised only with the other.
 

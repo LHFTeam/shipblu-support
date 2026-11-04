@@ -77,9 +77,10 @@ async function readFields(request: Request): Promise<Fields | 'too_large' | 'inv
     token: form.get('token'),
     body: form.get('body'),
     pageUrl: form.get('pageUrl'),
-    files: form
-      .getAll('files')
-      .filter((entry): entry is File => entry instanceof File && entry.size > 0),
+    // Every part, an empty one included: the composer's own rules refuse that
+    // one with a reason (`checkWidgetFiles`), where dropping it here stored the
+    // words without the file the visitor saw going.
+    files: form.getAll('files').filter((entry): entry is File => entry instanceof File),
   };
 }
 

@@ -85,7 +85,14 @@ const BY_TYPE = new Map<string, WidgetFileKind>([
   ['audio/aac', 'audio'],
   ['audio/x-aac', 'audio'],
   ['audio/aacp', 'audio'],
+  // What Windows' registry calls `.aac`, which Chrome, Edge and Firefox read
+  // there since none of them has an `aac` entry of its own.
+  ['audio/vnd.dlna.adts', 'audio'],
+  ['audio/aac-adts', 'audio'],
   ['audio/ogg', 'audio'],
+  // Firefox's own table labels every `.ogg` this way, before it asks the
+  // system, so without it no Ogg voice note could be attached from Firefox.
+  ['application/ogg', 'audio'],
   ['audio/opus', 'audio'],
   ['audio/wav', 'audio'],
   ['audio/x-wav', 'audio'],
@@ -100,8 +107,10 @@ const BY_TYPE = new Map<string, WidgetFileKind>([
 /**
  * For a file the browser gave no type, or only `application/octet-stream`:
  * Chrome on Windows has no type for `.heic`, and several browsers none for
- * `.amr` or `.opus`. `webm` and `3gp` are read as video, their usual content;
- * the bytes decide on the server whether one is only sound.
+ * `.amr` or `.opus`. `webm` and `3gp` are read as video, their usual content,
+ * which is only what is admitted: what is stored is the server's reading
+ * (`sniffWidgetFile`), which finds a WebM's tracks and stores one with sound
+ * alone as audio.
  */
 const BY_EXTENSION = new Map<string, WidgetFileKind>([
   ['jpg', 'image'],
@@ -169,7 +178,8 @@ export type WidgetFileRefusal =
   | { reason: 'too_many' }
   | { reason: 'too_large'; filename: string }
   | { reason: 'too_large_total' }
-  | { reason: 'type'; filename: string };
+  | { reason: 'type'; filename: string }
+  | { reason: 'empty'; filename: string };
 
 /**
  * Adds files to the ones already chosen, one at a time, keeping every one that
@@ -207,6 +217,9 @@ export function checkWidgetFiles(files: readonly FileLike[]): WidgetFileRefusal 
 
 function refusalFor(file: FileLike, count: number, total: number): WidgetFileRefusal | null {
   if (!declaredKind(file)) return { reason: 'type', filename: file.name };
+  // A recording that saved nothing, or a cloud file not yet on the phone: said
+  // in the panel, where sending it would have stored the words without it.
+  if (file.size === 0) return { reason: 'empty', filename: file.name };
   if (file.size > MAX_WIDGET_FILE_BYTES) return { reason: 'too_large', filename: file.name };
   if (count >= MAX_WIDGET_FILES) return { reason: 'too_many' };
   if (total + file.size > MAX_WIDGET_TOTAL_BYTES) return { reason: 'too_large_total' };

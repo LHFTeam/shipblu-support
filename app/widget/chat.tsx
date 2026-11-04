@@ -1,6 +1,13 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  type Dispatch,
+  type SetStateAction,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from 'react';
 import { ShipBluLogo } from '@/components/brand';
 import { ChevronLeftIcon, XIcon } from '@/components/icons';
 import { direction, type Locale } from '@/lib/kb/locale';
@@ -10,7 +17,7 @@ import { copyFor } from './copy';
 import { WidgetHome } from './home';
 import type { SurveyResult } from './survey-card';
 import { WidgetThread, type OfflineDetails, type SendOutcome, type SendRefusal } from './thread';
-import type { ArticleLink, Message, WidgetAttachment, WidgetView } from '@/lib/widget/types';
+import type { ArticleLink, Message, WidgetView } from '@/lib/widget/types';
 import { formatOpens } from '@/lib/format';
 import { postToHost, useHostBridge } from './use-host-bridge';
 import { useMessageStream } from './use-message-stream';
@@ -154,12 +161,51 @@ export function WidgetChat({
 
   // --- Live agent replies --------------------------------------------------
 
+  /*
+   * The visitor's sends still on the wire, each with the session it was sent
+   * in. A list from the server replaces the transcript whole, and until a send
+   * is stored it is in no list the server has: a push or a poll while a video
+   * uploaded took the visitor's message off the screen, with the composer
+   * already empty, so it read as lost and was attached again. So every list
+   * from the server is drawn with these after it — only for the session that
+   * sent them, or a sign-out on the host page would hand the next person the
+   * previous one's message.
+   */
+  const unsettled = useRef(new Map<string, Unsettled>());
+
+  /*
+   * A list read after the send was stored already holds it, under the id the
+   * server gave it, and the POST that says so can still be running the
+   * automations: one the transcript did not hold when the send began, from
+   * the visitor, with the same words and as many files, is that send.
+   */
+  const withUnsettled = useCallback((list: Message[]) => {
+    const mine = [...unsettled.current.values()].filter(
+      (entry) =>
+        entry.token === activeToken.current &&
+        !list.some(
+          (message) =>
+            message.from === 'visitor' &&
+            !entry.before.has(message.id) &&
+            message.body === entry.message.body &&
+            (message.attachments ?? []).length === (entry.message.attachments ?? []).length,
+        ),
+    );
+    return mine.length > 0 ? [...list, ...mine.map((entry) => entry.message)] : list;
+  }, []);
+
+  const setServerMessages = useCallback<Dispatch<SetStateAction<Message[]>>>(
+    (next) =>
+      setMessages((current) => withUnsettled(typeof next === 'function' ? next(current) : next)),
+    [setMessages, withUnsettled],
+  );
+
   useMessageStream({
     token,
     conversationId,
     activeToken,
     setConversationId,
-    setMessages,
+    setMessages: setServerMessages,
     setOnline,
     setOpensAt,
   });
@@ -235,18 +281,6 @@ export function WidgetChat({
     [setDetailsSaved],
   );
 
-  /**
-   * Where a stored file is fetched from: the visitor's token rides along,
-   * because an image or a player cannot send a header
-   * (`/api/widget/attachments/[id]`). The transcript is the token's, so a new
-   * token comes with a new transcript and no file is asked for under the wrong one.
-   */
-  const fileUrl = useCallback(
-    (file: WidgetAttachment) =>
-      `/api/widget/attachments/${encodeURIComponent(file.id)}?token=${encodeURIComponent(token ?? '')}`,
-    [token],
-  );
-
   async function send(
     body: string,
     files: File[],
@@ -271,9 +305,15 @@ export function WidgetChat({
         filename: file.name,
         contentType: file.type,
         sizeBytes: file.size,
-        pending: true,
+        // Nothing stored to fetch yet: drawn as its name until the server answers.
+        url: null,
       })),
     };
+    unsettled.current.set(pendingId, {
+      token: active,
+      message: optimistic,
+      before: new Set(messages.map((message) => message.id)),
+    });
     setMessages((current) => [...current, optimistic]);
 
     try {
@@ -298,8 +338,9 @@ export function WidgetChat({
       }
 
       const data = (await response.json()) as { conversationId: string; messages: Message[] };
+      unsettled.current.delete(pendingId);
       setConversationId(data.conversationId);
-      setMessages(data.messages);
+      setServerMessages(data.messages);
       seenCount.current = data.messages.filter((m) => m.from === 'agent').length;
 
       /*
@@ -319,6 +360,8 @@ export function WidgetChat({
     } catch {
       setMessages((current) => current.filter((m) => m.id !== optimistic.id));
       return FAILED;
+    } finally {
+      unsettled.current.delete(pendingId);
     }
   }
 
@@ -439,7 +482,6 @@ export function WidgetChat({
             active={view === 'thread'}
             detailsSaved={detailsSaved}
             prefill={prefill}
-            fileUrl={fileUrl}
             onSend={send}
             onSaveDetails={async (details) => {
               const active = await ensureSession();
@@ -455,6 +497,9 @@ export function WidgetChat({
 }
 
 const FAILED: SendOutcome = { ok: false, refusal: { reason: 'failed' } };
+
+/** A send on the wire: whose session, what is drawn for it, and what the transcript held before. */
+type Unsettled = { token: string; message: Message; before: ReadonlySet<string> };
 
 /**
  * A text message as the JSON it has always been, and one with files as a
@@ -503,6 +548,8 @@ async function refusalOf(response: Response): Promise<SendRefusal> {
       return { reason: 'type', filename };
     case 'too_large':
       return { reason: 'too_large', filename };
+    case 'empty':
+      return { reason: 'empty', filename };
     case 'too_large_total':
       return { reason: 'too_large_total' };
     case 'too_many':

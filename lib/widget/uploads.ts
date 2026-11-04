@@ -1,5 +1,5 @@
 import type { VisitorUpload } from './conversation';
-import { checkWidgetFiles, cleanFilename, type WidgetFileRefusal } from './files';
+import { checkWidgetFiles, cleanFilename, declaredKind, type WidgetFileRefusal } from './files';
 import { sniffWidgetFile } from './sniff';
 
 /**
@@ -23,7 +23,9 @@ export async function readVisitorUploads(
   const uploads: VisitorUpload[] = [];
   for (const file of files) {
     const bytes = Buffer.from(await file.arrayBuffer());
-    const sniffed = sniffWidgetFile(bytes, file.type);
+    // The kind it was admitted as, so a file with no label admitted by its
+    // `.m4a` is read as the sound it was admitted as, not as a video.
+    const sniffed = sniffWidgetFile(bytes, declaredKind(file) === 'audio');
     if (!sniffed) return { ok: false, refusal: { reason: 'type', filename: file.name } };
 
     uploads.push({

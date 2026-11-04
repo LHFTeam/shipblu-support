@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { asc, eq } from 'drizzle-orm';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { db } from '@/db/client';
@@ -15,17 +16,23 @@ import { withCleanDatabase } from '@/lib/testing/db';
 /*
   Storage stood in for, so the files' path through `appendVisitorMessage` runs
   against Postgres without a bucket: an upload answers as Storage does, or
-  fails for a file named `fail.*`, and every key written or removed is kept.
+  fails for a file whose bytes say `FAIL`, and every key written or removed is
+  kept. `during` runs inside an upload, for whatever a test needs to happen
+  while one is on the wire.
 */
 const storage = vi.hoisted(() => ({
   uploaded: [] as string[],
   removed: [] as string[],
+  finishedAt: null as Date | null,
+  during: null as (() => Promise<void>) | null,
 }));
 vi.mock('@/lib/storage', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/storage')>()),
   uploadObject: async (path: string, content: Buffer) => {
+    await storage.during?.();
     if (content.toString('latin1').includes('FAIL')) throw new Error('storage said no');
     storage.uploaded.push(path);
+    storage.finishedAt = new Date();
     return { path, checksum: `sha-${content.length}`, sizeBytes: content.length };
   },
   removeObjects: async (paths: string[]) => {
@@ -34,13 +41,40 @@ vi.mock('@/lib/storage', async (importOriginal) => ({
   },
 }));
 
-const { appendVisitorMessage, listMessages, visitorAttachmentPath, VisitorUploadFailed } =
+/*
+  A transaction that commits and then answers with an error, as one does when
+  the connection is lost between COMMIT and its reply: the real one runs, then
+  the throw. Armed for one transaction at a time.
+*/
+const lostCommit = vi.hoisted(() => ({ armed: false }));
+vi.mock('@/db/client', async (importOriginal) => {
+  const real = await importOriginal<typeof import('@/db/client')>();
+  const db = new Proxy(real.db, {
+    get(target, property) {
+      const value: unknown = Reflect.get(target, property);
+      if (property === 'transaction' && lostCommit.armed) {
+        lostCommit.armed = false;
+        return async (...args: Parameters<typeof target.transaction>) => {
+          await target.transaction(...args);
+          throw new Error('connection lost after COMMIT');
+        };
+      }
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+  return { ...real, db };
+});
+
+const { appendVisitorMessage, listMessages, widgetAttachmentPath, VisitorUploadFailed } =
   await import('./conversation');
+const { fileLinkValid } = await import('./file-links');
 type VisitorUpload = import('./conversation').VisitorUpload;
 
 beforeEach(() => {
   storage.uploaded.length = 0;
   storage.removed.length = 0;
+  storage.finishedAt = null;
+  storage.during = null;
 });
 
 /**
@@ -304,7 +338,7 @@ describe('appendVisitorMessage with files', () => {
     ]);
   });
 
-  it('stores nothing when a file cannot be stored, and removes the ones that were', async () => {
+  it('stores nothing when a file cannot be stored, and removes every key it tried', async () => {
     const contactId = await visitor();
 
     await expect(
@@ -317,8 +351,92 @@ describe('appendVisitorMessage with files', () => {
     expect(await db.select().from(conversations)).toEqual([]);
     expect(await db.select().from(messages)).toEqual([]);
     expect(await db.select().from(attachments)).toEqual([]);
-    expect(storage.removed).toEqual(storage.uploaded);
+    // The failed one too: an upload that answered with an error may still
+    // have been written.
     expect(storage.uploaded).toHaveLength(1);
+    expect(storage.removed).toHaveLength(2);
+    expect(storage.removed).toEqual(expect.arrayContaining(storage.uploaded));
+  });
+
+  it('removes the stored files when the transaction refuses the message', async () => {
+    // A requester that does not exist: the files store, the insert fails on
+    // its foreign key, and nothing may be left referencing nothing.
+    await expect(
+      appendVisitorMessage(randomUUID(), '', {}, [upload('a.jpg', 'image', 'image/jpeg', 'jpg')]),
+    ).rejects.not.toBeInstanceOf(VisitorUploadFailed);
+
+    expect(await db.select().from(conversations)).toEqual([]);
+    expect(await db.select().from(attachments)).toEqual([]);
+    expect(storage.uploaded).toHaveLength(1);
+    expect(storage.removed).toEqual(storage.uploaded);
+  });
+
+  it('keeps the files when the commit happened but its answer was lost', async () => {
+    const contactId = await visitor();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    lostCommit.armed = true;
+
+    try {
+      const result = await appendVisitorMessage(contactId, '', {}, [
+        upload('a.jpg', 'image', 'image/jpeg', 'jpg'),
+      ]);
+
+      // The message's own transaction was the one that answered with the error.
+      expect(warn).toHaveBeenCalledWith(
+        `[widget_files] a transaction answered with an error after storing ${result.messageId}; kept its files`,
+      );
+      expect(storage.removed).toEqual([]);
+      expect(await filesOf(result.messageId)).toHaveLength(1);
+    } finally {
+      lostCommit.armed = false;
+      warn.mockRestore();
+    }
+  });
+
+  it('dates the message when its files are stored, not when the upload began', async () => {
+    const contactId = await visitor();
+    storage.during = () => new Promise((resolve) => setTimeout(resolve, 50));
+
+    const result = await appendVisitorMessage(contactId, '', {}, [
+      upload('door.mov', 'video', 'video/quicktime', 'mov'),
+    ]);
+
+    const [message] = await messagesOf(result.conversationId);
+    expect(message!.createdAt.getTime()).toBeGreaterThanOrEqual(storage.finishedAt!.getTime());
+    const ticket = await conversation(result.conversationId);
+    expect(ticket.lastCustomerMessageAt?.getTime()).toBe(message!.createdAt.getTime());
+  });
+
+  it('opens a new chat when the live one was closed while the files uploaded', async () => {
+    const contactId = await visitor();
+    const first = await appendVisitorMessage(contactId, 'Hello');
+    storage.during = () => setStatus(first.conversationId, 'Closed');
+
+    const second = await appendVisitorMessage(contactId, '', {}, [
+      upload('box.jpg', 'image', 'image/jpeg', 'jpg'),
+    ]);
+
+    expect(second.createdConversation).toBe(true);
+    expect(second.conversationId).not.toBe(first.conversationId);
+    // Stored under the ticket that was live, and found through its row.
+    expect((await filesOf(second.messageId))[0]?.storagePath).toContain(first.conversationId);
+  });
+
+  it('records the files in the order attached, for the console as for the widget', async () => {
+    const contactId = await visitor();
+    const result = await appendVisitorMessage(contactId, '', {}, [
+      upload('first.jpg', 'image', 'image/jpeg', 'jpg'),
+      upload('second.jpg', 'image', 'image/jpeg', 'jpg'),
+      upload('third.jpg', 'image', 'image/jpeg', 'jpg'),
+    ]);
+
+    // The console's own order: `created_at`, then a random id.
+    const rows = await db
+      .select({ filename: attachments.filename })
+      .from(attachments)
+      .where(eq(attachments.messageId, result.messageId))
+      .orderBy(asc(attachments.createdAt), asc(attachments.id));
+    expect(rows.map((row) => row.filename)).toEqual(['first.jpg', 'second.jpg', 'third.jpg']);
   });
 
   it('adds files to the live chat rather than opening another', async () => {
@@ -353,6 +471,21 @@ describe('listMessages', () => {
 
     const transcript = await listMessages(photo.conversationId);
 
+    // Each file carries a link signed for it alone, and no token.
+    const now = new Date();
+    for (const file of transcript.flatMap((m) => m.attachments ?? [])) {
+      const url = new URL(file.url!, 'https://support.example');
+      expect(url.pathname).toBe(`/api/widget/attachments/${file.id}`);
+      expect(
+        fileLinkValid(
+          file.id,
+          url.searchParams.get('expires'),
+          url.searchParams.get('signature'),
+          now,
+        ),
+      ).toBe(true);
+    }
+
     expect(transcript.map(({ body, attachments: files }) => ({ body, files }))).toEqual([
       {
         body: '',
@@ -362,19 +495,27 @@ describe('listMessages', () => {
             filename: 'box.jpg',
             contentType: 'image/jpeg',
             sizeBytes: 5,
+            url: expect.any(String),
           },
           {
             id: expect.any(String),
             filename: 'label.pdf',
             contentType: 'application/pdf',
             sizeBytes: 9,
+            url: expect.any(String),
           },
         ],
       },
       {
         body: 'See above',
         files: [
-          { id: expect.any(String), filename: 'memo.m4a', contentType: 'audio/mp4', sizeBytes: 5 },
+          {
+            id: expect.any(String),
+            filename: 'memo.m4a',
+            contentType: 'audio/mp4',
+            sizeBytes: 5,
+            url: expect.any(String),
+          },
         ],
       },
       // Typed by the visitor, with no file: their words, kept.
@@ -408,7 +549,7 @@ describe('listMessages', () => {
   });
 });
 
-describe('visitorAttachmentPath', () => {
+describe('widgetAttachmentPath', () => {
   async function visitorWithFile() {
     const contactId = await visitor();
     const chat = await appendVisitorMessage(contactId, '', {}, [
@@ -421,28 +562,22 @@ describe('visitorAttachmentPath', () => {
     return { contactId, chat, file: file! };
   }
 
-  it('opens a file on the visitor’s own chat', async () => {
-    const { contactId, file } = await visitorWithFile();
-    expect(await visitorAttachmentPath(contactId, file.id)).toBe(file.path);
-  });
-
-  it('opens nothing for another visitor, as though the file did not exist', async () => {
+  it('opens a file on a web chat reply', async () => {
     const { file } = await visitorWithFile();
-    const stranger = await visitor();
-    expect(await visitorAttachmentPath(stranger, file.id)).toBeNull();
+    expect(await widgetAttachmentPath(file.id)).toBe(file.path);
   });
 
-  it('opens nothing on a deleted chat', async () => {
-    const { contactId, chat, file } = await visitorWithFile();
+  it('opens nothing on a deleted chat, though its links have not expired', async () => {
+    const { chat, file } = await visitorWithFile();
     await db
       .update(conversations)
       .set({ deletedAt: new Date() })
       .where(eq(conversations.id, chat.conversationId));
-    expect(await visitorAttachmentPath(contactId, file.id)).toBeNull();
+    expect(await widgetAttachmentPath(file.id)).toBeNull();
   });
 
   it('opens nothing on a note, though it is on the visitor’s own chat', async () => {
-    const { contactId, chat } = await visitorWithFile();
+    const { chat } = await visitorWithFile();
     const [note] = await db
       .insert(messages)
       .values({
@@ -462,15 +597,15 @@ describe('visitorAttachmentPath', () => {
         sizeBytes: 1,
       })
       .returning({ id: attachments.id });
-    expect(await visitorAttachmentPath(contactId, file!.id)).toBeNull();
+    expect(await widgetAttachmentPath(file!.id)).toBeNull();
   });
 
-  it('opens nothing on a ticket of the visitor’s that is not a web chat', async () => {
-    const { contactId, chat, file } = await visitorWithFile();
+  it('opens nothing on a ticket that is not a web chat', async () => {
+    const { chat, file } = await visitorWithFile();
     await db
       .update(conversations)
       .set({ channel: 'email' })
       .where(eq(conversations.id, chat.conversationId));
-    expect(await visitorAttachmentPath(contactId, file.id)).toBeNull();
+    expect(await widgetAttachmentPath(file.id)).toBeNull();
   });
 });

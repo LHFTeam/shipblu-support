@@ -34,6 +34,16 @@ vi.mock('@/lib/widget/conversation', () => ({
   listMessages: async () => [],
   VisitorUploadFailed: class VisitorUploadFailed extends Error {},
 }));
+/* What `megabytesOf` answers, when a test needs a send to weigh more than its bytes. */
+const weighs = vi.hoisted(() => ({ megabytes: null as number | null }));
+vi.mock('@/lib/widget/uploads', async (importOriginal) => {
+  const real = await importOriginal<typeof import('@/lib/widget/uploads')>();
+  return {
+    ...real,
+    megabytesOf: (uploads: Parameters<typeof real.megabytesOf>[0]) =>
+      weighs.megabytes ?? real.megabytesOf(uploads),
+  };
+});
 vi.mock('@/lib/widget/identify', () => ({
   applyVisitorIdentity,
   recordIdentityOnConversation: async () => undefined,
@@ -312,11 +322,73 @@ describe('POST /api/widget/message with files', () => {
     expect(await response.json()).toEqual({ error: 'empty message' });
   });
 
+  it('refuses an empty file by name, rather than storing the words without it', async () => {
+    const empty = new File([], 'memo.m4a', { type: 'audio/x-m4a' });
+    const response = await message.POST(
+      multipart({ token: 'known', body: 'here is the recording' }, [empty]),
+    );
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: 'empty', filename: 'memo.m4a' });
+    expect(appendVisitorMessage).not.toHaveBeenCalled();
+  });
+
+  it('answers a file Storage would not take with upload_failed, which the widget offers to retry', async () => {
+    const { VisitorUploadFailed } = await import('@/lib/widget/conversation');
+    appendVisitorMessage.mockRejectedValueOnce(new VisitorUploadFailed('no'));
+    const photo = new File([JPEG], 'parcel.jpg', { type: 'image/jpeg' });
+
+    const response = await message.POST(multipart({ token: 'known', body: '' }, [photo]));
+
+    expect(response.status).toBe(502);
+    expect(await response.json()).toEqual({ error: 'upload_failed' });
+  });
+
   it('asks who the visitor is before judging the files', async () => {
     const photo = new File([JPEG], 'parcel.jpg', { type: 'image/jpeg' });
     const response = await message.POST(multipart({ token: 'stranger', body: '' }, [photo]));
 
     expect(response.status).toBe(401);
     expect(appendVisitorMessage).not.toHaveBeenCalled();
+  });
+});
+
+/*
+  Last in the file: it fills the known visitor's hourly budget, which every
+  send with files from that token after it would then meet.
+*/
+describe('the hourly upload budget', () => {
+  it('refuses a visitor’s send past it with slow_down, and stores nothing', async () => {
+    const photo = () =>
+      new File([new Uint8Array([0xff, 0xd8, 0xff, 0xe0, ...new Array(12).fill(0)])], 'p.jpg', {
+        type: 'image/jpeg',
+      });
+    const send = () => {
+      address += 1;
+      const form = new FormData();
+      form.set('token', 'known');
+      form.set('body', '');
+      form.append('files', photo(), 'p.jpg');
+      return message.POST(
+        new Request('https://support.example/api/widget/message', {
+          method: 'POST',
+          body: form,
+          headers: { 'x-forwarded-for': `192.0.2.${address % 250}` },
+        }),
+      );
+    };
+
+    weighs.megabytes = 60;
+    try {
+      expect((await send()).status).toBe(200);
+      appendVisitorMessage.mockClear();
+
+      const refused = await send();
+      expect(refused.status).toBe(429);
+      expect(await refused.json()).toEqual({ error: 'slow_down' });
+      expect(appendVisitorMessage).not.toHaveBeenCalled();
+    } finally {
+      weighs.megabytes = null;
+    }
   });
 });

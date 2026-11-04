@@ -28,6 +28,10 @@ describe('declaredKind', () => {
     ['note.wav', 'audio/wav', 'audio'],
     ['call.amr', 'audio/amr', 'audio'],
     ['clip.webm', 'audio/webm', 'audio'],
+    // Firefox's own label for every .ogg, before it asks the system.
+    ['voice.ogg', 'application/ogg', 'audio'],
+    // What Windows' registry calls .aac, which Chrome, Edge and Firefox read there.
+    ['recording.aac', 'audio/vnd.dlna.adts', 'audio'],
   ])('reads %s labelled %s as %s', (name, type, kind) => {
     expect(declaredKind({ name, type })).toBe(kind);
   });
@@ -96,6 +100,13 @@ describe('admitWidgetFiles', () => {
     expect(refusal).toEqual({ reason: 'too_large_total' });
   });
 
+  it('refuses an empty file by name, rather than sending the words without it', () => {
+    expect(admitWidgetFiles([], [file('memo.m4a', 'audio/x-m4a', 0)]).refusal).toEqual({
+      reason: 'empty',
+      filename: 'memo.m4a',
+    });
+  });
+
   it('names a refused type before anything else about it', () => {
     expect(admitWidgetFiles([], [file('huge.zip', 'application/zip', 90 * MB)]).refusal).toEqual({
       reason: 'type',
@@ -120,10 +131,14 @@ describe('checkWidgetFiles', () => {
 });
 
 describe('the limits', () => {
-  it('stay under the 27 MB body clone proxy.ts forces, with room for the text', () => {
-    // next.config.ts: proxyClientMaxBodySize. A clone over it is truncated,
-    // not refused, so the request limit must stay below it.
-    expect(MAX_WIDGET_REQUEST_BYTES).toBeLessThan(27 * MB);
+  it('stay under the body clone proxy.ts forces, with room for the text', async () => {
+    // A clone over `proxyClientMaxBodySize` is truncated, not refused, so the
+    // request limit must stay below it: read from the config itself, so
+    // lowering it there fails here.
+    const { default: config } = await import('@/next.config');
+    const cap = Number(config.experimental?.proxyClientMaxBodySize);
+    expect(cap).toBeGreaterThan(0);
+    expect(MAX_WIDGET_REQUEST_BYTES).toBeLessThan(cap);
     expect(MAX_WIDGET_REQUEST_BYTES).toBeGreaterThan(MAX_WIDGET_TOTAL_BYTES);
     expect(MAX_WIDGET_FILE_BYTES).toBeLessThanOrEqual(MAX_WIDGET_TOTAL_BYTES);
   });

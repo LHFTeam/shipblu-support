@@ -3,24 +3,24 @@ import { ATTACHMENT_URL_TTL_SECONDS } from '@/lib/attachments/signed-url';
 import { allow, clientIp } from '@/lib/http/rate-limit';
 import { isUuid } from '@/lib/http/uuid';
 import { signedUrl } from '@/lib/storage';
-import { visitorAttachmentPath } from '@/lib/widget/conversation';
-import { resolveVisitor } from '@/lib/widget/session';
+import { widgetAttachmentPath } from '@/lib/widget/conversation';
+import { fileLinkValid } from '@/lib/widget/file-links';
 
 export const dynamic = 'force-dynamic';
 
 /**
- * Redirects a visitor to a short-lived signed URL for a file in their own chat.
+ * Redirects a widget's link to a short-lived signed URL for that one file.
  *
- * The widget's twin of `app/api/attachments/[id]/route.ts`, with the visitor's
- * token where the console has the agent's session: the bucket stays private,
- * the URL that reaches the browser expires in minutes, and which files the
- * token reaches is `visitorAttachmentPath`'s question — one on a web chat
- * conversation of theirs, off a message they can read.
+ * The widget's twin of `app/api/attachments/[id]/route.ts`: the bucket stays
+ * private, and the URL that reaches the browser expires in minutes. What
+ * authorises the request is the link itself, signed by the visitor's transcript
+ * for this file and for some hours (`lib/widget/file-links.ts`) — never the
+ * visitor's token, because a picture's, a player's and a link's address can be
+ * copied and shared, and the token is the whole chat. `widgetAttachmentPath`
+ * then asks what can have changed since the link was signed.
  *
- * The token rides in the query string because this is an `<img>`, a `<video>`
- * and a link, none of which can carry a header, as the stream's `EventSource`
- * cannot (`/api/widget/stream`). A file the token does not reach answers exactly
- * as one that does not exist.
+ * Every refusal answers as a file that does not exist, so a link reveals
+ * nothing about why it stopped working.
  */
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
   // A picture asks once, a player once per range it fetches; generous enough for
@@ -30,14 +30,13 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   }
 
   const { id } = await context.params;
+  const query = new URL(request.url).searchParams;
   // A malformed id is a link to nothing; Postgres would raise 22P02 on it.
-  if (!isUuid(id)) return NextResponse.json({ error: 'not found' }, { status: 404 });
+  if (!isUuid(id) || !fileLinkValid(id, query.get('expires'), query.get('signature'), new Date())) {
+    return NextResponse.json({ error: 'not found' }, { status: 404 });
+  }
 
-  const token = new URL(request.url).searchParams.get('token') ?? '';
-  const contactId = await resolveVisitor(token);
-  if (!contactId) return NextResponse.json({ error: 'unknown session' }, { status: 401 });
-
-  const path = await visitorAttachmentPath(contactId, id);
+  const path = await widgetAttachmentPath(id);
   if (!path) return NextResponse.json({ error: 'not found' }, { status: 404 });
 
   const url = await signedUrl(path, ATTACHMENT_URL_TTL_SECONDS);

@@ -12,15 +12,8 @@ import {
   useState,
 } from 'react';
 import { ChatBubble } from '@/components/chat';
-import {
-  AlertCircleIcon,
-  DocumentIcon,
-  PaperclipIcon,
-  SendIcon,
-  SmileIcon,
-  XIcon,
-} from '@/components/icons';
-import { Button, SuccessText } from '@/components/ui';
+import { DocumentIcon, PaperclipIcon, SendIcon, SmileIcon, XIcon } from '@/components/icons';
+import { Button, ErrorText, SuccessText } from '@/components/ui';
 import { isPreviewableImage, mediaFamily } from '@/lib/attachments/preview';
 import { runPositions } from '@/lib/chat/runs';
 import { formatBytes } from '@/lib/format';
@@ -38,7 +31,7 @@ import { EmojiPicker, type PickedWith } from './emoji-picker';
 import { WIDGET_COMPOSER_BOX, WIDGET_FIELD } from './field';
 import { WidgetFiles } from './message-files';
 import { SurveyCard, type SurveyResult } from './survey-card';
-import type { ArticleLink, Message, WidgetAttachment } from '@/lib/widget/types';
+import type { ArticleLink, Message } from '@/lib/widget/types';
 
 /**
  * The conversation itself.
@@ -56,7 +49,6 @@ export function WidgetThread({
   active,
   detailsSaved,
   prefill,
-  fileUrl,
   onSend,
   onSaveDetails,
   onOpenArticle,
@@ -71,8 +63,6 @@ export function WidgetThread({
   detailsSaved: boolean;
   /** A draft the host page asked us to start the visitor off with, or null. */
   prefill: { text: string; seq: number } | null;
-  /** Where a stored file is fetched from, for the session drawing this transcript. */
-  fileUrl: (file: WidgetAttachment) => string;
   onSend: (body: string, files: File[], details: OfflineDetails | null) => Promise<SendOutcome>;
   onSaveDetails: (details: OfflineDetails) => Promise<boolean>;
   onOpenArticle: (article: ArticleLink) => void;
@@ -122,6 +112,8 @@ export function WidgetThread({
   const lastPointer = useRef<'mouse' | 'touch'>('mouse');
   /** A press on the box is placing its own caret, which `insertAt` must not move. */
   const pressingBox = useRef(false);
+  /** What last pressed the box, read when its click arrives. */
+  const boxPointer = useRef<string | null>(null);
 
   /*
    * A draft handed over by the host page.
@@ -303,10 +295,13 @@ export function WidgetThread({
       askForDetails && !started && usable ? details : null,
     );
     if (!outcome.ok) {
-      // Put the text and the files back rather than losing them, ahead of any
-      // the visitor chose while this was on the wire, and say why.
-      setDraft(body);
-      setFiles((chosen) => admitWidgetFiles(attached, chosen).admitted);
+      // Put the words and the files back rather than losing them, and say why.
+      // A send with files can take a minute, and the box stays open while it
+      // does: words typed meanwhile follow the ones put back, never replaced
+      // by them. Files cannot be added meanwhile (the clip waits for the send),
+      // so the ones put back are all there are.
+      setDraft((typed) => (typed.trim() ? `${body}\n${typed}` : body));
+      setFiles(attached);
       setNotice(outcome.refusal);
     }
     setSending(false);
@@ -455,7 +450,6 @@ export function WidgetThread({
               ) : part === 'files' ? (
                 <WidgetFiles
                   files={message.attachments ?? []}
-                  urlFor={fileUrl}
                   sendingLabel={copy.fileSending}
                   dir={direction(locale)}
                   align={message.from === 'visitor' ? 'end' : 'start'}
@@ -572,9 +566,8 @@ export function WidgetThread({
         */}
         <div aria-live="polite">
           {notice ? (
-            <p className="mb-2 flex items-start gap-1 text-xs text-(--color-feedback-danger-fg)">
-              <AlertCircleIcon size={14} className="mt-px shrink-0" />
-              <span>{noticeText(notice, copy)}</span>
+            <p className="mb-2">
+              <ErrorText inline>{noticeText(notice, copy)}</ErrorText>
             </p>
           ) : null}
         </div>
@@ -635,12 +628,19 @@ export function WidgetThread({
               }}
               onPointerDown={(event) => {
                 pressingBox.current = true;
-                // Touching the box brings a phone's keyboard back, which takes
-                // the panel's place.
-                if (event.pointerType === 'touch' && emojiOpen) setEmojiOpen(false);
+                boxPointer.current = event.pointerType;
               }}
               onPointerUp={() => (pressingBox.current = false)}
               onPointerCancel={() => (pressingBox.current = false)}
+              onClick={() => {
+                // Touching the box brings a phone's keyboard back, which takes
+                // the panel's place. On the click, once the tap has landed and
+                // placed its caret: closed on the press, the panel went before
+                // the tap was delivered, the box moved down from under the
+                // finger, and the tap fell on whatever was there instead.
+                if (boxPointer.current === 'touch' && emojiOpen) setEmojiOpen(false);
+                boxPointer.current = null;
+              }}
               onKeyDown={(event) => {
                 if (event.key === 'Escape' && emojiOpen) {
                   event.preventDefault();
@@ -680,6 +680,9 @@ export function WidgetThread({
               type="button"
               aria-label={copy.attach}
               onClick={() => fileInput.current?.click()}
+              // While a send is on the wire: what it carries comes back if it
+              // fails, and a file added meanwhile would have nowhere to go.
+              disabled={sending}
               className={COMPOSER_BUTTON}
             >
               <PaperclipIcon size={20} />
@@ -778,6 +781,8 @@ function noticeText(notice: SendRefusal, copy: WidgetCopy): ReactNode {
   switch (notice.reason) {
     case 'type':
       return fill(copy.fileType, { name: notice.filename });
+    case 'empty':
+      return fill(copy.fileEmpty, { name: notice.filename });
     case 'too_large':
       return fill(copy.fileTooLarge, { name: notice.filename, limit });
     case 'too_large_total':
@@ -859,7 +864,10 @@ function SelectedFile({
       )}
       <span className="flex min-w-0 flex-col">
         <bdi className="truncate text-(--color-text-primary)">{file.name}</bdi>
-        <span className="text-(--color-text-tertiary) tabular-nums">{formatBytes(file.size)}</span>
+        {/* Left to right in either language: "125 B", not "B 125". */}
+        <span dir="ltr" className="self-start text-(--color-text-tertiary) tabular-nums">
+          {formatBytes(file.size)}
+        </span>
       </span>
       <span id={labelId} hidden>
         {removeLabel}

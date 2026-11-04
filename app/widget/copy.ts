@@ -62,6 +62,7 @@ export const COPY = {
     sendFailed: 'That did not go through. Try again.',
     fileType: '{name} cannot be sent here. Photos, videos, voice recordings and PDFs can.',
     fileTooLarge: '{name} is larger than {limit}.',
+    fileEmpty: '{name} is empty, so there is nothing in it to send.',
     filesTooLarge: 'These files add up to more than {limit}.',
     filesTooMany: 'Up to {count} files can go in one message.',
     filesSlowDown: 'That is a lot of files for now. Try again in a little while.',
@@ -107,6 +108,7 @@ export const COPY = {
     fileType:
       'لا يمكن إرسال {name} هنا. يمكن إرسال الصور والفيديوهات والتسجيلات الصوتية وملفات PDF.',
     fileTooLarge: 'حجم {name} أكبر من {limit}.',
+    fileEmpty: 'الملف {name} فارغ ولا يحتوي على شيء لإرساله.',
     filesTooLarge: 'حجم الملفات معًا أكبر من {limit}.',
     filesTooMany: 'يمكن إرسال {count} ملفات بحد أقصى في الرسالة الواحدة.',
     filesSlowDown: 'تم إرسال ملفات كثيرة الآن. يمكن لحضرتك المحاولة بعد قليل.',
