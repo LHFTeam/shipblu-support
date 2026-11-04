@@ -5,6 +5,7 @@ import { GRAPH_BASE, INSTAGRAM_GRAPH_BASE } from './graph';
 import {
   applyFieldSubscription,
   applyInstagramLoginSubscription,
+  applyUnifiedLoginSubscription,
   applyPageSubscription,
   type GraphSubscription,
   GraphSubscriptionError,
@@ -12,8 +13,10 @@ import {
   PAGE_OBJECT,
   planFieldSubscription,
   planInstagramLoginSubscription,
+  planUnifiedLoginSubscription,
   planPageSubscription,
   readInstagramLoginSubscription,
+  readUnifiedLoginSubscription,
   readPageSubscription,
   readSubscription,
   REQUIRED_INSTAGRAM_FIELDS,
@@ -294,6 +297,37 @@ describe('planInstagramLoginSubscription', () => {
   });
 });
 
+describe('planUnifiedLoginSubscription', () => {
+  const IG_ACCOUNT = '17841448759001625';
+
+  it('writes the instagram object vocabulary, merged over what the account carries', () => {
+    // The Page's host and the Instagram account's node: the field names are
+    // the `instagram` object's, as on the direct connection — `comments`,
+    // singular `messaging_referral` — and never the Page's `feed`.
+    const plan = planUnifiedLoginSubscription(IG_ACCOUNT, ['messages'], REQUIRED_INSTAGRAM_FIELDS);
+
+    expect(plan.subscribed).toBe(true);
+    expect(plan.adding).toEqual([
+      'comments',
+      'messaging_postbacks',
+      'messaging_referral',
+      'message_reactions',
+    ]);
+    expect(plan.merged).not.toContain('feed');
+    expect(plan.accountId).toBe(IG_ACCOUNT);
+  });
+
+  it('reports an account never subscribed on this connection', () => {
+    // Meta says the direct connection's subscription does not carry over, so
+    // this is the expected first answer on every account moved to Unified
+    // Login — and the state that explains a connection delivering nothing.
+    const plan = planUnifiedLoginSubscription(IG_ACCOUNT, null, REQUIRED_INSTAGRAM_FIELDS);
+
+    expect(plan.subscribed).toBe(false);
+    expect(plan.merged).toEqual([...REQUIRED_INSTAGRAM_FIELDS]);
+  });
+});
+
 describe('planPageSubscription', () => {
   const PAGE = '101449698657189';
 
@@ -434,6 +468,7 @@ describe('the Graph requests behind each level', () => {
     META_VERIFY_TOKEN: 'verify-me',
     META_PAGE_ACCESS_TOKEN: 'page-token',
     INSTAGRAM_ACCESS_TOKEN: 'instagram-token',
+    INSTAGRAM_UNIFIED_LOGIN_TOKEN: 'unified-token',
   });
 
   const LEVELS = [
@@ -496,6 +531,27 @@ describe('the Graph requests behind each level', () => {
       host: 'graph.instagram.com',
       explains: 'This call is addressed to graph.instagram.com and authenticated with',
       unset: 'INSTAGRAM_ACCESS_TOKEN',
+    },
+    {
+      // The Page's host, the Instagram account's node, the Unified Login
+      // token: Meta's webhook setup page, Unified Login row.
+      level: 'the Unified Login connection',
+      read: () => readUnifiedLoginSubscription('789'),
+      write: () =>
+        applyUnifiedLoginSubscription({
+          accountId: '789',
+          subscribed: true,
+          current: ['messages'],
+          merged: ['messages', 'comments'],
+          adding: ['comments'],
+        }),
+      node: `${GRAPH_BASE}/789/subscribed_apps`,
+      writes: { subscribed_fields: 'messages,comments' },
+      bearer: 'unified-token',
+      host: 'Graph API',
+      explains:
+        'This call is addressed to graph.facebook.com/{ig-account-id} and authenticated with',
+      unset: 'INSTAGRAM_UNIFIED_LOGIN_TOKEN',
     },
   ];
 

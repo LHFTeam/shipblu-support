@@ -257,8 +257,9 @@ const schema = z.object({
    * The direct Instagram connection, and the one place the "one app, one
    * credential" rule above does not hold.
    *
-   * An Instagram professional account can be connected two ways, and this app
-   * is connected **both** ways at once. Through the **Facebook Page** it is
+   * An Instagram professional account can be connected three ways, and this
+   * app has been connected two of them at once since 2026-08-30 (the third,
+   * Unified Login, is the pair declared after these). Through the **Facebook Page** it is
    * linked to, which is what everything above assumes: the Page token sends, the
    * app secret signs, and `graph.facebook.com` serves. And through **Instagram
    * Login**, which is its own setup inside the same Meta app, with its own
@@ -283,6 +284,34 @@ const schema = z.object({
   INSTAGRAM_APP_SECRET: z.string().optional(),
   META_INSTAGRAM_APP_SECRET: z.string().optional(),
   INSTAGRAM_ACCESS_TOKEN: z.string().optional(),
+
+  /**
+   * The third Instagram connection: **Instagram API with Unified Login**, the
+   * setup Meta recommends for new integrations and the one it releases new
+   * Instagram features for.
+   *
+   * The token is a Business Integration System User access token, minted by
+   * Meta when an admin of ShipBlu's business portfolio finishes the login its
+   * configuration opens (`lib/meta/unified-login.ts`), and set to never expire
+   * in that configuration — where `INSTAGRAM_ACCESS_TOKEN` above is an
+   * Instagram User token that lasts sixty days and ran out on 2026-10-29. It
+   * is served from `graph.facebook.com` with the Page vocabulary of
+   * permissions (`instagram_basic`, `instagram_manage_messages`, …), and its
+   * webhooks are signed with `META_APP_SECRET` like the Page's: no second
+   * secret, which is what the pair above needed. Set, it takes every Instagram
+   * call ahead of the other two connections (`metaConnection()`); unset, nothing
+   * changes. Presence is the flag, as for `INSTAGRAM_ACCESS_TOKEN`, so there is
+   * no mode variable to disagree with the credential behind it.
+   *
+   * The configuration id is the one the "Connect Instagram" control on
+   * `/admin/channels` opens Meta's login with — the `config_id` of the
+   * Facebook Login for Business configuration created under Instagram → API
+   * setup with Unified login. An id, not a secret, like
+   * `META_EMBEDDED_SIGNUP_CONFIG_ID` below, and per environment for the same
+   * reason: a configuration belongs to one Meta app.
+   */
+  INSTAGRAM_UNIFIED_LOGIN_TOKEN: z.string().optional(),
+  INSTAGRAM_UNIFIED_LOGIN_CONFIG_ID: z.string().optional(),
 
   WHATSAPP_PHONE_NUMBER_ID: z.string().optional(),
   WHATSAPP_WABA_ID: z.string().optional(),

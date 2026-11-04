@@ -38,9 +38,12 @@ export const webhookEvents = pgTable(
 
     /**
      * Which of a provider's connections delivered this — `facebook_page` or
-     * `instagram_login` for Meta, null for a provider that has only one.
+     * `instagram_login` for Meta, null for a provider that has only one. A
+     * Unified Login delivery reads `facebook_page`: it is signed with the same
+     * app secret as the Page's, so the signature cannot tell them apart
+     * (`lib/meta/signing.ts`).
      *
-     * Recorded because nothing downstream can work it out. Both Meta
+     * Recorded because nothing downstream can work it out. The Meta
      * connections deliver the same `instagram` payload, byte-identical apart
      * from the signature, and the only thing that separates them is which app
      * secret verified it — a fact known once, here, at the endpoint. It is also

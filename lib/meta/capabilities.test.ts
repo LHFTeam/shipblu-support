@@ -5,6 +5,8 @@ import type { MetaConnection } from './connection';
 const PAGE_IG_DM = 'Instagram direct messages (Facebook Page connection)';
 const PAGE_IG_COMMENTS = 'Instagram comment webhooks and moderation (Facebook Page connection)';
 const DIRECT_IG_DM = 'Instagram direct messages (direct connection)';
+const UNIFIED_IG_DM = 'Instagram direct messages (Unified Login)';
+const UNIFIED_IG_COMMENTS = 'Instagram comment webhooks and moderation (Unified Login)';
 
 function report(
   scopes: string[],
@@ -55,7 +57,7 @@ describe('diagnoseCapabilities', () => {
   });
 
   it('clears every capability when the full scope list is granted', () => {
-    for (const connection of ['facebook_page', 'instagram_login'] as const) {
+    for (const connection of ['facebook_page', 'instagram_login', 'unified_login'] as const) {
       const entries = diagnoseCapabilities(requiredScopes(connection), [], connection);
       expect(entries.filter((entry) => entry.blocked)).toEqual([]);
     }
@@ -114,13 +116,48 @@ describe('diagnoseCapabilities', () => {
     }
   });
 
-  it("keeps the two connections' scope lists disjoint", () => {
+  it("keeps the direct connection's scope list disjoint from the other two", () => {
     // Not an accident to preserve for tidiness: a permission in both lists would
     // be requested from whichever authorisation ran last and reported granted on
     // the other, which is precisely the confusion the split exists to end.
     const page = new Set(requiredScopes('facebook_page'));
+    const unified = new Set(requiredScopes('unified_login'));
     const direct = requiredScopes('instagram_login');
 
     expect(direct.filter((permission) => page.has(permission))).toEqual([]);
+    expect(direct.filter((permission) => unified.has(permission))).toEqual([]);
+  });
+
+  it('spells Unified Login in the Page vocabulary, without the Page permissions', () => {
+    /*
+      Meta's migration mapping: instagram_business_* → instagram_*. The same
+      names as the Page connection's Instagram rows, which is what lets the
+      2026-09-19 approval carry over — and none of the pages_* names, because
+      no Page is involved. A pages_* name here would make the diagnostic report
+      a correct Unified Login token as blocked.
+    */
+    const scopes = requiredScopes('unified_login');
+
+    expect(scopes).toEqual([
+      'instagram_basic',
+      'instagram_manage_comments',
+      'instagram_manage_messages',
+    ]);
+    expect(new Set(requiredScopes('facebook_page')).has('instagram_manage_messages')).toBe(true);
+  });
+
+  it('judges a Unified Login token against its own rows only', () => {
+    // The approved messaging pair, as the 2026-09-19 review granted it: DMs
+    // clear; comments stay blocked on the permission that was refused, and the
+    // Page's rows are not reported at all.
+    const entries = report(['instagram_basic', 'instagram_manage_messages'], [], 'unified_login');
+
+    expect(entries.has(PAGE_IG_DM)).toBe(false);
+    expect(entries.has(DIRECT_IG_DM)).toBe(false);
+    expect(entries.get(UNIFIED_IG_DM)?.blocked).toBe(false);
+    expect(entries.get(UNIFIED_IG_COMMENTS)?.blocked).toBe(true);
+    expect(entries.get(UNIFIED_IG_COMMENTS)?.capability.advancedAccess).toContain(
+      'Advanced Access',
+    );
   });
 });

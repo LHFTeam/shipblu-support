@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { setTestEnv, withTestEnv } from '@/lib/testing/env';
-import { instagramLoginConfigured, metaConnection } from './connection';
+import { instagramLoginConfigured, metaConnection, unifiedLoginConfigured } from './connection';
 
 withTestEnv();
 
@@ -26,6 +26,36 @@ describe('metaConnection', () => {
     setTestEnv({ INSTAGRAM_ACCESS_TOKEN: 'ig-token' });
 
     expect(metaConnection('facebook')).toBe('facebook_page');
+  });
+
+  it('sends Instagram over Unified Login ahead of both once it has a credential', () => {
+    /*
+      The order is the point. The direct connection's token expired on
+      2026-10-29 and the Page's route is refused by another app's thread
+      control, so the never-expiring token with no handover to be second to
+      wins — and it wins while the other two are still set, because activating
+      it must not wait on anybody unsetting a variable first (§6.29 is what
+      unsetting one too early costs).
+    */
+    setTestEnv({
+      INSTAGRAM_UNIFIED_LOGIN_TOKEN: 'unified-token',
+      INSTAGRAM_ACCESS_TOKEN: 'ig-token',
+    });
+
+    expect(metaConnection('instagram')).toBe('unified_login');
+    expect(unifiedLoginConfigured()).toBe(true);
+    expect(instagramLoginConfigured()).toBe(true);
+    expect(metaConnection('facebook')).toBe('facebook_page');
+  });
+
+  it('is unconfigured for Unified Login until its own token is set', () => {
+    // The Page token and the Instagram token are not stand-ins: the first
+    // cannot address the account's messages past the handover, and the second
+    // is refused by graph.facebook.com outright.
+    setTestEnv({ INSTAGRAM_ACCESS_TOKEN: 'ig-token' });
+
+    expect(unifiedLoginConfigured()).toBe(false);
+    expect(metaConnection('instagram')).toBe('instagram_login');
   });
 
   it('reads the credential live rather than at import', () => {

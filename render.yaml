@@ -178,6 +178,18 @@ projects:
             #                              repo shipped first; still read
             #   INSTAGRAM_ACCESS_TOKEN     sends, replies and moderates against
             #                              graph.instagram.com
+            #   INSTAGRAM_UNIFIED_LOGIN_TOKEN
+            #                              the Unified Login connection's own
+            #                              credential: a Business Integration
+            #                              System User token that never expires,
+            #                              served from graph.facebook.com and
+            #                              preferred over the two above for every
+            #                              Instagram call while it is set
+            #   INSTAGRAM_UNIFIED_LOGIN_CONFIG_ID
+            #                              the Facebook Login for Business
+            #                              configuration "Connect Instagram" on
+            #                              /admin/channels opens Meta's login
+            #                              with; an id, per environment
             #   WHATSAPP_PHONE_NUMBER_ID
             #   WHATSAPP_WABA_ID
             #   WHATSAPP_TOKEN_SHIPBLU     a connected WABA's own credential,
@@ -553,6 +565,8 @@ projects:
             #   INSTAGRAM_APP_SECRET
             #   META_INSTAGRAM_APP_SECRET
             #   INSTAGRAM_ACCESS_TOKEN
+            #   INSTAGRAM_UNIFIED_LOGIN_TOKEN
+            #   INSTAGRAM_UNIFIED_LOGIN_CONFIG_ID
             #   WHATSAPP_PHONE_NUMBER_ID
             #   WHATSAPP_WABA_ID
             #

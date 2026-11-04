@@ -360,10 +360,16 @@ function handoverExplanation(context: MetaSendContext): string {
   const instagramWayOut =
     context.platform === 'instagram' && context.connection === 'facebook_page'
       ? `\n\nThis went out over the Facebook Page, which is what makes it subject to the ` +
-        `Page's handover protocol. An Instagram account connected directly through Instagram ` +
-        `Login is not installed on the Page and has no primary receiver to be second to — ` +
-        `setting \`INSTAGRAM_ACCESS_TOKEN\` routes replies around this entirely (§6.29).`
-      : '';
+        `Page's handover protocol. An Instagram account connected through Unified Login — or ` +
+        `directly through Instagram Login — is not installed on the Page and has no primary ` +
+        `receiver to be second to: connecting it under Settings → Channels and setting ` +
+        `\`INSTAGRAM_UNIFIED_LOGIN_TOKEN\` routes replies around this entirely (§6.29, and ` +
+        `plans/instagram-unified-login.md).`
+      : context.platform === 'instagram' && context.connection === 'unified_login'
+        ? `\n\nThis went out over Unified Login, which Meta documents as having no handover ` +
+          `protocol at all — so a handover refusal here is new evidence, not a known state. ` +
+          `Record the trace id in docs/PROJECT-STATE.md before changing anything.`
+        : '';
 
   return (
     `Another app holds thread control of this ${product} conversation, so Meta will not ` +
@@ -607,12 +613,13 @@ export function explainMetaProfileError(error: MetaApiError, platform: MetaPlatf
         `account is not linked to the Page. It also means the call went out over the ` +
         `**Facebook Page connection**, because that is the only one that uses the Page token ` +
         `— so either the account is not linked to the Page, or it is meant to be reached ` +
-        `directly and INSTAGRAM_ACCESS_TOKEN is not set. Setting that token moves every ` +
-        `Instagram call to graph.instagram.com; \`metaConnection()\` in ` +
-        `lib/meta/connection.ts keys on it being present, not on a mode flag. Until one of ` +
-        `the two is true, every Instagram profile read, send and moderation call goes out ` +
-        `with a credential that cannot address the account, and Business Asset User Profile ` +
-        `Access cannot rescue it, because the request never reaches the feature.`,
+        `without it and neither INSTAGRAM_UNIFIED_LOGIN_TOKEN nor INSTAGRAM_ACCESS_TOKEN is ` +
+        `set. Setting the first moves every Instagram call onto the Unified Login token, the ` +
+        `second onto graph.instagram.com; \`metaConnection()\` in lib/meta/connection.ts ` +
+        `keys on their presence, not on a mode flag. Until one of the three is true, every ` +
+        `Instagram profile read, send and moderation call goes out with a credential that ` +
+        `cannot address the account, and Business Asset User Profile Access cannot rescue ` +
+        `it, because the request never reaches the feature.`,
       error,
     );
   }
@@ -760,7 +767,12 @@ function humanAgentExplanation(context: MetaSendContext): string {
       ? `the **Instagram API with Instagram Login** submission — the one whose permissions ` +
         `are spelled \`instagram_business_*\`. An approval on the Page connection is a ` +
         `different grant and does not reach this host`
-      : `the submission covering this Page`;
+      : context.connection === 'unified_login'
+        ? `the submission covering the \`instagram_*\` permissions (the Facebook Login family, ` +
+          `which Unified Login shares). Meta's Unified Login guide says to request the feature ` +
+          `again for this setup if replies go out after 24 hours, so an earlier grant may not ` +
+          `reach it`
+        : `the submission covering this Page`;
 
   return (
     `Sent more than 24 hours after the customer's last message, so it was tagged HUMAN_AGENT — ` +
@@ -797,10 +809,15 @@ function insideWindowExplanation(platform: MetaPlatform, connection: MetaConnect
     `and in a thread this app holds control of — so ${product} refused it for a reason ` +
     `it did not give and none of the usual ones apply. It went out over ` +
     `${CONNECTION_LABEL[connection]}, so check that one's credential and permissions ` +
-    `rather than the other's` +
+    `rather than the others'` +
     (connection === 'instagram_login'
       ? ` — INSTAGRAM_ACCESS_TOKEN and the instagram_business_* set, not the Page token`
-      : '') +
+      : connection === 'unified_login'
+        ? ` — INSTAGRAM_UNIFIED_LOGIN_TOKEN and the instagram_* set on graph.facebook.com, not ` +
+          `the Page token on the same host; \`npm run job -- check_meta_permissions\` says ` +
+          `whether that token still reaches the account, which it stops doing if the app is ` +
+          `removed from the business portfolio or the account is moved to another one`
+        : '') +
     `. Then check the Meta app for a restriction or a policy block, and whether the ` +
     `customer has blocked the ${platform === 'instagram' ? 'account' : 'page'}. The trace ` +
     `id below is what Meta support asks for.`

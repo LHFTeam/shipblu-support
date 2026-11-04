@@ -133,12 +133,17 @@ export function metaThreadState(input: MetaThreadInput): MetaThreadState {
     Freshworks is the Page's primary receiver, and every Instagram reply refused
     here on the strength of it. Freshworks owning the Page inbox says nothing
     about whether Instagram will accept a message sent with the account's own
-    token.
+    token. The same holds for Unified Login, whose token belongs to the business
+    portfolio rather than to an app installed on the Page: Meta's migration
+    guide lists the handover protocol as not supported on it, so there is no
+    primary receiver for it to be second to either.
 
     The inbound connection is checked as well as the route, because a flag
     recorded by one connection describes that one. Null — every row written
     before the distinction existed — is read as "the Page's", which is what those
-    rows were.
+    rows were. A Unified Login delivery is labelled `facebook_page` too, since it
+    is signed with the same app secret; that is harmless here, because the only
+    route it can block is the Page's.
   */
   const standbyBlocks =
     input.standby &&
@@ -157,9 +162,9 @@ export function metaThreadState(input: MetaThreadInput): MetaThreadState {
         `standby channel, which is what says so. Answer in whichever tool is the primary ` +
         `receiver, hand thread control to this app in the Meta app's Messenger settings` +
         (input.platform === 'instagram'
-          ? `, or connect the account directly under Instagram → API setup with Instagram ` +
-            `login and set INSTAGRAM_ACCESS_TOKEN, which routes replies around the Page ` +
-            `entirely`
+          ? `, or connect the account under Instagram → API setup with Unified login and set ` +
+            `INSTAGRAM_UNIFIED_LOGIN_TOKEN (Settings → Channels has the button), which routes ` +
+            `replies around the Page entirely`
           : '') +
         `.`,
     };
@@ -240,7 +245,16 @@ function holdsControl(
   return controlTakenAt.getTime() > lastInboundAt.getTime();
 }
 
-/** The connection off a message's `meta`, ignoring anything it is not. */
+/**
+ * The connection off a message's `meta`, ignoring anything it is not.
+ *
+ * `unified_login` is accepted though nothing writes it today: a Unified Login
+ * delivery is signed with the app secret and so labelled `facebook_page` at
+ * the endpoint (`lib/meta/connection.ts`). Reading it here costs nothing and
+ * means a future endpoint that can tell the two apart needs no change here.
+ */
 function readConnection(value: unknown): MetaConnection | null {
-  return value === 'facebook_page' || value === 'instagram_login' ? value : null;
+  return value === 'facebook_page' || value === 'instagram_login' || value === 'unified_login'
+    ? value
+    : null;
 }

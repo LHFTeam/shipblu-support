@@ -22,7 +22,7 @@ import type { MetaWebhookPayload } from './types';
  * unique index treats nulls as distinct and storing them separately is better
  * than colliding unrelated empty batches onto one row.
  *
- * **The connection is part of the key**, which is what stops the two Instagram
+ * **The connection is part of the key**, which is what stops the Instagram
  * connections deduplicating each other. They deliver the same message with the
  * same `mid`, so a key made of the contents alone collapses them onto one row —
  * and the row kept is whichever arrived first, meaning the record of the second

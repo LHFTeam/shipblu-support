@@ -193,7 +193,7 @@ describe('metaThreadState across the two Instagram connections', () => {
     expect(state.reason).toBe('standby');
     // The way out is named, because it is a configuration change rather than a
     // negotiation with whoever owns the Page inbox.
-    expect(state.explanation).toContain('INSTAGRAM_ACCESS_TOKEN');
+    expect(state.explanation).toContain('INSTAGRAM_UNIFIED_LOGIN_TOKEN');
   });
 
   it("reads a standby with no connection recorded as the Page's", () => {
@@ -225,6 +225,24 @@ describe('metaThreadState across the two Instagram connections', () => {
     });
 
     expect(state.canSend).toBe(true);
+  });
+
+  it('lets Unified Login answer a thread the Page does not control', () => {
+    // Meta's migration guide lists the handover protocol as not supported on
+    // Unified Login, so the Page's standby has no standing over a send made
+    // with the business portfolio's token — the same reasoning as the direct
+    // connection, on the Page's own host.
+    const state = metaThreadState({
+      platform: 'instagram',
+      connection: 'unified_login',
+      inboundAccountId: IG_ACCOUNT,
+      configuredAccountId: IG_ACCOUNT,
+      standby: true,
+      inboundConnection: 'facebook_page',
+    });
+
+    expect(state.canSend).toBe(true);
+    expect(state.route).toBe('unified_login');
   });
 
   it('reports the route it would send over', () => {
