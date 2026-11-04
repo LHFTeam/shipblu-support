@@ -1,20 +1,19 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { readJsonBody } from '@/lib/http/json-body';
-import { allow, clientIp } from '@/lib/http/rate-limit';
+import { allow, clientIp, fits } from '@/lib/http/rate-limit';
+import { isLocale } from '@/lib/kb/locale';
 import {
   appendVisitorMessage,
   listMessages,
   VisitorUploadFailed,
   type VisitorUpload,
 } from '@/lib/widget/conversation';
-import { MAX_WIDGET_REQUEST_BYTES } from '@/lib/widget/files';
+import { MAX_WIDGET_MESSAGE_CHARS, MAX_WIDGET_REQUEST_BYTES } from '@/lib/widget/files';
 import { resolveVisitor } from '@/lib/widget/session';
 import { megabytesOf, readVisitorUploads } from '@/lib/widget/uploads';
 
 export const dynamic = 'force-dynamic';
-
-const MAX_LENGTH = 5000;
 
 const HOUR = 60 * 60 * 1000;
 
@@ -27,6 +26,11 @@ const HOUR = 60 * 60 * 1000;
  * upload would otherwise have no ceiling but the session route's. Generous on
  * the address, because Egypt's mobile carriers put whole neighbourhoods behind
  * one, and a budget a crowd shares is one an honest customer can run out of.
+ *
+ * Asked before the files are stored and spent only once they are (`fits`, then
+ * `allow`), and on both buckets or neither: spent up front, a send that failed
+ * on Storage and told the visitor to try again still cost them its megabytes,
+ * so four retries of one video ran the hour's budget out with nothing stored.
  */
 const UPLOAD_MB_PER_VISITOR = 100;
 const UPLOAD_MB_PER_ADDRESS = 400;
@@ -36,9 +40,16 @@ const messageBody = z.object({
   token: z.unknown().optional(),
   body: z.unknown().optional(),
   pageUrl: z.unknown().optional(),
+  locale: z.unknown().optional(),
 });
 
-type Fields = { token: unknown; body: unknown; pageUrl: unknown; files: File[] };
+type Fields = {
+  token: unknown;
+  body: unknown;
+  pageUrl: unknown;
+  locale: unknown;
+  files: File[];
+};
 
 /**
  * A text message as the JSON it has always been sent as, or a message with
@@ -61,7 +72,13 @@ async function readFields(request: Request): Promise<Fields | 'too_large' | 'inv
   if (!type.toLowerCase().startsWith('multipart/form-data')) {
     const body = await readJsonBody(request, messageBody);
     return body
-      ? { token: body.token, body: body.body, pageUrl: body.pageUrl, files: [] }
+      ? {
+          token: body.token,
+          body: body.body,
+          pageUrl: body.pageUrl,
+          locale: body.locale,
+          files: [],
+        }
       : 'invalid';
   }
 
@@ -77,6 +94,7 @@ async function readFields(request: Request): Promise<Fields | 'too_large' | 'inv
     token: form.get('token'),
     body: form.get('body'),
     pageUrl: form.get('pageUrl'),
+    locale: form.get('locale'),
     // Every part, an empty one included: the composer's own rules refuse that
     // one with a reason (`checkWidgetFiles`), where dropping it here stored the
     // words without the file the visitor saw going.
@@ -103,12 +121,14 @@ export async function POST(request: Request) {
   // conversation would drop the message the visitor thought they had sent.
   if (!contactId) return NextResponse.json({ error: 'unknown session' }, { status: 401 });
 
-  const text = typeof fields.body === 'string' ? fields.body.trim().slice(0, MAX_LENGTH) : '';
+  const text =
+    typeof fields.body === 'string' ? fields.body.trim().slice(0, MAX_WIDGET_MESSAGE_CHARS) : '';
   if (!text && fields.files.length === 0) {
     return NextResponse.json({ error: 'empty message' }, { status: 400 });
   }
 
   let uploads: VisitorUpload[] = [];
+  let megabytes = 0;
   if (fields.files.length > 0) {
     const read = await readVisitorUploads(fields.files);
     // The reason is the composer's own, so the panel can say it in the
@@ -122,11 +142,10 @@ export async function POST(request: Request) {
     }
     uploads = read.uploads;
 
-    // Spent only on files that would be stored, so a refused one costs nothing.
-    const megabytes = megabytesOf(uploads);
+    megabytes = megabytesOf(uploads);
     if (
-      !allow(`widget-upload:${contactId}`, UPLOAD_MB_PER_VISITOR, HOUR, megabytes) ||
-      !allow(`widget-upload:${address}`, UPLOAD_MB_PER_ADDRESS, HOUR, megabytes)
+      !fits(`widget-upload:${contactId}`, UPLOAD_MB_PER_VISITOR, megabytes) ||
+      !fits(`widget-upload:${address}`, UPLOAD_MB_PER_ADDRESS, megabytes)
     ) {
       return NextResponse.json({ error: 'slow_down' }, { status: 429 });
     }
@@ -142,6 +161,8 @@ export async function POST(request: Request) {
         // agent can have when a chat opens with "this isn't working".
         pageUrl: typeof fields.pageUrl === 'string' ? fields.pageUrl.slice(0, 500) : null,
         userAgent: request.headers.get('user-agent')?.slice(0, 300) ?? null,
+        // The panel's language, for a reply to a message with no words in it.
+        locale: typeof fields.locale === 'string' && isLocale(fields.locale) ? fields.locale : null,
       },
       uploads,
     );
@@ -152,6 +173,11 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'upload_failed' }, { status: 502 });
     }
     throw error;
+  }
+
+  if (megabytes > 0) {
+    allow(`widget-upload:${contactId}`, UPLOAD_MB_PER_VISITOR, HOUR, megabytes);
+    allow(`widget-upload:${address}`, UPLOAD_MB_PER_ADDRESS, HOUR, megabytes);
   }
 
   return NextResponse.json({

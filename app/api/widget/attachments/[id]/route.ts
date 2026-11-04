@@ -23,17 +23,25 @@ export const dynamic = 'force-dynamic';
  * nothing about why it stopped working.
  */
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
-  // A picture asks once, a player once per range it fetches; generous enough for
-  // a thread of them, and a ceiling on a script walking ids.
-  if (!allow(`widget-attachment:${clientIp(request)}`, 120, 60_000)) {
-    return NextResponse.json({ error: 'slow down' }, { status: 429 });
-  }
-
   const { id } = await context.params;
   const query = new URL(request.url).searchParams;
-  // A malformed id is a link to nothing; Postgres would raise 22P02 on it.
+  // A malformed id is a link to nothing; Postgres would raise 22P02 on it. And
+  // the signature first: it costs an HMAC and no query, so a script walking
+  // ids is refused here without spending the honest visitors' budget below.
   if (!isUuid(id) || !fileLinkValid(id, query.get('expires'), query.get('signature'), new Date())) {
     return NextResponse.json({ error: 'not found' }, { status: 404 });
+  }
+
+  /*
+    What is left to limit is links we signed: each is a query and a Storage
+    signature. Per address, since a link carries no visitor, and generous for
+    the reason the upload budget gives — Egypt's carriers put whole
+    neighbourhoods behind one address, and a picture asks once and a player
+    once per range it fetches, so a dozen visitors there opening chats of ten
+    photos each used to meet a ceiling of 120 and see the rest as links.
+  */
+  if (!allow(`widget-attachment:${clientIp(request)}`, 600, 60_000)) {
+    return NextResponse.json({ error: 'slow down' }, { status: 429 });
   }
 
   const path = await widgetAttachmentPath(id);

@@ -166,6 +166,28 @@ describe('cleanFilename', () => {
     expect(cleanFilename(`${'x'.repeat(400)}.pdf`, 'pdf')).toHaveLength(255);
   });
 
+  it('removes what would break the subject or draw the name in the wrong order', () => {
+    const name = [
+      'inv',
+      0x2028, // line separator
+      'oi',
+      0x2029, // paragraph separator
+      'ce',
+      0x061c, // Arabic letter mark
+      0xfeff, // byte-order mark
+      0x0085, // next line, a C1 control
+      '.pdf',
+    ]
+      .map((part) => (typeof part === 'number' ? String.fromCharCode(part) : part))
+      .join('');
+    expect(cleanFilename(name, 'pdf')).toBe('invoice.pdf');
+  });
+
+  it('keeps the joiners a name in another script needs', () => {
+    const persian = `می${String.fromCharCode(0x200c)}خواهم.pdf`;
+    expect(cleanFilename(persian, 'pdf')).toBe(persian);
+  });
+
   it('names a file that is left with nothing after its type', () => {
     expect(cleanFilename(String.fromCharCode(0x200f, 0x202e), 'm4a')).toBe('file.m4a');
     expect(cleanFilename('   ', 'jpg')).toBe('file.jpg');

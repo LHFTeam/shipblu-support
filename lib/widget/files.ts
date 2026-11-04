@@ -21,6 +21,13 @@ import { mimeEssence } from '@/lib/http/mime';
 
 export type WidgetFileKind = 'image' | 'video' | 'audio' | 'document';
 
+/**
+ * The longest message the composer takes and the route stores, in UTF-16 code
+ * units as `maxLength` counts them. One number for both, or one side raised
+ * without the other lets a visitor type an ending the route then cuts off.
+ */
+export const MAX_WIDGET_MESSAGE_CHARS = 5000;
+
 /** Enough for a handful of photos of one parcel in one message. */
 export const MAX_WIDGET_FILES = 5;
 
@@ -232,12 +239,17 @@ function refusalFor(file: FileLike, count: number, total: number): WidgetFileRef
  * Display only — the stored key is derived from ids (`buildAttachmentPath`) —
  * but it is shown to an agent, in the ticket's thread and in the stand-in
  * `[document: …]` its message's text becomes, so the characters that could make
- * it lie are removed: control characters, and the bidirectional overrides that
+ * it lie are removed: control characters, C1 included; the line and paragraph
+ * separators, which put a break inside the ticket's subject; the byte-order
+ * mark; and the bidirectional marks and overrides — Arabic's own among them — that
  * draw `invoice<U+202E>fdp.exe` as `invoiceexe.pdf`. An Arabic name keeps its letters;
  * only the invisible formatting goes. Capped at the column's width.
  */
 export function cleanFilename(name: string, fallbackExtension: string): string {
-  const cleaned = name.replace(/[\u0000-\u001f\u007f\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, '');
+  const cleaned = name.replace(
+    /[\u0000-\u001f\u007f-\u009f\u061c\u200e\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069\ufeff]/g,
+    '',
+  );
   const trimmed = cleaned.trim().slice(0, 255);
   return trimmed || `file.${fallbackExtension}`;
 }

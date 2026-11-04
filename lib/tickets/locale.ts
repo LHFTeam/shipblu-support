@@ -1,4 +1,4 @@
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { contacts, conversations, messages } from '@/db/schema';
 import { carriesCustomerText } from './carries-customer-text';
@@ -139,8 +139,38 @@ export async function requesterLocale(
       ? await newestRequesterWords(conversationId)
       : await newestCustomerWords(conversationId);
 
+  // A web chat whose messages carry no words — a photo sent with no caption —
+  // is answered in the language of the panel it was sent from, which the
+  // widget records on each message. Without it the answer fell to
+  // `contacts.locale`, which nothing writes, and an Arabic visitor's photo of
+  // the damaged parcel was acknowledged in English (§6.97's trap, from the
+  // widget). Only when there are no words: a visitor typing English in the
+  // Arabic panel is answered in English.
+  if (words === null && ticket?.channel === 'webchat') {
+    const panel = await widgetPanelLocale(conversationId);
+    if (panel) return panel;
+  }
+
   const locale = contactLocale === undefined ? ticket?.locale : contactLocale;
   return preferredLocale(locale ?? 'en', words);
+}
+
+/** The language of the panel the newest widget message on a ticket was sent from, if it says. */
+async function widgetPanelLocale(conversationId: string): Promise<'ar' | 'en' | null> {
+  const [row] = await db
+    .select({ locale: sql<string | null>`${messages.meta}->>'locale'` })
+    .from(messages)
+    .where(
+      and(
+        eq(messages.conversationId, conversationId),
+        eq(messages.direction, 'inbound'),
+        eq(messages.kind, 'reply'),
+        sql`${messages.meta}->>'locale' in ('ar', 'en')`,
+      ),
+    )
+    .orderBy(desc(messages.createdAt), desc(messages.id))
+    .limit(1);
+  return row?.locale === 'ar' || row?.locale === 'en' ? row.locale : null;
 }
 
 /**

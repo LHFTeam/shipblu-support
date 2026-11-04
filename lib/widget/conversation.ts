@@ -340,14 +340,20 @@ type StoredUpload = Omit<VisitorUpload, 'bytes' | 'extension'> & {
  * an agent's reply that landed during it — `last_customer_message_at` older
  * than `last_agent_message_at`, so no reply clock started, and both threads
  * drawing the video above the answer to it. A conversation closed meanwhile
- * gets a new one beside it, as a message arriving a moment later would. The
- * keys already written name the conversation looked for first, which nothing
- * reads them by: the rows hold the key.
+ * gets a new one beside it, as a message arriving a moment later would.
+ *
+ * So the keys name the conversation looked for first, which is not always the
+ * one the message lands on: a ticket closed during the upload leaves the new
+ * ticket's files under the old one's `conversations/<id>/`, and a send that
+ * lost the race to open the chat leaves them under an id no row holds.
+ * Nothing reads a key by its prefix — the attachment row holds it, and the
+ * purge deletes exact keys off the rows (`storagePathsFor` in
+ * `lib/admin/purge.ts`, which says why a prefix delete would be wrong).
  */
 export async function appendVisitorMessage(
   contactId: string,
   body: string,
-  meta: { pageUrl?: string | null; userAgent?: string | null } = {},
+  meta: { pageUrl?: string | null; userAgent?: string | null; locale?: 'ar' | 'en' | null } = {},
   files: readonly VisitorUpload[] = [],
 ): Promise<AppendResult> {
   const messageId = randomUUID();
@@ -409,6 +415,9 @@ export async function appendVisitorMessage(
         meta: {
           pageUrl: meta.pageUrl ?? null,
           userAgent: meta.userAgent ?? null,
+          // The panel's language, which `requesterLocale` reads when no message
+          // on the chat has words in it — a photo sent with no caption.
+          ...(meta.locale ? { locale: meta.locale } : {}),
           // What was sent, for the stand-in's rebuild (`isMediaStandIn`).
           ...(stored.length > 0
             ? { webchatFiles: stored.map(({ kind, filename }) => ({ kind, filename })) }
@@ -461,18 +470,23 @@ export async function appendVisitorMessage(
     // was given; found, the send succeeded, and the rest of it runs.
     const outcome = await messageExists(messageId).catch(() => 'unknown' as const);
     if (outcome === true) {
-      log.warn(`a transaction answered with an error after storing ${messageId}; kept its files`);
+      log.warn(
+        `a transaction answered with an error but its message was stored, kept its files message_id=${messageId}`,
+      );
       result = { conversationId, messageId, createdConversation: !existing };
     } else {
       // Unknown is kept as well: an object nothing references costs bytes,
       // one a stored message references and that is gone is a broken file.
-      if (outcome === false)
+      if (outcome === false) {
         await discardPaths(
           stored.map((file) => file.path),
           conversationId,
         );
-      else
-        log.warn(`could not tell whether ${messageId} was stored; kept ${stored.length} objects`);
+      } else {
+        log.warn(
+          `could not tell whether a message was stored, kept its files message_id=${messageId} paths=${stored.map((file) => file.path).join(',')}`,
+        );
+      }
       throw error;
     }
   }
@@ -552,7 +566,7 @@ async function storeVisitorFiles(
   const failure = settled.find((outcome) => outcome.status === 'rejected');
   if (failure) {
     log.error(
-      `could not store a visitor's file on ${conversationId}, removing ${paths.join(', ')}`,
+      `could not store a visitor's file, removing what was tried conversation_id=${conversationId} message_id=${messageId} paths=${paths.join(',')}`,
       failure.reason,
     );
     await discardPaths(paths, conversationId);
@@ -571,7 +585,7 @@ async function discardPaths(paths: readonly string[], conversationId: string) {
   const { failed } = await removeObjects([...paths]);
   if (failed.length > 0) {
     log.warn(
-      `left ${failed.length} unreferenced objects on ${conversationId}: ${failed.join(', ')}`,
+      `left unreferenced objects conversation_id=${conversationId} paths=${failed.join(',')}`,
     );
   }
 }

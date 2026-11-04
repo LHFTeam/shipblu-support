@@ -12,7 +12,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
  * as invalid JSON, and is the one answer here that changed on purpose.
  */
 
-const resolveVisitor = vi.fn(async (token: string) => (token === 'known' ? 'contact-1' : null));
+const resolveVisitor = vi.fn(async (token: string) =>
+  token === 'known' ? 'contact-1' : token === 'second' ? 'contact-2' : null,
+);
 const registerVisitor = vi.fn(async () => ({ contactId: 'contact-new' }));
 const appendVisitorMessage = vi.fn(async () => ({ conversationId: 'conversation-1' }));
 const attachVisitorDetails = vi.fn(async () => undefined);
@@ -124,9 +126,19 @@ describe('a usable widget body', () => {
     expect(appendVisitorMessage).toHaveBeenCalledWith(
       'contact-1',
       'hi',
-      { pageUrl: null, userAgent: null },
+      { pageUrl: null, userAgent: null, locale: null },
       [],
     );
+  });
+
+  it('carries the panel’s language, and nothing that is not one', async () => {
+    await message.POST(post(JSON.stringify({ token: 'known', body: 'hi', locale: 'ar' })));
+    await message.POST(post(JSON.stringify({ token: 'known', body: 'hi', locale: 'fr' })));
+
+    expect(appendVisitorMessage.mock.calls.map((call) => (call as unknown[])[2])).toEqual([
+      expect.objectContaining({ locale: 'ar' }),
+      expect.objectContaining({ locale: null }),
+    ]);
   });
 
   it('passes the identity object through untouched', async () => {
@@ -358,6 +370,45 @@ describe('POST /api/widget/message with files', () => {
   send with files from that token after it would then meet.
 */
 describe('the hourly upload budget', () => {
+  it('spends nothing on a send whose files could not be stored', async () => {
+    const { VisitorUploadFailed } = await import('@/lib/widget/conversation');
+    const send = () => {
+      address += 1;
+      const form = new FormData();
+      form.set('token', 'second');
+      form.set('body', '');
+      form.append(
+        'files',
+        new File([new Uint8Array([0xff, 0xd8, 0xff, 0xe0, ...new Array(12).fill(0)])], 'v.jpg', {
+          type: 'image/jpeg',
+        }),
+        'v.jpg',
+      );
+      return message.POST(
+        new Request('https://support.example/api/widget/message', {
+          method: 'POST',
+          body: form,
+          headers: { 'x-forwarded-for': `192.0.2.${address % 250}` },
+        }),
+      );
+    };
+
+    weighs.megabytes = 60;
+    try {
+      // Storage down twice: answered "try again", and charged nothing.
+      appendVisitorMessage.mockRejectedValueOnce(new VisitorUploadFailed('no'));
+      appendVisitorMessage.mockRejectedValueOnce(new VisitorUploadFailed('no'));
+      expect((await send()).status).toBe(502);
+      expect((await send()).status).toBe(502);
+
+      // Back, and the visitor's hour is still theirs: charged here, once.
+      expect((await send()).status).toBe(200);
+      expect((await send()).status).toBe(429);
+    } finally {
+      weighs.megabytes = null;
+    }
+  });
+
   it('refuses a visitor’s send past it with slow_down, and stores nothing', async () => {
     const photo = () =>
       new File([new Uint8Array([0xff, 0xd8, 0xff, 0xe0, ...new Array(12).fill(0)])], 'p.jpg', {

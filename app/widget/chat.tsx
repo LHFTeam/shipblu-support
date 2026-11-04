@@ -320,7 +320,7 @@ export function WidgetChat({
       const pageUrl = document.referrer || null;
       const response = await fetch(
         '/api/widget/message',
-        messageRequest(active, body, pageUrl, files),
+        messageRequest(active, body, pageUrl, locale, files),
       );
 
       /*
@@ -511,19 +511,22 @@ function messageRequest(
   token: string,
   body: string,
   pageUrl: string | null,
+  /** The panel's language, which answers a message with no words in it (`requesterLocale`). */
+  locale: Locale,
   files: readonly File[],
 ): RequestInit {
   if (files.length === 0) {
     return {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token, body, pageUrl }),
+      body: JSON.stringify({ token, body, pageUrl, locale }),
     };
   }
 
   const form = new FormData();
   form.set('token', token);
   form.set('body', body);
+  form.set('locale', locale);
   if (pageUrl) form.set('pageUrl', pageUrl);
   for (const file of files) form.append('files', file, file.name);
   return { method: 'POST', body: form };

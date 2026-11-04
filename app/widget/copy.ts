@@ -52,7 +52,7 @@ export const COPY = {
     /*
      * The composer's two buttons are named by these, and the sentences under
      * it say what went wrong with a file. `{name}` is the visitor's own file
-     * name, drawn isolated from the sentence round it (`fillName`), since a
+     * name, drawn isolated from the sentence round it (`fill` in `thread.tsx`), since a
      * Latin name inside Arabic would otherwise reorder its neighbours.
      */
     attach: 'Attach a photo, video, voice recording or PDF',

@@ -1,13 +1,9 @@
 'use client';
 
-import { type SyntheticEvent, useRef, useState, useSyncExternalStore } from 'react';
+import { type SyntheticEvent, useRef, useState } from 'react';
 import { DocumentIcon, ImageIcon, PaperclipIcon } from '@/components/icons';
-import {
-  isPreviewableImage,
-  mediaFamily,
-  type PlayableMedia,
-  playableMedia,
-} from '@/lib/attachments/preview';
+import { canPlay, useOnClient } from '@/components/use-can-play';
+import { isPreviewableImage, mediaFamily, playableMedia } from '@/lib/attachments/preview';
 import { type MediaTrigger, shouldRefresh } from '@/lib/attachments/signed-url';
 import { formatBytes } from '@/lib/format';
 import type { WidgetAttachment } from '@/lib/widget/types';
@@ -73,8 +69,16 @@ function WidgetFile({
   onClient: boolean;
   sendingLabel: string;
 }) {
-  // A file that would not load falls back to its link, which still hands it over.
-  const [failed, setFailed] = useState(false);
+  /*
+    A file that would not load falls back to its link, which still hands it
+    over — for the link it failed on. The component outlives its link: a push
+    hands it a freshly signed one, and a widget left open overnight, whose
+    links had expired into links, drew its pictures again on the morning's
+    reply rather than staying a row of names until the panel was reloaded.
+  */
+  const [failedOn, setFailedOn] = useState<string | null>(null);
+  const failed = failedOn !== null && failedOn === file.url;
+  const setFailed = () => setFailedOn(file.url);
   /*
     Until a picture or a video knows its shape, it holds the largest box it can
     be. The thread scrolls to its end as a message arrives, before any picture
@@ -84,7 +88,7 @@ function WidgetFile({
     loads, and a shrinking end of the thread stays at the end.
   */
   const [shaped, setShaped] = useState(false);
-  const fresh = useFreshPlayer(() => setFailed(true));
+  const fresh = useFreshPlayer(setFailed);
   const url = file.url;
   const media = playableMedia(file.contentType);
   const playable = Boolean(media && onClient && canPlay(media));
@@ -98,7 +102,7 @@ function WidgetFile({
         alt={file.filename}
         loading="lazy"
         onLoad={() => setShaped(true)}
-        onError={() => setFailed(true)}
+        onError={setFailed}
         className={`block max-h-64 max-w-full rounded-lg border border-(--color-border-subtle) bg-(--color-background-surface-sunken) object-contain ${frame}`}
       />
     );
@@ -254,28 +258,3 @@ function useFreshPlayer(onFail: () => void) {
 /** A file in the thread, at the size the console's chips are drawn. */
 const CHIP =
   'inline-flex max-w-full min-w-0 items-center gap-2 rounded-lg border border-(--color-border-subtle) bg-(--color-background-surface) px-3 py-2 text-xs text-(--color-text-primary)';
-
-/*
-  Whether this browser plays a type is only known in the browser. The server's
-  snapshot says no, so the first client render matches the server's, as the
-  console's attachments do.
-*/
-const subscribeToNothing = () => () => {};
-const useOnClient = () =>
-  useSyncExternalStore(
-    subscribeToNothing,
-    () => true,
-    () => false,
-  );
-
-const verdicts = new Map<string, boolean>();
-
-function canPlay(media: PlayableMedia): boolean {
-  const key = `${media.kind} ${media.probe}`;
-  let verdict = verdicts.get(key);
-  if (verdict === undefined) {
-    verdict = document.createElement(media.kind).canPlayType(media.probe) !== '';
-    verdicts.set(key, verdict);
-  }
-  return verdict;
-}

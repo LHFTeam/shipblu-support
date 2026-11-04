@@ -23,6 +23,7 @@ import {
   admitWidgetFiles,
   MAX_WIDGET_FILE_BYTES,
   MAX_WIDGET_FILES,
+  MAX_WIDGET_MESSAGE_CHARS,
   WIDGET_ACCEPT,
   type WidgetFileRefusal,
 } from '@/lib/widget/files';
@@ -300,7 +301,7 @@ export function WidgetThread({
       // does: words typed meanwhile follow the ones put back, never replaced
       // by them. Files cannot be added meanwhile (the clip waits for the send),
       // so the ones put back are all there are.
-      setDraft((typed) => (typed.trim() ? `${body}\n${typed}` : body));
+      setDraft((typed) => withinLimit(typed.trim() ? `${body}\n${typed}` : body));
       setFiles(attached);
       setNotice(outcome.refusal);
     }
@@ -365,7 +366,7 @@ export function WidgetThread({
     const end = !focused && insertAt.current !== null ? start : (field?.selectionEnd ?? start);
     const next = draft.slice(0, start) + emoji + draft.slice(end);
     // A value set from code is not held to `maxLength`, so this is.
-    if (next.length > MAX_MESSAGE_LENGTH) return;
+    if (next.length > MAX_WIDGET_MESSAGE_CHARS) return;
 
     setDraft(next);
     const after = start + emoji.length;
@@ -657,7 +658,7 @@ export function WidgetThread({
               /* The floor, and what the box is before the effect above has
                  measured it. */
               rows={2}
-              maxLength={MAX_MESSAGE_LENGTH}
+              maxLength={MAX_WIDGET_MESSAGE_CHARS}
               placeholder={copy.placeholder}
               dir="auto"
               /*
@@ -766,8 +767,18 @@ function keyOf(file: File): number {
   return key;
 }
 
-/** The composer's own limit, and the route's (`/api/widget/message`). */
-const MAX_MESSAGE_LENGTH = 5000;
+/**
+ * Words put back after a failed send, joined to those typed while it was on the
+ * wire, held to the limit the box keeps while typing — a value set from code is
+ * not — so the visitor sees in the box what the route would keep, rather than
+ * the route cutting the end off unseen. Never through the middle of an emoji
+ * or another character written as two code units.
+ */
+function withinLimit(text: string): string {
+  if (text.length <= MAX_WIDGET_MESSAGE_CHARS) return text;
+  const cut = text.slice(0, MAX_WIDGET_MESSAGE_CHARS);
+  return /[\uD800-\uDBFF]$/.test(cut) ? cut.slice(0, -1) : cut;
+}
 
 /** A ghost button inside the composer's box, a full tap target around a 20px glyph. */
 const COMPOSER_BUTTON =

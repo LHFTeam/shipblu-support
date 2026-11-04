@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { allow } from './rate-limit';
+import { allow, fits } from './rate-limit';
 
 /** The counter every public endpoint shares, and the cost a budget in megabytes spends. */
 
@@ -28,5 +28,27 @@ describe('allow', () => {
     const k = key();
     expect(allow(k, 1, -1)).toBe(true);
     expect(allow(k, 1, HOUR)).toBe(true);
+  });
+});
+
+describe('fits', () => {
+  it('says whether a cost would fit, and spends nothing', () => {
+    const k = key();
+    expect(fits(k, 10, 10)).toBe(true);
+    expect(fits(k, 10, 10)).toBe(true);
+    expect(fits(k, 10, 11)).toBe(false);
+  });
+
+  it('counts what allow has spent in the window', () => {
+    const k = key();
+    allow(k, 10, HOUR, 7);
+    expect(fits(k, 10, 3)).toBe(true);
+    expect(fits(k, 10, 4)).toBe(false);
+  });
+
+  it('forgets a window that has passed', () => {
+    const k = key();
+    allow(k, 10, -1, 10);
+    expect(fits(k, 10, 10)).toBe(true);
   });
 });

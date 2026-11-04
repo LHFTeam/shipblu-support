@@ -383,7 +383,7 @@ describe('appendVisitorMessage with files', () => {
 
       // The message's own transaction was the one that answered with the error.
       expect(warn).toHaveBeenCalledWith(
-        `[widget_files] a transaction answered with an error after storing ${result.messageId}; kept its files`,
+        `[widget_files] a transaction answered with an error but its message was stored, kept its files message_id=${result.messageId}`,
       );
       expect(storage.removed).toEqual([]);
       expect(await filesOf(result.messageId)).toHaveLength(1);

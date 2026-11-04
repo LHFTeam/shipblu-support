@@ -45,6 +45,22 @@ export function allow(key: string, limit: number, windowMs: number, cost = 1): b
   return bucket.count <= limit;
 }
 
+/**
+ * Whether `cost` more would still fit in `key`'s window, spending nothing.
+ *
+ * For a budget that should be charged only for work that happened: the widget
+ * asks before it stores a visitor's files and spends (`allow`) only once they
+ * are stored, so a send that failed — and said "try again" — costs nothing. Two
+ * requests can both fit and then both spend; in-memory and per instance, as
+ * this whole module is, that is the price of not holding a lock across a
+ * multi-second upload.
+ */
+export function fits(key: string, limit: number, cost = 1): boolean {
+  const bucket = buckets.get(key);
+  const used = bucket && bucket.resetAt > Date.now() ? bucket.count : 0;
+  return used + cost <= limit;
+}
+
 function prune(now: number): void {
   for (const [key, bucket] of buckets) {
     if (bucket.resetAt <= now) buckets.delete(key);

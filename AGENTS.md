@@ -449,7 +449,7 @@ returns a full instant whose **time component is an artifact of when you asked**
 `YYYY-MM-DD` and never convert through a `Date` — the value carries `+03:00`, so
 a call answered after 21:00 UTC reads as the previous day in UTC.
 
-**Background work.** Anything slow, external or retryable is a job — with two
+**Background work.** Anything slow, external or retryable is a job — with three
 narrow exceptions, written down because they look like violations. The first: a
 control an agent presses and _waits on_, whose entire output is the provider's
 answer, calls the provider in the action instead. `refreshRequesterProfile`,
@@ -479,7 +479,13 @@ forces happens in the action — exchange it, prove the token reads the WABA the
 browser named, seal it, record the attempt — and everything after the exchange
 is the `complete_coexistence_onboarding` job, run with the stored credential, so
 a closed tab abandons nothing and the first run, a retry and a later "copy the
-history again" cannot differ. Everything else is a job: add the type
+history again" cannot differ. The third is the widget's upload of a visitor's
+files (`storeVisitorFiles`, **The widget carries files**), in the visitor's own
+request: they are still there to try again, and a message stored before its
+files would leave an agent reading about a photo that is not there, so a
+failure refuses the send and gives the files back rather than queueing
+anything. Each upload has its own deadline (`sizedTimeout`). Everything else is
+a job: add the type
 to `JobType` in `lib/queue/index.ts`, a handler under `worker/handlers/`, and
 register it in `worker/handlers/index.ts`. CI checks that the three agree, and
 that every cron in `render.yaml` names a type that exists. Use `dedupeKey` for anything a webhook retry could
@@ -2244,7 +2250,10 @@ we write when a form attachment fails, a photo sent without a caption is
 stored as our own English `[image]`, and on a comment thread the newest words
 can be a passer-by's reply under the customer's comment. Only there: an
 email's CC'd colleague still speaks for the conversation, or a requester whose
-own mail carried no words would fall to `contacts.locale`. A sender that reads the language off a
+own mail carried no words would fall to `contacts.locale`. A web chat whose
+messages carry no words at all — a photo sent with no caption — reads the
+language of the panel it was sent from, which the widget records on each
+message (`meta.locale`), before that fallback. A sender that reads the language off a
 message it already happens to be holding is how the two came to disagree, so do
 not reintroduce that shortcut — one indexed query is the price of the invariant.
 
