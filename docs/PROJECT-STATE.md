@@ -1310,7 +1310,13 @@ is code:
   broken: ShipBlu is still being supported out of Freshworks while this app is
   under construction, so the Freshworks app (Freshchat — `app_id`
   576817601276249, `metadata: "freshchannel"`) is the Page's default app and
-  **holds thread control** on both the Messenger and Instagram inboxes.
+  **holds thread control on the Messenger inbox**. _Since 2026-11-05 10:30:24
+  UTC it no longer holds Instagram's: this app (1009187740467732) was made the
+  Instagram account's default app in the Page's Advanced messaging settings —
+  Meta's `app_roles` webhook on the `instagram` object says so — and Instagram
+  DMs, comments and private replies are answered here over Unified Login
+  (§6.108). That was Instagram's point of no return; Messenger's is still
+  ahead._
 
   The consequence is that every Meta event reaches this system in the handover
   protocol's `standby` array rather than `messaging`. A secondary receiver may
@@ -1327,8 +1333,11 @@ is code:
 
   **Instagram is the exception as of 2026-08-30, and it is the way out of this
   paragraph.** _(The route changed on 2026-11-04: the Instagram Login token
-  below expired on 2026-10-29, and the way out is now Unified Login, the
-  next bullet — same property, a token that does not expire.)_ The account is
+  below expired on 2026-10-29, and the route is now Unified Login, the next
+  bullet — a token that does not expire, but **not** the same property: a
+  Unified Login send is refused by the account's thread owner exactly as the
+  Page's is, which is why Instagram's default app was swapped on 2026-11-05,
+  §6.108.)_ The account is
   now also connected directly through Instagram
   Login, which is not installed on the Page and therefore not subject to the
   Page's handover protocol at all: it receives its own copy of every event in
@@ -2186,34 +2195,40 @@ expires_at, inspected_at` — never `envelope`, and a null `expires_at` means
   group did — a group restricted to its members, or moderated, can hold mail
   from `help-support@` — so the test is a reply landing on the thread, not a
   delivery status.
-- **The first Instagram reply over Unified Login.** Built, unit-tested, and
-  never run against Meta: no Business Integration System User token has been
-  minted for this app yet, so nothing on the `unified_login` route in
-  `lib/meta/client.ts` has been exercised live. The activation order is in
-  `plans/instagram-unified-login.md` §"Activation"; what the first live run
-  must confirm and record here, in the plan's own words:
-  - what `debug_token` reports as `type` for the token (`SYSTEM_USER` is the
-    guess; `refuseInspection` warns on anything else and refuses on nothing
-    but `is_valid: false` or a foreign `app_id`), and `expires_at: 0`;
-  - that `/me/assigned_instagram_accounts` lists `17841448759001625`, and that
-    `check_meta_permissions` shows `instagram_basic` and
-    `instagram_manage_messages` granted on the token;
-  - that `POST graph.facebook.com/{ig-id}/subscribed_apps` with the token is
-    answered `{"success": true}` and reads back the five `instagram` fields;
-  - that a console reply inside 24 hours logs
-    `[send_meta] … on instagram via unified_login` and arrives — with
-    `messaging_type: RESPONSE` on the body, which the Page's host documents and
-    the Unified send has never been given;
+- **The first Instagram reply over Unified Login.** _Was "built, never run";
+  is now a reading, 2026-11-05._ The token was minted on the fourth login
+  (10:12 UTC) and set in the production group; the readings the plan asked
+  for, in its order:
+  - `debug_token` reports `type: SYSTEM_USER`, `expires_at: 0`, this app's id,
+    and seven scopes: the three Instagram ones, `pages_show_list`,
+    `pages_read_engagement`, `pages_read_user_content`, `public_profile` — no
+    `business_management`;
+  - `/me/assigned_instagram_accounts` is **empty** for that token, on every
+    login, and the direct read of `17841448759001625` succeeds; the callback
+    and `check_meta_permissions` judge the token by the read (§6.108).
+    `check_meta_permissions` shows `instagram_basic`,
+    `instagram_manage_messages` and `instagram_manage_comments` granted;
+  - `subscribe_meta_webhooks object=instagram` found the account already
+    subscribed on the Unified token with seventeen fields — Meta subscribes
+    the connected account at the login — added `messaging_referral` at the
+    app level, and ended failed on the direct half's expired token, as the
+    plan said it would;
+  - a console reply logged `[send_meta] … sent as dm on instagram via
+unified_login` at 10:30:46 UTC (ticket #13791) and arrived — after three
+    refusals `100 / 2534037 "not the thread owner"` at 10:20, 10:23 and 10:28,
+    while Freshworks was still the account's default app; `messaging_type:
+RESPONSE` was on every one of those bodies and the accepted one, so it is
+    accepted on the Unified send. A comment reply, a private reply and a
+    comment deletion followed at 10:45–10:46, all via `unified_login`;
   - that a customer's next message, delivered up to three times while the
     account is connected three ways, is one timeline line and not two (Meta
     says Unified Login's message ids differ in format from Instagram Login's;
     ingest dedupes on the `mid`), watched for an hour before the direct
     connection is disconnected;
-  - whether any Unified Login delivery ever arrives in `standby` (none is
-    expected; the migration guide lists handover as not supported) — not
-    answerable from `webhook_events.connection`, which labels both the Page's
-    and Unified Login's deliveries `facebook_page`, only from the envelope once
-    the Page's own `standby` copies stop;
+  - ~~whether any Unified Login delivery ever arrives in `standby`~~ — the
+    send is what answered it: a Unified Login send is subject to the account's
+    thread owner (§6.108), so the envelope on a `facebook_page`-labelled
+    delivery is read the same whichever of the two carried it;
   - whether a customer's profile read over this route is refused with `(#3)`
     while a role holder's succeeds, which would mean Business Asset User
     Profile Access is applied per connection.
@@ -7386,6 +7401,61 @@ dryRun=true`, then without, gives those two theirs back from their
       Drizzle's rendering of it, because the same fragment renders differently
       in a query with a join and one without; and only a test that reads the
       answer back, not one that plans the statement, sees the difference.
+
+108.  **Unified Login is not a way past another app's thread control, and an
+      empty account list is not a token that reaches nothing.** _2026-11-05,
+      the first live day of `plans/instagram-unified-login.md`._ Two guesses in
+      the plan, each written from Meta's documentation rather than a reading,
+      and each wrong in a way the first hour showed.
+
+      **The list.** Four logins issued a system-user token whose
+      `/me/assigned_instagram_accounts` was empty, although Business settings
+      listed the account as shared with the app. The first three were read as
+      a configuration missing `business_management`, which Meta's permissions
+      page calls a prerequisite for the token, and the capability table gained
+      a row demanding it. The fourth login — after the connection was removed
+      under Connected apps and made afresh — issued a token still without the
+      permission, whose list was still empty, and which read the account
+      directly, subscribed it and sent. The permission is what the list edge
+      needs; no reply needs it, and the configuration's editor never offers
+      it. So the row that reported a working token as blocked is gone, and the
+      callback page and `check_meta_permissions` read `INSTAGRAM_ACCOUNT_ID`
+      with the token when the list is empty and judge the token by that
+      (`probeAccount`, `lib/meta/unified-login.ts`).
+
+      **The thread owner.** Meta's migration guide lists the handover protocol
+      as not supported on Unified Login, and the plan, `lib/meta/thread.ts`,
+      `lib/meta/connection.ts` and `explainMetaSendError` all read that as "a
+      Unified send cannot be refused for thread control". The first three live
+      replies were refused:
+
+      ```
+      (#100) The action is invalid since it's not the thread owner.
+      (Meta: code 100, subcode 2534037, HTTP 400, via graph.facebook.com)
+      ```
+
+      — at 10:20:20, 10:23:17 and 10:28:33 UTC, while the customer's messages
+      were arriving in `standby`. At 10:30:24 this app was made the Instagram
+      account's default app in the Page's Advanced messaging settings; Meta
+      sent an `app_roles` webhook on the `instagram` object naming
+      `1009187740467732` as `default_app`, the next message arrived in
+      `messaging`, and the reply at 10:30:46 went. What the guide means is that
+      the _protocol's endpoints_ are not offered on that connection; Instagram's
+      thread owner (Conversation Routing, which replaced the handover for
+      Instagram in October 2025) is an app, and a Unified send is this app's
+      send from `graph.facebook.com` whatever token it carries. Only the direct
+      Instagram Login connection has been seen to send past another app's
+      ownership (§6.29). So `metaThreadState` now refuses a Unified send on a
+      `standby` as it refuses the Page's, `2534037` joins `2018300` as a
+      handover refusal in `lib/meta/errors.ts`, and every sentence that offered
+      the Unified token as the route around the Page's handover now names the
+      account's default app instead. Freshworks keeps Messenger's.
+
+      The lesson is the one §6.35 and §6.43 already carry, from the other side:
+      a Meta sentence about a _connection_ — "not supported", "prerequisite" —
+      says which endpoints and permissions that connection offers, and nothing
+      about what the account will accept. Each is a reading to take on the
+      first live call, written down here, not a rule to code from.
 
 ### Tooling notes for this environment
 

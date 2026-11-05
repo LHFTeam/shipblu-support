@@ -159,31 +159,23 @@ export const CAPABILITIES: readonly Capability[] = [
       the 2026-09-19 review granted for the two below — carries over. So a
       Unified Login token carrying these two is the approved messaging pair on
       a route the Page's handover cannot refuse.
+
+      `business_management` is deliberately not a row. Meta's permissions page
+      calls it a prerequisite for the system-user token, and the first three
+      live logins of 2026-11-05 — a token whose `/me/assigned_instagram_accounts`
+      was empty — were read as proof of that. The fourth, after the connection
+      was removed under Connected apps and made afresh, issued a token without
+      it whose list was still empty and which read the account directly all
+      the same; `check_meta_permissions` then reported the pair granted. So
+      the permission is what the *list edge* needs, and nothing a reply does:
+      a row here would report a working token as blocked, which is what it
+      did that morning. `connectedAccounts` in `lib/meta/unified-login.ts`
+      carries the reading; `probeAccount` beside it is the proof.
     */
     name: 'Instagram direct messages (Unified Login)',
     connection: 'unified_login',
     symptom: 'Instagram DMs arrive but every reply is refused by graph.facebook.com',
     permissions: ['instagram_basic', 'instagram_manage_messages'],
-  },
-  {
-    /*
-      Not a thing the helpdesk calls, and the row that decides whether any of
-      the others work. Meta's Unified Login permissions page calls
-      `business_management` a prerequisite for the system-user token and leaves
-      it out of the default configuration; without it a login still ends in
-      confetti and the portfolio still lists the account as shared with the
-      app, but the token is assigned no Instagram account — its account list is
-      empty and every read of the account is refused 100/33. Observed twice on
-      2026-11-05 and reported the same way by others; the configuration's
-      editor on the Unified login tab does not offer the permission, Facebook
-      Login for Business → Configurations → Edit does.
-    */
-    name: 'Instagram account assigned to the token (Unified Login)',
-    connection: 'unified_login',
-    symptom:
-      'the login finishes but the token reaches no Instagram account: an empty ' +
-      '/me/assigned_instagram_accounts and 100/33 on every read of the account id',
-    permissions: ['business_management'],
   },
   {
     name: 'Instagram comment webhooks and moderation (Unified Login)',
