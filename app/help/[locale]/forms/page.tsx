@@ -45,7 +45,7 @@ export default async function FormsIndex({
         crumbs={[{ label: t(locale, 'home'), href: `/${locale}` }]}
         title={t(locale, 'formsTitle')}
         selfPath={`/${locale}/forms`}
-        meta={t(locale, 'formsIntro')}
+        lede={t(locale, 'formsIntro')}
       />
 
       <PageBody>

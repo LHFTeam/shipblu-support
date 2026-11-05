@@ -669,7 +669,7 @@ describe('thread control', () => {
       Until 2026-11-05 this offered INSTAGRAM_UNIFIED_LOGIN_TOKEN as the route
       around the Page's handover. The first three live Unified Login sends were
       refused 100/2534037 for exactly this, until the app was made the account's
-      default app (§6.107) — so the token is not the way out, the setting is,
+      default app (§6.108) — so the token is not the way out, the setting is,
       on both routes alike.
     */
     for (const connection of ['facebook_page', 'unified_login'] as const) {

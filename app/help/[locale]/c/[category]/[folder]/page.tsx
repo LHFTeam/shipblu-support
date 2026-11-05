@@ -1,11 +1,15 @@
 import { notFound } from 'next/navigation';
 import type { Metadata } from 'next';
-import { FolderIcon } from '@/components/icons';
-import { isLocale, t } from '@/lib/kb/locale';
-import { getFolder } from '@/lib/kb/queries';
+import { supportAvailability } from '@/lib/kb/availability';
+import { isLocale, t, tFill } from '@/lib/kb/locale';
+import { getFolder, listCategories } from '@/lib/kb/queries';
 import { kbViewer } from '@/lib/kb/viewer';
 import { decodeSlugParam } from '@/lib/kb/slug';
-import { ArticleList, ArticleRow, EmptyNote, PageBody, PageHeader } from '../../../chrome';
+import { topicArt } from '@/lib/kb/art';
+import { TopicArtImage } from '../../../art';
+import { ArticleList, ArticleRow, EmptyNote, HelpCta, PageHeader } from '../../../chrome';
+import { SearchBox } from '../../../search-box';
+import { TopicBody, TopicMeta, TopicNav } from '../../../topic-nav';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,11 +28,21 @@ export async function generateMetadata({
 
   return {
     title: `${folder.name} — ShipBlu Support`,
-    description: folder.description ?? undefined,
+    description: folder.description || undefined,
     alternates: { canonical: `/${locale}/c/${folder.categorySlug}/${folder.slug}` },
   };
 }
 
+/**
+ * One folder of a topic, in the same clothes as the topic itself: the band,
+ * the Topics list with the folder's category marked, and the folder's articles.
+ *
+ * The search field searches the whole category rather than the folder. The
+ * query layer scopes by category alone, and a folder is small enough — fifteen
+ * articles at the most in production — that a reader can see whether their
+ * answer is in it; the search is for when it is not, and then the category is
+ * where it is likeliest to be.
+ */
 export default async function FolderPage({
   params,
 }: {
@@ -39,8 +53,19 @@ export default async function FolderPage({
   const folderSlug = decodeSlugParam(folderParam);
   if (!isLocale(locale)) notFound();
 
-  const folder = await getFolder(await kbViewer(), locale, categorySlug, folderSlug);
+  const viewer = await kbViewer();
+  const [folder, topics, availability] = await Promise.all([
+    getFolder(viewer, locale, categorySlug, folderSlug),
+    listCategories(viewer, locale),
+    supportAvailability(),
+  ]);
   if (!folder) notFound();
+
+  // The folder's own drawing when its name names a subject ("Financials"), and
+  // its category's when it does not ("FAQs"), so the band is not bare on the
+  // folders whose names say least.
+  const art =
+    topicArt(folder.name, folder.slug) ?? topicArt(folder.categoryName, folder.categorySlug);
 
   return (
     <>
@@ -52,11 +77,39 @@ export default async function FolderPage({
         ]}
         title={folder.name}
         selfPath={`/${locale}/c/${folder.categorySlug}/${folder.slug}`}
-        icon={<FolderIcon size={24} />}
-        meta={folder.description}
-      />
+        accent
+        lede={folder.description?.trim() || undefined}
+        meta={
+          <TopicMeta
+            locale={locale}
+            count={folder.articles.length}
+            updatedAt={folder.lastUpdatedAt}
+          />
+        }
+        art={<TopicArtImage art={art} className="kb-art-fade w-[260px]" priority />}
+        search={false}
+      >
+        <div className="max-w-[32.5rem]">
+          <SearchBox
+            locale={locale}
+            size="field"
+            id="kb-topic-search"
+            placeholder={tFill(locale, 'searchIn', { name: folder.categoryName })}
+            within={folder.categorySlug}
+          />
+        </div>
+      </PageHeader>
 
-      <PageBody>
+      <TopicBody
+        nav={
+          <TopicNav
+            locale={locale}
+            categories={topics}
+            currentSlug={folder.categorySlug}
+            currentIsPage={false}
+          />
+        }
+      >
         {folder.articles.length === 0 ? (
           <EmptyNote>{t(locale, 'emptyCategory')}</EmptyNote>
         ) : (
@@ -71,7 +124,13 @@ export default async function FolderPage({
             ))}
           </ArticleList>
         )}
-      </PageBody>
+
+        <HelpCta
+          locale={locale}
+          title={t(locale, 'ctaNotFoundTitle')}
+          availability={availability}
+        />
+      </TopicBody>
     </>
   );
 }

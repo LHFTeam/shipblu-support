@@ -144,7 +144,7 @@ export function metaThreadState(input: MetaThreadInput): MetaThreadState {
     `100 / 2534037 "not the thread owner"` while the customer's messages were
     arriving in `standby`; at 10:30:24 UTC this app was made the account's
     default app (an `app_roles` webhook said so), the next message arrived in
-    `messaging`, and the next send went (`docs/PROJECT-STATE.md` §6.107). So a
+    `messaging`, and the next send went (`docs/PROJECT-STATE.md` §6.108). So a
     `standby` on a Unified Login delivery — labelled `facebook_page`, since both
     sign with the same secret — refuses a Unified send exactly as it refuses the
     Page's, and the way out is the account's default app, not a token.

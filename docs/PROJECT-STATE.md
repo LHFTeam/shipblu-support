@@ -459,9 +459,11 @@ status taxonomy behind the tracking badge, which is what gives "out for delivery
 violet of its own instead of sharing blue with "in transit". Typography did not
 come across: the system substitutes Geist and Rubik and says so, while Lato and
 Tajawal are the live portal's and the ones customers already read. Nor did radii,
-spacing or its component bundle. Four of the six page types still wear the solid
-blue band the system would not have given them — moving them is a change to their
-layout rather than their colours, and it is the obvious next piece of work.
+spacing or its component bundle. Four of the six page types still wore the solid
+blue band the system would not have given them; the v02 help-centre design
+(`plans/help-centre-design-v02.md`) has since given every page one pale band, the
+design's illustrations and its topic and article layouts, on `dev` first and in
+production with the next release to `main`.
 
 A **service notice** banner sits above the content on every help centre page,
 from `KB_NOTICE_EN` / `KB_NOTICE_AR` / `KB_NOTICE_HREF` / `KB_NOTICE_TONE`. The
@@ -1313,7 +1315,7 @@ is code:
   Instagram account's default app in the Page's Advanced messaging settings —
   Meta's `app_roles` webhook on the `instagram` object says so — and Instagram
   DMs, comments and private replies are answered here over Unified Login
-  (§6.107). That was Instagram's point of no return; Messenger's is still
+  (§6.108). That was Instagram's point of no return; Messenger's is still
   ahead._
 
   The consequence is that every Meta event reaches this system in the handover
@@ -1335,7 +1337,7 @@ is code:
   bullet — a token that does not expire, but **not** the same property: a
   Unified Login send is refused by the account's thread owner exactly as the
   Page's is, which is why Instagram's default app was swapped on 2026-11-05,
-  §6.107.)_ The account is
+  §6.108.)_ The account is
   now also connected directly through Instagram
   Login, which is not installed on the Page and therefore not subject to the
   Page's handover protocol at all: it receives its own copy of every event in
@@ -2203,7 +2205,7 @@ expires_at, inspected_at` — never `envelope`, and a null `expires_at` means
     `business_management`;
   - `/me/assigned_instagram_accounts` is **empty** for that token, on every
     login, and the direct read of `17841448759001625` succeeds; the callback
-    and `check_meta_permissions` judge the token by the read (§6.107).
+    and `check_meta_permissions` judge the token by the read (§6.108).
     `check_meta_permissions` shows `instagram_basic`,
     `instagram_manage_messages` and `instagram_manage_comments` granted;
   - `subscribe_meta_webhooks object=instagram` found the account already
@@ -2225,7 +2227,7 @@ RESPONSE` was on every one of those bodies and the accepted one, so it is
     connection is disconnected;
   - ~~whether any Unified Login delivery ever arrives in `standby`~~ — the
     send is what answered it: a Unified Login send is subject to the account's
-    thread owner (§6.107), so the envelope on a `facebook_page`-labelled
+    thread owner (§6.108), so the envelope on a `facebook_page`-labelled
     delivery is read the same whichever of the two carried it;
   - whether a customer's profile read over this route is refused with `(#3)`
     while a role holder's succeeds, which would mean Business Asset User
@@ -7381,7 +7383,26 @@ dryRun=true`, then without, gives those two theirs back from their
       refuses — and every message and event inserted for a ticket holds one on
       it.
 
-107.  **Unified Login is not a way past another app's thread control, and an
+107.  **A correlated subquery in a `sql` fragment correlated with itself.**
+      _2026-11-05, found by `lib/kb/queries.db.test.ts` before it shipped._ The
+      help centre's edit date (`editedAt` in `lib/kb/queries.ts`) reads the
+      newest `kb_article_versions` row for the outer article, and was written
+      with interpolated columns:
+      `(select max(${kbArticleVersions.createdAt}) from ${kbArticleVersions} where ${kbArticleVersions.articleId} = ${kbArticles.id})`.
+      Drizzle qualifies a column with its table only when the query joins; in a
+      single-table select it renders a bare `"id"`, and inside the subquery a
+      bare name binds to the nearest scope, so the condition read
+      `article_id = kb_article_versions.id`. It is valid SQL that matches
+      nothing, so tsc, the planner and the article page (which joins, and so
+      got `"kb_articles"."id"`) all passed, while the folder page dated every
+      article by its publication. The fragment now aliases the inner table and
+      names the outer one, `where v.article_id = ${kbArticles}.id`. The lesson:
+      a fragment that refers to an outer query's column must not rely on
+      Drizzle's rendering of it, because the same fragment renders differently
+      in a query with a join and one without; and only a test that reads the
+      answer back, not one that plans the statement, sees the difference.
+
+108.  **Unified Login is not a way past another app's thread control, and an
       empty account list is not a token that reaches nothing.** _2026-11-05,
       the first live day of `plans/instagram-unified-login.md`._ Two guesses in
       the plan, each written from Meta's documentation rather than a reading,

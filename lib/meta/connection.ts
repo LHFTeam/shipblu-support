@@ -41,7 +41,7 @@ import type { MetaPlatform } from './types';
  * `standby` should stop a send, and it reads a Unified Login delivery as the
  * Page's — which is the right answer, because the account's thread owner
  * refuses a Unified Login send exactly as it refuses the Page's
- * (`docs/PROJECT-STATE.md` §6.107).
+ * (`docs/PROJECT-STATE.md` §6.108).
  */
 const META_CONNECTIONS = ['facebook_page', 'instagram_login', 'unified_login'] as const;
 
@@ -107,7 +107,7 @@ export function unifiedLoginConfigured(): boolean {
  * 2026-09-19 for messaging. It is **not** a route around another app's thread
  * control, as this comment once claimed: the first three Unified Login sends
  * were refused `2534037` until this app was made the account's default app
- * on 2026-11-05 (§6.107). The direct connection keeps second place for the
+ * on 2026-11-05 (§6.108). The direct connection keeps second place for the
  * reason it had first: it is the one route seen to send past the Page's
  * handover (§6.29). Unset leaves every
  * Instagram call going out exactly as it did before this existed — Page token,

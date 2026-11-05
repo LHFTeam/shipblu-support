@@ -24,7 +24,7 @@ export default async function PortalHome({ params }: { params: Promise<{ locale:
         crumbs={[{ label: t(locale, 'home'), href: `/${locale}` }]}
         title={t(locale, 'myTickets')}
         selfPath={`/${locale}/portal`}
-        meta={t(locale, 'myTicketsIntro')}
+        lede={t(locale, 'myTicketsIntro')}
       />
 
       <PageBody>

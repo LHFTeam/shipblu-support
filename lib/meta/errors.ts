@@ -291,7 +291,7 @@ function isCommentPermissionRefusal(error: MetaApiError): boolean {
  * "(#100) The action is invalid since it's not the thread owner." —
  * `100 / 2534037`, read out of the worker log three times on 2026-11-05 when
  * the first Unified Login replies went out while Freshworks was still the
- * account's default app (§6.107).
+ * account's default app (§6.108).
  *
  * Keyed on the subcode and not on the code, which both share with other
  * refusals (`10` with the comment-permission ones, `100` with a malformed
@@ -369,7 +369,7 @@ function handoverExplanation(context: MetaSendContext): string {
         `and Instagram's thread owner is an app: a send from this app is refused whichever ` +
         `of the two tokens it carries. The way through is the account's **default app** — ` +
         `the Page's settings → Advanced messaging — which is what let the first Unified ` +
-        `Login reply through on 2026-11-05 (§6.107, plans/instagram-unified-login.md). ` +
+        `Login reply through on 2026-11-05 (§6.108, plans/instagram-unified-login.md). ` +
         `Only the direct Instagram Login connection has been seen to send past another ` +
         `app's ownership (§6.29), and its token has expired.`
       : '';

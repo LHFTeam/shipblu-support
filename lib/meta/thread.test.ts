@@ -231,7 +231,7 @@ describe('metaThreadState across the two Instagram connections', () => {
   it('refuses Unified Login too while another app owns the thread', () => {
     // The plan guessed the opposite from Meta's migration guide, and the first
     // three live Unified Login sends were refused 100/2534037 for it
-    // (docs/PROJECT-STATE.md §6.107). The token is the portfolio's, but the
+    // (docs/PROJECT-STATE.md §6.108). The token is the portfolio's, but the
     // send is this app's, and Instagram's thread owner is an app.
     const state = metaThreadState({
       platform: 'instagram',

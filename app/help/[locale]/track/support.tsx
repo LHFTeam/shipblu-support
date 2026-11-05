@@ -4,7 +4,8 @@ import { chatWidget } from '../../chat';
 
 /**
  * "Ask support about this shipment", which opens the chat with the parcel
- * already in the composer.
+ * already in the composer — and, with no draft, the help centre's other
+ * "Contact support" buttons, which open it empty.
  *
  * A link with a click handler over it rather than a button, and the link is the
  * part that has to keep working: the snippet loads `async`, a visitor can reach
@@ -26,8 +27,8 @@ export function AskSupport({
   className,
 }: {
   href: string;
-  /** The draft, built by `shipmentChatPrefill` on the server. */
-  prefill: string;
+  /** The draft, built by `shipmentChatPrefill` on the server. None opens the chat empty. */
+  prefill?: string;
   children: React.ReactNode;
   className?: string;
 }) {
@@ -39,10 +40,13 @@ export function AskSupport({
         if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
 
         const widget = chatWidget();
-        if (!widget?.compose) return;
+        const show = prefill
+          ? widget?.compose && (() => widget.compose?.(prefill))
+          : widget?.open && (() => widget.open?.());
+        if (!show) return;
 
         event.preventDefault();
-        widget.compose(prefill);
+        show();
       }}
     >
       {children}
