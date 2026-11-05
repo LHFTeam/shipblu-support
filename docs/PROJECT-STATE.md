@@ -7536,8 +7536,8 @@ dryRun=true`, then without, gives those two theirs back from their
       fixes above every difference is the radius: 4px becoming the
       element's own. `tsc` and the linters see none of this.
       `focus-ring` now refuses four things: a focus style in no layer, or in
-      one other than `base` and `components`; an outline declared in no
-      layer; a suppressed outline (`outline-none`, `-hidden`, `-0`,
+      one other than `base` and `components`; an outline declared outside
+      Tailwind's layers; a suppressed outline (`outline-none`, `-hidden`, `-0`,
       `-transparent`) beside a translucent focus ring; and an important
       outline utility, in either spelling. It judges one class string at a
       time, so `FIELD_BASE` is held by its comment instead.

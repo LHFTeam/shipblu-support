@@ -28,7 +28,7 @@ const LAYERED = [
   '',
 ].join('\n');
 
-/** Ten class strings naming an outline: the rule's floor, so a case is only its own change. */
+/** Ten class strings naming an outline, above the rule's floor of eight, so a case is only its own change. */
 const FILLER = {
   'components/filler.tsx': `export const filler = [\n${"  'outline-hidden',\n".repeat(10)}];\n`,
 };
@@ -121,9 +121,9 @@ describe('focus-ring', () => {
     });
 
     expect(found).toEqual([
-      at('components/row.tsx:1', /drop the !/),
-      at('components/row.tsx:2', /drop the !/),
-      at('components/row.tsx:3', /drop the !/),
+      at('components/row.tsx:1', /no ! is needed against it/),
+      at('components/row.tsx:2', /no ! is needed against it/),
+      at('components/row.tsx:3', /no ! is needed against it/),
     ]);
   });
 
@@ -159,8 +159,8 @@ describe('focus-ring', () => {
     });
 
     expect(found).toEqual([
-      at('components/row.tsx:1', /drop the !/),
-      at('components/row.tsx:2', /drop the !/),
+      at('components/row.tsx:1', /no ! is needed against it/),
+      at('components/row.tsx:2', /no ! is needed against it/),
     ]);
   });
 
@@ -209,6 +209,74 @@ describe('focus-ring', () => {
     expect(found).toEqual([
       at('app/globals.css:9', /outline declared outside a cascade layer/),
       at('app/globals.css:14', /outline declared outside a cascade layer/),
+    ]);
+  });
+
+  it('reads a rule that holds a nested rule, and skips keyframe steps', async () => {
+    const found = await run({
+      'app/globals.css': [
+        LAYERED,
+        '.kb-panel {',
+        '  outline: none;',
+        '  & a { color: blue; }',
+        '}',
+        '@keyframes pulse {',
+        '  from { outline-offset: 0; }',
+        '  to { outline-offset: 4px; }',
+        '}',
+        '@theme static {',
+        '  @keyframes ring { from { outline-color: red; } }',
+        '}',
+        '',
+      ].join('\n'),
+    });
+
+    expect(found).toEqual([at('app/globals.css:9', /outline declared outside a cascade layer/)]);
+  });
+
+  it('is not moved by a brace or a semicolon inside a string or url()', async () => {
+    const found = await run({
+      'app/globals.css': [
+        "@import 'tailwindcss';",
+        '@layer base {',
+        "  .quote::before { content: '{'; }",
+        '  .tick { background: url(data:image/svg+xml;utf8,<svg>{}</svg>); }',
+        `  ${RING} { outline: 2px solid blue; }`,
+        '}',
+        '.after { outline: none; }',
+        '',
+      ].join('\n'),
+    });
+
+    expect(found).toEqual([at('app/globals.css:7', /outline declared outside a cascade layer/)]);
+  });
+
+  it("refuses an outline declared in a layer that is not one of Tailwind's", async () => {
+    const found = await run({
+      'app/globals.css': [
+        LAYERED,
+        '@layer overrides {',
+        '  .kb-article a { outline: none; }',
+        '}',
+        '',
+      ].join('\n'),
+    });
+
+    expect(found).toEqual([at('app/globals.css:10', /outline declared in @layer overrides/)]);
+  });
+
+  it('reads every opacity spelling as a translucent ring', async () => {
+    const found = await run({
+      'app/(console)/purge-panel.tsx': [
+        "export const a = 'border outline-none focus:ring-2 focus:ring-(--color-border-focus)/[0.2]';",
+        "export const b = 'border outline-none focus:ring-2 focus:ring-(--color-border-focus)/(--alpha)';",
+        '',
+      ].join('\n'),
+    });
+
+    expect(found).toEqual([
+      at('app/(console)/purge-panel.tsx:1', /translucent focus ring/),
+      at('app/(console)/purge-panel.tsx:2', /translucent focus ring/),
     ]);
   });
 

@@ -749,7 +749,8 @@ body {
 
    An outline rather than a box-shadow ring, because forced-colours mode keeps
    an outline and removes a shadow. The radius shapes only what has no rounding
-   of its own: a bare link, a table row. Anything with a `rounded-*` keeps it. */
+   of its own: a bare link, a table row. A `rounded-*` keeps the corners it
+   names; a partial one (`rounded-t-md`) leaves the others at this radius. */
 @layer base {
   :where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
     outline: var(--focus-width) solid var(--focus-color);

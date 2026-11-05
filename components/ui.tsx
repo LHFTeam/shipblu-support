@@ -149,7 +149,7 @@ export function Button({
  * The keyboard focus ring is the global one in `globals.css`, and a field keeps
  * it. The border and the 20% ring below say "this box takes typing"; they are
  * not a focus indicator on their own — that ring is 1.35:1 against the white
- * surface, a third of the 3:1 one needs, and forced-colours mode removes it
+ * surface, under the 3:1 one needs, and forced-colours mode removes it
  * with every other box-shadow. Suppressing the outline here did nothing while
  * the global rule was unlayered, and once it was layered it would have left
  * every field with a one-pixel border change and a read-only one with nothing
