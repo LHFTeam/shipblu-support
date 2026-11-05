@@ -139,6 +139,7 @@ describe('diagnoseCapabilities', () => {
     const scopes = requiredScopes('unified_login');
 
     expect(scopes).toEqual([
+      'business_management',
       'instagram_basic',
       'instagram_manage_comments',
       'instagram_manage_messages',

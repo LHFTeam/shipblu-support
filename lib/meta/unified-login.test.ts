@@ -39,7 +39,12 @@ function inspection(overrides: Partial<TokenInspection> = {}): TokenInspection {
     issuedAt: null,
     expiresAt: null,
     dataAccessExpiresAt: null,
-    scopes: ['instagram_basic', 'instagram_manage_messages', 'instagram_manage_comments'],
+    scopes: [
+      'instagram_basic',
+      'instagram_manage_messages',
+      'instagram_manage_comments',
+      'business_management',
+    ],
     granularScopes: [],
     error: null,
     ...overrides,

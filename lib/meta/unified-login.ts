@@ -462,6 +462,109 @@ function graphRefusal(url: URL, status: number, error: { message?: unknown } | u
 }
 
 /**
+ * Whether the token can read the account this environment replies as:
+ * `GET /{INSTAGRAM_ACCOUNT_ID}?fields=id,username`, bearer token.
+ *
+ * The question the callback exists to answer, asked directly. On 2026-11-05
+ * two logins minted tokens for a portfolio whose Connected apps page listed
+ * the account as shared with this app, and `/me/assigned_instagram_accounts`
+ * still answered an empty list both times — the edge is one description of
+ * what the token reaches, and this read is the thing every send does. A token
+ * that reads the account is a token that can address it, whatever the list
+ * says; one refused here is refused on every reply too, and Graph's sentence
+ * (`100/33`, "does not exist, cannot be loaded due to missing permissions")
+ * is the one worth showing. Never thrown: the answer is evidence either way.
+ */
+export async function probeAccount(
+  token: string,
+  accountId: string,
+): Promise<{ ok: true; account: ConnectedAccount } | { ok: false; error: string }> {
+  const url = new URL(`${GRAPH_BASE}/${accountId}`);
+  url.searchParams.set('fields', 'id,username');
+  type Body = { id?: unknown; username?: unknown; error?: { message?: unknown } };
+  try {
+    const { ok, status, body } = await readGraph<Body>(url, token);
+    if (!ok || typeof body?.id !== 'string') {
+      return { ok: false, error: graphRefusal(url, status, body?.error) };
+    }
+    return {
+      ok: true,
+      account: { id: body.id, username: typeof body.username === 'string' ? body.username : null },
+    };
+  } catch (error) {
+    return { ok: false, error: errorMessage(error) };
+  }
+}
+
+/**
+ * What to tell the admin when a token reaches no Instagram account — the
+ * facts the page has, in place of a guess about the dialog.
+ *
+ * Written after the first two live attempts refused with "connect again and
+ * share the account", which the admin had done. The known cause of this shape
+ * is a configuration without `business_management`, which Meta's permissions
+ * page calls a prerequisite for the system-user token and leaves out of the
+ * default configuration; the scopes show whether the token carries it, and
+ * Graph's sentence from the direct read says what the account thinks.
+ */
+export function accountlessDetails(input: {
+  inspection: TokenInspection | null;
+  clientBusinessId: string | null;
+  configuredAccountId: string | null;
+  probeError: string | null;
+}): string[] {
+  const details: string[] = [];
+  const { inspection } = input;
+
+  if (inspection) {
+    details.push(
+      `Token: type ${inspection.type ?? 'not reported'}, ` +
+        `${inspection.expiresAt ? `expires ${inspection.expiresAt.toISOString()}` : 'never expires'}, ` +
+        `for app ${inspection.appId ?? 'not reported'}.`,
+    );
+    details.push(
+      `Permissions on the token: ${inspection.scopes.length ? inspection.scopes.join(', ') : 'none reported'}.`,
+    );
+    const targeted = inspection.granularScopes.filter((entry) => entry.targetIds);
+    if (targeted.length) {
+      details.push(
+        `Assets named on the token: ${targeted
+          .map((entry) => `${entry.scope} → ${entry.targetIds!.join(', ')}`)
+          .join('; ')}.`,
+      );
+    }
+    if (!inspection.scopes.includes('business_management')) {
+      details.push(
+        'The token carries no business_management. Meta lists it as a prerequisite for the ' +
+          'system-user token and leaves it out of the default configuration; without it the ' +
+          'Instagram account is shared with the app but not assigned to the token. Add it under ' +
+          'Facebook Login for Business → Configurations → Edit (the Unified login tab’s editor ' +
+          'does not offer it), remove ShipBlu Helpdesk under Business settings → Integrations → ' +
+          'Connected apps so the next login creates the connection afresh, then connect again.',
+      );
+    }
+  } else {
+    details.push(
+      'Meta’s token inspection did not answer, so the token’s permissions are not known.',
+    );
+  }
+
+  details.push(`Business portfolio: ${input.clientBusinessId ?? 'not reported'}.`);
+
+  if (input.configuredAccountId) {
+    details.push(
+      input.probeError
+        ? `Reading INSTAGRAM_ACCOUNT_ID (${input.configuredAccountId}) with the token: ${input.probeError}`
+        : `INSTAGRAM_ACCOUNT_ID is ${input.configuredAccountId}.`,
+    );
+  } else {
+    details.push('INSTAGRAM_ACCOUNT_ID is not set in this environment.');
+  }
+
+  return details;
+}
+
+/**
  * Why a token Meta just issued must not be used, or null. Only what Meta
  * actually said is held against it: not valid, or minted for another app —
  * which is a configuration belonging to a different app than `META_APP_ID`
@@ -509,7 +612,12 @@ export type CallbackOutcome =
       configuredAccountId: string | null;
     }
   | { kind: 'cancelled'; reason: string }
-  | { kind: 'refused'; reason: string };
+  | {
+      kind: 'refused';
+      reason: string;
+      /** What the page knows, one line each, where the reason alone would be a guess. */
+      details?: string[];
+    };
 
 /**
  * The one-time page, as an HTML string.
@@ -529,7 +637,13 @@ export function callbackPage(outcome: CallbackOutcome): string {
         ? `<h1>Nothing was changed</h1>
 <p>Meta's login was closed before it finished (${escapeHtml(outcome.reason)}). No token was issued and nothing here moved.</p>`
         : `<h1>Instagram was not connected</h1>
-<p>${escapeHtml(outcome.reason)}</p>`;
+<p>${escapeHtml(outcome.reason)}</p>${
+            outcome.details?.length
+              ? `\n<h2>What Meta said</h2>\n<ul>\n${outcome.details
+                  .map((line) => `<li>${escapeHtml(line)}</li>`)
+                  .join('\n')}\n</ul>`
+              : ''
+          }`;
 
   return `<!doctype html>
 <html lang="en">

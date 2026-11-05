@@ -235,8 +235,38 @@ describe('GET /api/meta/unified-login/callback', () => {
     expect(html).not.toContain(TOKEN);
   });
 
-  it('refuses a token that reaches no Instagram account, and never shows it', async () => {
+  it('accepts a token whose account list is empty when it reads the configured account directly', async () => {
+    // 2026-11-05: two logins, the portfolio listing the account as shared, and
+    // an empty list both times. The read every reply makes is the proof.
     answers['/me/assigned_instagram_accounts'] = { body: { data: [] } };
+    answers['/17841448759001625'] = { body: { id: '17841448759001625', username: 'shipblu' } };
+
+    const response = await GET(request(`code=${CODE}&state=${STATE}`));
+    const html = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(html.split(TOKEN).length - 1).toBe(1);
+    expect(html).toContain('@shipblu');
+    expect(html).toContain('list of the token');
+    expect(html).toContain('was empty, but the token reads 17841448759001625 directly');
+    const probe = requests.find((entry) => entry.url.pathname.endsWith('/17841448759001625'));
+    expect(probe?.url.searchParams.get('fields')).toBe('id,username');
+    expect(new Headers(probe?.init?.headers).get('authorization')).toBe(`Bearer ${TOKEN}`);
+  });
+
+  it('refuses a token that reaches no account, naming the permissions it carries and Graph\u2019s sentence', async () => {
+    answers['/me/assigned_instagram_accounts'] = { body: { data: [] } };
+    answers['/17841448759001625'] = {
+      status: 400,
+      body: {
+        error: {
+          message:
+            'Unsupported get request. Object with ID \u201817841448759001625\u2019 does not exist',
+          code: 100,
+          error_subcode: 33,
+        },
+      },
+    };
 
     const response = await GET(request(`code=${CODE}&state=${STATE}`));
     const html = await response.text();
@@ -244,6 +274,25 @@ describe('GET /api/meta/unified-login/callback', () => {
     expect(response.status).toBe(409);
     expect(html).toContain('reaches no Instagram account');
     expect(html).not.toContain(TOKEN);
+    // The facts, not a guess about the dialog: the scopes, the missing
+    // prerequisite, the portfolio and what the account said.
+    expect(html).toContain('instagram_basic, instagram_manage_messages');
+    expect(html).toContain('business_management');
+    expect(html).toContain('555555555555');
+    expect(html).toContain('Unsupported get request');
+  });
+
+  it('says so when INSTAGRAM_ACCOUNT_ID is unset and the list is empty, probing nothing', async () => {
+    setTestEnv({ INSTAGRAM_ACCOUNT_ID: undefined });
+    answers['/me/assigned_instagram_accounts'] = { body: { data: [] } };
+
+    const response = await GET(request(`code=${CODE}&state=${STATE}`));
+    const html = await response.text();
+
+    expect(response.status).toBe(409);
+    expect(html).toContain('INSTAGRAM_ACCOUNT_ID is unset');
+    expect(html).not.toContain(TOKEN);
+    expect(requests.some((entry) => entry.url.pathname.endsWith('/17841448759001625'))).toBe(false);
   });
 
   it('still shows the token when the inspection and the business read do not answer, with warnings', async () => {
