@@ -88,7 +88,6 @@ export default async function ArticlePage({
         ]}
         title={article.title}
         selfPath={`/${locale}/a/${article.slug}`}
-        icon={<DocumentIcon size={24} />}
         meta={
           <>
             {t(locale, 'updated')} {formatArticleDate(locale, article.updatedAt)}
