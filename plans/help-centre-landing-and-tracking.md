@@ -183,7 +183,8 @@ would put it in a log even if it kept it out of an index.
   baseline instead of on its own line.
 - `SearchBox` gained a `placeholderKey`, so the front page can afford a
   placeholder that names an example question and a page header cannot.
-- `Hero` was deleted from `chrome.tsx`, and `Band` gained a `subtle` tone. The
+- _Superseded by `plans/help-centre-design-v02.md`, where every page has one
+  pale band._ `Hero` was deleted from `chrome.tsx`, and `Band` gained a `subtle` tone. The
   system is explicit that blue is the action colour and never a page background
   outside an auth or marketing panel, so a full-bleed blu-500 slab with a title
   on it is the loudest thing on a page and says nothing. The front page has its
@@ -195,7 +196,9 @@ would put it in a log even if it kept it out of an index.
   `ReadonlyHeaders` is not a `Headers` and a page has no `Request` to reach for.
 - `/portal/new` accepts `?subject=`, seeded from the tracking page. It is a
   default value on an editable field; the server still reads what was submitted.
-- Six parcel icons were added to `components/icons.tsx`, chosen per topic by
+- _Superseded by `plans/help-centre-design-v02.md`, where the design's
+  illustrations replace them (`lib/kb/art.ts`) and the icons are gone._ Six parcel
+  icons were added to `components/icons.tsx`, chosen per topic by
   keyword against the category's own name in either language. An unrecognised
   name gets the generic tile: this is decoration, and decoration that misleads is
   worse than none.
@@ -231,7 +234,8 @@ page with its variables unset.
 - **Somewhere to write a service notice.** The banner is built; a
   `service_notices` table with a start, an end and an author is what turns four
   environment variables into something ops owns.
-- **The remaining four page types.** They still wear the solid blue band the
+- **The remaining four page types.** Done since, by the v02 design
+  (`plans/help-centre-design-v02.md`). At the time, they still wore the solid blue band the
   design system would not have given them.
 - **Shipment history.** The page shows one update because the schema holds one.
   A real timeline arrives with the platform sync, and `TrackingTimeline` in the

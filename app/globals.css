@@ -151,14 +151,18 @@
   --text-2xs--line-height: 1rem;
 
   /* Reading scale, help centre and articles: phone value, then the md value. */
-  --text-read-display: 1.875rem;
-  --text-read-display--line-height: 1.2;
-  --text-read-display-md: 2.25rem;
-  --text-read-display-md--line-height: 1.2;
-  --text-read-h1: 1.5rem;
-  --text-read-h1--line-height: 1.25;
-  --text-read-h1-md: 1.875rem;
-  --text-read-h1-md--line-height: 1.25;
+  /* The front door's "How can we help?" and every other page's title. Larger
+     than they were since the help-centre redesign put each on a pale band of
+     its own with nothing competing beside it; tight leading, because at these
+     sizes 1.25 opens a visible gap between two lines of one title. */
+  --text-read-display: 2.125rem;
+  --text-read-display--line-height: 1.15;
+  --text-read-display-md: 3.25rem;
+  --text-read-display-md--line-height: 1.1;
+  --text-read-h1: 1.75rem;
+  --text-read-h1--line-height: 1.2;
+  --text-read-h1-md: 2.375rem;
+  --text-read-h1-md--line-height: 1.15;
   --text-read-h2: 1.5rem;
   --text-read-h2--line-height: 1.3;
   --text-read-h3: 1.25rem;
@@ -828,6 +832,20 @@ body {
   border: 1px solid var(--color-border-subtle);
   border-radius: 0.75rem;
   box-shadow: var(--elevation-card);
+}
+
+/* The help centre's illustrations sit on a pale tile of their own, and the
+   bands they are drawn on are a different pale; fading the tile's edge into
+   whatever is behind it is what stops each one reading as a pasted rectangle.
+   `closest-side` for the small topic drawings, `farthest-side` for the wide
+   support one, whose tile is three times as wide as it is tall. */
+.kb-art-fade {
+  -webkit-mask-image: radial-gradient(closest-side, #000 70%, transparent 100%);
+  mask-image: radial-gradient(closest-side, #000 70%, transparent 100%);
+}
+.kb-art-fade-wide {
+  -webkit-mask-image: radial-gradient(farthest-side, #000 65%, transparent 100%);
+  mask-image: radial-gradient(farthest-side, #000 65%, transparent 100%);
 }
 
 /* ── Article typography ─────────────────────────────────────────────────────

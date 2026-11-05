@@ -54,7 +54,7 @@ export default async function NewPortalTicket({
         ]}
         title={t(locale, 'newTicketTitle')}
         selfPath={`/${locale}/portal/new`}
-        meta={t(locale, 'newTicketIntro')}
+        lede={t(locale, 'newTicketIntro')}
       />
 
       <PageBody>

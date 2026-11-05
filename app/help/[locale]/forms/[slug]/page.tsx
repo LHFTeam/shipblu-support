@@ -102,7 +102,7 @@ export default async function FormPage({
         ]}
         title={name}
         selfPath={formPath(locale, slug)}
-        meta={description || undefined}
+        lede={description || undefined}
       />
 
       <PageBody>

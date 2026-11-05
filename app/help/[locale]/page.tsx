@@ -9,7 +9,7 @@ import {
   recentlyUpdatedArticles,
 } from '@/lib/kb/queries';
 import { kbViewer } from '@/lib/kb/viewer';
-import { CardGrid, EmptyNote, PageBody, SectionHeading } from './chrome';
+import { Container, EmptyNote, SectionHeading } from './chrome';
 import {
   ArticleShortlist,
   ContactPanel,
@@ -17,6 +17,7 @@ import {
   popularShortlist,
   recentShortlist,
   TopicCard,
+  TopicGrid,
 } from './home';
 
 export const dynamic = 'force-dynamic';
@@ -26,15 +27,19 @@ export const dynamic = 'force-dynamic';
  *
  * Four things, in the order a visitor wants them: the two questions they arrive
  * with (a phrase to search, or a parcel to find), the topics, the answers other
- * people needed this month, and only then how to reach a human. Everything on
- * the page is read from what is actually in the knowledge base, and each block
- * below removes itself when there is nothing to put in it — a freshly imported
- * help centre with no views and no tags renders as the front page it can honestly
+ * people needed, and only then how to reach a human. Everything on the page is
+ * read from what is actually in the knowledge base, and each block below
+ * removes itself when there is nothing to put in it — a freshly imported help
+ * centre with no views and no tags renders as the front page it can honestly
  * be, not as a page of empty furniture.
  *
  * All six reads go out at once. They are independent, they hit different
  * indexes, and awaiting them in sequence would make the front page — the most
  * requested page on the site — six round trips deep.
+ *
+ * The body is a `Container` with the design's own 48px between sections rather
+ * than `PageBody`, whose shorter top suits a page that opens under a header
+ * band's title; this one opens under the hero, and the topics need the air.
  */
 export default async function HelpCentreHome({ params }: { params: Promise<{ locale: string }> }) {
   const { locale } = await params;
@@ -57,28 +62,33 @@ export default async function HelpCentreHome({ params }: { params: Promise<{ loc
     <>
       <HomeHero locale={locale} tags={tags} />
 
-      <PageBody className="flex flex-col gap-10">
+      <Container className="flex flex-col gap-10 pt-10 pb-12 sm:gap-12 sm:pt-12 sm:pb-16">
         <section>
-          <SectionHeading meta={total > 0 ? articleCount(locale, total) : null}>
+          {/* The count alone: the design adds "updated weekly", which nothing
+              here schedules or measures. */}
+          <SectionHeading id="topics" meta={total > 0 ? articleCount(locale, total) : null}>
             {t(locale, 'browseTopics')}
           </SectionHeading>
 
           {categories.length === 0 ? (
             <EmptyNote>{t(locale, 'emptyCategory')}</EmptyNote>
           ) : (
-            <CardGrid>
+            <TopicGrid count={categories.length}>
               {categories.map((category) => (
                 <TopicCard key={category.id} locale={locale} category={category} />
               ))}
-            </CardGrid>
+            </TopicGrid>
           )}
         </section>
 
         {popular.length > 0 || recent.length > 0 ? (
           <div className="grid gap-8 md:grid-cols-2">
+            {/* "Most read", not the design's "this month": `view_count` is
+                every read the article has had, not a month of them. */}
             <ArticleShortlist
               locale={locale}
               title={t(locale, 'mostRead')}
+              ordered
               articles={popularShortlist(popular)}
             />
             <ArticleShortlist
@@ -90,7 +100,7 @@ export default async function HelpCentreHome({ params }: { params: Promise<{ loc
         ) : null}
 
         <ContactPanel locale={locale} availability={availability} signedIn={Boolean(customer)} />
-      </PageBody>
+      </Container>
     </>
   );
 }

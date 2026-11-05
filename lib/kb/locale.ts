@@ -31,6 +31,17 @@ export const LOCALE_NAMES: Record<Locale, string> = {
   ar: 'العربية',
 };
 
+/**
+ * The header's language switch, as the design draws it: two letters for
+ * English, the first letter of the alphabet for Arabic. Each is in its own
+ * script on purpose — the reader who needs the switch is the one who cannot read
+ * the page's.
+ */
+export const LOCALE_SHORT: Record<Locale, string> = {
+  en: 'EN',
+  ar: 'ع',
+};
+
 /** The handful of strings the public site needs, kept inline rather than in a i18n framework. */
 const STRINGS = {
   en: {
@@ -52,16 +63,11 @@ const STRINGS = {
     allArticles: 'All articles ({n})',
     mostRead: 'Most read',
     recentlyUpdated: 'Recently updated',
-    inThisFolder: 'Articles in this folder',
-    viewAll: 'View all',
     print: 'Print',
     footerRights: 'All rights reserved.',
     noResults: 'No articles matched that search.',
-    resultsFor: 'Results for',
-    wasHelpful: 'Was this article helpful?',
     yes: 'Yes',
     no: 'No',
-    thanks: 'Thanks for the feedback.',
     updated: 'Last updated',
     relatedArticles: 'Related articles',
     backToHelp: 'Back to help centre',
@@ -78,6 +84,31 @@ const STRINGS = {
     channelTicketsDetail: 'Follow up on something already sent.',
     channelTicketsSla: 'Every ticket, on any channel',
 
+    // --- The redesigned help centre (header, topic and article pages) ----
+    navKnowledgeBase: 'Knowledge base',
+    navContact: 'Contact',
+    languageLabel: 'Language',
+    topicsLabel: 'Topics',
+    // {name} is a category's own name, which an editor typed.
+    searchIn: 'Search in {name}',
+    noResultsIn: 'No articles in {name} match “{q}”.',
+    resultsForIn: 'Results for “{q}” in {name}',
+    // The unscoped title, as a template so each language keeps its own
+    // quotation marks: Arabic's «» beside the scoped title, not English's “”.
+    resultsForQuery: 'Results for “{q}”',
+    searchEverywhere: 'Search the whole help centre',
+    ctaNotFoundTitle: 'Didn’t find your answer?',
+    ctaStuckTitle: 'Stuck on a step?',
+    onThisPage: 'On this page',
+    backToTopic: 'Back to topic',
+    nextArticle: 'Next article',
+    feedbackQuestion: 'Did this article answer your question?',
+    feedbackYes: 'Yes, it did',
+    feedbackNo: 'No, I still need help',
+    feedbackThanksYes: 'Thanks. We use your answer to decide which articles to improve.',
+    feedbackThanksNo: 'Thanks for telling us. Support can answer your question directly.',
+    // The accessible name of the "Back to topic" / "Next article" pair.
+    articleNavLabel: 'More in this topic',
     // --- Tracking a shipment ---------------------------------------------
     trackTitle: 'Track a shipment',
     trackIntro: 'Expecting a parcel? Its tracking number is all you need for the latest status.',
@@ -248,16 +279,11 @@ const STRINGS = {
     allArticles: 'كل المقالات ({n})',
     mostRead: 'الأكثر قراءة',
     recentlyUpdated: 'آخر ما تم تحديثه',
-    inThisFolder: 'مقالات في هذا المجلد',
-    viewAll: 'عرض الكل',
     print: 'طباعة',
     footerRights: 'جميع الحقوق محفوظة.',
     noResults: 'لا توجد مقالات مطابقة لهذا البحث.',
-    resultsFor: 'نتائج البحث عن',
-    wasHelpful: 'هل كان هذا المقال مفيدًا؟',
     yes: 'نعم',
     no: 'لا',
-    thanks: 'شكرًا لحضرتك.',
     updated: 'آخر تحديث',
     relatedArticles: 'مقالات ذات صلة',
     backToHelp: 'العودة إلى مركز المساعدة',
@@ -273,6 +299,27 @@ const STRINGS = {
     channelTicketsDetail: 'متابعة طلب سبق إرساله.',
     channelTicketsSla: 'كل ما راسلت به حضرتك الدعم، من أي قناة',
 
+    // --- The redesigned help centre (header, topic and article pages) ----
+    navKnowledgeBase: 'قاعدة المعرفة',
+    navContact: 'التواصل معنا',
+    languageLabel: 'اللغة',
+    topicsLabel: 'المواضيع',
+    searchIn: 'البحث في {name}',
+    noResultsIn: 'لا توجد مقالات في {name} تطابق «{q}».',
+    resultsForIn: 'نتائج البحث عن «{q}» في {name}',
+    resultsForQuery: 'نتائج البحث عن «{q}»',
+    searchEverywhere: 'البحث في مركز المساعدة كله',
+    ctaNotFoundTitle: 'لم تجد حضرتك الإجابة؟',
+    ctaStuckTitle: 'هل توقفت حضرتك عند خطوة؟',
+    onThisPage: 'في هذه الصفحة',
+    backToTopic: 'العودة إلى الموضوع',
+    nextArticle: 'المقال التالي',
+    feedbackQuestion: 'هل أجاب هذا المقال عن سؤال حضرتك؟',
+    feedbackYes: 'نعم، أجاب',
+    feedbackNo: 'لا، ما زلت أحتاج إلى مساعدة',
+    feedbackThanksYes: 'شكرًا لحضرتك. نستخدم إجابة حضرتك في اختيار المقالات التي نحسّنها.',
+    feedbackThanksNo: 'شكرًا لإخبارنا. يستطيع فريق الدعم الإجابة عن سؤال حضرتك مباشرة.',
+    articleNavLabel: 'المزيد في هذا الموضوع',
     // --- Tracking a shipment ---------------------------------------------
     trackTitle: 'تتبّع شحنة',
     trackIntro: 'في انتظار شحنة؟ رقم التتبّع يكفي لمعرفة آخر حالة لها.',
@@ -437,6 +484,17 @@ export function tCount(locale: Locale, key: StringKey, count: number): string {
 }
 
 /**
+ * A string with named slots — `{name}`, `{q}` — filled in verbatim.
+ *
+ * The values are text React will escape when it renders the result, never
+ * markup; a slot the string does not have is ignored, and one the caller did not
+ * supply is left showing, which is the visible failure a review catches.
+ */
+export function tFill(locale: Locale, key: StringKey, values: Record<string, string>): string {
+  return t(locale, key).replace(/\{(\w+)\}/g, (slot, name: string) => values[name] ?? slot);
+}
+
+/**
  * Digits in the reader's own numerals.
  *
  * Arabic-Indic digits in Arabic, Latin in English. A count rendered with
@@ -472,4 +530,29 @@ export function articleCount(locale: Locale, count: number): string {
   const rule = new Intl.PluralRules(locale === 'ar' ? 'ar-EG' : 'en-GB').select(count);
   const template = forms[rule] ?? forms.other!;
   return template.replace('{n}', formatCount(locale, count));
+}
+
+/**
+ * "4 min read", "٤ دقائق قراءة" — the article's meta line.
+ *
+ * Plural rules again rather than a template, for the reason `articleCount`
+ * gives: Arabic says one minute, two minutes, three to ten minutes and eleven
+ * minutes with four different words.
+ */
+const READING_TIME: Record<Locale, Partial<Record<Intl.LDMLPluralRule, string>>> = {
+  en: { one: '{n} min read', other: '{n} min read' },
+  ar: {
+    one: 'دقيقة قراءة',
+    two: 'دقيقتا قراءة',
+    few: '{n} دقائق قراءة',
+    many: '{n} دقيقة قراءة',
+    other: '{n} دقيقة قراءة',
+  },
+};
+
+export function readingTime(locale: Locale, minutes: number): string {
+  const forms = READING_TIME[locale];
+  const rule = new Intl.PluralRules(locale === 'ar' ? 'ar-EG' : 'en-GB').select(minutes);
+  const template = forms[rule] ?? forms.other!;
+  return template.replace('{n}', formatCount(locale, minutes));
 }
