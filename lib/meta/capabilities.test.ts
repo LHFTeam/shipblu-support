@@ -138,12 +138,14 @@ describe('diagnoseCapabilities', () => {
     */
     const scopes = requiredScopes('unified_login');
 
+    // Not business_management: the list edge needs it, no reply does, and a
+    // row asking for it reported the working token of 2026-11-05 as blocked.
     expect(scopes).toEqual([
-      'business_management',
       'instagram_basic',
       'instagram_manage_comments',
       'instagram_manage_messages',
     ]);
+    expect(scopes).not.toContain('business_management');
     expect(new Set(requiredScopes('facebook_page')).has('instagram_manage_messages')).toBe(true);
   });
 

@@ -641,7 +641,8 @@ there and nowhere downstream. It cannot separate the Page's deliveries from
 Unified Login's, which are signed with the same `META_APP_SECRET`, so both are
 labelled `facebook_page`; nothing downstream needs more, since the one reader
 of the label (`lib/meta/thread.ts`) asks only whether a `standby` should stop a
-send, and Unified Login has no handover protocol for one to be about. The
+send, and the answer is the same for both: the account's thread owner refuses a
+Unified Login send as it refuses the Page's (`docs/PROJECT-STATE.md` §6.107). The
 envelope — `messaging` or `standby` — is what tells the two apart in the table,
 and the plan's verification queries read it off the payload.
 `INSTAGRAM_APP_SECRET` is also read under its older name

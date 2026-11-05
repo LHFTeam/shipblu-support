@@ -38,9 +38,10 @@ import type { MetaPlatform } from './types';
  * `facebook_page` whichever of the two sent it — `lib/meta/signing.ts` cannot
  * tell them apart and does not pretend to. Nothing downstream needs it to: the
  * one reader of a delivery's connection, `lib/meta/thread.ts`, asks whether a
- * `standby` recorded on the Page's connection should stop a send, and it never
- * stops one going out over Unified Login, which has no handover protocol for
- * it to be about.
+ * `standby` should stop a send, and it reads a Unified Login delivery as the
+ * Page's — which is the right answer, because the account's thread owner
+ * refuses a Unified Login send exactly as it refuses the Page's
+ * (`docs/PROJECT-STATE.md` §6.107).
  */
 const META_CONNECTIONS = ['facebook_page', 'instagram_login', 'unified_login'] as const;
 
@@ -101,12 +102,14 @@ export function unifiedLoginConfigured(): boolean {
  * direct connection, then the Page. Unified Login is the better route on every
  * axis that matters: its token never expires, where the direct connection's
  * Instagram User token ran out on 2026-10-29 and took every Instagram call with
- * it (`docs/PROJECT-STATE.md`, the header); it is not subject to another app's
- * thread control, where the Page connection has been receiving `standby` and
- * nothing else since 27 August; and its permissions are the `instagram_*`
- * family, which App Review already granted at Advanced Access on 2026-09-19
- * for messaging. The direct connection keeps second place for the reason it
- * had first: it is the route around the Page's handover. Unset leaves every
+ * it (`docs/PROJECT-STATE.md`, the header), and its permissions are the
+ * `instagram_*` family, which App Review already granted at Advanced Access on
+ * 2026-09-19 for messaging. It is **not** a route around another app's thread
+ * control, as this comment once claimed: the first three Unified Login sends
+ * were refused `2534037` until this app was made the account's default app
+ * on 2026-11-05 (§6.107). The direct connection keeps second place for the
+ * reason it had first: it is the one route seen to send past the Page's
+ * handover (§6.29). Unset leaves every
  * Instagram call going out exactly as it did before this existed — Page token,
  * `graph.facebook.com`.
  *

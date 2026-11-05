@@ -65,16 +65,16 @@ integrations and releases new Instagram features for. Read against the two
 connections this app already has (`lib/meta/connection.ts` carries the same
 table beside the code):
 
-|                    | `facebook_page`                                    | `instagram_login`                                 | `unified_login`                                                             |
-| ------------------ | -------------------------------------------------- | ------------------------------------------------- | --------------------------------------------------------------------------- |
-| Meta's name        | Instagram API with Facebook Login                  | Instagram API with Instagram Login                | Instagram API with Unified Login                                            |
-| host               | `graph.facebook.com`                               | `graph.instagram.com`                             | `graph.facebook.com`                                                        |
-| credential         | `META_PAGE_ACCESS_TOKEN`, a Page token             | `INSTAGRAM_ACCESS_TOKEN`, an Instagram User token | `INSTAGRAM_UNIFIED_LOGIN_TOKEN`, a Business Integration System User token   |
-| expiry             | long-lived                                         | 60 days — ran out 2026-10-29                      | never, as the configuration sets it                                         |
-| signs webhooks     | `META_APP_SECRET`                                  | `INSTAGRAM_APP_SECRET`                            | `META_APP_SECRET` — the same as the Page's                                  |
-| permissions        | `instagram_basic`, `instagram_manage_*`, `pages_*` | `instagram_business_*`                            | `instagram_basic`, `instagram_manage_messages`, `instagram_manage_comments` |
-| handover protocol  | yes — `standby` while another app owns the thread  | no                                                | no — "not yet supported" in Meta's migration guide                          |
-| `/me` on the token | the Page                                           | the Instagram account                             | the business integration system user — **never** the account                |
+|                    | `facebook_page`                                    | `instagram_login`                                 | `unified_login`                                                                                                |
+| ------------------ | -------------------------------------------------- | ------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| Meta's name        | Instagram API with Facebook Login                  | Instagram API with Instagram Login                | Instagram API with Unified Login                                                                               |
+| host               | `graph.facebook.com`                               | `graph.instagram.com`                             | `graph.facebook.com`                                                                                           |
+| credential         | `META_PAGE_ACCESS_TOKEN`, a Page token             | `INSTAGRAM_ACCESS_TOKEN`, an Instagram User token | `INSTAGRAM_UNIFIED_LOGIN_TOKEN`, a Business Integration System User token                                      |
+| expiry             | long-lived                                         | 60 days — ran out 2026-10-29                      | never, as the configuration sets it                                                                            |
+| signs webhooks     | `META_APP_SECRET`                                  | `INSTAGRAM_APP_SECRET`                            | `META_APP_SECRET` — the same as the Page's                                                                     |
+| permissions        | `instagram_basic`, `instagram_manage_*`, `pages_*` | `instagram_business_*`                            | `instagram_basic`, `instagram_manage_messages`, `instagram_manage_comments`                                    |
+| handover protocol  | yes — `standby` while another app owns the thread  | no                                                | **yes** — a send is refused `2534037` while another app is the account's default app (read 2026-11-05, §6.107) |
+| `/me` on the token | the Page                                           | the Instagram account                             | the business integration system user — **never** the account                                                   |
 
 Three facts carry the design:
 
@@ -92,9 +92,10 @@ Three facts carry the design:
   `META_APP_SECRET`, so `lib/meta/signing.ts` labels a Unified Login delivery
   `facebook_page`, and `webhook_events.connection` never says `unified_login`.
   The one thing that reads a delivery's connection, `lib/meta/thread.ts`, asks
-  whether a `standby` recorded on the Page's connection should stop a send, and
-  it never stops one going out over Unified Login, which has no handover
-  protocol for a `standby` to be about. So the label costs nothing today;
+  whether a `standby` should stop a send, and since 2026-11-05 it stops a
+  Unified Login send on one exactly as it stops the Page's — the first three
+  live replies were refused `100 / 2534037 "not the thread owner"` until this
+  app was made the account's default app (§6.107). So the label costs nothing;
   the envelope — `messaging` or `standby` — is what separates the two in the
   table, and the verification queries below read it off the payload.
 - **The token is the flag.** `metaConnection('instagram')` answers
@@ -107,15 +108,15 @@ Three facts carry the design:
 ## Decisions, with reasons
 
 1. **Unified Login goes first in `metaConnection`'s order, ahead of the direct
-   connection.** It wins on every axis that matters: the token never expires,
-   where the direct connection's ran out and took the channel with it; it is
-   not subject to another app's thread control, where the Page has received
-   `standby` and nothing else since 27 August; and its permissions are the
-   `instagram_*` pair App Review granted at Advanced Access on 2026-09-19, so
-   nothing is resubmitted for messaging. The direct connection keeps second
-   place for the reason it had first — it is the route around the Page's
-   handover — so an environment that never sets the new token behaves exactly
-   as it did.
+   connection.** It wins on the two axes that matter: the token never expires,
+   where the direct connection's ran out and took the channel with it; and its
+   permissions are the `instagram_*` pair App Review granted at Advanced Access
+   on 2026-09-19, so nothing is resubmitted for messaging. It is **not** a way
+   past another app's thread control, as this decision first said: a Unified
+   send is this app's send, and Instagram's thread owner is an app (§6.107).
+   The direct connection keeps second place for the reason it had first — it
+   is the one route seen to send past the Page's handover (§6.29) — so an
+   environment that never sets the new token behaves exactly as it did.
 2. **The token goes to the browser once, and to Render by hand; nothing stores
    it.** The repository stores exactly one credential, the WhatsApp business
    token Embedded Signup mints, and AGENTS.md says a second table holding a
@@ -172,19 +173,19 @@ Three facts carry the design:
 
 ## Shape
 
-| Piece                                                         | Where                                                                                           |
-| ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| The connection, its label, host and precedence                | `lib/meta/connection.ts` — `MetaConnection`, `metaConnection`, `unifiedLoginConfigured`         |
-| The two variables                                             | `lib/env.ts`, `render.yaml` (both environment groups, dashboard-owned)                          |
-| The host and token a call goes out with                       | `endpoint()` in `lib/meta/client.ts`                                                            |
-| `standby` never blocking a Unified Login send                 | `metaThreadState` in `lib/meta/thread.ts`                                                       |
-| The permissions and features the connection depends on        | `CAPABILITIES`, `FEATURES`, `requiredScopes('unified_login')` in `lib/meta/capabilities.ts`     |
-| The login: readiness, dialog URL, exchange, the one-time page | `lib/meta/unified-login.ts`                                                                     |
-| The two routes                                                | `app/api/meta/unified-login/start/route.ts`, `…/callback/route.ts`                              |
-| The card on Settings → Channels                               | `app/(console)/admin/channels/unified-login-card.tsx`                                           |
-| The account-level subscription                                | `readUnifiedLoginSubscription` / `applyUnifiedLoginSubscription` in `lib/meta/subscriptions.ts` |
-| The diagnostic                                                | `worker/handlers/check-meta-permissions.ts`, through `inspectToken` and `readGraph`             |
-| Every endpoint, in one table                                  | `docs/meta-endpoints.md` §1–§4, §6, §8                                                          |
+| Piece                                                           | Where                                                                                           |
+| --------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| The connection, its label, host and precedence                  | `lib/meta/connection.ts` — `MetaConnection`, `metaConnection`, `unifiedLoginConfigured`         |
+| The two variables                                               | `lib/env.ts`, `render.yaml` (both environment groups, dashboard-owned)                          |
+| The host and token a call goes out with                         | `endpoint()` in `lib/meta/client.ts`                                                            |
+| `standby` blocking a Unified Login send as it blocks the Page's | `metaThreadState` in `lib/meta/thread.ts`                                                       |
+| The permissions and features the connection depends on          | `CAPABILITIES`, `FEATURES`, `requiredScopes('unified_login')` in `lib/meta/capabilities.ts`     |
+| The login: readiness, dialog URL, exchange, the one-time page   | `lib/meta/unified-login.ts`                                                                     |
+| The two routes                                                  | `app/api/meta/unified-login/start/route.ts`, `…/callback/route.ts`                              |
+| The card on Settings → Channels                                 | `app/(console)/admin/channels/unified-login-card.tsx`                                           |
+| The account-level subscription                                  | `readUnifiedLoginSubscription` / `applyUnifiedLoginSubscription` in `lib/meta/subscriptions.ts` |
+| The diagnostic                                                  | `worker/handlers/check-meta-permissions.ts`, through `inspectToken` and `readGraph`             |
+| Every endpoint, in one table                                    | `docs/meta-endpoints.md` §1–§4, §6, §8                                                          |
 
 ## The Meta side, in order
 
@@ -228,16 +229,17 @@ Instagram → **"API setup with Unified login"** → **"1. Configure your app"**
    `instagram_manage_messages` and `instagram_manage_comments`. Remove
    `ads_management`, `ads_read` and `instagram_content_publish` (decision 5).
    Under business assets keep the Instagram account and drop the ad account.
-   **Add `business_management`**, which the tab's own editor does not offer:
-   Facebook Login for Business → Configurations → the same configuration →
-   Edit. Meta's permissions page calls it a prerequisite for the system-user
-   token and leaves it out of the default; without it the login ends in
-   confetti and the portfolio lists the account as shared with the app, but
-   the token is assigned no Instagram account — `/me/assigned_instagram_accounts`
-   is empty and every read of the account id is refused `100/33`. That is what
-   the first two live attempts met on 2026-11-05 (01:39 and 01:41 UTC), and
-   what others report with the same fix. The token keeps the permission only
-   on an app with Advanced Access to `public_profile`, which this app has.
+   `business_management` is **not** needed, and the tab's editor does not
+   offer it. The first three live attempts of 2026-11-05 (01:39, 01:41 and
+   ~09:30 UTC) ended with `/me/assigned_instagram_accounts` empty and were
+   read as its absence; the fourth, after the connection was removed under
+   Business settings → Integrations → Connected apps and made afresh, issued
+   a token still without it whose list was still empty — and which read the
+   account directly, subscribed it, and sent. The permission is what that
+   _list edge_ needs, nothing a reply does, so the callback and
+   `check_meta_permissions` read the account directly when the list is empty
+   (§6.107). An edit under Facebook Login for Business did not put it on the
+   token either; nothing here needs it to.
 3. Keep the access token as **System-user access token** and the expiration
    as **Never**. The never-expiring token is the whole point; a configuration
    set to a user token reproduces the 60-day problem under a new name.
@@ -369,8 +371,10 @@ take the old one away — in the dashboard first, the variable last.
 2. **Connect.** An admin holding `admin.channels.connect` presses **Connect
    Instagram**. Meta's login opens; they pick ShipBlu's business portfolio and
    the Instagram account and accept the three permissions. The callback page
-   shows, once: the accounts the token reaches (the username and id must
-   include `17841448759001625`, and the page warns if it does not), the
+   shows, once: the accounts the token reaches — read directly off
+   `INSTAGRAM_ACCOUNT_ID` when Meta's list is empty, which it is for every
+   token this configuration issues (the username and id must include
+   `17841448759001625`, and the page warns if it does not), the
    token's type and expiry ("never expires"), the scopes against
    `requiredScopes('unified_login')`, the client business id, and the token in
    a read-only box with a Copy button. The log line is
@@ -405,14 +409,27 @@ messages, comments, …`. The app-level half it reads first and writes only when
    `instagram_manage_messages` granted, `instagram_manage_comments` present,
    the account id listed. Note what it prints for `type`: see **Not known
    yet**.
-6. **One reply, from a role holder's own DM.** Somebody with a role on the app
+6. **Make this app the Instagram account's default app.** Page settings →
+   Advanced messaging (Conversation Routing): until then every reply is
+   refused `100 / 2534037 "not the thread owner"`, token or no token — the
+   first three live replies were, on 2026-11-05 (§6.107). Meta confirms the
+   change with an `app_roles` webhook naming this app `default_app` on the
+   `instagram` object (10:30:24 UTC that day), and the next customer message
+   arrives in `messaging` rather than `standby`. **This is Instagram's point of
+   no return (§5.1):** from that moment Instagram DMs are answered here or
+   nowhere, and Freshworks reads them in standby. Messenger is a separate
+   setting on the same page and was left with Freshworks.
+7. **One reply, from a role holder's own DM.** Somebody with a role on the app
    writes to the account from their own Instagram, and an agent answers from
    the console inside 24 hours. The worker log must show
    `[send_meta] <message id> sent as dm on instagram via unified_login`,
-   and the reply must arrive on the phone. A `(#10)`, `(#200)` or 190 here is
-   one of the troubleshooting strings below, and the token is reconnected
-   rather than retried.
-7. **Watch for an hour.** The customer's next message is now delivered up to
+   and the reply must arrive on the phone. _Done 2026-11-05 10:30:46 UTC, on
+   ticket #13791, 22 seconds after the default app changed; a comment reply, a
+   private reply and a comment deletion followed at 10:45–10:46, all via
+   `unified_login`._ A `(#10)`, `(#200)` or 190 here is one of the
+   troubleshooting strings below, and the token is reconnected rather than
+   retried.
+8. **Watch for an hour.** The customer's next message is now delivered up to
    three times — Page (`standby`), Instagram Login (`messaging`,
    `INSTAGRAM_APP_SECRET`) and Unified Login (`messaging`, `META_APP_SECRET`).
    The endpoint stores all three — the Page's and Unified Login's copies
@@ -425,7 +442,7 @@ messages, comments, …`. The app-level half it reads first and writes only when
    that proves a message is one timeline line and not two. The queries are
    below; a ticket showing the same words twice, seconds apart, stops the
    plan here.
-8. **Disconnect Instagram Login — in the dashboard first.** Instagram → "API
+9. **Disconnect Instagram Login — in the dashboard first.** Instagram → "API
    setup with Instagram login" → disconnect the account. This is the step that
    stops `INSTAGRAM_APP_SECRET` signing anything. Then wait until
    `webhook_events` shows no `instagram_login` delivery for an hour (the first
@@ -433,11 +450,11 @@ messages, comments, …`. The app-level half it reads first and writes only when
    `instagram messaging deliveries are verifying with INSTAGRAM_APP_SECRET` line
    prints once per process, so its silence proves nothing; the query is the
    reading.
-9. **Unset `INSTAGRAM_ACCESS_TOKEN`.** It is expired and second in line, so
-   this changes no routing; it is removed so the card and the diagnostic stop
-   describing a connection that no longer exists.
-10. **Unset `INSTAGRAM_APP_SECRET` and `META_INSTAGRAM_APP_SECRET` — last.**
-    Only after step 8's hour. Unsetting them while the direct connection still
+10. **Unset `INSTAGRAM_ACCESS_TOKEN`.** It is expired and second in line, so
+    this changes no routing; it is removed so the card and the diagnostic stop
+    describing a connection that no longer exists.
+11. **Unset `INSTAGRAM_APP_SECRET` and `META_INSTAGRAM_APP_SECRET` — last.**
+    Only after step 9's hour. Unsetting them while the direct connection still
     delivers is §6.29 reproduced: every one of its deliveries answered 403 and
     dropped. Each costs one HMAC per Instagram delivery while it lingers, which
     is not a reason to hurry.
@@ -508,11 +525,12 @@ whether the System users page offers a narrower revocation is not confirmed.
 Each of these is a reading to take on the first live run and record in
 `docs/PROJECT-STATE.md` §5.2, not something to assume in code:
 
-- **Whether `/me/assigned_instagram_accounts` ever lists the account on
-  v23.0.** The callback now reads `INSTAGRAM_ACCOUNT_ID` with the token
-  directly and accepts the token when that works, noting the empty list as a
-  warning; if the list stays empty while the read works, the edge is not the
-  proof on this version and the plan's step 2 wording moves to the read.
+- ~~**Whether `/me/assigned_instagram_accounts` ever lists the account on
+  v23.0.**~~ _Answered 2026-11-05:_ not for a token without
+  `business_management`, which is every token this configuration issues. The
+  list was empty on all four logins while the direct read of the account
+  succeeded and the token sent; the callback and `check_meta_permissions`
+  judge the token by the read (§6.107).
 - **Whether anything in the two bodies tells Unified Login's copy of an
   event from the Page's.** The envelope does today, for a message, only
   because Freshworks holds the Page's thread; a comment's two copies collapse
@@ -521,18 +539,18 @@ Each of these is a reading to take on the first live run and record in
   between the two copies, `lib/meta/delivery.ts` can key on it and the
   endpoint can label a Unified delivery as its own; the first live hour's rows
   are where to look, side by side.
-- **What `debug_token` reports as `type` for a Business Integration System
-  User token.** `SYSTEM_USER` is the guess; `refuseInspection` warns on
-  anything else and refuses on nothing but `is_valid: false` or a foreign
-  `app_id`, so the first run is what settles it.
-- **Whether a Unified Login delivery ever arrives in `standby`.** Meta's
-  migration guide lists the handover protocol as not supported, so none is
-  expected, and `lib/meta/thread.ts` never blocks a Unified send on one; but a
-  `standby` on an `instagram` delivery is labelled `facebook_page` whichever
-  of the two sent it, so a count of `standby` rows cannot answer this alone —
-  the Page's own copies are `standby` today. It is answered by the Page's
-  copies stopping once Freshworks is swapped out (§5.1) while `standby` rows
-  continue, or not.
+- ~~**What `debug_token` reports as `type` for a Business Integration System
+  User token.**~~ _Answered 2026-11-05:_ `SYSTEM_USER`, `expires_at` 0, the
+  app's id, and seven scopes — the three Instagram ones, `pages_show_list`,
+  `pages_read_engagement`, `pages_read_user_content` and `public_profile`.
+- ~~**Whether a Unified Login delivery ever arrives in `standby`.**~~
+  _Answered 2026-11-05, the other way round from the guess:_ the question
+  that matters is whether a Unified Login **send** is subject to the account's
+  thread owner, and it is — `100 / 2534037` three times while Freshworks was
+  the default app, a send 22 seconds after this app became it (§6.107).
+  `lib/meta/thread.ts` now blocks a Unified send on a `standby` as it blocks
+  the Page's. Whether the delivery itself was the Page's copy or Unified
+  Login's is still not readable off the row, and no longer decides anything.
 - **Whether `messaging_type: RESPONSE` is accepted on the Unified send.** The
   in-window Instagram body carries it and the send goes to the Page's host,
   where the parameter is documented for every send, so yes is expected; the
@@ -573,19 +591,20 @@ community or support if the first run does not settle them.
 From Meta's eligibility and troubleshooting page for Unified Login, so a
 search on the sentence lands here:
 
-| Graph says                                                                                             | Means                                                                                                                                  | Do                                                                                                                                                                                                                                                                             |
-| ------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `(#10) Access is denied because the instagram account type is not business or creator.`                | The account picked in the login is a personal account                                                                                  | Convert it to a professional account in the Instagram app, then connect again                                                                                                                                                                                                  |
-| `(#200) The account owner has disabled access to Instagram Direct Messaging Outside of Instagram App.` | "Allow access to messages" is off for connected tools                                                                                  | Instagram app → Settings → Messages and story replies → Message controls → Connected tools → allow, then send again                                                                                                                                                            |
-| `(#10) App is missing the instagram_manage_messages permission to access Instagram user information.`  | The configuration or the grant lacks the permission, or it was unticked in the login                                                   | Check the configuration's permissions and `check_meta_permissions`; connect again accepting all three                                                                                                                                                                          |
-| `190 Session has expired` / `Error validating access token`                                            | The client removed the app from the portfolio, moved the account to another portfolio, or revoked the system user                      | Connect again; the old token is gone for good                                                                                                                                                                                                                                  |
-| The "API setup with Unified login" tab is missing                                                      | The app is not owned by a business portfolio                                                                                           | App settings → Basic → assign a business portfolio                                                                                                                                                                                                                             |
-| The dialog answers "URL blocked" or "redirect_uri is not allowed"                                      | The callback is not registered, or `APP_URL` differs from the registered origin                                                        | Step 2 above; compare the generated Login URL with `loginDialogUrl()`'s                                                                                                                                                                                                        |
-| The callback page says the token reaches no Instagram account                                          | The configuration lacks `business_management`, so the shared account was never assigned to the token; or the login skipped the account | Step 1's `business_management`; then remove ShipBlu Helpdesk under Business settings → Integrations → Connected apps so the next login creates the connection afresh, and connect again. The page prints the token's permissions and Graph's sentence from reading the account |
-| The callback page warns `INSTAGRAM_ACCOUNT_ID` is not among the accounts                               | The wrong account or portfolio was picked, or the variable names another account                                                       | Compare the id shown with `INSTAGRAM_ACCOUNT_ID`; do not set the token until they agree                                                                                                                                                                                        |
-| The callback page says the link was not opened from the console, or expired (HTTP 400)                 | No `state` cookie matched: a different browser profile, more than ten minutes in the dialog, or a reused link                          | Back to Channels, press Connect Instagram again, finish in the same browser                                                                                                                                                                                                    |
-| The callback page says Meta refused the login code (HTTP 502)                                          | The code was spent or expired, or the redirect URL on the configuration differs from the callback's                                    | Step 2 above, then connect again; a code is single-use                                                                                                                                                                                                                         |
-| The callback page says the token was minted for another app (HTTP 409)                                 | `INSTAGRAM_UNIFIED_LOGIN_CONFIG_ID` names a configuration on a different Meta app than `META_APP_ID`                                   | Set the config id from this app's tab, redeploy, connect again                                                                                                                                                                                                                 |
+| Graph says                                                                                             | Means                                                                                                                                                 | Do                                                                                                                                                                                                                                                                       |
+| ------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `(#10) Access is denied because the instagram account type is not business or creator.`                | The account picked in the login is a personal account                                                                                                 | Convert it to a professional account in the Instagram app, then connect again                                                                                                                                                                                            |
+| `(#200) The account owner has disabled access to Instagram Direct Messaging Outside of Instagram App.` | "Allow access to messages" is off for connected tools                                                                                                 | Instagram app → Settings → Messages and story replies → Message controls → Connected tools → allow, then send again                                                                                                                                                      |
+| `(#10) App is missing the instagram_manage_messages permission to access Instagram user information.`  | The configuration or the grant lacks the permission, or it was unticked in the login                                                                  | Check the configuration's permissions and `check_meta_permissions`; connect again accepting all three                                                                                                                                                                    |
+| `(#100) The action is invalid since it's not the thread owner.` (`100 / 2534037`)                      | Another app — Freshworks, or the Meta inbox — is the account's default app, so Instagram refuses a send from this one whatever token it carries       | Page settings → Advanced messaging: make this app the account's default app (activation step 6); the next message arrives in `messaging` and sends go through                                                                                                            |
+| `190 Session has expired` / `Error validating access token`                                            | The client removed the app from the portfolio, moved the account to another portfolio, or revoked the system user                                     | Connect again; the old token is gone for good                                                                                                                                                                                                                            |
+| The "API setup with Unified login" tab is missing                                                      | The app is not owned by a business portfolio                                                                                                          | App settings → Basic → assign a business portfolio                                                                                                                                                                                                                       |
+| The dialog answers "URL blocked" or "redirect_uri is not allowed"                                      | The callback is not registered, or `APP_URL` differs from the registered origin                                                                       | Step 2 above; compare the generated Login URL with `loginDialogUrl()`'s                                                                                                                                                                                                  |
+| The callback page says the token reaches no Instagram account                                          | The direct read of `INSTAGRAM_ACCOUNT_ID` failed too (an empty list alone is normal, §6.107): the account was not assigned to the token in this login | Remove ShipBlu Helpdesk under Business settings → Integrations → Connected apps so the next login creates the connection afresh, pick the account in the login, and connect again; the page prints the token's permissions and Graph's sentence from reading the account |
+| The callback page warns `INSTAGRAM_ACCOUNT_ID` is not among the accounts                               | The wrong account or portfolio was picked, or the variable names another account                                                                      | Compare the id shown with `INSTAGRAM_ACCOUNT_ID`; do not set the token until they agree                                                                                                                                                                                  |
+| The callback page says the link was not opened from the console, or expired (HTTP 400)                 | No `state` cookie matched: a different browser profile, more than ten minutes in the dialog, or a reused link                                         | Back to Channels, press Connect Instagram again, finish in the same browser                                                                                                                                                                                              |
+| The callback page says Meta refused the login code (HTTP 502)                                          | The code was spent or expired, or the redirect URL on the configuration differs from the callback's                                                   | Step 2 above, then connect again; a code is single-use                                                                                                                                                                                                                   |
+| The callback page says the token was minted for another app (HTTP 409)                                 | `INSTAGRAM_UNIFIED_LOGIN_CONFIG_ID` names a configuration on a different Meta app than `META_APP_ID`                                                  | Set the config id from this app's tab, redeploy, connect again                                                                                                                                                                                                           |
 
 ## Alternatives rejected
 

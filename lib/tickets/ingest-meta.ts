@@ -141,11 +141,12 @@ export async function ingestMetaMessage(
           metaKind: 'direct_message',
           platform: message.platform,
           accountId: message.accountId,
-          // Which of the two Meta connections delivered this. Recorded beside
-          // `standby` rather than instead of it, because it is what makes the
-          // flag readable: handover belongs to the Facebook Page, so a standby
-          // reported by the Page connection says nothing about a reply sent
-          // with the Instagram account's own token.
+          // Which Meta connection delivered this. Recorded beside `standby`
+          // rather than instead of it, because it is what makes the flag
+          // readable: a standby reported by the Page connection refuses a send
+          // from this app over the Page or Unified Login (§6.107), and has not
+          // been seen to say anything about one sent with the Instagram
+          // account's own token over Instagram Login (§6.29).
           connection: message.connection,
           // Whether this app may answer the thread at all, recorded per message
           // because thread control moves: the same customer can be answerable

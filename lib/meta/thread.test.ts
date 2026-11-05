@@ -193,7 +193,8 @@ describe('metaThreadState across the two Instagram connections', () => {
     expect(state.reason).toBe('standby');
     // The way out is named, because it is a configuration change rather than a
     // negotiation with whoever owns the Page inbox.
-    expect(state.explanation).toContain('INSTAGRAM_UNIFIED_LOGIN_TOKEN');
+    expect(state.explanation).toContain('default app');
+    expect(state.explanation).not.toContain('INSTAGRAM_UNIFIED_LOGIN_TOKEN');
   });
 
   it("reads a standby with no connection recorded as the Page's", () => {
@@ -227,11 +228,11 @@ describe('metaThreadState across the two Instagram connections', () => {
     expect(state.canSend).toBe(true);
   });
 
-  it('lets Unified Login answer a thread the Page does not control', () => {
-    // Meta's migration guide lists the handover protocol as not supported on
-    // Unified Login, so the Page's standby has no standing over a send made
-    // with the business portfolio's token — the same reasoning as the direct
-    // connection, on the Page's own host.
+  it('refuses Unified Login too while another app owns the thread', () => {
+    // The plan guessed the opposite from Meta's migration guide, and the first
+    // three live Unified Login sends were refused 100/2534037 for it
+    // (docs/PROJECT-STATE.md §6.107). The token is the portfolio's, but the
+    // send is this app's, and Instagram's thread owner is an app.
     const state = metaThreadState({
       platform: 'instagram',
       connection: 'unified_login',
@@ -241,8 +242,26 @@ describe('metaThreadState across the two Instagram connections', () => {
       inboundConnection: 'facebook_page',
     });
 
-    expect(state.canSend).toBe(true);
+    expect(state.canSend).toBe(false);
+    expect(state.reason).toBe('standby');
     expect(state.route).toBe('unified_login');
+    expect(state.explanation).toContain('default app');
+  });
+
+  it('does not let a standby the direct connection recorded refuse a Unified Login send', () => {
+    // The direct connection's flag describes graph.instagram.com's thread,
+    // which is the one place the account's app ownership has not been seen
+    // to reach (§6.29); nothing has shown it says anything about this route.
+    const state = metaThreadState({
+      platform: 'instagram',
+      connection: 'unified_login',
+      inboundAccountId: IG_ACCOUNT,
+      configuredAccountId: IG_ACCOUNT,
+      standby: true,
+      inboundConnection: 'instagram_login',
+    });
+
+    expect(state.canSend).toBe(true);
   });
 
   it('reports the route it would send over', () => {

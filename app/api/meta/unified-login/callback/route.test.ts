@@ -248,7 +248,8 @@ describe('GET /api/meta/unified-login/callback', () => {
     expect(html.split(TOKEN).length - 1).toBe(1);
     expect(html).toContain('@shipblu');
     expect(html).toContain('list of the token');
-    expect(html).toContain('was empty, but the token reads 17841448759001625 directly');
+    expect(html).toContain('the token reads 17841448759001625 directly');
+    expect(html).toContain('no business_management, which that list needs and no reply does');
     const probe = requests.find((entry) => entry.url.pathname.endsWith('/17841448759001625'));
     expect(probe?.url.searchParams.get('fields')).toBe('id,username');
     expect(new Headers(probe?.init?.headers).get('authorization')).toBe(`Bearer ${TOKEN}`);
