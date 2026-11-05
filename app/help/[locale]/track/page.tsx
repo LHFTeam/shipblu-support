@@ -1,7 +1,7 @@
 import { headers } from 'next/headers';
 import { notFound } from 'next/navigation';
 import type { Metadata } from 'next';
-import { ChatIcon, PackageSearchIcon, ReturnIcon } from '@/components/icons';
+import { ChatIcon, ReturnIcon } from '@/components/icons';
 import { StatusBadge, Stepper } from '@/components/shipment-status';
 import { buttonClass } from '@/components/ui';
 import { formatCalendarDate, formatTimestamp } from '@/lib/kb/dates';
@@ -89,7 +89,6 @@ export default async function TrackShipment({
       crumbs={[{ label: t(locale, 'home'), href: `/${locale}` }]}
       title={t(locale, 'trackTitle')}
       selfPath={`/${locale}/track`}
-      icon={<PackageSearchIcon size={24} />}
       search={false}
     />
   );

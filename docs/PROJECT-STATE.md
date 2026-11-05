@@ -459,9 +459,11 @@ status taxonomy behind the tracking badge, which is what gives "out for delivery
 violet of its own instead of sharing blue with "in transit". Typography did not
 come across: the system substitutes Geist and Rubik and says so, while Lato and
 Tajawal are the live portal's and the ones customers already read. Nor did radii,
-spacing or its component bundle. Four of the six page types still wear the solid
-blue band the system would not have given them — moving them is a change to their
-layout rather than their colours, and it is the obvious next piece of work.
+spacing or its component bundle. Four of the six page types still wore the solid
+blue band the system would not have given them; the v02 help-centre design
+(`plans/help-centre-design-v02.md`) has since given every page one pale band, the
+design's illustrations and its topic and article layouts, on `dev` first and in
+production with the next release to `main`.
 
 A **service notice** banner sits above the content on every help centre page,
 from `KB_NOTICE_EN` / `KB_NOTICE_AR` / `KB_NOTICE_HREF` / `KB_NOTICE_TONE`. The
@@ -7365,6 +7367,25 @@ dryRun=true`, then without, gives those two theirs back from their
       upgrade, and `FOR UPDATE` is the one upgrade a foreign key's KEY SHARE
       refuses — and every message and event inserted for a ticket holds one on
       it.
+
+107.  **A correlated subquery in a `sql` fragment correlated with itself.**
+      _2026-11-05, found by `lib/kb/queries.db.test.ts` before it shipped._ The
+      help centre's edit date (`editedAt` in `lib/kb/queries.ts`) reads the
+      newest `kb_article_versions` row for the outer article, and was written
+      with interpolated columns:
+      `(select max(${kbArticleVersions.createdAt}) from ${kbArticleVersions} where ${kbArticleVersions.articleId} = ${kbArticles.id})`.
+      Drizzle qualifies a column with its table only when the query joins; in a
+      single-table select it renders a bare `"id"`, and inside the subquery a
+      bare name binds to the nearest scope, so the condition read
+      `article_id = kb_article_versions.id`. It is valid SQL that matches
+      nothing, so tsc, the planner and the article page (which joins, and so
+      got `"kb_articles"."id"`) all passed, while the folder page dated every
+      article by its publication. The fragment now aliases the inner table and
+      names the outer one, `where v.article_id = ${kbArticles}.id`. The lesson:
+      a fragment that refers to an outer query's column must not rely on
+      Drizzle's rendering of it, because the same fragment renders differently
+      in a query with a join and one without; and only a test that reads the
+      answer back, not one that plans the statement, sees the difference.
 
 ### Tooling notes for this environment
 
