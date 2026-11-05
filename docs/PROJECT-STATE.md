@@ -7497,9 +7497,18 @@ dryRun=true`, then without, gives those two theirs back from their
         asks for (13.41:1). The logo link above it had no override at all,
         and now has the white one too.
       - **The note composer's amber focus.** Its comment promised one, and
-        the box drew a blue ring. It is amber now (6.11:1 on white).
+        the box drew a blue ring. It is amber now, 5.62:1 against the note's
+        amber paper.
       - **The skip link's `focus:rounded-md`**, and every other `rounded-*`
         on something focusable.
+
+      Two focus targets lose their ring, and both meant to: the help centre's
+      `main`, which the skip link moves focus to (`outline-none`), and the
+      WhatsApp onboarding card's heading, focused when the card opens
+      (`focus:outline-none`). Each is `tabIndex={-1}`, so Tab never lands on
+      it. Focus is put there so the next Tab starts in the right place and a
+      screen reader reads it, and there is nothing to type or press. The
+      feedback thanks line is the third such element, and it had its `!`.
 
       Two weak indicators had nothing to do with the layer and were fixed
       beside it, because the layer made each a one-class change. The widget
@@ -7519,12 +7528,19 @@ dryRun=true`, then without, gives those two theirs back from their
       outline, offset, radius and box-shadow, and the before and after runs
       were compared stop by stop. Before, one stop had no ring in normal
       colours (the feedback thanks line, by design) and three under forced
-      colours (that line and the widget composer twice). After, there is that
-      one line in each. `tsc` and the linters see none of this.
-      `focus-ring` now refuses an unlayered focus style, `outline-none`
-      beside a translucent focus ring, and a `!` on an outline utility. It
-      judges one class string at a time, so `FIELD_BASE` is held by its
-      comment instead.
+      colours (that line and the widget composer twice). After, four stops
+      have no ring in either mode: that line, the help centre's `main` in
+      both languages and the onboarding heading. All four are the deliberate
+      ones above. Every field and the composer have a ring in both. 670 of
+      the 1,038 stops differ in all, and apart from the colour and placement
+      fixes above every difference is the radius: 4px becoming the
+      element's own. `tsc` and the linters see none of this.
+      `focus-ring` now refuses four things: a focus style in no layer, or in
+      one other than `base` and `components`; an outline declared in no
+      layer; a suppressed outline (`outline-none`, `-hidden`, `-0`,
+      `-transparent`) beside a translucent focus ring; and an important
+      outline utility, in either spelling. It judges one class string at a
+      time, so `FIELD_BASE` is held by its comment instead.
 
       Generally: in a Tailwind v4 stylesheet, a rule outside a layer is a
       rule no class can touch. `.kb-panel`, `.app-scroll` and the

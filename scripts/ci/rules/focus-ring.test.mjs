@@ -6,11 +6,13 @@ import { runRule } from '../fixture.mjs';
  * translucent box-shadow, and no outline utility carries an important suffix
  * it no longer needs.
  *
- * The important suffix is appended by `bang` rather than written into a class
- * below: Tailwind scans this file like any other, and a literal one would put a
- * utility nothing uses into the served stylesheet.
+ * The important modifier is added by `bang` (after) and `lead` (before)
+ * rather than written into a class below: Tailwind scans this file like any
+ * other, and a literal one would put a utility nothing uses into the served
+ * stylesheet.
  */
 const bang = (utility) => `${utility}!`;
+const lead = (utility) => `!${utility}`;
 
 const RING = ':where(a, button, input, select, textarea, summary, [tabindex]):focus-visible';
 
@@ -122,6 +124,87 @@ describe('focus-ring', () => {
       at('components/row.tsx:1', /drop the !/),
       at('components/row.tsx:2', /drop the !/),
       at('components/row.tsx:3', /drop the !/),
+    ]);
+  });
+
+  it('refuses every way of removing the outline beside a translucent ring, by name', async () => {
+    const found = await run({
+      'app/widget/field.ts': [
+        "export const a = 'border outline-hidden focus:ring-2 focus:ring-(--color-border-focus)/20';",
+        "export const b = 'border outline-0 focus:ring-2 focus:ring-(--color-border-focus)/20';",
+        "export const c = 'border focus:outline-transparent focus-visible:ring-(--color-border-focus)/30';",
+        "export const d = 'border outline-hidden focus:ring-2 focus:ring-(--color-border-focus)';",
+        '',
+      ].join('\n'),
+    });
+
+    expect(found).toEqual([
+      at('app/widget/field.ts:1', /^outline-hidden beside a translucent focus ring/),
+      at('app/widget/field.ts:2', /^outline-0 beside/),
+      at('app/widget/field.ts:3', /^focus:outline-transparent beside/),
+    ]);
+  });
+
+  it('refuses the leading spelling of the important modifier too', async () => {
+    const found = await run({
+      'components/row.tsx': [
+        `export const a = '${lead('outline-none')} text-sm';`,
+        `export const b = 'flex focus-visible:${lead('outline-offset-[-2px]')}';`,
+        '',
+      ].join('\n'),
+    });
+
+    expect(found).toEqual([
+      at('components/row.tsx:1', /drop the !/),
+      at('components/row.tsx:2', /drop the !/),
+    ]);
+  });
+
+  it('refuses a focus style in a layer that competes with the utilities', async () => {
+    const found = await run({
+      'app/globals.css': [
+        LAYERED,
+        '@layer utilities {',
+        '  .chip:focus-visible { outline-offset: 0; }',
+        '}',
+        '@layer overrides {',
+        '  .tab:focus { outline-color: red; }',
+        '}',
+        '@layer components {',
+        '  .card:focus-within { outline-offset: 4px; }',
+        '}',
+        '',
+      ].join('\n'),
+    });
+
+    expect(found).toEqual([
+      at('app/globals.css:10', /@layer utilities competes/),
+      at('app/globals.css:13', /@layer overrides competes/),
+    ]);
+  });
+
+  it('refuses an outline declared outside a layer on any selector, and passes a layered one', async () => {
+    const found = await run({
+      'app/globals.css': [
+        LAYERED,
+        '.kb-article a {',
+        '  color: blue;',
+        '  outline: none;',
+        '}',
+        '@media print {',
+        '  .kb-noprint { outline-width: 0; }',
+        '}',
+        '@layer components {',
+        '  .kb-panel { outline: 1px solid; }',
+        '}',
+        '.scroll-cue { background: white; }',
+        '',
+      ].join('\n'),
+    });
+
+    expect(found).toEqual([
+      at('app/globals.css:9', /outline declared outside a cascade layer/),
+      at('app/globals.css:14', /outline declared outside a cascade layer/),
     ]);
   });
 

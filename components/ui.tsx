@@ -174,9 +174,9 @@ const FIELD_BASE =
  *
  * `note` is the private-note composer: amber paper, focused in amber rather
  * than in the action blue, so an agent typing a note never sees the box turn
- * into the reply box. The keyboard ring is amber too (6.1:1 on the white
- * composer), which the unlayered focus rule kept blue until it moved into a
- * layer.
+ * into the reply box. The keyboard ring is amber too, 5.6:1 against the
+ * note's amber paper around it, which the unlayered focus rule kept blue until
+ * it moved into a layer.
  *
  * The read-only surface keeps the global ring, which is the same ring a button
  * or a link takes, not the editing border: focused, it says where the keyboard
