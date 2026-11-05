@@ -134,6 +134,8 @@ describe('focus-ring', () => {
         "export const b = 'border outline-0 focus:ring-2 focus:ring-(--color-border-focus)/20';",
         "export const c = 'border focus:outline-transparent focus-visible:ring-(--color-border-focus)/30';",
         "export const d = 'border outline-hidden focus:ring-2 focus:ring-(--color-border-focus)';",
+        "export const e = 'border md:focus:outline-none aria-invalid:focus:ring-(--color-feedback-danger-fg)/20';",
+        "export const f = 'flex outline-none focus-within:ring-2 focus-within:ring-(--color-border-focus)/20';",
         '',
       ].join('\n'),
     });
@@ -142,6 +144,8 @@ describe('focus-ring', () => {
       at('app/widget/field.ts:1', /^outline-hidden beside a translucent focus ring/),
       at('app/widget/field.ts:2', /^outline-0 beside/),
       at('app/widget/field.ts:3', /^focus:outline-transparent beside/),
+      at('app/widget/field.ts:5', /^md:focus:outline-none beside/),
+      at('app/widget/field.ts:6', /^outline-none beside/),
     ]);
   });
 

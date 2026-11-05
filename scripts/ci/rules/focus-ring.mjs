@@ -121,9 +121,11 @@ export function checkFocusRing() {
   // Either spelling of the important modifier: after the utility, or before
   // it and after any variants (`focus-visible:!outline-none`).
   const IMPORTANT_OUTLINE = /^(?:[^\s:]+:)*(?:!-?outline(?:-\S*)?|-?outline(?:-\S*)?!)$/;
-  const SUPPRESSES =
-    /^(?:(?:focus|focus-visible|focus-within):)?outline-(?:none|hidden|0|transparent)$/;
-  const TRANSLUCENT_RING = /^(?:focus|focus-visible):ring-\S*\/\d+$/;
+  // Behind any variants, responsive and stacked ones included
+  // (`md:focus:outline-none`), since each still removes the ring where it
+  // applies; and a translucent ring behind any variants, `focus-within:` too.
+  const SUPPRESSES = /^(?:[^\s:]+:)*outline-(?:none|hidden|0|transparent)$/;
+  const TRANSLUCENT_RING = /^(?:[^\s:]+:)*(?:focus|focus-visible|focus-within):ring-\S*\/\d+$/;
 
   let classStrings = 0;
   for (const file of scannable.filter((f) => /\.tsx?$/.test(f) && !/\.test\.tsx?$/.test(f))) {
