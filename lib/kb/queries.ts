@@ -232,23 +232,21 @@ export type ArticleLink = {
   slug: string;
 };
 
-/**
- * How many article titles a folder shows before it collapses into "View all".
- *
- * Three, which is the live portal's number too. Enough to tell a customer what
- * kind of thing is in the folder — which is the whole job of the preview — and
- * few enough that a category with eight folders still fits on one screen.
- */
-const FOLDER_PREVIEW_SIZE = 3;
-
 export type FolderSummary = {
   id: string;
   name: string;
   slug: string;
   description: string | null;
   articleCount: number;
-  /** The first `FOLDER_PREVIEW_SIZE` articles, for the category page. */
-  preview: ArticleLink[];
+  /**
+   * Every article in the folder the viewer may read, in the editor's order.
+   *
+   * All of them, not a preview: the category page lists each folder as a
+   * section of article rows, title and excerpt, the way the help-centre design
+   * draws a topic. Production's largest folder holds fifteen, and a list a
+   * reader scans beats a "View all" they have to press to find out.
+   */
+  articles: ArticleSummary[];
 };
 
 export type CategoryDetail = {
@@ -257,6 +255,8 @@ export type CategoryDetail = {
   slug: string;
   description: string | null;
   folders: FolderSummary[];
+  /** The newest edit to anything listed, for "Last updated" in the header. */
+  lastUpdatedAt: Date | null;
 };
 
 /**
@@ -309,32 +309,33 @@ export async function getCategory(
   const visible = folders.filter((folder) => folder.articleCount > 0);
   if (visible.length === 0) return null;
 
-  const previews = await folderPreviews(
+  const { byFolder, lastUpdatedAt } = await folderListings(
     viewer,
     visible.map((folder) => folder.id),
   );
 
   return {
     ...category,
-    folders: visible.map((folder) => ({ ...folder, preview: previews.get(folder.id) ?? [] })),
+    folders: visible.map((folder) => ({ ...folder, articles: byFolder.get(folder.id) ?? [] })),
+    lastUpdatedAt,
   };
 }
 
 /**
- * The first few article titles in each of several folders.
+ * Every readable article in each of several folders, and the newest edit among
+ * them.
  *
  * One query for every folder on the page rather than one per folder: a category
  * with eight folders is eight round trips otherwise, and the whole result set
- * here is a few dozen rows of title and slug. The per-folder cut is taken in
- * JavaScript, which is what keeps this a plain `where … in` instead of a window
- * function nobody will want to read again.
+ * here is a few dozen rows of title, slug and excerpt. The split by folder is
+ * taken in JavaScript, which is what keeps this a plain `where … in`.
  */
-async function folderPreviews(
+async function folderListings(
   viewer: KbViewer,
   folderIds: string[],
-): Promise<Map<string, ArticleLink[]>> {
-  const byFolder = new Map<string, ArticleLink[]>();
-  if (folderIds.length === 0) return byFolder;
+): Promise<{ byFolder: Map<string, ArticleSummary[]>; lastUpdatedAt: Date | null }> {
+  const byFolder = new Map<string, ArticleSummary[]>();
+  if (folderIds.length === 0) return { byFolder, lastUpdatedAt: null };
 
   const rows = await db
     .select({
@@ -342,18 +343,22 @@ async function folderPreviews(
       id: kbArticles.id,
       title: kbArticles.title,
       slug: kbArticles.slug,
+      excerpt: kbArticles.excerpt,
+      updatedAt: kbArticles.updatedAt,
     })
     .from(kbArticles)
     .where(and(inArray(kbArticles.folderId, folderIds), articleVisibleTo(viewer)))
     .orderBy(asc(kbArticles.position), asc(kbArticles.title));
 
-  for (const { folderId, ...article } of rows) {
+  let lastUpdatedAt: Date | null = null;
+  for (const { folderId, updatedAt, ...article } of rows) {
     const list = byFolder.get(folderId) ?? [];
-    if (list.length < FOLDER_PREVIEW_SIZE) list.push(article);
+    list.push(article);
     byFolder.set(folderId, list);
+    if (!lastUpdatedAt || updatedAt > lastUpdatedAt) lastUpdatedAt = updatedAt;
   }
 
-  return byFolder;
+  return { byFolder, lastUpdatedAt };
 }
 
 export type ArticleSummary = {
@@ -371,6 +376,8 @@ export type FolderDetail = {
   categoryName: string;
   categorySlug: string;
   articles: ArticleSummary[];
+  /** The newest edit to any article listed, for "Last updated" in the header. */
+  lastUpdatedAt: Date | null;
 };
 
 export async function getFolder(
@@ -403,18 +410,25 @@ export async function getFolder(
   const folder = rows[0];
   if (!folder) return null;
 
-  const articles = await db
+  const listed = await db
     .select({
       id: kbArticles.id,
       title: kbArticles.title,
       slug: kbArticles.slug,
       excerpt: kbArticles.excerpt,
+      updatedAt: kbArticles.updatedAt,
     })
     .from(kbArticles)
     .where(and(eq(kbArticles.folderId, folder.id), articleVisibleTo(viewer)))
     .orderBy(asc(kbArticles.position), asc(kbArticles.title));
 
-  return { ...folder, articles };
+  let lastUpdatedAt: Date | null = null;
+  const articles = listed.map(({ updatedAt, ...article }) => {
+    if (!lastUpdatedAt || updatedAt > lastUpdatedAt) lastUpdatedAt = updatedAt;
+    return article;
+  });
+
+  return { ...folder, articles, lastUpdatedAt };
 }
 
 export type ArticleDetail = {
@@ -542,6 +556,39 @@ export async function relatedArticles(
     .limit(limit);
 }
 
+/**
+ * The article after this one in its folder, in the editor's order — the
+ * article page's "Next article".
+ *
+ * The same order `getFolder` lists the folder in, position then title, so the
+ * link is to the row a reader would have met next on the folder's page. Locale
+ * is filtered for the reason `folderArticles` gives: a folder inherits its
+ * category's locale, and a mis-filed row would put an English article behind an
+ * Arabic "next" link. Null on the last article, or one the folder list cannot
+ * find, rather than wrapping round to the first.
+ */
+export async function nextInFolder(
+  viewer: KbViewer,
+  locale: Locale,
+  folderId: string,
+  articleId: string,
+): Promise<ArticleLink | null> {
+  const rows = await db
+    .select({ id: kbArticles.id, title: kbArticles.title, slug: kbArticles.slug })
+    .from(kbArticles)
+    .where(
+      and(
+        eq(kbArticles.folderId, folderId),
+        eq(kbArticles.locale, locale),
+        articleVisibleTo(viewer),
+      ),
+    )
+    .orderBy(asc(kbArticles.position), asc(kbArticles.title));
+
+  const index = rows.findIndex((row) => row.id === articleId);
+  return index >= 0 ? (rows[index + 1] ?? null) : null;
+}
+
 /** Locales this article has been translated into, for the language switcher. */
 export async function translationsOf(
   viewer: KbViewer,
@@ -569,6 +616,12 @@ export async function searchArticles(
   locale: Locale,
   query: string,
   limit = 20,
+  /**
+   * A category's slug, for the search box on a category page. The design's
+   * "Search in Shipments & tracking" — and a slug that names no category simply
+   * matches nothing, the same answer an empty category gives.
+   */
+  withinCategory?: string,
 ): Promise<SearchHit[]> {
   const trimmed = query.trim();
   if (trimmed.length < 2) return [];
@@ -596,6 +649,7 @@ export async function searchArticles(
         articleVisibleTo(viewer),
         folderVisibleTo(viewer),
         hybridMatch(trimmed),
+        withinCategory ? eq(kbCategories.slug, withinCategory) : undefined,
       ),
     )
     .orderBy(desc(rank), asc(kbArticles.title))

@@ -89,7 +89,6 @@ export default async function TrackShipment({
       crumbs={[{ label: t(locale, 'home'), href: `/${locale}` }]}
       title={t(locale, 'trackTitle')}
       selfPath={`/${locale}/track`}
-      icon={<PackageSearchIcon size={24} />}
       search={false}
     />
   );

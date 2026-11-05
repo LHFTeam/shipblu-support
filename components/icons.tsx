@@ -129,6 +129,24 @@ export function ChevronLeftIcon(props: IconProps) {
   );
 }
 
+export function ChevronRightIcon(props: IconProps) {
+  return (
+    <Directional {...props}>
+      <path d="m9.5 6 6 6-6 6" />
+    </Directional>
+  );
+}
+
+/** "All articles →", "Next article →": onward along the reading direction. */
+export function ArrowRightIcon(props: IconProps) {
+  return (
+    <Directional {...props}>
+      <path d="M5 12h14" />
+      <path d="m13 6 6 6-6 6" />
+    </Directional>
+  );
+}
+
 export function ChevronDownIcon(props: IconProps) {
   return (
     <Icon {...props}>
@@ -340,6 +358,15 @@ export const GLOBE_SHAPES = (
 
 export function GlobeIcon(props: IconProps) {
   return <Icon {...props}>{GLOBE_SHAPES}</Icon>;
+}
+
+export function CalendarIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <rect x="4" y="5.5" width="16" height="14.5" rx="2" />
+      <path d="M4 10h16M8.5 3.5v4M15.5 3.5v4" />
+    </Icon>
+  );
 }
 
 export function ClockIcon(props: IconProps) {
