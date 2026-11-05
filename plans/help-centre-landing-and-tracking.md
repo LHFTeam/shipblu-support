@@ -231,7 +231,8 @@ page with its variables unset.
 - **Somewhere to write a service notice.** The banner is built; a
   `service_notices` table with a start, an end and an author is what turns four
   environment variables into something ops owns.
-- **The remaining four page types.** They still wear the solid blue band the
+- **The remaining four page types.** Done since, by the v02 design
+  (`plans/help-centre-design-v02.md`). At the time, they still wore the solid blue band the
   design system would not have given them.
 - **Shipment history.** The page shows one update because the schema holds one.
   A real timeline arrives with the platform sync, and `TrackingTimeline` in the

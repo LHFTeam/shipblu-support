@@ -63,14 +63,16 @@ Design decisions worth knowing before changing things:
 - **The front door is the Arabic help centre.** `/` lands on `/ar` on every hostname. The
   console used to own the bare domain, which made the public site something you had to
   already know the URL of.
-- **The help centre has its own palette and its own typefaces**, scoped to `.kb-shell` in
-  `app/globals.css`. The light values are the hex from the live Freshdesk portal theme and
-  the fonts are its Lato/Tajawal pairing, so the cutover is not also a redesign as far as a
-  returning customer is concerned. The console's token names are redefined inside that
-  scope, which is how the shared primitives in `components/ui.tsx` pick up help-centre
-  colours without a second set of components. Page furniture — the blue band, the trail,
-  the card, the article list — lives in `app/help/[locale]/chrome.tsx`; adding a public page
-  means composing those, not restyling one.
+- **The help centre has its own typefaces and reading density**, scoped to `.kb-shell` in
+  `app/globals.css`, and the design system's colours. The fonts are the live Freshdesk
+  portal's Lato/Tajawal pairing, so the cutover is not also a change of typeface for a
+  returning customer; the colours are the same roles the console reads, with the help
+  centre's older `--kb-*` names pointed at them, which is how the shared primitives in
+  `components/ui.tsx` work there without a second set of components. The layout follows the
+  help-centre design ("ShipBlu support landing page v02", `plans/help-centre-design-v02.md`).
+  Page furniture — the pale header band, the trail, the card, the article row, the "still
+  need help?" band — lives in `app/help/[locale]/chrome.tsx`; adding a public page means
+  composing those, not restyling one.
 - **The help centre embeds the chat widget the way any other site would.** Every page
   loads `/widget/embed.js`, the same snippet a marketing page would paste in, rather than
   carrying a launcher of its own: one launcher to fix, and the chat stays inside its

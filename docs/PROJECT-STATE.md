@@ -459,9 +459,11 @@ status taxonomy behind the tracking badge, which is what gives "out for delivery
 violet of its own instead of sharing blue with "in transit". Typography did not
 come across: the system substitutes Geist and Rubik and says so, while Lato and
 Tajawal are the live portal's and the ones customers already read. Nor did radii,
-spacing or its component bundle. Four of the six page types still wear the solid
-blue band the system would not have given them — moving them is a change to their
-layout rather than their colours, and it is the obvious next piece of work.
+spacing or its component bundle. Four of the six page types still wore the solid
+blue band the system would not have given them; the v02 help-centre design
+(`plans/help-centre-design-v02.md`) has since given every page one pale band, the
+design's illustrations and its topic and article layouts, on `dev` first and in
+production with the next release to `main`.
 
 A **service notice** banner sits above the content on every help centre page,
 from `KB_NOTICE_EN` / `KB_NOTICE_AR` / `KB_NOTICE_HREF` / `KB_NOTICE_TONE`. The
