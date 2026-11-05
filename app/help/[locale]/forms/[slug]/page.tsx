@@ -60,7 +60,7 @@ export default async function FormPage({
         <PageBody>
           <div className="mx-auto w-full max-w-2xl">
             <Panel className="p-6">
-              <p className="text-base font-bold text-(--color-text-primary)">{confirmation}</p>
+              <p className="text-base font-semibold text-(--color-text-primary)">{confirmation}</p>
               <p className="mt-2 text-sm">{tCount(locale, 'formTicketNumber', submitted)}</p>
               <p className="mt-1 text-sm text-(--color-text-secondary)">
                 {t(locale, 'formAnonymousNext')}

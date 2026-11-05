@@ -127,7 +127,7 @@
      is preloaded), and its variable carries a 'Tajawal Fallback' face that is
      Arial with no range at all. Either one under this stack would set every
      Latin letter in the console in Tajawal or Arial. The help centre's stack
-     stays on the .kb-shell rule, where var(--font-lato) resolves. */
+     stays on the .kb-shell rule, where var(--font-geist) resolves. */
   --font-console:
     'Tajawal Arabic', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue',
     Arial, sans-serif;
@@ -677,9 +677,10 @@
     U+2010-2011, U+204F, U+2E41, U+FB50-FDFF, U+FE70-FE74, U+FE76-FEFC;
 }
 
-/* Message text's Arabic typeface (--font-conversation): Rubik's Arabic subset,
-   the Fontsource builds the design system ships, self-hosted beside the
-   Tajawal faces for the same reasons. */
+/* Rubik's Arabic subset, the Fontsource builds (5.3.0) the design system ships,
+   self-hosted beside the Tajawal faces for the same reasons. Message text's
+   Arabic everywhere (--font-conversation), and all of the help centre's Arabic
+   (`.kb-shell`), whose design sets its headings at 600. */
 @font-face {
   font-family: 'Rubik Arabic';
   font-style: normal;
@@ -696,6 +697,16 @@
   font-weight: 500;
   font-display: swap;
   src: url('./fonts/rubik-arabic-500.woff2') format('woff2');
+  unicode-range:
+    U+0600-06FF, U+0750-077F, U+0870-088E, U+0890-0891, U+0897-08E1, U+08E3-08FF, U+200C-200E,
+    U+2010-2011, U+204F, U+2E41, U+FB50-FDFF, U+FE70-FE74, U+FE76-FEFC;
+}
+@font-face {
+  font-family: 'Rubik Arabic';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('./fonts/rubik-arabic-600.woff2') format('woff2');
   unicode-range:
     U+0600-06FF, U+0750-077F, U+0870-088E, U+0890-0891, U+0897-08E1, U+08E3-08FF, U+200C-200E,
     U+2010-2011, U+204F, U+2E41, U+FB50-FDFF, U+FE70-FE74, U+FE76-FEFC;
@@ -790,32 +801,33 @@ body {
 .kb-shell {
   background: var(--color-background-canvas);
   color: var(--color-text-primary);
-  /* Lato for Latin, Tajawal for Arabic — the same pairing the live portal uses.
-     Lato's own faces carry no Arabic, so Arabic falls through to Tajawal per
-     glyph and no `:lang()` rule is needed.
+  /* Geist for Latin, Rubik for Arabic: the faces the help-centre design is set
+     in ("ShipBlu support landing page v02"). Geist's own faces carry no Arabic,
+     so Arabic falls through to 'Rubik Arabic' per glyph and no `:lang()` rule
+     is needed.
 
-     The two families are named before the variables that also contain them,
-     which reads like a mistake and is the whole fix. `--font-lato` is not one
-     family but `"Lato", "Lato Fallback"`, and that second face is Arial with
-     Lato's metrics and *no* `unicode-range` — so it answers for every
-     codepoint, Arabic included. Led with `var(--font-lato)`, it sat ahead of
-     Tajawal and every Arabic glyph on the site rendered in Arial on any machine
-     that has Arial, which is all of Windows and macOS. It looked right in
-     development only because a Linux container has none, so the face failed to
-     load and Arabic reached Tajawal by accident.
+     The two families are named before the variable that also contains one of
+     them, which reads like a mistake and is the whole fix. `--font-geist` is
+     not one family but `"Geist", "Geist Fallback"`, and that second face is
+     Arial with Geist's metrics and *no* `unicode-range` — so it answers for
+     every codepoint, Arabic included. When the stack was Lato's and led with
+     `var(--font-lato)`, its fallback sat ahead of Tajawal and every Arabic
+     glyph on the site rendered in Arial on any machine that has Arial, which is
+     all of Windows and macOS. It looked right in development only because a
+     Linux container has none.
 
-     Naming `Lato` and `Tajawal` first gives each script its own typeface; the
-     variables then follow so the metric-matched fallbacks still apply while a
-     font is loading, which is the only thing they are good for. Repeating a
-     family in a stack is harmless — the browser takes the first entry that has
-     the glyph. Anything that covers every codepoint belongs after Tajawal, not
-     before it.
+     Naming `Geist` and 'Rubik Arabic' first gives each script its own
+     typeface; the variable then follows so the metric-matched fallback still
+     applies while Geist is loading, which is the only thing it is good for.
+     'Rubik Arabic' is self-hosted with an Arabic `unicode-range` (below
+     `@theme`), so it can lead nothing but Arabic. Anything that covers every
+     codepoint belongs after it, not before it.
 
-     Held in a variable so message text can name Rubik ahead of the same stack:
-     a bubble or a reply box in the help centre keeps Lato for its Latin. */
+     Held in a variable so message text can name Rubik ahead of the same stack,
+     which here changes nothing: the help centre's Arabic is Rubik already. */
   --font-help:
-    Lato, Tajawal, var(--font-lato), var(--font-tajawal), ui-sans-serif, system-ui, -apple-system,
-    'Segoe UI', Roboto, 'Noto Sans Arabic', sans-serif;
+    Geist, 'Rubik Arabic', var(--font-geist), ui-sans-serif, system-ui, -apple-system, 'Segoe UI',
+    Roboto, 'Noto Sans Arabic', sans-serif;
   --font-conversation: 'Rubik Arabic', var(--font-help);
   font-family: var(--font-help);
   /* The console runs tabular figures so ticket numbers stop jittering. Prose
@@ -908,9 +920,9 @@ body {
 .kb-article h5,
 .kb-article h6 {
   color: var(--color-text-primary);
-  /* 700, not 600: Lato ships 400/700/900, so a 600 was already rendering as
-     700 and only said otherwise. */
-  font-weight: 700;
+  /* The design's 600, which Geist and Rubik both carry (Lato, before them,
+     had no 600 and drew it at 700). */
+  font-weight: 600;
   line-height: 1.3;
   /* A heading belongs to what follows it, so the space above is roughly twice
      the space below. Without this every section floats equidistant and the
@@ -1044,7 +1056,7 @@ body {
 .kb-article th {
   background: var(--color-background-surface-sunken);
   color: var(--color-text-primary);
-  font-weight: 700;
+  font-weight: 600;
 }
 
 .kb-article hr {

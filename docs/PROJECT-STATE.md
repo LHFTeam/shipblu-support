@@ -456,10 +456,11 @@ design system's `tokens/colors.css`, so the swap reaches every page under
 `app/help/` rather than only the two the redesign covered — charcoal text on cool
 neutrals, blu-500 as the one action colour, and the system's canonical logistics
 status taxonomy behind the tracking badge, which is what gives "out for delivery"
-violet of its own instead of sharing blue with "in transit". Typography did not
-come across: the system substitutes Geist and Rubik and says so, while Lato and
-Tajawal are the live portal's and the ones customers already read. Nor did radii,
-spacing or its component bundle. Four of the six page types still wore the solid
+violet of its own instead of sharing blue with "in transit". Typography came
+across later, with the v02 design's second pass on 2026-11-05: Geist for Latin
+and Rubik for Arabic, the owner's choice over keeping the live portal's Lato and
+Tajawal (`plans/help-centre-design-v02.md` §6). Radii, spacing and the system's
+component bundle did not. Four of the six page types still wore the solid
 blue band the system would not have given them; the v02 help-centre design
 (`plans/help-centre-design-v02.md`) has since given every page one pale band, the
 design's illustrations and its topic and article layouts, on `dev` first and in
@@ -3494,7 +3495,10 @@ Each cost real time. Most are also comments in the code.
     variable and watching the rename land in the served CSS while the fallback
     stayed). The fix is ordering, in `.kb-shell`: name `Lato, Tajawal` before
     the variables that also contain them. Anything covering every codepoint goes
-    after the script-specific family, never before it. Checking this needs
+    after the script-specific family, never before it. Since the help centre
+    moved to Geist and Rubik (2026-11-05) the same holds for `--font-geist`,
+    which is `"Geist", "Geist Fallback"`: the stack names `Geist, 'Rubik Arabic'`
+    first. Checking this needs
     `CSS.getPlatformFontsForNode` over CDP — a computed `font-family` shows the
     stack you asked for, never the font that painted — and, on Linux, a
     `@font-face` override standing in for the Arial the container lacks.
@@ -6911,8 +6915,9 @@ still waiting for it` one whose outcome is not known yet.
     `'Tajawal Arabic'`, over the design system's Arabic-subset builds committed
     in `app/fonts/` (relative `url()`, so they land under `/_next/static/media`,
     which both hosts serve without a session — `public/` would have sent the
-    widget's and the sign-in page's requests to `/login`). The help centre keeps
-    next/font's Tajawal, where Lato answers for Latin first.
+    widget's and the sign-in page's requests to `/login`). The help centre has
+    not used Tajawal since 2026-11-05: its Arabic is the self-hosted 'Rubik
+    Arabic', with an Arabic `unicode-range`, and its Latin is next/font's Geist.
 
 93. **A `className` override on a primitive can silently lose.** Tailwind v4
     sorts utilities that set the same property by a fixed order of its own, not

@@ -104,13 +104,13 @@ export default async function SearchPage({
           <NoResults>
             {scope ? (
               <>
-                <p className="text-base font-bold text-(--color-text-primary)">
+                <p className="text-base font-semibold text-(--color-text-primary)">
                   {tFill(locale, 'noResultsIn', { name: scope.name, q: query })}
                 </p>
                 <EverywhereLink locale={locale} href={everywhere} />
               </>
             ) : (
-              <p className="text-base font-bold text-(--color-text-primary)">
+              <p className="text-base font-semibold text-(--color-text-primary)">
                 {t(locale, 'noResults')}
               </p>
             )}
@@ -170,7 +170,7 @@ function EverywhereLink({
   return (
     <Link
       href={href}
-      className={`inline-flex items-center gap-1.5 text-sm font-bold text-(--color-text-link) underline-offset-4 hover:text-(--color-text-link-hover) hover:underline ${className}`}
+      className={`inline-flex items-center gap-1.5 text-sm font-semibold text-(--color-text-link) underline-offset-4 hover:text-(--color-text-link-hover) hover:underline ${className}`}
     >
       {t(locale, 'searchEverywhere')}
       <ArrowRightIcon size={16} className="shrink-0" />

@@ -27,7 +27,7 @@ export function AccountShell({
   return (
     <PageBody>
       <div className="mx-auto w-full max-w-sm">
-        <h1 className="text-2xl font-bold text-(--color-text-primary)">{title}</h1>
+        <h1 className="text-2xl font-semibold text-(--color-text-primary)">{title}</h1>
         {intro ? <p className="mt-1.5 text-sm text-(--color-text-secondary)">{intro}</p> : null}
 
         <Panel className="mt-6 p-6">{children}</Panel>

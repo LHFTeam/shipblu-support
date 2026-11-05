@@ -1,8 +1,9 @@
 import type { StaticImageData } from 'next/image';
 import type { TopicArt } from '@/lib/kb/art';
+import account from './art/account.webp';
 import claims from './art/claims.webp';
 import payments from './art/payments.webp';
-import pickups from './art/pickups.webp';
+import questions from './art/questions.webp';
 import returns from './art/returns.webp';
 import shipping from './art/shipping.webp';
 import store from './art/store.webp';
@@ -21,17 +22,19 @@ import trackingPin from './art/tracking-pin.webp';
  * the bytes arrive and nothing jumps.
  *
  * A plain `<img>` rather than `next/image`. These are 5–32 KB drawn at the size
- * they were exported at, so the optimiser would spend a request and a CPU cycle
- * on Render to hand back what it was given.
+ * they were exported at — the questions drawing re-exported at 280px, twice the
+ * card's largest, from the design's 474px original — so the optimiser would
+ * spend a request and a CPU cycle on Render to hand back what it was given.
  *
  * Every one is decoration: the words beside it say everything it does, so it
  * carries an empty `alt` and is hidden from assistive technology.
  */
 
 const TOPIC_IMAGES: Record<TopicArt, StaticImageData> = {
+  account,
   claims,
   payments,
-  pickups,
+  questions,
   returns,
   shipping,
   store,

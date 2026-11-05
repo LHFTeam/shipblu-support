@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import type { Metadata } from 'next';
-import { ShipBluLogo } from '@/components/brand';
+import { ShipBluMark } from '@/components/brand';
 import {
   DEFAULT_LOCALE,
   direction,
@@ -17,7 +17,7 @@ import { AccountNav } from './account-nav';
 import { AskSupport } from './track/support';
 import { Container } from './chrome';
 import { ServiceNoticeBanner } from './notice';
-import { lato, tajawal } from './fonts';
+import { geist } from './fonts';
 
 export const dynamic = 'force-dynamic';
 
@@ -49,7 +49,7 @@ export default async function KbLayout({
     <div
       dir={direction(locale)}
       lang={locale}
-      className={`kb-shell ${lato.variable} ${tajawal.variable} flex min-h-dvh flex-col antialiased`}
+      className={`kb-shell ${geist.variable} flex min-h-dvh flex-col antialiased`}
     >
       {/*
         First thing in the tab order, invisible until it has focus. On the
@@ -67,10 +67,15 @@ export default async function KbLayout({
         <Container className="flex min-h-15 flex-wrap items-center gap-x-6 gap-y-2 py-2.5">
           <Link
             href={`/${locale}`}
-            className="flex items-center gap-2.5 font-bold text-(--color-text-primary)"
+            className="flex items-center gap-2.5 font-semibold text-(--color-text-primary)"
           >
-            <ShipBluLogo className="size-8" />
-            <span className="text-base">{t(locale, 'title')}</span>
+            {/* The bare mark, as the design draws it on this white header. The
+                console's tile (`ShipBluLogo`) is for its navy rail, where the
+                mark needs the white behind it; here it would only add a box. */}
+            <ShipBluMark className="w-8 shrink-0" />
+            <span className={`text-[15px] ${locale === 'ar' ? '' : 'tracking-tight'}`}>
+              {t(locale, 'title')}
+            </span>
           </Link>
 
           <nav
@@ -136,7 +141,7 @@ export default async function KbLayout({
             links are not here because none of those pages has an address this
             system knows; every link that is here goes somewhere that answers. */}
         <Container className="flex flex-wrap items-center gap-x-5 gap-y-3 pt-6 pb-24 text-xs text-(--color-text-secondary) sm:pb-6">
-          <span lang="en" className="font-bold text-(--color-text-primary)">
+          <span lang="en" className="font-semibold text-(--color-text-primary)">
             ShipBlu
           </span>
 
@@ -201,7 +206,7 @@ function LocaleSwitcher({ locale }: { locale: Locale }) {
       role="group"
       aria-label={t(locale, 'languageLabel')}
       dir="ltr"
-      className="flex items-center overflow-hidden rounded-md border border-(--color-border-subtle) text-xs font-bold"
+      className="flex items-center overflow-hidden rounded-md border border-(--color-border-subtle) text-xs font-semibold"
     >
       {LOCALES.map((option) =>
         option === locale ? (

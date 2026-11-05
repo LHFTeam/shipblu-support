@@ -12,19 +12,44 @@ describe('topicArt', () => {
   it('draws the subjects the design was drawn for', () => {
     expect(topicArt('Getting started')).toBe('store');
     expect(topicArt('Shipments & tracking')).toBe('shipping');
-    expect(topicArt('Pickups & deliveries')).toBe('pickups');
+    expect(topicArt('Pickups & deliveries')).toBe('account');
     expect(topicArt('Returns & exchanges')).toBe('returns');
     expect(topicArt('Payments & settlement')).toBe('payments');
     expect(topicArt('Lost, damaged & claims')).toBe('claims');
   });
 
-  it("reads production's folders, where Arabic attaches the article to the noun", () => {
-    expect(topicArt('Financials', 'financials')).toBe('payments');
-    expect(topicArt('الماليات', 'الماليات')).toBe('payments');
-    expect(topicArt('Shipping Services', 'shipping-services')).toBe('shipping');
-    expect(topicArt('خدمات الشحن', 'خدمات-الشحن')).toBe('shipping');
-    expect(topicArt('Integrations', 'integrations')).toBe('store');
-    expect(topicArt('أدوات الربط', 'أدوات-الربط')).toBe('store');
+  it("draws every one of production's folders, in both languages", () => {
+    // ShipBlu Partners: six folders, six different drawings, as the design's
+    // six cards have.
+    const partners = [
+      [topicArt('FAQs', 'faqs'), topicArt('الأسئلة الشائعة', 'الأسئلة-الشائعة'), 'questions'],
+      [topicArt('Financials', 'financials'), topicArt('الماليات', 'الماليات'), 'payments'],
+      [topicArt('Integrations', 'integrations'), topicArt('أدوات الربط', 'أدوات-الربط'), 'store'],
+      [
+        topicArt('Policies and Regulations', 'policies-and-regulations'),
+        topicArt('السياسات واللوائح', 'السياسات-واللوائح'),
+        'claims',
+      ],
+      [
+        topicArt('ShipBlu Unique Products', 'shipblu-unique-products'),
+        topicArt('منتجات شيب بلو المميزة', 'منتجات-شيب-بلو-المميزة'),
+        'account',
+      ],
+      [
+        topicArt('Shipping Services', 'shipping-services'),
+        topicArt('خدمات الشحن', 'خدمات-الشحن'),
+        'shipping',
+      ],
+    ] as const;
+    for (const [english, arabic, expected] of partners) {
+      expect(english).toBe(expected);
+      expect(arabic).toBe(expected);
+    }
+    expect(new Set(partners.map(([, , art]) => art)).size).toBe(6);
+
+    // ShipBlu Customers: its FAQs and the myBlu app.
+    expect(topicArt('myBlu Support', 'myblu-support')).toBe('account');
+    expect(topicArt('دعم تطبيق ماي بلو', 'دعم-تطبيق-ماي-بلو')).toBe('account');
   });
 
   it('prefers the particular subject over the general one', () => {
@@ -41,20 +66,26 @@ describe('topicArt', () => {
     expect(topicArt('Disclaimer')).toBeNull();
     expect(topicArt('Restore a deleted label')).toBeNull();
     expect(topicArt('Accountability')).toBeNull();
+    expect(topicArt('Apply a discount')).toBeNull();
+    expect(topicArt('Police reports')).toBe('claims');
   });
 
   it('still reads the stems Arabic attaches its article and prepositions to', () => {
     expect(topicArt('بالشحن')).toBe('shipping');
     expect(topicArt('للتجار')).toBe('store');
     expect(topicArt('والمرتجعات')).toBe('returns');
-    expect(topicArt('Accounts')).toBe('store');
+    expect(topicArt('Accounts')).toBe('account');
     expect(topicArt('RTO shipments')).toBe('returns');
   });
 
+  it('reads a subject before the questions it is a list of', () => {
+    expect(topicArt('Shipping FAQs')).toBe('shipping');
+    expect(topicArt('أسئلة الدفع والتحويل')).toBe('payments');
+  });
+
   it('draws nothing for a name it does not recognise', () => {
-    expect(topicArt('FAQs', 'faqs')).toBeNull();
-    expect(topicArt('الأسئلة الشائعة', 'الأسئلة-الشائعة')).toBeNull();
     expect(topicArt('Barcode labels')).toBeNull();
+    expect(topicArt('Miscellaneous')).toBeNull();
     expect(topicArt('')).toBeNull();
   });
 });

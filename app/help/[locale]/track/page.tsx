@@ -129,7 +129,7 @@ export default async function TrackShipment({
         </div>
 
         <Panel as="aside" className="p-5">
-          <h2 className="text-base font-bold text-(--color-text-primary)">
+          <h2 className="text-base font-semibold text-(--color-text-primary)">
             {t(locale, 'trackAnother')}
           </h2>
           <div className="mt-4">
@@ -296,10 +296,10 @@ async function Lookup({ locale, canonical }: { locale: Locale; canonical: string
         */}
         <div className="flex flex-wrap items-center gap-3">
           <div>
-            <p className="mb-0.5 text-xs font-bold text-(--color-text-secondary)">
+            <p className="mb-0.5 text-xs font-semibold text-(--color-text-secondary)">
               {t(locale, 'trackNumber')}
             </p>
-            <p dir="ltr" className="text-lg font-bold tabular-nums rtl:text-right">
+            <p dir="ltr" className="text-lg font-semibold tabular-nums rtl:text-right">
               {canonical}
             </p>
           </div>

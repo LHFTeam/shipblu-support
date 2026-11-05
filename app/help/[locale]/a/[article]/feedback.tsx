@@ -90,7 +90,7 @@ export function ArticleFeedback({ articleId, locale }: { articleId: string; loca
       ) : (
         <>
           <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
-            <p className="min-w-0 flex-[1_1_12.5rem] text-sm font-bold text-(--color-text-primary)">
+            <p className="min-w-0 flex-[1_1_12.5rem] text-sm font-semibold text-(--color-text-primary)">
               {t(locale, 'feedbackQuestion')}
             </p>
 

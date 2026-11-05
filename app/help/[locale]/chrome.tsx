@@ -218,7 +218,7 @@ export function PageHeader({
           <div className="flex items-center justify-between gap-8">
             <div className="min-w-0 max-w-[42rem] flex-1">
               <h1
-                className={`text-read-h1 font-bold text-balance break-words sm:text-read-h1-md ${
+                className={`text-read-h1 font-semibold text-balance break-words sm:text-read-h1-md ${
                   locale === 'ar' ? 'leading-read-heading-ar' : 'tracking-tight'
                 }`}
               >
@@ -303,7 +303,7 @@ export function ArticleRow({
         {/* A div, not a span: the heading inside is flow content, which a span
             may not hold. */}
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <Heading className="text-[0.9375rem] leading-snug font-bold text-(--color-text-link) group-hover:text-(--color-text-link-hover)">
+          <Heading className="text-[0.9375rem] leading-snug font-semibold text-(--color-text-link) group-hover:text-(--color-text-link-hover)">
             {title}
           </Heading>
           {excerpt ? (
@@ -355,7 +355,7 @@ export function SectionHeading({
 }) {
   if (!meta) {
     return (
-      <h2 id={id} className="mb-4 scroll-mt-24 text-xl font-bold text-(--color-text-primary)">
+      <h2 id={id} className="mb-4 scroll-mt-24 text-xl font-semibold text-(--color-text-primary)">
         {children}
       </h2>
     );
@@ -363,7 +363,7 @@ export function SectionHeading({
 
   return (
     <div className="mb-4 flex flex-wrap items-baseline gap-x-3 gap-y-1">
-      <h2 id={id} className="scroll-mt-24 text-xl font-bold text-(--color-text-primary)">
+      <h2 id={id} className="scroll-mt-24 text-xl font-semibold text-(--color-text-primary)">
         {children}
       </h2>
       <span className="text-sm text-(--color-text-secondary)">{meta}</span>
@@ -403,7 +403,7 @@ export function Availability({
   if (availability.open) {
     return (
       <p
-        className={`flex items-center gap-2 text-sm font-bold text-(--color-feedback-success-fg) ${className}`}
+        className={`flex items-center gap-2 text-sm font-semibold text-(--color-feedback-success-fg) ${className}`}
       >
         <span aria-hidden className="size-2 rounded-full bg-current" />
         {t(locale, 'supportOpen')}
@@ -449,7 +449,7 @@ export function HelpCta({
     >
       <SupportArt className="kb-art-fade-wide w-40 shrink-0" />
       <div className="min-w-0 flex-[1_1_16rem]">
-        <h2 className="text-lg font-bold text-(--color-text-primary)">{title}</h2>
+        <h2 className="text-lg font-semibold text-(--color-text-primary)">{title}</h2>
         <p className="mt-1.5 text-sm leading-relaxed text-(--color-text-secondary)">
           {t(locale, 'contactIntro')}
         </p>
