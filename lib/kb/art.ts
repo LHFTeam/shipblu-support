@@ -9,8 +9,9 @@
  *
  * Production's top level is two audiences rather than six subjects ("ShipBlu
  * Partners", the merchants, and "ShipBlu Customers", the people waiting on a
- * parcel), so the audiences are named here as well as the subjects the design
- * drew its cards for.
+ * parcel), and its subjects are the folders under them — Financials,
+ * Integrations, FAQs. The front page draws a card per folder, so the folders'
+ * names are matched here as well as the audiences' and the design's own.
  *
  * An unrecognised name gets no drawing at all rather than a near miss. This is
  * decoration, and decoration that misleads is worse than none.
@@ -20,7 +21,8 @@
  * that understands `.webp`.
  */
 
-export type TopicArt = 'store' | 'shipping' | 'pickups' | 'returns' | 'payments' | 'claims';
+export type TopicArt =
+  'store' | 'shipping' | 'account' | 'returns' | 'payments' | 'claims' | 'questions';
 
 /**
  * First match wins, so the order is from the most particular subject to the
@@ -34,14 +36,30 @@ export type TopicArt = 'store' | 'shipping' | 'pickups' | 'returns' | 'payments'
  * after the letters the language attaches to its nouns — و, ف, then ب, ك or ل,
  * then the article — so الماليات, بالشحن and للتجار still match their stems
  * (`startsWord`). A few Latin keywords are whole words rather than stems
- * (`WHOLE`): "account" is a topic, "accountability" is not, and "RTO" is a
- * return while "carton" is a box. `cod` is left out altogether, since "COD"
- * reads as the payment and as part of every "code".
+ * (`WHOLE`): "account" is a topic, "accountability" is not, "RTO" is a
+ * return while "carton" is a box, and "app" is not "apply". `cod` is left out
+ * altogether, since "COD" reads as the payment and as part of every "code".
  */
 const TOPIC_KEYWORDS: ReadonlyArray<readonly [TopicArt, ReadonlyArray<string>]> = [
   [
     'claims',
-    ['lost', 'damage', 'claim', 'compensation', 'مفقود', 'فقد', 'تالف', 'تلف', 'مطالب', 'تعويض'],
+    [
+      'lost',
+      'damage',
+      'claim',
+      'compensation',
+      'prohibit',
+      'forbidden',
+      'restricted',
+      'مفقود',
+      'فقد',
+      'تالف',
+      'تلف',
+      'مطالب',
+      'تعويض',
+      'محظور',
+      'ممنوع',
+    ],
   ],
   ['returns', ['return', 'exchange', 'rto', 'مرتجع', 'ارتجاع', 'استبدال', 'إرجاع']],
   [
@@ -63,8 +81,10 @@ const TOPIC_KEYWORDS: ReadonlyArray<readonly [TopicArt, ReadonlyArray<string>]> 
       'تحويل',
     ],
   ],
+  // The design's account-settings drawing, a person and a gear, which the
+  // design put on "Pickups & deliveries".
   [
-    'pickups',
+    'account',
     ['pickup', 'pick-up', 'deliver', 'courier', 'استلام', 'تسليم', 'توصيل', 'مندوب', 'الكابتن'],
   ],
   [
@@ -76,7 +96,7 @@ const TOPIC_KEYWORDS: ReadonlyArray<readonly [TopicArt, ReadonlyArray<string>]> 
       'getting started',
       'onboard',
       'integration',
-      'account',
+      'connect',
       'store',
       'شركاء',
       'شريك',
@@ -84,8 +104,7 @@ const TOPIC_KEYWORDS: ReadonlyArray<readonly [TopicArt, ReadonlyArray<string>]> 
       'تجار',
       'البدء',
       'بداية',
-      'الربط',
-      'حساب',
+      'ربط',
       'متجر',
     ],
   ],
@@ -107,9 +126,25 @@ const TOPIC_KEYWORDS: ReadonlyArray<readonly [TopicArt, ReadonlyArray<string>]> 
       'مستلم',
     ],
   ],
+  // The general words, behind every subject, each read only when a name says
+  // nothing more particular. A policy is about its subject before it is a
+  // policy: "Return policy" is a return, and only "Policies and Regulations"
+  // draws the shield.
+  ['claims', ['polic', 'regulation', 'سياس', 'لائح', 'لوائح']],
+  // The account and what it gives a merchant, on the account drawing:
+  // production's "ShipBlu Unique Products" (the dashboard, analytics,
+  // sub-accounts) and "myBlu Support" (the app). Behind the store, so "Apps &
+  // Integrations" is an integration.
+  [
+    'account',
+    ['account', 'product', 'dashboard', 'myblu', 'app', 'حساب', 'منتج', 'تطبيق', 'ماي بلو'],
+  ],
+  // Last, as the most general subject there is: "Shipping FAQs" is about
+  // shipping before it is a list of questions.
+  ['questions', ['faq', 'question', 'أسئلة', 'سؤال', 'استفسار']],
 ];
 
-const WHOLE = new Set(['account', 'rto']);
+const WHOLE = new Set(['account', 'rto', 'app']);
 
 function startsWord(keyword: string): RegExp {
   const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');

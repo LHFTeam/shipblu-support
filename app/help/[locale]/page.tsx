@@ -3,7 +3,7 @@ import { getSessionCustomer } from '@/lib/auth/customer-session';
 import { supportAvailability } from '@/lib/kb/availability';
 import { articleCount, isLocale, t } from '@/lib/kb/locale';
 import {
-  listCategoryPreviews,
+  listTopicFolders,
   popularArticles,
   popularTags,
   recentlyUpdatedArticles,
@@ -16,8 +16,7 @@ import {
   HomeHero,
   popularShortlist,
   recentShortlist,
-  TopicCard,
-  TopicGrid,
+  TopicGroups,
 } from './home';
 
 export const dynamic = 'force-dynamic';
@@ -47,8 +46,8 @@ export default async function HelpCentreHome({ params }: { params: Promise<{ loc
 
   const viewer = await kbViewer();
 
-  const [categories, popular, recent, tags, availability, customer] = await Promise.all([
-    listCategoryPreviews(viewer, locale),
+  const [groups, popular, recent, tags, availability, customer] = await Promise.all([
+    listTopicFolders(viewer, locale),
     popularArticles(viewer, locale),
     recentlyUpdatedArticles(viewer, locale),
     popularTags(viewer, locale),
@@ -56,7 +55,7 @@ export default async function HelpCentreHome({ params }: { params: Promise<{ loc
     getSessionCustomer(),
   ]);
 
-  const total = categories.reduce((sum, category) => sum + category.articleCount, 0);
+  const total = groups.reduce((sum, group) => sum + group.articleCount, 0);
 
   return (
     <>
@@ -70,14 +69,10 @@ export default async function HelpCentreHome({ params }: { params: Promise<{ loc
             {t(locale, 'browseTopics')}
           </SectionHeading>
 
-          {categories.length === 0 ? (
+          {groups.length === 0 ? (
             <EmptyNote>{t(locale, 'emptyCategory')}</EmptyNote>
           ) : (
-            <TopicGrid count={categories.length}>
-              {categories.map((category) => (
-                <TopicCard key={category.id} locale={locale} category={category} />
-              ))}
-            </TopicGrid>
+            <TopicGroups locale={locale} groups={groups} />
           )}
         </section>
 

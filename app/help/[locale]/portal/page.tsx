@@ -48,7 +48,7 @@ export default async function PortalHome({ params }: { params: Promise<{ locale:
                     className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-3.5 transition-colors hover:bg-(--color-background-surface-sunken)"
                   >
                     <span className="min-w-0 flex-1">
-                      <span className="block text-base font-bold text-(--color-text-primary)">
+                      <span className="block text-base font-semibold text-(--color-text-primary)">
                         {ticket.subject ?? '—'}
                       </span>
                       <span className="mt-0.5 block text-xs text-(--color-text-secondary) tabular-nums">

@@ -98,8 +98,8 @@ export function TrackFact({
 }) {
   return (
     <div className={`flex flex-col gap-1 border-s-2 ps-3.5 ${rule}`}>
-      <span className="text-xs font-bold text-(--color-text-secondary)">{label}</span>
-      <span className="text-base font-bold text-(--color-text-primary)">{children}</span>
+      <span className="text-xs font-semibold text-(--color-text-secondary)">{label}</span>
+      <span className="text-base font-semibold text-(--color-text-primary)">{children}</span>
     </div>
   );
 }
@@ -156,7 +156,7 @@ export function Timeline({
 
   return (
     <section>
-      <h2 className="mb-3 text-xs font-bold text-(--color-text-secondary)">
+      <h2 className="mb-3 text-xs font-semibold text-(--color-text-secondary)">
         {t(locale, 'trackHistory')}
       </h2>
 
@@ -186,7 +186,9 @@ export function Timeline({
               </div>
 
               <div className={index < newestFirst.length - 1 ? 'pb-4' : ''}>
-                <p className={`text-base text-(--color-text-primary) ${latest ? 'font-bold' : ''}`}>
+                <p
+                  className={`text-base text-(--color-text-primary) ${latest ? 'font-semibold' : ''}`}
+                >
                   {onReturnLeg
                     ? returnStatusLabel(locale, event.status, overrides)
                     : statusLabel(locale, event.status, overrides)}

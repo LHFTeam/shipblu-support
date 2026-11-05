@@ -150,7 +150,7 @@ function FolderSection({
   return (
     <section aria-labelledby={headingId} className="flex flex-col gap-3">
       <div className="flex items-baseline gap-2.5">
-        <h2 id={headingId} className="text-lg font-bold text-(--color-text-primary)">
+        <h2 id={headingId} className="text-lg font-semibold text-(--color-text-primary)">
           <Link
             href={`/${locale}/c/${categorySlug}/${folder.slug}`}
             className="group inline-flex items-center gap-1 underline-offset-4 hover:text-(--color-text-link-hover) hover:underline"

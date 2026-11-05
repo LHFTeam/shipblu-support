@@ -56,7 +56,8 @@ const STRINGS = {
     noticeMore: 'Read the update',
     heroEyebrow: 'Help centre',
     heroHeading: 'How can we help?',
-    heroIntro: 'Answers for merchants and for anyone waiting on a ShipBlu parcel.',
+    heroIntro:
+      'Search the knowledge base for answers on shipments, pickups, returns and settlement.',
     searchPlaceholderHero: 'Search for an answer — e.g. “change a pickup address”',
     commonSearches: 'Common searches',
     browseTopics: 'Browse by topic',
@@ -272,7 +273,7 @@ const STRINGS = {
     noticeMore: 'التفاصيل',
     heroEyebrow: 'مركز المساعدة',
     heroHeading: 'كيف يمكننا مساعدتك؟',
-    heroIntro: 'إجابات للتجّار ولكل من ينتظر شحنة من شيب بلو.',
+    heroIntro: 'البحث في قاعدة المعرفة عن إجابات حول الشحنات والاستلام والمرتجعات والتسويات.',
     searchPlaceholderHero: 'البحث عن إجابة — مثل «تغيير عنوان الاستلام»',
     commonSearches: 'الأكثر بحثًا',
     browseTopics: 'تصفّح حسب الموضوع',

@@ -374,6 +374,25 @@ describe('importFreshdeskKb', () => {
     expect(await folders()).toHaveLength(3);
   });
 
+  it("keeps a folder's description on a re-run when Freshdesk has none", async () => {
+    serve(account());
+    await importFreshdeskKb();
+    // What `db/sql/010_kb_folder_descriptions.sql` does to production's
+    // folders, which Freshdesk holds no description for.
+    await db
+      .update(kbFolders)
+      .set({ description: 'Written here.' })
+      .where(eq(kbFolders.externalId, '22:ar'));
+
+    serve(account({ folders: { 11: [{ ...TRACKING, description: 'وصف جديد' }, STAFF] } }));
+    await importFreshdeskKb();
+
+    const after = await folders();
+    expect(byExternalId(after, '22:ar').description).toBe('Written here.');
+    // One Freshdesk does have still wins: it is the source of that folder.
+    expect(byExternalId(after, '21:ar').description).toBe('وصف جديد');
+  });
+
   it('adopts and repairs a row an earlier version wrote under the bare id', async () => {
     serve(account());
     await importFreshdeskKb();

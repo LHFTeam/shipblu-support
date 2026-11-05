@@ -10,14 +10,15 @@ import {
   getCategory,
   getFolder,
   listCategories,
+  listTopicFolders,
   recentlyUpdatedArticles,
 } from './queries';
 import { ANONYMOUS } from './visibility';
 
 /**
  * The help centre's reads that are raw SQL or a filter a static check cannot
- * see: the edit date (`editedAt`, a correlated subquery over the versions) and
- * the locale every count and list now filters.
+ * see: the edit date (`editedAt`, a correlated subquery over the versions), the
+ * locale every count and list now filters, and the front page's folder cards.
  */
 
 withCleanDatabase();
@@ -173,5 +174,80 @@ describe('folderNeighbours', () => {
 
     expect(next).toBeNull();
     expect(related.map((a) => a.slug)).toEqual(['one']);
+  });
+});
+
+describe('listTopicFolders', () => {
+  async function audience(name: string, position: number): Promise<string> {
+    const [row] = await db
+      .insert(kbCategories)
+      .values({ name, slug: name.toLowerCase(), locale: 'en', position })
+      .returning({ id: kbCategories.id });
+    return row!.id;
+  }
+
+  async function subject(
+    categoryId: string,
+    name: string,
+    values: Partial<typeof kbFolders.$inferInsert> = {},
+  ): Promise<string> {
+    const [row] = await db
+      .insert(kbFolders)
+      .values({ categoryId, name, slug: name.toLowerCase(), ...values })
+      .returning({ id: kbFolders.id });
+    return row!.id;
+  }
+
+  it('groups the folders under their audience, in the folder page order', async () => {
+    const partners = await audience('Partners', 0);
+    const customers = await audience('Customers', 1);
+    const financials = await subject(partners, 'Financials');
+    const faqs = await subject(partners, 'FAQs', { description: '  Questions.  ' });
+    const tracking = await subject(customers, 'Tracking');
+
+    for (const [position, slug] of ['d', 'a', 'c', 'b'].entries()) {
+      await article(financials, `finance-${slug}`, { position });
+    }
+    await article(faqs, 'faq-one');
+    await article(tracking, 'where-is-it');
+
+    const groups = await listTopicFolders(ANONYMOUS, 'en');
+
+    expect(groups.map((group) => [group.name, group.folders.map((f) => f.name)])).toEqual([
+      // Folders by position, then name: both are at 0 here, as in production.
+      ['Partners', ['FAQs', 'Financials']],
+      ['Customers', ['Tracking']],
+    ]);
+
+    const finance = groups[0]!.folders[1]!;
+    expect(finance.articleCount).toBe(4);
+    // The first three in the folder page's own order, by position.
+    expect(finance.preview.map((a) => a.slug)).toEqual(['finance-d', 'finance-a', 'finance-c']);
+
+    expect(groups[0]!.folders[0]!.description).toBe('Questions.');
+    expect(finance.description).toBeNull();
+    expect(groups[0]!.articleCount).toBe(5);
+  });
+
+  it('leaves out what a reader may not open, and an audience left with nothing', async () => {
+    const partners = await audience('Partners', 0);
+    const staff = await audience('Staff', 1);
+    const open = await subject(partners, 'Open');
+    const internal = await subject(partners, 'Internal', { visibility: 'agents_only' });
+    // A folder with nothing in it has no rows, and so no card.
+    await subject(partners, 'Empty');
+    const handbook = await subject(staff, 'Handbook', { visibility: 'agents_only' });
+
+    await article(open, 'public-one');
+    await article(open, 'draft-one', { status: 'draft' });
+    await article(open, 'arabic-one', { locale: 'ar' });
+    await article(internal, 'runbook');
+    await article(handbook, 'rota');
+
+    const groups = await listTopicFolders(ANONYMOUS, 'en');
+
+    expect(groups.map((group) => group.name)).toEqual(['Partners']);
+    expect(groups[0]!.folders.map((f) => [f.name, f.articleCount])).toEqual([['Open', 1]]);
+    expect(groups[0]!.folders[0]!.preview.map((a) => a.slug)).toEqual(['public-one']);
   });
 });
