@@ -133,10 +133,21 @@ export function metaThreadState(input: MetaThreadInput): MetaThreadState {
     Freshworks is the Page's primary receiver, and every Instagram reply refused
     here on the strength of it. Freshworks owning the Page inbox says nothing
     about whether Instagram will accept a message sent with the account's own
-    token. The same holds for Unified Login, whose token belongs to the business
-    portfolio rather than to an app installed on the Page: Meta's migration
-    guide lists the handover protocol as not supported on it, so there is no
-    primary receiver for it to be second to either.
+    token.
+
+    **Unified Login is not that exception, and the plan's guess that it was
+    cost three refused replies.** Its token belongs to the business portfolio,
+    but a send with it goes to `graph.facebook.com` *as this app*, and
+    Instagram's thread ownership — Conversation Routing, which replaced the
+    handover protocol for Instagram in October 2025 — is about the app. On
+    2026-11-05 the first three Unified Login sends were refused
+    `100 / 2534037 "not the thread owner"` while the customer's messages were
+    arriving in `standby`; at 10:30:24 UTC this app was made the account's
+    default app (an `app_roles` webhook said so), the next message arrived in
+    `messaging`, and the next send went (`docs/PROJECT-STATE.md` §6.108). So a
+    `standby` on a Unified Login delivery — labelled `facebook_page`, since both
+    sign with the same secret — refuses a Unified send exactly as it refuses the
+    Page's, and the way out is the account's default app, not a token.
 
     The inbound connection is checked as well as the route, because a flag
     recorded by one connection describes that one. Null — every row written
@@ -147,7 +158,7 @@ export function metaThreadState(input: MetaThreadInput): MetaThreadState {
   */
   const standbyBlocks =
     input.standby &&
-    input.connection === 'facebook_page' &&
+    (input.connection === 'facebook_page' || input.connection === 'unified_login') &&
     (input.inboundConnection === null || input.inboundConnection === 'facebook_page');
 
   if (standbyBlocks) {
@@ -160,12 +171,11 @@ export function metaThreadState(input: MetaThreadInput): MetaThreadState {
         `readable here but cannot be answered from here — ${product} accepts a reply only ` +
         `from the app that owns the thread. The messages arrive in the handover protocol's ` +
         `standby channel, which is what says so. Answer in whichever tool is the primary ` +
-        `receiver, hand thread control to this app in the Meta app's Messenger settings` +
+        `receiver, or make this app the ` +
         (input.platform === 'instagram'
-          ? `, or connect the account under Instagram → API setup with Unified login and set ` +
-            `INSTAGRAM_UNIFIED_LOGIN_TOKEN (Settings → Channels has the button), which routes ` +
-            `replies around the Page entirely`
-          : '') +
+          ? `Instagram account's default app in the Page's Advanced messaging settings — ` +
+            `which is what let the first Unified Login reply through on 2026-11-05`
+          : `Page's default app in its Advanced messaging settings`) +
         `.`,
     };
   }

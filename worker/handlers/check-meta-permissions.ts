@@ -7,7 +7,7 @@ import {
 } from '@/lib/meta/connection';
 import { inspectToken, readGraph, type TokenInspection } from '@/lib/meta/debug-token';
 import { INSTAGRAM_GRAPH_BASE } from '@/lib/meta/graph';
-import { connectedAccounts } from '@/lib/meta/unified-login';
+import { connectedAccounts, probeAccount } from '@/lib/meta/unified-login';
 import { credentialsForAccount, listAccounts } from '@/lib/whatsapp/accounts';
 import { credentialStatuses, REQUIRED_BUSINESS_TOKEN_SCOPES } from '@/lib/whatsapp/credentials';
 import { errorMessage } from '@/lib/errors';
@@ -275,9 +275,12 @@ async function checkUnifiedLogin(): Promise<void> {
     console.warn(`[meta:permissions]         symptom: ${report.capability.symptom}`);
   }
 
-  // The same read the callback page proves the token with, so the page and
-  // this diagnostic cannot answer "does the token reach the account?"
-  // differently for one token. Its refusal names host, path and Meta's sentence.
+  // The same two reads the callback page proves the token with — the list,
+  // then the configured account directly when the list leaves it out — so the
+  // page and this diagnostic cannot answer "does the token reach the account?"
+  // differently for one token. The list is empty for a token without
+  // `business_management` (`connectedAccounts`), which is every token the
+  // configuration issues today, so the direct read is the one that decides.
   let accounts;
   try {
     accounts = await connectedAccounts(token);
@@ -300,12 +303,26 @@ async function checkUnifiedLogin(): Promise<void> {
         '— set it to one of the ids above.',
     );
   } else if (!accounts.some((entry) => entry.id === expected)) {
-    console.warn(
-      `[meta:permissions] but INSTAGRAM_ACCOUNT_ID is ${expected}, which this token does not ` +
-        `reach. Every reply is addressed to the configured id with this token, which Graph ` +
-        `refuses with a message about the object not existing — connect again and share that ` +
-        `account, or point the variable at one of the ids above.`,
-    );
+    const probe = await probeAccount(token, expected);
+    if (probe.ok) {
+      console.log(
+        `[meta:permissions] but the token reads INSTAGRAM_ACCOUNT_ID ${expected} ` +
+          `(@${probe.account.username ?? 'unknown'}) directly, which is what every reply does. ` +
+          (inspection.scopes.includes('business_management')
+            ? `The list above needs business_management, which the token carries, so its ` +
+              `silence is a reading to record (plans/instagram-unified-login.md).`
+            : `The list above needs business_management, which the token does not carry and ` +
+              `no reply does.`),
+      );
+    } else {
+      console.warn(
+        `[meta:permissions] but INSTAGRAM_ACCOUNT_ID is ${expected}, which this token does not ` +
+          `reach: reading it answered ${probe.error}. Every reply is addressed to the ` +
+          `configured id with this token, which Graph refuses the same way — remove ShipBlu ` +
+          `Helpdesk under Business settings → Integrations → Connected apps, connect again ` +
+          `picking that account, or point the variable at one of the ids above.`,
+      );
+    }
   }
 }
 

@@ -39,12 +39,9 @@ function inspection(overrides: Partial<TokenInspection> = {}): TokenInspection {
     issuedAt: null,
     expiresAt: null,
     dataAccessExpiresAt: null,
-    scopes: [
-      'instagram_basic',
-      'instagram_manage_messages',
-      'instagram_manage_comments',
-      'business_management',
-    ],
+    // The seven the live token carries, less the three pages_* ones: no
+    // business_management, which the configuration never puts on it.
+    scopes: ['instagram_basic', 'instagram_manage_messages', 'instagram_manage_comments'],
     granularScopes: [],
     error: null,
     ...overrides,

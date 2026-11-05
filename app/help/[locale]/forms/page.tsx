@@ -64,7 +64,7 @@ export default async function FormsIndex({
                       href={formPath(locale, form.slug, suffix)}
                       className="block px-4 py-3.5 transition-colors hover:bg-(--color-background-surface-sunken)"
                     >
-                      <span className="text-base font-bold text-(--color-text-primary)">
+                      <span className="text-base font-semibold text-(--color-text-primary)">
                         {formName(form, locale)}
                       </span>
                       {description ? (

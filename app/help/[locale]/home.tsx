@@ -4,7 +4,7 @@ import { ArrowRightIcon, DocumentIcon, ListIcon, MailIcon } from '@/components/i
 import type { SupportAvailability } from '@/lib/kb/availability';
 import { formatArticleDate } from '@/lib/kb/dates';
 import { formatCount, t, tCount, type Locale } from '@/lib/kb/locale';
-import type { CategoryPreview, DatedArticle, RankedArticle } from '@/lib/kb/queries';
+import type { DatedArticle, RankedArticle, TopicFolder, TopicGroup } from '@/lib/kb/queries';
 import { topicArt } from '@/lib/kb/art';
 import { SupportArt, TopicArtImage, TrackingArt } from './art';
 import { AccentTitle, Availability, Container, Panel } from './chrome';
@@ -21,9 +21,10 @@ import { AskSupport } from './track/support';
  * one caller ever passes.
  *
  * The layout is the help-centre design's ("ShipBlu support landing page v02"
- * in Claude Design), drawn over what the knowledge base actually holds: two
- * topics rather than the design's six, no descriptions on them in production,
- * and lists that are only as long as the reads behind them.
+ * in Claude Design), drawn over what the knowledge base actually holds: the
+ * design's subject cards are production's folders, grouped under the two
+ * audiences they belong to, and the lists are only as long as the reads behind
+ * them.
  */
 
 /**
@@ -54,7 +55,7 @@ export function HomeHero({
               instead, as the design's Arabic page does, since at 11px its
               letters lose the dots that tell them apart. */}
           <p
-            className={`font-bold text-(--color-text-brand) ${
+            className={`font-semibold text-(--color-text-brand) ${
               locale === 'ar' ? 'text-[0.8125rem]' : 'text-2xs tracking-eyebrow uppercase'
             }`}
           >
@@ -62,7 +63,7 @@ export function HomeHero({
           </p>
 
           <h1
-            className={`mt-2.5 text-read-display font-bold text-balance text-(--color-text-primary) md:text-read-display-md ${
+            className={`mt-2.5 text-read-display font-semibold text-balance text-(--color-text-primary) md:text-read-display-md ${
               locale === 'ar' ? 'leading-read-heading-ar' : 'tracking-tight'
             }`}
           >
@@ -123,7 +124,9 @@ function TrackingCard({ locale }: { locale: Locale }) {
   return (
     <Panel className="relative mt-14 w-full max-w-[37.5rem] p-5 lg:max-w-none">
       <TrackingArt className="absolute -top-18 end-3 w-[150px]" />
-      <h2 className="text-lg font-bold text-(--color-text-primary)">{t(locale, 'trackTitle')}</h2>
+      <h2 className="text-lg font-semibold text-(--color-text-primary)">
+        {t(locale, 'trackTitle')}
+      </h2>
       <p className="mt-2 text-sm leading-relaxed text-(--color-text-secondary)">
         {t(locale, 'trackIntro')}
       </p>
@@ -138,46 +141,102 @@ function TrackingCard({ locale }: { locale: Locale }) {
 }
 
 /**
- * The topic cards' grid: three across when there are enough topics to fill a
- * row of three, two across otherwise.
+ * "Browse by topic": one group per audience, a card per folder in each.
  *
- * Not a fixed three columns, which is what the design draws for its six sample
- * topics. Production has two topics — the merchants' and the recipients' — and two
- * cards in a row of three leave a third of the page as a hole that reads as a
- * card that failed to load. Four is two rows of two for the same reason.
+ * The design's six cards are subjects, and production's subjects are its
+ * folders, so a card is a folder (`listTopicFolders`). The audiences the
+ * folders sit under — the merchants' and the recipients' — head their own
+ * groups, each with a link to the audience's page, because "FAQs" means a
+ * different list to each of them and a card alone cannot say whose it is.
+ */
+export function TopicGroups({ locale, groups }: { locale: Locale; groups: TopicGroup[] }) {
+  return (
+    <div className="flex flex-col gap-8">
+      {groups.map((group) => (
+        <section key={group.id} aria-labelledby={`topic-group-${group.id}`}>
+          <div className="mb-3 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+            <h3
+              id={`topic-group-${group.id}`}
+              className="text-base font-semibold text-(--color-text-primary)"
+            >
+              {group.name}
+            </h3>
+            <Link
+              href={`/${locale}/c/${group.slug}`}
+              // The visible words first, then whose: ten "All articles (N)"
+              // links on one page read alike in a screen reader's links list.
+              aria-label={`${tCount(locale, 'allArticles', group.articleCount)} — ${group.name}`}
+              className="text-xs font-medium text-(--color-text-link) underline-offset-2 hover:text-(--color-text-link-hover) hover:underline"
+            >
+              {tCount(locale, 'allArticles', group.articleCount)}
+            </Link>
+          </div>
+          <TopicGrid>
+            {group.folders.map((folder) => (
+              <TopicCard
+                key={folder.id}
+                locale={locale}
+                categorySlug={group.slug}
+                folder={folder}
+              />
+            ))}
+          </TopicGrid>
+        </section>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * The topic cards' grid: the design's three across, two on a tablet, one on a
+ * phone.
+ *
+ * Three across in every group, the recipients' two cards included, so a card
+ * is the same size wherever it sits and the two groups' columns line up. The
+ * short row is a group's last one under its own heading, not a hole in one
+ * grid where a card failed to load.
  *
  * Each card takes two of its rows, band and list, as a subgrid (`TopicCard`),
  * so the bands of one row are one height and their dividers one line, whatever
  * each topic's name, description or drawing makes its own band want.
  */
-export function TopicGrid({ count, children }: { count: number; children: ReactNode }) {
-  const columns = count <= 2 || count === 4 ? 'sm:grid-cols-2' : 'sm:grid-cols-2 lg:grid-cols-3';
-  return <ul className={`grid gap-4 ${columns}`}>{children}</ul>;
+function TopicGrid({ children }: { children: ReactNode }) {
+  return <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{children}</ul>;
 }
 
 /**
- * A topic: a pale band naming it, with its drawing, and the first three answers
- * inside it under that.
+ * A topic: a pale band naming the folder, with its description and drawing,
+ * and the first three answers inside it under that.
  *
- * The titles are the point. A category name is a guess at what is behind it;
+ * The titles are the point. A folder name is a guess at what is behind it;
  * three titles are the thing itself, and a visitor who spots the one they came
- * for skips the category page entirely.
+ * for skips the folder page entirely.
  *
- * The band's 148px is the drawing's room. A topic `topicArt` does not recognise
- * gets no drawing and no minimum height either, so its band closes round the
- * name as a plain header strip rather than standing as a pale box with a gap
- * where a picture should be. A missing description — every one, in production —
- * leaves the name centred against the drawing, which is a layout of its own
- * rather than a hole.
+ * The description is never clamped, as in the design: the lines are ours
+ * (`db/sql/010_kb_folder_descriptions.sql`) and short, and a longer one only
+ * deepens its row, whose bands the subgrid keeps one height.
+ *
+ * The band's 148px is the drawing's room. A folder `topicArt` does not
+ * recognise gets no drawing and no minimum height either, so its band closes
+ * round the name as a plain header strip rather than standing as a pale box
+ * with a gap where a picture should be.
  *
  * The border turns the action blue while the pointer is anywhere on the card,
  * or the keyboard is on one of its links, as the design has it: the card is one
  * object with three ways in, and the whole of it answers. `!` because
  * `.kb-panel` is unlayered CSS and outranks a utility (§6.93).
  */
-export function TopicCard({ locale, category }: { locale: Locale; category: CategoryPreview }) {
-  const href = `/${locale}/c/${category.slug}`;
-  const art = topicArt(category.name, category.slug);
+function TopicCard({
+  locale,
+  categorySlug,
+  folder,
+}: {
+  locale: Locale;
+  categorySlug: string;
+  folder: TopicFolder;
+}) {
+  const href = `/${locale}/c/${categorySlug}/${folder.slug}`;
+  const art = topicArt(folder.name, folder.slug);
   const drawn = art !== null;
 
   return (
@@ -194,16 +253,16 @@ export function TopicCard({ locale, category }: { locale: Locale; category: Cate
         }`}
       >
         <div className="flex min-w-0 flex-1 flex-col gap-2">
-          <h3
-            className={`text-lg leading-snug font-bold break-words ${
+          <h4
+            className={`text-lg leading-snug font-semibold break-words ${
               locale === 'ar' ? '' : 'tracking-tight'
             }`}
           >
-            {category.name}
-          </h3>
-          {category.description ? (
-            <p className="line-clamp-3 text-sm leading-relaxed text-(--color-text-secondary)">
-              {category.description}
+            {folder.name}
+          </h4>
+          {folder.description ? (
+            <p className="text-sm leading-relaxed text-(--color-text-secondary)">
+              {folder.description}
             </p>
           ) : null}
         </div>
@@ -218,34 +277,33 @@ export function TopicCard({ locale, category }: { locale: Locale; category: Cate
       </Link>
 
       <div className="flex flex-col px-5 pt-4 pb-5">
-        {category.preview.length > 0 ? (
-          <ul
-            className={`flex flex-col gap-2 text-sm ${
-              locale === 'ar' ? 'leading-relaxed' : 'leading-snug'
-            }`}
-          >
-            {category.preview.map((article) => (
-              <li key={article.id}>
-                <Link
-                  href={`/${locale}/a/${article.slug}`}
-                  className="text-(--color-text-link) underline-offset-2 hover:text-(--color-text-link-hover) hover:underline"
-                >
-                  {article.title}
-                </Link>
-              </li>
-            ))}
-          </ul>
-        ) : null}
+        <ul
+          className={`flex flex-col gap-2 text-sm ${
+            locale === 'ar' ? 'leading-relaxed' : 'leading-snug'
+          }`}
+        >
+          {folder.preview.map((article) => (
+            <li key={article.id}>
+              <Link
+                href={`/${locale}/a/${article.slug}`}
+                className="text-(--color-text-link) underline-offset-2 hover:text-(--color-text-link-hover) hover:underline"
+              >
+                {article.title}
+              </Link>
+            </li>
+          ))}
+        </ul>
 
         {/* The gap above is on the wrapper, not the link: as padding on the link
             it made the link's own target reach up to the third title's, and two
             targets that touch are easy to miss with a thumb. */}
-        <div className={`mt-auto ${category.preview.length > 0 ? 'pt-3.5' : ''}`}>
+        <div className="mt-auto pt-3.5">
           <Link
             href={href}
-            className="inline-flex items-center gap-1.5 text-xs font-bold text-(--color-text-link) underline-offset-2 hover:text-(--color-text-link-hover) hover:underline"
+            aria-label={`${tCount(locale, 'allArticles', folder.articleCount)} — ${folder.name}`}
+            className="inline-flex items-center gap-1.5 text-xs font-medium text-(--color-text-link) underline-offset-2 hover:text-(--color-text-link-hover) hover:underline"
           >
-            {tCount(locale, 'allArticles', category.articleCount)}
+            {tCount(locale, 'allArticles', folder.articleCount)}
             <ArrowRightIcon size={14} className="shrink-0" />
           </Link>
         </div>
@@ -289,7 +347,7 @@ export function ArticleShortlist({
 
   return (
     <section>
-      <h2 className="mb-4 text-lg font-bold text-(--color-text-primary)">{title}</h2>
+      <h2 className="mb-4 text-lg font-semibold text-(--color-text-primary)">{title}</h2>
       <List className="rounded-xl border border-(--color-border-subtle) bg-(--color-background-surface)">
         {articles.map((article, index) => (
           <li
@@ -368,7 +426,7 @@ export function ContactPanel({
         <SupportArt className="kb-art-fade-wide -ms-3 mb-3 block max-w-full" />
         <h2
           id="contact-title"
-          className={`text-xl font-bold text-(--color-text-primary) ${
+          className={`text-xl font-semibold text-(--color-text-primary) ${
             locale === 'ar' ? '' : 'tracking-tight'
           }`}
         >
@@ -456,7 +514,7 @@ function ChannelCard({
     <>
       <span className="flex items-center gap-2 text-(--color-text-brand)">
         {icon}
-        <span className="text-sm font-bold text-(--color-text-primary)">{name}</span>
+        <span className="text-sm font-semibold text-(--color-text-primary)">{name}</span>
       </span>
       <span className="text-xs leading-relaxed break-words text-(--color-text-secondary)">
         {detail}

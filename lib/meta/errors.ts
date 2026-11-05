@@ -287,17 +287,22 @@ function isCommentPermissionRefusal(error: MetaApiError): boolean {
 
 /**
  * "Message failed to send because another app is controlling this thread now."
+ * — `10 / 2018300` on the Messenger send API. And its Instagram spelling,
+ * "(#100) The action is invalid since it's not the thread owner." —
+ * `100 / 2534037`, read out of the worker log three times on 2026-11-05 when
+ * the first Unified Login replies went out while Freshworks was still the
+ * account's default app (§6.108).
  *
- * `10 / 2018300` on the Messenger send API. Keyed on the subcode and not on the
- * code, which it shares with the comment-permission refusals — and deliberately
- * on this one subcode rather than a range, because the codebase's rule for this
- * file is to widen from a refusal actually read out of a log rather than to
- * guess at the neighbours.
+ * Keyed on the subcode and not on the code, which both share with other
+ * refusals (`10` with the comment-permission ones, `100` with a malformed
+ * request) — and on these two subcodes rather than a range, because the
+ * codebase's rule for this file is to widen from a refusal actually read out of
+ * a log rather than to guess at the neighbours.
  */
-const HANDOVER_SUBCODE = 2018300;
+const HANDOVER_SUBCODES = new Set([2018300, 2534037]);
 
 function isHandoverRefusal(error: MetaApiError): boolean {
-  return error.subcode === HANDOVER_SUBCODE;
+  return error.subcode !== null && HANDOVER_SUBCODES.has(error.subcode);
 }
 
 /**
@@ -358,18 +363,16 @@ function handoverExplanation(context: MetaSendContext): string {
   const product = context.platform === 'facebook' ? 'Messenger' : 'Instagram';
 
   const instagramWayOut =
-    context.platform === 'instagram' && context.connection === 'facebook_page'
-      ? `\n\nThis went out over the Facebook Page, which is what makes it subject to the ` +
-        `Page's handover protocol. An Instagram account connected through Unified Login — or ` +
-        `directly through Instagram Login — is not installed on the Page and has no primary ` +
-        `receiver to be second to: connecting it under Settings → Channels and setting ` +
-        `\`INSTAGRAM_UNIFIED_LOGIN_TOKEN\` routes replies around this entirely (§6.29, and ` +
-        `plans/instagram-unified-login.md).`
-      : context.platform === 'instagram' && context.connection === 'unified_login'
-        ? `\n\nThis went out over Unified Login, which Meta documents as having no handover ` +
-          `protocol at all — so a handover refusal here is new evidence, not a known state. ` +
-          `Record the trace id in docs/PROJECT-STATE.md before changing anything.`
-        : '';
+    context.platform === 'instagram' &&
+    (context.connection === 'facebook_page' || context.connection === 'unified_login')
+      ? `\n\nThis went out over ${context.connection === 'unified_login' ? 'Unified Login' : 'the Facebook Page'}, ` +
+        `and Instagram's thread owner is an app: a send from this app is refused whichever ` +
+        `of the two tokens it carries. The way through is the account's **default app** — ` +
+        `the Page's settings → Advanced messaging — which is what let the first Unified ` +
+        `Login reply through on 2026-11-05 (§6.108, plans/instagram-unified-login.md). ` +
+        `Only the direct Instagram Login connection has been seen to send past another ` +
+        `app's ownership (§6.29), and its token has expired.`
+      : '';
 
   return (
     `Another app holds thread control of this ${product} conversation, so Meta will not ` +

@@ -17,9 +17,10 @@ What came across: the layout and component shapes of all three screens, the
 illustrations, and the interaction details (the accent word in titles, the
 sticky Topics list and article rail, the feedback card, the next-article cards).
 
-What did not: sample copy that makes promises nothing here keeps, the data the
-design assumes and the schema does not hold, and the design system's typography.
-Lato and Tajawal stay, for the reason the earlier plan gives. §4 lists each one.
+What did not: sample copy that makes promises nothing here keeps, and the data
+the design assumes and the schema does not hold. §4 lists each one. A second
+pass (§6) brought the front page's topic cards and the design's typeface across
+once the owner had compared the live page with the design.
 
 ---
 
@@ -56,7 +57,7 @@ than styled:
 
 ## 2. The illustrations
 
-The design's eight drawings live in `app/help/[locale]/art/` and are imported
+The design's drawings live in `app/help/[locale]/art/` and are imported
 statically (`art.tsx`). They are not in `public/` because the help-centre host
 rewrites every path except Next's own under `/help`, and a file at `/art/x.webp`
 would be rewritten out of existence. A static import is served from
@@ -67,14 +68,22 @@ drawings at the size they were exported.
 
 `lib/kb/art.ts` matches a topic to its drawing by the topic's own name, in either
 language, most particular subject first ("Lost shipments" is a claim before it is
-a shipment). The design's sample topics are six subjects. Production's top level
-is two audiences, so those are named too:
+a shipment), and only at the start of a word. The design's sample topics are six
+subjects. Production's top level is two audiences, and its subjects are the
+folders under them, so both are named:
 
 - "ShipBlu Partners" / "شركاء شيب بلو" → the store drawing
 - "ShipBlu Customers" / "عملاء شيب بلو" → the parcel
+- Partners' six folders, each with its own drawing: FAQs → the questions
+  drawing, Financials → payments, Integrations → the store, Policies and
+  Regulations → the claims shield, ShipBlu Unique Products → the account
+  drawing, Shipping Services → the parcel
+- Customers' two: FAQs → the questions drawing, myBlu Support → the account
+  drawing
 
-An unrecognised name, such as "FAQs", gets no drawing, and the layouts close up
-around its absence. A folder with no drawing of its own borrows its category's.
+An unrecognised name gets no drawing, and the layouts close up around its
+absence. On its own page a folder with no drawing of its own borrows its
+category's; its card on the front page draws none.
 The payments drawing has Arabic text in the artwork itself. It is the design's own
 asset and is shown on the English page too.
 
@@ -92,6 +101,10 @@ asset and is shown on the English page too.
   `kb_article_versions` row, cut only when a title or body changes, or the
   publication date, or the creation date. "Last updated", "Recently updated",
   the folder and topic dates and the sitemap's `lastmod` all read it.
+- `listTopicFolders` gives the front page its cards: each audience with its
+  folders, and each folder's count, description and first three titles, in the
+  folder page's own order. A folder with nothing the reader may open in the
+  page's locale has no card, and an audience with no card has no group.
 - `folderNeighbours` reads the folder once and answers both "Next article", the
   article after this one in the folder's own order (null on the last rather than
   wrapping round), and the rail's related list, the rest of the folder by
@@ -116,7 +129,7 @@ asset and is shown on the English page too.
 | --------------------------------------------------------------- | ------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
 | A WhatsApp card with a number, "replies in about 15 min"        | The contact form, email, and sign in / my tickets                   | No public WhatsApp number exists. A channel printed on a help centre has to answer, and a reply time nobody measures is a promise. |
 | Printed opening hours                                           | `Availability`, from the schedule the chat widget is gated on       | Printed hours would disagree with the launcher the day the schedule changed.                                                       |
-| "84 articles, updated weekly"; "answered in under a minute"     | The count alone; the existing lede                                  | Neither cadence nor speed is measured.                                                                                             |
+| "84 articles, updated weekly"; "answered in under a minute"     | The count alone; the lede's first sentence                          | Neither cadence nor speed is measured.                                                                                             |
 | "It starts with SB"; placeholder `SB-4820-1193`                 | The existing hint; a 13-digit placeholder that is not a real number | Tracking numbers are thirteen digits. A live one as a placeholder would publish that parcel's recipient (PROJECT-STATE §6.38).     |
 | Audience chips and "Merchants"/"Recipients" on each article     | Nothing                                                             | Articles carry no audience. In production the two categories already are the two audiences, and the Topics list offers them.       |
 | Topic search filtering the list in place                        | A GET form to the scoped search page                                | It works without JavaScript, and the empty state lives where the search does.                                                      |
@@ -125,8 +138,7 @@ asset and is shown on the English page too.
 | No tracking link in the header                                  | Track a shipment in the header                                      | The visitor who needs it most arrived on an article from a search engine.                                                          |
 | No search on the article page                                   | The compact search at the trail's end                               | A reader on the wrong article can try again without going back to the front page.                                                  |
 | "No, I still need help" offering Contact support at once        | A comment box first, then Contact support                           | Asking only the readers an article failed is where the useful sentence comes from.                                                 |
-| Three topic cards a row                                         | Two, for production's two topics                                    | Two cards in a row of three leave a hole that reads as a card that failed to load.                                                 |
-| Semibold (600) headings in Geist                                | Bold in Lato                                                        | Lato ships 400/700/900, and the help centre keeps the typefaces customers already read.                                            |
+| Six subject cards in one grid                                   | A card per folder, under a heading per audience                     | Production's subjects are its folders, and "FAQs" is a different list for merchants and for recipients.                            |
 | Tertiary meta text on the pale band                             | Secondary                                                           | Contrast on the tint.                                                                                                              |
 | Contact support → the front page's list of channels             | Opens the chat (`AskSupport`), with `/forms` as the link underneath | Production has no ticket form, so `/forms` redirects to a sign-in most readers cannot pass; the chat needs no account.             |
 | The title's last word in blue, in Arabic too                    | The head of the phrase in Arabic (`lib/kb/accent.ts`)               | Arabic puts the topic word first: the last word of «شركاء شيب بلو» is half the brand name.                                         |
@@ -147,7 +159,53 @@ asset and is shown on the English page too.
   privacy pages, which would let the header and footer carry the design's
   remaining links.
 
-## 6. Verified
+## 6. The second pass: the landing page as drawn
+
+The first pass drew production's two audiences as the front page's two topic
+cards, so "Browse by topic" was two wide cards where the design has six subject
+cards. Compared side by side on 2026-11-05, the owner read it as a different
+page. The second pass closed the gap:
+
+- **A card per folder.** Production's subjects are its folders: Partners has six
+  (FAQs, Financials, Integrations, Policies and Regulations, ShipBlu Unique
+  Products, Shipping Services), which fill the design's three-by-two grid, and
+  Customers has two. The audiences head their groups, each linking to its own
+  page. The grid is three across in both groups, so a card is one size
+  wherever it sits.
+- **A description on every card.** The folders came from Freshdesk without one
+  and the console has no folder editor, so
+  `db/sql/010_kb_folder_descriptions.sql` writes one per folder in both
+  languages, matched by audience and slug. It fills only a blank description,
+  so a replay writes nothing and a line written later wins. It reaches
+  production on the first deploy after `dev` is merged into `main`.
+- **The design's typeface.** Geist for Latin, from `next/font`, and Rubik for
+  Arabic, from the self-hosted 'Rubik Arabic' faces the message text already
+  used, with the 600 weight added from the same Fontsource build (5.3.0) so the
+  design's semibold headings are drawn at 600 rather than 700. The owner chose
+  this over keeping the live Freshdesk portal's Lato and Tajawal. Every
+  `font-bold` under `app/help/` became `font-semibold`, since the design uses
+  400, 500 and 600 and never 700. The stack's order matters for the reason
+  PROJECT-STATE §6.25 gives: `Geist, 'Rubik Arabic'` lead, ahead of
+  `var(--font-geist)` and its Arial fallback.
+- **Two drawings.** The design's question-and-search parcel, re-exported at
+  280px from its 474px original, for the FAQs folders, and the account-settings
+  drawing, renamed from `pickups` to `account` for what it shows.
+- **The header's bare mark**, as the design draws it on white, at the size of
+  the design's bird, and the design's own lede.
+- **The design's sizes and weights where they differ from Tailwind's.** Inside
+  `.kb-shell` only, `text-xs` is 13px, `text-2xs` 12px, `text-lg` 17px and
+  `tracking-tight` -0.011em, as the design's tokens have them; `text-base`
+  stays 16px, because a form field below 640px must, or iOS zooms into it.
+  Article rows, the next-article cards, the language switch and the footer's
+  name are at the design's 500, and Arabic titles at its 1.25 leading.
+- **The general words read last in the drawing matcher.** "Policy", "product"
+  and "app" match only when a name says nothing more particular, so "Return
+  policy" is a return and "Apps & Integrations" an integration.
+- **A Freshdesk re-import keeps a folder's description** when Freshdesk has
+  none, which is every one of production's, so it cannot undo the descriptions
+  above.
+
+## 7. Verified
 
 Verified against a local Postgres seeded in production's shape: two audiences
 with their folders, in both locales, with excerpts, headings and tags. The

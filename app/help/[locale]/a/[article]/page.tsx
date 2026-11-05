@@ -254,7 +254,7 @@ function MetaItem({
  * pulls its joined letters apart.
  */
 function eyebrowClass(locale: Locale) {
-  return `mb-2.5 text-2xs font-bold text-(--color-text-tertiary) ${
+  return `mb-2.5 text-2xs font-semibold text-(--color-text-tertiary) ${
     locale === 'ar' ? '' : 'tracking-eyebrow uppercase'
   }`;
 }
@@ -344,7 +344,7 @@ const PAGER_CARD =
 
 const PAGER_LABEL = 'inline-flex items-center gap-1 text-2xs text-(--color-text-tertiary)';
 
-const PAGER_TITLE = 'text-sm leading-snug font-bold text-(--color-text-link)';
+const PAGER_TITLE = 'text-sm leading-snug font-medium text-(--color-text-link)';
 
 /**
  * "Back to topic" and "Next article", the two ways on from the foot of an

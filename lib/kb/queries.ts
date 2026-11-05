@@ -93,34 +93,50 @@ export async function listCategories(viewer: KbViewer, locale: Locale): Promise<
 }
 
 /**
- * The categories, each with the first few article titles inside it.
+ * The front page's topics: each audience with its folders, and the first few
+ * article titles inside each folder.
  *
- * The front page shows those titles rather than only a category name and a
- * count, because a name is a guess at what is inside and three titles are the
- * thing itself. Most visitors arriving at a help centre are looking for one
- * specific answer, and seeing it on the front page saves them the category page
- * entirely.
+ * The design draws "Browse by topic" as one card per subject — Getting started,
+ * Shipments & tracking, Payments & settlement. Production's top level is two
+ * audiences rather than subjects ("ShipBlu Partners", "ShipBlu Customers"), and
+ * the subjects are the folders under them: Financials, Integrations, Shipping
+ * Services. So a card is a folder, and the audiences are the groups the cards
+ * sit in.
  *
- * Two queries whatever the number of categories, on the same reasoning as
- * `folderPreviews` below: the whole result is a few dozen rows of title and
- * slug, and the per-category cut in JavaScript keeps this a plain `where … in`
- * rather than a window function.
+ * Each card lists titles rather than only a name and a count, because a name is
+ * a guess at what is inside and three titles are the thing itself: a visitor
+ * who spots the answer they came for skips the folder page entirely.
+ *
+ * One query beyond the categories, whatever the number of folders: the whole
+ * result is a few dozen rows of title and slug, and the per-folder cut in
+ * JavaScript keeps it a plain `where … in` rather than a window function. A
+ * folder with nothing the reader may open in this locale has no rows and so no
+ * card, and an audience left with no card has no group.
  */
-/** Three titles per category on the front page, matching the folder preview. */
-const CATEGORY_PREVIEW_SIZE = 3;
+const FOLDER_PREVIEW_SIZE = 3;
 
-export type CategoryPreview = CategorySummary & { preview: ArticleLink[] };
+export type TopicFolder = {
+  id: string;
+  name: string;
+  slug: string;
+  description: string | null;
+  articleCount: number;
+  preview: ArticleLink[];
+};
 
-export async function listCategoryPreviews(
-  viewer: KbViewer,
-  locale: Locale,
-): Promise<CategoryPreview[]> {
+export type TopicGroup = CategorySummary & { folders: TopicFolder[] };
+
+export async function listTopicFolders(viewer: KbViewer, locale: Locale): Promise<TopicGroup[]> {
   const categories = await listCategories(viewer, locale);
   if (categories.length === 0) return [];
 
   const rows = await db
     .select({
       categoryId: kbFolders.categoryId,
+      folderId: kbFolders.id,
+      folderName: kbFolders.name,
+      folderSlug: kbFolders.slug,
+      folderDescription: kbFolders.description,
       id: kbArticles.id,
       title: kbArticles.title,
       slug: kbArticles.slug,
@@ -133,24 +149,48 @@ export async function listCategoryPreviews(
           kbFolders.categoryId,
           categories.map((category) => category.id),
         ),
+        // The article's own locale, as every list here filters it: a folder
+        // inherits its category's language, and a mis-filed row would be
+        // counted on this card and linked to a 404.
         eq(kbArticles.locale, locale),
         articleVisibleTo(viewer),
         folderVisibleTo(viewer),
       ),
     )
-    .orderBy(asc(kbFolders.position), asc(kbArticles.position), asc(kbArticles.title));
+    // The folder page's own order, folder by folder, so the card's three
+    // titles are the first three a reader meets on the page it links to.
+    .orderBy(
+      asc(kbFolders.position),
+      asc(kbFolders.name),
+      asc(kbArticles.position),
+      asc(kbArticles.title),
+    );
 
-  const byCategory = new Map<string, ArticleLink[]>();
-  for (const { categoryId, ...article } of rows) {
-    const list = byCategory.get(categoryId) ?? [];
-    if (list.length < CATEGORY_PREVIEW_SIZE) list.push(article);
-    byCategory.set(categoryId, list);
+  const folders = new Map<string, TopicFolder>();
+  const byCategory = new Map<string, TopicFolder[]>();
+  for (const row of rows) {
+    let folder = folders.get(row.folderId);
+    if (!folder) {
+      folder = {
+        id: row.folderId,
+        name: row.folderName,
+        slug: row.folderSlug,
+        description: row.folderDescription?.trim() || null,
+        articleCount: 0,
+        preview: [],
+      };
+      folders.set(row.folderId, folder);
+      byCategory.set(row.categoryId, [...(byCategory.get(row.categoryId) ?? []), folder]);
+    }
+    folder.articleCount += 1;
+    if (folder.preview.length < FOLDER_PREVIEW_SIZE) {
+      folder.preview.push({ id: row.id, title: row.title, slug: row.slug });
+    }
   }
 
-  return categories.map((category) => ({
-    ...category,
-    preview: byCategory.get(category.id) ?? [],
-  }));
+  return categories
+    .map((category) => ({ ...category, folders: byCategory.get(category.id) ?? [] }))
+    .filter((group) => group.folders.length > 0);
 }
 
 export type RankedArticle = {

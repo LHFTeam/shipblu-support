@@ -159,21 +159,25 @@ export async function GET(request: Request) {
 
   /*
     An empty list is not the last word. `/me/assigned_instagram_accounts`
-    answered `[]` on 2026-11-05 for a token whose portfolio listed the account
-    as shared with this app, so the account every reply is addressed to is
-    read directly: a token that reads it can address it, and is accepted with
-    the list's silence noted; one that cannot is refused with Graph's own
-    sentence and the token's permissions, which is what the admin needs to
-    fix the configuration rather than the dialog.
+    answers `[]` for a token without `business_management`, which the
+    configuration does not give it (`connectedAccounts`), so the account every
+    reply is addressed to is read directly: a token that reads it can address
+    it, and is accepted with the list's silence explained; one that cannot is
+    refused with Graph's own sentence and the token's permissions, which is
+    what the admin needs to fix the login rather than retry it.
   */
   if (accounts.length === 0 && configuredAccountId) {
     const probe = await probeAccount(token, configuredAccountId);
     if (probe.ok) {
       accounts = [probe.account];
       warnings.push(
-        `Meta’s list of the token’s Instagram accounts was empty, but the token reads ` +
-          `${configuredAccountId} directly, which is what every reply does. Treat the empty list ` +
-          `as a reading to record (plans/instagram-unified-login.md, Not known yet).`,
+        `Meta’s list of the token’s Instagram accounts was empty, ` +
+          (inspection?.scopes.includes('business_management')
+            ? `although the token carries business_management, which that list needs — a ` +
+              `reading to record (plans/instagram-unified-login.md)`
+            : `because the token carries no business_management, which that list needs and no ` +
+              `reply does`) +
+          `; the token reads ${configuredAccountId} directly, which is what every reply does.`,
       );
       log.warn(`assigned_instagram_accounts empty, direct read ok agent_id=${agent.id}`);
     } else {

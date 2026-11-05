@@ -2,7 +2,7 @@
 
 import { useParams } from 'next/navigation';
 import { DEFAULT_LOCALE, direction, isLocale } from '@/lib/kb/locale';
-import { lato, tajawal } from './[locale]/fonts';
+import { geist } from './[locale]/fonts';
 import { HelpFailed } from './failed';
 
 /**
@@ -31,7 +31,7 @@ export default function HelpLayoutError({ retry }: { retry: () => void }) {
     <div
       dir={direction(locale)}
       lang={locale}
-      className={`kb-shell ${lato.variable} ${tajawal.variable} flex min-h-dvh flex-col antialiased`}
+      className={`kb-shell ${geist.variable} flex min-h-dvh flex-col antialiased`}
     >
       <main className="flex-1">
         <HelpFailed retry={retry} />

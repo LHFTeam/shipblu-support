@@ -88,7 +88,10 @@ export function TicketForm({
       {visible.map((element, index) => {
         if (element.kind === 'heading') {
           return (
-            <h2 key={`h${index}`} className="mt-2 text-base font-bold text-(--color-text-primary)">
+            <h2
+              key={`h${index}`}
+              className="mt-2 text-base font-semibold text-(--color-text-primary)"
+            >
               {elementText(element, locale)}
             </h2>
           );

@@ -162,7 +162,7 @@ export function SurveyForm({
   if (saved) {
     return (
       <div className="kb-panel mx-auto max-w-[600px] p-7">
-        <h1 className="text-2xl font-bold text-(--color-text-primary)">{wording.thanks}</h1>
+        <h1 className="text-2xl font-semibold text-(--color-text-primary)">{wording.thanks}</h1>
       </div>
     );
   }
@@ -172,7 +172,9 @@ export function SurveyForm({
       {wording.intro ? (
         <p className="text-sm text-(--color-text-secondary)">{wording.intro}</p>
       ) : null}
-      <h1 className="mt-1 text-2xl font-bold text-(--color-text-primary)">{wording.question}</h1>
+      <h1 className="mt-1 text-2xl font-semibold text-(--color-text-primary)">
+        {wording.question}
+      </h1>
 
       {/* Stacked on a phone, where five words side by side do not fit; one row
           from `sm`, worst first in reading order — so right to left in Arabic. */}

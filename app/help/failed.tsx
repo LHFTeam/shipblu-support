@@ -25,7 +25,9 @@ export function HelpFailed({ retry }: { retry: () => void }) {
   return (
     <PageBody>
       <Panel className="mx-auto max-w-lg p-8 text-center sm:p-10">
-        <h1 className="text-xl font-bold text-(--color-text-primary)">{t(locale, 'pageError')}</h1>
+        <h1 className="text-xl font-semibold text-(--color-text-primary)">
+          {t(locale, 'pageError')}
+        </h1>
         <p className="mt-2 text-sm text-(--color-text-secondary)">{t(locale, 'pageErrorHint')}</p>
 
         <Button className="mt-6" onClick={() => retry()}>

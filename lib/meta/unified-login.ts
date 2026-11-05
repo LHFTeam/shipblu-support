@@ -400,6 +400,16 @@ const MAX_ACCOUNT_PAGES = 10;
  * `paging.next` is followed, on Graph's own host only: a `next` pointing
  * anywhere else would carry the bearer token to it.
  * https://developers.facebook.com/documentation/instagram-platform/instagram-api-with-unified-login/get-started
+ *
+ * An empty list is not proof the token reaches nothing. On 2026-11-05 the
+ * edge answered `[]` for a token carrying the three Instagram permissions and
+ * no `business_management` — the Unified login tab's editor does not offer
+ * it, and an edit under Facebook Login for Business did not put it on the
+ * token — while a direct read of the account with the same token succeeded
+ * and the token checked out granted for messaging. The edge is a business
+ * asset read, and that is the permission such a read needs. So both callers
+ * fall back to `probeAccount` when the list is empty, and judge the token by
+ * that; the list is a convenience for a portfolio with several accounts.
  */
 export async function connectedAccounts(token: string): Promise<ConnectedAccount[]> {
   const first = new URL(`${GRAPH_BASE}/me/assigned_instagram_accounts`);
@@ -501,11 +511,12 @@ export async function probeAccount(
  * facts the page has, in place of a guess about the dialog.
  *
  * Written after the first two live attempts refused with "connect again and
- * share the account", which the admin had done. The known cause of this shape
- * is a configuration without `business_management`, which Meta's permissions
- * page calls a prerequisite for the system-user token and leaves out of the
- * default configuration; the scopes show whether the token carries it, and
- * Graph's sentence from the direct read says what the account thinks.
+ * share the account", which the admin had done. It is answered only once the
+ * direct read of `INSTAGRAM_ACCOUNT_ID` has failed too, because the list is
+ * empty for any token without `business_management` (see `connectedAccounts`)
+ * and says nothing on its own. What is left is the facts: the scopes, Graph's
+ * sentence from the read, and the one fix known to make the next login
+ * create the connection afresh.
  */
 export function accountlessDetails(input: {
   inspection: TokenInspection | null;
@@ -533,16 +544,20 @@ export function accountlessDetails(input: {
           .join('; ')}.`,
       );
     }
-    if (!inspection.scopes.includes('business_management')) {
-      details.push(
-        'The token carries no business_management. Meta lists it as a prerequisite for the ' +
-          'system-user token and leaves it out of the default configuration; without it the ' +
-          'Instagram account is shared with the app but not assigned to the token. Add it under ' +
-          'Facebook Login for Business → Configurations → Edit (the Unified login tab’s editor ' +
-          'does not offer it), remove ShipBlu Helpdesk under Business settings → Integrations → ' +
-          'Connected apps so the next login creates the connection afresh, then connect again.',
-      );
-    }
+    details.push(
+      inspection.scopes.includes('business_management')
+        ? 'The token carries business_management, so Meta’s list of its Instagram accounts ' +
+            'should have named the account; that it did not, and the direct read failed too, ' +
+            'means the account was not assigned to the token in this login.'
+        : 'The token carries no business_management, which Meta’s list of its Instagram ' +
+            'accounts needs and no reply does, so the empty list says nothing by itself; the ' +
+            'direct read below is what counts, and it failed.',
+    );
+    details.push(
+      'The account is shared with the app but not assigned to this token. Remove ShipBlu ' +
+        'Helpdesk under Business settings → Integrations → Connected apps so the next login ' +
+        'creates the connection afresh, pick the account in the login, and connect again.',
+    );
   } else {
     details.push(
       'Meta’s token inspection did not answer, so the token’s permissions are not known.',

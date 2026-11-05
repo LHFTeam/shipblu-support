@@ -664,13 +664,23 @@ describe('thread control', () => {
     expect(explained).not.toContain('thread control');
   });
 
-  it('offers the direct Instagram connection only when the Page is the route', () => {
-    const viaPage = explainMetaSendError(handover(), {
-      platform: 'instagram',
-      connection: 'facebook_page',
-      sendKind: 'private_reply',
-    });
-    expect(viaPage).toContain('INSTAGRAM_UNIFIED_LOGIN_TOKEN');
+  it('names the account’s default app on the Page and on Unified Login, and no token', () => {
+    /*
+      Until 2026-11-05 this offered INSTAGRAM_UNIFIED_LOGIN_TOKEN as the route
+      around the Page's handover. The first three live Unified Login sends were
+      refused 100/2534037 for exactly this, until the app was made the account's
+      default app (§6.108) — so the token is not the way out, the setting is,
+      on both routes alike.
+    */
+    for (const connection of ['facebook_page', 'unified_login'] as const) {
+      const explained = explainMetaSendError(handover(), {
+        platform: 'instagram',
+        connection,
+        sendKind: 'private_reply',
+      });
+      expect(explained).toContain('default app');
+      expect(explained).not.toContain('INSTAGRAM_UNIFIED_LOGIN_TOKEN');
+    }
 
     /*
       Already on the direct connection, where the Page's handover does not apply
@@ -684,6 +694,29 @@ describe('thread control', () => {
       sendKind: 'private_reply',
     });
     expect(direct).not.toContain('INSTAGRAM_ACCESS_TOKEN');
+    expect(direct).not.toContain('default app');
+  });
+
+  it('reads Instagram’s 100/2534037 as the same handover refusal', () => {
+    // "(#100) The action is invalid since it's not the thread owner." — the
+    // worker log, three times on 2026-11-05. Code 100 is also a malformed
+    // request, so only the subcode may decide.
+    const explained = explainMetaSendError(
+      new MetaApiError(
+        "(#100) The action is invalid since it's not the thread owner.",
+        400,
+        100,
+        2534037,
+        false,
+        null,
+        'A1tDCe',
+      ),
+      { platform: 'instagram', connection: 'unified_login', sendKind: 'dm' },
+    );
+
+    expect(explained).toContain('thread control');
+    expect(explained).toContain('default app');
+    expect(explained).not.toContain('malformed');
   });
 });
 
@@ -697,6 +730,7 @@ describe('isRecipientRefusal', () => {
     expect(refusal(10, 1545041)).toBe(true);
     expect(refusal(1545041)).toBe(true);
     expect(refusal(10, 2018300)).toBe(true);
+    expect(refusal(100, 2534037)).toBe(true);
     // No such user, not receiving our messages, outside the allowed window.
     expect(refusal(100, 2018001)).toBe(true);
     expect(refusal(10, 2018108)).toBe(true);

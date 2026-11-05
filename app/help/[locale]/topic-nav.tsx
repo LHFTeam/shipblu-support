@@ -100,7 +100,7 @@ export function TopicNav({
           tracking pulls its joined letters apart. */}
       <p
         id="kb-topics-label"
-        className={`mb-2.5 text-2xs font-bold text-(--color-text-tertiary) lg:px-3 ${
+        className={`mb-2.5 text-2xs font-semibold text-(--color-text-tertiary) lg:px-3 ${
           locale === 'ar' ? '' : 'tracking-eyebrow uppercase'
         }`}
       >
@@ -145,7 +145,7 @@ const TOPIC_LINK =
   'relative flex min-h-9 items-center gap-2 overflow-hidden rounded-full border px-3.5 py-1.5 text-sm transition-colors focus-visible:rounded-full! lg:justify-between lg:rounded-md lg:border-transparent lg:px-3 lg:py-2 lg:focus-visible:rounded-md!';
 
 const TOPIC_CURRENT =
-  'border-(--color-action-primary-default) bg-(--color-background-selected) font-bold text-(--color-text-brand) lg:before:absolute lg:before:inset-y-0 lg:before:start-0 lg:before:w-0.5 lg:before:bg-(--color-action-primary-default)';
+  'border-(--color-action-primary-default) bg-(--color-background-selected) font-semibold text-(--color-text-brand) lg:before:absolute lg:before:inset-y-0 lg:before:start-0 lg:before:w-0.5 lg:before:bg-(--color-action-primary-default)';
 
 const TOPIC_OTHER =
   'border-(--color-border-subtle) bg-(--color-background-surface) text-(--color-text-secondary) hover:bg-(--color-background-hover) hover:text-(--color-text-primary) lg:bg-transparent lg:hover:bg-(--color-background-hover)';

@@ -36,7 +36,7 @@ export function ServiceNoticeBanner({ locale }: { locale: Locale }) {
     */
     <div role="status" className={`kb-noprint border-b ${TONE_CLASS[notice.tone]}`}>
       <Container className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1 py-2.5 text-sm">
-        <span className="flex items-center gap-2 font-bold">
+        <span className="flex items-center gap-2 font-semibold">
           <WarningIcon size={16} className="shrink-0 self-center" />
           {t(locale, 'noticeLabel')}
         </span>
@@ -55,7 +55,7 @@ export function ServiceNoticeBanner({ locale }: { locale: Locale }) {
         {notice.href ? (
           <a
             href={notice.href}
-            className="ms-auto font-bold whitespace-nowrap underline-offset-4 hover:underline"
+            className="ms-auto font-semibold whitespace-nowrap underline-offset-4 hover:underline"
           >
             {t(locale, 'noticeMore')}
           </a>

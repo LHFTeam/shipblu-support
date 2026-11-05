@@ -468,11 +468,17 @@ async function upsertFolder(
     .limit(1);
 
   if (existing[0]) {
+    // A description only when Freshdesk has one. Production's folders have
+    // none there, and the help centre's are written here instead
+    // (`db/sql/010_kb_folder_descriptions.sql`); writing Freshdesk's blank back
+    // on a re-import would empty every front-page card until the next deploy
+    // filled them again.
+    const description = folder.description?.trim() ? folder.description : null;
     await db
       .update(kbFolders)
       .set({
         name: folder.name,
-        description: folder.description ?? null,
+        ...(description ? { description } : {}),
         visibility,
         categoryId,
         externalId,

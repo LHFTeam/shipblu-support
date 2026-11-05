@@ -64,10 +64,10 @@ Design decisions worth knowing before changing things:
   console used to own the bare domain, which made the public site something you had to
   already know the URL of.
 - **The help centre has its own typefaces and reading density**, scoped to `.kb-shell` in
-  `app/globals.css`, and the design system's colours. The fonts are the live Freshdesk
-  portal's Lato/Tajawal pairing, so the cutover is not also a change of typeface for a
-  returning customer; the colours are the same roles the console reads, with the help
-  centre's older `--kb-*` names pointed at them, which is how the shared primitives in
+  `app/globals.css`, and the design system's colours. The fonts are the help-centre
+  design's, Geist for Latin and Rubik for Arabic, chosen over keeping the live Freshdesk
+  portal's Lato and Tajawal; the colours are the same roles the console reads, with the
+  help centre's older `--kb-*` names pointed at them, which is how the shared primitives in
   `components/ui.tsx` work there without a second set of components. The layout follows the
   help-centre design ("ShipBlu support landing page v02", `plans/help-centre-design-v02.md`).
   Page furniture — the pale header band, the trail, the card, the article row, the "still
