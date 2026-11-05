@@ -98,6 +98,9 @@ const STRINGS = {
     searchIn: 'Search in {name}',
     noResultsIn: 'No articles in {name} match “{q}”.',
     resultsForIn: 'Results for “{q}” in {name}',
+    // The unscoped title, as a template so each language keeps its own
+    // quotation marks: Arabic's «» beside the scoped title, not English's “”.
+    resultsForQuery: 'Results for “{q}”',
     searchEverywhere: 'Search the whole help centre',
     ctaNotFoundTitle: 'Didn’t find your answer?',
     ctaStuckTitle: 'Stuck on a step?',
@@ -312,6 +315,7 @@ const STRINGS = {
     searchIn: 'البحث في {name}',
     noResultsIn: 'لا توجد مقالات في {name} تطابق «{q}».',
     resultsForIn: 'نتائج البحث عن «{q}» في {name}',
+    resultsForQuery: 'نتائج البحث عن «{q}»',
     searchEverywhere: 'البحث في مركز المساعدة كله',
     ctaNotFoundTitle: 'لم تجد حضرتك الإجابة؟',
     ctaStuckTitle: 'هل توقفت حضرتك عند خطوة؟',

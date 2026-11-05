@@ -1,12 +1,16 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import type { Metadata } from 'next';
-import { CategoryIcon, DocumentIcon, FolderIcon } from '@/components/icons';
-import { articleCount, formatCount, isLocale, t, type Locale } from '@/lib/kb/locale';
-import { getCategory, type FolderSummary } from '@/lib/kb/queries';
+import { ChevronRightIcon } from '@/components/icons';
+import { supportAvailability } from '@/lib/kb/availability';
+import { articleCount, formatCount, isLocale, t, tFill, type Locale } from '@/lib/kb/locale';
+import { getCategory, listCategories, type FolderSummary } from '@/lib/kb/queries';
 import { kbViewer } from '@/lib/kb/viewer';
 import { decodeSlugParam } from '@/lib/kb/slug';
-import { PageBody, PageHeader, Panel } from '../../chrome';
+import { TopicArtImage } from '../../art';
+import { ArticleList, ArticleRow, HelpCta, PageHeader } from '../../chrome';
+import { SearchBox } from '../../search-box';
+import { TopicBody, TopicMeta, TopicNav } from '../../topic-nav';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,11 +28,26 @@ export async function generateMetadata({
 
   return {
     title: `${category.name} — ShipBlu Support`,
-    description: category.description ?? undefined,
+    description: category.description || undefined,
     alternates: { canonical: `/${locale}/c/${category.slug}` },
   };
 }
 
+/**
+ * A topic: every folder in the category as a section of its own, every article
+ * in each, title and excerpt — the design's grouped list.
+ *
+ * All of them, where this page used to show each folder as a card with three
+ * titles and a "View all". Production's biggest category holds forty-odd
+ * articles in six folders, which is a list a reader scans in one scroll, and
+ * every "View all" was a page load between them and an answer that could have
+ * been on screen already.
+ *
+ * The design also draws a row of audience chips — "For merchants", "For
+ * recipients" — over the list. They are not here: an article carries no
+ * audience, and in production the categories themselves are the two audiences,
+ * which the Topics list beside this one already offers.
+ */
 export default async function CategoryPage({
   params,
 }: {
@@ -38,8 +57,15 @@ export default async function CategoryPage({
   const slug = decodeSlugParam(categoryParam);
   if (!isLocale(locale)) notFound();
 
-  const category = await getCategory(await kbViewer(), locale, slug);
+  const viewer = await kbViewer();
+  const [category, topics, availability] = await Promise.all([
+    getCategory(viewer, locale, slug),
+    listCategories(viewer, locale),
+    supportAvailability(),
+  ]);
   if (!category) notFound();
+
+  const total = category.folders.reduce((sum, folder) => sum + folder.articleCount, 0);
 
   return (
     <>
@@ -48,9 +74,32 @@ export default async function CategoryPage({
         crumbs={[{ label: t(locale, 'home'), href: `/${locale}` }]}
         title={category.name}
         selfPath={`/${locale}/c/${category.slug}`}
-        icon={<CategoryIcon size={24} />}
-        meta={category.description}
-      />
+        accent
+        /* Empty in production, where nobody has written one yet: the header
+           then goes straight from the title to its facts, rather than leaving a
+           gap where a sentence should be. */
+        lede={category.description?.trim() || undefined}
+        meta={<TopicMeta locale={locale} count={total} updatedAt={category.lastUpdatedAt} />}
+        art={
+          <TopicArtImage
+            name={category.name}
+            slug={category.slug}
+            className="kb-art-fade w-[260px]"
+            priority
+          />
+        }
+        search={false}
+      >
+        <div className="max-w-[32.5rem]">
+          <SearchBox
+            locale={locale}
+            size="field"
+            id="kb-topic-search"
+            placeholder={tFill(locale, 'searchIn', { name: category.name })}
+            within={category.slug}
+          />
+        </div>
+      </PageHeader>
 
       {/*
         No empty state: `getCategory` answers null when nothing inside is
@@ -58,32 +107,36 @@ export default async function CategoryPage({
         only thing that keeps a category whose folders are all internal off the
         public help centre, since categories carry no visibility of their own.
       */}
-      <PageBody>
-        <div className="grid items-start gap-4 lg:grid-cols-2">
-          {category.folders.map((folder) => (
-            <FolderPanel
-              key={folder.id}
-              locale={locale}
-              categorySlug={category.slug}
-              folder={folder}
-            />
-          ))}
-        </div>
-      </PageBody>
+      <TopicBody nav={<TopicNav locale={locale} categories={topics} currentSlug={category.slug} />}>
+        {category.folders.map((folder) => (
+          <FolderSection
+            key={folder.id}
+            locale={locale}
+            categorySlug={category.slug}
+            folder={folder}
+          />
+        ))}
+
+        <HelpCta
+          locale={locale}
+          title={t(locale, 'ctaNotFoundTitle')}
+          availability={availability}
+        />
+      </TopicBody>
     </>
   );
 }
 
 /**
- * A folder, with the first few article titles showing through.
+ * One folder: its name, how many articles it holds, and every one of them.
  *
- * The titles are the point. A folder called "Financials" tells a customer
- * nothing about whether their transfer question is inside it; "Billing Days ||
- * Transfer Cycle and Fees" tells them immediately — and often it *is* the
- * article they wanted, so the preview saves them the intermediate page
- * entirely.
+ * The name links to the folder's own page, which is the address to share for
+ * "everything about Financials", and the chevron beside it is what says the
+ * heading goes somewhere — a heading in the text colour reads as a label
+ * otherwise. The articles are `h3`s under it, so a screen reader's heading list
+ * is the same outline a sighted reader sees.
  */
-function FolderPanel({
+function FolderSection({
   locale,
   categorySlug,
   folder,
@@ -92,48 +145,40 @@ function FolderPanel({
   categorySlug: string;
   folder: FolderSummary;
 }) {
-  const href = `/${locale}/c/${categorySlug}/${folder.slug}`;
+  const headingId = `folder-${folder.id}`;
 
   return (
-    <Panel as="section" className="flex flex-col p-5">
-      <div className="flex items-start gap-3">
-        <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-(--color-background-brand-subtle) text-(--color-text-brand)">
-          <FolderIcon size={20} />
+    <section aria-labelledby={headingId} className="flex flex-col gap-3">
+      <div className="flex items-baseline gap-2.5">
+        <h2 id={headingId} className="text-lg font-bold text-(--color-text-primary)">
+          <Link
+            href={`/${locale}/c/${categorySlug}/${folder.slug}`}
+            className="group inline-flex items-center gap-1 underline-offset-4 hover:text-(--color-text-link-hover) hover:underline"
+          >
+            {folder.name}
+            <ChevronRightIcon
+              size={16}
+              className="shrink-0 text-(--color-text-tertiary) group-hover:text-current"
+            />
+          </Link>
+        </h2>
+        <span aria-hidden className="text-xs tabular-nums text-(--color-text-tertiary)">
+          {formatCount(locale, folder.articleCount)}
         </span>
-        <div className="min-w-0">
-          <h2 className="text-base font-bold text-(--color-text-primary)">
-            <Link href={href} className="underline-offset-4 hover:underline">
-              {folder.name}
-            </Link>
-          </h2>
-          <p className="mt-0.5 text-xs text-(--color-text-secondary)">
-            {articleCount(locale, folder.articleCount)}
-          </p>
-        </div>
+        <span className="sr-only">{articleCount(locale, folder.articleCount)}</span>
       </div>
 
-      <ul className="mt-4 flex flex-col gap-2.5 text-sm">
-        {folder.preview.map((article) => (
-          <li key={article.id}>
-            <Link
-              href={`/${locale}/a/${article.slug}`}
-              className="flex items-start gap-2 text-(--color-text-link) underline-offset-4 hover:text-(--color-text-link-hover) hover:underline"
-            >
-              <DocumentIcon size={17} className="mt-0.5 shrink-0 text-(--color-text-secondary)" />
-              <span className="min-w-0">{article.title}</span>
-            </Link>
-          </li>
+      <ArticleList>
+        {folder.articles.map((article) => (
+          <ArticleRow
+            key={article.id}
+            href={`/${locale}/a/${article.slug}`}
+            title={article.title}
+            excerpt={article.excerpt}
+            level="h3"
+          />
         ))}
-      </ul>
-
-      {folder.articleCount > folder.preview.length ? (
-        <Link
-          href={href}
-          className="pt-4 text-sm font-bold text-(--color-text-link) underline-offset-4 hover:text-(--color-text-link-hover) hover:underline"
-        >
-          {t(locale, 'viewAll')} {formatCount(locale, folder.articleCount)}
-        </Link>
-      ) : null}
-    </Panel>
+      </ArticleList>
+    </section>
   );
 }
