@@ -56,7 +56,7 @@ export function SearchBox({
 
   if (size === 'hero') {
     return (
-      <form action={`/${locale}/search`} role="search" className="flex gap-2">
+      <form action={`/${locale}/search`} role="search" className="kb-noprint flex gap-2">
         <label htmlFor={id} className="sr-only">
           {t(locale, 'search')}
         </label>
@@ -75,12 +75,15 @@ export function SearchBox({
             enterKeyHint="search"
             /* 16px on a phone: iOS Safari zooms into anything smaller when it
                takes focus, and it does not zoom back out. */
-            className={`h-12 ps-11 pe-3 text-base ${FIELD}`}
+            className={`h-12 ps-11 pe-3 text-base ${FIELD} ${EMPTY_NO_CANCEL}`}
           />
         </div>
         {within ? <input type="hidden" name="c" value={within} /> : null}
-        <button type="submit" className={`${buttonClass()} h-12! px-5! text-base!`}>
-          {t(locale, 'search')}
+        {/* Labelled from `sm` up, as the design draws it; a magnifier on a phone,
+            where the label's 70px were the end of the placeholder's example. */}
+        <button type="submit" className={`${buttonClass()} h-12! px-5! text-base! max-sm:px-3.5!`}>
+          <SearchIcon size={20} className="sm:hidden" />
+          <span className="max-sm:sr-only">{t(locale, 'search')}</span>
         </button>
       </form>
     );
@@ -89,7 +92,7 @@ export function SearchBox({
   const tall = size === 'field';
 
   return (
-    <form action={`/${locale}/search`} role="search" className="relative">
+    <form action={`/${locale}/search`} role="search" className="kb-noprint relative">
       <label htmlFor={id} className="sr-only">
         {hint}
       </label>
@@ -104,7 +107,7 @@ export function SearchBox({
         required
         placeholder={hint}
         enterKeyHint="search"
-        className={`${FIELD} ${tall ? 'h-12 ps-4 pe-12 text-base' : 'h-10 ps-3 pe-11 text-base sm:text-sm'}`}
+        className={`${FIELD} ${EMPTY_NO_CANCEL} ${tall ? 'h-12 ps-4 pe-12 text-base' : 'h-10 ps-3 pe-11 text-base sm:text-sm'}`}
       />
 
       <button
@@ -123,3 +126,11 @@ export function SearchBox({
 /** The surface and focus ring are the design system's field, the same as `Input`'s. */
 const FIELD =
   'w-full rounded-md border border-(--color-border-subtle) bg-(--color-background-surface) text-(--color-text-primary) outline-none transition-colors placeholder:text-(--color-text-tertiary) hover:border-(--color-border-default) focus:border-(--color-border-focus) focus:ring-2 focus:ring-(--color-border-focus)/20';
+
+/**
+ * Chromium keeps room for a `type="search"` field's clear button even while the
+ * field is empty and the button is hidden, which cut the hero's example
+ * placeholder off mid-word at tablet width. Hidden until there is something to
+ * clear.
+ */
+const EMPTY_NO_CANCEL = 'placeholder-shown:[&::-webkit-search-cancel-button]:hidden';

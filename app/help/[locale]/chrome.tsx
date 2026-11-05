@@ -3,11 +3,14 @@ import type { ReactNode } from 'react';
 import { BookIcon, ChevronRightIcon } from '@/components/icons';
 import { buttonClass } from '@/components/ui';
 import { formatOpening } from '@/lib/hours';
+import { jsonForScript } from '@/lib/html/json-script';
+import { accentSplit } from '@/lib/kb/accent';
 import type { SupportAvailability } from '@/lib/kb/availability';
 import { t, type Locale } from '@/lib/kb/locale';
 import { publicBaseUrl } from '@/lib/kb/site';
 import { SupportArt } from './art';
 import { SearchBox } from './search-box';
+import { AskSupport } from './track/support';
 
 /**
  * The shapes every help-centre page is built from.
@@ -94,6 +97,10 @@ export function Breadcrumbs({ locale, items }: { locale: Locale; items: Crumb[] 
  * rewritten path and a relative `item` would describe a URL that does not
  * exist. Emitted next to the visible trail rather than assembled separately in
  * each page's metadata, so the two can never disagree about the hierarchy.
+ *
+ * Through `jsonForScript`, never a bare `JSON.stringify`: the search page's
+ * crumb is the reader's own query, and a `</script>` in it would otherwise end
+ * the element and run whatever followed.
  */
 function BreadcrumbSchema({ items }: { items: Crumb[] }) {
   const base = publicBaseUrl();
@@ -109,28 +116,29 @@ function BreadcrumbSchema({ items }: { items: Crumb[] }) {
   };
 
   return (
-    <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(data) }} />
+    <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonForScript(data) }} />
   );
 }
 
 /**
- * A title whose last word is in the brand blue — "How can we **help?**",
- * "Shipments & **tracking**" — the design's one flourish on a title.
- *
- * The last word whatever the language, which in Arabic is the word read last
- * too. A one-word title is drawn plain: colouring all of it would make the
- * whole heading the accent, which is not what the design does. The space is
- * kept outside the span so the browser's line breaking is untouched.
+ * A title with one word in the brand blue — "How can we **help?**",
+ * "Shipments & **tracking**", "**شركاء** شيب بلو" — the design's one flourish on
+ * a title. Which word is `accentSplit`'s question (`lib/kb/accent.ts`): the last
+ * in English, the head of the phrase in Arabic. The space is kept outside the
+ * span so the browser's line breaking is untouched.
  */
-export function AccentTitle({ text }: { text: string }) {
-  const trimmed = text.trim();
-  const cut = trimmed.search(/\s\S+$/u);
-  if (cut < 0) return <>{trimmed}</>;
+export function AccentTitle({ text, at }: { text: string; at: 'first' | 'last' }) {
+  const split = accentSplit(text, at);
+  if (!split) return <>{text.trim()}</>;
 
-  return (
+  const word = <span className="text-(--color-text-brand)">{split.word}</span>;
+  return split.accent === 'first' ? (
     <>
-      {trimmed.slice(0, cut)}{' '}
-      <span className="text-(--color-text-brand)">{trimmed.slice(cut + 1)}</span>
+      {word} {split.rest}
+    </>
+  ) : (
+    <>
+      {split.rest} {word}
     </>
   );
 }
@@ -173,11 +181,14 @@ export function PageHeader({
   title: string;
   /** The current page's own path, for the structured-data trail. */
   selfPath: string;
-  /** Last word in the brand blue, as the design draws topic titles. */
+  /** The topic's word in the brand blue, as the design draws topic titles. */
   accent?: boolean;
-  /** One sentence under the title: what this page is for. */
+  /** One sentence under the title: what this page is for. A page's intro goes here. */
   lede?: ReactNode;
-  /** Small facts about the page — a count, a date, a translation link. */
+  /**
+   * Small facts about the page — a count, a date, a translation link — set at
+   * 12px. Not a sentence: a page's intro in this slot reads as fine print.
+   */
   meta?: ReactNode;
   art?: ReactNode;
   search?: boolean;
@@ -211,7 +222,11 @@ export function PageHeader({
                   locale === 'ar' ? 'leading-read-heading-ar' : 'tracking-tight'
                 }`}
               >
-                {accent ? <AccentTitle text={title} /> : title}
+                {accent ? (
+                  <AccentTitle text={title} at={locale === 'ar' ? 'first' : 'last'} />
+                ) : (
+                  title
+                )}
               </h1>
               {lede ? (
                 <p className="mt-2.5 max-w-[62ch] text-read-ui text-(--color-text-secondary)">
@@ -271,17 +286,32 @@ export function ArticleRow({
 }) {
   return (
     <li className="border-b border-(--color-border-subtle) last:border-0">
+      {/*
+        The focus ring is drawn inside the row. The list card clips its overflow
+        to keep the rounded corners, so the global ring, offset outwards, was
+        cut away on three sides and left a keyboard reader with a 2px line or
+        nothing. The `!` is needed against that unlayered global rule (§6.93).
+      */}
       <Link
         href={href}
-        className="group flex items-center gap-4 px-4 py-3.5 transition-colors hover:bg-(--color-background-hover)"
+        className="group flex items-center gap-4 px-4 py-3.5 transition-colors hover:bg-(--color-background-hover) focus-visible:bg-(--color-background-hover) focus-visible:outline-offset-[-2px]!"
       >
-        <BookIcon size={18} className="shrink-0 self-start text-(--color-text-tertiary) sm:self-center" />
+        <BookIcon
+          size={18}
+          className="shrink-0 self-start text-(--color-text-tertiary) sm:self-center"
+        />
         <span className="flex min-w-0 flex-1 flex-col gap-0.5">
           <Heading className="text-[0.9375rem] leading-snug font-bold text-(--color-text-link) group-hover:text-(--color-text-link-hover)">
             {title}
           </Heading>
           {excerpt ? (
             <span className="line-clamp-2 text-sm text-(--color-text-secondary)">{excerpt}</span>
+          ) : null}
+          {/* Below sm the end column has no room, and the label still has to
+              show: on a search it is what says a result belongs to the other
+              audience. Only one copy is ever displayed. */}
+          {meta ? (
+            <span className="text-xs text-(--color-text-secondary) sm:hidden">{meta}</span>
           ) : null}
         </span>
         {meta ? (
@@ -393,9 +423,13 @@ export function Availability({
  * The pale band at the foot of a topic or an article: "Didn't find your
  * answer?", "Stuck on a step?" — the headset, one sentence, and the button.
  *
- * The button goes straight to the contact forms rather than to the front page's
- * list of channels, as the design has it: somebody who has read to the bottom
- * of an article that did not help has already chosen to ask.
+ * The button opens the chat rather than the front page's list of channels, as
+ * the design has it: somebody who has read to the bottom of an article that did
+ * not help has already chosen to ask. Not the contact forms either, though that
+ * is the link underneath: with no ticket form built — production has none —
+ * `/forms` redirects to `/portal/new`, which asks for an account, and most
+ * people reading the help centre do not have one. The chat needs none.
+ * `AskSupport` keeps `/forms` as the `href` for a page whose chat never loaded.
  */
 export function HelpCta({
   locale,
@@ -420,9 +454,9 @@ export function HelpCta({
         </p>
         <Availability locale={locale} availability={availability} className="mt-2" />
       </div>
-      <Link href={`/${locale}/forms`} className={buttonClass()}>
+      <AskSupport href={`/${locale}/forms`} className={buttonClass()}>
         {t(locale, 'contactAction')}
-      </Link>
+      </AskSupport>
     </section>
   );
 }

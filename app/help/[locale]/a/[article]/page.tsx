@@ -29,6 +29,9 @@ import { ViewBeacon } from './view-beacon';
 
 export const dynamic = 'force-dynamic';
 
+/** The rail's "Related articles": `relatedArticles`' own default. */
+const RELATED_SHOWN = 5;
+
 export async function generateMetadata({
   params,
 }: {
@@ -90,7 +93,9 @@ export default async function ArticlePage({
   if (!article) notFound();
 
   const [related, translations, next, availability] = await Promise.all([
-    relatedArticles(viewer, article.folderId, article.id),
+    // One more than the rail shows, so dropping the article already offered
+    // as Next leaves the list full rather than a link short.
+    relatedArticles(viewer, article.folderId, article.id, RELATED_SHOWN + 1),
     translationsOf(viewer, article.translationGroupId),
     nextInFolder(viewer, locale, article.folderId, article.id),
     supportAvailability(),
@@ -106,7 +111,7 @@ export default async function ArticlePage({
   // The next article is offered under the body already. Listed in the rail as
   // well, it would spend one of the rail's few places on a link the reader is
   // about to meet anyway.
-  const rail = related.filter((entry) => entry.id !== next?.id);
+  const rail = related.filter((entry) => entry.id !== next?.id).slice(0, RELATED_SHOWN);
   const hasRail = sections.length > 0 || rail.length > 0;
 
   return (

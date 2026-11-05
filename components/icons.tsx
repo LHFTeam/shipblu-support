@@ -175,27 +175,6 @@ export function DocumentIcon(props: IconProps) {
   );
 }
 
-/*
- * Parcels.
- *
- * Six of them, and they exist because the public help centre's front page and
- * its tracking page are read by recipients rather than by agents: a row of six
- * identical squares makes a customer read every label to find the topic they
- * came for, where a truck and a wallet are told apart at a glance. The console
- * still uses `CategoryIcon`, which is what an unrecognised topic falls back to.
- */
-
-export function PackageSearchIcon(props: IconProps) {
-  return (
-    <Icon {...props}>
-      <path d="M20 11V7.4L12 3.2 4 7.4v9.2l8 4.2 1.6-.8" />
-      <path d="M4 7.4 12 11.6l8-4.2M12 11.6v7.5" />
-      <circle cx="17.5" cy="16.5" r="2.8" />
-      <path d="m19.6 18.6 1.9 1.9" />
-    </Icon>
-  );
-}
-
 export function ReturnIcon(props: IconProps) {
   return (
     <Directional {...props}>

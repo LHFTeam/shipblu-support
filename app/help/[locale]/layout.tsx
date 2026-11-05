@@ -161,8 +161,10 @@ export default async function KbLayout({
   );
 }
 
+/* Regular weight, as the design draws them: bold, three text links outweighed
+   the Sign in button beside them and the help centre's name. */
 const NAV_LINK =
-  'font-bold text-(--color-text-secondary) underline-offset-4 hover:text-(--color-text-primary) hover:underline';
+  'text-(--color-text-secondary) underline-offset-4 hover:text-(--color-text-primary) hover:underline';
 const FOOTER_LINK = 'underline-offset-4 hover:text-(--color-text-primary) hover:underline';
 
 /**
@@ -176,6 +178,13 @@ const FOOTER_LINK = 'underline-offset-4 hover:text-(--color-text-primary) hover:
  * script, because the reader who needs it is the one who cannot read the page's,
  * and the pair is always English-then-Arabic, left to right, so it does not swap
  * sides when the page does.
+ *
+ * Two things the design's 26px segments do not do. On a phone each is 40px tall,
+ * a target a thumb can find beside the 42px Sign in. And the link's focus ring
+ * is drawn inside it: the group clips its overflow for the rounded corners, and
+ * the global ring, offset outwards, was cut away — on an Arabic page, where the
+ * link is the first segment, entirely. The `!` is needed against that unlayered
+ * global rule (§6.93).
  *
  * It points at that locale's front page rather than at a translation of the
  * current one. There is no general path mapping — an Arabic article has its own
@@ -196,7 +205,7 @@ function LocaleSwitcher({ locale }: { locale: Locale }) {
             key={option}
             lang={option}
             aria-current="true"
-            className="bg-(--color-background-selected) px-2.5 py-1.5 text-(--color-text-brand)"
+            className="bg-(--color-background-selected) px-2.5 py-1.5 text-(--color-text-brand) max-sm:py-3"
           >
             {LOCALE_SHORT[option]}
           </span>
@@ -207,7 +216,7 @@ function LocaleSwitcher({ locale }: { locale: Locale }) {
             lang={option}
             hrefLang={option}
             aria-label={LOCALE_NAMES[option]}
-            className="px-2.5 py-1.5 text-(--color-text-secondary) transition-colors hover:bg-(--color-background-hover) hover:text-(--color-text-primary)"
+            className="px-2.5 py-1.5 text-(--color-text-secondary) transition-colors hover:bg-(--color-background-hover) hover:text-(--color-text-primary) focus-visible:outline-offset-[-2px]! max-sm:py-3"
           >
             {LOCALE_SHORT[option]}
           </Link>

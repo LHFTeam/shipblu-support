@@ -108,7 +108,14 @@ export default async function FolderPage({
       </PageHeader>
 
       <TopicBody
-        nav={<TopicNav locale={locale} categories={topics} currentSlug={folder.categorySlug} />}
+        nav={
+          <TopicNav
+            locale={locale}
+            categories={topics}
+            currentSlug={folder.categorySlug}
+            currentIsPage={false}
+          />
+        }
       >
         {folder.articles.length === 0 ? (
           <EmptyNote>{t(locale, 'emptyCategory')}</EmptyNote>

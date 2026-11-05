@@ -79,11 +79,18 @@ export function TopicNav({
   locale,
   categories,
   currentSlug,
+  currentIsPage = true,
 }: {
   locale: Locale;
   categories: CategorySummary[];
   /** The category the page belongs to; null marks none. */
   currentSlug: string | null;
+  /**
+   * Whether the current topic's link is this very page (the category page) or
+   * only the topic the page sits in (a folder). A folder page marking its
+   * parent `aria-current="page"` told a screen reader the link led here.
+   */
+  currentIsPage?: boolean;
 }) {
   if (categories.length === 0) return null;
 
@@ -108,7 +115,7 @@ export function TopicNav({
             <li key={category.id}>
               <Link
                 href={`/${locale}/c/${category.slug}`}
-                aria-current={current ? 'page' : undefined}
+                aria-current={current ? (currentIsPage ? 'page' : 'true') : undefined}
                 className={`${TOPIC_LINK} ${current ? TOPIC_CURRENT : TOPIC_OTHER}`}
               >
                 <span className="min-w-0">{category.name}</span>

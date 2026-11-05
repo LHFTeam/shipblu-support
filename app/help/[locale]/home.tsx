@@ -9,6 +9,7 @@ import { hasTopicArt, SupportArt, TopicArtImage, TrackingArt } from './art';
 import { AccentTitle, Availability, Container, Panel } from './chrome';
 import { SearchBox } from './search-box';
 import { TrackForm } from './track/form';
+import { AskSupport } from './track/support';
 
 /**
  * The front page, and only the front page.
@@ -64,7 +65,7 @@ export function HomeHero({
               locale === 'ar' ? 'leading-read-heading-ar' : 'tracking-tight'
             }`}
           >
-            <AccentTitle text={t(locale, 'heroHeading')} />
+            <AccentTitle text={t(locale, 'heroHeading')} at="last" />
           </h1>
 
           <p className="mt-3 max-w-[52ch] text-read-ui text-(--color-text-secondary)">
@@ -77,7 +78,9 @@ export function HomeHero({
 
           {tags.length > 0 ? (
             <div className="mt-4 flex flex-wrap items-baseline gap-2 text-sm">
-              <span className="text-(--color-text-tertiary)">{t(locale, 'commonSearches')}</span>
+              {/* Secondary, not the design's tertiary: tertiary on this band is
+                  4.49:1, a hair under AA for 14px text. */}
+              <span className="text-(--color-text-secondary)">{t(locale, 'commonSearches')}</span>
               {/* Each tag on one line — a two-word Arabic phrase broken across
                   a pill reads as two searches — and cut short only when it is
                   longer than the whole row, which no tag written as a search
@@ -228,15 +231,18 @@ export function TopicCard({ locale, category }: { locale: Locale; category: Cate
           </ul>
         ) : null}
 
-        <Link
-          href={href}
-          className={`mt-auto flex items-center gap-1.5 self-start text-xs font-bold text-(--color-text-link) underline-offset-2 hover:text-(--color-text-link-hover) hover:underline ${
-            category.preview.length > 0 ? 'pt-3.5' : ''
-          }`}
-        >
-          {tCount(locale, 'allArticles', category.articleCount)}
-          <ArrowRightIcon size={14} className="shrink-0" />
-        </Link>
+        {/* The gap above is on the wrapper, not the link: as padding on the link
+            it made the link's own target reach up to the third title's, and two
+            targets that touch are easy to miss with a thumb. */}
+        <div className={`mt-auto ${category.preview.length > 0 ? 'pt-3.5' : ''}`}>
+          <Link
+            href={href}
+            className="inline-flex items-center gap-1.5 text-xs font-bold text-(--color-text-link) underline-offset-2 hover:text-(--color-text-link-hover) hover:underline"
+          >
+            {tCount(locale, 'allArticles', category.articleCount)}
+            <ArrowRightIcon size={14} className="shrink-0" />
+          </Link>
+        </div>
       </div>
     </li>
   );
@@ -371,6 +377,7 @@ export function ContactPanel({
       <ul className="grid grid-cols-[repeat(auto-fit,minmax(170px,1fr))] gap-3">
         <ChannelCard
           href={`/${locale}/forms`}
+          chat
           icon={<DocumentIcon size={17} />}
           name={t(locale, 'contactAction')}
           detail={t(locale, 'channelTicketDetail')}
@@ -412,12 +419,20 @@ export function ContactPanel({
  */
 function ChannelCard({
   href,
+  chat = false,
   icon,
   name,
   detail,
   note,
 }: {
   href: string;
+  /**
+   * Open the chat rather than follow `href`, which stays the link for a page
+   * whose chat never loaded. The contact card needs it: with no ticket form
+   * built — production has none — `/forms` redirects to a sign-in wall, and the
+   * chat, which takes photos too, needs no account (`AskSupport`).
+   */
+  chat?: boolean;
   icon: ReactNode;
   name: string;
   detail: ReactNode;
@@ -449,7 +464,11 @@ function ChannelCard({
 
   return (
     <li>
-      {external ? (
+      {chat ? (
+        <AskSupport href={href} className={className}>
+          {body}
+        </AskSupport>
+      ) : external ? (
         <a href={href} className={className}>
           {body}
         </a>

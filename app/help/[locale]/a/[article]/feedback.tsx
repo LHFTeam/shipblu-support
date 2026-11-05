@@ -1,10 +1,10 @@
 'use client';
 
-import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { CheckIcon } from '@/components/icons';
 import { Button, buttonClass, Textarea } from '@/components/ui';
 import { t, type Locale } from '@/lib/kb/locale';
+import { AskSupport } from '../../track/support';
 
 /**
  * "Did this article answer your question?" — the one signal that tells the team
@@ -60,7 +60,10 @@ export function ArticleFeedback({ articleId, locale }: { articleId: string; loca
         <p
           ref={thanks}
           tabIndex={-1}
-          className="flex items-center gap-2 text-sm text-(--color-text-secondary) outline-none"
+          // `!` because the global `[tabindex]:focus-visible` ring is unlayered
+          // and beats a utility (§6.93): focus is moved here only so the next
+          // Tab lands on what follows, and a ring made the line read as a field.
+          className="flex items-center gap-2 text-sm text-(--color-text-secondary) outline-none!"
         >
           {/* The design's circle-check, drawn as a ring round the plain tick. */}
           <span className="flex size-4 shrink-0 items-center justify-center rounded-full border-[1.5px] border-current text-(--color-feedback-success-fg)">
@@ -73,15 +76,16 @@ export function ArticleFeedback({ articleId, locale }: { articleId: string; loca
           <p
             ref={thanks}
             tabIndex={-1}
-            className="min-w-0 flex-[1_1_15rem] text-sm text-(--color-text-secondary) outline-none"
+            className="min-w-0 flex-[1_1_15rem] text-sm text-(--color-text-secondary) outline-none!"
           >
             {t(locale, 'feedbackThanksNo')}
           </p>
-          {/* Straight to the forms, as the help band below does: somebody who
-              has just said the article did not help has already chosen to ask. */}
-          <Link href={`/${locale}/forms`} className={buttonClass()}>
+          {/* The chat, as the help band below opens: somebody who has just said
+              the article did not help has already chosen to ask, and `/forms`
+              asks for an account while no ticket form is built (`AskSupport`). */}
+          <AskSupport href={`/${locale}/forms`} className={buttonClass()}>
             {t(locale, 'contactAction')}
-          </Link>
+          </AskSupport>
         </div>
       ) : (
         <>

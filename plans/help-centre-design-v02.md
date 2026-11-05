@@ -42,7 +42,7 @@ than styled:
   chevron, with the whole row as the link.
 - **`HelpCta`** is the pale "Didn't find your answer?" / "Stuck on a step?" band
   at the foot of topics and articles: the headset drawing, one sentence, the
-  real `Availability` line, and the button.
+  real `Availability` line, and a Contact support button that opens the chat.
 - **Header and footer** (`layout.tsx`):
   - Header: Knowledge base and Contact (the front page's `#topics` and
     `#contact`), Track a shipment, an EN | ع switch, and Sign in as a secondary
@@ -116,6 +116,8 @@ asset and is shown on the English page too.
 | Three topic cards a row                                         | Two, for production's two topics                                    | Two cards in a row of three leave a hole that reads as a card that failed to load.                                                 |
 | Semibold (600) headings in Geist                                | Bold in Lato                                                        | Lato ships 400/700/900, and the help centre keeps the typefaces customers already read.                                            |
 | Tertiary meta text on the pale band                             | Secondary                                                           | Contrast on the tint.                                                                                                              |
+| Contact support → the front page's list of channels             | Opens the chat (`AskSupport`), with `/forms` as the link underneath | Production has no ticket form, so `/forms` redirects to a sign-in most readers cannot pass; the chat needs no account.             |
+| The title's last word in blue, in Arabic too                    | The head of the phrase in Arabic (`lib/kb/accent.ts`)               | Arabic puts the topic word first: the last word of «شركاء شيب بلو» is half the brand name.                                         |
 
 ## 5. Left open
 
