@@ -196,6 +196,26 @@ describe('noteVerifyingSecret', () => {
     expect(log).toHaveBeenCalledTimes(2);
   });
 
+  it('says the app secret could be either of the two connections that sign with it', () => {
+    // The Page and Unified Login sign alike, so a line naming the Page alone
+    // would read a Unified Login delivery as the Page's — and a `messaging`
+    // delivery verifying with the app secret is the first sign Unified Login
+    // is delivering, since the Page's copies have arrived in standby since
+    // 27 August. The direct connection's line stays as it was.
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    noteVerifyingSecret('instagram', candidate('META_APP_SECRET', 'facebook_page'), 'messaging');
+    noteVerifyingSecret(
+      'instagram',
+      candidate('INSTAGRAM_APP_SECRET', 'instagram_login'),
+      'messaging',
+    );
+
+    expect(log.mock.calls[0]![0]).toContain('unified_login');
+    expect(log.mock.calls[0]![0]).toContain('facebook_page');
+    expect(log.mock.calls[1]![0]).not.toContain('unified_login');
+  });
+
   it('stays quiet for WhatsApp and Page deliveries', () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
 

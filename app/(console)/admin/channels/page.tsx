@@ -52,6 +52,7 @@ import {
   type WebchatSwitchView,
 } from './forms';
 import { RoutingBadge, RoutingReadinessPanel } from './routing-readiness';
+import { UnifiedLoginCard } from './unified-login-card';
 import { NewWhatsAppAccount, WhatsAppAccountEditor, type WhatsAppAccountRow } from './waba-forms';
 
 export const dynamic = 'force-dynamic';
@@ -365,6 +366,11 @@ export default async function ChannelsPage() {
             />
           </Card>
         ) : null}
+
+        {/* The Instagram account's third connection, beside the rows it sends
+            for: a setting of the environment rather than a row, like the Meta
+            channels above it, with the control that mints its credential. */}
+        <UnifiedLoginCard canConnect={canConnect} />
 
         <ChannelForm
           groups={groupList}

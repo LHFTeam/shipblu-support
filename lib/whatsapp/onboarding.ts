@@ -7,6 +7,7 @@ import { errorMessage } from '@/lib/errors';
 import { isTimeout } from '@/lib/http/deadline';
 import { logger } from '@/lib/log';
 import { inspectToken, type TokenInspection } from '@/lib/meta/debug-token';
+import { redact } from '@/lib/meta/redact';
 import { GRAPH_BASE, graphTimeout } from '@/lib/meta/graph';
 import { enqueue } from '@/lib/queue';
 import { ensureAccountForWaba, listAccounts, parseTokenEnvVar } from './accounts';
@@ -792,12 +793,7 @@ async function exchangeCode(
  * misconfigured one is. An empty one is skipped, since splitting on it would
  * put a marker between every character.
  */
-export function redact(text: string, secrets: readonly string[]): string {
-  return secrets.reduce(
-    (out, secret) => (secret ? out.split(secret).join('[redacted]') : out),
-    text,
-  );
-}
+export { redact };
 
 /**
  * Starts an attempt's job again — the "Retry connection" button — for an

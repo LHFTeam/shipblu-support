@@ -173,7 +173,11 @@ Design decisions worth knowing before changing things:
   since Graph refuses a wrong-shaped request with the same sentence it uses for a
   deleted comment. An Instagram account connected through Instagram Login rather than
   through its Facebook Page goes further and brings its own host, access token and app
-  secret; see `docs/PROJECT-STATE.md` §6.26 for what that cost before it was known.
+  secret; see `docs/PROJECT-STATE.md` §6.26 for what that cost before it was known. A
+  third route, Meta's Unified Login, keeps the Page's host and app secret with a
+  never-expiring token of its own and no handover protocol, and is the one to use
+  (`plans/instagram-unified-login.md`); `lib/meta/connection.ts` prefers it whenever its
+  token is set.
 - **Configuration is validated by the engines that consume it.** The admin screens parse
   conditions and actions with `lib/rules` and `lib/automations` before storing them, so a
   rule that saves is a rule that will run rather than one the sweep silently ignores.

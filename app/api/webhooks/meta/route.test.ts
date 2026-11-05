@@ -125,13 +125,24 @@ describe('the subscription handshake', () => {
 
 describe('a signed delivery', () => {
   it.each([
-    ['a Page delivery signed by the app secret', 'page', PAGE_SECRET, 'facebook', 'facebook_page'],
     [
+      'a Page delivery signed by the app secret',
+      'page',
+      PAGE_SECRET,
+      'facebook',
+      'facebook_page',
+      'facebook_page',
+    ],
+    [
+      // The app secret signs the Page's and Unified Login's `instagram`
+      // deliveries alike, so the key carries the envelope as well as the label
+      // (`lib/meta/delivery.ts`): this one arrived in `messaging`.
       'an Instagram delivery signed by the app secret',
       'instagram',
       PAGE_SECRET,
       'instagram',
       'facebook_page',
+      'facebook_page:messaging',
     ],
     [
       'an Instagram delivery signed by the Instagram Login secret',
@@ -139,10 +150,11 @@ describe('a signed delivery', () => {
       INSTAGRAM_SECRET,
       'instagram',
       'instagram_login',
+      'instagram_login',
     ],
   ] as const)(
     '%s is stored on its connection, under an id naming it, and queued',
-    async (_what, object, secret, channel, connection) => {
+    async (_what, object, secret, channel, connection, scope) => {
       const response = await deliver(message(object), secret);
 
       expect(response.status).toBe(200);
@@ -152,7 +164,7 @@ describe('a signed delivery', () => {
           provider: 'meta',
           channel,
           connection,
-          providerEventId: `${connection}|m:m_1`,
+          providerEventId: `${scope}|m:m_1`,
           payload: message(object),
           signatureVerified: true,
           error: null,

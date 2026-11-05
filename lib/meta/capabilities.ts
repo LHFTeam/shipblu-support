@@ -149,6 +149,33 @@ export const CAPABILITIES: readonly Capability[] = [
       "Standard Access covers, and which says nothing about a customer's. Treat a public " +
       "comment arriving as the thing that settles it, not the account's own.",
   },
+  {
+    /*
+      The third spelling, which is the first one's. Unified Login takes the
+      `instagram_*` vocabulary of the Facebook Login setup without the `pages_*`
+      names, because no Page is involved: Meta's permission mapping for the
+      migration reads instagram_business_basic → instagram_basic and so on, and
+      its permissions page says Advanced Access already held for these — which
+      the 2026-09-19 review granted for the two below — carries over. So a
+      Unified Login token carrying these two is the approved messaging pair on
+      a route the Page's handover cannot refuse.
+    */
+    name: 'Instagram direct messages (Unified Login)',
+    connection: 'unified_login',
+    symptom: 'Instagram DMs arrive but every reply is refused by graph.facebook.com',
+    permissions: ['instagram_basic', 'instagram_manage_messages'],
+  },
+  {
+    name: 'Instagram comment webhooks and moderation (Unified Login)',
+    connection: 'unified_login',
+    symptom: 'no ticket is opened when somebody comments on a post, while DMs still arrive',
+    permissions: ['instagram_basic', 'instagram_manage_comments'],
+    advancedAccess:
+      'Meta requires Advanced Access to deliver `comments` to the general public, and ' +
+      '`instagram_manage_comments` was refused in the 2026-09-19 review ' +
+      '(`plans/meta-app-review-submission.md`). A grant here is Standard Access until a ' +
+      'resubmission is approved, which covers a role holder on the account and nobody else.',
+  },
 ];
 
 /** What Meta says about one permission. `missing` is our word, not Meta's. */
@@ -177,9 +204,12 @@ export function diagnoseCapabilities(
   /**
    * Which connection's token these scopes came from.
    *
-   * Rows belonging to the other connection are left out rather than reported
+   * Rows belonging to another connection are left out rather than reported
    * missing. A Page token is *supposed* to lack `instagram_business_basic`, and
-   * saying otherwise turns a correct configuration into six blocked lines.
+   * saying otherwise turns a correct configuration into six blocked lines. A
+   * Unified Login token shares the Page's spelling and still gets its own rows,
+   * because it is a different authorisation: what one carries says nothing
+   * about the other.
    */
   connection: MetaConnection = 'facebook_page',
 ): CapabilityReport[] {
@@ -260,6 +290,13 @@ export type Feature = {
 };
 
 export const FEATURES: readonly Feature[] = [
+  {
+    name: 'Human Agent',
+    connection: 'unified_login',
+    symptom:
+      'every Instagram reply between 24 hours and 7 days after the customer wrote is refused; ' +
+      'replies inside 24 hours still send',
+  },
   {
     name: 'Human Agent',
     connection: 'instagram_login',

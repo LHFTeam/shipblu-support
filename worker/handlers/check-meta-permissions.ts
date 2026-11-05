@@ -1,8 +1,13 @@
 import { env, metaAppSecret } from '@/lib/env';
 import { FEATURES, diagnoseCapabilities, requiredScopes } from '@/lib/meta/capabilities';
-import { CONNECTION_LABEL, instagramLoginConfigured } from '@/lib/meta/connection';
+import {
+  CONNECTION_LABEL,
+  instagramLoginConfigured,
+  unifiedLoginConfigured,
+} from '@/lib/meta/connection';
 import { inspectToken, readGraph, type TokenInspection } from '@/lib/meta/debug-token';
 import { INSTAGRAM_GRAPH_BASE } from '@/lib/meta/graph';
+import { connectedAccounts } from '@/lib/meta/unified-login';
 import { credentialsForAccount, listAccounts } from '@/lib/whatsapp/accounts';
 import { credentialStatuses, REQUIRED_BUSINESS_TOKEN_SCOPES } from '@/lib/whatsapp/credentials';
 import { errorMessage } from '@/lib/errors';
@@ -32,14 +37,18 @@ import { errorMessage } from '@/lib/errors';
  * That last one matters when an app administers more than one Page: a scope
  * granted for the wrong account reads as granted in every other view.
  *
- * **It reports on both connections, and it can say much less about the second
+ * **It reports on every connection, and it can say much less about the direct
  * one.** `debug_token` is a graph.facebook.com endpoint and an Instagram Login
  * token is issued by the Instagram side of the app, which publishes no scope
  * list of its own — so for the direct connection this asks the only question
  * that host will answer, `GET /me`, and reports what that settles: whether the
  * token works at all, and which account it belongs to. That is not nothing. Both
  * Instagram outages this system has had were a credential in the wrong place,
- * and both would have been answered by it in one line.
+ * and both would have been answered by it in one line. The Unified Login token
+ * is a graph.facebook.com token of this app, so `debug_token` answers for it
+ * in full, and `/me/assigned_instagram_accounts` says which accounts it
+ * reaches — which is the check that matters, because `/me` on it is the
+ * business integration system user and not the account.
  */
 
 export async function checkMetaPermissions(): Promise<void> {
@@ -116,6 +125,7 @@ export async function checkMetaPermissions(): Promise<void> {
     // Human Agent refusal reads as a contradiction of, and it is not one — see
     // `reportFeatures`.
     console.log('\n[meta:permissions] every Facebook Page capability is granted by this token.');
+    await checkUnifiedLogin();
     await checkInstagramLogin();
     await checkStoredWhatsAppCredentials();
     reportFeatures();
@@ -139,6 +149,7 @@ export async function checkMetaPermissions(): Promise<void> {
   );
   console.warn(`[meta:permissions] full scope list to request: ${requiredScopes().join(',')}`);
 
+  await checkUnifiedLogin();
   await checkInstagramLogin();
   await checkStoredWhatsAppCredentials();
   reportFeatures();
@@ -174,6 +185,131 @@ function reportFeatures(): void {
 }
 
 /**
+ * The Unified Login connection: what Meta says about its token, which accounts
+ * the token reaches, and whether the configured one is among them.
+ *
+ * `debug_token` answers in full here — this is a graph.facebook.com token of
+ * this very app — so the scopes are diagnosed against the connection's own
+ * rows rather than printed and disclaimed as the direct connection's are. The
+ * account check is the one that matters most and the one `/me` cannot make: on
+ * this token `/me` is the business integration system user, so the accounts
+ * come from `/me/assigned_instagram_accounts`, and a token that does not list
+ * `INSTAGRAM_ACCOUNT_ID` refuses every send with a sentence about the object
+ * not existing. It stops listing it when the app is removed from the business
+ * portfolio or the account is moved to another one, and Meta's advice then is
+ * to stop retrying and connect again — which Settings → Channels does.
+ */
+async function checkUnifiedLogin(): Promise<void> {
+  console.log('');
+
+  if (!unifiedLoginConfigured()) {
+    console.log(
+      '[meta:permissions] no Unified Login connection — INSTAGRAM_UNIFIED_LOGIN_TOKEN is unset, ' +
+        'so Instagram calls go out over the direct connection below, or the Page above',
+    );
+    return;
+  }
+
+  const token = env().INSTAGRAM_UNIFIED_LOGIN_TOKEN!;
+  const expected = env().INSTAGRAM_ACCOUNT_ID;
+  const appId = env().META_APP_ID;
+
+  let inspection: TokenInspection;
+  try {
+    inspection = await inspectToken(token);
+  } catch (error) {
+    console.error(
+      `[meta:permissions] could not inspect INSTAGRAM_UNIFIED_LOGIN_TOKEN: ${errorMessage(error)}`,
+    );
+    return;
+  }
+
+  const expiry = inspection.expiresAt ? inspection.expiresAt.toISOString() : 'never expires';
+  console.log(
+    `[meta:permissions] unified login token type ${inspection.type ?? 'unknown'}, ` +
+      `valid=${inspection.isValid}, ${expiry}, app ${inspection.appId ?? 'unknown'}`,
+  );
+
+  if (!inspection.isValid) {
+    console.error(
+      `[meta:permissions] Meta refuses INSTAGRAM_UNIFIED_LOGIN_TOKEN` +
+        `${inspection.error ? ` — ${inspection.error}` : ''}. Every Instagram send, reply and ` +
+        `moderation is routed to this credential while it is set (metaConnection() in ` +
+        `lib/meta/connection.ts), so this is the whole Instagram channel. Connect the account ` +
+        `again under Settings → Channels and replace the variable.`,
+    );
+    return;
+  }
+
+  // A token minted under another app verifies nothing about this one: its
+  // webhooks would be signed with a secret this environment does not hold.
+  if (appId && inspection.appId && inspection.appId !== appId) {
+    console.warn(
+      `[meta:permissions] but this token was minted for app ${inspection.appId}, and ` +
+        `META_APP_ID is ${appId} — the login was opened on a different Meta app's configuration.`,
+    );
+  }
+
+  console.log(
+    `[meta:permissions] ${inspection.scopes.length} scope(s): ` +
+      `${inspection.scopes.join(', ') || '(none)'}`,
+  );
+  for (const entry of inspection.granularScopes) {
+    const targets = entry.targetIds ? entry.targetIds.join(', ') : 'all assets';
+    console.log(`[meta:permissions]   ${entry.scope} → ${targets}`);
+  }
+
+  for (const report of diagnoseCapabilities(inspection.scopes, [], 'unified_login')) {
+    const gaps = report.permissions.filter((entry) => entry.status !== 'granted');
+    if (gaps.length === 0) {
+      console.log(`[meta:permissions] OK      ${report.capability.name}`);
+      if (report.capability.advancedAccess) {
+        console.warn(`[meta:permissions]         but: ${report.capability.advancedAccess}`);
+      }
+      continue;
+    }
+    console.warn(
+      `[meta:permissions] BLOCKED ${report.capability.name} — ` +
+        `${gaps.map((entry) => `${entry.permission} (${entry.status})`).join(', ')}`,
+    );
+    console.warn(`[meta:permissions]         symptom: ${report.capability.symptom}`);
+  }
+
+  // The same read the callback page proves the token with, so the page and
+  // this diagnostic cannot answer "does the token reach the account?"
+  // differently for one token. Its refusal names host, path and Meta's sentence.
+  let accounts;
+  try {
+    accounts = await connectedAccounts(token);
+  } catch (error) {
+    console.error(
+      `[meta:permissions] could not list the accounts the Unified Login token reaches: ` +
+        `${errorMessage(error)} — instagram_basic is what this read needs.`,
+    );
+    return;
+  }
+
+  console.log(
+    `[meta:permissions] unified login token reaches ${accounts.length} Instagram account(s): ` +
+      `${accounts.map((entry) => `@${entry.username ?? 'unknown'} (${entry.id})`).join(', ') || '(none)'}`,
+  );
+
+  if (!expected) {
+    console.warn(
+      '[meta:permissions] INSTAGRAM_ACCOUNT_ID is unset, so no Instagram reply can be addressed ' +
+        '— set it to one of the ids above.',
+    );
+  } else if (!accounts.some((entry) => entry.id === expected)) {
+    console.warn(
+      `[meta:permissions] but INSTAGRAM_ACCOUNT_ID is ${expected}, which this token does not ` +
+        `reach. Every reply is addressed to the configured id with this token, which Graph ` +
+        `refuses with a message about the object not existing — connect again and share that ` +
+        `account, or point the variable at one of the ids above.`,
+    );
+  }
+}
+
+/**
  * The direct Instagram connection, as far as its own host will describe it.
  *
  * Three things are checked and each has already been the whole cause of an
@@ -194,7 +330,8 @@ async function checkInstagramLogin(): Promise<void> {
   if (!instagramLoginConfigured()) {
     console.log(
       '[meta:permissions] no direct Instagram connection — INSTAGRAM_ACCESS_TOKEN is unset, ' +
-        'so every Instagram call goes out over the Facebook Page above',
+        'so every Instagram call goes out over Unified Login when that is set, else the ' +
+        'Facebook Page above',
     );
     return;
   }
@@ -224,9 +361,14 @@ async function checkInstagramLogin(): Promise<void> {
         `(HTTP ${status}): ${JSON.stringify(body?.error ?? body)}`,
     );
     console.error(
-      '[meta:permissions] every Instagram send, reply and moderation is routed to this ' +
-        'credential while it is set — see metaConnection() in lib/meta/connection.ts — so ' +
-        'this refusal is the whole Instagram channel, not one call.',
+      unifiedLoginConfigured()
+        ? '[meta:permissions] nothing is routed to this credential while ' +
+            'INSTAGRAM_UNIFIED_LOGIN_TOKEN is set — see metaConnection() in ' +
+            'lib/meta/connection.ts — so this is a stale variable, not an outage; ' +
+            'plans/instagram-unified-login.md says when to unset it.'
+        : '[meta:permissions] every Instagram send, reply and moderation is routed to this ' +
+            'credential while it is set — see metaConnection() in lib/meta/connection.ts — so ' +
+            'this refusal is the whole Instagram channel, not one call.',
     );
     return;
   }

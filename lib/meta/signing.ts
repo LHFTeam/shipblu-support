@@ -7,11 +7,19 @@ const log = logger('webhook:meta');
  * Which app secret an inbound Meta delivery is signed with.
  *
  * One Meta app was assumed to mean one signing secret, and for WhatsApp,
- * Messenger and a Page-connected Instagram account that is true. It stops being
- * true the moment an Instagram professional account is also connected through
- * **Instagram Login**: that setup issues its own *Instagram app secret* — a
- * separate value from the app's Basic-settings app secret — and signs the
- * `instagram` object's deliveries with it.
+ * Messenger, a Page-connected Instagram account and one connected through
+ * **Unified Login** that is true. It stops being true the moment an Instagram
+ * professional account is also connected through **Instagram Login**: that
+ * setup issues its own *Instagram app secret* — a separate value from the app's
+ * Basic-settings app secret — and signs the `instagram` object's deliveries
+ * with it.
+ *
+ * The other side of that: the Page connection and Unified Login sign with the
+ * **same** secret, so a delivery `META_APP_SECRET` verifies is labelled
+ * `facebook_page` whichever of the two sent it. Nothing here guesses further —
+ * a label is written as a fact, and the envelope is the only hint (the Page's
+ * copies have arrived in `standby` since 27 August). `lib/meta/connection.ts`
+ * says why that ambiguity costs nothing downstream.
  *
  * Nothing about the payload says which one was used. The object, the entry id,
  * the headers and the user agent are identical either way, so a mismatch shows
@@ -74,6 +82,9 @@ export function signingCandidates(
   object: string | undefined,
   secrets: SigningSecrets,
 ): SigningCandidate[] {
+  // `facebook_page` for the app secret even on an `instagram` delivery that
+  // Unified Login sent: the two sign alike, and the label records what the
+  // signature can prove.
   const app: SigningCandidate[] = secrets.appSecret
     ? [{ name: 'META_APP_SECRET', secret: secrets.appSecret, connection: 'facebook_page' }]
     : [];
@@ -157,10 +168,15 @@ export function noteVerifyingSecret(
   if (noted.has(key)) return;
 
   noted.add(key);
-  log.info(
-    `instagram ${envelope} deliveries are verifying with ${candidate.name} ` +
-      `— ${candidate.connection}`,
-  );
+  // The app secret signs both the Page's deliveries and Unified Login's, so
+  // its line says so rather than naming one: a `messaging` delivery verifying
+  // with it is the first sign the Unified Login connection is delivering,
+  // since the Page's own copies have arrived in `standby` since 27 August.
+  const route =
+    candidate.connection === 'facebook_page'
+      ? 'facebook_page or unified_login (both sign with it)'
+      : candidate.connection;
+  log.info(`instagram ${envelope} deliveries are verifying with ${candidate.name} — ${route}`);
 }
 
 /** Test-only, as `resetEnvCache` is: module state outlives a single test. */

@@ -1,5 +1,6 @@
 import { boundedDeliveryKey } from '@/lib/webhooks/delivery-key';
 import type { MetaConnection } from './connection';
+import { deliveryEnvelope } from './signing';
 import type { MetaWebhookPayload } from './types';
 
 /**
@@ -22,7 +23,7 @@ import type { MetaWebhookPayload } from './types';
  * unique index treats nulls as distinct and storing them separately is better
  * than colliding unrelated empty batches onto one row.
  *
- * **The connection is part of the key**, which is what stops the two Instagram
+ * **The connection is part of the key**, which is what stops the Instagram
  * connections deduplicating each other. They deliver the same message with the
  * same `mid`, so a key made of the contents alone collapses them onto one row —
  * and the row kept is whichever arrived first, meaning the record of the second
@@ -33,6 +34,30 @@ import type { MetaWebhookPayload } from './types';
  * would have been a second chance at the same customer's message. Ingest
  * deduplicates on the `mid` itself, so storing both costs a row and a no-op
  * job, never a second ticket.
+ *
+ * **The Page's and Unified Login's copies share a label, so for them the
+ * envelope is in the key too.** Both sign with the app secret, and the endpoint
+ * labels either `facebook_page` (`lib/meta/signing.ts`); keyed on that label
+ * alone, the Page's `standby` copy and Unified Login's `messaging` copy of one
+ * message collapsed onto whichever arrived first, and the per-connection count
+ * this key exists for read the race rather than the deliveries. The envelope
+ * is the one thing in the two bodies that differs — the Page's copies have
+ * arrived in `standby` since 27 August, and Unified Login has no handover
+ * protocol to put a copy there — so it is scoped in for an `instagram`
+ * delivery the app secret verified, and nowhere else: a key already stored for
+ * any other delivery keeps its spelling, and a retry of the same copy carries
+ * the same envelope and still collapses.
+ *
+ * That is an observation about today's traffic, not a structural difference,
+ * and it is worth knowing where it stops. A comment reaches both as `changes`,
+ * so the two copies of a comment still share a key and the second is answered
+ * "duplicate"; and the day thread control is handed back to this app, or
+ * Freshworks leaves the Page, the Page's copies arrive in `messaging` too and
+ * the two copies of a message collapse again. Nothing is lost on the ticket —
+ * ingest dedupes on the `mid` — but the per-connection row count reads one row
+ * where two connections delivered. Whether anything structural separates the
+ * two copies (`entry[].id`, the `recipient`) is one of the readings
+ * `plans/instagram-unified-login.md` leaves to the first live run.
  */
 export function deliveryId(payload: MetaWebhookPayload, connection: MetaConnection): string | null {
   const parts: string[] = [];
@@ -82,6 +107,10 @@ export function deliveryId(payload: MetaWebhookPayload, connection: MetaConnecti
   }
 
   if (parts.length === 0) return null;
+  const scope =
+    payload.object === 'instagram' && connection === 'facebook_page'
+      ? `${connection}:${deliveryEnvelope(payload)}`
+      : connection;
   // Hashed whole rather than truncated when too long: see `boundedDeliveryKey`.
-  return boundedDeliveryKey(`${connection}|${parts.sort().join('|')}`);
+  return boundedDeliveryKey(`${scope}|${parts.sort().join('|')}`);
 }
