@@ -57,7 +57,10 @@ async function article(
   return row!.id;
 }
 
-/** What `recordArticleView` does: a write the `touch_updated_at` trigger sees. */
+/**
+ * What `recordArticleView` does: a write the `touch_updated_at` trigger sees,
+ * and since §6.51's fix leaves `updated_at` where it was.
+ */
 async function view(id: string): Promise<void> {
   await db
     .update(kbArticles)
@@ -79,14 +82,22 @@ describe('the edit date', () => {
   it('is the publication date for an article only ever read', async () => {
     const folderId = await folder('en', 'shipping');
     const id = await article(folderId, 'pickups');
+    const written = async () =>
+      (
+        await db
+          .select({ updatedAt: kbArticles.updatedAt })
+          .from(kbArticles)
+          .where(eq(kbArticles.id, id))
+      )[0]!.updatedAt;
+    const before = await written();
     await view(id);
 
-    const [stored] = await db
-      .select({ updatedAt: kbArticles.updatedAt })
-      .from(kbArticles)
-      .where(eq(kbArticles.id, id));
-    // The premise: the view moved the row's own date.
-    expect(stored!.updatedAt.getTime()).toBeGreaterThan(PUBLISHED.getTime());
+    // The premise: the row's own date is not the publication date. It is when
+    // the row was written, after `PUBLISHED`, and the view leaves it there —
+    // a view is no edit (§6.51) — so a date read back as `PUBLISHED` can only
+    // have come from `editedAt`, never from the column.
+    expect(await written()).toEqual(before);
+    expect(before.getTime()).toBeGreaterThan(PUBLISHED.getTime());
 
     const read = await getArticle(ANONYMOUS, 'en', 'pickups');
     expect(read?.updatedAt).toEqual(PUBLISHED);

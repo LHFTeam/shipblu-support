@@ -44,12 +44,16 @@ import { logger } from '@/lib/log';
  * **A run with nothing to do issues no UPDATE at all**, which is a stronger
  * claim than it sounds and has to be maintained deliberately. Every table with
  * an `updated_at` carries `touch_updated_at BEFORE UPDATE` from
- * `db/sql/001_extensions_and_triggers.sql`, so an unconditional
- * `set({folderId, visibility, position})` on a row that already holds those
- * values still moves the timestamp — 20 rows a run, reported as "already
- * current". `/kb` orders by `updated_at desc`, so the whole handbook would jump
- * to the top of the list every time somebody re-ran the seed, which is the
- * misleading-`updated_at` trap §6.51 already records once.
+ * `db/sql/001_extensions_and_triggers.sql`, and on `kb_folders`, as on every
+ * table but `kb_articles`, it stamps any UPDATE, values changed or not. So an
+ * unconditional `set(shape)` on a folder that already holds those values still
+ * moves its timestamp — rows restamped on every run while the tally reports
+ * them "already current" (§6.59). On `kb_articles` the trigger now keeps the
+ * date on an UPDATE that changes nothing (§6.51), so an article re-asserted as
+ * it stands would no longer jump to the top of `/kb`, which orders by
+ * `updated_at desc`. The comparison is kept for articles all the same: it costs
+ * less than a write the trigger then ignores, and it does not lean on a rule
+ * that holds for one table. The folders still need it outright.
  *
  * Idempotent, and enqueued **without a `dedupeKey`** for the reason spelled out
  * in `AGENTS.md`: a key is spent for good rather than until the job finishes,

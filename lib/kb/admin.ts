@@ -65,6 +65,13 @@ export type AdminArticleRow = {
   minRole: AgentRole | null;
   folderName: string;
   categoryName: string;
+  /**
+   * When anybody last changed the row — the title, the body, the status, the
+   * folder, the tags — and never when somebody read it or voted on it
+   * (`touch_updated_at`, PROJECT-STATE §6.51). Wider than the help centre's
+   * `editedAt`, which only the title and the body move, because the list is
+   * where the team looks for what it last touched.
+   */
   updatedAt: Date;
   viewCount: number;
   helpfulCount: number;
