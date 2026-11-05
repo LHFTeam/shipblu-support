@@ -7,6 +7,7 @@ import { articleCount, formatCount, isLocale, t, tFill, type Locale } from '@/li
 import { getCategory, listCategories, type FolderSummary } from '@/lib/kb/queries';
 import { kbViewer } from '@/lib/kb/viewer';
 import { decodeSlugParam } from '@/lib/kb/slug';
+import { topicArt } from '@/lib/kb/art';
 import { TopicArtImage } from '../../art';
 import { ArticleList, ArticleRow, HelpCta, PageHeader } from '../../chrome';
 import { SearchBox } from '../../search-box';
@@ -82,8 +83,7 @@ export default async function CategoryPage({
         meta={<TopicMeta locale={locale} count={total} updatedAt={category.lastUpdatedAt} />}
         art={
           <TopicArtImage
-            name={category.name}
-            slug={category.slug}
+            art={topicArt(category.name, category.slug)}
             className="kb-art-fade w-[260px]"
             priority
           />

@@ -28,11 +28,15 @@ export type TopicArt = 'store' | 'shipping' | 'pickups' | 'returns' | 'payments'
  * shipments" folder is about returns, and only a name that says nothing more
  * specific than "shipping" falls through to the parcel.
  *
- * Substrings, not words. Arabic attaches its article and its prepositions to
- * the noun — الماليات, بالشحن — so a word match would need the same folding the
- * subcategoriser does, and these are names an editor typed, not free text.
- * Short Latin fragments that live inside unrelated words (`cod` in "barcode")
- * are left out for that reason.
+ * Each keyword has to start a word, or the drawing lands on names that only
+ * contain one: `claim` inside "disclaimer", `store` inside "restore", تلف inside
+ * مختلف ("different"), مالي inside إجمالي ("total"). In Arabic a word starts
+ * after the letters the language attaches to its nouns — و, ف, then ب, ك or ل,
+ * then the article — so الماليات, بالشحن and للتجار still match their stems
+ * (`startsWord`). A few Latin keywords are whole words rather than stems
+ * (`WHOLE`): "account" is a topic, "accountability" is not, and "RTO" is a
+ * return while "carton" is a box. `cod` is left out altogether, since "COD"
+ * reads as the payment and as part of every "code".
  */
 const TOPIC_KEYWORDS: ReadonlyArray<readonly [TopicArt, ReadonlyArray<string>]> = [
   [
@@ -105,10 +109,24 @@ const TOPIC_KEYWORDS: ReadonlyArray<readonly [TopicArt, ReadonlyArray<string>]> 
   ],
 ];
 
+const WHOLE = new Set(['account', 'rto']);
+
+function startsWord(keyword: string): RegExp {
+  const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  if (/\p{Script=Arabic}/u.test(keyword)) {
+    return new RegExp(`(?<!\\p{Script=Arabic})[وف]?[بكل]?(?:ال|ل)?${escaped}`, 'u');
+  }
+  const end = WHOLE.has(keyword) ? 's?(?![a-z])' : '';
+  return new RegExp(`(?<![a-z])${escaped}${end}`, 'u');
+}
+
+const TOPIC_PATTERNS: ReadonlyArray<readonly [TopicArt, ReadonlyArray<RegExp>]> =
+  TOPIC_KEYWORDS.map(([art, keywords]) => [art, keywords.map(startsWord)] as const);
+
 export function topicArt(name: string, slug = ''): TopicArt | null {
   const haystack = `${name} ${slug}`.toLowerCase();
-  for (const [art, keywords] of TOPIC_KEYWORDS) {
-    if (keywords.some((keyword) => haystack.includes(keyword))) return art;
+  for (const [art, patterns] of TOPIC_PATTERNS) {
+    if (patterns.some((pattern) => pattern.test(haystack))) return art;
   }
   return null;
 }

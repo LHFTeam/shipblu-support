@@ -34,6 +34,23 @@ describe('topicArt', () => {
     expect(topicArt('Failed delivery claims')).toBe('claims');
   });
 
+  it('only matches a keyword that starts a word', () => {
+    expect(topicArt('طرق دفع مختلفة')).not.toBe('claims');
+    expect(topicArt('إجمالي الرسوم')).toBeNull();
+    expect(topicArt('Carton sizes')).toBeNull();
+    expect(topicArt('Disclaimer')).toBeNull();
+    expect(topicArt('Restore a deleted label')).toBeNull();
+    expect(topicArt('Accountability')).toBeNull();
+  });
+
+  it('still reads the stems Arabic attaches its article and prepositions to', () => {
+    expect(topicArt('بالشحن')).toBe('shipping');
+    expect(topicArt('للتجار')).toBe('store');
+    expect(topicArt('والمرتجعات')).toBe('returns');
+    expect(topicArt('Accounts')).toBe('store');
+    expect(topicArt('RTO shipments')).toBe('returns');
+  });
+
   it('draws nothing for a name it does not recognise', () => {
     expect(topicArt('FAQs', 'faqs')).toBeNull();
     expect(topicArt('الأسئلة الشائعة', 'الأسئلة-الشائعة')).toBeNull();

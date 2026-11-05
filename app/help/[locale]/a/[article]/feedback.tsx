@@ -95,9 +95,10 @@ export function ArticleFeedback({ articleId, locale }: { articleId: string; loca
             </p>
 
             <div className="flex flex-wrap gap-2">
+              {/* No `aria-pressed`: Yes is a one-shot answer that replaces the
+                  card, not a toggle. No keeps it, because it stays pressed. */}
               <Button
                 variant="secondary"
-                aria-pressed={false}
                 onClick={() => {
                   setAnswer(true);
                   void send(true);

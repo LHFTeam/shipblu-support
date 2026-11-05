@@ -12,11 +12,15 @@ import {
 import { supportAvailability } from '@/lib/kb/availability';
 import { formatArticleDate } from '@/lib/kb/dates';
 import { isLocale, LOCALE_NAMES, readingTime, t, type Locale } from '@/lib/kb/locale';
-import { articleOutline, readingMinutes, type ArticleSection } from '@/lib/kb/outline';
 import {
+  articleOutline,
+  excerptRepeatsOpening,
+  readingMinutes,
+  type ArticleSection,
+} from '@/lib/kb/outline';
+import {
+  folderNeighbours,
   getArticle,
-  nextInFolder,
-  relatedArticles,
   translationsOf,
   type ArticleSummary,
 } from '@/lib/kb/queries';
@@ -28,9 +32,6 @@ import { PrintButton } from './print-button';
 import { ViewBeacon } from './view-beacon';
 
 export const dynamic = 'force-dynamic';
-
-/** The rail's "Related articles": `relatedArticles`' own default. */
-const RELATED_SHOWN = 5;
 
 export async function generateMetadata({
   params,
@@ -92,12 +93,13 @@ export default async function ArticlePage({
   const article = await getArticle(viewer, locale, slug);
   if (!article) notFound();
 
-  const [related, translations, next, availability] = await Promise.all([
-    // One more than the rail shows, so dropping the article already offered
-    // as Next leaves the list full rather than a link short.
-    relatedArticles(viewer, article.folderId, article.id, RELATED_SHOWN + 1),
+  // "Next article" and the rail's related list come from one read of the folder
+  // (`folderNeighbours`), the related list already without the next article, so
+  // the rail does not spend one of its few places on a link the reader is about
+  // to meet under the body anyway.
+  const [{ next, related: rail }, translations, availability] = await Promise.all([
+    folderNeighbours(viewer, locale, article.folderId, article.id),
     translationsOf(viewer, article.translationGroupId),
-    nextInFolder(viewer, locale, article.folderId, article.id),
     supportAvailability(),
   ]);
 
@@ -108,10 +110,6 @@ export default async function ArticlePage({
   // section there is promises a structure the article does not have.
   const sections = outline.sections.length >= 2 ? outline.sections : [];
 
-  // The next article is offered under the body already. Listed in the rail as
-  // well, it would spend one of the rail's few places on a link the reader is
-  // about to meet anyway.
-  const rail = related.filter((entry) => entry.id !== next?.id).slice(0, RELATED_SHOWN);
   const hasRail = sections.length > 0 || rail.length > 0;
 
   return (
@@ -130,7 +128,14 @@ export default async function ArticlePage({
         ]}
         title={article.title}
         selfPath={`/${locale}/a/${article.slug}`}
-        lede={article.excerpt?.trim() || undefined}
+        /* Only an excerpt somebody wrote for the article. The stored one is
+           usually the body's own first 200 characters (`articleBody`), which
+           as a lede printed the opening twice, the first time cut mid-word. */
+        lede={
+          article.excerpt && !excerptRepeatsOpening(article.excerpt, article.bodyText)
+            ? article.excerpt.trim()
+            : undefined
+        }
         meta={
           <>
             <MetaItem icon={<ClockIcon size={14} />}>
@@ -348,7 +353,7 @@ const PAGER_TITLE = 'text-sm leading-snug font-bold text-(--color-text-link)';
  * Back goes to the topic — the category — rather than the folder, as the design
  * has it: the topic page lists this folder's articles and every other folder's
  * beside them, so the same click opens the larger map. Next is the folder's next
- * article in the editor's order (`nextInFolder`), and is left out on the last
+ * article in the editor's order (`folderNeighbours`), and is left out on the last
  * one rather than wrapping round to the first, which would read as more to come.
  *
  * Two columns from `sm` whatever is in them, so a lone "Back" takes half the row

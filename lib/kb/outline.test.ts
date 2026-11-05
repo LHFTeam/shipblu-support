@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { articleOutline, readingMinutes } from './outline';
+import { articleOutline, excerptRepeatsOpening, readingMinutes } from './outline';
 
 describe('articleOutline', () => {
   it('gives every h2 an id and lists it, in order', () => {
@@ -69,5 +69,31 @@ describe('readingMinutes', () => {
   it('counts a screenshot as a few seconds of reading', () => {
     const body = `<p>${'word '.repeat(200)}</p>${'<img src="a.png">'.repeat(12)}`;
     expect(readingMinutes(body)).toBe(3);
+  });
+});
+
+describe('excerptRepeatsOpening', () => {
+  const body =
+    'Shipments created before 14:00 on a working day are picked up the same day.\n\nAfter 14:00 the pickup moves to the next working day.';
+
+  it('recognises the stored preview: the opening cut short with an ellipsis', () => {
+    const preview = `${body.replace(/\s+/g, ' ').slice(0, 39)}…`;
+    expect(excerptRepeatsOpening(preview, body)).toBe(true);
+  });
+
+  it('recognises a short body stored whole as its own excerpt', () => {
+    expect(excerptRepeatsOpening('Pay cash on delivery.', 'Pay cash\non delivery.')).toBe(true);
+  });
+
+  it('keeps an excerpt somebody wrote for itself', () => {
+    expect(
+      excerptRepeatsOpening('When your parcel is collected, and what to have ready.', body),
+    ).toBe(false);
+  });
+
+  it('works in Arabic', () => {
+    const arabic = 'الشحنات التي تُنشأ قبل الساعة ٢ ظهرًا تُستلم في اليوم نفسه.';
+    expect(excerptRepeatsOpening(`${arabic.slice(0, 20)}…`, arabic)).toBe(true);
+    expect(excerptRepeatsOpening('شرح موعد الاستلام.', arabic)).toBe(false);
   });
 });

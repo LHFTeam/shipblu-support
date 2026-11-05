@@ -1,5 +1,5 @@
 import type { StaticImageData } from 'next/image';
-import { topicArt, type TopicArt } from '@/lib/kb/art';
+import type { TopicArt } from '@/lib/kb/art';
 import claims from './art/claims.webp';
 import payments from './art/payments.webp';
 import pickups from './art/pickups.webp';
@@ -63,28 +63,21 @@ function Art({
 }
 
 /**
- * The drawing for a category or folder, matched on its own name — or nothing,
- * for a name `topicArt` does not recognise. Callers lay out around its absence.
+ * The drawing for a topic, already matched by `topicArt` — or nothing, for a
+ * name it did not recognise. The caller resolves the match once and lays out
+ * around its absence with the same answer it hands here.
  */
 export function TopicArtImage({
-  name,
-  slug,
+  art,
   className = '',
   priority = false,
 }: {
-  name: string;
-  slug?: string;
+  art: TopicArt | null;
   className?: string;
   priority?: boolean;
 }) {
-  const art = topicArt(name, slug);
   if (!art) return null;
   return <Art image={TOPIC_IMAGES[art]} className={className} priority={priority} />;
-}
-
-/** Whether `TopicArtImage` would draw anything, for a layout that changes shape. */
-export function hasTopicArt(name: string, slug?: string): boolean {
-  return topicArt(name, slug) !== null;
 }
 
 /** The parcel and pin that perches on the front page's tracking card. */

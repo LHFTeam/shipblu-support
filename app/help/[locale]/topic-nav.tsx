@@ -142,7 +142,7 @@ export function TopicNav({
 
 /** A pill on a phone, a row from `lg`; `relative` and clipped for the accent bar. */
 const TOPIC_LINK =
-  'relative flex min-h-9 items-center gap-2 overflow-hidden rounded-full border px-3.5 py-1.5 text-sm transition-colors lg:justify-between lg:rounded-md lg:border-transparent lg:px-3 lg:py-2';
+  'relative flex min-h-9 items-center gap-2 overflow-hidden rounded-full border px-3.5 py-1.5 text-sm transition-colors focus-visible:rounded-full! lg:justify-between lg:rounded-md lg:border-transparent lg:px-3 lg:py-2 lg:focus-visible:rounded-md!';
 
 const TOPIC_CURRENT =
   'border-(--color-action-primary-default) bg-(--color-background-selected) font-bold text-(--color-text-brand) lg:before:absolute lg:before:inset-y-0 lg:before:start-0 lg:before:w-0.5 lg:before:bg-(--color-action-primary-default)';

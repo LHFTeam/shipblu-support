@@ -6,7 +6,7 @@ import { formatOpening } from '@/lib/hours';
 import { jsonForScript } from '@/lib/html/json-script';
 import { accentSplit } from '@/lib/kb/accent';
 import type { SupportAvailability } from '@/lib/kb/availability';
-import { t, type Locale } from '@/lib/kb/locale';
+import { t, tFill, type Locale } from '@/lib/kb/locale';
 import { publicBaseUrl } from '@/lib/kb/site';
 import { SupportArt } from './art';
 import { SearchBox } from './search-box';
@@ -300,7 +300,9 @@ export function ArticleRow({
           size={18}
           className="shrink-0 self-start text-(--color-text-tertiary) sm:self-center"
         />
-        <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+        {/* A div, not a span: the heading inside is flow content, which a span
+            may not hold. */}
+        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
           <Heading className="text-[0.9375rem] leading-snug font-bold text-(--color-text-link) group-hover:text-(--color-text-link-hover)">
             {title}
           </Heading>
@@ -313,7 +315,7 @@ export function ArticleRow({
           {meta ? (
             <span className="text-xs text-(--color-text-secondary) sm:hidden">{meta}</span>
           ) : null}
-        </span>
+        </div>
         {meta ? (
           <span className="shrink-0 text-xs whitespace-nowrap text-(--color-text-secondary) max-sm:hidden">
             {meta}
@@ -410,10 +412,9 @@ export function Availability({
   }
 
   const opening = availability.opensAt
-    ? t(locale, 'supportOpensAt').replace(
-        '{when}',
-        formatOpening(availability.opensAt, availability.timezone, locale),
-      )
+    ? tFill(locale, 'supportOpensAt', {
+        when: formatOpening(availability.opensAt, availability.timezone, locale),
+      })
     : t(locale, 'supportClosed');
 
   return <p className={`text-sm text-(--color-text-secondary) ${className}`}>{opening}</p>;

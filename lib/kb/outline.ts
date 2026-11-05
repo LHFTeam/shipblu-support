@@ -90,6 +90,27 @@ export function readingMinutes(html: string): number {
   return Math.max(1, Math.round(words / 200 + images / 6));
 }
 
+/**
+ * Whether an excerpt is only the body's own opening — in which case it is no
+ * lede, and the article page leaves it out of the band.
+ *
+ * `articleBody` (`lib/kb/article-write.ts`) stores the excerpt as `preview(
+ * bodyText, 200)`: the text with its spaces collapsed, cut at 199 characters
+ * with an ellipsis, or the whole text when it is shorter. Shown above the body,
+ * that printed the article's first sentences twice, the first time cut off
+ * mid-word. An excerpt somebody wrote for itself does not begin the body, and
+ * stays.
+ */
+export function excerptRepeatsOpening(excerpt: string, bodyText: string): boolean {
+  const lead = excerpt
+    .replace(/\s+/gu, ' ')
+    .trim()
+    .replace(/(?:…|\.\.\.)$/u, '')
+    .trimEnd();
+  if (!lead) return true;
+  return bodyText.replace(/\s+/gu, ' ').trim().startsWith(lead);
+}
+
 /** The visible text of a fragment: tags gone, entities read, spaces collapsed. */
 function textOf(fragment: string): string {
   return decodeEntities(fragment.replace(/<[^>]*>/g, ' '))

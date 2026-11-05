@@ -5,7 +5,8 @@ import type { SupportAvailability } from '@/lib/kb/availability';
 import { formatArticleDate } from '@/lib/kb/dates';
 import { formatCount, t, tCount, type Locale } from '@/lib/kb/locale';
 import type { CategoryPreview, DatedArticle, RankedArticle } from '@/lib/kb/queries';
-import { hasTopicArt, SupportArt, TopicArtImage, TrackingArt } from './art';
+import { topicArt } from '@/lib/kb/art';
+import { SupportArt, TopicArtImage, TrackingArt } from './art';
 import { AccentTitle, Availability, Container, Panel } from './chrome';
 import { SearchBox } from './search-box';
 import { TrackForm } from './track/form';
@@ -89,7 +90,9 @@ export function HomeHero({
                 <Link
                   key={tag}
                   href={`/${locale}/search?q=${encodeURIComponent(tag)}`}
-                  className="max-w-full truncate rounded-full border border-(--color-border-subtle) bg-(--color-background-surface) px-2.5 py-1 text-xs text-(--color-text-secondary) transition-colors hover:border-(--color-border-default) hover:bg-(--color-background-hover) hover:text-(--color-text-primary)"
+                  // `focus-visible:rounded-full!`: the global focus rule sets a
+                  // 4px radius, which squared the pill off while focused.
+                  className="max-w-full truncate rounded-full border border-(--color-border-subtle) bg-(--color-background-surface) px-2.5 py-1 text-xs text-(--color-text-secondary) transition-colors hover:border-(--color-border-default) hover:bg-(--color-background-hover) hover:text-(--color-text-primary) focus-visible:rounded-full!"
                 >
                   {tag}
                 </Link>
@@ -174,7 +177,8 @@ export function TopicGrid({ count, children }: { count: number; children: ReactN
  */
 export function TopicCard({ locale, category }: { locale: Locale; category: CategoryPreview }) {
   const href = `/${locale}/c/${category.slug}`;
-  const drawn = hasTopicArt(category.name, category.slug);
+  const art = topicArt(category.name, category.slug);
+  const drawn = art !== null;
 
   return (
     // `.kb-panel` on the item itself rather than a `Panel` inside it, because
@@ -182,7 +186,10 @@ export function TopicCard({ locale, category }: { locale: Locale; category: Cate
     <li className="kb-panel row-span-2 grid grid-rows-subgrid gap-y-0 overflow-hidden transition-colors focus-within:border-(--color-action-primary-default)! hover:border-(--color-action-primary-default)!">
       <Link
         href={href}
-        className={`flex items-center gap-2 border-b border-(--color-border-subtle) bg-(--color-background-brand-subtle) pt-5 pb-4 ps-5 text-(--color-text-primary) ${
+        // Ring drawn inside: the card clips its overflow for the rounded
+        // corners, and the global ring, offset outwards, was cut away (§6.93
+        // for the `!`).
+        className={`flex items-center gap-2 border-b border-(--color-border-subtle) bg-(--color-background-brand-subtle) pt-5 pb-4 ps-5 text-(--color-text-primary) focus-visible:outline-offset-[-2px]! ${
           drawn ? 'min-h-37 pe-2' : 'pe-5'
         }`}
       >
@@ -201,8 +208,7 @@ export function TopicCard({ locale, category }: { locale: Locale; category: Cate
           ) : null}
         </div>
         <TopicArtImage
-          name={category.name}
-          slug={category.slug}
+          art={art}
           /* Capped at the band's height less its padding, and drawn inside
              that box: the drawings are not all one shape, and at its natural
              height the parcel alone stretched every band in its row past the

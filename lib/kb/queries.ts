@@ -1,6 +1,6 @@
-import { and, asc, desc, eq, inArray, ne, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
-import { kbArticles, kbCategories, kbFolders, kbRedirects } from '@/db/schema';
+import { kbArticleVersions, kbArticles, kbCategories, kbFolders, kbRedirects } from '@/db/schema';
 import type { Locale } from './locale';
 import { hybridMatch, hybridRank } from './rank';
 import { ANONYMOUS, articleVisibleTo, folderVisibleTo, type KbViewer } from './visibility';
@@ -21,6 +21,36 @@ import { ANONYMOUS, articleVisibleTo, folderVisibleTo, type KbViewer } from './v
  * `public` — and a query written without one does not compile.
  */
 
+/**
+ * When an article's content last changed — what every "Last updated" on the
+ * help centre means, and what the sitemap's `lastmod` and "Recently updated"
+ * are ordered by.
+ *
+ * Not `kb_articles.updated_at`. The `touch_updated_at` trigger moves that on
+ * every write to the row, and `recordArticleView` writes on every read, so a
+ * busy article told each customer it was revised today (PROJECT-STATE §6.51). A
+ * version is cut only when the title or the body changes (`cutArticleVersion`),
+ * so the newest one is the last edit; an article never edited since it went up
+ * is as old as its publication, and a draft that never had one as its row.
+ * `greatest` because a version cut while the article was still a draft is older
+ * than the day it was published, and nulls drop out of it.
+ *
+ * Mapped through a timestamp column so it arrives as a `Date`, as the columns
+ * it stands in for did.
+ *
+ * The subquery spells its correlation out by table name rather than
+ * interpolating the columns. Drizzle leaves a column unqualified in a select
+ * with no join, so `${kbArticles.id}` inside the subquery came out as a bare
+ * `"id"`, which Postgres binds to the nearest scope, `kb_article_versions.id`:
+ * no version ever matched, and a folder page dated every article by its
+ * publication while the article page, which joins, dated it by its last edit
+ * (`queries.db.test.ts`).
+ */
+const editedAt =
+  sql<Date>`coalesce(greatest((select max(v.created_at) from ${kbArticleVersions} v where v.article_id = ${kbArticles}.id), ${kbArticles.publishedAt}), ${kbArticles.createdAt})`.mapWith(
+    kbArticles.updatedAt,
+  );
+
 export type CategorySummary = {
   id: string;
   name: string;
@@ -40,7 +70,19 @@ export async function listCategories(viewer: KbViewer, locale: Locale): Promise<
     })
     .from(kbCategories)
     .leftJoin(kbFolders, and(eq(kbFolders.categoryId, kbCategories.id), folderVisibleTo(viewer)))
-    .leftJoin(kbArticles, and(eq(kbArticles.folderId, kbFolders.id), articleVisibleTo(viewer)))
+    .leftJoin(
+      kbArticles,
+      and(
+        eq(kbArticles.folderId, kbFolders.id),
+        // Every count and list on the help centre filters the article's own
+        // locale, as `getArticle` does. A folder inherits its category's
+        // language and the Freshdesk importer does not enforce that an article
+        // matches, so without it a mis-filed English row is counted, listed and
+        // linked on an Arabic page whose link then 404s.
+        eq(kbArticles.locale, locale),
+        articleVisibleTo(viewer),
+      ),
+    )
     .where(eq(kbCategories.locale, locale))
     .groupBy(kbCategories.id)
     .orderBy(asc(kbCategories.position), asc(kbCategories.name));
@@ -91,6 +133,7 @@ export async function listCategoryPreviews(
           kbFolders.categoryId,
           categories.map((category) => category.id),
         ),
+        eq(kbArticles.locale, locale),
         articleVisibleTo(viewer),
         folderVisibleTo(viewer),
       ),
@@ -199,12 +242,10 @@ export type DatedArticle = {
 };
 
 /**
- * What changed recently.
- *
- * `updated_at` is maintained by the `touch_updated_at` trigger, so it moves on
- * any write to the row — including an editor fixing a typo. That is the right
- * meaning here: the question this list answers is "has the answer I read last
- * month changed", not "what was published".
+ * What changed recently: the question this list answers is "has the answer I
+ * read last month changed", not "what was published", so it is ordered by the
+ * last edit to the content (`editedAt`) — an editor fixing a typo counts, a
+ * reader opening the page does not.
  */
 export async function recentlyUpdatedArticles(
   viewer: KbViewer,
@@ -216,12 +257,12 @@ export async function recentlyUpdatedArticles(
       id: kbArticles.id,
       title: kbArticles.title,
       slug: kbArticles.slug,
-      updatedAt: kbArticles.updatedAt,
+      updatedAt: editedAt,
     })
     .from(kbArticles)
     .innerJoin(kbFolders, eq(kbFolders.id, kbArticles.folderId))
     .where(and(eq(kbArticles.locale, locale), articleVisibleTo(viewer), folderVisibleTo(viewer)))
-    .orderBy(desc(kbArticles.updatedAt), asc(kbArticles.title))
+    .orderBy(desc(editedAt), asc(kbArticles.title))
     .limit(limit);
 }
 
@@ -255,7 +296,7 @@ export type CategoryDetail = {
   slug: string;
   description: string | null;
   folders: FolderSummary[];
-  /** The newest edit to anything listed, for "Last updated" in the header. */
+  /** The newest edit to anything listed (`editedAt`), for "Last updated" in the header. */
   lastUpdatedAt: Date | null;
 };
 
@@ -301,7 +342,14 @@ export async function getCategory(
       articleCount: sql<number>`count(${kbArticles.id})::int`,
     })
     .from(kbFolders)
-    .leftJoin(kbArticles, and(eq(kbArticles.folderId, kbFolders.id), articleVisibleTo(viewer)))
+    .leftJoin(
+      kbArticles,
+      and(
+        eq(kbArticles.folderId, kbFolders.id),
+        eq(kbArticles.locale, locale),
+        articleVisibleTo(viewer),
+      ),
+    )
     .where(and(eq(kbFolders.categoryId, category.id), folderVisibleTo(viewer)))
     .groupBy(kbFolders.id)
     .orderBy(asc(kbFolders.position), asc(kbFolders.name));
@@ -311,6 +359,7 @@ export async function getCategory(
 
   const { byFolder, lastUpdatedAt } = await folderListings(
     viewer,
+    locale,
     visible.map((folder) => folder.id),
   );
 
@@ -332,6 +381,7 @@ export async function getCategory(
  */
 async function folderListings(
   viewer: KbViewer,
+  locale: Locale,
   folderIds: string[],
 ): Promise<{ byFolder: Map<string, ArticleSummary[]>; lastUpdatedAt: Date | null }> {
   const byFolder = new Map<string, ArticleSummary[]>();
@@ -344,10 +394,16 @@ async function folderListings(
       title: kbArticles.title,
       slug: kbArticles.slug,
       excerpt: kbArticles.excerpt,
-      updatedAt: kbArticles.updatedAt,
+      updatedAt: editedAt,
     })
     .from(kbArticles)
-    .where(and(inArray(kbArticles.folderId, folderIds), articleVisibleTo(viewer)))
+    .where(
+      and(
+        inArray(kbArticles.folderId, folderIds),
+        eq(kbArticles.locale, locale),
+        articleVisibleTo(viewer),
+      ),
+    )
     .orderBy(asc(kbArticles.position), asc(kbArticles.title));
 
   let lastUpdatedAt: Date | null = null;
@@ -376,7 +432,7 @@ export type FolderDetail = {
   categoryName: string;
   categorySlug: string;
   articles: ArticleSummary[];
-  /** The newest edit to any article listed, for "Last updated" in the header. */
+  /** The newest edit to any article listed (`editedAt`), for "Last updated" in the header. */
   lastUpdatedAt: Date | null;
 };
 
@@ -416,10 +472,16 @@ export async function getFolder(
       title: kbArticles.title,
       slug: kbArticles.slug,
       excerpt: kbArticles.excerpt,
-      updatedAt: kbArticles.updatedAt,
+      updatedAt: editedAt,
     })
     .from(kbArticles)
-    .where(and(eq(kbArticles.folderId, folder.id), articleVisibleTo(viewer)))
+    .where(
+      and(
+        eq(kbArticles.folderId, folder.id),
+        eq(kbArticles.locale, locale),
+        articleVisibleTo(viewer),
+      ),
+    )
     .orderBy(asc(kbArticles.position), asc(kbArticles.title));
 
   let lastUpdatedAt: Date | null = null;
@@ -436,8 +498,11 @@ export type ArticleDetail = {
   title: string;
   slug: string;
   bodyHtml: string;
+  /** The body as plain text, which the excerpt was cut from (`articleBody`). */
+  bodyText: string;
   excerpt: string | null;
   seo: { title?: string; description?: string };
+  /** The last edit to the content (`editedAt`), not the row's `updated_at`. */
   updatedAt: Date;
   folderId: string;
   folderName: string;
@@ -458,9 +523,10 @@ export async function getArticle(
       title: kbArticles.title,
       slug: kbArticles.slug,
       bodyHtml: kbArticles.bodyHtml,
+      bodyText: kbArticles.bodyText,
       excerpt: kbArticles.excerpt,
       seo: kbArticles.seo,
-      updatedAt: kbArticles.updatedAt,
+      updatedAt: editedAt,
       folderId: kbArticles.folderId,
       folderName: kbFolders.name,
       folderSlug: kbFolders.slug,
@@ -530,51 +596,44 @@ export async function folderArticles(
     .limit(limit);
 }
 
-/** Same folder, excluding the article itself. Cheap and usually relevant. */
-export async function relatedArticles(
+export type FolderNeighbours = {
+  /** The article after this one in the folder's own order, or null on the last. */
+  next: ArticleLink | null;
+  /** The folder's other articles, most helpful first, the next one left out. */
+  related: ArticleSummary[];
+};
+
+/**
+ * What the article page needs from the article's folder: "Next article" and
+ * the rail's "Related articles", from one read of the folder.
+ *
+ * One query rather than one for each. This is the help centre's most visited
+ * page, every query on it waits at the pool's admission gate, and both answers
+ * come from the same few rows — production's largest folder holds fifteen.
+ *
+ * "Next" follows the order `getFolder` lists the folder in, position then
+ * title, so the link is to the row a reader would have met next on the folder's
+ * page; null on the last article, or one the folder cannot find, rather than
+ * wrapping round to the first. "Related" is the rest by how often readers said
+ * an article helped, ties left in the editor's order, without the article
+ * already offered as Next. Locale is filtered as `getFolder` filters it, so the
+ * three lists agree about which rows the folder holds.
+ */
+export async function folderNeighbours(
   viewer: KbViewer,
+  locale: Locale,
   folderId: string,
-  excludeArticleId: string,
-  limit = 5,
-): Promise<ArticleSummary[]> {
-  return db
+  articleId: string,
+  relatedLimit = 5,
+): Promise<FolderNeighbours> {
+  const rows = await db
     .select({
       id: kbArticles.id,
       title: kbArticles.title,
       slug: kbArticles.slug,
       excerpt: kbArticles.excerpt,
+      helpfulCount: kbArticles.helpfulCount,
     })
-    .from(kbArticles)
-    .where(
-      and(
-        eq(kbArticles.folderId, folderId),
-        ne(kbArticles.id, excludeArticleId),
-        articleVisibleTo(viewer),
-      ),
-    )
-    .orderBy(desc(kbArticles.helpfulCount), asc(kbArticles.position))
-    .limit(limit);
-}
-
-/**
- * The article after this one in its folder, in the editor's order — the
- * article page's "Next article".
- *
- * The same order `getFolder` lists the folder in, position then title, so the
- * link is to the row a reader would have met next on the folder's page. Locale
- * is filtered for the reason `folderArticles` gives: a folder inherits its
- * category's locale, and a mis-filed row would put an English article behind an
- * Arabic "next" link. Null on the last article, or one the folder list cannot
- * find, rather than wrapping round to the first.
- */
-export async function nextInFolder(
-  viewer: KbViewer,
-  locale: Locale,
-  folderId: string,
-  articleId: string,
-): Promise<ArticleLink | null> {
-  const rows = await db
-    .select({ id: kbArticles.id, title: kbArticles.title, slug: kbArticles.slug })
     .from(kbArticles)
     .where(
       and(
@@ -586,7 +645,19 @@ export async function nextInFolder(
     .orderBy(asc(kbArticles.position), asc(kbArticles.title));
 
   const index = rows.findIndex((row) => row.id === articleId);
-  return index >= 0 ? (rows[index + 1] ?? null) : null;
+  const nextRow = index >= 0 ? (rows[index + 1] ?? null) : null;
+
+  // `sort` is stable, so rows readers rated alike keep the editor's order.
+  const related = rows
+    .filter((row) => row.id !== articleId && row.id !== nextRow?.id)
+    .sort((a, b) => b.helpfulCount - a.helpfulCount)
+    .slice(0, relatedLimit)
+    .map(({ id, title, slug, excerpt }) => ({ id, title, slug, excerpt }));
+
+  return {
+    next: nextRow ? { id: nextRow.id, title: nextRow.title, slug: nextRow.slug } : null,
+    related,
+  };
 }
 
 /** Locales this article has been translated into, for the language switcher. */
@@ -717,10 +788,12 @@ export async function allPublishedArticles(): Promise<
     .select({
       slug: kbArticles.slug,
       locale: kbArticles.locale,
-      updatedAt: kbArticles.updatedAt,
+      // The last edit, so a crawler is told a page changed when its content did
+      // rather than whenever somebody read it.
+      updatedAt: editedAt,
     })
     .from(kbArticles)
     .innerJoin(kbFolders, eq(kbFolders.id, kbArticles.folderId))
     .where(and(articleVisibleTo(viewer), folderVisibleTo(viewer)))
-    .orderBy(desc(kbArticles.updatedAt));
+    .orderBy(desc(editedAt));
 }

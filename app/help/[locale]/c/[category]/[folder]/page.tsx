@@ -5,7 +5,8 @@ import { isLocale, t, tFill } from '@/lib/kb/locale';
 import { getFolder, listCategories } from '@/lib/kb/queries';
 import { kbViewer } from '@/lib/kb/viewer';
 import { decodeSlugParam } from '@/lib/kb/slug';
-import { hasTopicArt, TopicArtImage } from '../../../art';
+import { topicArt } from '@/lib/kb/art';
+import { TopicArtImage } from '../../../art';
 import { ArticleList, ArticleRow, EmptyNote, HelpCta, PageHeader } from '../../../chrome';
 import { SearchBox } from '../../../search-box';
 import { TopicBody, TopicMeta, TopicNav } from '../../../topic-nav';
@@ -63,9 +64,8 @@ export default async function FolderPage({
   // The folder's own drawing when its name names a subject ("Financials"), and
   // its category's when it does not ("FAQs"), so the band is not bare on the
   // folders whose names say least.
-  const art = hasTopicArt(folder.name, folder.slug)
-    ? { name: folder.name, slug: folder.slug }
-    : { name: folder.categoryName, slug: folder.categorySlug };
+  const art =
+    topicArt(folder.name, folder.slug) ?? topicArt(folder.categoryName, folder.categorySlug);
 
   return (
     <>
@@ -86,14 +86,7 @@ export default async function FolderPage({
             updatedAt={folder.lastUpdatedAt}
           />
         }
-        art={
-          <TopicArtImage
-            name={art.name}
-            slug={art.slug}
-            className="kb-art-fade w-[260px]"
-            priority
-          />
-        }
+        art={<TopicArtImage art={art} className="kb-art-fade w-[260px]" priority />}
         search={false}
       >
         <div className="max-w-[32.5rem]">

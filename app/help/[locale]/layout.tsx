@@ -14,6 +14,7 @@ import {
 } from '@/lib/kb/locale';
 import { publicBaseUrl } from '@/lib/kb/site';
 import { AccountNav } from './account-nav';
+import { AskSupport } from './track/support';
 import { Container } from './chrome';
 import { ServiceNoticeBanner } from './notice';
 import { lato, tajawal } from './fonts';
@@ -145,9 +146,12 @@ export default async function KbLayout({
           <Link href={`/${locale}/track`} className={FOOTER_LINK}>
             {t(locale, 'trackTitle')}
           </Link>
-          <Link href={`/${locale}/forms`} className={FOOTER_LINK}>
+          {/* The chat, like every other Contact support: on a phone this is the
+              one contact control left on the page, and `/forms` asks for an
+              account while no ticket form is built (`AskSupport`). */}
+          <AskSupport href={`/${locale}/forms`} className={FOOTER_LINK}>
             {t(locale, 'contactAction')}
-          </Link>
+          </AskSupport>
           <a href="mailto:support@shipblu.com" dir="ltr" className={FOOTER_LINK}>
             support@shipblu.com
           </a>

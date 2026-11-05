@@ -7368,6 +7368,25 @@ dryRun=true`, then without, gives those two theirs back from their
       refuses — and every message and event inserted for a ticket holds one on
       it.
 
+107.  **A correlated subquery in a `sql` fragment correlated with itself.**
+      _2026-11-05, found by `lib/kb/queries.db.test.ts` before it shipped._ The
+      help centre's edit date (`editedAt` in `lib/kb/queries.ts`) reads the
+      newest `kb_article_versions` row for the outer article, and was written
+      with interpolated columns:
+      `(select max(${kbArticleVersions.createdAt}) from ${kbArticleVersions} where ${kbArticleVersions.articleId} = ${kbArticles.id})`.
+      Drizzle qualifies a column with its table only when the query joins; in a
+      single-table select it renders a bare `"id"`, and inside the subquery a
+      bare name binds to the nearest scope, so the condition read
+      `article_id = kb_article_versions.id`. It is valid SQL that matches
+      nothing, so tsc, the planner and the article page (which joins, and so
+      got `"kb_articles"."id"`) all passed, while the folder page dated every
+      article by its publication. The fragment now aliases the inner table and
+      names the outer one, `where v.article_id = ${kbArticles}.id`. The lesson:
+      a fragment that refers to an outer query's column must not rely on
+      Drizzle's rendering of it, because the same fragment renders differently
+      in a query with a join and one without; and only a test that reads the
+      answer back, not one that plans the statement, sees the difference.
+
 ### Tooling notes for this environment
 
 Supabase and Render MCP tools work and are the fastest way to check real state —
