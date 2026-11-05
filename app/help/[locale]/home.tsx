@@ -135,8 +135,8 @@ function TrackingCard({ locale }: { locale: Locale }) {
  * The topic cards' grid: three across when there are enough topics to fill a
  * row of three, two across otherwise.
  *
- * Not `CardGrid`, whose three columns are right for a category page's folders.
- * Production has two topics — the merchants' and the recipients' — and two
+ * Not a fixed three columns, which is what the design draws for its six sample
+ * topics. Production has two topics — the merchants' and the recipients' — and two
  * cards in a row of three leave a third of the page as a hole that reads as a
  * card that failed to load. Four is two rows of two for the same reason.
  *

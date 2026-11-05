@@ -68,7 +68,6 @@ const STRINGS = {
     print: 'Print',
     footerRights: 'All rights reserved.',
     noResults: 'No articles matched that search.',
-    resultsFor: 'Results for',
     wasHelpful: 'Was this article helpful?',
     yes: 'Yes',
     no: 'No',
@@ -112,6 +111,8 @@ const STRINGS = {
     feedbackNo: 'No, I still need help',
     feedbackThanksYes: 'Thanks. We use your answer to decide which articles to improve.',
     feedbackThanksNo: 'Thanks for telling us. Support can answer your question directly.',
+    // The accessible name of the "Back to topic" / "Next article" pair.
+    articleNavLabel: 'More in this topic',
     // --- Tracking a shipment ---------------------------------------------
     trackTitle: 'Track a shipment',
     trackIntro: 'Expecting a parcel? Its tracking number is all you need for the latest status.',
@@ -287,7 +288,6 @@ const STRINGS = {
     print: 'طباعة',
     footerRights: 'جميع الحقوق محفوظة.',
     noResults: 'لا توجد مقالات مطابقة لهذا البحث.',
-    resultsFor: 'نتائج البحث عن',
     wasHelpful: 'هل كان هذا المقال مفيدًا؟',
     yes: 'نعم',
     no: 'لا',
@@ -327,6 +327,7 @@ const STRINGS = {
     feedbackNo: 'لا، ما زلت أحتاج إلى مساعدة',
     feedbackThanksYes: 'شكرًا لحضرتك. نستخدم إجابة حضرتك في اختيار المقالات التي نحسّنها.',
     feedbackThanksNo: 'شكرًا لإخبارنا. يستطيع فريق الدعم الإجابة عن سؤال حضرتك مباشرة.',
+    articleNavLabel: 'المزيد في هذا الموضوع',
     // --- Tracking a shipment ---------------------------------------------
     trackTitle: 'تتبّع شحنة',
     trackIntro: 'في انتظار شحنة؟ رقم التتبّع يكفي لمعرفة آخر حالة لها.',

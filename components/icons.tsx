@@ -175,26 +175,6 @@ export function DocumentIcon(props: IconProps) {
   );
 }
 
-export function FolderIcon(props: IconProps) {
-  return (
-    <Icon {...props}>
-      <path d="M3.5 7.5A1.5 1.5 0 0 1 5 6h4l2 2.5h8a1.5 1.5 0 0 1 1.5 1.5v8A1.5 1.5 0 0 1 19 19.5H5A1.5 1.5 0 0 1 3.5 18z" />
-    </Icon>
-  );
-}
-
-/** The mark used for a whole category — a shelf of folders. */
-export function CategoryIcon(props: IconProps) {
-  return (
-    <Icon {...props}>
-      <rect x="3.5" y="4" width="7" height="7" rx="1.5" />
-      <rect x="13.5" y="4" width="7" height="7" rx="1.5" />
-      <rect x="3.5" y="13" width="7" height="7" rx="1.5" />
-      <rect x="13.5" y="13" width="7" height="7" rx="1.5" />
-    </Icon>
-  );
-}
-
 /*
  * Parcels.
  *
@@ -205,25 +185,6 @@ export function CategoryIcon(props: IconProps) {
  * still uses `CategoryIcon`, which is what an unrecognised topic falls back to.
  */
 
-export function PackageIcon(props: IconProps) {
-  return (
-    <Icon {...props}>
-      <path d="M12 3.2 20 7.4v9.2L12 20.8 4 16.6V7.4z" />
-      <path d="M4 7.4 12 11.6l8-4.2M12 11.6v9.2" />
-    </Icon>
-  );
-}
-
-export function PackagePlusIcon(props: IconProps) {
-  return (
-    <Icon {...props}>
-      <path d="M20 11.2V7.4L12 3.2 4 7.4v9.2l8 4.2 2.4-1.3" />
-      <path d="M4 7.4 12 11.6l8-4.2M12 11.6v6" />
-      <path d="M17.5 15v5M15 17.5h5" />
-    </Icon>
-  );
-}
-
 export function PackageSearchIcon(props: IconProps) {
   return (
     <Icon {...props}>
@@ -231,18 +192,6 @@ export function PackageSearchIcon(props: IconProps) {
       <path d="M4 7.4 12 11.6l8-4.2M12 11.6v7.5" />
       <circle cx="17.5" cy="16.5" r="2.8" />
       <path d="m19.6 18.6 1.9 1.9" />
-    </Icon>
-  );
-}
-
-export function TruckIcon(props: IconProps) {
-  return (
-    <Icon {...props}>
-      <path d="M3 6.5h10.5v9.8H3z" />
-      <path d="M13.5 10h3.8l2.7 3v3.3h-6.5z" />
-      <circle cx="7" cy="17.8" r="1.7" />
-      <circle cx="16.5" cy="17.8" r="1.7" />
-      <path d="M8.7 17.8h6.1" />
     </Icon>
   );
 }
@@ -266,16 +215,6 @@ export function ReplyIcon(props: IconProps) {
   );
 }
 
-export function WalletIcon(props: IconProps) {
-  return (
-    <Icon {...props}>
-      <path d="M4 8a2 2 0 0 1 2-2h11v3" />
-      <path d="M4 8v9a2 2 0 0 0 2 2h12.5a1.5 1.5 0 0 0 1.5-1.5V10.5A1.5 1.5 0 0 0 18.5 9H6a2 2 0 0 1-2-2z" />
-      <circle cx="16.5" cy="14" r="1.1" />
-    </Icon>
-  );
-}
-
 export function WarningIcon(props: IconProps) {
   return (
     <Icon {...props}>
@@ -291,15 +230,6 @@ export function PrinterIcon(props: IconProps) {
       <path d="M7 9V4.5h10V9" />
       <path d="M7 17.5H5.5A1.5 1.5 0 0 1 4 16v-5.5A1.5 1.5 0 0 1 5.5 9h13a1.5 1.5 0 0 1 1.5 1.5V16a1.5 1.5 0 0 1-1.5 1.5H17" />
       <path d="M7 14h10v5.5H7z" />
-    </Icon>
-  );
-}
-
-export function ThumbsUpIcon(props: IconProps) {
-  return (
-    <Icon {...props}>
-      <path d="M7 20V10l4-6.5a2 2 0 0 1 2 2V10h4.5a2 2 0 0 1 2 2.35l-1.1 6A2 2 0 0 1 16.4 20z" />
-      <path d="M7 10H4.5v10H7" />
     </Icon>
   );
 }

@@ -248,17 +248,6 @@ export function Panel({
 }
 
 /**
- * Two up from `sm`, three from `lg`.
- *
- * Not four, which is where the live portal's home page lands: at four across a
- * category name long enough to be useful — "Lost & Damaged Shipments" — wraps to
- * three lines in Arabic and the row turns ragged.
- */
-export function CardGrid({ children }: { children: ReactNode }) {
-  return <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{children}</ul>;
-}
-
-/**
  * One article in a list: the book, the title in link blue, its excerpt, and a
  * chevron saying the row goes somewhere.
  *
