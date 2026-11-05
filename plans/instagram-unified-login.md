@@ -382,7 +382,12 @@ object=instagram` — on the worker, through Render's shell — writes the
    expected first answer) and ends with `unified-login-level done — subscribed:
 messages, comments, …`. The app-level half it reads first and writes only when
    one of the five fields is missing from it, which the September runs already
-   put right.
+   put right. The Unified half is written first, and the direct connection's
+   after it: at this step `INSTAGRAM_ACCESS_TOKEN` is still set and expired, so
+   the run ends failed on the direct half's code 190, with a warning saying the
+   Unified half above is done and that this stops at step 9. That failure is
+   expected here; `unified-login-level done — subscribed: …` before it is what
+   the step needs.
 5. **Check the token.** `npm run job -- check_meta_permissions` inspects the
    Unified token with `debug_token` — which answers fully, because it is a
    `graph.facebook.com` token — and reads `/me/assigned_instagram_accounts`.
@@ -402,7 +407,10 @@ messages, comments, …`. The app-level half it reads first and writes only when
    `INSTAGRAM_APP_SECRET`) and Unified Login (`messaging`, `META_APP_SECRET`).
    The endpoint stores all three — the Page's and Unified Login's copies
    share the `facebook_page` label, so `lib/meta/delivery.ts` keys them apart
-   by envelope — and ingest dedupes on the `mid`. Meta says Unified Login's
+   by envelope, which holds for a message while Freshworks keeps the Page's
+   copies in `standby`, and not for a comment, whose two copies both arrive as
+   `changes` and still collapse onto one row — and ingest dedupes on the
+   `mid`. Meta says Unified Login's
    message ids differ in format from Instagram Login's, so this is the hour
    that proves a message is one timeline line and not two. The queries are
    below; a ticket showing the same words twice, seconds apart, stops the
@@ -490,6 +498,14 @@ whether the System users page offers a narrower revocation is not confirmed.
 Each of these is a reading to take on the first live run and record in
 `docs/PROJECT-STATE.md` §5.2, not something to assume in code:
 
+- **Whether anything in the two bodies tells Unified Login's copy of an
+  event from the Page's.** The envelope does today, for a message, only
+  because Freshworks holds the Page's thread; a comment's two copies collapse
+  onto one row, and so will a message's once the Page's copies arrive in
+  `messaging`. If `entry[].id`, the `recipient` or anything else differs
+  between the two copies, `lib/meta/delivery.ts` can key on it and the
+  endpoint can label a Unified delivery as its own; the first live hour's rows
+  are where to look, side by side.
 - **What `debug_token` reports as `type` for a Business Integration System
   User token.** `SYSTEM_USER` is the guess; `refuseInspection` warns on
   anything else and refuses on nothing but `is_valid: false` or a foreign

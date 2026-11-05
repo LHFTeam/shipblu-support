@@ -103,20 +103,17 @@ export async function subscribeMetaWebhooks(job?: ClaimedJob): Promise<void> {
   */
   if (object !== INSTAGRAM_OBJECT) return;
 
-  if (instagramLoginConfigured()) {
-    await subscribeInstagramLogin(want);
-  } else {
-    log.info(
-      'INSTAGRAM_ACCESS_TOKEN is unset, so there is no direct Instagram connection to subscribe',
-    );
-  }
-
   /*
-    The Unified Login half, after the direct connection's and independent of it.
-    Both can be live while the account is moved from one to the other, and
-    Meta says the direct connection's subscription does not carry over — so a
-    run that stopped at the first would leave the new connection subscribed at
-    the app level only, which delivers nothing (the `feed` lesson above).
+    The Unified Login half first, and the direct connection's after it, each
+    independent of the other. Both can be live while the account is moved from
+    one to the other, and Meta says the direct connection's subscription does
+    not carry over — so a run that stopped at the first would leave the other
+    subscribed at the app level only, which delivers nothing (the `feed` lesson
+    above). The order is the activation order's: Unified Login is written while
+    `INSTAGRAM_ACCESS_TOKEN` is still set and expired, and its read is refused
+    with code 190 — a run that reached the direct half first failed there and
+    never wrote the half that is live. The direct half's failure still fails
+    the job, after the Unified half is done, and says whose it is.
   */
   if (unifiedLoginConfigured()) {
     await subscribeUnifiedLogin(want);
@@ -125,6 +122,27 @@ export async function subscribeMetaWebhooks(job?: ClaimedJob): Promise<void> {
       'INSTAGRAM_UNIFIED_LOGIN_TOKEN is unset, so there is no Unified Login connection to ' +
         'subscribe — with neither Instagram token set, the Page half is written by object=page',
     );
+  }
+
+  if (!instagramLoginConfigured()) {
+    log.info(
+      'INSTAGRAM_ACCESS_TOKEN is unset, so there is no direct Instagram connection to subscribe',
+    );
+    return;
+  }
+
+  try {
+    await subscribeInstagramLogin(want);
+  } catch (error) {
+    if (unifiedLoginConfigured()) {
+      log.warn(
+        "the direct Instagram connection's half failed after the Unified Login half was written; " +
+          'while INSTAGRAM_UNIFIED_LOGIN_TOKEN is set nothing sends over the direct connection, ' +
+          'and this stops once INSTAGRAM_ACCESS_TOKEN is unset (plans/instagram-unified-login.md)',
+        error,
+      );
+    }
+    throw error;
   }
 }
 

@@ -6,7 +6,8 @@ import {
   unifiedLoginConfigured,
 } from '@/lib/meta/connection';
 import { inspectToken, readGraph, type TokenInspection } from '@/lib/meta/debug-token';
-import { GRAPH_BASE, INSTAGRAM_GRAPH_BASE } from '@/lib/meta/graph';
+import { INSTAGRAM_GRAPH_BASE } from '@/lib/meta/graph';
+import { connectedAccounts } from '@/lib/meta/unified-login';
 import { credentialsForAccount, listAccounts } from '@/lib/whatsapp/accounts';
 import { credentialStatuses, REQUIRED_BUSINESS_TOKEN_SCOPES } from '@/lib/whatsapp/credentials';
 import { errorMessage } from '@/lib/errors';
@@ -198,8 +199,6 @@ function reportFeatures(): void {
  * portfolio or the account is moved to another one, and Meta's advice then is
  * to stop retrying and connect again — which Settings → Channels does.
  */
-type AssignedAccounts = { data?: { id?: string; username?: string }[]; error?: unknown };
-
 async function checkUnifiedLogin(): Promise<void> {
   console.log('');
 
@@ -276,31 +275,20 @@ async function checkUnifiedLogin(): Promise<void> {
     console.warn(`[meta:permissions]         symptom: ${report.capability.symptom}`);
   }
 
-  const url = new URL(`${GRAPH_BASE}/me/assigned_instagram_accounts`);
-  url.searchParams.set('fields', 'id,username');
-
-  let body: AssignedAccounts | null = null;
-  let status = 0;
+  // The same read the callback page proves the token with, so the page and
+  // this diagnostic cannot answer "does the token reach the account?"
+  // differently for one token. Its refusal names host, path and Meta's sentence.
+  let accounts;
   try {
-    ({ status, body } = await readGraph<AssignedAccounts>(url, token));
+    accounts = await connectedAccounts(token);
   } catch (error) {
     console.error(
       `[meta:permissions] could not list the accounts the Unified Login token reaches: ` +
-        `${errorMessage(error)}`,
+        `${errorMessage(error)} — instagram_basic is what this read needs.`,
     );
     return;
   }
 
-  if (status !== 200 || !body || body.error || !Array.isArray(body.data)) {
-    console.error(
-      `[meta:permissions] graph.facebook.com refused /me/assigned_instagram_accounts ` +
-        `(HTTP ${status}): ${JSON.stringify(body?.error ?? body)} — instagram_basic is what ` +
-        `this read needs.`,
-    );
-    return;
-  }
-
-  const accounts = body.data.filter((entry) => typeof entry.id === 'string');
   console.log(
     `[meta:permissions] unified login token reaches ${accounts.length} Instagram account(s): ` +
       `${accounts.map((entry) => `@${entry.username ?? 'unknown'} (${entry.id})`).join(', ') || '(none)'}`,

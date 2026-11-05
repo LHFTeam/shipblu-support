@@ -1,4 +1,4 @@
-import type { MetaConnection } from './connection';
+import { isMetaConnection, type MetaConnection } from './connection';
 import type { MetaPlatform } from './types';
 
 /**
@@ -254,7 +254,5 @@ function holdsControl(
  * means a future endpoint that can tell the two apart needs no change here.
  */
 function readConnection(value: unknown): MetaConnection | null {
-  return value === 'facebook_page' || value === 'instagram_login' || value === 'unified_login'
-    ? value
-    : null;
+  return isMetaConnection(value) ? value : null;
 }

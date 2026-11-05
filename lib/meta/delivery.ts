@@ -47,6 +47,17 @@ import type { MetaWebhookPayload } from './types';
  * delivery the app secret verified, and nowhere else: a key already stored for
  * any other delivery keeps its spelling, and a retry of the same copy carries
  * the same envelope and still collapses.
+ *
+ * That is an observation about today's traffic, not a structural difference,
+ * and it is worth knowing where it stops. A comment reaches both as `changes`,
+ * so the two copies of a comment still share a key and the second is answered
+ * "duplicate"; and the day thread control is handed back to this app, or
+ * Freshworks leaves the Page, the Page's copies arrive in `messaging` too and
+ * the two copies of a message collapse again. Nothing is lost on the ticket —
+ * ingest dedupes on the `mid` — but the per-connection row count reads one row
+ * where two connections delivered. Whether anything structural separates the
+ * two copies (`entry[].id`, the `recipient`) is one of the readings
+ * `plans/instagram-unified-login.md` leaves to the first live run.
  */
 export function deliveryId(payload: MetaWebhookPayload, connection: MetaConnection): string | null {
   const parts: string[] = [];

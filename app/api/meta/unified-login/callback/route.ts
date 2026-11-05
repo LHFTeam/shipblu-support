@@ -4,13 +4,13 @@ import { env, metaAppSecret } from '@/lib/env';
 import { errorMessage } from '@/lib/errors';
 import { logger } from '@/lib/log';
 import { inspectToken, type TokenInspection } from '@/lib/meta/debug-token';
+import { redact } from '@/lib/meta/redact';
 import {
   callbackPage,
   clearedStateCookie,
   clientBusinessId,
   connectedAccounts,
   exchangeCode,
-  redact,
   inspectionWarning,
   readCallbackParams,
   readStateCookie,
@@ -115,7 +115,11 @@ export async function GET(request: Request) {
   try {
     inspection = await inspectToken(token);
   } catch (error) {
-    warnings.push(`Meta's token inspection did not answer (${scrub(errorMessage(error))}).`);
+    warnings.push(
+      `Meta's token inspection did not answer (${scrub(errorMessage(error))}), so the type, ` +
+        `expiry and permissions are not shown; npm run job -- check_meta_permissions reads ` +
+        `them once the token is set.`,
+    );
   }
   if (inspection) {
     const refusal = scrub(refuseInspection(inspection, readiness.appId) ?? '');

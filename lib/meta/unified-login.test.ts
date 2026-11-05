@@ -284,9 +284,13 @@ describe('callbackPage', () => {
     expect(callbackPage(connected)).not.toContain('Missing from the token');
   });
 
-  it('says so when the inspection did not answer, and prints an expiry when there is one', () => {
+  it('draws nothing for an inspection that did not answer, and prints an expiry when there is one', () => {
+    // The callback puts the reason among the warnings; a second sentence here
+    // was the same thing read twice.
     const silent = callbackPage({ ...connected, inspection: null });
-    expect(silent).toContain('token inspection did not answer');
+    expect(silent).not.toContain('What Meta says about the token');
+    expect(silent).not.toContain('did not answer');
+    expect(silent.split(connected.token).length - 1).toBe(1);
 
     const expiring = callbackPage({
       ...connected,

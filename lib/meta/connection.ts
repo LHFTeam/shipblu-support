@@ -42,7 +42,19 @@ import type { MetaPlatform } from './types';
  * stops one going out over Unified Login, which has no handover protocol for
  * it to be about.
  */
-export type MetaConnection = 'facebook_page' | 'instagram_login' | 'unified_login';
+const META_CONNECTIONS = ['facebook_page', 'instagram_login', 'unified_login'] as const;
+
+export type MetaConnection = (typeof META_CONNECTIONS)[number];
+
+/**
+ * Whether a stored value — `webhook_events.connection`, a message's
+ * `meta.connection`, both jsonb or free text — is a connection. The one guard
+ * for the two readers that used to each spell the list out, so a connection
+ * added here reaches both or neither.
+ */
+export function isMetaConnection(value: unknown): value is MetaConnection {
+  return (META_CONNECTIONS as readonly unknown[]).includes(value);
+}
 
 /** How to name a connection to a person reading a ticket or a log line. */
 export const CONNECTION_LABEL: Record<MetaConnection, string> = {

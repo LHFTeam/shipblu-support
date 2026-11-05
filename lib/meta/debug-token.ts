@@ -2,6 +2,7 @@ import { env, metaAppSecret } from '@/lib/env';
 import { errorMessage } from '@/lib/errors';
 import { isTimeout } from '@/lib/http/deadline';
 import { GRAPH_BASE, graphTimeout } from '@/lib/meta/graph';
+import { redact } from '@/lib/meta/redact';
 
 /**
  * Asking Meta what a token is: `GET /debug_token`.
@@ -139,7 +140,7 @@ export async function inspectToken(inputToken: string): Promise<TokenInspection>
     // Re-said rather than rethrown: the network layer's own message is not
     // ours to vouch for, and the one thing that must not survive into it is
     // the token riding in the query string.
-    throw new DebugTokenError(redact(errorMessage(error), inputToken), 0);
+    throw new DebugTokenError(redact(errorMessage(error), [inputToken], TOKEN_MIN_LENGTH), 0);
   }
 
   const { ok, status, body } = answer;
@@ -147,7 +148,8 @@ export async function inspectToken(inputToken: string): Promise<TokenInspection>
     throw new DebugTokenError(
       redact(
         `debug_token failed (HTTP ${status}): ${JSON.stringify(body?.error ?? body)}`,
-        inputToken,
+        [inputToken],
+        TOKEN_MIN_LENGTH,
       ),
       status,
     );
@@ -157,15 +159,11 @@ export async function inspectToken(inputToken: string): Promise<TokenInspection>
 }
 
 /**
- * `text` with every occurrence of `secret` cut out.
- *
- * Not for a value too short to be a credential: a Meta token runs to well over
- * a hundred characters, and cutting a five-letter test value out of a sentence
- * turns "debug_token failed" into nonsense without protecting anything.
+ * Below this a value is too short to be a credential: a Meta token runs to well
+ * over a hundred characters, and cutting a five-letter test value out of a
+ * sentence turns "debug_token failed" into nonsense without protecting anything.
  */
-function redact(text: string, secret: string): string {
-  return secret.length >= 16 ? text.split(secret).join('[redacted]') : text;
-}
+const TOKEN_MIN_LENGTH = 16;
 
 /**
  * A GET to Graph with the read deadline, and the JSON it answered with.

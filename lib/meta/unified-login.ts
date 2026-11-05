@@ -6,6 +6,7 @@ import { isTimeout } from '@/lib/http/deadline';
 import { requiredScopes } from '@/lib/meta/capabilities';
 import { readGraph, type TokenInspection } from '@/lib/meta/debug-token';
 import { GRAPH_BASE, GRAPH_VERSION, graphTimeout } from '@/lib/meta/graph';
+import { redact } from '@/lib/meta/redact';
 
 /**
  * Connecting the Instagram account through Meta's Instagram API with Unified
@@ -294,18 +295,6 @@ export function readCallbackParams(searchParams: URLSearchParams): CallbackParam
   return { kind: 'code', code, state };
 }
 
-/**
- * `text` with every occurrence of each secret cut out. No minimum length,
- * unlike `redact` in `./debug-token.ts`: every secret this is handed was sent
- * to Meta by this module or the callback, and a short one is still one.
- */
-export function redact(text: string, secrets: readonly string[]): string {
-  return secrets.reduce(
-    (out, secret) => (secret ? out.split(secret).join('[redacted]') : out),
-    text,
-  );
-}
-
 export type Exchange =
   { ok: true; token: string; expiresIn: number | null } | { ok: false; error: string };
 
@@ -361,6 +350,19 @@ export async function exchangeCode(input: {
     };
   }
 
+  // A 200 that carries no token is an answer, not a refusal: saying Meta
+  // refused would send the admin after the code and the redirect URL, which
+  // were accepted. Nothing can be made of it but to say what came back.
+  if (response.ok) {
+    return {
+      ok: false,
+      error:
+        `${where} answered HTTP ${response.status} without an access token, so there is ` +
+        `nothing to set. Nothing was changed; connect again, and if it repeats, the answer's ` +
+        `shape is the thing to read off the network tab.`,
+    };
+  }
+
   const said =
     typeof body?.error?.message === 'string'
       ? scrub(body.error.message)
@@ -377,27 +379,66 @@ export async function exchangeCode(input: {
 export type ConnectedAccount = { id: string; username: string | null };
 
 /**
+ * How many pages of `assigned_instagram_accounts` are followed. Graph pages the
+ * edge at 25 by default; a hundred per page and ten pages is a thousand
+ * accounts, far past any portfolio this app will be connected to, and a bound
+ * rather than `while (next)` so a paging bug on either side cannot loop.
+ */
+const ACCOUNT_PAGE_SIZE = 100;
+const MAX_ACCOUNT_PAGES = 10;
+
+/**
  * The Instagram professional accounts the token reaches:
  * `GET /me/assigned_instagram_accounts?fields=id,username`, bearer token, on
  * `graph.facebook.com`. `/me` here is the business integration system user,
  * which is why the accounts are an edge on it rather than the answer itself.
  * Throws when Meta did not answer or refused, with Meta's sentence.
+ *
+ * The edge is paginated, and the whole list is what the callers compare
+ * `INSTAGRAM_ACCOUNT_ID` against — a portfolio with more accounts than one page
+ * would otherwise be told the token cannot address an account it reaches. So
+ * `paging.next` is followed, on Graph's own host only: a `next` pointing
+ * anywhere else would carry the bearer token to it.
  * https://developers.facebook.com/documentation/instagram-platform/instagram-api-with-unified-login/get-started
  */
 export async function connectedAccounts(token: string): Promise<ConnectedAccount[]> {
-  const url = new URL(`${GRAPH_BASE}/me/assigned_instagram_accounts`);
-  url.searchParams.set('fields', 'id,username');
-  type Body = { data?: { id?: unknown; username?: unknown }[]; error?: { message?: unknown } };
-  const { ok, status, body } = await readGraph<Body>(url, token);
-  if (!ok || !Array.isArray(body?.data)) {
-    throw new Error(graphRefusal(url, status, body?.error));
+  const first = new URL(`${GRAPH_BASE}/me/assigned_instagram_accounts`);
+  first.searchParams.set('fields', 'id,username');
+  first.searchParams.set('limit', String(ACCOUNT_PAGE_SIZE));
+  type Body = {
+    data?: { id?: unknown; username?: unknown }[];
+    paging?: { next?: unknown };
+    error?: { message?: unknown };
+  };
+
+  const accounts: ConnectedAccount[] = [];
+  let url: URL | null = first;
+  for (let page = 0; url && page < MAX_ACCOUNT_PAGES; page += 1) {
+    const { ok, status, body } = await readGraph<Body>(url, token);
+    if (!ok || !Array.isArray(body?.data)) {
+      throw new Error(graphRefusal(url, status, body?.error));
+    }
+    for (const entry of body.data) {
+      if (typeof entry.id !== 'string') continue;
+      accounts.push({
+        id: entry.id,
+        username: typeof entry.username === 'string' ? entry.username : null,
+      });
+    }
+    url = nextPage(body.paging?.next, first.host);
   }
-  return body.data
-    .filter((entry): entry is { id: string; username?: unknown } => typeof entry.id === 'string')
-    .map((entry) => ({
-      id: entry.id,
-      username: typeof entry.username === 'string' ? entry.username : null,
-    }));
+  return accounts;
+}
+
+/** Graph's `paging.next` as a URL to follow, or null when there is none or it leaves Graph's host. */
+function nextPage(next: unknown, host: string): URL | null {
+  if (typeof next !== 'string' || !next) return null;
+  try {
+    const url = new URL(next);
+    return url.protocol === 'https:' && url.host === host ? url : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -550,6 +591,9 @@ function connectedBody(outcome: Extract<CallbackOutcome, { kind: 'connected' }>)
   const missingScopes = inspection
     ? required.filter((scope) => !inspection.scopes.includes(scope))
     : [];
+  // Nothing is drawn for an inspection that did not answer: the callback puts
+  // the reason, scrubbed, among the warnings below, and a second sentence
+  // saying the same thing without the reason is one the admin reads twice.
   const inspectionSection = inspection
     ? `<h2>What Meta says about the token</h2>
 <ul>
@@ -570,7 +614,7 @@ ${
         )}. Add them to the configuration's permissions in the "API setup with Unified login" tab and connect again.</p>`
     : ''
 }`
-    : `<p class="warning">Meta's token inspection did not answer, so the type, expiry and permissions are not shown. <code>npm run job -- check_meta_permissions</code> reads them once the token is set.</p>`;
+    : '';
 
   const warnings = outcome.warnings
     .map((warning) => `<p class="warning">${escapeHtml(warning)}</p>`)
