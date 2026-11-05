@@ -48,17 +48,17 @@ const TOPIC_KEYWORDS: ReadonlyArray<readonly [TopicArt, ReadonlyArray<string>]> 
       'damage',
       'claim',
       'compensation',
-      'polic',
-      'regulation',
+      'prohibit',
+      'forbidden',
+      'restricted',
       'مفقود',
       'فقد',
       'تالف',
       'تلف',
       'مطالب',
       'تعويض',
-      'سياس',
-      'لائح',
-      'لوائح',
+      'محظور',
+      'ممنوع',
     ],
   ],
   ['returns', ['return', 'exchange', 'rto', 'مرتجع', 'ارتجاع', 'استبدال', 'إرجاع']],
@@ -81,32 +81,11 @@ const TOPIC_KEYWORDS: ReadonlyArray<readonly [TopicArt, ReadonlyArray<string>]> 
       'تحويل',
     ],
   ],
-  // The design's account-settings drawing, a person and a gear. The design put
-  // it on "Pickups & deliveries"; production's "ShipBlu Unique Products" (the
-  // dashboard, analytics, sub-accounts) and "myBlu Support" (the app) are the
-  // account and its features, and it fits them better than it fits a pickup.
+  // The design's account-settings drawing, a person and a gear, which the
+  // design put on "Pickups & deliveries".
   [
     'account',
-    [
-      'pickup',
-      'pick-up',
-      'deliver',
-      'courier',
-      'account',
-      'product',
-      'dashboard',
-      'myblu',
-      'app',
-      'استلام',
-      'تسليم',
-      'توصيل',
-      'مندوب',
-      'الكابتن',
-      'حساب',
-      'منتج',
-      'تطبيق',
-      'ماي بلو',
-    ],
+    ['pickup', 'pick-up', 'deliver', 'courier', 'استلام', 'تسليم', 'توصيل', 'مندوب', 'الكابتن'],
   ],
   [
     'store',
@@ -146,6 +125,19 @@ const TOPIC_KEYWORDS: ReadonlyArray<readonly [TopicArt, ReadonlyArray<string>]> 
       'عملاء',
       'مستلم',
     ],
+  ],
+  // The general words, behind every subject, each read only when a name says
+  // nothing more particular. A policy is about its subject before it is a
+  // policy: "Return policy" is a return, and only "Policies and Regulations"
+  // draws the shield.
+  ['claims', ['polic', 'regulation', 'سياس', 'لائح', 'لوائح']],
+  // The account and what it gives a merchant, on the account drawing:
+  // production's "ShipBlu Unique Products" (the dashboard, analytics,
+  // sub-accounts) and "myBlu Support" (the app). Behind the store, so "Apps &
+  // Integrations" is an integration.
+  [
+    'account',
+    ['account', 'product', 'dashboard', 'myblu', 'app', 'حساب', 'منتج', 'تطبيق', 'ماي بلو'],
   ],
   // Last, as the most general subject there is: "Shipping FAQs" is about
   // shipping before it is a list of questions.

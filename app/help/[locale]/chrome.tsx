@@ -303,7 +303,7 @@ export function ArticleRow({
         {/* A div, not a span: the heading inside is flow content, which a span
             may not hold. */}
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <Heading className="text-[0.9375rem] leading-snug font-semibold text-(--color-text-link) group-hover:text-(--color-text-link-hover)">
+          <Heading className="text-sm leading-snug font-medium text-(--color-text-link) group-hover:text-(--color-text-link-hover)">
             {title}
           </Heading>
           {excerpt ? (

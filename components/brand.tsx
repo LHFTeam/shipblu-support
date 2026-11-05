@@ -38,12 +38,14 @@ export function ShipBluMark({ className = '', ...props }: ComponentProps<'svg'>)
 }
 
 /**
- * The mark on the white rounded square it always appears in — an app icon.
+ * The mark on a white rounded square — an app icon, as the console draws it.
  *
  * The white tile is what makes the mark readable on the navy rail, where the
  * navy half of the bird would otherwise sink into the background. The ring is
- * for the other case: on a light header, a white square on white needs an edge
- * to read as a shape at all.
+ * for the other case: on a light surface, as an avatar or beside a light
+ * header, a white square on white needs an edge to read as a shape at all.
+ * The help centre's white header draws the bare `ShipBluMark` instead, as its
+ * design does.
  */
 export function ShipBluLogo({ className = '' }: { className?: string }) {
   return (

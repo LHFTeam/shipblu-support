@@ -78,9 +78,19 @@ describe('topicArt', () => {
     expect(topicArt('RTO shipments')).toBe('returns');
   });
 
-  it('reads a subject before the questions it is a list of', () => {
+  it('reads a subject before the general word that comes with it', () => {
     expect(topicArt('Shipping FAQs')).toBe('shipping');
     expect(topicArt('أسئلة الدفع والتحويل')).toBe('payments');
+    // A policy is about its subject first.
+    expect(topicArt('Return policy', 'return-policy')).toBe('returns');
+    expect(topicArt('Shipping policy', 'shipping-policy')).toBe('shipping');
+    expect(topicArt('سياسة الإرجاع', 'سياسة-الإرجاع')).toBe('returns');
+    expect(topicArt('سياسة الشحن', 'سياسة-الشحن')).toBe('shipping');
+    // An app that connects a store is an integration.
+    expect(topicArt('Apps & Integrations')).toBe('store');
+    // What cannot be shipped is a rule, whatever the products are.
+    expect(topicArt('Prohibited products')).toBe('claims');
+    expect(topicArt('المنتجات الممنوع شحنها')).toBe('claims');
   });
 
   it('draws nothing for a name it does not recognise', () => {

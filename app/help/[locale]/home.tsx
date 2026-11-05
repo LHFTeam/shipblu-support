@@ -163,6 +163,9 @@ export function TopicGroups({ locale, groups }: { locale: Locale; groups: TopicG
             </h3>
             <Link
               href={`/${locale}/c/${group.slug}`}
+              // The visible words first, then whose: ten "All articles (N)"
+              // links on one page read alike in a screen reader's links list.
+              aria-label={`${tCount(locale, 'allArticles', group.articleCount)} — ${group.name}`}
               className="text-xs font-medium text-(--color-text-link) underline-offset-2 hover:text-(--color-text-link-hover) hover:underline"
             >
               {tCount(locale, 'allArticles', group.articleCount)}
@@ -209,6 +212,10 @@ function TopicGrid({ children }: { children: ReactNode }) {
  * three titles are the thing itself, and a visitor who spots the one they came
  * for skips the folder page entirely.
  *
+ * The description is never clamped, as in the design: the lines are ours
+ * (`db/sql/010_kb_folder_descriptions.sql`) and short, and a longer one only
+ * deepens its row, whose bands the subgrid keeps one height.
+ *
  * The band's 148px is the drawing's room. A folder `topicArt` does not
  * recognise gets no drawing and no minimum height either, so its band closes
  * round the name as a plain header strip rather than standing as a pale box
@@ -254,7 +261,7 @@ function TopicCard({
             {folder.name}
           </h4>
           {folder.description ? (
-            <p className="line-clamp-4 text-sm leading-relaxed text-(--color-text-secondary)">
+            <p className="text-sm leading-relaxed text-(--color-text-secondary)">
               {folder.description}
             </p>
           ) : null}
@@ -293,6 +300,7 @@ function TopicCard({
         <div className="mt-auto pt-3.5">
           <Link
             href={href}
+            aria-label={`${tCount(locale, 'allArticles', folder.articleCount)} — ${folder.name}`}
             className="inline-flex items-center gap-1.5 text-xs font-medium text-(--color-text-link) underline-offset-2 hover:text-(--color-text-link-hover) hover:underline"
           >
             {tCount(locale, 'allArticles', folder.articleCount)}

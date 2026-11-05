@@ -75,7 +75,7 @@ describe('010_kb_folder_descriptions.sql', () => {
     await run();
 
     expect(await descriptionOf(written)).toBe('Written by an editor.');
-    expect(await descriptionOf(blank)).toMatch(/^Connecting a Shopify/);
+    expect(await descriptionOf(blank)).toMatch(/^Connect a Shopify/);
   });
 
   it('leaves a folder it does not name alone, and one in another audience', async () => {

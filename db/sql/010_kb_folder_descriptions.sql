@@ -15,8 +15,9 @@
 -- cleared to empty comes back on the next deploy. On a database without these
 -- folders (every one but production's) it matches nothing.
 --
--- Kept short enough for the four lines the card gives a description beside its
--- drawing, in the narrowest column the grid draws.
+-- Short: a line or two at full width, four at most in the narrowest column the
+-- grid draws (measured with Geist at 320, 640 and 1024px), so the cards of one
+-- row stay close to one height. The card clamps nothing, as in the design.
 update kb_folders f
 set description = v.description
 from (
@@ -24,13 +25,13 @@ from (
     ('en', 'shipblu-partners', 'faqs',
       'Accounts, pickups, delivery attempts, pricing, and what merchants ask most.'),
     ('en', 'shipblu-partners', 'financials',
-      'Transfer cycles and fees, your ShipBlu wallet, payout methods and tax invoices.'),
+      'Transfer cycles and fees, your ShipBlu wallet, payouts and tax invoices.'),
     ('en', 'shipblu-partners', 'integrations',
-      'Connecting a Shopify, WooCommerce, Magento or Zammit store to ShipBlu.'),
+      'Connect a Shopify, WooCommerce, Magento or Zammit store to ShipBlu.'),
     ('en', 'shipblu-partners', 'policies-and-regulations',
       'Packaging rules, items ShipBlu can''t ship, claims and Shield plan terms.'),
     ('en', 'shipblu-partners', 'shipblu-unique-products',
-      'The analytics dashboard, Instant Payout, Shield plans, sub-accounts and more.'),
+      'The analytics dashboard, Instant Payout, Shield plans and sub-accounts.'),
     ('en', 'shipblu-partners', 'shipping-services',
       'Creating delivery, return, exchange and cash-collection orders, in bulk too.'),
     ('en', 'shipblu-customers', 'faqs',

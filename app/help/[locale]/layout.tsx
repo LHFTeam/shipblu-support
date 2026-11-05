@@ -64,7 +64,7 @@ export default async function KbLayout({
       </a>
 
       <header className="kb-noprint sticky top-0 z-30 border-b border-(--color-border-subtle) bg-(--color-background-surface)">
-        <Container className="flex min-h-15 flex-wrap items-center gap-x-6 gap-y-2 py-2.5">
+        <Container className="flex min-h-14 flex-wrap items-center gap-x-6 gap-y-2 py-2.5">
           <Link
             href={`/${locale}`}
             className="flex items-center gap-2.5 font-semibold text-(--color-text-primary)"
@@ -72,7 +72,7 @@ export default async function KbLayout({
             {/* The bare mark, as the design draws it on this white header. The
                 console's tile (`ShipBluLogo`) is for its navy rail, where the
                 mark needs the white behind it; here it would only add a box. */}
-            <ShipBluMark className="w-8 shrink-0" />
+            <ShipBluMark className="w-[18px] shrink-0" />
             <span className={`text-[15px] ${locale === 'ar' ? '' : 'tracking-tight'}`}>
               {t(locale, 'title')}
             </span>
@@ -141,7 +141,7 @@ export default async function KbLayout({
             links are not here because none of those pages has an address this
             system knows; every link that is here goes somewhere that answers. */}
         <Container className="flex flex-wrap items-center gap-x-5 gap-y-3 pt-6 pb-24 text-xs text-(--color-text-secondary) sm:pb-6">
-          <span lang="en" className="font-semibold text-(--color-text-primary)">
+          <span lang="en" className="font-medium text-(--color-text-secondary)">
             ShipBlu
           </span>
 
@@ -206,7 +206,7 @@ function LocaleSwitcher({ locale }: { locale: Locale }) {
       role="group"
       aria-label={t(locale, 'languageLabel')}
       dir="ltr"
-      className="flex items-center overflow-hidden rounded-md border border-(--color-border-subtle) text-xs font-semibold"
+      className="flex items-center overflow-hidden rounded-md border border-(--color-border-subtle) text-xs font-medium"
     >
       {LOCALES.map((option) =>
         option === locale ? (

@@ -344,7 +344,7 @@ const PAGER_CARD =
 
 const PAGER_LABEL = 'inline-flex items-center gap-1 text-2xs text-(--color-text-tertiary)';
 
-const PAGER_TITLE = 'text-sm leading-snug font-semibold text-(--color-text-link)';
+const PAGER_TITLE = 'text-sm leading-snug font-medium text-(--color-text-link)';
 
 /**
  * "Back to topic" and "Next article", the two ways on from the foot of an

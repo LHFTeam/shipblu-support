@@ -82,7 +82,8 @@ folders under them, so both are named:
   drawing
 
 An unrecognised name gets no drawing, and the layouts close up around its
-absence. A folder with no drawing of its own borrows its category's.
+absence. On its own page a folder with no drawing of its own borrows its
+category's; its card on the front page draws none.
 The payments drawing has Arabic text in the artwork itself. It is the design's own
 asset and is shown on the English page too.
 
@@ -189,8 +190,20 @@ page. The second pass closed the gap:
 - **Two drawings.** The design's question-and-search parcel, re-exported at
   280px from its 474px original, for the FAQs folders, and the account-settings
   drawing, renamed from `pickups` to `account` for what it shows.
-- **The header's bare mark**, as the design draws it on white, and the design's
-  own lede.
+- **The header's bare mark**, as the design draws it on white, at the size of
+  the design's bird, and the design's own lede.
+- **The design's sizes and weights where they differ from Tailwind's.** Inside
+  `.kb-shell` only, `text-xs` is 13px, `text-2xs` 12px, `text-lg` 17px and
+  `tracking-tight` -0.011em, as the design's tokens have them; `text-base`
+  stays 16px, because a form field below 640px must, or iOS zooms into it.
+  Article rows, the next-article cards, the language switch and the footer's
+  name are at the design's 500, and Arabic titles at its 1.25 leading.
+- **The general words read last in the drawing matcher.** "Policy", "product"
+  and "app" match only when a name says nothing more particular, so "Return
+  policy" is a return and "Apps & Integrations" an integration.
+- **A Freshdesk re-import keeps a folder's description** when Freshdesk has
+  none, which is every one of production's, so it cannot undo the descriptions
+  above.
 
 ## 7. Verified
 
