@@ -11,7 +11,8 @@
  * and their costs; the comments below carry the ones a reader of this file
  * needs.
  *
- * Three layers.
+ * Three tiers of tokens (not cascade layers: the one `@layer` in this file is
+ * the focus ring's, below).
  * 1. `@theme` holds primitives. Each one generates utilities (`bg-blu-500`,
  *    `text-neutral-600`, `text-2xs`, `shadow-float`), and that is the only
  *    reason anything belongs there.
@@ -737,11 +738,24 @@ body {
 }
 
 /* A single visible focus treatment, so keyboard users get the same affordance
-   on a button, a link, a disclosure and a table row. */
-:where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
-  outline: var(--focus-width) solid var(--focus-color);
-  outline-offset: var(--focus-offset);
-  border-radius: 0.25rem;
+   on a button, a link, a disclosure, a field and a table row.
+
+   In `@layer base`, below Tailwind's utilities, so a plain utility adjusts it:
+   `focus-visible:outline-offset-[-2px]` draws it inside a clipping card, the
+   rail recolours it for navy, a pill keeps its own radius while focused.
+   Unlayered, it outranked every utility whatever the specificity, so none of
+   that worked without `!`, and the classes written without one did nothing
+   (docs/PROJECT-STATE.md §6.109; `focus-ring` keeps it layered).
+
+   An outline rather than a box-shadow ring, because forced-colours mode keeps
+   an outline and removes a shadow. The radius shapes only what has no rounding
+   of its own: a bare link, a table row. Anything with a `rounded-*` keeps it. */
+@layer base {
+  :where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+    outline: var(--focus-width) solid var(--focus-color);
+    outline-offset: var(--focus-offset);
+    border-radius: 0.25rem;
+  }
 }
 
 /* The console is a dense, scrolling application; the default scrollbar is wide

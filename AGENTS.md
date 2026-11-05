@@ -1191,7 +1191,7 @@ the chart series — and `light-only` comes out in that commit.
 
 **The design system.** The console, the help centre and the widget follow the
 ShipBlu Support design system, and `app/globals.css` is its token half in three
-layers: `@theme` primitives that generate utilities (`bg-blu-500`, `text-2xs`),
+tiers: `@theme` primitives that generate utilities (`bg-blu-500`, `text-2xs`),
 `:root` roles and component tokens (`--color-feedback-danger-fg`,
 `--color-ticket-open-border`, `--color-channel-whatsapp-bg`, `--console-gap`), and
 the legacy names (`--muted`, `brand-*`, `--kb-*`) kept as aliases. Markup reads a
@@ -1201,7 +1201,7 @@ declared in `globals.css` renders nothing, silently. A value with no role yet
 gets one in `:root` beside its kin (the switch track, the pressed surface, the
 rail's washes are there) rather than a primitive at the call site; the logo's
 white tile in `components/brand.tsx` is the one exception, because it is the
-brand's artwork rather than a state of the interface. Four rules from the system
+brand's artwork rather than a state of the interface. Five rules from the system
 are easy to break by accident:
 
 - **One blue acts; coral only demands attention.** Every action is the
@@ -1216,7 +1216,20 @@ are easy to break by accident:
   (`ChevronLeft`, `Reply`, `Return`, `Send`, `External`) mirror themselves in
   RTL — never flip one again at the call site.
 - **A `className` on a primitive does not reliably override it** (§6.93). Use
-  the `!` suffix or a prop.
+  the `!` suffix or a prop. That is one utility against another. The focus ring
+  is not that case: it sits in `@layer base`, so a plain utility adjusts its
+  colour, offset or radius, and `focus-ring` refuses a `!` on an outline
+  utility.
+- **Every focusable element keeps a visible ring, and a field keeps the global
+  one.** It is the one `:focus-visible` rule in `globals.css`: a 2px outline,
+  which forced-colours mode keeps. A field's own border and 20% ring say "this
+  box takes typing". They are not a focus indicator, since that ring is 1.35:1
+  and forced colours removes it, so `outline-none` beside one is refused
+  (`focus-ring`). Suppress the outline only where focus is moved for a screen
+  reader and nothing is to be typed or pressed (the skip link's target, a
+  thanks line), or where a wrapper draws an outline for what is inside it (the
+  widget's composer box). On a surface the blue does not reach 3:1 against,
+  recolour the ring rather than removing it: the rail's is white (§6.109).
 
 The shared shapes live in one place each: `components/ui.tsx` (`Button`,
 `buttonClass`, fields with `tone`, `Badge`/`BadgeTone`, `CountBadge`, `Notice`,

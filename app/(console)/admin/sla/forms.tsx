@@ -95,7 +95,7 @@ function TargetGrid({ targets }: { targets?: SlaTargets }) {
                       name={`${priority}_${column}`}
                       defaultValue={targets?.[priority]?.[key] ?? ''}
                       placeholder="—"
-                      className="w-24 rounded-md border border-(--color-border-subtle) bg-(--color-background-surface) px-2 py-1 text-base outline-none transition-colors hover:border-(--color-border-default) focus:border-(--color-border-focus) focus:ring-2 focus:ring-(--color-border-focus)/20 sm:text-sm"
+                      className="w-24 rounded-md border border-(--color-border-subtle) bg-(--color-background-surface) px-2 py-1 text-base transition-colors hover:border-(--color-border-default) focus:border-(--color-border-focus) focus:ring-2 focus:ring-(--color-border-focus)/20 sm:text-sm"
                     />
                   </td>
                 );
@@ -203,7 +203,7 @@ function Fields({
           multiple
           defaultValue={escalationAgents}
           size={Math.min(5, Math.max(3, agents.length))}
-          className="w-full rounded-md border border-(--color-border-subtle) bg-(--color-background-surface) p-2 text-base outline-none transition-colors hover:border-(--color-border-default) focus:border-(--color-border-focus) focus:ring-2 focus:ring-(--color-border-focus)/20 sm:text-sm"
+          className="w-full rounded-md border border-(--color-border-subtle) bg-(--color-background-surface) p-2 text-base transition-colors hover:border-(--color-border-default) focus:border-(--color-border-focus) focus:ring-2 focus:ring-(--color-border-focus)/20 sm:text-sm"
         >
           {agents.map((agent) => (
             <option key={agent.value} value={agent.value}>

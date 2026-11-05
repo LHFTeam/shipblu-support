@@ -145,9 +145,18 @@ export function Button({
  *
  * `aria-invalid` is styled here because callers already set it — the ticket
  * field inputs and the help-centre forms do — and until now it showed nothing.
+ *
+ * The keyboard focus ring is the global one in `globals.css`, and a field keeps
+ * it. The border and the 20% ring below say "this box takes typing"; they are
+ * not a focus indicator on their own — that ring is 1.35:1 against the white
+ * surface, a third of the 3:1 one needs, and forced-colours mode removes it
+ * with every other box-shadow. Suppressing the outline here did nothing while
+ * the global rule was unlayered, and once it was layered it would have left
+ * every field with a one-pixel border change and a read-only one with nothing
+ * (docs/PROJECT-STATE.md §6.109).
  */
 const FIELD_BASE =
-  'w-full rounded-md border text-base sm:text-sm placeholder:text-(--color-text-tertiary) outline-none transition-colors disabled:cursor-not-allowed disabled:opacity-60 aria-invalid:border-(--color-feedback-danger-fg)';
+  'w-full rounded-md border text-base sm:text-sm placeholder:text-(--color-text-tertiary) transition-colors disabled:cursor-not-allowed disabled:opacity-60 aria-invalid:border-(--color-feedback-danger-fg)';
 
 /**
  * A field's surface and its focus, held apart from `FIELD_BASE` so the
@@ -165,12 +174,18 @@ const FIELD_BASE =
  *
  * `note` is the private-note composer: amber paper, focused in amber rather
  * than in the action blue, so an agent typing a note never sees the box turn
- * into the reply box.
+ * into the reply box. The keyboard ring is amber too (6.1:1 on the white
+ * composer), which the unlayered focus rule kept blue until it moved into a
+ * layer.
+ *
+ * The read-only surface keeps the global ring, which is the same ring a button
+ * or a link takes, not the editing border: focused, it says where the keyboard
+ * is without saying the box takes typing.
  */
 const FIELD_SURFACE = {
   default:
     'border-(--color-border-subtle) bg-(--color-background-surface) text-(--color-text-primary) hover:border-(--color-border-default) focus:border-(--color-border-focus) focus:ring-2 focus:ring-(--color-border-focus)/20 aria-invalid:focus:ring-(--color-feedback-danger-fg)/20',
-  note: 'border-(--color-message-note-border) bg-(--color-message-note-bg) text-(--color-text-primary) focus:border-(--color-feedback-warning-fg) focus:ring-2 focus:ring-(--color-feedback-warning-fg)/20',
+  note: 'border-(--color-message-note-border) bg-(--color-message-note-bg) text-(--color-text-primary) focus:border-(--color-feedback-warning-fg) focus:ring-2 focus:ring-(--color-feedback-warning-fg)/20 focus-visible:outline-(--color-feedback-warning-fg)',
   readOnly:
     'border-(--color-border-subtle) bg-(--color-background-hover) text-(--color-text-secondary) cursor-default',
 };

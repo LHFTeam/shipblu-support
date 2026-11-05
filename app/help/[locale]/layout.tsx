@@ -192,8 +192,7 @@ const FOOTER_LINK = 'underline-offset-4 hover:text-(--color-text-primary) hover:
  * a target a thumb can find beside the 42px Sign in. And the link's focus ring
  * is drawn inside it: the group clips its overflow for the rounded corners, and
  * the global ring, offset outwards, was cut away — on an Arabic page, where the
- * link is the first segment, entirely. The `!` is needed against that unlayered
- * global rule (§6.93).
+ * link is the first segment, entirely.
  *
  * It points at that locale's front page rather than at a translation of the
  * current one. There is no general path mapping — an Arabic article has its own
@@ -225,7 +224,7 @@ function LocaleSwitcher({ locale }: { locale: Locale }) {
             lang={option}
             hrefLang={option}
             aria-label={LOCALE_NAMES[option]}
-            className="px-2.5 py-1.5 text-(--color-text-secondary) transition-colors hover:bg-(--color-background-hover) hover:text-(--color-text-primary) focus-visible:outline-offset-[-2px]! max-sm:py-3"
+            className="px-2.5 py-1.5 text-(--color-text-secondary) transition-colors hover:bg-(--color-background-hover) hover:text-(--color-text-primary) focus-visible:outline-offset-[-2px] max-sm:py-3"
           >
             {LOCALE_SHORT[option]}
           </Link>
