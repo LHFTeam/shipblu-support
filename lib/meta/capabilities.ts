@@ -166,6 +166,26 @@ export const CAPABILITIES: readonly Capability[] = [
     permissions: ['instagram_basic', 'instagram_manage_messages'],
   },
   {
+    /*
+      Not a thing the helpdesk calls, and the row that decides whether any of
+      the others work. Meta's Unified Login permissions page calls
+      `business_management` a prerequisite for the system-user token and leaves
+      it out of the default configuration; without it a login still ends in
+      confetti and the portfolio still lists the account as shared with the
+      app, but the token is assigned no Instagram account — its account list is
+      empty and every read of the account is refused 100/33. Observed twice on
+      2026-11-05 and reported the same way by others; the configuration's
+      editor on the Unified login tab does not offer the permission, Facebook
+      Login for Business → Configurations → Edit does.
+    */
+    name: 'Instagram account assigned to the token (Unified Login)',
+    connection: 'unified_login',
+    symptom:
+      'the login finishes but the token reaches no Instagram account: an empty ' +
+      '/me/assigned_instagram_accounts and 100/33 on every read of the account id',
+    permissions: ['business_management'],
+  },
+  {
     name: 'Instagram comment webhooks and moderation (Unified Login)',
     connection: 'unified_login',
     symptom: 'no ticket is opened when somebody comments on a post, while DMs still arrive',

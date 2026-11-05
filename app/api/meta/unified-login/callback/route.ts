@@ -11,7 +11,9 @@ import {
   clientBusinessId,
   connectedAccounts,
   exchangeCode,
+  accountlessDetails,
   inspectionWarning,
+  probeAccount,
   readCallbackParams,
   readStateCookie,
   refuseInspection,
@@ -142,14 +144,8 @@ export async function GET(request: Request) {
       reason: `The token Meta issued could not list its Instagram accounts (${said}), so there is nothing to set. Connect again.`,
     });
   }
-  if (accounts.length === 0) {
-    const reason =
-      'The token Meta issued reaches no Instagram account, so there is nothing to set. Connect again and share the Instagram account in Meta’s dialog.';
-    log.warn(`no accounts on the token agent_id=${agent.id}`);
-    return page(409, { kind: 'refused', reason });
-  }
-
-  // Metadata, never the reason a connection fails.
+  // Metadata, never the reason a connection fails — read before the account
+  // question is settled, because the refusal page prints it too.
   let business: string | null = null;
   try {
     business = await clientBusinessId(token);
@@ -157,6 +153,65 @@ export async function GET(request: Request) {
     warnings.push(
       `Meta did not say which business portfolio the token is for (${scrub(errorMessage(error))}).`,
     );
+  }
+
+  const configuredAccountId = env().INSTAGRAM_ACCOUNT_ID ?? null;
+
+  /*
+    An empty list is not the last word. `/me/assigned_instagram_accounts`
+    answered `[]` on 2026-11-05 for a token whose portfolio listed the account
+    as shared with this app, so the account every reply is addressed to is
+    read directly: a token that reads it can address it, and is accepted with
+    the list's silence noted; one that cannot is refused with Graph's own
+    sentence and the token's permissions, which is what the admin needs to
+    fix the configuration rather than the dialog.
+  */
+  if (accounts.length === 0 && configuredAccountId) {
+    const probe = await probeAccount(token, configuredAccountId);
+    if (probe.ok) {
+      accounts = [probe.account];
+      warnings.push(
+        `Meta’s list of the token’s Instagram accounts was empty, but the token reads ` +
+          `${configuredAccountId} directly, which is what every reply does. Treat the empty list ` +
+          `as a reading to record (plans/instagram-unified-login.md, Not known yet).`,
+      );
+      log.warn(`assigned_instagram_accounts empty, direct read ok agent_id=${agent.id}`);
+    } else {
+      const details = accountlessDetails({
+        inspection,
+        clientBusinessId: business,
+        configuredAccountId,
+        probeError: scrub(probe.error),
+      });
+      log.warn(
+        `no accounts on the token agent_id=${agent.id} scopes=${inspection?.scopes.join(',') ?? '?'} ` +
+          `probe=${scrub(probe.error)}`,
+      );
+      return page(409, {
+        kind: 'refused',
+        reason:
+          'The token Meta issued reaches no Instagram account, so there is nothing to set: its ' +
+          'account list is empty and it cannot read the account this environment replies as.',
+        details,
+      });
+    }
+  }
+  if (accounts.length === 0) {
+    log.warn(
+      `no accounts on the token agent_id=${agent.id} scopes=${inspection?.scopes.join(',') ?? '?'}`,
+    );
+    return page(409, {
+      kind: 'refused',
+      reason:
+        'The token Meta issued reaches no Instagram account, so there is nothing to set, and ' +
+        'INSTAGRAM_ACCOUNT_ID is unset, so no account could be read directly.',
+      details: accountlessDetails({
+        inspection,
+        clientBusinessId: business,
+        configuredAccountId: null,
+        probeError: null,
+      }),
+    });
   }
 
   log.info('token issued', {
@@ -176,7 +231,7 @@ export async function GET(request: Request) {
     inspection,
     clientBusinessId: business,
     warnings,
-    configuredAccountId: env().INSTAGRAM_ACCOUNT_ID ?? null,
+    configuredAccountId,
   });
 }
 

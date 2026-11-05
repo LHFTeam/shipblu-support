@@ -5,13 +5,66 @@ it is designed; **this file is about the state of the work** — what is live,
 what is merely built, what is left, and the mistakes that have already cost us
 time. Read both. Do not re-derive settled decisions.
 
-Last updated: 2026-10-31, against `main` at `eaf07ab`. The figures in §1 and §5
+Last updated: 2026-11-05, against `main` at `1062f5e`. The figures in §1 and §5
 were last re-measured as a whole against production on 2026-09-20, and a
 paragraph re-read since gives its own date; where a number here disagrees with
 an older paragraph elsewhere in the file, the older one has not been re-checked.
 
-**Production runs `eaf07ab`, deployed by hand on 2026-10-30, all six services by
-15:22:45 UTC:** release #450, which carries #448, and with it #445, which
+**Production runs `1062f5e`, deployed by hand from another session on
+2026-11-05, all six services by 01:33:41 UTC:** release #456, which carries
+#455, Instagram's third connection, Unified Login (the Instagram paragraph
+below, and `plans/instagram-unified-login.md`). Web first, live at 01:31:00;
+then the four crons, live by 01:32:18, and the worker at 01:33:41. It adds two
+variables, `INSTAGRAM_UNIFIED_LOGIN_TOKEN` and
+`INSTAGRAM_UNIFIED_LOGIN_CONFIG_ID`, and no migration, and nothing on its route
+has run against Meta: `metaConnection()` prefers it only once the token is set.
+Its checks are that session's to record. At 08:48 `/api/health` reports
+`1062f5e`, nothing pending or processing, and the dead jobs still the 27 named
+below; the 1,340 jobs created from 00:58 to 08:49 had all completed. Its way
+back is `c2bd778` on each service.
+
+The release before it, `c2bd778`, was deployed by hand on 2026-11-05, all six
+services by 00:31:10 UTC: release #454, which carries #453. #453 gives the widget's
+composer a paperclip and an emoji button (below, "the widget's composer takes
+files and emoji"; AGENTS.md, "The widget carries files"): a visitor attaches
+photos, PDFs, videos and voice recordings, five a message and 25 MB together,
+in the message's own request; the route types each file by its bytes and stores
+the files and the message together or not at all; and both threads draw a file
+as what it is, the widget through a link signed for that one file rather than
+through the visitor's token. Code only: web first, live at 00:25:32, its
+preDeploy finding no migration and replaying the nine `db/sql` files; then the
+worker at 00:28:52 and the four crons, live by 00:31:10. At 00:33:56 an
+environment change made on Render, not part of this release, redeployed all six
+on the same commit, the crons live again by 00:34:46 and web by 00:37:20; which
+variable it changed is in no log. The checks read clean across both: `/api/health`
+reports `c2bd778`, nothing pending or processing; no service logged an error
+from 00:21 to 00:58 and web served no 5xx, the only warnings two 404s for an
+unsigned link to `/api/widget/attachments/…`, sent to see the route answer as a
+file that does not exist (each build's "critical" line is `npm audit`); the 12
+jobs created after 00:21, all `process_webhook`, had completed, none overdue;
+the 27 dead jobs all predate the deploy, the newest created at 22:57 on
+2026-11-04 — 26
+are the expired Instagram token (below) and one the `subscribe_meta_webhooks` of
+2026-09-21; and the crons ran clean on the new code from their first runs
+(`run_time_automations` at 00:31:36 and 00:46:49, one rule over 610 tickets,
+nothing changed; `sla_sweep`, `presence_sweep` and `assign_sweep` from 00:35:51,
+every five minutes since). `sync_whatsapp_templates`, `snapshot_backlog` and the
+nightly had not run on it by 00:58. The widget page serves the Arabic panel. No
+visitor had attached a file by then. The first came at 01:42:55, under
+`1062f5e`, which changes nothing in the widget: a test message with a PNG from
+Chrome on Windows, on ticket #67335, the route answering in 1.5 s; Storage holds
+the object as `image/png` at the 11,733 bytes the row records, and its signed
+link answered 307 at once and again at 08:46, under the next window's signature.
+The players in Safari and on an iPhone are still proved by the tests and a local
+build alone. Its way back is `eaf07ab` on each service, in any order, with no
+migration to undo, at one cost: a file sent since stays on its ticket and in the
+console's thread, and one sent without words is drawn under its stand-in text
+(`[image]`, `[document: …]`), which that release's thread does not hide; the
+visitor's own widget loses the file — one sent without words shows its stand-in
+where the file was, and one sent with words shows the words alone.
+
+The release before that, `eaf07ab`, was deployed by hand on 2026-10-30, all six
+services by 15:22:45 UTC: release #450, which carries #448, and with it #445, which
 reached `main` in #447 and was first deployed in this release. #445 gives the
 ticket field editor the Active switch its action always read, so a field can be
 deactivated again rather than reactivated by every save; the switch names the
@@ -41,7 +94,7 @@ one as on, so a field deactivated since comes back on at its next save there,
 its forms ask it again, and the condition builder draws a rule naming it as the
 first field in its list, as it did before #445.
 
-The release before it, `83f1889`, was deployed by hand on 2026-10-30, all six
+The release before that, `83f1889`, was deployed by hand on 2026-10-30, all six
 services by 12:03:38 UTC: release #446, which carries #443 and #444. #443 makes
 every web chat row editable and gives each an active switch that never leaves
 the widget without a row (`plans/ticket-category-routing.md`, Stage 6);
@@ -79,7 +132,23 @@ Instagram message's profile read will say. The way out that does not expire
 again is `plans/instagram-unified-login.md`: a third connection, Unified Login,
 whose system-user token never expires and which `metaConnection()` prefers the
 moment `INSTAGRAM_UNIFIED_LOGIN_TOKEN` is set — the Meta-side steps and the
-activation order are there, and in §5.1.
+activation order are there, and in §5.1. The direct token had not been renewed
+by 23:02 UTC on 2026-11-04, when the last of 20 profile reads for 11 Instagram
+customers, queued at 22:57, went `dead` the same way, and on 2026-11-02 the
+expiry reached customers: six agent replies on five Instagram tickets (#82069,
+#82967, #81962 twice, #70373 and #83437), queued between 10:13 and 15:24 UTC,
+each went `dead` after five attempts and is marked failed on its ticket, and
+none reached its customer. #82967 and #83437 are still open; the other three
+were resolved with the reply undelivered. From the expiry to 00:58 UTC on
+2026-11-05, 22 Instagram messages came in on 12 tickets, 9 of them open now,
+and no Instagram reply was delivered. Two environment changes on Render since
+redeployed every service, at 09:59 on 2026-11-04 and at 00:33 on 2026-11-05:
+the first did not renew the token, since every attempt of that last read failed
+after it, and whether the second did, or whether a Unified Login token has been
+set since, is again for the next Instagram call to say — none had come by 08:48
+UTC on 2026-11-05. Neither credential sends anything that already failed: the
+console has no resend, so each of those replies has to be written again on its
+ticket.
 
 **Jev's category classifier has been in `apply` since 18:37:23 UTC on
 2026-10-29**, switched by the user on `/admin/categories` after twelve and a
