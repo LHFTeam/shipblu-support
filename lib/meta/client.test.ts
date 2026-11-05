@@ -138,6 +138,31 @@ describe('which connection a call goes out over', () => {
     expect(url().searchParams.get('access_token')).toBe('token');
   });
 
+  it('sends Instagram over graph.facebook.com with the Unified Login token when it is set', async () => {
+    // The Page's host with a credential of its own, ahead of the direct
+    // connection: the two tokens are set together while the account is moved,
+    // and the one that never expires must win without the other being unset.
+    setTestEnv({
+      INSTAGRAM_UNIFIED_LOGIN_TOKEN: 'unified-token',
+      INSTAGRAM_ACCESS_TOKEN: 'ig-token',
+      INSTAGRAM_ACCOUNT_ID: '17841448759001625',
+    });
+
+    const { url } = captureUrl();
+    await sendDirectMessage({
+      platform: 'instagram',
+      recipientId: 'igsid-1',
+      text: 'hello',
+      tag: 'RESPONSE',
+    });
+
+    expect(url().host).toBe('graph.facebook.com');
+    expect(url().searchParams.get('access_token')).toBe('unified-token');
+    // Addressed to the account id, never to `/me`, which on this token is the
+    // business integration system user rather than the account.
+    expect(url().pathname).toContain('17841448759001625/messages');
+  });
+
   it('routes comment operations the same way as messages', async () => {
     // The paths are identical on both hosts, which is exactly why this is easy
     // to get wrong: a comment reply posted to the wrong origin is refused with

@@ -75,7 +75,11 @@ its customer went `dead` the same way; a reply to it will fail until then. At
 18:04 UTC on 2026-10-31 nothing had called `graph.instagram.com` since those
 reads, no Instagram reply had been sent since the expiry and no Instagram ticket
 had opened since, so whether the token has been renewed is in no log: the next
-Instagram message's profile read will say.
+Instagram message's profile read will say. The way out that does not expire
+again is `plans/instagram-unified-login.md`: a third connection, Unified Login,
+whose system-user token never expires and which `metaConnection()` prefers the
+moment `INSTAGRAM_UNIFIED_LOGIN_TOKEN` is set — the Meta-side steps and the
+activation order are there, and in §5.1.
 
 **Jev's category classifier has been in `apply` since 18:37:23 UTC on
 2026-10-29**, switched by the user on `/admin/categories` after twelve and a
@@ -1251,7 +1255,10 @@ is code:
   configured.
 
   **Instagram is the exception as of 2026-08-30, and it is the way out of this
-  paragraph.** The account is now also connected directly through Instagram
+  paragraph.** _(The route changed on 2026-11-04: the Instagram Login token
+  below expired on 2026-10-29, and the way out is now Unified Login, the
+  next bullet — same property, a token that does not expire.)_ The account is
+  now also connected directly through Instagram
   Login, which is not installed on the Page and therefore not subject to the
   Page's handover protocol at all: it receives its own copy of every event in
   `messaging`, and a reply sent with its own token against `graph.instagram.com`
@@ -1269,6 +1276,33 @@ is code:
   of no return** for these channels: the moment Freshworks stops being default,
   the Meta inboxes are answered here or not at all, so the channel rows, the
   agents and the groups below need to be in place first rather than after.
+
+- **Instagram through Unified Login — the next configuration task, and none of
+  it is a deploy.** The direct connection's token expired on 2026-10-29 (the
+  header), so Instagram answers nothing until a credential is in place, and
+  the one to put in place is the Unified Login connection
+  (`plans/instagram-unified-login.md`), whose system-user token never expires
+  and which `metaConnection()` prefers while `INSTAGRAM_UNIFIED_LOGIN_TOKEN` is
+  set. In the App Dashboard, Instagram → "API setup with Unified login": create
+  the configuration under "1. Configure your app" (system-user token, never
+  expires, Instagram account required; keep `instagram_basic`,
+  `instagram_manage_messages`, `instagram_manage_comments`, drop the ads
+  permissions and `instagram_content_publish`), "Use this configuration" and
+  copy its `config_id`; register
+  `https://shipblu-support.onrender.com/api/meta/unified-login/callback` under
+  "Redirect URL" (the root URL already there is not usable). On Render, set
+  `INSTAGRAM_UNIFIED_LOGIN_CONFIG_ID` in `shipblu-support-production`; then an
+  admin presses "Connect Instagram" on Settings → Channels, and sets the token
+  the page shows once as `INSTAGRAM_UNIFIED_LOGIN_TOKEN` in the same group.
+  Then `subscribe_meta_webhooks object=instagram`, `check_meta_permissions`,
+  one reply from a role holder's DM, an hour watching for duplicated
+  timelines — and only then disconnect the account under "API setup with
+  Instagram login", wait for `instagram_login` deliveries to stop, and unset
+  `INSTAGRAM_ACCESS_TOKEN` and, last, `INSTAGRAM_APP_SECRET` /
+  `META_INSTAGRAM_APP_SECRET` (§6.29's order: dashboard first, variable last).
+  The plan has the queries and the rollback, which is unsetting the token.
+  Nothing in the database changes. Staging gets the same steps against its own
+  app and `shipblu-support-staging`, once it is resumed.
 
 - ~~**Channel rows.**~~ **Done, bar one.** All five human channels have a row as
   of 2026-09-20 — "Support Mailbox", "Facebook Page", "Instagram", "Web Chat",
@@ -2081,6 +2115,37 @@ expires_at, inspected_at` — never `envelope`, and a null `expires_at` means
   group did — a group restricted to its members, or moderated, can hold mail
   from `help-support@` — so the test is a reply landing on the thread, not a
   delivery status.
+- **The first Instagram reply over Unified Login.** Built, unit-tested, and
+  never run against Meta: no Business Integration System User token has been
+  minted for this app yet, so nothing on the `unified_login` route in
+  `lib/meta/client.ts` has been exercised live. The activation order is in
+  `plans/instagram-unified-login.md` §"Activation"; what the first live run
+  must confirm and record here, in the plan's own words:
+  - what `debug_token` reports as `type` for the token (`SYSTEM_USER` is the
+    guess; `refuseInspection` warns on anything else and refuses on nothing
+    but `is_valid: false` or a foreign `app_id`), and `expires_at: 0`;
+  - that `/me/assigned_instagram_accounts` lists `17841448759001625`, and that
+    `check_meta_permissions` shows `instagram_basic` and
+    `instagram_manage_messages` granted on the token;
+  - that `POST graph.facebook.com/{ig-id}/subscribed_apps` with the token is
+    answered `{"success": true}` and reads back the five `instagram` fields;
+  - that a console reply inside 24 hours logs
+    `[send_meta] … on instagram via unified_login` and arrives — with
+    `messaging_type: RESPONSE` on the body, which the Page's host documents and
+    the Unified send has never been given;
+  - that a customer's next message, delivered up to three times while the
+    account is connected three ways, is one timeline line and not two (Meta
+    says Unified Login's message ids differ in format from Instagram Login's;
+    ingest dedupes on the `mid`), watched for an hour before the direct
+    connection is disconnected;
+  - whether any Unified Login delivery ever arrives in `standby` (none is
+    expected; the migration guide lists handover as not supported) — not
+    answerable from `webhook_events.connection`, which labels both the Page's
+    and Unified Login's deliveries `facebook_page`, only from the envelope once
+    the Page's own `standby` copies stop;
+  - whether a customer's profile read over this route is refused with `(#3)`
+    while a role holder's succeeds, which would mean Business Asset User
+    Profile Access is applied per connection.
 - **Meta's Human Agent feature is not approved. Confirmed 2026-09-06, and it is
   the whole 24-hour-to-7-day path.** _Was a hypothesis; is now a reading._ A
   Facebook or Instagram reply sent more than 24 hours after the customer's last

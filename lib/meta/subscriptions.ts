@@ -1,4 +1,5 @@
 import { env, metaAppSecret, metaVerifyToken } from '@/lib/env';
+import { CONNECTION_LABEL } from './connection';
 import { isTimeout } from '@/lib/http/deadline';
 import { GRAPH_BASE, graphTimeout, INSTAGRAM_GRAPH_BASE } from './graph';
 import { errorMessage } from '@/lib/errors';
@@ -28,17 +29,18 @@ import { errorMessage } from '@/lib/errors';
  * reason `feed` had never delivered a single event — 0 of 4,503 `page` and
  * `instagram` deliveries carried a `changes` entry.
  *
- * The account-level half is where the two Instagram connections part company,
- * and there are three writes in this file rather than two because of it:
+ * The account-level half is where the Instagram connections part company,
+ * and there are four writes in this file rather than two because of it:
  *
  *   app level          POST graph.facebook.com/{app-id}/subscriptions      app token
  *   Facebook Page      POST graph.facebook.com/{page-id}/subscribed_apps   Page token
  *   direct Instagram   POST graph.instagram.com/{ig-id}/subscribed_apps    Instagram token
+ *   Unified Login      POST graph.facebook.com/{ig-id}/subscribed_apps     Unified Login token
  *
  * The app level is shared: one app, one `instagram` object subscription, serving
- * both connections. Each connection then owns its own account-level half, with a
- * different host, a different credential and — for the Page — a different field
- * vocabulary.
+ * every connection. Each connection then owns its own account-level half, with
+ * its own credential, on its own host for the direct one, and — for the Page — a
+ * different field vocabulary.
  */
 
 /** The Webhooks objects this app subscribes to, one per product. */
@@ -683,6 +685,108 @@ export async function applyInstagramLoginSubscription(
   plan: InstagramLoginSubscriptionPlan,
 ): Promise<void> {
   await instagramGraph(plan.accountId, {
+    method: 'POST',
+    query: { subscribed_fields: plan.merged.join(',') },
+  });
+}
+
+// --- The Unified Login half: graph.facebook.com/{ig-id}/subscribed_apps ---
+
+/**
+ * The account-level subscription for the **Unified Login** connection.
+ *
+ * The Page's host and the Instagram account's node: Meta's webhook setup page
+ * gives it as `POST graph.facebook.com/<INSTAGRAM_ACCOUNT_ID>/subscribed_apps`
+ * with `subscribed_fields` and the Business Integration System User token,
+ * answered `{"success": true}`, and says the Instagram Login subscription does
+ * not carry over — each account is subscribed again on this connection. The
+ * field names are the `instagram` object's, the same list the direct
+ * connection writes; the vocabulary that differs is the Page's, and this is not
+ * the Page's node.
+ *
+ * Read before it is written, like the other three, because the POST replaces
+ * the field list: the lesson `mergeFields` carries holds on every level, and a
+ * run that assumed "adds" is the one that costs a channel.
+ */
+function unifiedLoginToken(): string {
+  const token = env().INSTAGRAM_UNIFIED_LOGIN_TOKEN;
+  if (!token) {
+    throw new GraphSubscriptionError(
+      'INSTAGRAM_UNIFIED_LOGIN_TOKEN is not set, so the Unified Login connection has no ' +
+        'credential to subscribe with. It is the system-user token Meta issues when the ' +
+        'account is connected under Instagram → API setup with Unified login (Settings → ' +
+        'Channels opens that login); neither the Page token nor the Instagram token can stand ' +
+        'in for it.',
+    );
+  }
+  return token;
+}
+
+async function unifiedLoginGraph<T>(
+  accountId: string,
+  init: { method: 'GET' | 'POST'; query?: Record<string, string> },
+): Promise<T> {
+  const token = unifiedLoginToken();
+
+  return request<T>(
+    'Graph API',
+    `${GRAPH_BASE}/${accountId}/subscribed_apps`,
+    token,
+    init,
+    `This call is addressed to graph.facebook.com/{ig-account-id} and authenticated with ` +
+      `INSTAGRAM_UNIFIED_LOGIN_TOKEN, ${CONNECTION_LABEL.unified_login}'s own credential. A ` +
+      `refusal naming the object usually means the token does not reach this account — ` +
+      `\`npm run job -- check_meta_permissions\` lists the accounts it does.`,
+  );
+}
+
+/**
+ * The fields the Unified Login connection is subscribed to, or null when the
+ * account carries no subscription for this app on it at all.
+ *
+ * Read the way the direct connection's is, and for the same reason: the two
+ * answers mean different things, and null is the one that explains an account
+ * that has never delivered an event on this connection.
+ */
+export async function readUnifiedLoginSubscription(accountId: string): Promise<string[] | null> {
+  const body = await unifiedLoginGraph<{ data?: { subscribed_fields?: string[] }[] }>(accountId, {
+    method: 'GET',
+  });
+
+  const entries = body?.data;
+  if (!Array.isArray(entries) || entries.length === 0) return null;
+
+  const fields = new Set<string>();
+  for (const entry of entries) {
+    for (const field of entry?.subscribed_fields ?? []) fields.add(field);
+  }
+
+  return [...fields];
+}
+
+export type UnifiedLoginSubscriptionPlan = {
+  accountId: string;
+  /** False when the account carries no subscription for this app on this connection yet. */
+  subscribed: boolean;
+  current: string[];
+  merged: string[];
+  adding: string[];
+};
+
+export function planUnifiedLoginSubscription(
+  accountId: string,
+  current: string[] | null,
+  want: readonly string[],
+): UnifiedLoginSubscriptionPlan {
+  const merged = mergeFields(current ?? [], want);
+
+  return { accountId, subscribed: current !== null, ...merged };
+}
+
+export async function applyUnifiedLoginSubscription(
+  plan: UnifiedLoginSubscriptionPlan,
+): Promise<void> {
+  await unifiedLoginGraph(plan.accountId, {
     method: 'POST',
     query: { subscribed_fields: plan.merged.join(',') },
   });

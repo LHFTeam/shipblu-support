@@ -598,15 +598,24 @@ group, so each group lists its dashboard-owned keys as a comment beside its
 literal ones. A module reachable from the search parser must read `process.env` directly
 rather than `env()`, which validates the whole schema (see
 `lib/shipments/detect.ts`). The one place "one Meta app, one credential" does not
-hold is Instagram, which this app is connected to **twice**: through the Facebook
-Page the account is linked to, and directly through **Instagram Login**. The
-second is a separate identity inside the same app — its own host
-(`graph.instagram.com`), its own token (`INSTAGRAM_ACCESS_TOKEN`), its own app
-secret (`INSTAGRAM_APP_SECRET`, also read as `META_INSTAGRAM_APP_SECRET`) and its
-own App Review vocabulary (`instagram_business_*` rather than `instagram_*`).
-`lib/meta/connection.ts` names the two and decides which one a call goes out
-over; nothing else may re-derive that. Three rules follow, each of which has
-already cost a customer channel:
+hold is Instagram, which this app can be connected to **three ways**: through
+the Facebook Page the account is linked to, directly through **Instagram
+Login**, and through **Unified Login**. The second is a separate identity
+inside the same app — its own host (`graph.instagram.com`), its own token
+(`INSTAGRAM_ACCESS_TOKEN`, sixty days, expired 2026-10-29), its own app secret
+(`INSTAGRAM_APP_SECRET`, also read as `META_INSTAGRAM_APP_SECRET`) and its own
+App Review vocabulary (`instagram_business_*` rather than `instagram_*`). The
+third is the Page's host and app secret with a credential of its own:
+`INSTAGRAM_UNIFIED_LOGIN_TOKEN`, a Business Integration System User token that
+never expires, served from `graph.facebook.com`, signed for by `META_APP_SECRET`
+(so its deliveries are labelled `facebook_page`) and preferred over the other
+two for every Instagram call while it is set. It is minted by the login
+"Connect Instagram" on `/admin/channels` opens (`lib/meta/unified-login.ts`,
+behind `admin.channels.connect`), shown to the admin once and set on Render by
+hand — nothing stores it; `plans/instagram-unified-login.md` has the Meta-side
+steps and the activation order. `lib/meta/connection.ts` names the three and
+decides which one a call goes out over; nothing else may re-derive that. Three
+rules follow, each of which has already cost a customer channel:
 
 - **Both app secrets are tried on every `instagram` delivery, and neither can be
   removed while both connections are live.** Unsetting one resumes 403s for that

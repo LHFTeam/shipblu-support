@@ -114,7 +114,10 @@ function pageToken(): string {
  * it has its own access token and is served from `graph.instagram.com`. The
  * paths are identical — `/{ig-account-id}/messages`, `/{comment-id}/replies` and
  * the rest are spelled the same on both hosts — which is the only reason this is
- * a three-field return rather than a second client.
+ * a three-field return rather than a second client. **Unified Login** is the
+ * Page's host with a credential of its own: a Business Integration System User
+ * token addressed to the Instagram account id, never to `/me`, which on that
+ * token is the system user and not the account.
  *
  * Which connection is chosen is `metaConnection`'s decision and is made from
  * configuration alone; the reasoning is there rather than here, because the
@@ -126,6 +129,17 @@ function endpoint(platform: MetaPlatform): {
   connection: MetaConnection;
 } {
   const connection = metaConnection(platform);
+
+  if (connection === 'unified_login') {
+    const token = env().INSTAGRAM_UNIFIED_LOGIN_TOKEN;
+    // Unreachable for the same reason the branch below is, and kept for the
+    // same reason: `metaConnection` keys on this value, and a rule that picks
+    // this connection on other grounds must fail here, not at Graph.
+    if (!token) {
+      throw new Error('INSTAGRAM_UNIFIED_LOGIN_TOKEN is not configured — Instagram cannot send');
+    }
+    return { base: GRAPH_BASE, token, connection };
+  }
 
   if (connection === 'instagram_login') {
     const token = env().INSTAGRAM_ACCESS_TOKEN;
@@ -170,12 +184,14 @@ export function accountId(platform: MetaPlatform): string {
 
 export function isConfigured(platform: MetaPlatform): boolean {
   const e = env();
-  // Either credential will do for Instagram: whichever connection `endpoint()`
-  // picks is the one that has to hold a token, and holding neither is what makes
-  // it unconfigured.
+  // Any of the three credentials will do for Instagram: whichever connection
+  // `endpoint()` picks is the one that has to hold a token, and holding none is
+  // what makes it unconfigured.
   const hasToken =
     platform === 'instagram'
-      ? Boolean(e.INSTAGRAM_ACCESS_TOKEN || e.META_PAGE_ACCESS_TOKEN)
+      ? Boolean(
+          e.INSTAGRAM_UNIFIED_LOGIN_TOKEN || e.INSTAGRAM_ACCESS_TOKEN || e.META_PAGE_ACCESS_TOKEN,
+        )
       : Boolean(e.META_PAGE_ACCESS_TOKEN);
 
   if (!hasToken) return false;

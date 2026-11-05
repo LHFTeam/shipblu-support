@@ -1,5 +1,5 @@
 import { recordMetaFeedback } from '@/lib/csat/meta-feedback';
-import type { MetaConnection } from '@/lib/meta/connection';
+import { isMetaConnection, type MetaConnection } from '@/lib/meta/connection';
 import { parseMetaWebhook } from '@/lib/meta/parse';
 import {
   applyMetaInteraction,
@@ -151,5 +151,5 @@ export async function processMetaWebhook(event: {
 
 /** The stored connection, or null for anything that is not one we know. */
 function readConnection(value: string | null): MetaConnection | null {
-  return value === 'facebook_page' || value === 'instagram_login' ? value : null;
+  return isMetaConnection(value) ? value : null;
 }

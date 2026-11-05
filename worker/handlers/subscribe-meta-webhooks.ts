@@ -1,17 +1,20 @@
 import { configuredAccountId } from '@/lib/meta/client';
-import { instagramLoginConfigured } from '@/lib/meta/connection';
+import { instagramLoginConfigured, unifiedLoginConfigured } from '@/lib/meta/connection';
 import {
   applyFieldSubscription,
   applyInstagramLoginSubscription,
   applyPageSubscription,
+  applyUnifiedLoginSubscription,
   INSTAGRAM_OBJECT,
   PAGE_OBJECT,
   planFieldSubscription,
   planInstagramLoginSubscription,
   planPageSubscription,
+  planUnifiedLoginSubscription,
   readInstagramLoginSubscription,
   readPageSubscription,
   readSubscription,
+  readUnifiedLoginSubscription,
   REQUIRED_FIELDS,
   resolveObject,
 } from '@/lib/meta/subscriptions';
@@ -45,8 +48,10 @@ const log = logger('subscribe_meta_webhooks');
  *
  *   object=page        the Page's subscribed_apps, with the Page token
  *   object=instagram   the Instagram account's subscribed_apps on
- *                      graph.instagram.com, with INSTAGRAM_ACCESS_TOKEN —
- *                      skipped when that is unset, because then the Page half
+ *                      graph.instagram.com, with INSTAGRAM_ACCESS_TOKEN, and
+ *                      the same account's subscribed_apps on graph.facebook.com,
+ *                      with INSTAGRAM_UNIFIED_LOGIN_TOKEN — each skipped when
+ *                      its token is unset, and with neither set the Page half
  *                      above is the only account-level subscription Instagram
  *                      has and `object=page` already writes it
  *
@@ -96,13 +101,48 @@ export async function subscribeMetaWebhooks(job?: ClaimedJob): Promise<void> {
     about which one changed — which is the failure the one-object-per-run rule
     above exists to prevent.
   */
-  if (object === INSTAGRAM_OBJECT && instagramLoginConfigured()) {
-    await subscribeInstagramLogin(want);
-  } else if (object === INSTAGRAM_OBJECT) {
+  if (object !== INSTAGRAM_OBJECT) return;
+
+  /*
+    The Unified Login half first, and the direct connection's after it, each
+    independent of the other. Both can be live while the account is moved from
+    one to the other, and Meta says the direct connection's subscription does
+    not carry over — so a run that stopped at the first would leave the other
+    subscribed at the app level only, which delivers nothing (the `feed` lesson
+    above). The order is the activation order's: Unified Login is written while
+    `INSTAGRAM_ACCESS_TOKEN` is still set and expired, and its read is refused
+    with code 190 — a run that reached the direct half first failed there and
+    never wrote the half that is live. The direct half's failure still fails
+    the job, after the Unified half is done, and says whose it is.
+  */
+  if (unifiedLoginConfigured()) {
+    await subscribeUnifiedLogin(want);
+  } else {
     log.info(
-      'INSTAGRAM_ACCESS_TOKEN is unset, so there is no direct ' +
-        'Instagram connection to subscribe — the Page half is written by object=page',
+      'INSTAGRAM_UNIFIED_LOGIN_TOKEN is unset, so there is no Unified Login connection to ' +
+        'subscribe — with neither Instagram token set, the Page half is written by object=page',
     );
+  }
+
+  if (!instagramLoginConfigured()) {
+    log.info(
+      'INSTAGRAM_ACCESS_TOKEN is unset, so there is no direct Instagram connection to subscribe',
+    );
+    return;
+  }
+
+  try {
+    await subscribeInstagramLogin(want);
+  } catch (error) {
+    if (unifiedLoginConfigured()) {
+      log.warn(
+        "the direct Instagram connection's half failed after the Unified Login half was written; " +
+          'while INSTAGRAM_UNIFIED_LOGIN_TOKEN is set nothing sends over the direct connection, ' +
+          'and this stops once INSTAGRAM_ACCESS_TOKEN is unset (plans/instagram-unified-login.md)',
+        error,
+      );
+    }
+    throw error;
   }
 }
 
@@ -305,4 +345,62 @@ async function subscribeInstagramLogin(want: readonly string[]): Promise<void> {
   }
 
   log.info(`instagram_login done — subscribed: ${(after ?? []).join(', ')}`);
+}
+
+/**
+ * The account-level half for the Unified Login connection.
+ *
+ * Addressed to `graph.facebook.com/{ig-id}/subscribed_apps` with
+ * `INSTAGRAM_UNIFIED_LOGIN_TOKEN` — the Page's host, the Instagram account's
+ * node, the `instagram` object's field names. The same id as the direct
+ * connection's, which Meta lists for this token under
+ * `/me/assigned_instagram_accounts`; named rather than `/me`, which on this
+ * token is the business integration system user and not the account.
+ *
+ * Read back after the write, as every level is: Meta documents the POST's
+ * `{"success": true}` and nothing about the GET, so the read is defensive and
+ * the proof is the field list coming back with every name in it.
+ */
+async function subscribeUnifiedLogin(want: readonly string[]): Promise<void> {
+  const accountId = configuredAccountId('instagram');
+  if (!accountId) {
+    throw new Error(
+      'INSTAGRAM_ACCOUNT_ID is not set, so the Unified Login half of this subscription cannot ' +
+        'be addressed. The app-level field list is already updated; set it and re-run.',
+    );
+  }
+
+  const current = await readUnifiedLoginSubscription(accountId);
+  const plan = planUnifiedLoginSubscription(accountId, current, want);
+
+  if (!plan.subscribed) {
+    log.warn(
+      `Instagram account ${accountId} has no subscription for this app on the Unified Login ` +
+        `connection — no event has ever been deliverable over it. Subscribing it now.`,
+    );
+  } else {
+    log.info(
+      `unified login account ${accountId} subscribed now: ${plan.current.join(', ') || '(none)'}`,
+    );
+  }
+
+  if (plan.subscribed && plan.adding.length === 0) {
+    log.info('unified-login-level nothing to add — already subscribed');
+    return;
+  }
+
+  log.info(`unified-login-level writing ${plan.merged.join(', ')}`);
+  await applyUnifiedLoginSubscription(plan);
+
+  const after = await readUnifiedLoginSubscription(accountId);
+  const missing = plan.merged.filter((field) => !(after ?? []).includes(field));
+
+  if (missing.length > 0) {
+    throw new Error(
+      `Graph accepted the Unified Login write but ${missing.join(', ')} is not subscribed on ` +
+        `account ${accountId}. Subscribed fields are now: ${(after ?? []).join(', ') || '(none)'}`,
+    );
+  }
+
+  log.info(`unified-login-level done — subscribed: ${(after ?? []).join(', ')}`);
 }

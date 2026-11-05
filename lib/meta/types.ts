@@ -133,8 +133,10 @@ export type NormalisedDirectMessage = {
    * Carried through to the message row because it is the only place it is
    * knowable — the payloads are identical and only the signature differs — and
    * because `standby` below means nothing without it. Null only when replaying
-   * a row stored before the two connections were told apart; a guess written
-   * there would be indistinguishable from a fact afterwards.
+   * a row stored before the connections were told apart; a guess written
+   * there would be indistinguishable from a fact afterwards. A Unified Login
+   * delivery carries `facebook_page`, for the reason `lib/meta/signing.ts`
+   * gives: the two sign alike.
    */
   connection: MetaConnection | null;
   /** Meta's message id. The idempotency key for ingest. */

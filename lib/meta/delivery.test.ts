@@ -44,6 +44,36 @@ describe('deliveryId', () => {
     expect(deliveryId(viaDirect, 'instagram_login')).not.toBe(deliveryId(viaPage, 'facebook_page'));
   });
 
+  it("tells Unified Login's copy from the Page's, which the signature cannot", () => {
+    /*
+      Both are verified by META_APP_SECRET and labelled `facebook_page`. The
+      Page's copy arrives in `standby` (Freshworks holds the thread) and Unified
+      Login's in `messaging` (it has no handover protocol), so the envelope is
+      what keeps the second from being answered "duplicate" and leaving no row
+      — which is what the plan's per-connection counts are read from.
+    */
+    expect(deliveryId(viaDirect, 'facebook_page')).not.toBe(deliveryId(viaPage, 'facebook_page'));
+    // A retry of either copy carries the same envelope and still collapses.
+    expect(deliveryId(viaPage, 'facebook_page')).toBe(deliveryId(viaPage, 'facebook_page'));
+    // The envelope scopes only the ambiguous label: the direct connection's
+    // key, and every Page object's, keep the spelling already in the table.
+    expect(deliveryId(viaDirect, 'instagram_login')).toBe(
+      deliveryId(
+        {
+          ...viaDirect,
+          entry: [
+            {
+              ...viaDirect.entry[0]!,
+              standby: viaDirect.entry[0]!.messaging,
+              messaging: undefined,
+            },
+          ],
+        },
+        'instagram_login',
+      ),
+    );
+  });
+
   it('still collapses a redelivery on the same connection', () => {
     // The property that must survive: Meta retries the whole batch on a failed
     // or slow response, and a retry is not a second customer message.

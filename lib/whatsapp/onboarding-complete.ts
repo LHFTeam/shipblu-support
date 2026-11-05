@@ -40,7 +40,7 @@ import {
 } from './coexistence-state';
 import { CredentialKeyError } from './credential-envelope';
 import { ACCESS_TOKEN_CODE, explainAuthError } from './errors';
-import { redact } from './onboarding';
+import { redact } from '@/lib/meta/redact';
 import { runsNamedSteps } from './onboarding-reads';
 import {
   numberPlatformRequest,
