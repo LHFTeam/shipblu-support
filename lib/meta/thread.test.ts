@@ -506,8 +506,16 @@ describe('the switch of default app, against a standby', () => {
     expect(state.explanation).not.toContain('make this app');
   });
 
-  it('counts a tie as not superseded, as it does for taking control', () => {
-    expect(onUnified(SWITCH, SWITCH).canSend).toBe(false);
+  it('reads a standby from the second the switch is stamped with as before it', () => {
+    // Meta stamps app_roles to the second and a message to the millisecond, so
+    // a standby 400 ms after the stamp may well predate the switch itself.
+    expect(onUnified(SWITCH, SWITCH).canSend).toBe(true);
+    expect(onUnified(new Date(SWITCH.getTime() + 400), SWITCH).canSend).toBe(true);
+
+    // A full second later it is after it, and worded so.
+    const after = onUnified(new Date(SWITCH.getTime() + 1_000), SWITCH);
+    expect(after.canSend).toBe(false);
+    expect(after.explanation).toContain('after it became so');
   });
 
   it('is one of two newer facts, and either is enough', () => {

@@ -83,7 +83,8 @@ export type MetaThreadInput = {
    * Since when this app has been the account's default app, where that moves
    * threads (`defaultAppStanding`, `lib/meta/app-roles.ts`), or null. Here only
    * for the words: a `standby` it supersedes never reaches this function as
-   * one, so a `standby` that does, with this set, arrived after the switch.
+   * one, so a `standby` that does, with this set, arrived after the second the
+   * switch is stamped with (`metaThreadStateFromMessage`).
    */
   defaultAppSince?: Date | null;
   /**
@@ -342,9 +343,14 @@ export function metaThreadStateFromMessage(input: {
   const onConfiguredAccount = accountId === null || accountId === input.configuredAccountId;
   const since = onConfiguredAccount ? input.defaultApp.since : null;
   const lostAt = onConfiguredAccount ? input.defaultApp.lostAt : null;
+  // Meta stamps an `app_roles` event to the second (1793874624) and a message
+  // to the millisecond, so the switch happened somewhere inside the second it
+  // names, and a `standby` from that same second is read as before it. Read as
+  // after it, it was told as fact that another app had taken the thread since.
+  const sinceSecondEnd = since ? new Date(Math.floor(since.getTime() / 1000) * 1000 + 1000) : null;
   const superseded =
     holdsControl(input.controlTakenAt, input.lastInboundAt) ||
-    holdsControl(since, input.lastInboundAt);
+    holdsControl(sinceSecondEnd, input.lastInboundAt);
   // A switch away newer than the customer's last message is the newer fact the
   // other way: the thread is the new default's (`metaThreadState`).
   const lost = holdsControl(lostAt, input.lastInboundAt);
