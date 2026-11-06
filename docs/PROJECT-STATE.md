@@ -5,12 +5,37 @@ it is designed; **this file is about the state of the work** — what is live,
 what is merely built, what is left, and the mistakes that have already cost us
 time. Read both. Do not re-derive settled decisions.
 
-Last updated: 2026-11-05, against `main` at `1062f5e`. The figures in §1 and §5
+Last updated: 2026-11-06, against `main` at `eb69c8c`. The figures in §1 and §5
 were last re-measured as a whole against production on 2026-09-20, and a
 paragraph re-read since gives its own date; where a number here disagrees with
 an older paragraph elsewhere in the file, the older one has not been re-checked.
 
-**Production runs `1062f5e`, deployed by hand from another session on
+**Production runs `eb69c8c`, which deployed itself on 2026-11-06, all six
+services by 20:04:51 UTC:** release #478, which carries #473 — "Take thread
+control" offered only where it can work, and Instagram's switch of default app
+stored in `meta_app_role_events` (§6.111). Nobody deployed it. Since 19:44 UTC
+that day every production service deploys once the checks on `main` pass (§2),
+and this was the first release to go out that way on all six. Merged at 19:50,
+the checks passed at about 20:00. All six then started within five seconds of
+each other, so nothing ordered them: the four crons were live at 20:02:38, the
+worker at 20:04:00, and the web service at 20:04:51. Its preDeploy applied
+`0058_meta_app_role_events` and replayed `db/sql/` from 20:04:00 to 20:04:02,
+so the crons ran the new code against the old schema for a minute and a half,
+which this release does not mind and another might (§2). Checked at 20:13:
+`meta_app_role_events` holds the Page's switch and the Instagram account's,
+written by `012` at 20:04:01; since the deploy neither the web service nor the
+worker has logged an error, the web service has answered no 5xx and no job has
+failed. Its way back is reverting #473 on `main`, which deploys itself as well.
+
+Six releases reached production between `1062f5e` and it that this file does
+not record: `bb85b01` (#459), `53911b4` (#461) and `cfd10ca` (#463) on
+2026-11-05, then `00255d3` (#470), `8b03e61` (one help-centre image, uploaded
+straight to `main` through GitHub) and `31c8973` (#475) on 2026-11-06. The last
+three went to the web service and, for `31c8973` alone, the worker; the four
+crons ran `cfd10ca` until this release replaced it. Their records are those
+sessions' to write.
+
+**Before it, production ran `1062f5e`, deployed by hand from another session on
 2026-11-05, all six services by 01:33:41 UTC:** release #456, which carries
 #455, Instagram's third connection, Unified Login (the Instagram paragraph
 below, and `plans/instagram-unified-login.md`). Web first, live at 01:31:00;
@@ -271,12 +296,14 @@ times §5.1 argues from. It carries three changes:
 - WhatsApp number owners (§1, §5.1);
 - the positioned scroll panes.
 
-`main` running ahead of production is the trap rather than the footnote.
-`autoDeploy` is `no` on every production service (§2), so a merge changes
-nothing that is running. The gap is invisible because CI is green and the old
-code keeps serving: until 23:41 UTC on 2026-09-20 production served `b1d911a`
-for eleven days while `main` moved on. Check `/api/health`, which reports the
-commit, before concluding any change below is live.
+`main` running ahead of production was the trap rather than the footnote while
+nothing deployed itself: until 23:41 UTC on 2026-09-20 production served
+`b1d911a` for eleven days while `main` moved on. Since 2026-11-06 every
+production service deploys once the checks on `main` pass (§2), so the gap is
+the ten minutes CI takes and the build after it — and, for good, any merge whose
+checks fail on `main`, which deploys nothing and leaves no failed deploy to
+notice. Check `/api/health`, which reports the commit, before concluding any
+change below is live.
 
 ---
 
@@ -925,24 +952,49 @@ rules — an old one's `auto_assign` assigns a held ticket, and its
 `assign_group` moves one without ending the hold, so the router may then move
 it away from where the rule put it.
 
-**No production service on Render deploys itself.** `autoDeploy` is `no` and
-`autoDeployTrigger` is `off` on all six of them (read back on each after #397
-deployed, 2026-10-23; that day it had been `checksPass` on all six from about
-13:53 to 18:25 UTC), so merging to `main`
-changes nothing that is running — a deploy is triggered by hand, from the
-dashboard or the API, and until it is, `main` and production are different
-software. This is easy to miss precisely because it looks like nothing went
-wrong: the merge succeeds, CI is green, and the old code keeps serving. Check
-what a service is actually running before concluding a change is live, and
-before enqueueing a job whose handler only exists in the new code — the running
-worker would take it, find no handler, and kill it.
+**Every production service deploys itself once the checks on `main` pass.**
+`autoDeploy` is `yes` and `autoDeployTrigger` is `checksPass` on all six (read
+back with `list_services` at 20:16 UTC on 2026-11-06; Render's events date the
+change to 16:49:21 that day for the web service and 19:43:09 to 19:44:03 for
+the worker and the four crons). So merging `dev` into `main` is the release:
+once CI's run on the push to `main` is green, Render deploys every service from
+it and nobody presses anything. From 2026-10-23 until then it was `off`
+everywhere and a deploy was triggered by hand, from the dashboard or the API
+(that day it had briefly been `checksPass` on all six, from about 13:53 to
+18:25 UTC). `render.yaml` says `checksPass` too, so a Blueprint sync changes
+nothing. Three things follow, and each is easy to miss:
+
+- **A red check on `main` deploys nothing, and nothing says so.** The merge
+  succeeded and the old code keeps serving. Check what a service is actually
+  running — `/api/health` reports the commit, `list_deploys` names it per
+  service — before concluding a change is live, and before enqueueing a job
+  whose handler only exists in the new code: the running worker would take it,
+  find no handler, and kill it.
+- **Nothing orders the six.** They start together and go live as their builds
+  finish. On `eb69c8c` the crons, which build with `npm ci` alone, were live a
+  minute and a half in, the worker at three minutes, and the web service, whose
+  preDeploy migrates, at almost four. So a release's new crons and worker can
+  run before its migration has applied, which a deploy by hand avoided by going
+  web first. That is not a small gap: a worker whose schema has a column the
+  database lacks fails every insert into that table, because Drizzle names
+  every column, and every whole-row select of it (deploy rule 1 of
+  `plans/ticket-category-routing.md`). So worker or cron code that needs a new
+  table or column needs its migration live already, from an earlier release,
+  or must tolerate its absence for those minutes; and a change whose web half
+  must be live before a cron writes something new (`metrics_daily`'s
+  dimensions, in AGENTS.md) is not merged in the minutes before that cron runs.
+- **A merge into `main` is a production change**, as `trigger_deploy` was:
+  what it carries reaches customers a quarter of an hour later, with no second
+  step at which to stop it. The brake is a service's auto-deploy setting in the
+  dashboard, and `render.yaml` changes with it in the same commit.
 
 **Staging is suspended, tracks `main`, and deploys itself.** The running
-service says `branch: main` and `autoDeployTrigger: commit` — the only service
-in the project that deploys itself — and `render.yaml` now says the same (it
-used to pin a deleted feature branch, which failed every Blueprint sync:
-§6.67, §6.76). Resuming staging therefore arms an automatic deploy of `main` on
-the next commit, against staging's own database. Before resuming it, read
+service says `branch: main` and `autoDeployTrigger: commit` — on every commit,
+without waiting for the checks production waits for — and `render.yaml` now
+says the same (it used to pin a deleted feature branch, which failed every
+Blueprint sync: §6.67, §6.76). Resuming staging therefore arms an automatic
+deploy of `main` on the next commit, against staging's own database. Before
+resuming it, read
 staging's `EMAIL_PROVIDER` in the dashboard: it should be `local`, the blueprint
 no longer sets it, and staging holds a Postmark `EMAIL_API_KEY` of its own.
 
@@ -1295,10 +1347,11 @@ services were then on `6d9b7f3`. This said all seven, but staging, the seventh,
 has had no deploy since 2026-08-18. The header names the commit production
 runs now, since a commit named here goes stale at every release; `/api/health`
 reports the commit and the new `pool` block from #153. The
-standing hazard is unchanged, though, and it is why this paragraph stays:
-`autoDeploy` is off everywhere, so the next merge is again not running until
-somebody triggers it — including the job whose handler a queued row will look
-for.
+standing hazard has narrowed rather than gone, and it is why this paragraph
+stays: since 2026-11-06 a merge into `main` deploys itself once its checks pass
+(§2), so a merge is not running for the quarter of an hour that takes, and not
+at all when a check fails on `main` — including the job whose handler a queued
+row will look for.
 
 ### 5.1 Configuration and cutover — the real remaining work
 

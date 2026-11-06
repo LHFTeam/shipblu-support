@@ -296,9 +296,10 @@ projects:
             region: frankfurt
             plan: standard # 2GB RAM / 1 CPU
             branch: main
-            # Matches the dashboard. Nothing in production deploys itself — a
-            # deploy is triggered by hand (docs/PROJECT-STATE.md §2).
-            autoDeployTrigger: 'off' # quoted: bare off is YAML 1.1 for false
+            # Matches the dashboard: every production service deploys itself
+            # once the checks on main pass, so merging into main is the release
+            # (docs/PROJECT-STATE.md §2).
+            autoDeployTrigger: checksPass
             buildCommand: npm ci --include=dev && npm run build
             # Runs after build, before traffic shifts. Migrations are idempotent,
             # so a rolled-back deploy re-running them is safe.
@@ -351,9 +352,10 @@ projects:
             region: frankfurt
             plan: starter # 512MB / 0.5 CPU — the worker is I/O bound, not CPU bound
             branch: main
-            # Matches the dashboard. Nothing in production deploys itself — a
-            # deploy is triggered by hand (docs/PROJECT-STATE.md §2).
-            autoDeployTrigger: 'off' # quoted: bare off is YAML 1.1 for false
+            # Matches the dashboard: every production service deploys itself
+            # once the checks on main pass, so merging into main is the release
+            # (docs/PROJECT-STATE.md §2).
+            autoDeployTrigger: checksPass
             buildCommand: npm ci --include=dev && npm run build
             startCommand: npm run worker
             # Dashboard-owned, listed rather than declared, and normally absent:
@@ -420,9 +422,10 @@ projects:
             region: frankfurt
             plan: starter
             branch: main
-            # Matches the dashboard. Nothing in production deploys itself — a
-            # deploy is triggered by hand (docs/PROJECT-STATE.md §2).
-            autoDeployTrigger: 'off' # quoted: bare off is YAML 1.1 for false
+            # Matches the dashboard: every production service deploys itself
+            # once the checks on main pass, so merging into main is the release
+            # (docs/PROJECT-STATE.md §2).
+            autoDeployTrigger: checksPass
             schedule: '*/5 * * * *' # SLA breaches need minute-ish resolution
             buildCommand: npm ci --include=dev
             startCommand: npm run job -- sla_sweep && npm run job -- presence_sweep && npm run job -- assign_sweep
@@ -436,9 +439,10 @@ projects:
             region: frankfurt
             plan: starter
             branch: main
-            # Matches the dashboard. Nothing in production deploys itself — a
-            # deploy is triggered by hand (docs/PROJECT-STATE.md §2).
-            autoDeployTrigger: 'off' # quoted: bare off is YAML 1.1 for false
+            # Matches the dashboard: every production service deploys itself
+            # once the checks on main pass, so merging into main is the release
+            # (docs/PROJECT-STATE.md §2).
+            autoDeployTrigger: checksPass
             schedule: '*/15 * * * *'
             buildCommand: npm ci --include=dev
             startCommand: npm run job -- run_time_automations
@@ -473,9 +477,10 @@ projects:
             region: frankfurt
             plan: starter
             branch: main
-            # Matches the dashboard. Nothing in production deploys itself — a
-            # deploy is triggered by hand (docs/PROJECT-STATE.md §2).
-            autoDeployTrigger: 'off' # quoted: bare off is YAML 1.1 for false
+            # Matches the dashboard: every production service deploys itself
+            # once the checks on main pass, so merging into main is the release
+            # (docs/PROJECT-STATE.md §2).
+            autoDeployTrigger: checksPass
             schedule: '0 * * * *'
             buildCommand: npm ci --include=dev
             startCommand: npm run job -- sync_whatsapp_templates; npm run job -- snapshot_backlog
@@ -493,9 +498,10 @@ projects:
             region: frankfurt
             plan: starter
             branch: main
-            # Matches the dashboard. Nothing in production deploys itself — a
-            # deploy is triggered by hand (docs/PROJECT-STATE.md §2).
-            autoDeployTrigger: 'off' # quoted: bare off is YAML 1.1 for false
+            # Matches the dashboard: every production service deploys itself
+            # once the checks on main pass, so merging into main is the release
+            # (docs/PROJECT-STATE.md §2).
+            autoDeployTrigger: checksPass
             # 02:00 Africa/Cairo = 00:00 UTC. Render cron schedules are UTC.
             schedule: '0 0 * * *'
             buildCommand: npm ci --include=dev
@@ -615,9 +621,9 @@ projects:
             # Blueprint sync, not just this service (docs/PROJECT-STATE.md
             # §6.67, §6.76).
             branch: main
-            # The only service in the project that deploys itself: resuming
-            # staging arms a deploy of `main` on the next commit, against
-            # staging's own database.
+            # On every commit, without waiting for the checks production waits
+            # for: resuming staging arms a deploy of `main` on the next commit,
+            # against staging's own database.
             autoDeployTrigger: commit
             buildCommand: npm ci --include=dev && npm run build
             preDeployCommand: npm run db:migrate
