@@ -1,8 +1,8 @@
 'use client';
 
-import { useActionState } from 'react';
 import { useFormStatus } from 'react-dom';
 import { Button } from '@/components/ui';
+import { useActionForm } from '@/components/use-action-form';
 import { claimThreadControl } from '../../meta-actions';
 import { INITIAL } from './form-state';
 
@@ -12,12 +12,22 @@ import { INITIAL } from './form-state';
  * Sits under the explanation in the composer rather than beside the tabs,
  * because it is the *answer* to that paragraph: the agent reads why the ticket
  * cannot be answered and the remedy is the next thing under it. Anywhere else
- * and the paragraph still ends in "go and use the other tool".
+ * and the paragraph still ends in "go and use the other tool". The composer
+ * draws it only where the thread verdict says taking control can help
+ * (`canTakeControl`, `lib/meta/thread.ts`).
  *
  * A refusal is rendered here and left on screen, exactly as `ProfileRefresh`
  * does and for the same reason. The refusal that matters — this app is not the
  * primary receiver — is a sentence the agent has to hand to whoever holds the
  * Meta dashboard, and a toast would take it away before they had read it twice.
+ *
+ * Submitted through `useActionForm` though the form holds nothing a reset could
+ * move, for the hook's other half: an action that throws comes back as a
+ * refusal under the button. With a bare `useActionState` it fell through to the
+ * console's error page, which is all an agent saw of five presses on Instagram
+ * tickets the night the button was first offered where it could not work
+ * (`docs/PROJECT-STATE.md` §6.111). Its default "no answer" sentence is the
+ * right one: taking control reaches Meta, never the customer.
  *
  * A success has nothing to say here, because this component does not survive
  * it. The action writes the event that reopens the composer and revalidates the
@@ -27,11 +37,11 @@ import { INITIAL } from './form-state';
  * records who took control.
  */
 export function ThreadControl({ conversationId }: { conversationId: string }) {
-  const [state, formAction] = useActionState(claimThreadControl, INITIAL);
+  const { state, form } = useActionForm(claimThreadControl, INITIAL);
 
   return (
     <div className="mt-3">
-      <form action={formAction}>
+      <form {...form}>
         <input type="hidden" name="conversationId" value={conversationId} />
         <Submit />
       </form>

@@ -7749,7 +7749,87 @@ dryRun=true`, then without, gives those two theirs back from their
       two SHARE UPDATE EXCLUSIVE locks (on `jobs` and its TOAST table), and the
       contention case fails with 55P03 on both files.
 
-111.  **The merchant dashboard's sign-out never cleared the support chat, so
+111.  **A refusal widened without its remedy: "Take thread control" threw on
+      every Instagram ticket it was offered on.** _2026-11-06, from the night
+      of the 5th._ §6.108 let a `standby` refuse a Unified Login send, and
+      that much was right. But the composer drew "Take thread control" under
+      every `standby` refusal, and `claimThreadControl` passed every `standby`
+      on to `takeThreadControl`, which serves the Facebook Page connection
+      alone and throws a plain `Error` for any other route. Both had keyed on
+      the verdict's `reason`, sound while only the Page route could produce a
+      `standby`, and #462 changed that without either noticing. Released at
+      21:04 UTC; at 22:37–22:38 UTC five presses on three Instagram tickets
+      (86324 three times, 86310, 82967) each logged
+      `Thread control belongs to the Facebook Page connection, and instagram is routed over the Unified Login connection`
+      before any request reached Meta. The action catches only `MetaApiError`,
+      so each was a 500, and the button's bare `useActionState` put the agent
+      on the console's error page. The same session's presses on three
+      Messenger tickets (87176, 86370, 86299) worked.
+
+      `offersThreadControl` (`lib/meta/handover.ts`) now says where the call
+      can work: a Messenger thread over the Page connection, and nothing else.
+      The verdict carries its answer as `canTakeControl`, which the composer
+      draws the button from and the action refuses on, and
+      `takeThreadControl` asks the same function before it calls Graph, so the
+      offer and the guard cannot drift apart again. Instagram is out on the
+      Page route as well: the request would address the Instagram account's
+      node, where Meta documents Instagram's take only on the Page node with
+      the customer's IGSID, and every `thread_control_taken` ever recorded is
+      a Messenger thread. On Unified Login nothing is there to call: the
+      migration guide lists the handover protocol as unsupported. The button
+      is also withheld, and the action refuses, once the 7-day window has
+      closed, since taking a thread nothing can be sent on would only take it
+      from the other tool. It submits through `useActionForm`, so anything
+      that still throws comes back as a sentence. The verdict also carries the
+      `headline` the header chip and the composer's notice both draw, and the
+      action's refusal is the verdict's own explanation. The Instagram
+      `standby` sentence no longer ends "make this app the default app", which
+      had been done that morning; it says the flag is about when the customer
+      last wrote.
+
+      **What it left, and the same PR then stored.** On 2026-11-06, 94 of
+      the 98 open Instagram direct message tickets had a newest inbound
+      recorded in `standby` before this app became the account's default app
+      at 10:30:24 UTC on the 5th. The flag was stale: ticket 13791 sent past
+      one 20 seconds after the switch, and no Instagram `standby` has arrived
+      since. But the `app_roles` webhook announcing the switch was parsed by
+      nothing, and its only copy was `webhook_events` row
+      `f7cb5701-8aea-41e0-8b69-7cd095a8337d`, which the 30-day cleanup removes
+      around 2026-12-05.
+
+      So it is stored. `meta_app_role_events` (migration 0058) is written by
+      `process_meta_webhook` for every `app_roles` event from now on, and by
+      `db/sql/012_meta_app_role_backfill.sql` for the two delivered before:
+      the Page's at 10:30:12 and Instagram's at 10:30:24. `defaultAppSince`
+      (`lib/meta/app-roles.ts`) reads it into the verdict, which supersedes an
+      Instagram `standby` older than the switch as it supersedes one older
+      than a `thread_control_taken`. It is Instagram only. The Page's event
+      named this app `default_app` too, yet the 23 Messenger messages received
+      in the day after it all arrived in `standby`. A `standby` newer than the
+      switch still refuses, worded as another app having taken the thread
+      since. A switch away from this app is weighed the other way: a thread
+      whose customer last wrote before it reads as the new default's, and
+      refuses (`defaultAppStanding` answers the newest switch in either
+      direction). A CHECK in `db/sql/003` holds `platform` to `facebook` or
+      `instagram`, since a row spelled `page` would be a switch stored and
+      never read.
+
+      It unblocks no reply today: none of the 94 was inside 24 hours (87 were
+      past seven days, 7 between), and a reply after 24 hours needs Human
+      Agent (§5.2). What changes is that a ticket the window blocks says so
+      rather than blaming another app. A ticket still inside seven days shows
+      the reply box, and its tagged reply is refused by Meta as every Human
+      Agent send is today. The composer prints the window under a `standby`
+      refusal once the seven days are gone.
+
+      **It has to deploy before 2026-12-05**, or the backfill finds the
+      delivery gone and nothing records the switch. After the deploy,
+      `select platform, account_id, roles, at from meta_app_role_events`
+      shows the two rows. Once it has run and that date has passed,
+      `db/sql/012` and its test are deleted, since nothing is left for it to
+      copy.
+
+112.  **The merchant dashboard's sign-out never cleared the support chat, so
       the next person at the machine opened the last one's conversation.**
       _2026-11-06, found from the review of ShipBlu/merchant#148 and fixed the
       same day._ The dashboard calls `clear()` on every sign-out, as

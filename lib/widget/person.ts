@@ -10,7 +10,7 @@ import { parseIdentity } from './identity-parse';
  * the shell's unmount took the panel down a couple of milliseconds after it, a
  * panel never opened in that page load could not be told at all before the
  * Auth0 redirect, and a session that simply expired never called it
- * (`docs/PROJECT-STATE.md` §6.111). The next person at that browser then
+ * (`docs/PROJECT-STATE.md` §6.112). The next person at that browser then
  * opened the previous one's conversation, because the frame resumed the stored
  * token the moment it mounted and only heard who was reading afterwards.
  *

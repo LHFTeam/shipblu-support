@@ -20,12 +20,12 @@ export function MetaWindowIndicator({
   // the countdown would contradict the composer standing beside it. Rendered
   // before the mount guard because this one is server-computed and does not
   // tick — there is no first frame to get wrong.
+  //
+  // Worded by the verdict, which the composer's notice reads too, so the two
+  // cannot say "owns" and "owned" about one ticket (`docs/PROJECT-STATE.md`
+  // §6.111).
   if (thread && !thread.canSend) {
-    return (
-      <Badge tone="window-closed">
-        {thread.reason === 'standby' ? 'Another app owns this inbox' : 'Cannot reply from here'}
-      </Badge>
-    );
+    return <Badge tone="window-closed">{thread.headline ?? 'Cannot reply from here'}</Badge>;
   }
 
   if (!now) return null;
