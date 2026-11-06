@@ -727,6 +727,11 @@ export function WidgetThread({
             the shared button's height and padding are set per size, and a second
             utility on the same property wins or loses by Tailwind's order, not
             this one's.
+
+            As tall as the box beside it: the 44px of the buttons inside, and
+            the box's border, 1px above and below. At 44px it sat on the box's
+            bottom edge with its centre a pixel under theirs and its top two
+            under the box's; square, so it is still a round-cornered tile.
           */}
           <Button
             type="submit"
@@ -734,7 +739,7 @@ export function WidgetThread({
             loading={sending}
             aria-label={copy.send}
             icon={<SendIcon size={18} />}
-            className="min-h-(--tap-min)! min-w-(--tap-min) px-0!"
+            className="min-h-[calc(var(--tap-min)+2px)]! min-w-[calc(var(--tap-min)+2px)] px-0!"
           />
         </div>
 
