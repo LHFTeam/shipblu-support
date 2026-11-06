@@ -122,9 +122,9 @@ describe('kb_articles.updated_at', () => {
   it('ignores a date an UPDATE writes itself, either way', async () => {
     const id = await article(await folder());
 
-    // Every console writer and the Freshdesk import set `updatedAt: new Date()`
-    // beside what they change, so a re-import that only refreshes the counters
-    // is this statement, and it is not an edit.
+    // The console's save, status and restore actions and the Freshdesk import
+    // set `updatedAt: new Date()` beside what they change, so a re-import that
+    // only refreshes the counters is this statement, and it is not an edit.
     await db
       .update(kbArticles)
       .set({ viewCount: 500, updatedAt: new Date('2030-01-01T00:00:00Z') })

@@ -4747,11 +4747,15 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
     default. Every other table keeps the plain stamp, which `presence_policy`'s
     grace period depends on. It is a change to the function body only:
     `CREATE OR REPLACE FUNCTION` locks no table and every replay of `db/sql`
-    installs it, where swapping the trigger would take ACCESS EXCLUSIVE on a
-    table the help centre reads (§6.15's deploy failures). `db/sql/touch-updated-at.db.test.ts`
-    holds both halves. So `/kb`, which shows the column and sorts by it, now
-    orders by the last change anybody made — a metadata edit included, which is
-    why the help centre still reads `editedAt` instead.
+    installs it. Pointing the trigger at another function would lock the
+    table: `DROP TRIGGER` takes ACCESS EXCLUSIVE, which any open reader holds
+    off (§6.15's deploy failures), and `CREATE OR REPLACE TRIGGER` takes SHARE
+    ROW EXCLUSIVE, which every open write holds off — each view and vote is
+    one — and which then holds the table's writes off until the whole of
+    `db/sql/001` commits. `db/sql/touch-updated-at.db.test.ts` holds both
+    halves. So `/kb`, which shows the column and sorts by it, now orders by the
+    last change anybody made — a metadata edit included, which is why the help
+    centre still reads `editedAt` instead.
 
     The existing values were left as they are. On 2026-11-05, 39 of the 112
     articles had an `updated_at` newer than their last version and their

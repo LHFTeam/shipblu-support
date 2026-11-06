@@ -220,7 +220,8 @@ END $$;
 -- pinning the path costs nothing.
 --
 -- On every table but one this stamps `now()` on any UPDATE at all, values
--- changed or not, and an UPDATE cannot set the column itself — so it can never
+-- changed or not, and an UPDATE cannot set the column itself: whatever it
+-- writes there is replaced by its own transaction's `now()`, so no writer can
 -- backdate it. `presence_policy` depends on exactly that: its grace period is
 -- anchored on `updated_at` (`StoredPresencePolicy` in `lib/presence/idle.ts`).
 --
@@ -248,13 +249,18 @@ END $$;
 -- which are compared on their own.
 --
 -- Here, in the one shared function, rather than in a trigger of its own on
--- `kb_articles`, because of the locks. Trigger DDL takes ACCESS EXCLUSIVE on
--- the table (the loop below says what that cost on 2026-08-19), and this file
--- is replayed on every deploy; a trigger of another name would also have the
--- loop create the generic one again beside it, still stamping. `CREATE OR
--- REPLACE FUNCTION` locks no table, and every replay installs the current
--- body, so the change reaches a running database on the next deploy with
--- nothing to guard. Undoing it is the same statement with the old body.
+-- `kb_articles`, because of the locks. Changing which function the table's
+-- trigger calls is trigger DDL: `DROP TRIGGER` takes ACCESS EXCLUSIVE, which
+-- any open reader holds off (the loop below says what that cost on
+-- 2026-08-19), and `CREATE OR REPLACE TRIGGER` takes SHARE ROW EXCLUSIVE,
+-- which any open writer holds off — every view and every vote is one — and
+-- which then holds every write to the table off until this whole file
+-- commits, because the file runs as one transaction. A trigger of another
+-- name would also have the loop create the generic one again beside it, still
+-- stamping. `CREATE OR REPLACE FUNCTION` locks no table at all, and every
+-- replay installs the current body, so the change reaches a running database
+-- on the next deploy with nothing to guard. Undoing it is the same statement
+-- with the old body.
 CREATE OR REPLACE FUNCTION touch_updated_at() RETURNS trigger
 LANGUAGE plpgsql
 SET search_path = ''
@@ -280,13 +286,14 @@ $$;
 
 -- Only tables that do not already have the trigger.
 --
--- This file is replayed on every deploy, and trigger DDL — DROP or CREATE alike
--- — needs ACCESS EXCLUSIVE on the table. Dropping and recreating an identical
--- trigger every time therefore asked for an exclusive lock on every busy table
--- in the schema to do nothing, and any concurrent *reader* was enough to make
--- it wait: on 2026-08-19 two connections left mid-transaction on `agents` held
--- AccessShareLock for six hours and every deploy in between failed on
--- `DROP TRIGGER IF EXISTS touch_updated_at ON agents`.
+-- This file is replayed on every deploy, and trigger DDL locks the table:
+-- `DROP TRIGGER` takes ACCESS EXCLUSIVE, and `CREATE TRIGGER` SHARE ROW
+-- EXCLUSIVE, which waits on any open writer. Dropping and recreating an
+-- identical trigger every time therefore asked for an exclusive lock on every
+-- busy table in the schema to do nothing, and any concurrent *reader* was
+-- enough to make it wait: on 2026-08-19 two connections left mid-transaction on
+-- `agents` held AccessShareLock for six hours and every deploy in between
+-- failed on `DROP TRIGGER IF EXISTS touch_updated_at ON agents`.
 --
 -- Checking first makes the steady state lock-free: a table that already has the
 -- trigger is skipped without touching it. New tables still pick it up, which is
@@ -297,11 +304,13 @@ $$;
 -- presence is checked. What it does is not part of that definition: the body of
 -- `touch_updated_at()` above is installed by `CREATE OR REPLACE FUNCTION` on
 -- every replay, which locks no table, so a change of behaviour belongs there,
--- as the `kb_articles` case does. A trigger that really must change has to be
--- dropped and created again under a guard that compares what it is, not its
--- name, and under a `lock_timeout` (`008_comment_channel_check.sql`). Giving
--- the new one a different name is not a way round this: this loop would create
--- the generic trigger again beside it.
+-- as the `kb_articles` case does. A trigger that really must change is
+-- replaced in place with `CREATE OR REPLACE TRIGGER` under the same name —
+-- SHARE ROW EXCLUSIVE, never the DROP's ACCESS EXCLUSIVE — under a guard that
+-- compares what it is (`tgfoid`, its events), not its name, and under a
+-- `lock_timeout` (`008_comment_channel_check.sql`). Giving the new one a
+-- different name is not a way round this: this loop would create the generic
+-- trigger again beside it.
 DO $$
 DECLARE
   t text;
