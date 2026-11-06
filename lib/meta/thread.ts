@@ -1,4 +1,5 @@
 import { CONNECTION_LABEL, isMetaConnection, type MetaConnection } from './connection';
+import { offersThreadControl } from './handover';
 import type { MetaPlatform } from './types';
 
 /**
@@ -29,21 +30,28 @@ export type MetaThreadState = {
   /**
    * Whether the console's "Take thread control" can change this verdict.
    *
-   * Only a `standby` on the Facebook Page route. `takeThreadControl` is a call
-   * on the Page's own edge with the Page's token, and over Unified Login the
-   * thread belongs to the Instagram account's default app, which nothing here
-   * can move (Meta's migration guide lists the handover protocol as unsupported
-   * there). The button and the action used to key on `reason` alone, which was
-   * sound while only the Page route could produce a `standby`; #462 let one
-   * refuse a Unified Login send too, and the button then appeared on every such
-   * Instagram ticket and threw on every press (`docs/PROJECT-STATE.md` §6.111).
+   * Only a Messenger `standby` on the Facebook Page route: what
+   * `offersThreadControl` (`lib/meta/handover.ts`) answers, and what
+   * `takeThreadControl` asks again before it calls Graph. The button and the
+   * action used to key on `reason` alone, which was sound while only the Page
+   * route could produce a `standby`; #462 let one refuse a Unified Login send
+   * too, and the button then appeared on every such Instagram ticket and threw
+   * on every press (`docs/PROJECT-STATE.md` §6.111).
    *
-   * Decided here, once, so the composer drawing the button and the action
-   * taking control cannot disagree — and carried on the verdict rather than
-   * offered as a function, because the composer is a client component and this
-   * module reaches `lib/env` through `./connection`.
+   * Carried on the verdict rather than asked of that function by the composer,
+   * so the composer drawing the button and the action taking control read one
+   * answer, and because the composer is a client component and this module
+   * reaches `lib/env` through `./connection`.
    */
   canTakeControl: boolean;
+  /**
+   * The verdict in a few words, for the header chip and the notice beside the
+   * composer's tabs; null when the thread is ours. Worded here, beside the
+   * explanation it heads, so the places that show a state cannot word it two
+   * ways — the chip saying another app owns the inbox while the notice says it
+   * owned the thread.
+   */
+  headline: string | null;
 };
 
 export type MetaThreadInput = {
@@ -81,6 +89,7 @@ export function metaThreadState(input: MetaThreadInput): MetaThreadState {
     explanation: null,
     route: input.connection,
     canTakeControl: false,
+    headline: null,
   };
 
   if (!input.configuredAccountId) {
@@ -89,6 +98,7 @@ export function metaThreadState(input: MetaThreadInput): MetaThreadState {
       reason: 'not_configured',
       route: input.connection,
       canTakeControl: false,
+      headline: 'Cannot reply from here',
       explanation:
         input.platform === 'instagram'
           ? 'INSTAGRAM_ACCOUNT_ID is not set, so no Instagram reply can be addressed.'
@@ -111,6 +121,7 @@ export function metaThreadState(input: MetaThreadInput): MetaThreadState {
       reason: 'other_account',
       route: input.connection,
       canTakeControl: false,
+      headline: 'Cannot reply from here',
       explanation:
         `This ticket arrived on ${product} account ${input.inboundAccountId}, but this ` +
         `deployment sends from ${input.configuredAccountId}. The customer's id is scoped ` +
@@ -184,32 +195,33 @@ export function metaThreadState(input: MetaThreadInput): MetaThreadState {
     (input.inboundConnection === null || input.inboundConnection === 'facebook_page');
 
   if (standbyBlocks) {
-    const canTakeControl = input.connection === 'facebook_page';
+    const canTakeControl = offersThreadControl(input.platform, input.connection);
 
     return {
       canSend: false,
       reason: 'standby',
       route: input.connection,
       canTakeControl,
+      headline: canTakeControl
+        ? 'Another app owns this inbox'
+        : 'Another app owned this thread when the customer last wrote',
       explanation: canTakeControl
         ? `Another app holds thread control on this ${product} inbox, so this ticket is ` +
           `readable here but cannot be answered from here — ${product} accepts a reply only ` +
           `from the app that owns the thread. The messages arrive in the handover protocol's ` +
           `standby channel, which is what says so. Answer in whichever tool is the primary ` +
-          `receiver, or make this app the ` +
-          (input.platform === 'instagram'
-            ? `Instagram account's default app in the Page's Advanced messaging settings — ` +
-              `which is what let the first Unified Login reply through on 2026-11-05`
-            : `Page's default app in its Advanced messaging settings`) +
-          `.`
+          `receiver, or make this app the Page's default app in its Advanced messaging ` +
+          `settings.`
         : /*
-            Not "make this app the default app", which the sentence above ends
-            on: on the evening that sentence first reached a Unified Login
-            ticket, this app had been the default app since that morning, and
-            every flag it was refusing on predated the switch (§6.111). A `standby`
-            says who owned the thread when the message was sent, not who owns
-            it now, and the only newer fact this route ever gets is the
-            customer's next message — so that is what the sentence says.
+            Instagram's sentence, on either route, since the button is offered
+            on neither (`offersThreadControl`). Not "make this app the default
+            app", which the sentence above ends on: on the evening that sentence
+            first reached a Unified Login ticket, this app had been the default
+            app since that morning, and every flag it was refusing on predated
+            the switch (§6.111). A `standby` says who owned the thread when the
+            message was sent, not who owns it now, and the only newer fact a
+            route without take-control ever gets is the customer's next message
+            — so that is what the sentence says.
           */
           `When this customer last wrote, another app owned this ${product} thread — the ` +
           `message arrived in the standby channel, which is what says so — and ${product} ` +

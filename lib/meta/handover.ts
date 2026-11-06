@@ -1,3 +1,6 @@
+import type { MetaConnection } from './connection';
+import type { MetaPlatform } from './types';
+
 /**
  * Taking thread control back from whichever app currently holds it.
  *
@@ -37,6 +40,31 @@
  * with `/me/messages`: an id that can be read in a log line is worth more than
  * one resolved from whichever credential happened to be in the environment.
  */
+
+/**
+ * Whether this console can take thread control of a conversation at all: a
+ * Messenger thread, over the Facebook Page connection, and nothing else.
+ *
+ * Both halves are limits of the request, not policy. The call is the Page's
+ * edge under the Page's token, so no other connection has it; over Unified
+ * Login an Instagram thread belongs to the account's default app, and Meta's
+ * migration guide lists the handover protocol as unsupported there. And it is
+ * addressed to `accountId(platform)`, which for Instagram is the Instagram
+ * account, where Meta documents Instagram's take only on the Page node with the
+ * customer's IGSID. That addressing has never been tried — every
+ * `thread_control_taken` recorded is a Messenger thread — and a wrong shape is
+ * invisible in Graph's answer, so Instagram is left out until a live round trip
+ * shows the request (`docs/PROJECT-STATE.md` §6.111).
+ *
+ * The one statement of it. The thread verdict asks it whether to offer the
+ * button (`canTakeControl`, `lib/meta/thread.ts`), and `takeThreadControl` asks
+ * it again to refuse a caller that skipped the verdict, so the offer and the
+ * guard cannot drift apart — which the verdict's `reason` and a guard written
+ * out separately did, and five presses on Instagram tickets were five 500s.
+ */
+export function offersThreadControl(platform: MetaPlatform, connection: MetaConnection): boolean {
+  return platform === 'facebook' && connection === 'facebook_page';
+}
 
 export type TakeThreadControlRequest = {
   recipient: { id: string };

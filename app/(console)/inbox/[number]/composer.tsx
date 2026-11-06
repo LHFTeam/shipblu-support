@@ -158,13 +158,8 @@ export function Composer({
   const notice = replyBlocked
     ? consoleReplyNotice(conversation.channel)
     : threadBlocked
-      ? metaThread?.reason === 'standby'
-        ? // Over Unified Login the flag is a fact about when the customer last
-          // wrote, and this app may well own the inbox now (§6.111).
-          metaThread.canTakeControl
-          ? 'Another app owns this inbox — this ticket can be read here but not answered'
-          : 'Another app owned this thread when the customer last wrote — it can be read here but not answered'
-        : 'This ticket cannot be answered from here — see the message below'
+      ? // Worded by the verdict, which the header chip reads too (§6.111).
+        `${metaThread?.headline ?? 'Cannot reply from here'} — see the message below`
       : isWhatsApp && now !== null
         ? state.isOpen
           ? `24h window: ${formatRemaining(state.remainingMs)}`
@@ -305,14 +300,17 @@ export function Composer({
               <div className="rounded-md border border-(--color-border-subtle) bg-(--color-background-surface-sunken) p-3 text-sm text-(--color-text-secondary)">
                 <p className="whitespace-pre-line">{metaThread?.explanation}</p>
                 {/*
-                  The clock as well, under a standby refusal, once it is not
-                  open. The notice beside the tabs gives the thread verdict
+                  The clock as well, under a standby refusal, once the seven days
+                  are gone. The notice beside the tabs gives the thread verdict
                   precedence, rightly, but a thread this app owned would still
                   be past its window here, and that is the blocker no thread
                   control removes: of the 94 Instagram tickets refusing on a
-                  standby on 2026-11-06, 87 were past seven days (§6.111).
+                  standby on 2026-11-06, 87 were past seven days (§6.111). Not
+                  between 24 hours and seven days, where `describeWindow` says
+                  replies go out tagged as a human agent — under "cannot be
+                  answered from here" that reads as a contradiction.
                 */}
-                {metaThread?.reason === 'standby' && now !== null && !metaState.isOpen ? (
+                {metaThread?.reason === 'standby' && now !== null && metaState.isClosed ? (
                   <p className="mt-2">{describeWindow(metaState)}</p>
                 ) : null}
                 {/*
@@ -320,12 +318,14 @@ export function Composer({
                   verdict says itself (`canTakeControl`, read by the action too).
                   Not under the other two refusals — a page this deployment
                   cannot address, an account id that is not set — which taking
-                  control would not fix, and not under a standby on the Unified
-                  Login route, where nothing here can take the thread: keyed on
-                  the reason alone, the button appeared on those Instagram
-                  tickets and threw on every press (§6.111).
+                  control would not fix, and not on an Instagram ticket, where
+                  nothing here can take the thread: keyed on the reason alone,
+                  the button appeared on those and threw on every press (§6.111).
+                  Nor once the seven days are gone: nothing could be sent on the
+                  thread, and taking it would only take it from the other tool.
+                  Before mount the window is assumed open, as everywhere here.
                 */}
-                {metaThread?.canTakeControl ? (
+                {metaThread?.canTakeControl && (now === null || !metaState.isClosed) ? (
                   <ThreadControl conversationId={conversation.id} />
                 ) : null}
               </div>

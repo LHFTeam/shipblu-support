@@ -16,8 +16,8 @@ import {
 } from '@/lib/meta/moderation';
 import { describeProfileRefresh, refreshChannelProfile } from '@/lib/meta/profile-refresh';
 import { MetaApiError, takeThreadControl } from '@/lib/meta/client';
-import { CONNECTION_LABEL } from '@/lib/meta/connection';
 import { explainTakeControlError } from '@/lib/meta/errors';
+import { describeWindow, metaWindowState } from '@/lib/meta/window';
 import { isCommentTicket, isMetaChannel, metaPlatformOf } from '@/lib/tickets/channel-policy';
 import { metaReplyTarget, THREAD_CONTROL_TAKEN } from '@/lib/tickets/meta-thread';
 import { loadConversation, refresh, refuseIfReadOnly } from '@/lib/tickets/console-guards';
@@ -276,19 +276,32 @@ export async function claimThreadControl(
     };
   }
 
-  // The composer draws the button from this same field, so only a page drawn
-  // before it existed reaches here. Before it, a `standby` on the Unified Login
-  // route came this far and `takeThreadControl`'s route guard threw — a plain
-  // Error, not the MetaApiError caught below — and five presses on three
-  // Instagram tickets were five 500s (`docs/PROJECT-STATE.md` §6.111). The guard
-  // stays a throw, since a caller that skipped this check is a bug to see.
+  // The composer draws the button from this same field, but the verdict can
+  // change between a page's render and the press: a page drawn before the field
+  // existed, or before the route moved — `INSTAGRAM_UNIFIED_LOGIN_TOKEN` set or
+  // unset and the service restarted. So this is not dead code once old tabs are
+  // gone. Without it such a press reaches `takeThreadControl`'s guard, which
+  // throws a plain Error rather than the MetaApiError caught below, and five
+  // presses on three Instagram tickets were five 500s (`docs/PROJECT-STATE.md`
+  // §6.111). The guard stays a throw, since a caller that skipped this check is
+  // a bug to see. The refusal is the verdict's own explanation, so the advice
+  // under the button cannot differ from the paragraph above it.
   if (!thread.canTakeControl) {
     return {
       error:
-        `Thread control cannot be taken on this ticket: its replies go out over ` +
-        `${CONNECTION_LABEL[thread.route]}, where the thread belongs to the account's default ` +
-        `app, set in the Page's Advanced messaging settings. Reload the page to see what is ` +
-        `blocking it.`,
+        'Thread control cannot be taken on this ticket.' +
+        (thread.explanation ? `\n\n${thread.explanation}` : ''),
+    };
+  }
+
+  // Past the seven days nothing can be sent on the thread whoever owns it, so
+  // taking it would only take it from the tool answering there, which then sees
+  // a thread go quiet for nothing. The composer hides the button then too; this
+  // is the same refusal for a page that drew it before the window closed.
+  const messaging = metaWindowState(row.conversation.lastCustomerMessageAt);
+  if (messaging.isClosed) {
+    return {
+      error: `${describeWindow(messaging)} Taking thread control would only take it from the other tool.`,
     };
   }
 

@@ -115,7 +115,7 @@ us.
 | #   | Graph request                                             | What it does                        | Called from                                                                                    |
 | --- | --------------------------------------------------------- | ----------------------------------- | ---------------------------------------------------------------------------------------------- |
 | 1   | `POST /{account-id}/messages`                             | Send a direct message               | `worker/handlers/send-meta.ts:217`                                                             |
-| 2   | `POST /{page-id}/take_thread_control`                     | Take a thread back from another app | `app/(console)/meta-actions.ts:300`                                                            |
+| 2   | `POST /{page-id}/take_thread_control`                     | Take a thread back from another app | `app/(console)/meta-actions.ts:313`                                                            |
 | 3   | `POST /{comment-id}/comments` (FB) · `/replies` (IG)      | Public reply under a comment        | `worker/handlers/send-meta.ts:152`, `worker/handlers/test-comment-permission.ts:64`            |
 | 4   | `POST /{account-id}/messages` with `recipient.comment_id` | Private reply to a commenter        | `worker/handlers/send-meta.ts:164`                                                             |
 | 5   | `POST /{comment-id}?is_hidden=` (FB) · `?hide=` (IG)      | Hide / unhide a comment             | `worker/handlers/moderate-meta-comment.ts:87`                                                  |
@@ -215,11 +215,17 @@ lists the protocol as not supported on Unified Login — so `takeThreadControl()
 asserts the connection before calling, rather than sending a request to an edge
 that does not exist on `graph.instagram.com` or means nothing for a
 system-user token. The console offers the call only where it can work:
-`canTakeControl` on the thread verdict (`lib/meta/thread.ts`), true for a
-`standby` on the Page route alone, draws the button and is what the action
-refuses on. A `standby` on the Unified Login route is answered by the
-Instagram account's default app, never by this call (`docs/PROJECT-STATE.md`
-§6.111).
+`offersThreadControl` (`lib/meta/handover.ts`) answers true for a Messenger
+thread over the Page connection alone, the thread verdict carries that as
+`canTakeControl` for the button and the action, and `takeThreadControl` asks
+the same function before it calls Graph. Instagram is left out on the Page
+route too: the path is built from `accountId(platform)`, the Instagram
+account's node for Instagram, where Meta documents Instagram's take only on
+the Page node with the customer's IGSID, and that addressing has never been
+tried. A `standby` on the Unified Login route is answered by the Instagram
+account's default app, never by this call. Nor is the button offered once the
+7-day window has closed, when taking the thread would only take it from the
+other tool (`docs/PROJECT-STATE.md` §6.111).
 
 It exists because a customer's message arriving in the webhook's `standby` array
 means another app owns that inbox and Meta will refuse a send from this one. An

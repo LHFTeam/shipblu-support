@@ -248,22 +248,68 @@ describe('metaThreadState across the two Instagram connections', () => {
     expect(state.explanation).toContain('default app');
   });
 
-  it('offers thread control only over the Page connection', () => {
-    // takeThreadControl serves the Page's edge alone. Keyed on the reason, the
-    // button appeared on Unified Login standbys and every press was a 500
-    // (docs/PROJECT-STATE.md §6.111).
+  it('offers thread control only on a Messenger thread over the Page connection', () => {
+    // takeThreadControl serves the Page's edge alone, and for Instagram it would
+    // address the account's node, which Meta does not document for this call.
+    // Keyed on the reason, the button appeared on Unified Login standbys and
+    // every press was a 500 (docs/PROJECT-STATE.md §6.111).
     expect(metaThreadState(onPage({ standby: true })).canTakeControl).toBe(true);
 
-    const unified = metaThreadState({
+    const instagram = (connection: MetaThreadInput['connection']) =>
+      metaThreadState({
+        platform: 'instagram',
+        connection,
+        inboundAccountId: IG_ACCOUNT,
+        configuredAccountId: IG_ACCOUNT,
+        standby: true,
+        inboundConnection: 'facebook_page',
+      });
+
+    // Refused on both routes a Page-labelled standby blocks, and offered on
+    // neither.
+    for (const connection of ['unified_login', 'facebook_page'] as const) {
+      const state = instagram(connection);
+      expect(state.reason).toBe('standby');
+      expect(state.canTakeControl).toBe(false);
+    }
+  });
+
+  it('does not offer thread control where a standby does not block the send', () => {
+    // The direct connection answers past the Page's handover (§6.29), so there
+    // is nothing to take.
+    const state = metaThreadState({
       platform: 'instagram',
-      connection: 'unified_login',
+      connection: 'instagram_login',
       inboundAccountId: IG_ACCOUNT,
       configuredAccountId: IG_ACCOUNT,
       standby: true,
       inboundConnection: 'facebook_page',
     });
-    expect(unified.reason).toBe('standby');
-    expect(unified.canTakeControl).toBe(false);
+
+    expect(state.canSend).toBe(true);
+    expect(state.canTakeControl).toBe(false);
+    expect(state.headline).toBeNull();
+  });
+
+  it('heads each refusal in words the chip and the notice share', () => {
+    expect(metaThreadState(onPage()).headline).toBeNull();
+    expect(metaThreadState(onPage({ standby: true })).headline).toBe('Another app owns this inbox');
+    expect(
+      metaThreadState({
+        platform: 'instagram',
+        connection: 'unified_login',
+        inboundAccountId: IG_ACCOUNT,
+        configuredAccountId: IG_ACCOUNT,
+        standby: true,
+        inboundConnection: 'facebook_page',
+      }).headline,
+    ).toBe('Another app owned this thread when the customer last wrote');
+    expect(metaThreadState(onPage({ inboundAccountId: OTHER_PAGE })).headline).toBe(
+      'Cannot reply from here',
+    );
+    expect(metaThreadState(onPage({ configuredAccountId: null })).headline).toBe(
+      'Cannot reply from here',
+    );
   });
 
   it('never offers thread control where the refusal is not thread control', () => {

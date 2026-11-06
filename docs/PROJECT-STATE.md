@@ -7761,15 +7761,26 @@ dryRun=true`, then without, gives those two theirs back from their
       on the console's error page. The same session's presses on three
       Messenger tickets (87176, 86370, 86299) worked.
 
-      The verdict now carries `canTakeControl`, true for a `standby` on the
-      Page route alone. The composer draws the button from it and the action
-      refuses on it. The button submits through `useActionForm`, so anything
-      that still throws comes back as a sentence. Nothing else is there to
-      call: Meta documents take-control for Instagram only on the Page node
-      with a Page token, and the Unified Login migration guide lists the
-      handover protocol as unsupported. The Unified Login `standby` sentence
-      no longer ends "make this app the default app", which had been done that
-      morning; it says the flag is about when the customer last wrote.
+      `offersThreadControl` (`lib/meta/handover.ts`) now says where the call
+      can work: a Messenger thread over the Page connection, and nothing else.
+      The verdict carries its answer as `canTakeControl`, which the composer
+      draws the button from and the action refuses on, and
+      `takeThreadControl` asks the same function before it calls Graph, so the
+      offer and the guard cannot drift apart again. Instagram is out on the
+      Page route as well: the request would address the Instagram account's
+      node, where Meta documents Instagram's take only on the Page node with
+      the customer's IGSID, and every `thread_control_taken` ever recorded is
+      a Messenger thread. On Unified Login nothing is there to call: the
+      migration guide lists the handover protocol as unsupported. The button
+      is also withheld, and the action refuses, once the 7-day window has
+      closed, since taking a thread nothing can be sent on would only take it
+      from the other tool. It submits through `useActionForm`, so anything
+      that still throws comes back as a sentence. The verdict also carries the
+      `headline` the header chip and the composer's notice both draw, and the
+      action's refusal is the verdict's own explanation. The Instagram
+      `standby` sentence no longer ends "make this app the default app", which
+      had been done that morning; it says the flag is about when the customer
+      last wrote.
 
       **What it leaves.** On 2026-11-06, 94 of the 98 open Instagram direct
       message tickets had a newest inbound recorded in `standby` before this
@@ -7784,8 +7795,8 @@ dryRun=true`, then without, gives those two theirs back from their
       `thread_control_taken`, needs that fact stored first. It would unblock
       nothing today, though: none of the 94 was inside 24 hours (87 were past
       seven days, 7 between), and a reply after 24 hours needs Human Agent
-      (§5.2). The composer now prints the window under a `standby` refusal so
-      the agent sees that blocker too. A customer's next message, delivered
+      (§5.2). The composer now prints the window under a `standby` refusal
+      once the seven days are gone, so the agent sees that blocker too. A customer's next message, delivered
       in `messaging`, reopens a ticket by itself.
 
 ### Tooling notes for this environment
