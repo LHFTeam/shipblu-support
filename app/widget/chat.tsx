@@ -115,6 +115,7 @@ export function WidgetChat({
     ensureSession,
     startFreshSession,
     sendIdentity,
+    hearHost,
   } = useWidgetSession({
     initialOnline,
     initialOpensAt,
@@ -238,6 +239,7 @@ export function WidgetChat({
     compose,
     sendIdentity,
     startFreshSession,
+    hearHost,
   });
 
   // --- Navigation ----------------------------------------------------------

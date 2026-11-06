@@ -1,7 +1,7 @@
 import { createHmac } from 'node:crypto';
-import { looksLikeEmail, normaliseEmail, normalisePhone } from '@/lib/auth/normalise';
 import { safeEqual } from '@/lib/auth/tokens';
 import { env } from '@/lib/env';
+import type { WidgetIdentity } from './identity-parse';
 
 /**
  * Who the page carrying the widget says its visitor is.
@@ -30,67 +30,7 @@ import { env } from '@/lib/env';
  * mismatch and silently stops being identified at all.
  */
 
-export type WidgetIdentity = {
-  name: string | null;
-  email: string | null;
-  phone: string | null;
-  /** The merchant's account number on the shipping platform, if the host knows it. */
-  accountId: string | null;
-  accountName: string | null;
-  /** Anything else the host chose to send, flattened to strings. */
-  fields: Record<string, string>;
-};
-
-/** Long enough for a real value, short enough that nobody stores a document here. */
-const MAX_VALUE = 200;
-const MAX_FIELDS = 20;
-
-export function parseIdentity(raw: unknown): WidgetIdentity | null {
-  if (!raw || typeof raw !== 'object') return null;
-  const input = raw as Record<string, unknown>;
-
-  /*
-   * `name`, or first and last joined. Both shapes because a dashboard holds the
-   * two halves separately far more often than it holds the whole — the
-   * Freshchat config this replaces sent `firstName` and `lastName`.
-   */
-  const joined = [text(input.firstName), text(input.lastName)]
-    .filter(Boolean)
-    .join(' ')
-    .trim()
-    .slice(0, MAX_VALUE);
-  const name = text(input.name) ?? (joined || null);
-
-  const rawEmail = text(input.email);
-  const email = rawEmail && looksLikeEmail(rawEmail) ? normaliseEmail(rawEmail) : null;
-
-  // Digits only, and only if there are enough of them to be a number rather
-  // than an extension somebody pasted.
-  const digits = normalisePhone(text(input.phone) ?? '');
-  const phone = digits.length >= 6 && digits.length <= 20 ? digits : null;
-
-  const accountId = identifier(input.accountId ?? input.account_id);
-  const accountName = text(input.accountName ?? input.account_name);
-
-  const identity: WidgetIdentity = {
-    name,
-    email,
-    phone,
-    accountId,
-    accountName,
-    fields: extraFields(input.meta ?? input.fields),
-  };
-
-  const empty =
-    !identity.name &&
-    !identity.email &&
-    !identity.phone &&
-    !identity.accountId &&
-    !identity.accountName &&
-    Object.keys(identity.fields).length === 0;
-
-  return empty ? null : identity;
-}
+export { parseIdentity, type WidgetIdentity } from './identity-parse';
 
 /**
  * What makes this identity *this person*, for the purpose of noticing that the
@@ -99,6 +39,11 @@ export function parseIdentity(raw: unknown): WidgetIdentity | null {
  * The account first: on a shared dashboard machine two colleagues of the same
  * merchant are the same customer for support purposes, and starting a new
  * conversation for each of them would split one account's history in two.
+ *
+ * This is the server's key, and it stays account-first. Whether the person at
+ * the browser changed since a token was vouched for — which a host page's
+ * `clear()` promises a clean slate for — is the frame's question, asked before
+ * it reopens anything, in `lib/widget/person.ts`.
  */
 export function identityKey(identity: WidgetIdentity): string | null {
   if (identity.accountId) return `account:${identity.accountId}`;
@@ -144,41 +89,4 @@ export function verifyIdentity(identity: WidgetIdentity, signature: unknown): bo
  */
 export function identitySigningEnabled(): boolean {
   return Boolean(env().WIDGET_IDENTITY_SECRET);
-}
-
-function text(value: unknown): string | null {
-  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
-  if (typeof value !== 'string') return null;
-  const trimmed = value.trim().slice(0, MAX_VALUE);
-  return trimmed || null;
-}
-
-/**
- * An account number as the platform writes it, with the punctuation a dashboard
- * might have wrapped it in removed. Not `normaliseSbid()` — that is the
- * canonical form for the `shipping_accounts` lookup, and this value is also
- * shown to an agent and compared against what we stored last time.
- */
-function identifier(value: unknown): string | null {
-  const raw = text(value);
-  if (!raw) return null;
-  const cleaned = raw.replace(/[^A-Za-z0-9_-]/g, '').slice(0, 64);
-  return cleaned || null;
-}
-
-function extraFields(value: unknown): Record<string, string> {
-  if (!value || typeof value !== 'object') return {};
-
-  const fields: Record<string, string> = {};
-  for (const [key, raw] of Object.entries(value as Record<string, unknown>)) {
-    if (Object.keys(fields).length >= MAX_FIELDS) break;
-    // A key that is not an identifier ends up in a jsonb column an agent reads
-    // and a rule can match on; keeping it to this shape means neither has to
-    // quote it.
-    if (!/^[A-Za-z][A-Za-z0-9_]{0,39}$/.test(key)) continue;
-    const flat = text(raw);
-    if (flat) fields[key] = flat;
-  }
-
-  return fields;
 }

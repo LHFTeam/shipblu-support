@@ -142,7 +142,11 @@ class FakeNode extends FakeTarget {
     get: (declared, name: string) => declared[name] ?? '',
   });
   readonly dataset: Record<string, string> = {};
-  private readonly frameWindow = { postMessage() {} };
+  /** What was posted to this node's window while it was a frame on the page. */
+  readonly received: Record<string, unknown>[] = [];
+  private readonly frameWindow = {
+    postMessage: (message: Record<string, unknown>) => void this.received.push(message),
+  };
   id = '';
   type = '';
   title = '';
@@ -154,7 +158,7 @@ class FakeNode extends FakeTarget {
   }
 
   /** What a browser gives a frame once it has been taken out of the page. */
-  get contentWindow(): { postMessage(): void } | null {
+  get contentWindow(): { postMessage(message: Record<string, unknown>): void } | null {
     return this.parentNode ? this.frameWindow : null;
   }
 
@@ -369,5 +373,108 @@ describe('destroy()', () => {
     page.window.shipbluChat!.close!();
 
     expect(page.window.scrolls).toEqual([500]);
+  });
+});
+
+/**
+ * The frame reopens a stored conversation only for the person the page says
+ * is reading (`lib/widget/person.ts`), and it hears that on `opened` and
+ * `closed`. So every one of them must carry the field — its absence means a
+ * snippet older than it — and carry what the page holds now, not what it held
+ * when the snippet loaded.
+ */
+describe('who the page says is reading', () => {
+  const visibility = (frame: FakeNode) =>
+    frame.received.filter(
+      (message) => message.type === HOST_SAYS.opened || message.type === HOST_SAYS.closed,
+    );
+
+  it('rides on every opened and closed, following identify() and clear()', async () => {
+    const source = await (await GET()).text();
+    const page = fakePage({ phone: false });
+    Object.assign(page.window, {
+      shipbluChatSettings: {
+        locale: 'en',
+        firstName: 'Nour',
+        email: 'nour@merchant.example',
+        phone: '+20 100 123 4567',
+        accountId: 4471,
+        accountName: 'Acme Trading',
+        meta: { tier: 'gold' },
+        // A host page's object can hold anything; postMessage would throw on this.
+        onUnread() {},
+      },
+    });
+
+    page.load(source);
+    const api = page.window.shipbluChat!;
+    api.open!();
+    const frame = page.body.childNodes.find((node) => node.id === 'shipblu-chat-frame')!;
+    page.frameSays(WIDGET_SAYS.hello);
+
+    const nour = { accountId: 4471, email: 'nour@merchant.example', phone: '+20 100 123 4567' };
+    expect(visibility(frame).length).toBeGreaterThanOrEqual(2);
+    for (const message of visibility(frame)) {
+      expect(message).toEqual({ source: SOURCE.host, type: HOST_SAYS.opened, person: nour });
+    }
+
+    api.identify!({ account_id: 'SB-9', email: 'omar@merchant.example', name: 'Omar' });
+    api.close!();
+    expect(visibility(frame).at(-1)).toEqual({
+      source: SOURCE.host,
+      type: HOST_SAYS.closed,
+      person: { accountId: 'SB-9', email: 'omar@merchant.example', phone: null },
+    });
+
+    api.clear!();
+    page.frameSays(WIDGET_SAYS.hello);
+    expect(visibility(frame).at(-1)).toEqual({
+      source: SOURCE.host,
+      type: HOST_SAYS.closed,
+      person: null,
+    });
+  });
+
+  /*
+   * Before 'ready' the snippet pushes no identity, so a person changed by
+   * identify() alone reached the frame only at the next toggle, and a frame
+   * deciding about a stored conversation meanwhile decided on the person
+   * named before.
+   */
+  it('tells a frame that is not ready yet at once when identify() changes the person', async () => {
+    const source = await (await GET()).text();
+    const page = fakePage({ phone: false });
+    Object.assign(page.window, { shipbluChatSettings: { email: 'nour@merchant.example' } });
+
+    page.load(source);
+    const api = page.window.shipbluChat!;
+    api.open!();
+    const frame = page.body.childNodes.find((node) => node.id === 'shipblu-chat-frame')!;
+    const before = visibility(frame).length;
+
+    api.identify!({ accountId: 4471, email: 'omar@merchant.example' });
+
+    expect(visibility(frame)).toHaveLength(before + 1);
+    expect(visibility(frame).at(-1)).toEqual({
+      source: SOURCE.host,
+      type: HOST_SAYS.opened,
+      person: { accountId: 4471, email: 'omar@merchant.example', phone: null },
+    });
+    // No identity was posted: that still waits for 'ready'.
+    expect(frame.received.some((message) => message.type === HOST_SAYS.identify)).toBe(false);
+  });
+
+  it('says nobody, rather than nothing, on a page that never named anyone', async () => {
+    const source = await (await GET()).text();
+    const page = fakePage({ phone: false });
+
+    page.load(source);
+    page.window.shipbluChat!.open!();
+    const frame = page.body.childNodes.find((node) => node.id === 'shipblu-chat-frame')!;
+    page.frameSays(WIDGET_SAYS.hello);
+
+    const answer = visibility(frame).at(-1)!;
+    expect(Object.prototype.hasOwnProperty.call(answer, 'person')).toBe(true);
+    expect(answer.person).toBeNull();
   });
 });

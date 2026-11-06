@@ -26,7 +26,20 @@ export const WIDGET_SAYS = {
   close: 'close',
 } as const;
 
-/** What the host page tells the frame. */
+/**
+ * What the host page tells the frame.
+ *
+ * `opened` and `closed` carry `person`: the identifying fields the page holds
+ * for its visitor (account id, email, phone), or null when it names nobody.
+ * The frame waits for the page's first word before it reopens a stored
+ * conversation, and reopens it only for the person it was last vouched for
+ * (`lib/widget/person.ts`). An `identify` says who is reading as well, and the
+ * snippet's `identify()` posts an `opened`/`closed` at once, so a frame that is
+ * not ready yet never decides on the person named before. A message without
+ * the property comes from a snippet older than the field and means "this page
+ * does not say", which is not the same as null. The field is wire format like
+ * the names, so it is never renamed either.
+ */
 export const HOST_SAYS = {
   opened: 'opened',
   closed: 'closed',

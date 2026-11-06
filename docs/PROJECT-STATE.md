@@ -1725,7 +1725,8 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
   stays available and is safe to re-run — a second pass recovers nothing — so
   re-run it if the parser ever learns to read a shape it currently skips. §7 has
   the figures.
-- **Unset config:** `WIDGET_ALLOWED_ORIGINS`, `WIDGET_IDENTITY_SECRET`. The
+- **Unset config:** `WIDGET_IDENTITY_SECRET`. `WIDGET_ALLOWED_ORIGINS` has
+  been set since this list was written (below). The
   email keys that were on this list are all set. `EMAIL_API_KEY` and
   `EMAIL_FROM_ADDRESS` were confirmed by the owner on 2026-10-05, since Render's
   API does not show values, and the traffic agrees: ticket #13777's reply went
@@ -1734,11 +1735,15 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
   `shipblu-support-shared` taken from the 2026-09-26 dashboard export
   (`render.yaml`).
 
-  **Both are what stands between the widget and the merchant dashboard.** Measured 2026-08-31: `https://shipblu-support.onrender.com/widget`
-  answers `content-security-policy: frame-ancestors 'self';`, so
-  `app.shipblu.com` cannot frame it at all — the launcher would open an empty
-  box. `WIDGET_ALLOWED_ORIGINS` has to name that origin before the snippet in
-  `docs/embedding-the-widget.md` does anything. `WIDGET_IDENTITY_SECRET` is the
+  **Both were what stood between the widget and the merchant dashboard.**
+  Measured 2026-08-31, `https://shipblu-support.onrender.com/widget` answered
+  `content-security-policy: frame-ancestors 'self';`. Measured 2026-11-06 it
+  answers `frame-ancestors 'self' https://app.shipblu.com
+https://app.staging.shipblu.com https://merchant.staging.shipblu.com
+https://merchant-web-production.onrender.com`. The new merchant app's
+  production domain, `https://merchant.shipblu.com`, is not on that list,
+  although its `render.yaml` sets `NEXT_PUBLIC_SUPPORT_WIDGET_URL`: the
+  launcher there opens an empty box until the origin is added. `WIDGET_IDENTITY_SECRET` is the
   softer half: without it the dashboard can still say who its visitor is and the
   agent still sees a name, an address and a phone — the claim just never gets to
   link the person to their shipping account.
@@ -7823,6 +7828,90 @@ dryRun=true`, then without, gives those two theirs back from their
       shows the two rows. Once it has run and that date has passed,
       `db/sql/012` and its test are deleted, since nothing is left for it to
       copy.
+
+112.  **The merchant dashboard's sign-out never cleared the support chat, so
+      the next person at the machine opened the last one's conversation.**
+      _2026-11-06, found from the review of ShipBlu/merchant#148 and fixed the
+      same day._ The dashboard calls `clear()` on every sign-out, as
+      `docs/embedding-the-widget.md` asks. Then, in the same React commit, the
+      gate swaps the shell for its loader, and `SupportChat`'s unmount calls
+      `destroy()` 2–7 ms later. That drops the clear in every case:
+      - a frame that had said `ready` is removed in the same task as the
+        `postMessage`, and a message queued to a frame removed in the same
+        task is never delivered;
+      - a panel not opened in that page load has no frame, so `clear()` builds
+        a hidden one that must load, resume its token over the network and
+        say `ready` before it can be told, and `destroy()` removes it first;
+      - the storage event and the 401 path would have delivered for a ready
+        frame, but `clearSupportChat()`'s own store update reaches the top
+        bar's `useSyncExternalStore` subscribers, which forces the commit
+        synchronous;
+      - every sign-out then leaves for Auth0 within tens of milliseconds;
+      - a sign-out from a page without the shell (onboarding, terms, the error
+        cards), one while `embed.js` is still downloading, and a session that
+        simply expired never reach `clear()` at all.
+
+      Measured in Chromium, with the merchant's real `SupportChat.tsx` under
+      React 19 and the widget cross-site. The visitor token survived all 12
+      sign-out variants (click, another tab's logout, a 401; panel opened or
+      not; with and without the redirect), and the in-flight case. With the
+      real `/widget`, the next person on the same merchant account opened the
+      panel onto the previous person's message. The server's reset is
+      account-first by design (`lib/widget/identity.ts`), so it never fired.
+      Another merchant was reset only after the transcript had been fetched
+      and drawn, and never if that identify request failed. The stale
+      `window.shipbluChatSettings` the other session reported was real, but
+      inert: the late script's `onload` destroyed it before it built a frame.
+
+      **The fix is in the frame, at the next open**, because that is the one
+      moment every one of those cases passes through, and a fix at sign-out
+      can only cover some of them. The snippet's `opened` and `closed` now
+      carry `person`, the identifying half of what the page holds, and
+      `identify()` sends one at once rather than waiting for `ready`. The
+      frame waits for the page's first word before it resumes a stored token,
+      and takes the decision again when the request comes back, so a page
+      that names somebody else meanwhile is drawn nothing. One function,
+      `judge()` in `lib/widget/person.ts`, decides for the resume, the mint
+      and the identity sent after them, against the token's record
+      (`shipblu.widget.person`: the account, email and phone as separate
+      SHA-256 digests, bound to the token):
+      - a page naming somebody else has the token thrown away, unasked;
+      - a page naming nobody, or saying less than the record (the email
+        before the account), has it left in storage and not reopened. It
+        reopens when the page says the rest;
+      - a page adding a field to the record is the same person, and the
+        record takes it up. Agreeing on the account alone never claims a
+        person, so colleagues of one merchant stay apart;
+      - a token with no record is thrown away for a page that names
+        somebody. That is every token from before the deploy, and each had
+        survived a sign-out, so a merchant mid-conversation starts a fresh
+        widget chat once; the ticket stays. A token minted in the same page
+        load is the exception: it belongs to whoever was reading then.
+
+      A snippet cached from before the field (up to five minutes) sends no
+      `person` and resumes as before. The check then runs on its first
+      `identify`, before the server is told anything. Same-account colleagues
+      now get separate widget contacts, which is what `clear()` always
+      promised a host page. The review of #476 found the first version
+      deleting a token it only had to set aside, relabelling a reopened token
+      with a statement heard after its request, deciding on a person
+      `identify()` had already replaced, and reading a field added in the same
+      page load as somebody else. Each case is a test in
+      `use-widget-session.test.ts`.
+
+      With the fix, through the real widget and the same harness: a
+      colleague, another merchant and a pre-deploy token each opened onto a
+      clean panel, with no `/api/widget/session` carrying the previous token.
+      The same person's reload resumed their own conversation, 472 ms after
+      the click that opened the panel. The control, run on the code before
+      the fix, showed the colleague the previous person's message.
+
+      The dashboard still calls `destroy()`, which the contract says not to,
+      and its `clear()` is still dropped. The leak no longer depends on it
+      landing. The token stays in the frame's storage until the next open,
+      where it is refused, rather than leaving at sign-out. A host-page
+      teardown that delivers a pending clear is still owed if the dashboard is
+      to stop relying on a method the contract disclaims.
 
 ### Tooling notes for this environment
 

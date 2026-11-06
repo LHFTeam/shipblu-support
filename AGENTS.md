@@ -2677,6 +2677,19 @@ deleting it, and drop the sections that genuinely do not apply.
   is what promotes a claim to a fact. `docs/embedding-the-widget.md` is the
   contract the other side implements; changing what the signature covers breaks
   a deployed integration silently, so add a second accepted form instead.
+- **The widget's frame reopens a stored conversation only for the person the
+  host page names.** The visitor token outlives the host's session, and a host's
+  `clear()` at sign-out can be lost: the merchant dashboard's never landed once
+  (`docs/PROJECT-STATE.md` §6.112). So the frame waits for the host page's word
+  on who is reading — `person` on the snippet's `opened`/`closed`, and every
+  `identify` — before it sends a stored token anywhere, and asks it again when
+  the request comes back. It throws away a token vouched for as somebody else,
+  without asking the server, and leaves one in storage for a page that names
+  nobody or says less than the record. One function decides all of it,
+  `judge()` in `lib/widget/person.ts`: a new path that resumes, mints or
+  identifies a token asks it, or it is a second answer to the same question
+  and reopens the leak. This is a finer question than the server's
+  account-first `identityKey`, which stays as it is.
 - Side conversation recipients come from a directory and are re-read
   server-side; a free-text address is checked against the requester's own
   identities and our mailbox in the action, not only in the composer.
