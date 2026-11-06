@@ -7744,6 +7744,50 @@ dryRun=true`, then without, gives those two theirs back from their
       two SHARE UPDATE EXCLUSIVE locks (on `jobs` and its TOAST table), and the
       contention case fails with 55P03 on both files.
 
+111.  **A refusal widened without its remedy: "Take thread control" threw on
+      every Instagram ticket it was offered on.** _2026-11-06, from the night
+      of the 5th._ §6.108 let a `standby` refuse a Unified Login send, and
+      that much was right. But the composer drew "Take thread control" under
+      every `standby` refusal, and `claimThreadControl` passed every `standby`
+      on to `takeThreadControl`, which serves the Facebook Page connection
+      alone and throws a plain `Error` for any other route. Both had keyed on
+      the verdict's `reason`, sound while only the Page route could produce a
+      `standby`, and #462 changed that without either noticing. Released at
+      21:04 UTC; at 22:37–22:38 UTC five presses on three Instagram tickets
+      (86324 three times, 86310, 82967) each logged
+      `Thread control belongs to the Facebook Page connection, and instagram is routed over the Unified Login connection`
+      before any request reached Meta. The action catches only `MetaApiError`,
+      so each was a 500, and the button's bare `useActionState` put the agent
+      on the console's error page. The same session's presses on three
+      Messenger tickets (87176, 86370, 86299) worked.
+
+      The verdict now carries `canTakeControl`, true for a `standby` on the
+      Page route alone. The composer draws the button from it and the action
+      refuses on it. The button submits through `useActionForm`, so anything
+      that still throws comes back as a sentence. Nothing else is there to
+      call: Meta documents take-control for Instagram only on the Page node
+      with a Page token, and the Unified Login migration guide lists the
+      handover protocol as unsupported. The Unified Login `standby` sentence
+      no longer ends "make this app the default app", which had been done that
+      morning; it says the flag is about when the customer last wrote.
+
+      **What it leaves.** On 2026-11-06, 94 of the 98 open Instagram direct
+      message tickets had a newest inbound recorded in `standby` before this
+      app became the account's default app at 10:30:24 UTC on the 5th, and
+      they still refuse. The fact is probably stale: ticket 13791 sent past
+      such a flag 20 seconds after the switch, and no Instagram `standby` has
+      arrived since. But nothing here can read the switch. The `app_roles`
+      webhook announcing it is parsed by nothing, and its only copy is
+      `webhook_events` row `f7cb5701-8aea-41e0-8b69-7cd095a8337d`, which the
+      30-day cleanup removes around 2026-12-05. Reading a `standby` older than
+      the switch as superseded, as `holdsControl` reads one older than a
+      `thread_control_taken`, needs that fact stored first. It would unblock
+      nothing today, though: none of the 94 was inside 24 hours (87 were past
+      seven days, 7 between), and a reply after 24 hours needs Human Agent
+      (§5.2). The composer now prints the window under a `standby` refusal so
+      the agent sees that blocker too. A customer's next message, delivered
+      in `messaging`, reopens a ticket by itself.
+
 ### Tooling notes for this environment
 
 Supabase and Render MCP tools work and are the fastest way to check real state —

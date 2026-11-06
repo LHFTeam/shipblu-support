@@ -159,7 +159,11 @@ export function Composer({
     ? consoleReplyNotice(conversation.channel)
     : threadBlocked
       ? metaThread?.reason === 'standby'
-        ? 'Another app owns this inbox — this ticket can be read here but not answered'
+        ? // Over Unified Login the flag is a fact about when the customer last
+          // wrote, and this app may well own the inbox now (§6.111).
+          metaThread.canTakeControl
+          ? 'Another app owns this inbox — this ticket can be read here but not answered'
+          : 'Another app owned this thread when the customer last wrote — it can be read here but not answered'
         : 'This ticket cannot be answered from here — see the message below'
       : isWhatsApp && now !== null
         ? state.isOpen
@@ -301,13 +305,27 @@ export function Composer({
               <div className="rounded-md border border-(--color-border-subtle) bg-(--color-background-surface-sunken) p-3 text-sm text-(--color-text-secondary)">
                 <p className="whitespace-pre-line">{metaThread?.explanation}</p>
                 {/*
-                  Only under the standby refusal. The other two the thread state
-                  can give — a page this deployment cannot address, an account id
-                  that is not set — are not thread control and would not be fixed
-                  by taking it; offering the button there would send an agent
-                  pressing it at a refusal that has nothing to do with handover.
+                  The clock as well, under a standby refusal, once it is not
+                  open. The notice beside the tabs gives the thread verdict
+                  precedence, rightly, but a thread this app owned would still
+                  be past its window here, and that is the blocker no thread
+                  control removes: of the 94 Instagram tickets refusing on a
+                  standby on 2026-11-06, 87 were past seven days (§6.111).
                 */}
-                {metaThread?.reason === 'standby' ? (
+                {metaThread?.reason === 'standby' && now !== null && !metaState.isOpen ? (
+                  <p className="mt-2">{describeWindow(metaState)}</p>
+                ) : null}
+                {/*
+                  Only where taking control can change the verdict, which the
+                  verdict says itself (`canTakeControl`, read by the action too).
+                  Not under the other two refusals — a page this deployment
+                  cannot address, an account id that is not set — which taking
+                  control would not fix, and not under a standby on the Unified
+                  Login route, where nothing here can take the thread: keyed on
+                  the reason alone, the button appeared on those Instagram
+                  tickets and threw on every press (§6.111).
+                */}
+                {metaThread?.canTakeControl ? (
                   <ThreadControl conversationId={conversation.id} />
                 ) : null}
               </div>

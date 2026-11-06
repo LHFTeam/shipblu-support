@@ -248,6 +248,52 @@ describe('metaThreadState across the two Instagram connections', () => {
     expect(state.explanation).toContain('default app');
   });
 
+  it('offers thread control only over the Page connection', () => {
+    // takeThreadControl serves the Page's edge alone. Keyed on the reason, the
+    // button appeared on Unified Login standbys and every press was a 500
+    // (docs/PROJECT-STATE.md §6.111).
+    expect(metaThreadState(onPage({ standby: true })).canTakeControl).toBe(true);
+
+    const unified = metaThreadState({
+      platform: 'instagram',
+      connection: 'unified_login',
+      inboundAccountId: IG_ACCOUNT,
+      configuredAccountId: IG_ACCOUNT,
+      standby: true,
+      inboundConnection: 'facebook_page',
+    });
+    expect(unified.reason).toBe('standby');
+    expect(unified.canTakeControl).toBe(false);
+  });
+
+  it('never offers thread control where the refusal is not thread control', () => {
+    expect(metaThreadState(onPage()).canTakeControl).toBe(false);
+    expect(
+      metaThreadState(onPage({ inboundAccountId: OTHER_PAGE, standby: true })).canTakeControl,
+    ).toBe(false);
+    expect(
+      metaThreadState(onPage({ configuredAccountId: null, standby: true })).canTakeControl,
+    ).toBe(false);
+  });
+
+  it('does not tell an agent on a Unified Login standby to do what may be done already', () => {
+    // The remedy the Page's sentence ends on — make this app the default app —
+    // had been done that morning when it first reached these tickets (§6.111).
+    // What the flag says is who owned the thread when the customer wrote.
+    const state = metaThreadState({
+      platform: 'instagram',
+      connection: 'unified_login',
+      inboundAccountId: IG_ACCOUNT,
+      configuredAccountId: IG_ACCOUNT,
+      standby: true,
+      inboundConnection: null,
+    });
+
+    expect(state.explanation).not.toContain('make this app');
+    expect(state.explanation).toContain('cannot be taken from here');
+    expect(state.explanation).toContain('until the customer writes again');
+  });
+
   it('does not let a standby the direct connection recorded refuse a Unified Login send', () => {
     // The direct connection's flag describes graph.instagram.com's thread,
     // which is the one place the account's app ownership has not been seen

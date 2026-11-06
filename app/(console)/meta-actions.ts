@@ -16,6 +16,7 @@ import {
 } from '@/lib/meta/moderation';
 import { describeProfileRefresh, refreshChannelProfile } from '@/lib/meta/profile-refresh';
 import { MetaApiError, takeThreadControl } from '@/lib/meta/client';
+import { CONNECTION_LABEL } from '@/lib/meta/connection';
 import { explainTakeControlError } from '@/lib/meta/errors';
 import { isCommentTicket, isMetaChannel, metaPlatformOf } from '@/lib/tickets/channel-policy';
 import { metaReplyTarget, THREAD_CONTROL_TAKEN } from '@/lib/tickets/meta-thread';
@@ -272,6 +273,22 @@ export async function claimThreadControl(
         ? 'This ticket is already answerable from here — reload the page.'
         : (thread.explanation ??
           'This ticket cannot be answered from here, and not because of thread control.'),
+    };
+  }
+
+  // The composer draws the button from this same field, so only a page drawn
+  // before it existed reaches here. Before it, a `standby` on the Unified Login
+  // route came this far and `takeThreadControl`'s route guard threw — a plain
+  // Error, not the MetaApiError caught below — and five presses on three
+  // Instagram tickets were five 500s (`docs/PROJECT-STATE.md` §6.111). The guard
+  // stays a throw, since a caller that skipped this check is a bug to see.
+  if (!thread.canTakeControl) {
+    return {
+      error:
+        `Thread control cannot be taken on this ticket: its replies go out over ` +
+        `${CONNECTION_LABEL[thread.route]}, where the thread belongs to the account's default ` +
+        `app, set in the Page's Advanced messaging settings. Reload the page to see what is ` +
+        `blocking it.`,
     };
   }
 

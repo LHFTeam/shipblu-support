@@ -397,7 +397,11 @@ export async function sendMessageRequest(
  * would be a request to an edge that does not exist there, refused with a
  * sentence naming nothing (§6.43). `metaConnection()` decides the route, so the
  * check belongs where the button does; this asserts it rather than repeating the
- * decision, because being wrong here is invisible.
+ * decision, because being wrong here is invisible. The check is `canTakeControl`
+ * on the thread verdict (`lib/meta/thread.ts`), which the composer draws the
+ * button from and `claimThreadControl` refuses on. Before it, both read the
+ * verdict's `reason` alone, and a Unified Login `standby` reached this throw on
+ * every press (§6.111).
  *
  * Unlike a send, the answer is worth reading: Graph returns `{"success": true}`
  * and this insists on it. A 200 with anything else in the body is a call that

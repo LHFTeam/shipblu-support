@@ -20,10 +20,19 @@ export function MetaWindowIndicator({
   // the countdown would contradict the composer standing beside it. Rendered
   // before the mount guard because this one is server-computed and does not
   // tick — there is no first frame to get wrong.
+  //
+  // A standby the console cannot take back (Unified Login) is worded as what it
+  // is, a fact about when the customer last wrote: this app may own the inbox
+  // now, and the chip saying otherwise is what the composer stopped saying
+  // (`docs/PROJECT-STATE.md` §6.111).
   if (thread && !thread.canSend) {
     return (
       <Badge tone="window-closed">
-        {thread.reason === 'standby' ? 'Another app owns this inbox' : 'Cannot reply from here'}
+        {thread.reason !== 'standby'
+          ? 'Cannot reply from here'
+          : thread.canTakeControl
+            ? 'Another app owns this inbox'
+            : 'Another app owned this thread'}
       </Badge>
     );
   }
