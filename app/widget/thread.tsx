@@ -29,7 +29,7 @@ import {
 } from '@/lib/widget/files';
 import type { WidgetCopy } from './copy';
 import { EmojiPicker, type PickedWith } from './emoji-picker';
-import { WIDGET_COMPOSER_BOX, WIDGET_FIELD } from './field';
+import { WIDGET_COMPOSER_BOX, WIDGET_FIELD, WIDGET_SEND_SIZE } from './field';
 import { WidgetFiles } from './message-files';
 import { SurveyCard, type SurveyResult } from './survey-card';
 import type { ArticleLink, Message } from '@/lib/widget/types';
@@ -98,15 +98,17 @@ export function WidgetThread({
   const pickerId = useId();
   /** The last prefill actually put in the box, so a repaint does not redo it. */
   const applied = useRef(0);
-  /** The prefill whose caret goes at the end of the box, in the render it causes. */
-  const [caretFor, setCaretFor] = useState(0);
+  /**
+   * Words put in the box from code with the caret at their end — a draft from
+   * the host page, or a failed send's put back — counted, and shown by the
+   * effect that sizes the box once it has measured them. A prefill also takes
+   * focus and the caret there; a failed send leaves both where they are.
+   */
+  const [reveal, setReveal] = useState({ count: 0, focus: false });
+  /** The last `reveal` the box has shown, so a re-measure does not redo it. */
+  const revealed = useRef(0);
   /** A caret waiting to sit after an emoji just put in the focused box. */
   const caretAt = useRef<number | null>(null);
-  /**
-   * Words a failed send put back, with the caret at their end, which the box
-   * scrolls to once it has measured them (the effect that sizes it).
-   */
-  const revealEnd = useRef(false);
   /**
    * Where the next emoji goes while the box is not focused — picked from the
    * keyboard, or tapped on a phone. Setting a controlled value moves an
@@ -131,12 +133,12 @@ export function WidgetThread({
    *
    * Applying it is one thing and putting the caret after it is another, because
    * the field still holds the old value when this runs: `setDraft` has not been
-   * rendered yet. An effect further down places the caret in the render this
-   * causes, once the value is in the field and the box is measured, which is
-   * also what makes the case above right — the caret lands at the end of
+   * rendered yet. The effect that sizes the box places the caret in the render
+   * this causes (`reveal`), once the value is in the field and measured, which
+   * is also what makes the case above right — the caret lands at the end of
    * whatever the visitor kept.
    *
-   * `caretFor` is state rather than a flag in a ref so that render always
+   * `reveal` is state rather than a flag in a ref so that render always
    * happens. A box that keeps the visitor's words gives `setDraft` nothing to
    * change, and a flag waiting for the draft's next render waited for the
    * visitor's next keystroke instead: that one landed where they had put the
@@ -149,7 +151,7 @@ export function WidgetThread({
 
     applied.current = prefill.seq;
     setDraft((current) => (current.trim() ? current : prefill.text));
-    setCaretFor(prefill.seq);
+    setReveal((last) => ({ count: last.count + 1, focus: true }));
   }, [prefill]);
 
   useEffect(() => {
@@ -180,14 +182,21 @@ export function WidgetThread({
    * re-measures it on the way back.
    *
    * Past the cap the box scrolls, and Chrome scrolls a textarea to its caret
-   * when somebody types, never when code sets the value. So a long message a
-   * failed send put back, its caret at the end, showed its first six lines and
-   * hid the one the caret was on — the failure above, at the cap — and is
-   * scrolled to its end here (`revealEnd`). Here rather than beside the send,
-   * because the send can fail while the visitor is reading an article, and a
-   * hidden box is not measured: the flag waits for the measure on the way back.
-   * A prefill scrolls where it places its caret, since it always arrives with
-   * the thread on screen.
+   * when somebody types, never when code sets the value or the selection. So
+   * words put in from code with the caret at their end — a prefill longer than
+   * six lines, a long message a failed send put back — opened on their first
+   * six lines and hid the one the caret was on, the failure above at the cap.
+   * Each such change is a `reveal`, and the box is scrolled to its end here,
+   * once it has measured them. Resizing alone never moves the scroll: the
+   * `auto` pass only shrinks the box, which lowers no limit on it, so a box the
+   * visitor scrolled stays where they left it.
+   *
+   * Here, because this is a layout effect: the scroll lands before the browser
+   * paints the words, where a plain effect ran after a paint about half the
+   * time a prefill opened the thread, and a long draft flashed its first six
+   * lines for a frame before jumping to its end. And because a send can fail
+   * while the visitor is reading an article: a hidden box is not measured, and
+   * its `reveal` waits for the measure on the way back.
    */
   useLayoutEffect(() => {
     const field = composer.current;
@@ -195,34 +204,15 @@ export function WidgetThread({
 
     field.style.height = 'auto';
     field.style.height = `${Math.min(field.scrollHeight, MAX_COMPOSER_PX)}px`;
-    if (revealEnd.current) {
-      revealEnd.current = false;
-      field.scrollTop = field.scrollHeight;
+
+    if (reveal.count === revealed.current) return;
+    revealed.current = reveal.count;
+    if (reveal.focus) {
+      field.focus();
+      field.setSelectionRange(field.value.length, field.value.length);
     }
-  }, [draft, active]);
-
-  /*
-   * A prefill's caret, at the end of the box (`caretFor`, above), and the box
-   * scrolled to it: Chrome scrolls a textarea to its caret when somebody
-   * types, never when code sets the value or the selection, so a draft past
-   * the cap would open on its first six lines and hide the one the caret is
-   * on.
-   *
-   * A layout effect, and declared after the one that sizes the box. Layout, so
-   * the scroll lands before the browser paints the words: as a plain effect it
-   * ran after a paint about half the time a prefill opened the thread, and a
-   * long draft flashed its first six lines for a frame before jumping to its
-   * end. After the sizing, because that sets `height: auto` first, which puts
-   * the scroll back to the top.
-   */
-  useLayoutEffect(() => {
-    const field = composer.current;
-    if (!caretFor || !field) return;
-
-    field.focus();
-    field.setSelectionRange(field.value.length, field.value.length);
     field.scrollTop = field.scrollHeight;
-  }, [caretFor]);
+  }, [draft, active, reveal]);
 
   /*
    * Out of hours, ask before the message rather than after it.
@@ -343,9 +333,13 @@ export function WidgetThread({
       // A send with files can take a minute, and the box stays open while it
       // does: words typed meanwhile follow the ones put back, never replaced
       // by them. Files cannot be added meanwhile (the clip waits for the send),
-      // so the ones put back are all there are.
-      revealEnd.current = true;
-      setDraft((typed) => withinLimit(typed.trim() ? `${body}\n${typed}` : body));
+      // so the ones put back are all there are. A send of files alone put no
+      // words back: what was typed meanwhile stands as it is, rather than after
+      // an empty first line, and keeps its own caret.
+      if (body) {
+        setDraft((typed) => withinLimit(typed.trim() ? `${body}\n${typed}` : body));
+        setReveal((last) => ({ count: last.count + 1, focus: false }));
+      }
       setFiles(attached);
       setNotice(outcome.refusal);
     }
@@ -770,12 +764,7 @@ export function WidgetThread({
             spends its width on what the visitor is typing. `!` on the box because
             the shared button's height and padding are set per size, and a second
             utility on the same property wins or loses by Tailwind's order, not
-            this one's.
-
-            As tall as the box beside it: the 44px of the buttons inside, and
-            the box's border, 1px above and below. At 44px it sat on the box's
-            bottom edge with its centre a pixel under theirs and its top two
-            under the box's; square, so it is still a round-cornered tile.
+            this one's. As tall as the box beside it (`WIDGET_SEND_SIZE`).
           */}
           <Button
             type="submit"
@@ -783,7 +772,7 @@ export function WidgetThread({
             loading={sending}
             aria-label={copy.send}
             icon={<SendIcon size={18} />}
-            className="min-h-[calc(var(--tap-min)+2px)]! min-w-[calc(var(--tap-min)+2px)] px-0!"
+            className={`${WIDGET_SEND_SIZE} px-0!`}
           />
         </div>
 
