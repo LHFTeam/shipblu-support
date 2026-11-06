@@ -7,9 +7,9 @@ helpful?" tap, in the transaction that stores its `kb_article_feedback` row. So
 every reader wrote the article's own row.
 
 That made `kb_articles.updated_at` follow readers, and #466 fixed only the date:
-`touch_updated_at()` in `db/sql/001_extensions_and_triggers.sql` now keeps the
-old date when an UPDATE changes nothing but those three, comparing
-`to_jsonb(NEW) - not_an_edit` with `OLD`, and the `kb-edit-date` repo rule holds
+`touch_updated_at()` in `db/sql/001_extensions_and_triggers.sql` kept the old
+date when an UPDATE changed nothing but those three, comparing
+`to_jsonb(NEW) - not_an_edit` with `OLD`, and the `kb-edit-date` repo rule held
 that list to the schema (`docs/PROJECT-STATE.md` §6.51). Two costs were left,
 raised in #466's review and decided then to remove:
 
@@ -47,7 +47,8 @@ Freshdesk at cutover. No `kb_article_stats` table yet.
   article it brings in, its counts carried across, zeros included. Every reader
   reads a missing row as zero.
 - **Every write that counts is in `lib/kb/stats.ts`**, with the join and the
-  zero-for-missing counts the readers share; `011` is the one-off copy.
+  zero-for-missing counts the readers share; `011` was the one-off copy, which
+  PR 2 moves into migration 0059.
   - `recordArticleView` inserts from a read of `kb_articles` where the id
     matches, `ON CONFLICT (article_id) DO UPDATE` adding one, so a view of an
     article that no longer exists inserts nothing and raises nothing, as the
@@ -74,15 +75,22 @@ Freshdesk at cutover. No `kb_article_stats` table yet.
   (`xmin`, and here `xmax` too, unchanged). The first view inserts, and the
   insert's foreign-key check takes KEY SHARE on the article for the length of
   one statement, which only a delete, or an edit changing a column under one of
-  the table's unique keys — the slug, the locale, the external id — waits on. Measured on two connections against local Postgres 16.
+  the table's unique keys — the slug, the locale, the external id — waits on.
+  Measured on two connections against local Postgres 16.
 
-## PR 1 — this one
+## PR 1 — #472, in production
 
 Adds the table, moves every writer and reader to it, and copies today's counts
-across. Into `dev`; it reaches production on the first deploy after `dev` is
-merged into `main`. #466 went first: it reached `main` through #470, and
-production's `touch_updated_at` named `not_an_edit` when read on 2026-11-06 at
-15:52 UTC.
+across. #466 went first: it reached `main` through #470, and production's
+`touch_updated_at` named `not_an_edit` when read on 2026-11-06 at 15:52 UTC.
+
+Merged into `dev` as `62eae73`, released to `main` in #475 (`31c8973`), and
+deployed on 2026-11-06: the web service by itself at 17:58 UTC, once `main`'s
+checks had passed, and the worker by hand at 18:56. The web service deploying
+itself was not the plan: `render.yaml` says `autoDeployTrigger: 'off'` for it,
+but the running service read `autoDeploy: yes`, `autoDeployTrigger: checksPass`
+that day (PROJECT-STATE §2). The worker and the four crons read `off` then, and
+were switched to `checksPass` from 19:43 that evening (#479).
 
 - **The copy** is `db/sql/011_kb_article_stats_backfill.sql`: `INSERT … SELECT`
   from `kb_articles` for every article with a non-zero count,
@@ -124,10 +132,13 @@ production's `touch_updated_at` named `not_an_edit` when read on 2026-11-06 at
 
 ### Verifying PR 1 in production
 
-Read-only, once it has deployed:
+Read-only, once it has deployed. Read on 2026-11-06 after the web deploy, and
+again at 19:04 UTC: the answers follow each step.
 
 1. `pg_get_functiondef('touch_updated_at'::regproc)` names `not_an_edit` —
-   #466's own check, owed in §6.51.
+   #466's own check, owed in §6.51. It did, and the six views the old release
+   counted between 15:53 and 17:46 left every `updated_at` where it was: the
+   newest stayed 2026-11-05 22:33.
 2. Every article with a count on the old columns has a stats row, and the
    totals are at least what was copied:
 
@@ -147,12 +158,21 @@ Read-only, once it has deployed:
    next view or vote, or the next deploy's replay of `011`, so a `missing` of
    one or two is the window, not a failed copy.
 
+   `missing` was 0, with 108 stats rows, and at 19:04 the sums were 63,848,
+   548 and 2,313 — exactly what the old columns held, the six views above
+   included, and no stats row below its article's columns.
+
 3. One article's `xmin` and `updated_at` are the same before and after it is
    opened on the help centre, and its stats row's `view_count` is one more.
    Open it signed out of the console — a private window, or the help centre's
    own host, where the console's cookie is never sent — because the view route
    counts nothing for a console session, and the `xmin` half would then pass
    with nothing written.
+
+   Still to be seen: no view or vote had reached the new release by 19:04, the
+   totals unchanged since the copy. `app/api/kb/stats.db.test.ts` holds it in
+   CI, against the real writers.
+
 4. RLS is on and not forced, so the `db/sql/001` loop covered the new table:
 
    ```sql
@@ -160,7 +180,11 @@ Read-only, once it has deployed:
    from pg_class where relname = 'kb_article_stats';  -- t, f
    ```
 
+   `t`, `f`; and no trigger on the table.
+
 ### The way back from PR 1
+
+Only until PR 2 has deployed; after that, PR 2's way back comes first.
 
 Redeploy the build before it. The table and migration 0057 stay — the old code
 never names them — and so does `011`, which only the new code's deploys replay.
@@ -188,56 +212,177 @@ would overwrite what the old build had counted by then. Rolling forward
 again afterwards, `011` leaves the existing stats rows as they are, so the old
 code's counts from the rollback are lost unless copied the other way by hand.
 
-## PR 2 — not before PR 1 is in production
+## PR 2 — this one
 
-**Waits for PR 1 to be merged into `dev`, released to `main` and deployed — on
-the web service and on the worker** — not merely for it to be in `dev`. `dev`
-reaches production in batches, so PR 2 merged into `dev` before PR 1 has
-shipped would deploy with it: the drop would run in `preDeployCommand` while the
-old web release still serves, and every view and vote it makes, and every
-article it inserts (drizzle names every column in an INSERT, `default` for the
-ones it was not given), would fail until the new release was live; and an old
-worker running `import_freshdesk_kb` would fail for as long as it stayed on old
-code. And with `011` deleted, no copy would ever run.
+**It waited for PR 1 to be merged into `dev`, released to `main` and deployed —
+on the web service and on the worker** — not merely for it to be in `dev`. `dev`
+reaches production in batches, so PR 2 merged into `dev` before PR 1 had
+shipped would have deployed with it: the drop would run in `preDeployCommand`
+while the old web release still served, and every view and vote it made, and
+every article it inserted (drizzle names every column in an INSERT, `default`
+for the ones it was not given), would fail until the new release was live; an
+old worker running `import_freshdesk_kb` would fail for as long as it stayed on
+old code. PR 1 has been on both since 18:56 UTC on 2026-11-06, and its copy is
+complete (above), so the drop loses nothing in production.
 
 It does, in one change:
 
-- drops `view_count`, `helpful_count` and `unhelpful_count` from `kbArticles`,
-  through `db/schema/kb.ts` and `npm run db:generate`;
-- deletes `db/sql/011_kb_article_stats_backfill.sql` and its test, since a replay
-  reading a dropped column fails the deploy;
+- **migration 0060 drops** `view_count`, `helpful_count` and `unhelpful_count`
+  from `kbArticles`, through `db/schema/kb.ts` and `npm run db:generate`;
+- **migration 0059 copies them first.** It is the copy `011` made, moved into a
+  migration (`drizzle-kit generate --custom`, as 0047 is) so that it runs ahead
+  of the drop in the same transaction. `011` replays after every migration, so
+  on a database taking 0057 and 0060 in one deploy the columns would be gone
+  before it ran, and every count with them. That is staging, suspended since
+  August, or any database that skipped PR 1's release. In production it inserts
+  nothing: every count was copied when PR 1 deployed, and nothing has written
+  the columns since;
+- deletes `db/sql/011_kb_article_stats_backfill.sql` and its test, since a
+  replay reading a dropped column fails the deploy. The copy's test is now
+  `db/kb-article-stats-copy.db.test.ts`, which puts the columns back in a
+  transaction it rolls back and runs 0059 and 0060 from their files;
 - puts `touch_updated_at()` back to its one-line body, `NEW.updated_at = now()`.
   That removes the whole `kb_articles` branch, including its other half, which
   keeps the date on an UPDATE that changes nothing at all. Every comment and
-  test that relies on that half changes with it: §6.59, `seed-console-handbook.ts`
-  and `normalise-kb-formatting.ts` and its test (which use `xmin` already),
+  test that relies on that half changes with it: §6.59,
+  `seed-console-handbook.ts` and `normalise-kb-formatting.ts` and its test
+  (which use `xmin` already),
   `db/sql/touch-updated-at.db.test.ts`'s `kb_articles` cases, and the
   `AdminArticleRow.updatedAt` comment in `lib/kb/admin.ts`;
+- adds `worker/handlers/seed-console-handbook.db.test.ts`. With that half gone,
+  the seed's own comparison is all that keeps a re-run from moving every
+  handbook article's date, and CI's step counts articles and versions, which a
+  structural re-assert changes neither of. The test reads `xmin`;
 - deletes `scripts/ci/rules/kb-edit-date.mjs`, its test and its entry in `RULES`;
 - drops the destructuring that leaves the three columns out of
   `getArticleForEdit`'s select, and with it the `Pick` that `EditableArticle`
-  takes from it.
+  takes from it;
+- adds `db/runbooks/kb-article-counters-restore.sql` and its test, the way back
+  (below);
+- and changes the comments that described the old columns, or the exception, as
+  still there.
 
 **Its own deploy window.** PR 1's code still names the three columns in every
 INSERT into `kb_articles` — `saveArticle`'s for a new article, the Freshdesk
 import's and `seed_console_handbook`'s — because drizzle names every column,
 `default` for the ones it was not given. No release can stop doing that before
 the one that drops them: CI's drift check refuses a schema that leaves out a
-column the database still has. So PR 2 deploys the **worker first**, whose code
-names none of the three and works against the table before the drop as after
-it, and the web service second, whose `preDeployCommand` drops them. For the
-length of that deploy the old web release still counts views and votes and
-draws every page, and fails only on creating a new article in the console,
-which the editor saves again once the new release is live.
+column the database still has. The web service's `preDeployCommand` copies
+(0059) and drops (0060), and PR 2's worker names none of the three, so it works
+against the table before the drop as after it. For the length of the web
+service's deploy the old web release still counts views and votes and draws
+every page — every read in PR 1's code names its columns, and none of
+the three — and fails only on creating a new article in the console, which the
+editor saves again once the new release is live.
 
-`ALTER TABLE … DROP COLUMN` takes ACCESS EXCLUSIVE on `kb_articles`, briefly,
-behind every open reader, under the same ten-second `lock_timeout`.
+Once 0060 has committed, that lasts until a deploy succeeds, not only for the
+length of this one. Should the replay of `db/sql` fail after it, or the new
+release fail its health check, Render keeps the old release serving. The way
+out is to deploy the same commit again: its migrate finds 0060 applied and only
+replays `db/sql`. The other way out is the runbook below, which gives the old
+release its columns back. Redeploying PR 1's build without the runbook fails
+its own preDeploy, on `011`.
+
+Nothing orders the worker before the drop any more. Every production service
+deploys itself once the checks on `main` pass (PROJECT-STATE §2, as #479 records
+it), all six starting together. On `eb69c8c` the worker went live at 20:04:00,
+the second the web service's `preDeployCommand` began to migrate. So the old
+worker may still be running when the columns go. Its only writes that name them
+are the INSERTs of `import_freshdesk_kb` and `seed_console_handbook`, both run
+by hand and on no schedule. Run neither from the release merge until the worker
+is on this build (`list_deploys`, or `/api/health`'s commit). No cron touches
+`kb_articles`.
+
+The trigger goes back to the plain stamp in the same `preDeployCommand`, the
+replay of `db/sql/001` after the migrations. From then on an UPDATE of an
+article that changes nothing moves its date, as on every other table: a console
+save with nothing changed, a restore of a version identical to the current
+text, or an `import_freshdesk_kb` re-run that finds an article as it was. That
+is the trade the one-line body makes; the writers that must not move it compare
+first (§6.59), as `seed_console_handbook` and `normalise_kb_formatting` do.
+
+`ALTER TABLE … DROP COLUMN` takes ACCESS EXCLUSIVE on `kb_articles` and writes
+no row: a catalog change, held until the migrations' transaction commits. It
+waits behind every open reader, up to the same ten-second `lock_timeout`, and
+while it waits, every new read of the table queues behind it, the help centre's
+pages included. A long transaction open on `kb_articles` is worth finding before
+the merge (PROJECT-STATE §5.5's `pg_stat_activity` query). 0059's copy before it
+reads the table under ACCESS SHARE and, in production, inserts nothing.
+
+### Verifying PR 2 in production
+
+Read-only, once the web service has deployed it:
+
+1. 0059 and 0060 are the two newest rows Drizzle recorded:
+
+   ```sql
+   select created_at from drizzle.__drizzle_migrations
+   order by created_at desc limit 2;  -- 1793998971121, 1793998969537
+   ```
+
+2. The columns are gone, and the trigger is the plain stamp:
+
+   ```sql
+   select column_name from information_schema.columns
+   where table_schema = 'public' and table_name = 'kb_articles'
+     and column_name in ('view_count', 'helpful_count', 'unhelpful_count');
+   -- no rows
+   select pg_get_functiondef('touch_updated_at'::regproc) like '%not_an_edit%';
+   -- f
+   ```
+
+3. `kb_article_stats` still holds 108 rows or more, and their sums are at least
+   63,848, 548 and 2,313.
+4. One view, opened signed out as in PR 1's step 3, leaves the article's `xmin`
+   and `updated_at` where they were and adds one to its stats row — the check
+   PR 1 could not complete, if nobody has read an article since.
+
+Record the answers in PROJECT-STATE §6.51, and put §6.51 and §6.59 into the
+present tense there.
 
 ### The way back from PR 2
 
-The column drop cannot be undone by redeploying PR 1's build alone: that build's
-inserts name the three columns, and its replay of `011` reads them. Restore the
-columns first — a migration adding them back as `integer NOT NULL DEFAULT 0` —
-and then redeploy. Nothing is lost: the counts are in `kb_article_stats`, which
-PR 1's code reads, and `011` finds every restored column zero and copies
-nothing.
+`db/runbooks/kb-article-counters-restore.sql`, run by hand on the session
+connection, never the transaction pooler:
+
+```bash
+psql "$DATABASE_URL_SESSION" -v ON_ERROR_STOP=1 -f db/runbooks/kb-article-counters-restore.sql
+```
+
+In one transaction, it puts the three columns back as `integer NOT NULL DEFAULT
+0` and deletes 0060's row from `drizzle.__drizzle_migrations`. It refuses if a
+migration newer than 0060 has been applied, and a second run refuses too. Then
+put the web service back on the build it ran before this release (`eb69c8c` as
+this is written; record the exact commit at the release). Either revert the
+release through `dev` and `main`, which every service then deploys by itself, or
+deploy that build to the web service by hand with its auto-deploy turned off
+first. Done by hand, the worker and the crons can stay on PR 2, whose code names
+none of the three. Nothing is lost: the counts are in `kb_article_stats`, which
+the earlier build's code reads, and its replay of `011` finds each restored
+column zero and copies nothing. 0059 stays recorded, with nothing left to
+copy.
+
+Deleting 0060's row is what lets the release roll forward again. Drizzle
+applies only migrations newer than the newest row, so with the row left in
+place a later deploy of PR 2 would skip 0060 and keep the columns for good.
+With it gone, that deploy drops them again. After a hand deploy, the next
+commit on `main` that passes its checks does exactly that, unless the
+auto-deploy is still off or the release has been reverted.
+
+Driven end to end on a scratch Postgres 16 with each build's own `db:migrate`:
+
+1. PR 1;
+2. PR 2: the columns gone, the one-line body;
+3. the runbook;
+4. PR 1 again: the columns there, #466's body back, no migration applied;
+5. PR 2 again: the columns gone and the one-line body back.
+
+The runbook's test runs it and then 0060 again on every CI run. It fails once a
+migration follows 0060, and the PR adding that migration deletes the runbook
+and writes the way back from there.
+
+Going back past PR 1 starts here too. With #473 on `main` after PR 1, it is a
+revert of PR 1, not a redeploy of the build before it, which would take #473
+out as well. PR 1's way back above says what that revert costs: run its
+copy-back UPDATE once the build that reads `kb_article_stats` has put #466's
+trigger back, and before the revert deploys.

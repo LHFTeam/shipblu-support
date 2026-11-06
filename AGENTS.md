@@ -191,9 +191,9 @@ proxy.ts         Next 16 middleware: host routing + the signed-out redirect
 ```
 
 **A rollback runbook in `db/runbooks/` lasts until the next migration.** It
-undoes a migration by renaming back and deleting that migration's row, and a
-later deploy applies the migration again only while it is the newest one
-applied. So its test reads `db/migrations/meta/_journal.json` and fails as soon
+undoes a migration (renaming back, or adding back what the migration dropped)
+and deletes that migration's row, and a later deploy applies the migration
+again only while it is the newest one applied. So its test reads `db/migrations/meta/_journal.json` and fails as soon
 as anything follows that migration, with a sentence saying what to do: the PR
 adding the new migration deletes the runbook and its test, and writes the way
 back from the new state into the stage's plan.
@@ -284,9 +284,11 @@ migration of its own, made by `npx drizzle-kit generate --custom`. That writes
 an empty file and a snapshot copied from the last one, so the drift check
 regenerates nothing; the file is filled in by hand before anything applies it,
 and is guarded so a database that does not need it passes straight through.
-`0047_free_old_pkey_names` is the one so far: a fresh database had to give up
-the old `ticket_categories_pkey` name before `0048` created the new table.
-Once applied it is as fixed as any other migration.
+There are two so far. `0047_free_old_pkey_names`: a fresh database had to give
+up the old `ticket_categories_pkey` name before `0048` created the new table.
+`0059_kb_article_stats_copy`: a database taking `0057` and `0060` in one deploy
+copies the knowledge base's reader counters into `kb_article_stats` before
+`0060` drops them. Once applied, each is as fixed as any other migration.
 
 ## Conventions
 

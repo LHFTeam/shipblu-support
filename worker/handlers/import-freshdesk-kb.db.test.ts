@@ -335,19 +335,6 @@ describe('importFreshdeskKb', () => {
       visibility: 'public',
     });
 
-    // The counts went to `kb_article_stats` alone: the columns of the same
-    // names still on the article are what it replaced, and nothing counts into
-    // them.
-    const onTheRow = await db
-      .select({
-        viewCount: kbArticles.viewCount,
-        helpfulCount: kbArticles.helpfulCount,
-        unhelpfulCount: kbArticles.unhelpfulCount,
-      })
-      .from(kbArticles)
-      .where(eq(kbArticles.id, where.id));
-    expect(onTheRow).toEqual([{ viewCount: 0, helpfulCount: 0, unhelpfulCount: 0 }]);
-
     // Three legacy URL shapes per primary-language article, none for the translation.
     const redirects = await db
       .select({ fromPath: kbRedirects.fromPath, articleId: kbRedirects.articleId })

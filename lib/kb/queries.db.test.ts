@@ -95,9 +95,9 @@ describe('the edit date', () => {
   it('is the publication date for an article only ever read', async () => {
     const folderId = await folder('en', 'shipping');
     const id = await article(folderId, 'pickups');
-    // `xmin` beside the date: `touch_updated_at` still keeps the date on an
-    // UPDATE of the old counters, so the date alone would not show a view that
-    // had started writing the article again.
+    // `xmin` beside the date: the transaction that wrote the row's current
+    // version, which proves no write at all rather than only no write the
+    // trigger dated.
     const written = async () =>
       (
         await db

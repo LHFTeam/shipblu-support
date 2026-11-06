@@ -155,10 +155,11 @@ asset and is shown on the English page too.
 - ~~**`updated_at` itself still moves on every view.**~~ **Done, in its own
   PR.** The help centre no longer reads it (§3), and the console's article list,
   which shows it and sorts by it, would have followed readers once the help
-  centre was live. `touch_updated_at()` in `db/sql/001` now keeps the date on
-  `kb_articles` when an UPDATE changes only `view_count`, `helpful_count` or
-  `unhelpful_count`. It is a change to the function body alone, so it locks no
-  table and every replay of `db/sql` installs it (PROJECT-STATE §6.51).
+  centre was live. #466 made `touch_updated_at()` in `db/sql/001` keep the date
+  on `kb_articles` when an UPDATE changed only `view_count`, `helpful_count` or
+  `unhelpful_count`. `plans/kb-article-stats.md` then moved the counters to
+  `kb_article_stats` and dropped them, and put the trigger back to its plain
+  stamp, so a reader no longer writes the article at all (PROJECT-STATE §6.51).
 - **An audience on the article**, if the design's chips are wanted beyond what
   the two categories already give.
 - **The addresses** of the merchant dashboard, the status page and the terms and

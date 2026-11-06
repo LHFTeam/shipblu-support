@@ -414,6 +414,20 @@
       "when": 1793986730040,
       "tag": "0058_meta_app_role_events",
       "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1793998969537,
+      "tag": "0059_kb_article_stats_copy",
+      "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "7",
+      "when": 1793998971121,
+      "tag": "0060_kb_articles_drop_counters",
+      "breakpoints": true
     }
   ]
 }

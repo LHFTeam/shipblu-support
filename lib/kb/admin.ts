@@ -1,15 +1,4 @@
-import {
-  and,
-  asc,
-  desc,
-  eq,
-  getTableColumns,
-  ne,
-  notInArray,
-  or,
-  sql,
-  type SQL,
-} from 'drizzle-orm';
+import { and, asc, desc, eq, ne, notInArray, or, sql, type SQL } from 'drizzle-orm';
 import { db } from '@/db/client';
 import {
   agents,
@@ -91,15 +80,16 @@ export type AdminArticleRow = {
   folderName: string;
   categoryName: string;
   /**
-   * When anybody last changed the row — the title, the body, the status, the
-   * folder, the tags, the translation link — and never when somebody read it
-   * or voted on it, which counts in `kb_article_stats` and leaves the row
-   * alone, or saved it unchanged (`touch_updated_at`, PROJECT-STATE §6.51).
-   * Not the help centre's `editedAt`, which moves when a version is cut or the
-   * article is published and for nothing else, because the list is where the
-   * team looks for what it last touched. Neither date contains the other: a
-   * folder move moves only this one, and restoring a version identical to the
-   * current text cuts a version row, moving only `editedAt`.
+   * When anybody last wrote the row — the title, the body, the status, the
+   * folder, the tags, the translation link, or a save that changed nothing,
+   * since `touch_updated_at` stamps every UPDATE (PROJECT-STATE §6.59) — and
+   * never when somebody read it or voted on it, which counts in
+   * `kb_article_stats` and leaves the row alone (§6.51). Not the help centre's
+   * `editedAt`, which moves when a version is cut or the article is published
+   * and for nothing else, because the list is where the team looks for what it
+   * last touched. This date moves whenever that one does, since every version
+   * cut and every publication writes the row as well, and on every other write
+   * besides, a folder move or a tag edit among them.
    */
   updatedAt: Date;
   viewCount: number;
@@ -147,21 +137,7 @@ export async function listArticlesForAdmin(
     .limit(200);
 }
 
-/**
- * Every column of an article but the three counters `kb_article_stats` took
- * over. They are still on the row until the release after this one drops them
- * (`plans/kb-article-stats.md`), and nothing counts into them any more, so a
- * read that carried them would hand the editor numbers frozen at the move.
- */
-const {
-  viewCount: _views,
-  helpfulCount: _helpful,
-  unhelpfulCount: _unhelpful,
-  ...articleColumns
-} = getTableColumns(kbArticles);
-
-/** The row as `articleColumns` selects it, so the type follows the destructure above. */
-export type EditableArticle = Pick<typeof kbArticles.$inferSelect, keyof typeof articleColumns> & {
+export type EditableArticle = typeof kbArticles.$inferSelect & {
   categoryId: string;
   /** The floor in force, folder included — what the editor shows and re-saves. */
   effectiveMinRole: AgentRole | null;
@@ -192,7 +168,7 @@ export async function getArticleForEdit(
 ): Promise<EditableArticle | null> {
   const rows = await db
     .select({
-      article: articleColumns,
+      article: kbArticles,
       categoryId: kbFolders.categoryId,
       effectiveMinRole: effectiveFloor,
       effectiveVisibility,

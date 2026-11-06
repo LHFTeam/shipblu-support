@@ -4727,16 +4727,19 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
     does not normalise it fails the build.
 
 51. ~~**`kb_articles.updated_at` is not an edit date — every page view moves
-    it.**~~ **Fixed by #466, which is in production: on 2026-11-06 at 15:52 UTC
-    `pg_get_functiondef` of `touch_updated_at` named `not_an_edit`.** The view
-    counts did not move between 15:14 and 15:53 that day, so that a view leaves
-    the date where it was is still to be seen there. The counters then moved off
-    the row with the first half of `plans/kb-article-stats.md`, which reaches
-    production on the first deploy after `dev` is next merged into `main`: once
-    it has, record here that every article with a count on the old columns has a
-    `kb_article_stats` row, and that one view left an article's `xmin` and
-    `updated_at` where they were (the plan has the queries). The history below
-    is why. _2026-09-03._
+    it.**~~ **Fixed by #466, and then by moving the counters off the row: the
+    first half of `plans/kb-article-stats.md` (#472) has been in production on
+    the web service and the worker since 2026-11-06. The second drops the old
+    columns and is not deployed yet; the plan says what to read once it is.**
+    On 2026-11-06 at 15:52 UTC `pg_get_functiondef` of `touch_updated_at` named
+    `not_an_edit`, and the six views the old release counted between then and
+    17:46 left every `updated_at` where it was. Once #472 had deployed, every
+    article with a count had a `kb_article_stats` row, and at 19:04 their
+    counters summed to exactly what the old columns held (63,848 views, 548
+    helpful, 2,313 unhelpful). They had not moved by 21:02, so no view had
+    reached the new release, and that one leaves an article's `xmin` where it
+    was is still to be seen in production; `app/api/kb/stats.db.test.ts` holds
+    it in CI. The history below is why. _2026-09-03._
     `recordArticleView` increments `view_count` on the
     article row, and `touch_updated_at` fires on any update of a table with that
     column, so a read writes the timestamp. The article page renders it as
@@ -4750,10 +4753,10 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
     handful that read later are the ones somebody happened to open.
 
     The help centre took the first way out in #460: every date a customer sees
-    is `editedAt` in `lib/kb/queries.ts`, read from `kb_article_versions`. The
-    column itself is fixed in the trigger. `touch_updated_at()` in
-    `db/sql/001_extensions_and_triggers.sql` now keeps the old date on
-    `kb_articles` when an UPDATE changes nothing but `view_count`,
+    is `editedAt` in `lib/kb/queries.ts`, read from `kb_article_versions`. #466
+    then fixed the column in the trigger. `touch_updated_at()` in
+    `db/sql/001_extensions_and_triggers.sql` kept the old date on
+    `kb_articles` when an UPDATE changed nothing but `view_count`,
     `helpful_count` and `unhelpful_count`, comparing the whole row minus those
     three, `updated_at` and the generated `search_vector` (which reads null in
     a BEFORE trigger) as jsonb, so a column added later counts as an edit by
@@ -4763,12 +4766,12 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
     installs it. Pointing the trigger at another function would lock the
     table: `DROP TRIGGER` takes ACCESS EXCLUSIVE, which any open reader holds
     off (§6.15's deploy failures), and `CREATE OR REPLACE TRIGGER` takes SHARE
-    ROW EXCLUSIVE, which every open write holds off — each view and vote is
+    ROW EXCLUSIVE, which every open write holds off — each view and vote was
     one — and which then holds the table's writes off until the whole of
-    `db/sql/001` commits. `db/sql/touch-updated-at.db.test.ts` holds both
-    halves. So `/kb`, which shows the column and sorts by it, now orders by the
+    `db/sql/001` commits. `db/sql/touch-updated-at.db.test.ts` held both
+    halves. So `/kb`, which shows the column and sorts by it, ordered by the
     last change anybody made — a metadata edit included, which is why the help
-    centre still reads `editedAt` instead.
+    centre reads `editedAt` instead.
 
     The existing values were left as they are. On 2026-11-05, 39 of the 112
     articles had an `updated_at` newer than their last version and their
@@ -4786,13 +4789,17 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
     comparison reading the row twice more — and took the row lock a console
     save waits on. `view_count`, `helpful_count` and `unhelpful_count` now live
     in `kb_article_stats`, one row per article that no console edit touches
-    (`lib/kb/stats.ts`), and `db/sql/011_kb_article_stats_backfill.sql` copies
-    what each article had (108 of 112 in production, 63,842 views). So "each
-    view and vote is one" open write above no longer holds. The old columns,
-    `touch_updated_at`'s exception for them and the `kb-edit-date` rule stay
-    for the old release's writes during a deploy, and go together in the
-    plan's second half, once the first is in production on the web service
-    and the worker.
+    (`lib/kb/stats.ts`), and `db/sql/011_kb_article_stats_backfill.sql` copied
+    what each article had (108 of 112 in production, 63,848 views by the time
+    it ran). The old columns, `touch_updated_at`'s exception for them and the
+    `kb-edit-date` rule stayed for the old release's writes during that deploy.
+    The plan's second half removes them together, with `011`, whose copy moves
+    into migration 0059 ahead of 0060's drop, for a database that takes both in
+    one deploy. Once it has deployed, the function is back to its one-line body,
+    so `kb_articles` stamps an UPDATE that changes nothing like every other
+    table (§6.59), and an article's date moves only when somebody writes the
+    row — a save that changed nothing included — and never when somebody reads
+    it.
 
 52. **`current_date` in a page query is the database's date, and the database is
     UTC.** _2026-09-04._ `/reports/categories` filtered its rollups with
@@ -4941,10 +4948,14 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
     confusion a job moving it for nothing deepens. An idempotent writer has to
     compare before it writes, field by field.
 
-    Since §6.51's fix `kb_articles` is the one exception: there the trigger
-    keeps the date on an UPDATE that changes nothing, or nothing but a
-    reader's counter. Every other table still stamps a no-op, `kb_folders` and
-    `canned_responses` included, so the rule above stands for writers.
+    From #466 until its reader counters are dropped by the second half of
+    `plans/kb-article-stats.md` (§6.51), `kb_articles` is the one exception:
+    there the trigger keeps the date on an UPDATE that changes nothing, or
+    nothing but a reader's counter. Once that has deployed, the trigger is the
+    plain stamp on every table again, `kb_articles` included, so the rule
+    above stands for every writer, `seed_console_handbook` and
+    `normalise_kb_formatting` among them, and
+    `db/sql/touch-updated-at.db.test.ts` holds the trigger to it.
 
     The measurement matters as much as the fix. The job's own tally could not
     have caught this — it was reporting the truth — and neither could
