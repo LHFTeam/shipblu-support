@@ -766,7 +766,13 @@ opens the ticket under the replier, and the root, when it arrives, makes its
 author the requester, and its first line the subject, with a
 `requester_changed` event (`adoptRootAuthor` in `ingest-meta.ts`). A later
 reply never moves it, because its author is somebody under the customer's
-comment. The sender judges the message
+comment. What Jev read off the replier's words before the root arrived stays
+on the ticket but stops counting as the customer's: neither classifier counts
+a run on a message by somebody who is not the requester now as having judged
+or settled the ticket, and each re-checks the requester under its row lock,
+so the root's own answer may lower the priority the reply raised and settles
+the category; and the router waits for the root before routing on Jev's
+reading of a reply (**Routing by category**). The sender judges the message
 the lifecycle hands it by id, never the newest inbound row, which after a
 batch retry is a passer-by's reply stored before the requester's older comment. `pickRule` takes the stored channel and
 external id and reads a comment filed on its platform's channel as its comment
@@ -1922,6 +1928,33 @@ README says why it is a setting and not a rule. The rules:
   caller the job took over may only have stalled, and on waking asks the claim
   alone — so no rule runs, nobody is assigned and no reply goes, where finishing
   from the stored row ran a category's rules on a deleted ticket.
+- **On a comment thread a reply opened, Jev's category waits for the root**
+  (`categoryStanding` in `lib/routing/decide.ts`, read under the ticket's lock
+  by `categorySource`). Meta delivers a thread in no order, so a passer-by's
+  reply can open the ticket under the passer-by, and the customer's comment,
+  arriving later, makes its author the requester (`adoptRootAuthor`); Jev
+  answers in seconds and a decision is made once, so routing on the reply's
+  words sent the customer's ticket to whichever team a stranger's words named.
+  Before the window's end, a decision that would read a category Jev wrote
+  answers `waiting` — the row moves to `holding` and nothing else is written —
+  while the routing row's message is a reply comment and no root comment is
+  stored, or while every answer of Jev's that chose the category was about
+  somebody who is not the requester now. Which message an answer was about is
+  read off its event's `messageId` and off the live `applied` run, because an
+  answer agreeing with the category the ticket carries writes no event. To the
+  category's writer `waiting` is the router's pass still to come
+  (`routerDecidedOn`), so it runs none of its own. At the window's end a reply
+  whose root never came — one under the Page's own comment, which ingest never
+  stores — routes as any ticket does, and a category read off somebody who is
+  not the requester is set aside: `fallback`, the ticket stays in its group, no
+  pass and no policy for it, the `routed` event naming it under `setAside`, and
+  the label left on the ticket for a person or the customer's own next answer
+  to replace. A person's, a rule's or a form's category routes at once,
+  whatever the thread's order. What it costs is the window's length before a
+  ticket a reply opened is assigned; a root arriving after the window's end
+  only relabels; and while the ticket waits another writer's `on_update` pass
+  meets a rule keyed on the replier's category as on any held ticket (no
+  active rule is keyed on the category, 2026-11-06).
 - **The creation pass is `on_create` rules, `applySlaOnCreate`, then
   `beginRouting`, and it stops on `routed`.** After the rules, so a rule gets
   the first word: its stamp has ended the hold, or its `set_category` is routed
@@ -2076,8 +2109,13 @@ level, not an evidence grade, and one ticket in the archive had a priority set
 by hand. What it may not do is overrule anybody: `lib/priority-ai/decide.ts` is
 the only place that decides whether an answer may be written, and its rules are
 tests. A priority set by a person, a rule, a form default or an agent opening
-the ticket is never touched; only the answer to the customer's opening message
-may lower a ticket, and later ones only raise; and every answer, applied or not,
+the ticket is never touched; only the answer to the requester's opening message
+may lower a ticket, and later ones only raise — the requester's as they are now,
+so a message somebody else wrote is never the opening and its run never judged
+it, on every channel (a passer-by's reply that opened a comment thread before
+its root, a colleague copied on an email), and the job asks `skipReason` again
+under its row lock with the requester and the message's author read there; and
+every answer, applied or not,
 is a row in `ai_priority_runs` with its full distribution, because those rows
 are the only labels priority has. A new writer of `conversations.priority`
 writes the column and its `priority_changed` event in one transaction, stamps

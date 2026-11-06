@@ -1,19 +1,30 @@
 import { asc, eq, inArray, sql } from 'drizzle-orm';
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { db } from '@/db/client';
 import {
   agents,
+  aiCategoryRuns,
+  aiPriorityRuns,
   channels,
   contactIdentities,
   contacts,
   conversationEvents,
   conversations,
+  groupMembers,
   groups,
   jobs,
   messages,
+  routingDecisions,
   slaPolicies,
+  ticketCategories,
   ticketStatuses,
 } from '@/db/schema';
+import { classifyMessageCategory } from '@/lib/category-ai/run';
+import { forgetCategoryAiSettings } from '@/lib/category-ai/settings';
+import { resetEnvCache } from '@/lib/env';
+import { classifyMessagePriority } from '@/lib/priority-ai/run';
+import { settleRouting } from '@/lib/routing/apply';
+import { stubFetch } from '@/lib/testing/fetch';
 import type {
   NormalisedComment,
   NormalisedDirectMessage,
@@ -1031,5 +1042,297 @@ describe('Meta ingest, once rolling back 1.2 has moved comments back', () => {
       createdConversation: false,
     });
     expect(await conversation(root.conversationId)).toMatchObject({ channel: 'facebook' });
+  });
+});
+
+/**
+ * The thread a passer-by's reply opened, driven through the real ingest, both
+ * of Jev's classifiers (TypeSafe answered by the test) and the router, on a
+ * Facebook Page routing by category — the state the Page and Instagram rows
+ * are about to be switched to. Each classifier and the router has its own
+ * tests of the rule it follows; these are the three together, in the order
+ * production would run them: the reply stored and judged, then the root.
+ */
+describe('a reply-first comment thread, through Jev and the router', () => {
+  const BOB = '9988776655';
+  const BASE = 'https://typesafe.test';
+
+  beforeEach(async () => {
+    vi.stubEnv('TYPESAFE_API_KEY', 'test-key');
+    vi.stubEnv('PRIORITY_AI', 'apply');
+    resetEnvCache();
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    await db.execute(sql`
+      insert into category_ai_settings (id, mode, min_probability, routing_window_minutes)
+      values (1, 'apply', 0.6, 5)
+      on conflict (id) do update set mode = 'apply', min_probability = 0.6`);
+    forgetCategoryAiSettings();
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+    resetEnvCache();
+    forgetCategoryAiSettings();
+  });
+
+  /** Customer Care on the Page's row, and the two teams its categories route to. */
+  async function page() {
+    const team = async (name: string, agentName: string, email: string) => {
+      const [agent] = await db
+        .insert(agents)
+        .values({ name: agentName, email, presence: 'online', lastSeenAt: new Date() })
+        .returning({ id: agents.id });
+      const [group] = await db
+        .insert(groups)
+        .values({ name, assignmentStrategy: 'round_robin', assignWithinHoursOnly: false })
+        .returning({ id: groups.id });
+      await db.insert(groupMembers).values({ groupId: group!.id, agentId: agent!.id });
+      return { agent: agent!.id, group: group!.id };
+    };
+    const care = await team('Customer Care', 'Hana', 'hana@shipblu.test');
+    const sales = await team('Sales', 'Samir', 'samir@shipblu.test');
+    const merchants = await team('Merchant Care', 'Mona', 'mona@shipblu.test');
+    for (const [key, group] of [
+      ['sales', sales.group],
+      ['merchant_support', merchants.group],
+    ] as const) {
+      await db
+        .update(ticketCategories)
+        .set({ routeGroupId: group })
+        .where(eq(ticketCategories.key, key));
+    }
+    await db.insert(channels).values({
+      type: 'facebook',
+      name: 'Facebook Page',
+      config: {},
+      defaultGroupId: care.group,
+      routingMode: 'category',
+    });
+    return { care, sales, merchants };
+  }
+
+  /** Jev answering both questions at once; each classifier reads its own. */
+  function jev(category: string, priority: string, probability = 0.9) {
+    return stubFetch(() =>
+      Response.json({
+        model: 'jev-1.13.0',
+        answers: {
+          ticket_category: {
+            type: 'choice',
+            choice: category,
+            probabilities: { [category]: probability },
+            confidence: 0.8,
+          },
+          priority: {
+            type: 'choice',
+            choice: priority,
+            probabilities: { [priority]: probability },
+            confidence: 0.8,
+          },
+        },
+        usage: { input_tokens: 400 },
+      }),
+    );
+  }
+
+  /** Both classifiers on one message, as the two jobs it queued would. */
+  async function judged(messageId: string) {
+    return {
+      priority: await classifyMessagePriority(messageId, { baseUrl: BASE }),
+      category: await classifyMessageCategory(messageId, { baseUrl: BASE }),
+    };
+  }
+
+  async function ticketOf(conversationId: string) {
+    const [row] = await db
+      .select({
+        requesterContactId: conversations.requesterContactId,
+        priority: conversations.priority,
+        groupId: conversations.groupId,
+        assigneeAgentId: conversations.assigneeAgentId,
+        categoryKey: ticketCategories.key,
+      })
+      .from(conversations)
+      .leftJoin(ticketCategories, eq(ticketCategories.id, conversations.categoryId))
+      .where(eq(conversations.id, conversationId));
+    return row!;
+  }
+
+  async function routing(conversationId: string) {
+    const [row] = await db
+      .select({ stage: routingDecisions.stage, outcome: routingDecisions.outcome })
+      .from(routingDecisions)
+      .where(eq(routingDecisions.conversationId, conversationId));
+    return row!;
+  }
+
+  async function contactOf(identifier: string) {
+    const [row] = await db
+      .select({ id: contactIdentities.contactId })
+      .from(contactIdentities)
+      .where(eq(contactIdentities.identifier, identifier));
+    return row!.id;
+  }
+
+  /** Bob's "scammers" reply, stored before Amira's comment, judged urgent and sales. */
+  async function bobFirst() {
+    const opened = await ingestMetaComment(
+      comment({
+        commentId: 'post-1_c2',
+        parentCommentId: 'post-1_c1',
+        from: BOB,
+        fromName: 'Bob',
+        text: 'Scammers, I will sue. How much to ship to Alexandria?',
+        createdAt: LATER,
+      }),
+    );
+    expect(opened).toMatchObject({ createdConversation: true });
+    jev('sales', 'urgent');
+    expect(await judged(opened.messageId)).toMatchObject({
+      priority: { outcome: 'applied' },
+      category: { outcome: 'applied' },
+    });
+    // Held still: the root may yet arrive and take the ticket.
+    expect(await routing(opened.conversationId)).toMatchObject({
+      stage: 'holding',
+      outcome: null,
+    });
+    expect(await ticketOf(opened.conversationId)).toMatchObject({
+      priority: 'urgent',
+      categoryKey: 'sales',
+      assigneeAgentId: null,
+    });
+    return opened;
+  }
+
+  it('files, prices and routes the ticket on the customer’s own comment', async () => {
+    const t = await page();
+    const opened = await bobFirst();
+
+    const root = await ingestMetaComment(comment({ text: 'My shop’s COD payments never arrived' }));
+    expect(root.conversationId).toBe(opened.conversationId);
+    jev('merchant_support', 'low');
+    expect(await judged(root.messageId)).toMatchObject({
+      priority: { outcome: 'applied' },
+      category: { outcome: 'applied' },
+    });
+
+    expect(await ticketOf(opened.conversationId)).toMatchObject({
+      requesterContactId: await contactOf('1122334455'),
+      priority: 'low',
+      categoryKey: 'merchant_support',
+      groupId: t.merchants.group,
+      assigneeAgentId: t.merchants.agent,
+    });
+    expect(await routing(opened.conversationId)).toMatchObject({
+      stage: 'decided',
+      outcome: 'category',
+    });
+
+    // Bob's next comment is somebody under the customer's: neither asks.
+    const later = await ingestMetaComment(
+      comment({
+        commentId: 'post-1_c3',
+        parentCommentId: 'post-1_c1',
+        from: BOB,
+        fromName: 'Bob',
+        text: 'Still waiting, this is urgent',
+        createdAt: new Date(LATER.getTime() + 60_000),
+      }),
+    );
+    expect(await judged(later.messageId)).toEqual({
+      priority: { status: 'skipped', reason: 'not written by the requester' },
+      category: { status: 'skipped', reason: 'not written by the requester' },
+    });
+  });
+
+  // Meta omitted the root's created_time, so parse.ts stamped it when it was
+  // read: after Bob's reply, which is then the thread's earliest message.
+  it('does the same when the customer’s comment is stamped after Bob’s reply', async () => {
+    const t = await page();
+    const opened = await bobFirst();
+
+    const root = await ingestMetaComment(
+      comment({
+        text: 'My shop’s COD payments never arrived',
+        createdAt: new Date(LATER.getTime() + 5 * 60_000),
+      }),
+    );
+    jev('merchant_support', 'low');
+    expect(await judged(root.messageId)).toMatchObject({
+      priority: { outcome: 'applied' },
+      category: { outcome: 'applied' },
+    });
+
+    expect(await ticketOf(opened.conversationId)).toMatchObject({
+      priority: 'low',
+      categoryKey: 'merchant_support',
+      groupId: t.merchants.group,
+      assigneeAgentId: t.merchants.agent,
+    });
+  });
+
+  it('routes on nothing of Bob’s when the customer’s comment has no words', async () => {
+    const t = await page();
+    const opened = await bobFirst();
+
+    // A photo: nothing to ask either classifier about.
+    const root = await ingestMetaComment(comment({ text: '' }));
+    const calls = jev('merchant_support', 'low');
+    expect(await judged(root.messageId)).toEqual({
+      priority: { status: 'skipped', reason: 'no text' },
+      category: { status: 'skipped', reason: 'no text' },
+    });
+    expect(calls).not.toHaveBeenCalled();
+
+    expect(await settleRouting(opened.conversationId)).toBe('decided');
+
+    expect(await routing(opened.conversationId)).toMatchObject({ outcome: 'fallback' });
+    expect(await ticketOf(opened.conversationId)).toMatchObject({
+      groupId: t.care.group,
+      assigneeAgentId: t.care.agent,
+      // Labels only: a person or her own next words replace them. The
+      // priority stands because her photo was her opening, and later words
+      // may raise and never lower.
+      categoryKey: 'sales',
+      priority: 'urgent',
+    });
+  });
+
+  it('routes on nothing of Bob’s when the answers about the customer’s comment are unsure', async () => {
+    const t = await page();
+    const opened = await bobFirst();
+
+    const root = await ingestMetaComment(comment({ text: 'Hello?' }));
+    jev('merchant_support', 'low', 0.4);
+    expect(await judged(root.messageId)).toMatchObject({
+      priority: { outcome: 'below_threshold' },
+      category: { outcome: 'below_threshold' },
+    });
+
+    expect(await settleRouting(opened.conversationId)).toBe('decided');
+
+    expect(await routing(opened.conversationId)).toMatchObject({ outcome: 'fallback' });
+    expect(await ticketOf(opened.conversationId)).toMatchObject({
+      groupId: t.care.group,
+      assigneeAgentId: t.care.agent,
+      categoryKey: 'sales',
+      priority: 'urgent',
+    });
+    expect(
+      await db
+        .select({ outcome: aiPriorityRuns.outcome })
+        .from(aiPriorityRuns)
+        .where(eq(aiPriorityRuns.messageId, root.messageId)),
+    ).toEqual([{ outcome: 'below_threshold' }]);
+    expect(
+      await db
+        .select({ outcome: aiCategoryRuns.outcome })
+        .from(aiCategoryRuns)
+        .where(eq(aiCategoryRuns.messageId, root.messageId)),
+    ).toEqual([{ outcome: 'below_threshold' }]);
   });
 });
