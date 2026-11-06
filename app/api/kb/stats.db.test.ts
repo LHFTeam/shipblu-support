@@ -17,8 +17,8 @@ import { withCleanDatabase } from '@/lib/testing/db';
  * tap — land in `kb_article_stats` and never on the article's own row.
  *
  * The writers are the real ones, `recordArticleView` and the feedback
- * endpoint's `POST`, as `db/sql/touch-updated-at.db.test.ts` drives them, so a
- * writer that started touching the article again fails here. "Never on the
+ * endpoint's `POST`, so a writer that started touching the article again fails
+ * here. "Never on the
  * article's row" is read off `xmin`, the transaction that wrote the row's
  * current version: an UPDATE that changed nothing, which `touch_updated_at`
  * would leave dated as it was, still moves it. Here rather than in `lib/kb/`
@@ -141,9 +141,14 @@ describe('a view', () => {
     await didDelete;
 
     const viewing = recordArticleView(id);
-    await waitForALockWait();
-    release();
-    await deleting;
+    try {
+      await waitForALockWait();
+    } finally {
+      // Whatever the wait found, so a failed one does not leave the delete
+      // holding the article's row lock past the end of the test.
+      release();
+      await deleting;
+    }
 
     await expect(viewing).resolves.toBeUndefined();
     expect(await db.select().from(kbArticleStats)).toEqual([]);
@@ -188,9 +193,13 @@ describe('a feedback tap', () => {
   });
 });
 
-/** Until a backend of this database is waiting on a lock, for at most five seconds. */
+/**
+ * Until a backend of this database is waiting on a lock, for about two seconds
+ * at most: well inside the test's own five, so a view that never waited fails
+ * with this sentence rather than with a timeout.
+ */
 async function waitForALockWait(): Promise<void> {
-  for (let attempt = 0; attempt < 100; attempt += 1) {
+  for (let attempt = 0; attempt < 40; attempt += 1) {
     const rows = await db.execute<{ waiting: number }>(
       sql`select count(*)::int as waiting from pg_stat_activity
           where datname = current_database() and wait_event_type = 'Lock'`,

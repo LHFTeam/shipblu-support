@@ -12,10 +12,11 @@ import { isForeignKeyViolation } from '@/lib/db/errors';
  * the row lock a console save waits on (PROJECT-STATE §6.51). Here a view
  * writes one narrow row that no console edit writes or locks. An article's
  * first view inserts that row, and the insert's foreign-key check takes a KEY
- * SHARE lock on the article for the length of the statement, which a save
- * waits on only when it changes the slug or the locale (a key a foreign key
- * could name), and a delete always; every later view updates the stats row
- * alone and leaves the article's row untouched.
+ * SHARE lock on the article for the length of the statement. Only a delete,
+ * or an edit changing a column under one of the table's unique keys, waits on
+ * that: a console save that changes the slug or the locale, or the Freshdesk
+ * import re-keying an article's external id. Every later view updates the
+ * stats row alone and leaves the article's row untouched.
  *
  * Every write that counts is in this module — `db/sql/011` is the one-off
  * copy — so nothing counts into the three columns of the same names still on

@@ -336,7 +336,8 @@ describe('importFreshdeskKb', () => {
     });
 
     // The counts went to `kb_article_stats` alone: the columns of the same
-    // names still on the article are what it replaced, and nothing writes them.
+    // names still on the article are what it replaced, and nothing counts into
+    // them.
     const onTheRow = await db
       .select({
         viewCount: kbArticles.viewCount,

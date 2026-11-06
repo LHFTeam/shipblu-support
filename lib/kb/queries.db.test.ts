@@ -218,7 +218,9 @@ describe('folderNeighbours', () => {
 describe('popularArticles', () => {
   it('orders by views, a tie by title, and leaves out every article nobody opened', async () => {
     const folderId = await folder('en', 'shipping');
-    await counted(await article(folderId, 'pickups', { title: 'Pickups' }), { viewCount: 5 });
+    // A tie, whose slugs sort the other way round from its titles, so a tie
+    // broken by anything but the title is caught.
+    await counted(await article(folderId, 'a-pickups', { title: 'Pickups' }), { viewCount: 5 });
     await counted(await article(folderId, 'returns', { title: 'Returns' }), { viewCount: 12 });
     await counted(await article(folderId, 'cod', { title: 'Cash on delivery' }), { viewCount: 5 });
     // A stats row with no views — rated, never opened — is still unread.
@@ -232,7 +234,7 @@ describe('popularArticles', () => {
 
     const rows = await popularArticles(ANONYMOUS, 'en');
 
-    expect(rows.map((row) => row.slug)).toEqual(['returns', 'cod', 'pickups']);
+    expect(rows.map((row) => row.slug)).toEqual(['returns', 'cod', 'a-pickups']);
     expect(rows[0]).toEqual({
       id: expect.any(String),
       title: 'Returns',
