@@ -264,6 +264,7 @@ function TopicCard({
           ) : null}
         </div>
         <TopicArtImage
+          locale={locale}
           art={art}
           /* Capped at the band's height less its padding, and drawn inside
              that box: the drawings are not all one shape, and at its natural

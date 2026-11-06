@@ -86,7 +86,7 @@ export default async function FolderPage({
             updatedAt={folder.lastUpdatedAt}
           />
         }
-        art={<TopicArtImage art={art} className="kb-art-fade w-[260px]" priority />}
+        art={<TopicArtImage locale={locale} art={art} className="kb-art-fade w-[260px]" priority />}
         search={false}
       >
         <div className="max-w-[32.5rem]">
