@@ -38,11 +38,13 @@ export async function afterHoldEnded(
   ending: {
     /**
      * The `on_update` pass, for a write that ended the hold and runs none of
-     * its own: an agent's reply. Every other ending runs one after its commit,
-     * which reads the category Jev wrote before it — the console's group and
-     * assignee cases (`afterTicketUpdate`), Hand to, and an engine rule's
-     * pass, which is one. Handed in rather than imported, for the reason this
-     * module is not in `apply.ts`.
+     * its own: an agent's reply. A person's other endings run one after their
+     * commit, which reads the category Jev wrote before it — the console's
+     * group and assignee cases (`afterTicketUpdate`) and Hand to. A rule ends
+     * the hold from inside a pass that may have read the ticket before Jev's
+     * write, and Jev's own relabel covers that (`relabelOwed`, `run.ts`).
+     * Handed in rather than imported, for the reason this module is not in
+     * `apply.ts`.
      */
     runOwedPass?: () => Promise<unknown>;
   } = {},

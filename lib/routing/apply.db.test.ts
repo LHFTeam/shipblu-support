@@ -1945,6 +1945,28 @@ describe('the held out-of-hours reply', () => {
     expect(await acknowledgements(id)).toHaveLength(1);
   });
 
+  // The read of what Jev's category is owed is the hold's end's own question,
+  // and losing it costs only its answer: the customer is still told the team
+  // is closed.
+  it('goes once though what the category is owed cannot be read', async () => {
+    errorsExpected = true;
+    const t = await teams();
+    const lead = await agent('Laila');
+    const { id } = await heldTicket(t.channel, t.home.group);
+    owed.throws = true;
+
+    await db.transaction(async (tx) => {
+      await tx.update(conversations).set({ groupId: t.care.group }).where(eq(conversations.id, id));
+      return endHold(tx, id, 'manual', { agentId: lead });
+    });
+    await afterHoldEnded(id);
+
+    expect(await acknowledgements(id)).toHaveLength(1);
+    expect(errors.mock.calls.map((call) => String(call[0]))).toEqual([
+      expect.stringContaining('category was owed'),
+    ]);
+  });
+
   it('does not go after an agent answered during the hold', async () => {
     const t = await teams();
     const { id } = await heldTicket(t.channel, t.home.group);
@@ -2525,7 +2547,7 @@ describe('a comment thread a reply opened', () => {
     expect((await ticketRow(thread.id)).assigneeAgentId).toBe(t.home.agent);
     expect(await tagged(thread.id)).toBe(0);
     expect(errors.mock.calls.map((call) => String(call[0]))).toEqual([
-      expect.stringContaining('could not read what the hold'),
+      expect.stringContaining('category was owed'),
     ]);
   });
 

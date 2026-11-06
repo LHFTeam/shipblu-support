@@ -1323,6 +1323,51 @@ describe('a reply-first comment thread, through Jev and the router', () => {
     });
   });
 
+  // Set aside at the window's end, with no policy for it; her own words then
+  // read as his were, which writes nothing, and the category is hers now, so
+  // the policy keyed on it is chosen as a write's would have been.
+  it('gives the policy to the category her later words agree with, once it was set aside', async () => {
+    await page();
+    const round = { firstResponseMins: 30, nextResponseMins: 30, resolutionMins: 240 };
+    const [sales] = await db
+      .select({ id: ticketCategories.id })
+      .from(ticketCategories)
+      .where(eq(ticketCategories.key, 'sales'));
+    const [salesPolicy] = await db
+      .insert(slaPolicies)
+      .values({
+        name: 'Sales',
+        hoursSource: 'round_the_clock',
+        targets: { low: round, medium: round, high: round, urgent: round },
+        conditions: { field: 'category.id', op: 'eq', value: sales!.id },
+      })
+      .returning({ id: slaPolicies.id });
+    const opened = await bobFirst();
+    await ingestMetaComment(comment({ text: '' }));
+    expect(await settleRouting(opened.conversationId)).toBe('decided');
+    const policyOf = async () => {
+      const [row] = await db
+        .select({ slaPolicyId: conversations.slaPolicyId })
+        .from(conversations)
+        .where(eq(conversations.id, opened.conversationId));
+      return row!.slaPolicyId;
+    };
+    expect(await policyOf()).toBeNull();
+
+    const hers = await ingestMetaComment(
+      comment({
+        commentId: 'post-1_c3',
+        parentCommentId: 'post-1_c1',
+        text: 'How much to ship 30 parcels a week?',
+        createdAt: new Date(LATER.getTime() + 60_000),
+      }),
+    );
+    jev('sales', 'medium');
+    expect(await judged(hers.messageId)).toMatchObject({ category: { outcome: 'applied' } });
+
+    expect(await policyOf()).toBe(salesPolicy!.id);
+  });
+
   it('routes on nothing of Bob’s when the answers about the customer’s comment are unsure', async () => {
     const t = await page();
     const opened = await bobFirst();

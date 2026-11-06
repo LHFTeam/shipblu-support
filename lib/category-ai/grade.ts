@@ -203,9 +203,9 @@ export type GradingInput = {
 /**
  * Why a ticket with rows was never judged on an answer. `not_the_requesters`:
  * every message Jev judged was somebody else's than the requester's, and the
- * requester has no row at all — a passer-by's reply that opened a comment
- * thread before the customer's comment took it over, the comment itself
- * giving Jev nothing to ask about. The live job no longer counts those answers
+ * requester has no row of her own but one his answer settled — a passer-by's
+ * reply that opened a comment thread before the customer's comment took it
+ * over, the comment itself giving Jev nothing to ask about. The live job no longer counts those answers
  * as the ticket's (`decide.ts`), so the ticket has none of its own, and
  * grading it would count as a miss a ticket Jev was never asked about. Where
  * the customer's comment has a row of its own, that row says why: owned,
@@ -295,14 +295,27 @@ export function ticketVerdicts(
     // deleted and the row's id with it. Only the requester's: a filing read off
     // a passer-by's reply is Jev's work, counted in the answers above, but no
     // filing of the ticket — the router sets it aside (`categoryStanding`), and
-    // a person replacing it has not overruled Jev on the customer's words.
+    // a person replacing it has not overruled Jev on the customer's words —
+    // unless her own answer agreed with it. That answer wrote nothing, since
+    // the ticket already carried the category, so the passer-by's write is the
+    // filing it stands on: the router routes on it (`requesterChose`).
     const answered = new Set(own.map((run) => run.messageId).filter(Boolean));
     const answeredDeleted = new Set(
       own.filter((run) => run.messageId === null).map((run) => run.messageCreatedAt.getTime()),
     );
+    const agreedWith = new Set(
+      own.filter((run) => run.outcome === 'applied').map((run) => run.predictedKey),
+    );
+    const theirsAnswered = new Set(
+      ticketRuns.filter((run) => run.byNonRequester).map((run) => run.messageId),
+    );
     const answers = (write: GradingEvent) =>
       (write.messageId !== null && answered.has(write.messageId)) ||
-      (write.messageCreatedAt !== null && answeredDeleted.has(write.messageCreatedAt.getTime()));
+      (write.messageCreatedAt !== null && answeredDeleted.has(write.messageCreatedAt.getTime())) ||
+      (write.messageId !== null &&
+        theirsAnswered.has(write.messageId) &&
+        write.key !== null &&
+        agreedWith.has(write.key));
     const lastJev =
       jev.filter((write) => write.runLabel === runLabel && answers(write)).at(-1) ?? null;
     const changedAfter = lastJev
@@ -313,13 +326,7 @@ export function ticketVerdicts(
       conversationId,
       channel: ticketRuns[0]!.channel,
       judged,
-      outOfPlay: judged
-        ? null
-        : own.length > 0
-          ? outOfPlay(own)
-          : ticketRuns.some((run) => JUDGED.has(run.outcome))
-            ? 'not_the_requesters'
-            : outOfPlay(ticketRuns),
+      outOfPlay: judged ? null : outOfPlayOf(own, ticketRuns),
       answers: predicted.length,
       unknowns: predicted.filter((run) => run.predictedKey === UNKNOWN_CATEGORY_KEY).length,
       settle: settleRun
@@ -376,6 +383,26 @@ function inJudgedOrder(a: Arrival, b: Arrival): number {
     { createdAt: a.messageCreatedAt, messageId: a.messageId },
     { createdAt: b.messageCreatedAt, messageId: b.messageId },
   );
+}
+
+/**
+ * Why a ticket none of whose own rows was judged is out of play. Her own rows
+ * say why where she has any — owned, capped, failed, as on any ticket — but
+ * for one that is only `after_settle` because a passer-by's answer in this
+ * view settled the ticket, as the live job counted before it stopped counting
+ * his (rows older than that fix): settled on his words here, not outside this
+ * run. With no row of hers, a passer-by's judged answer is the reason.
+ */
+function outOfPlayOf(own: readonly GradingRun[], runs: readonly GradingRun[]): OutOfPlay {
+  const theirs = runs.filter((run) => run.byNonRequester);
+  if (own.length > 0) {
+    const reason = outOfPlay(own);
+    const settledByTheirs = theirs.some(
+      (run) => SETTLING.has(run.outcome) && run.predictedKey !== null,
+    );
+    return reason === 'settled_elsewhere' && settledByTheirs ? 'not_the_requesters' : reason;
+  }
+  return theirs.some((run) => JUDGED.has(run.outcome)) ? 'not_the_requesters' : outOfPlay(runs);
 }
 
 /**

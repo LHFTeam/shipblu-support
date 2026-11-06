@@ -1,8 +1,11 @@
 import { and, asc, eq, ne } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { conversations, messages, routingDecisions } from '@/db/schema';
+import { logger } from '@/lib/log';
 import { notReaction } from '@/lib/tickets/not-reaction';
 import { jevCategoryOwed } from './category-source';
+
+const log = logger('routing');
 
 type Strategy = NonNullable<(typeof routingDecisions.$inferSelect)['heldStrategy']>;
 
@@ -145,7 +148,14 @@ export async function heldFollowUp(conversationId: string): Promise<{
     .where(eq(routingDecisions.conversationId, conversationId));
   if (!found) return null;
 
-  const categoryOwed = await jevCategoryOwed(conversationId);
+  // Apart from the rest, so a statement lost in its reads owes the category
+  // nothing and leaves the held reply and a rule's kept pick their due.
+  let categoryOwed = false;
+  try {
+    categoryOwed = await jevCategoryOwed(conversationId);
+  } catch (error) {
+    log.error(`could not read what ${conversationId}'s category was owed`, error);
+  }
   const { requesterContactId, openedBy, ...rest } = found;
   const held = { ...rest, categoryOwed };
   if (held.messageId && openedBy === requesterContactId) return held;

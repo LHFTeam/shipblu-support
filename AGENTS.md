@@ -1958,7 +1958,8 @@ README says why it is a setting and not a rule. The rules:
   not the requester is set aside: `fallback`, the ticket stays in its group, no
   pass and no policy for it, the `routed` event naming it under `setAside`, and
   the label left on the ticket for a person or the customer's own next answer
-  to replace. A category a person, a rule or a form wrote is never held back by
+  to replace — or, agreeing with it, to make hers, when the policy then looks
+  at it (`afterCategoryConfirmed`). A category a person, a rule or a form wrote is never held back by
   this: it routes whenever the router next decides, as it always has. What it
   costs is the window's length before a ticket a reply opened is assigned; a
   root arriving after the window's end only relabels; the console's Category
@@ -2006,12 +2007,17 @@ README says why it is a setting and not a rule. The rules:
   chooses the policy, and runs the `on_update` pass for an agent's reply, the
   one ending that runs no pass of its own (`runOwedPass`); the console's edits
   and Hand to run theirs after their end of the hold, which reads the
-  category. A failure in that read is logged and owes nothing, so the reply's
-  send is still queued. And a
-  confident answer naming the category the ticket already carries writes
-  nothing, but on a live `holding` row it routes the ticket all the same
-  (`afterCategoryConfirmed`): the customer's root agreeing with what the
-  replier's reply was read as is the one ticket it reaches.
+  category. A failure in that read is logged and owes nothing, in its own
+  guard, so the reply's send is still queued and the held reply and a rule's
+  kept pick still go. And a confident answer naming the category the ticket
+  already carries writes nothing, but on a live `holding` row it routes the
+  ticket all the same (`afterCategoryConfirmed`): the customer's root agreeing
+  with what the replier's reply was read as is the one ticket it reaches. On
+  a decided or unrouted comment ticket whose category is still that reading —
+  set aside at the window's end, or past a hold a person ended while the
+  words were still the replier's — it gives the policy its look
+  (`categoryReadOffAnother`), as a write would have; no pass, since the
+  customer's message already ran one with the category on the ticket.
 - **What a hold kept back is owed by state, not by one caller.** Whatever ends a
   live hold — the router, `settle_routing` whatever it decides but `not_open`,
   which assigns and sends nothing (`routeNow` answers `none` for it), a caller
@@ -2204,8 +2210,10 @@ is a new question no report averages with the old. `/reports/category-ai` grades
 one label, question and mode at a time, and its rules are
 `lib/category-ai/grade.ts`'s tests: one settling answer per ticket, in the order
 the live job judges messages and over the messages it counts, a passer-by's
-left out of the settle, the cap and Filed by Jev, and a ticket judged on
-nothing else out of play unless the customer's own row says why; ground truth only a person's `category_changed`
+left out of the settle, the cap and Filed by Jev — unless the customer's own
+answer agreed with the filing it made, which wrote nothing and so stands on his
+— and a ticket judged on nothing else out of play unless the customer's own row
+says why; ground truth only a person's `category_changed`
 given before Jev, a rule or a form wrote the category, since agreeing with a
 write leaves no event and every label after one is a disagreement — so a ticket
 written to first is in no rate read off labels, and in `apply`, where every settle is Jev's

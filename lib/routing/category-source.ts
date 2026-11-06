@@ -73,12 +73,12 @@ export async function categorySource(
 async function lastCategoryWrite(
   executor: Executor,
   ticket: { id: string; categoryId: string | null },
-): Promise<{ byJev: boolean; at: Date } | null> {
+): Promise<{ byJev: boolean; eventId: string; messageId: string | null } | null> {
   const [last] = await executor
     .select({
+      id: conversationEvents.id,
       actorLabel: conversationEvents.actorLabel,
       data: conversationEvents.data,
-      createdAt: conversationEvents.createdAt,
     })
     .from(conversationEvents)
     .where(
@@ -92,7 +92,9 @@ async function lastCategoryWrite(
   if (!last) return null;
   return {
     byJev: last.actorLabel === CATEGORY_AI_ACTOR && last.data.to === ticket.categoryId,
-    at: last.createdAt,
+    eventId: last.id,
+    // Spelled as the database spells an id, as `requesterChose` reads it.
+    messageId: canonicalUuid(last.data.messageId),
   };
 }
 
@@ -165,23 +167,61 @@ export async function jevCategoryOwed(conversationId: string): Promise<boolean> 
   const last = await lastCategoryWrite(db, ticket);
   if (!last?.byJev) return false;
 
+  // Compared in the database, to the microsecond `clock_timestamp()` keeps: read
+  // back as a JavaScript Date, two stamps a fraction of a millisecond apart are
+  // one instant, and a write just before the end would read as after it.
   const [ended] = await db
-    .select({ at: conversationEvents.createdAt })
+    .select({ id: conversationEvents.id })
     .from(conversationEvents)
     .where(
       and(
         eq(conversationEvents.conversationId, conversationId),
         eq(conversationEvents.type, 'routed'),
         sql`${conversationEvents.data}->>'outcome' = ${row.outcome}`,
+        sql`${conversationEvents.createdAt} > (select written.created_at from conversation_events written where written.id = ${last.eventId})`,
       ),
     )
-    .orderBy(desc(conversationEvents.createdAt), desc(conversationEvents.id))
     .limit(1);
-  if (!ended || last.at >= ended.at) return false;
+  if (!ended) return false;
 
   if (!isCommentTicket(row.channel, row.externalId)) return true;
   const source = await standingOf(db, ticket, row.messageId, true);
   return categoryStanding(source, true) === 'routes';
+}
+
+/**
+ * Whether the category a comment ticket carries is Jev's reading of a message
+ * somebody other than the requester wrote: a passer-by's reply that opened the
+ * thread, read before the customer's comment took the ticket over
+ * (`adoptRootAuthor`). Asked of a confident answer of the requester's naming
+ * that same category, which writes nothing (`setConversationCategoryOn`, on an
+ * unchanged value) and so would otherwise leave the ticket as the passer-by's
+ * reading left it: set aside at the window's end with no policy, or past a
+ * hold a person ended while the words were still his. The answer makes the
+ * category hers, and is owed the policy's look a write would have had
+ * (`afterCategoryConfirmed`).
+ *
+ * Off a comment thread every reading of Jev's is the requester's, so false.
+ */
+export async function categoryReadOffAnother(conversationId: string): Promise<boolean> {
+  const [ticket] = await db
+    .select({
+      categoryId: conversations.categoryId,
+      requesterContactId: conversations.requesterContactId,
+      channel: conversations.channel,
+      externalId: conversations.externalId,
+    })
+    .from(conversations)
+    .where(eq(conversations.id, conversationId));
+  if (!ticket?.categoryId || !isCommentTicket(ticket.channel, ticket.externalId)) return false;
+
+  const last = await lastCategoryWrite(db, { id: conversationId, categoryId: ticket.categoryId });
+  if (!last?.byJev || !last.messageId) return false;
+  const [read] = await db
+    .select({ authorContactId: messages.authorContactId })
+    .from(messages)
+    .where(eq(messages.id, last.messageId));
+  return writtenByAnother(read?.authorContactId, ticket.requesterContactId);
 }
 
 /**

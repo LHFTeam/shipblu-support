@@ -619,7 +619,13 @@ describe('a run on a message the requester did not write', () => {
     expect(verdict([his, run('t', 1, 'owned')]).outOfPlay).toBe('owned');
     expect(verdict([his, run('t', 1, 'capped')]).outOfPlay).toBe('capped');
     expect(verdict([his, run('t', 1, 'failed')]).outOfPlay).toBe('failed');
-    expect(verdict([his, run('t', 1, 'after_settle')]).outOfPlay).toBe('settled_elsewhere');
+    // Hers only after_settle because his answer here settled the ticket, as
+    // the live job counted before it stopped counting his: settled on his
+    // words in this run, not outside it.
+    expect(verdict([his, run('t', 1, 'after_settle')]).outOfPlay).toBe('not_the_requesters');
+    // His only unsure, so something outside this run settled it.
+    const unsure = run('t', 0, 'unknown', 'unknown', 0.9, theirs);
+    expect(verdict([unsure, run('t', 1, 'after_settle')]).outOfPlay).toBe('settled_elsewhere');
   });
 
   // Jev filed his reply as sales, and a supervisor moved the ticket on: no
@@ -636,6 +642,24 @@ describe('a run on a message the requester did not write', () => {
       jevWrite('t', 1, 'merchant_support', LABEL, messageAt('t', 1)),
     ];
     expect(verdict(both, hers).filed).toEqual({ key: 'merchant_support', changedTo: null });
+  });
+
+  // Her comment was read as his reply was, which wrote nothing: his write is
+  // the filing the ticket stands on, and the router routed on it, so a
+  // supervisor moving it on overruled Jev on her words.
+  it('counts his filing when her own answer agreed with it', () => {
+    const runs = [
+      run('t', 0, 'applied', 'sales', 0.9, theirs),
+      run('t', 1, 'applied', 'sales', 0.9),
+    ];
+    const events = [jevWrite('t', 0, 'sales'), person('t', 3, 'customer_support')];
+    expect(verdict(runs, events).filed).toEqual({
+      key: 'sales',
+      changedTo: { key: 'customer_support' },
+    });
+    // Not when she was read otherwise and nothing of hers was written.
+    const unsure = [runs[0]!, run('t', 1, 'below_threshold', 'merchant_support', 0.4)];
+    expect(verdict(unsure, events).filed).toBeNull();
   });
 
   it('is passed over by the threshold sweep', () => {

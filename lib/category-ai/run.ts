@@ -15,6 +15,7 @@ import { errorMessage } from '@/lib/errors';
 import { canonicalUuid } from '@/lib/http/uuid';
 import { logger } from '@/lib/log';
 import { routeNow } from '@/lib/routing/apply';
+import { categoryReadOffAnother } from '@/lib/routing/category-source';
 import {
   deferToRouter,
   routerDecidedOn,
@@ -388,29 +389,44 @@ export async function classifyMessageCategory(
 }
 
 /**
- * A confident answer naming the category the ticket already carries, on a
- * ticket held for the router: routed now, as a write would have been, and
- * nothing else, since nothing changed for a rule or the policy to react to.
+ * A confident answer naming the category the ticket already carries, which
+ * writes no event (`setConversationCategoryOn` writes nothing on an unchanged
+ * value), and is owed something only on a comment thread a passer-by's reply
+ * opened, where Jev's reading of the reply put the category there and the
+ * customer's own comment, answered the same, makes it the requester's:
  *
- * The one ticket this reaches is a comment thread a passer-by's reply opened.
- * Jev's reading of the reply put the category there and the router waited for
- * the thread's root (`categoryStanding`); the customer's own comment, answered
- * the same, writes no event (`setConversationCategoryOn` writes nothing on an
- * unchanged value), but its run makes the category the requester's, so the
- * router routes on it — at once here, where without this the ticket stayed
- * held, unassigned and unanswered until the window's end. Anywhere else an
- * agreeing answer finds the ticket routed already, or not routing at all.
- *
- * Not while `pending`, which the creation pass's `beginRouting` routes, nor on
- * a decision in flight, which nothing written here re-arms. In shadow too, so
- * the would-be decision is recorded when the live one would have been made.
+ * - **Held** — routed now, as a write would have been: the router waited for
+ *   the thread's root (`categoryStanding`), and the answer's run makes the
+ *   category hers (`requesterChose`), so it routes on it — at once here, where
+ *   without this the ticket stayed held, unassigned and unanswered until the
+ *   window's end. Not while `pending`, which the creation pass's
+ *   `beginRouting` routes, nor on a decision in flight, which nothing written
+ *   here re-arms. In shadow too, so the would-be decision is recorded when
+ *   the live one would have been made.
+ * - **Decided, or never routed** — the SLA policy's look, when the category
+ *   is still the passer-by's reading (`categoryReadOffAnother`): set aside at
+ *   the window's end, which chose no policy for it, or past a hold a person
+ *   ended while the words were still his. Her answer agreeing is the
+ *   category becoming hers, and owes the look a changed write would have had;
+ *   otherwise an agreeing answer was treated worse than a disagreeing one.
+ *   No pass: the rules keyed on the category already ran on her message's
+ *   own update pass, with the category on the ticket (`afterInboundMessage`).
+ *   A look that finds the same policy changes nothing.
  */
 async function afterCategoryConfirmed(
   conversationId: string,
   routing: UndecidedRouting | 'deferred' | null,
 ): Promise<void> {
-  if (routing === 'deferred' || routing?.stage !== 'holding' || routing.decisionInFlight) return;
-  await routeNow(conversationId, { label: CATEGORY_AI_ACTOR });
+  if (routing === 'deferred') return;
+  if (routing) {
+    if (routing.stage === 'holding' && !routing.decisionInFlight) {
+      await routeNow(conversationId, { label: CATEGORY_AI_ACTOR });
+    }
+    return;
+  }
+  if (await categoryReadOffAnother(conversationId)) {
+    await afterRoutingChanged(conversationId, { category: true, group: false });
+  }
 }
 
 /**
