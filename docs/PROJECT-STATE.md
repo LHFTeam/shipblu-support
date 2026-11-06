@@ -4721,8 +4721,14 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
     `scripts/ci/repo-rules.mjs`: a write path that sanitises an article body and
     does not normalise it fails the build.
 
-51. **`kb_articles.updated_at` is not an edit date — every page view moves
-    it.** _2026-09-03._ `recordArticleView` increments `view_count` on the
+51. ~~**`kb_articles.updated_at` is not an edit date — every page view moves
+    it.**~~ **Fixed in code by #466.** It reaches production with the first
+    deploy after `dev` is merged into `main`, which nobody has checked yet:
+    once it has deployed, record here that `pg_get_functiondef` of
+    `touch_updated_at` names `not_an_edit` and that one view left an
+    article's `updated_at` where it was. The history below is why.
+    _2026-09-03._
+    `recordArticleView` increments `view_count` on the
     article row, and `touch_updated_at` fires on any update of a table with that
     column, so a read writes the timestamp. The article page renders it as
     "Updated <date>" under the title, which means a busy article tells every
@@ -4733,6 +4739,38 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
     — or dropping. And nothing should reason about content freshness from this
     column: 99 of the 112 articles read 2026-08-19, the import date, and the
     handful that read later are the ones somebody happened to open.
+
+    The help centre took the first way out in #460: every date a customer sees
+    is `editedAt` in `lib/kb/queries.ts`, read from `kb_article_versions`. The
+    column itself is fixed in the trigger. `touch_updated_at()` in
+    `db/sql/001_extensions_and_triggers.sql` now keeps the old date on
+    `kb_articles` when an UPDATE changes nothing but `view_count`,
+    `helpful_count` and `unhelpful_count`, comparing the whole row minus those
+    three, `updated_at` and the generated `search_vector` (which reads null in
+    a BEFORE trigger) as jsonb, so a column added later counts as an edit by
+    default. Every other table keeps the plain stamp, which `presence_policy`'s
+    grace period depends on. It is a change to the function body only:
+    `CREATE OR REPLACE FUNCTION` locks no table and every replay of `db/sql`
+    installs it. Pointing the trigger at another function would lock the
+    table: `DROP TRIGGER` takes ACCESS EXCLUSIVE, which any open reader holds
+    off (§6.15's deploy failures), and `CREATE OR REPLACE TRIGGER` takes SHARE
+    ROW EXCLUSIVE, which every open write holds off — each view and vote is
+    one — and which then holds the table's writes off until the whole of
+    `db/sql/001` commits. `db/sql/touch-updated-at.db.test.ts` holds both
+    halves. So `/kb`, which shows the column and sorts by it, now orders by the
+    last change anybody made — a metadata edit included, which is why the help
+    centre still reads `editedAt` instead.
+
+    The existing values were left as they are. On 2026-11-05, 39 of the 112
+    articles had an `updated_at` newer than their last version and their
+    publication. 24 of those share 2026-09-29, the day `normalise_kb_formatting`
+    rebuilt the derived text of 25 articles without cutting a version (§7,
+    #321), a change the new trigger counts too; 4 still carry 2026-08-19, the
+    import. The other 11 are spread from 2026-09-05 to the day of the fix, and
+    the rows cannot say which of those a reader wrote and which a folder move,
+    a status change or a tag edit did. A backfill to `editedAt` would erase the
+    real changes among all 39 to correct at most those 11. An article's date
+    settles at its next real change.
 
 52. **`current_date` in a page query is the database's date, and the database is
     UTC.** _2026-09-04._ `/reports/categories` filtered its rollups with
@@ -4880,6 +4918,11 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
     already records that this column is not an edit date, which is exactly the
     confusion a job moving it for nothing deepens. An idempotent writer has to
     compare before it writes, field by field.
+
+    Since §6.51's fix `kb_articles` is the one exception: there the trigger
+    keeps the date on an UPDATE that changes nothing, or nothing but a
+    reader's counter. Every other table still stamps a no-op, `kb_folders` and
+    `canned_responses` included, so the rule above stands for writers.
 
     The measurement matters as much as the fix. The job's own tally could not
     have caught this — it was reporting the truth — and neither could
@@ -7554,6 +7597,25 @@ dryRun=true`, then without, gives those two theirs back from their
       `[dir='rtl']` text alignment are still unlayered. The `!` beside
       `.kb-panel` in `home.tsx` is for that, and §6.81 says why
       `.app-scroll` stays as it is.
+
+110.  **`CREATE INDEX IF NOT EXISTS` locks the table even when the index is
+      there.** _2026-11-06, found while measuring the locks for #466._ It takes
+      SHARE on the table before it looks for the index, so the eleven at the
+      top of `db/sql/001_extensions_and_triggers.sql` — on `conversations`,
+      `contacts`, `messages`, `side_conversation_messages`, `companies`,
+      `kb_articles`, `shipments` and `shipping_accounts` — each wait on any
+      open writer of their table on every replay. Measured on Postgres 16: with
+      a session holding ROW EXCLUSIVE on `kb_articles`, the statement for an
+      index that already existed failed under `lock_timeout = '1s'`. And
+      because a `db/sql` file runs as one transaction, each SHARE it is granted
+      is held until the whole file commits, so writes to those tables queue
+      behind the rest of the file. The file's own comments said its steady
+      state took no locks; they now point here. Not fixed yet: the cure is a
+      guard that asks `pg_class` and creates the index only when it is
+      missing, never `CONCURRENTLY`, which `db/sql` cannot run. Until then a
+      deploy can fail on `db:migrate` behind an open writer as §6.15's did
+      behind an open reader, and the ten-second `LOCK_TIMEOUT` in
+      `db/migrate.ts` is what turns that into a fast failure.
 
 ### Tooling notes for this environment
 

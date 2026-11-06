@@ -26,11 +26,16 @@ import { ANONYMOUS, articleVisibleTo, folderVisibleTo, type KbViewer } from './v
  * help centre means, and what the sitemap's `lastmod` and "Recently updated"
  * are ordered by.
  *
- * Not `kb_articles.updated_at`. The `touch_updated_at` trigger moves that on
- * every write to the row, and `recordArticleView` writes on every read, so a
- * busy article told each customer it was revised today (PROJECT-STATE §6.51). A
- * version is cut only when the title or the body changes (`cutArticleVersion`),
- * so the newest one is the last edit; an article never edited since it went up
+ * Not `kb_articles.updated_at`. That column once moved on every view, because
+ * `recordArticleView` writes the row and the `touch_updated_at` trigger stamped
+ * every write, so a busy article told each customer it was revised today
+ * (PROJECT-STATE §6.51). The trigger now leaves the date alone when only a
+ * reader's counter changes, but the column still moves for a change of folder,
+ * status, visibility or tags, none of which is a revision a customer reads, and
+ * on an imported article it starts at the import, not at the last edit. A
+ * version is cut when the title or the body changes and when a version is
+ * restored (`cutArticleVersion`), so the newest one is the last edit or restore,
+ * a restore of identical text included; an article never edited since it went up
  * is as old as its publication, and a draft that never had one as its row.
  * `greatest` because a version cut while the article was still a draft is older
  * than the day it was published, and nulls drop out of it.
