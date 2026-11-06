@@ -76,6 +76,18 @@ async function articles(tx: Tx, counts: Record<string, [number, number, number]>
   return ids;
 }
 
+/** One article on the table as it is, without the counters. */
+async function articleRow(tx: Tx): Promise<void> {
+  await tx.execute(sql`
+    with category as (
+      insert into kb_categories (name, slug) values ('Shipping', 'shipping') returning id
+    ), folder as (
+      insert into kb_folders (category_id, name, slug)
+      select id, 'Pickups', 'pickups' from category returning id
+    )
+    insert into kb_articles (folder_id, title, slug) select id, 'read', 'read' from folder`);
+}
+
 /** Every stats row, by its article's slug, as `[views, helpful, unhelpful]`. */
 async function stats(tx: Tx) {
   const rows = await tx.execute<{ slug: string; counts: [number, number, number] }>(sql`
@@ -121,6 +133,25 @@ describe('0059_kb_article_stats_copy and 0060_kb_articles_drop_counters', () => 
 
     expect(first).toEqual({ counted: [9, 0, 0], read: [5, 0, 0] });
     expect(second).toEqual(first);
+  });
+
+  // A database whose counters are already gone: the migrated test database
+  // itself, past 0060. The copy's guard lets it through without reading a
+  // column that is not there.
+  it('passes straight through a table without the columns', async () => {
+    let copied;
+    await db
+      .transaction(async (tx) => {
+        await articleRow(tx);
+        await run(tx, COPY);
+        copied = await stats(tx);
+        throw new RolledBack();
+      })
+      .catch((error: unknown) => {
+        if (!(error instanceof RolledBack)) throw error;
+      });
+
+    expect(copied).toEqual({});
   });
 
   it('loses no count to the drop that follows it', async () => {

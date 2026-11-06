@@ -81,10 +81,12 @@ export type AdminArticleRow = {
   categoryName: string;
   /**
    * When anybody last wrote the row — the title, the body, the status, the
-   * folder, the tags, the translation link, or a save that changed nothing,
-   * since `touch_updated_at` stamps every UPDATE (PROJECT-STATE §6.59) — and
-   * never when somebody read it or voted on it, which counts in
-   * `kb_article_stats` and leaves the row alone (§6.51). Not the help centre's
+   * folder, the tags, the translation link — and never when somebody read it
+   * or voted on it, which counts in `kb_article_stats` and leaves the row alone
+   * (§6.51). `touch_updated_at` stamps every UPDATE, one that changes nothing
+   * included, so the writers that may have nothing to say, the console's Save
+   * and the Freshdesk import's re-run among them, compare before they write
+   * (`changesNothing`, PROJECT-STATE §6.59). Not the help centre's
    * `editedAt`, which moves when a version is cut or the article is published
    * and for nothing else, because the list is where the team looks for what it
    * last touched. This date moves whenever that one does, since every version

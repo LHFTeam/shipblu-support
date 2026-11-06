@@ -89,8 +89,9 @@ deployed on 2026-11-06: the web service by itself at 17:58 UTC, once `main`'s
 checks had passed, and the worker by hand at 18:56. The web service deploying
 itself was not the plan: `render.yaml` says `autoDeployTrigger: 'off'` for it,
 but the running service read `autoDeploy: yes`, `autoDeployTrigger: checksPass`
-that day (PROJECT-STATE §2). The worker and the four crons read `off` then, and
-were switched to `checksPass` from 19:43 that evening (#479).
+that day. The worker and the four crons read `off` then, and were switched to
+`checksPass` from 19:43 that evening; #479 records both in `render.yaml` and
+PROJECT-STATE §2.
 
 - **The copy** is `db/sql/011_kb_article_stats_backfill.sql`: `INSERT … SELECT`
   from `kb_articles` for every article with a non-zero count,
@@ -284,8 +285,10 @@ release its columns back. Redeploying PR 1's build without the runbook fails
 its own preDeploy, on `011`.
 
 Nothing orders the worker before the drop any more. Every production service
-deploys itself once the checks on `main` pass (PROJECT-STATE §2, as #479 records
-it), all six starting together. On `eb69c8c` the worker went live at 20:04:00,
+deploys itself once the checks on `main` pass, all six starting together. That
+was read off Render on 2026-11-06; `render.yaml` and PROJECT-STATE §2 say so
+once #479 lands, so read the dashboard rather than either file before relying
+on it. On `eb69c8c` the worker went live at 20:04:00,
 the second the web service's `preDeployCommand` began to migrate. So the old
 worker may still be running when the columns go. Its only writes that name them
 are the INSERTs of `import_freshdesk_kb` and `seed_console_handbook`, both run
@@ -295,11 +298,17 @@ is on this build (`list_deploys`, or `/api/health`'s commit). No cron touches
 
 The trigger goes back to the plain stamp in the same `preDeployCommand`, the
 replay of `db/sql/001` after the migrations. From then on an UPDATE of an
-article that changes nothing moves its date, as on every other table: a console
-save with nothing changed, a restore of a version identical to the current
-text, or an `import_freshdesk_kb` re-run that finds an article as it was. That
-is the trade the one-line body makes; the writers that must not move it compare
-first (§6.59), as `seed_console_handbook` and `normalise_kb_formatting` do.
+article that changes nothing moves its date, as on every other table. So the
+writers that may have nothing to say compare first (§6.59), through
+`changesNothing` (`lib/kb/article-write.ts`). `seed_console_handbook` and
+`normalise_kb_formatting` already did. PR 2 adds the console's Save, which
+wrote every field on every save, and the `import_freshdesk_kb` re-run, which
+wrote every article it found as it was: both moved the whole of what they
+touched to the top of `/kb`. Two writes still stamp a no-op, both rare and
+deliberate. One is a restore of a version identical to the current text, which
+cuts a version too. The other is a status button posted from a page drawn
+before the status changed, since the sidebar never offers the status an
+article already has.
 
 `ALTER TABLE … DROP COLUMN` takes ACCESS EXCLUSIVE on `kb_articles` and writes
 no row: a catalog change, held until the migrations' transaction commits. It
@@ -351,23 +360,33 @@ psql "$DATABASE_URL_SESSION" -v ON_ERROR_STOP=1 -f db/runbooks/kb-article-counte
 
 In one transaction, it puts the three columns back as `integer NOT NULL DEFAULT
 0` and deletes 0060's row from `drizzle.__drizzle_migrations`. It refuses if a
-migration newer than 0060 has been applied, and a second run refuses too. Then
-put the web service back on the build it ran before this release (`eb69c8c` as
-this is written; record the exact commit at the release). Either revert the
-release through `dev` and `main`, which every service then deploys by itself, or
-deploy that build to the web service by hand with its auto-deploy turned off
-first. Done by hand, the worker and the crons can stay on PR 2, whose code names
-none of the three. Nothing is lost: the counts are in `kb_article_stats`, which
-the earlier build's code reads, and its replay of `011` finds each restored
-column zero and copies nothing. 0059 stays recorded, with nothing left to
-copy.
+migration newer than 0060 has been applied, and a second run refuses too.
+Nothing is lost: the counts are in `kb_article_stats`, which the earlier build's
+code reads, and its replay of `011` finds each restored column zero and copies
+nothing. 0059 stays recorded, with nothing left to copy.
+
+Then put the web service back on the build it ran before this release
+(`eb69c8c` as this is written; record the exact commit at the release), by hand:
+
+1. Turn auto-deploy off on every production service that has it on. Read the
+   setting in the dashboard, since `render.yaml` and PROJECT-STATE §2 can lag
+   it; on 2026-11-06 all six had it on (#479). All six, not the web service
+   alone: otherwise a commit on `main` still carrying 0060 drops the columns
+   again under the old build. And only the web service migrates, so a worker or
+   cron going live on newer code would meet a schema nothing has migrated.
+2. Deploy the earlier build to the web service. The worker and the crons can
+   stay on PR 2, whose code names none of the three.
+
+Not by reverting the release. A revert deletes 0059 and 0060, and CI refuses a
+pull request that deletes a migration (`generated-files`). Even forced through,
+the work landing again later would carry 0060 under a `when` older than
+whatever was generated in between, and Drizzle would skip it for good.
 
 Deleting 0060's row is what lets the release roll forward again. Drizzle
 applies only migrations newer than the newest row, so with the row left in
 place a later deploy of PR 2 would skip 0060 and keep the columns for good.
-With it gone, that deploy drops them again. After a hand deploy, the next
-commit on `main` that passes its checks does exactly that, unless the
-auto-deploy is still off or the release has been reverted.
+With it gone, turning auto-deploy back on is the roll forward: the next deploy
+of `main` drops them again.
 
 Driven end to end on a scratch Postgres 16 with each build's own `db:migrate`:
 
@@ -381,8 +400,11 @@ The runbook's test runs it and then 0060 again on every CI run. It fails once a
 migration follows 0060, and the PR adding that migration deletes the runbook
 and writes the way back from there.
 
-Going back past PR 1 starts here too. With #473 on `main` after PR 1, it is a
-revert of PR 1, not a redeploy of the build before it, which would take #473
-out as well. PR 1's way back above says what that revert costs: run its
-copy-back UPDATE once the build that reads `kb_article_stats` has put #466's
-trigger back, and before the revert deploys.
+Going back past PR 1 is not prepared here, and is no longer a revert either.
+Reverting #472 deletes 0057, which `generated-files` refuses. A redeploy of the
+build before it would take #473 out as well. It would be a forward change:
+
+- the old readers and writers restored in a new commit;
+- the columns added back to the schema through a migration of its own, rather
+  than this runbook, so that the schema and the database agree;
+- `kb_article_stats` copied back onto the columns before that code reads them.

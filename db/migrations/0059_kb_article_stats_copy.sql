@@ -16,8 +16,24 @@
 -- NOTHING` leaves a stats row as it is, whoever wrote it, and an article whose
 -- counters are all zero has nothing to copy. It reads `kb_articles` under ACCESS
 -- SHARE, which 0060's ACCESS EXCLUSIVE in the same transaction then supersedes.
-INSERT INTO kb_article_stats (article_id, view_count, helpful_count, unhelpful_count)
-SELECT id, view_count, helpful_count, unhelpful_count
-FROM kb_articles
-WHERE view_count <> 0 OR helpful_count <> 0 OR unhelpful_count <> 0
-ON CONFLICT (article_id) DO NOTHING;
+--
+-- Guarded on the three columns, as 0047 is on its constraints, so that a
+-- database whose counters are already gone passes straight through. One whose
+-- drop was run by hand, or whose migration rows were reset after 0060, would
+-- otherwise fail here with 42703 and take every migration pending beside it
+-- down too. PL/pgSQL plans the INSERT only when it runs, so on such a database
+-- it never reads a column that is not there.
+DO $$
+BEGIN
+  IF (
+    SELECT count(*) FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'kb_articles'
+      AND column_name IN ('view_count', 'helpful_count', 'unhelpful_count')
+  ) = 3 THEN
+    INSERT INTO kb_article_stats (article_id, view_count, helpful_count, unhelpful_count)
+    SELECT id, view_count, helpful_count, unhelpful_count
+    FROM kb_articles
+    WHERE view_count <> 0 OR helpful_count <> 0 OR unhelpful_count <> 0
+    ON CONFLICT (article_id) DO NOTHING;
+  END IF;
+END $$;

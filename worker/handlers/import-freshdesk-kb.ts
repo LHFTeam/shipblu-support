@@ -19,7 +19,7 @@ import {
   type FreshdeskCategory,
   type FreshdeskFolder,
 } from '@/lib/freshdesk/client';
-import { articleBody } from '@/lib/kb/article-write';
+import { articleBody, changesNothing } from '@/lib/kb/article-write';
 import { detectCategoryLocale, detectLocale, looksUntranslated } from '@/lib/kb/language';
 import { LOCALES, LOCALE_NAMES, type Locale } from '@/lib/kb/locale';
 import { slugify, uniqueSlug } from '@/lib/kb/slug';
@@ -561,8 +561,23 @@ async function upsertArticle(
     unhelpfulCount: article.thumbs_down ?? 0,
   };
 
+  // Read as the columns the update below writes, so a re-run can tell an
+  // article that is as Freshdesk says from one it changes.
   const existing = await db
-    .select({ id: kbArticles.id, translationGroupId: kbArticles.translationGroupId })
+    .select({
+      id: kbArticles.id,
+      translationGroupId: kbArticles.translationGroupId,
+      title: kbArticles.title,
+      bodyHtml: kbArticles.bodyHtml,
+      bodyText: kbArticles.bodyText,
+      excerpt: kbArticles.excerpt,
+      folderId: kbArticles.folderId,
+      locale: kbArticles.locale,
+      status: kbArticles.status,
+      tags: kbArticles.tags,
+      seo: kbArticles.seo,
+      externalId: kbArticles.externalId,
+    })
     .from(kbArticles)
     .where(
       and(
@@ -577,15 +592,20 @@ async function upsertArticle(
     // The slug is deliberately not recomputed. It is the public URL, and a
     // title tweak in Freshdesk between rehearsal and cutover must not silently
     // move a page that is already linked to.
+    const next = {
+      ...values,
+      externalId,
+      ...(translationGroupId ? { translationGroupId } : {}),
+    };
     await db.transaction(async (tx) => {
-      await tx
-        .update(kbArticles)
-        .set({
-          ...values,
-          externalId,
-          ...(translationGroupId ? { translationGroupId } : {}),
-        })
-        .where(eq(kbArticles.id, id));
+      // An article already as Freshdesk says is not written: `touch_updated_at`
+      // stamps every UPDATE, one that changes nothing included, and a re-run
+      // writing all of them anyway floated the whole imported knowledge base to
+      // the top of `/kb` (§6.59). Its counts are still offered, since
+      // Freshdesk's totals move without the article changing.
+      if (!changesNothing(existing[0]!, next)) {
+        await tx.update(kbArticles).set(next).where(eq(kbArticles.id, id));
+      }
       await setArticleStats(tx, id, counts);
     });
 

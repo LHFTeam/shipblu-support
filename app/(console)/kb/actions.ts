@@ -16,7 +16,7 @@ import {
   translationGroupHasLocale,
   type EditableArticle,
 } from '@/lib/kb/admin';
-import { articleBody, cutArticleVersion } from '@/lib/kb/article-write';
+import { articleBody, changesNothing, cutArticleVersion } from '@/lib/kb/article-write';
 import { FLOOR_LABELS, SELECTABLE_FLOORS, folderFloor, meetsFloor } from '@/lib/kb/floors';
 import { isLocale } from '@/lib/kb/locale';
 import { slugify, uniqueSlug } from '@/lib/kb/slug';
@@ -222,25 +222,31 @@ export async function saveArticle(_state: KbState, formData: FormData): Promise<
 
   const current = before!;
 
-  await db.transaction(async (tx) => {
-    // A version is only cut when the content actually changed. Snapshotting
-    // every save would bury the edits that matter under a pile of identical
-    // rows from someone tabbing through the form.
-    const changed = current.bodyHtml !== bodyHtml || current.title !== title;
+  // A Save with nothing edited writes nothing. `touch_updated_at` stamps every
+  // UPDATE, one that changes nothing included, so writing it anyway would float
+  // the article to the top of `/kb`, dated as an edit nobody made (§6.59).
+  // The answer is still a success, revalidated like any other.
+  if (!changesNothing(current, values)) {
+    await db.transaction(async (tx) => {
+      // A version is only cut when the content actually changed. Snapshotting
+      // every save would bury the edits that matter under a pile of identical
+      // rows from someone tabbing through the form.
+      const changed = current.bodyHtml !== bodyHtml || current.title !== title;
 
-    if (changed) {
-      await cutArticleVersion(tx, {
-        articleId: id,
-        // The version stores the state being replaced, so restoring one means
-        // taking the body out of the row rather than reconstructing a diff.
-        title: current.title,
-        bodyHtml: current.bodyHtml,
-        editedByAgentId: agent.id,
-      });
-    }
+      if (changed) {
+        await cutArticleVersion(tx, {
+          articleId: id,
+          // The version stores the state being replaced, so restoring one means
+          // taking the body out of the row rather than reconstructing a diff.
+          title: current.title,
+          bodyHtml: current.bodyHtml,
+          editedByAgentId: agent.id,
+        });
+      }
 
-    await tx.update(kbArticles).set(values).where(eq(kbArticles.id, id));
-  });
+      await tx.update(kbArticles).set(values).where(eq(kbArticles.id, id));
+    });
+  }
 
   revalidatePath('/kb');
   revalidatePath(`/kb/${id}`);

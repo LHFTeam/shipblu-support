@@ -12,9 +12,10 @@ import { normaliseArticleHtml } from '@/lib/kb/format';
  * Only these two. The writers' upserts look alike and are not: each keys its
  * rows on a different identity, decides its slug differently, and has its own
  * rule for when a write happens at all — the import overwrites what Freshdesk
- * says every run, the handbook compares first and leaves an edited article
- * alone. Those rules are each writer's reason for existing, so they stay with
- * the writer; what is shared here is what none of them has a reason to vary.
+ * says every run, the handbook leaves an edited article alone. Those rules are
+ * each writer's reason for existing, so they stay with the writer; what is
+ * shared here is what none of them has a reason to vary, whether a write would
+ * change anything among it.
  */
 
 /**
@@ -29,6 +30,51 @@ export function articleBody(html: string): { bodyHtml: string; bodyText: string;
   const bodyHtml = normaliseArticleHtml(sanitiseArticleHtml(html));
   const bodyText = htmlToText(bodyHtml);
   return { bodyHtml, bodyText, excerpt: preview(bodyText, 200) };
+}
+
+/**
+ * Whether writing `next` over the stored row `current` would change nothing.
+ *
+ * Asked before an UPDATE by a writer that may have nothing to say, because
+ * `touch_updated_at` stamps every UPDATE of `kb_articles`, one that changes
+ * nothing included, and the console's list orders by that date: a Save with
+ * nothing edited, or a re-import that finds an article as it was, would float
+ * it to the top dated as an edit nobody made (PROJECT-STATE §6.59). Only the
+ * columns `next` names are compared, and never `updatedAt`, which is the
+ * trigger's: a writer's own stamp is replaced whatever it says, so it is no
+ * reason to write. A key holding `undefined` is one Drizzle leaves out of the
+ * SET, so it is no change either. Arrays compare in order, since `tags` is
+ * stored as typed, and objects by their keys, as jsonb compares them.
+ */
+export function changesNothing(
+  current: Readonly<Record<string, unknown>>,
+  next: Readonly<Record<string, unknown>>,
+): boolean {
+  return Object.entries(next).every(
+    ([key, value]) => key === 'updatedAt' || value === undefined || same(current[key], value),
+  );
+}
+
+function same(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (a instanceof Date && b instanceof Date) return a.getTime() === b.getTime();
+  if (Array.isArray(a) && Array.isArray(b)) {
+    return a.length === b.length && a.every((item, index) => same(item, b[index]));
+  }
+  if (isRecord(a) && isRecord(b)) {
+    const keys = Object.keys(a);
+    return (
+      keys.length === Object.keys(b).length &&
+      keys.every((key) => Object.hasOwn(b, key) && same(a[key], b[key]))
+    );
+  }
+  return false;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return (
+    typeof value === 'object' && value !== null && !Array.isArray(value) && !(value instanceof Date)
+  );
 }
 
 /**

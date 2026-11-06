@@ -4798,8 +4798,10 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
     one deploy. Once it has deployed, the function is back to its one-line body,
     so `kb_articles` stamps an UPDATE that changes nothing like every other
     table (§6.59), and an article's date moves only when somebody writes the
-    row — a save that changed nothing included — and never when somebody reads
-    it.
+    row, never when somebody reads it. The console's Save and the Freshdesk
+    import's re-run compare first (`changesNothing` in
+    `lib/kb/article-write.ts`), so neither writes an article it would leave as
+    it was.
 
 52. **`current_date` in a page query is the database's date, and the database is
     UTC.** _2026-09-04._ `/reports/categories` filtered its rollups with
@@ -4953,9 +4955,12 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
     there the trigger keeps the date on an UPDATE that changes nothing, or
     nothing but a reader's counter. Once that has deployed, the trigger is the
     plain stamp on every table again, `kb_articles` included, so the rule
-    above stands for every writer, `seed_console_handbook` and
-    `normalise_kb_formatting` among them, and
-    `db/sql/touch-updated-at.db.test.ts` holds the trigger to it.
+    above stands for every writer, and `db/sql/touch-updated-at.db.test.ts`
+    holds the trigger to it. On `kb_articles` the writers that may have nothing
+    to say compare through `changesNothing` (`lib/kb/article-write.ts`), the
+    console's Save and the Freshdesk import's re-run among them, and
+    `seed_console_handbook` and `normalise_kb_formatting` compare field by field
+    as they always did; each is held to it by `xmin` in its database test.
 
     The measurement matters as much as the fix. The job's own tally could not
     have caught this — it was reporting the truth — and neither could

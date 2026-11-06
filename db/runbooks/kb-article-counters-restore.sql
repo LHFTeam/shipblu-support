@@ -24,15 +24,27 @@
 --
 --   psql "$DATABASE_URL_SESSION" -v ON_ERROR_STOP=1 -f db/runbooks/kb-article-counters-restore.sql
 --
--- Then put the web service back on the build it ran before this release, in
--- one of two ways. Every production service deploys `main` by itself once
--- `main`'s checks pass (docs/PROJECT-STATE.md §2), so the first is to revert
--- the release through `dev` and `main`, as any change goes in. The second is
--- to deploy that build to the web service by hand, with its auto-deploy turned
--- off first: otherwise the next commit on `main` that still carries 0060 drops
--- the columns again, a roll forward rather than a failure. That way the worker
--- and the crons can stay where they are: the second half's code names none of
--- the three and runs with them there as without.
+-- Then put the web service back on the build it ran before this release, by
+-- hand. Not by reverting the release: a revert deletes 0059 and 0060, and CI
+-- refuses a pull request that deletes a migration (`generated-files`). Even
+-- forced through, the work landing again later would carry 0060 under a `when`
+-- older than whatever was generated in between, and Drizzle would never apply
+-- it.
+--
+--   1. Turn auto-deploy off on every production service that has it on. Read
+--      each one's setting in the dashboard, since render.yaml and
+--      docs/PROJECT-STATE.md §2 can lag it; on 2026-11-06 all six had it on.
+--      All six, not the web service alone. Otherwise a commit on `main` still
+--      carrying 0060 drops the columns again under the old build. Only the web
+--      service migrates, so a worker or cron going live on newer code would
+--      also meet a schema nothing has migrated.
+--   2. Deploy the earlier build to the web service. The worker and the crons
+--      can stay on the second half's code, which names none of the three and
+--      runs with them there as without.
+--
+-- Rolling forward again is turning auto-deploy back on. The next deploy of
+-- `main` applies 0060 again, since its row is gone and it is newer than every
+-- row left.
 --
 -- It is also the way out of a deploy whose preDeploy failed after 0060
 -- committed, or whose new release never went live. The first half's web
