@@ -10,6 +10,7 @@ import {
   max,
   min,
   ne,
+  not,
   notExists,
   or,
   sql,
@@ -28,7 +29,7 @@ import {
 import { listCategories } from '@/lib/categories/queries';
 import { CATEGORY_OUTCOMES, type CategoryOutcome } from './decide';
 import { grade, type Grading, type GradingTicket } from './grade';
-import { jevMayStillAsk } from './runs';
+import { jevMayStillAsk, messageByAnotherThan } from './runs';
 
 /**
  * The reads behind `/reports/category-ai`: which run labels and questions
@@ -137,6 +138,12 @@ export async function categoryAiReport(
     .selectDistinct({ id: aiCategoryRuns.conversationId })
     .from(aiCategoryRuns)
     .where(scope);
+  // Whose ticket it is now, which is whose messages settle it and count
+  // towards its cap in the live job (`ticketFacts` in `run.ts`): read off the
+  // ticket at load, as the live job reads it at each job.
+  const byNonRequester = messageByAnotherThan(
+    sql`(select ${conversations.requesterContactId} from ${conversations} where ${conversations.id} = ${aiCategoryRuns.conversationId})`,
+  );
 
   const runs = await db
     .select({
@@ -150,6 +157,7 @@ export async function categoryAiReport(
       minProbability: aiCategoryRuns.minProbability,
       baselineKey: aiCategoryRuns.baselineCategoryKey,
       writtenAt: aiCategoryRuns.createdAt,
+      byNonRequester,
     })
     .from(aiCategoryRuns)
     .where(scope)
@@ -165,6 +173,7 @@ export async function categoryAiReport(
 
   // The label's answers in its other views, which the live job's cap counted
   // with these: a ticket asked four times in shadow had one ask left in apply.
+  // Its cap counts none on a passer-by's message, in any view.
   const askedElsewhere = await db
     .select({
       conversationId: aiCategoryRuns.conversationId,
@@ -178,6 +187,7 @@ export async function categoryAiReport(
         or(ne(aiCategoryRuns.requestFingerprint, fingerprint), ne(aiCategoryRuns.mode, mode)),
         isNotNull(aiCategoryRuns.predictedKey),
         ne(aiCategoryRuns.outcome, 'failed'),
+        not(byNonRequester),
         inArray(aiCategoryRuns.conversationId, named),
       ),
     );

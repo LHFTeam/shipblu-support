@@ -10,6 +10,7 @@ import {
   autoResponses,
   automationRules,
   channels,
+  contactIdentities,
   contacts,
   conversationEvents,
   conversations,
@@ -22,8 +23,9 @@ import {
   ticketStatuses,
 } from '@/db/schema';
 import { maybeSendAutoResponse } from '@/lib/auto-response';
-import { setConversationCategory } from '@/lib/categories/write';
+import { fileBacklogCategory, setConversationCategory } from '@/lib/categories/write';
 import { resetEnvCache } from '@/lib/env';
+import type { NormalisedComment } from '@/lib/meta/types';
 import { settleRouting } from '@/lib/routing/apply';
 import { beginRouting } from '@/lib/routing/begin';
 import { endHold } from '@/lib/routing/end-hold';
@@ -33,10 +35,11 @@ import { stubFetch } from '@/lib/testing/fetch';
 import { withCleanDatabase } from '@/lib/testing/db';
 import { holdNextTransaction, untilWaitingOnALock } from '@/lib/testing/hold-transaction';
 import { cairo } from '@/lib/testing/time';
+import { ingestMetaComment } from '@/lib/tickets/ingest-meta';
 import { CATEGORY_AI_ACTOR } from './decide';
 import { enqueueCategoryClassification } from './enqueue';
 import { requestFingerprint } from './request';
-import { classifyMessageCategory } from './run';
+import { classifyMessageCategory, type ClassifyResult } from './run';
 import { forgetCategoryAiSettings } from './settings';
 
 /**
@@ -49,6 +52,26 @@ import { forgetCategoryAiSettings } from './settings';
  * capped ticket is never sent to Jev at all, and that every statement here
  * plans — CI's handler loop skips this job, because it needs the provider.
  */
+
+/**
+ * What happens next between the job's first read of the message and its first
+ * look at the ticket, once, when a test asks for it: the question's options
+ * are read in that gap, so a write made here has committed by the look and
+ * after the read.
+ */
+const between = vi.hoisted(() => ({ next: null as null | (() => Promise<void>) }));
+vi.mock('./options', async (importOriginal) => {
+  const real = await importOriginal<typeof import('./options')>();
+  return {
+    ...real,
+    categoryOptionsForAi: async () => {
+      const write = between.next;
+      between.next = null;
+      await write?.();
+      return real.categoryOptionsForAi();
+    },
+  };
+});
 
 withCleanDatabase();
 
@@ -963,6 +986,258 @@ describe('classifyMessageCategory, again and after a failure', () => {
     expect((await runsOf(id)).map((run) => run.runLabel).sort()).toEqual(['archive-1', 'live']);
   });
 });
+
+/**
+ * A comment thread whose first comment is stored after a passer-by's reply
+ * under it: the reply opens the ticket under Bob, and is asked about as the
+ * requester's; Amira's comment, when it arrives, makes her the requester
+ * (`adoptRootAuthor`). From then on Bob's answers are a passer-by's, and none
+ * of them settles her ticket or takes a place in her five. Built through the
+ * real ingest, which stores each comment at Meta's `created_time` — or, where
+ * Meta sent none, when it was processed, after his reply.
+ */
+describe('classifyMessageCategory, once the first comment took the ticket from a reply', () => {
+  const AMIRA = '1122334455';
+  const BOB = '9988776655';
+
+  function comment(overrides: Partial<NormalisedComment> = {}): NormalisedComment {
+    return {
+      platform: 'facebook',
+      connection: 'facebook_page',
+      commentId: 'post-1_c1',
+      parentCommentId: null,
+      postId: 'post-1',
+      from: AMIRA,
+      fromName: 'Amira Hassan',
+      text: 'My parcel never came',
+      createdAt: at(6),
+      verb: 'add',
+      raw: {},
+      ...overrides,
+    };
+  }
+
+  /** Bob's `n`th reply under Amira's comment. */
+  function bobsReply(n: number, createdAt: Date): NormalisedComment {
+    return comment({
+      commentId: `post-1_b${n}`,
+      parentCommentId: 'post-1_c1',
+      from: BOB,
+      fromName: 'Bob',
+      text: `How much is shipping to Alexandria? (${n})`,
+      createdAt,
+    });
+  }
+
+  /** Amira's own reply under her comment, with words of hers. */
+  const amirasReply = (createdAt: Date) =>
+    comment({
+      commentId: 'post-1_c2',
+      parentCommentId: 'post-1_c1',
+      text: 'Order 5512, it is a week late',
+      createdAt,
+    });
+
+  async function requesterOf(conversationId: string) {
+    const [row] = await db
+      .select({ requester: conversations.requesterContactId })
+      .from(conversations)
+      .where(eq(conversations.id, conversationId));
+    return row!.requester;
+  }
+
+  async function contactOf(identifier: string) {
+    const [row] = await db
+      .select({ id: contactIdentities.contactId })
+      .from(contactIdentities)
+      .where(eq(contactIdentities.identifier, identifier));
+    return row!.id;
+  }
+
+  /** Bob's reply opens the ticket, and Jev files it as sales on his words. */
+  async function filedOnHisReply(createdAt = at(5)) {
+    const reply = await ingestMetaComment(bobsReply(1, createdAt));
+    answers('sales');
+    await expect(
+      classifyMessageCategory(reply.messageId, { baseUrl: BASE }),
+    ).resolves.toMatchObject({ outcome: 'applied', predicted: 'sales' });
+    return reply;
+  }
+
+  // Meta sent no `created_time`, so the comment is dated after his reply, and
+  // his settle is the earlier one: counted, her comment is `after_settle`.
+  it('lets her first comment settle when it is dated after his reply', async () => {
+    const reply = await filedOnHisReply();
+    const root = await ingestMetaComment(comment({ createdAt: at(1) }));
+    expect(root).toMatchObject({
+      conversationId: reply.conversationId,
+      createdConversation: false,
+    });
+    expect(await requesterOf(reply.conversationId)).toBe(await contactOf(AMIRA));
+
+    answers('customer_support');
+    await expect(classifyMessageCategory(root.messageId, { baseUrl: BASE })).resolves.toEqual({
+      status: 'recorded',
+      outcome: 'applied',
+      predicted: 'customer_support',
+    });
+    expect(await carried(reply.conversationId)).toBe(await categoryId('customer_support'));
+  });
+
+  // A photo with no caption: her comment carries no words of hers, so it is
+  // never asked about, and his category stands until she writes.
+  it('asks her next words when her first comment had none', async () => {
+    const reply = await filedOnHisReply();
+    const root = await ingestMetaComment(comment({ text: '', createdAt: at(6) }));
+    await expect(classifyMessageCategory(root.messageId, { baseUrl: BASE })).resolves.toEqual({
+      status: 'skipped',
+      reason: 'no text',
+    });
+    expect(await carried(reply.conversationId)).toBe(await categoryId('sales'));
+
+    const next = await ingestMetaComment(amirasReply(at(1)));
+    answers('customer_support');
+    await expect(classifyMessageCategory(next.messageId, { baseUrl: BASE })).resolves.toMatchObject(
+      { outcome: 'applied', predicted: 'customer_support' },
+    );
+    expect(await carried(reply.conversationId)).toBe(await categoryId('customer_support'));
+  });
+
+  it('asks her next words when her first comment was not confident', async () => {
+    const reply = await filedOnHisReply();
+    const root = await ingestMetaComment(comment({ createdAt: at(6) }));
+    answers('customer_support', 0.5);
+    await expect(classifyMessageCategory(root.messageId, { baseUrl: BASE })).resolves.toMatchObject(
+      { outcome: 'below_threshold' },
+    );
+    expect(await carried(reply.conversationId)).toBe(await categoryId('sales'));
+
+    const next = await ingestMetaComment(amirasReply(at(1)));
+    answers('customer_support');
+    await expect(classifyMessageCategory(next.messageId, { baseUrl: BASE })).resolves.toMatchObject(
+      { outcome: 'applied', predicted: 'customer_support' },
+    );
+    expect(await carried(reply.conversationId)).toBe(await categoryId('customer_support'));
+  });
+
+  it('leaves his five answers out of her cap', async () => {
+    const his: string[] = [];
+    for (let n = 1; n <= 5; n++) {
+      his.push((await ingestMetaComment(bobsReply(n, at(11 - n)))).messageId);
+    }
+    answers('unknown');
+    for (const message of his) {
+      await expect(classifyMessageCategory(message, { baseUrl: BASE })).resolves.toMatchObject({
+        outcome: 'unknown',
+      });
+    }
+
+    const root = await ingestMetaComment(comment({ createdAt: at(12) }));
+    answers('customer_support');
+    await expect(classifyMessageCategory(root.messageId, { baseUrl: BASE })).resolves.toMatchObject(
+      { outcome: 'applied', predicted: 'customer_support' },
+    );
+  });
+
+  // A backfill's apply files from a record label's answer and leaves no live
+  // run beside it, so only the write's event names his message.
+  it('is not settled by a backfill’s filing on his reply', async () => {
+    const reply = await ingestMetaComment(bobsReply(1, at(5)));
+    const sales = await categoryId('sales');
+    await db.transaction((tx) =>
+      fileBacklogCategory(
+        tx,
+        reply.conversationId,
+        sales,
+        { label: CATEGORY_AI_ACTOR },
+        {
+          probability: 0.9,
+          model: 'jev-1.13.0',
+          messageId: reply.messageId,
+          messageCreatedAt: at(5).toISOString(),
+          runLabel: 'archive-1',
+        },
+      ),
+    );
+    const root = await ingestMetaComment(comment({ createdAt: at(1) }));
+
+    answers('customer_support');
+    await expect(classifyMessageCategory(root.messageId, { baseUrl: BASE })).resolves.toMatchObject(
+      { outcome: 'applied', predicted: 'customer_support' },
+    );
+    expect(await runsOf(reply.conversationId)).toEqual([
+      expect.objectContaining({ messageId: root.messageId, outcome: 'applied' }),
+    ]);
+  });
+
+  // His job read the message while he was the requester, and asks Jev; her
+  // comment's ingest moves the requester and holds the ticket's row until it
+  // commits, so the job's look under the lock waits for it and reads her.
+  it('writes nothing for his message once her comment committed while Jev was asked', async () => {
+    const reply = await ingestMetaComment(bobsReply(1, at(5)));
+    const [amira] = await db
+      .insert(contacts)
+      .values({ name: 'Amira Hassan' })
+      .returning({ id: contacts.id });
+    const calls = answers('sales');
+
+    let classifying!: Promise<ClassifyResult>;
+    await db.transaction(async (tx) => {
+      // What `adoptRootAuthor` writes, before the root's own message.
+      await tx
+        .update(conversations)
+        .set({ requesterContactId: amira!.id, requesterKind: null })
+        .where(eq(conversations.id, reply.conversationId));
+      classifying = classifyMessageCategory(reply.messageId, { baseUrl: BASE });
+      await untilSomebodyWaits();
+    });
+
+    await expect(classifying).resolves.toEqual({
+      status: 'skipped',
+      reason: 'not written by the requester',
+    });
+    // Asked: every read before the lock saw him still the requester.
+    expect(calls).toHaveBeenCalledTimes(1);
+    expect(await runsOf(reply.conversationId)).toEqual([]);
+    expect(await carried(reply.conversationId)).toBeNull();
+    expect(await categoryEvents(reply.conversationId)).toEqual([]);
+  });
+
+  // Her comment commits between the job's read of his message and its first
+  // look at the ticket, which finds the ticket owned: the outcome known before
+  // asking is no outcome for a message that is not hers.
+  it('records nothing for his message once her comment committed before the first look', async () => {
+    const reply = await ingestMetaComment(bobsReply(1, at(5)));
+    await setConversationCategory(reply.conversationId, await categoryId('merchant_support'), {
+      label: 'automation:Merchant number',
+    });
+    const calls = answers('sales');
+    between.next = async () => {
+      await ingestMetaComment(comment({ createdAt: at(6) }));
+    };
+
+    await expect(classifyMessageCategory(reply.messageId, { baseUrl: BASE })).resolves.toEqual({
+      status: 'skipped',
+      reason: 'not written by the requester',
+    });
+    expect(between.next).toBeNull();
+    expect(calls).not.toHaveBeenCalled();
+    expect(await runsOf(reply.conversationId)).toEqual([]);
+  });
+});
+
+/** Resolves once another session is waiting on a lock this test holds. */
+async function untilSomebodyWaits(): Promise<void> {
+  for (let tries = 0; tries < 200; tries++) {
+    const [row] = await db.execute<{ waiting: number }>(
+      sql`select count(*)::int as waiting from pg_stat_activity
+          where datname = current_database() and wait_event_type = 'Lock'`,
+    );
+    if (row && row.waiting > 0) return;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error('nothing came to wait on the lock this test holds');
+}
 
 describe('enqueueCategoryClassification', () => {
   const queued = async () =>

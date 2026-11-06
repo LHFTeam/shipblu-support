@@ -110,6 +110,25 @@ export function jevMayStillAsk(ticket: {
 }
 
 /**
+ * Whether a run's message was written by somebody other than `requester` —
+ * `skipReason`'s test, asked of a row already recorded, where the live job's
+ * settle and cap and the report's walks leave such a run out
+ * (`ticketFacts` in `run.ts`).
+ *
+ * The requester is whoever the ticket names now, not who it named when the
+ * run was recorded: on a comment thread a passer-by's reply stored before the
+ * customer's comment opens the ticket under them, and is asked about as the
+ * requester's, until the comment arrives and makes its author the requester
+ * (`adoptRootAuthor`). `<>` answers null for a message with no author and for
+ * a ticket with no requester, so neither is anybody else's, as `skipReason`
+ * reads them; and a run whose message was deleted since names none, which
+ * nothing can say was another's, so it still counts as it always did.
+ */
+export function messageByAnotherThan(requester: SQL): SQL<boolean> {
+  return sql<boolean>`exists (select 1 from ${messages} where ${messages.id} = ${aiCategoryRuns.messageId} and ${messages.authorContactId} <> ${requester})`;
+}
+
+/**
  * One question to Jev and its answer, read against the keys it was offered.
  * Throws what the client throws; the caller decides what a failure means for
  * its run.

@@ -95,6 +95,22 @@ async function message(conversationId: string, at: number, id?: string): Promise
   return row!.id;
 }
 
+/** A message `authorContactId` wrote on the ticket. */
+async function messageBy(conversationId: string, at: number, authorContactId: string | null) {
+  const [row] = await db
+    .insert(messages)
+    .values({
+      conversationId,
+      direction: 'inbound',
+      kind: 'reply',
+      bodyText: 'بكام الشحن؟',
+      authorContactId,
+      createdAt: minute(at),
+    })
+    .returning({ id: messages.id });
+  return row!.id;
+}
+
 async function statusNamed(name: string): Promise<string> {
   const [row] = await db
     .select({ id: ticketStatuses.id })
@@ -330,6 +346,54 @@ describe('categoryAiReport', () => {
 
     const report = await categoryAiReport('live', QUESTION, 'apply');
 
+    expect(report.sweep.find((row) => row.threshold === 0.7)).toMatchObject({
+      settled: 0,
+      unasked: 1,
+    });
+  });
+
+  // A comment thread a passer-by's reply opened: his messages were asked about
+  // while he was its requester, five in shadow and one filed in apply, until
+  // the customer's comment took the ticket over. Read as the live job reads
+  // it now, his answers settle nothing and take none of her five — in this
+  // view, and in the other views the cap counts — so her settle is the one
+  // graded, and above it her next message is unasked rather than capped.
+  it('leaves runs on a passer-by’s messages out of the settle and the cap', async () => {
+    const t = await ticket({ channel: 'facebook_comment', externalId: 'facebook:comment:p_1' });
+    const [requester] = await db
+      .select({ id: conversations.requesterContactId })
+      .from(conversations)
+      .where(eq(conversations.id, t.id));
+    const [bob] = await db.insert(contacts).values({ name: 'Bob' }).returning({ id: contacts.id });
+    const run = { channel: 'facebook_comment' } as const;
+    for (const at of [0, 1, 2, 3, 4]) {
+      await answer(t.id, at, 'unknown', 'unknown', {
+        ...run,
+        messageId: await messageBy(t.id, at, bob!.id),
+      });
+    }
+    await answer(t.id, 4.5, 'applied', 'sales', {
+      ...run,
+      mode: 'apply',
+      messageId: await messageBy(t.id, 4.5, bob!.id),
+    });
+    await answer(t.id, 5, 'applied', 'customer_support', {
+      ...run,
+      mode: 'apply',
+      probability: 0.65,
+      messageId: await messageBy(t.id, 5, requester!.id),
+    });
+    await answer(t.id, 6, 'after_settle', null, {
+      ...run,
+      mode: 'apply',
+      messageId: await messageBy(t.id, 6, null),
+    });
+
+    const report = await categoryAiReport('live', QUESTION, 'apply');
+
+    const settled = (key: string) => report.categories.find((each) => each.key === key)?.settled;
+    expect(settled('customer_support')).toBe(1);
+    expect(settled('sales')).toBe(0);
     expect(report.sweep.find((row) => row.threshold === 0.7)).toMatchObject({
       settled: 0,
       unasked: 1,

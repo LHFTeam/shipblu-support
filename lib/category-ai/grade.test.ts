@@ -46,9 +46,13 @@ function run(
     minProbability: 0.6,
     baselineKey: null,
     judgedAfterReply: false,
+    byNonRequester: false,
     ...extra,
   };
 }
+
+/** A run on a message somebody other than the ticket's requester now wrote. */
+const theirs = { byNonRequester: true } as const;
 
 function person(conversationId: string, at: number, key: string | null): GradingEvent {
   return {
@@ -568,6 +572,74 @@ describe('settleAt, the threshold sweep', () => {
       (row) => row.threshold === 0.7,
     );
     expect(high).toMatchObject({ settled: 0, unasked: 0 });
+  });
+});
+
+/**
+ * A comment thread whose ticket a passer-by's reply opened before the
+ * customer's comment took it over: his message was asked about as the
+ * requester's, and the live job no longer counts it as settling her ticket or
+ * as one of her five. Every walk here reads the ticket as the live job does.
+ */
+describe('a run on a message the requester did not write', () => {
+  it('neither settles the ticket nor is its first message', () => {
+    const graded = verdict([
+      run('t', 0, 'applied', 'sales', 0.9, theirs),
+      run('t', 1, 'applied', 'customer_support', 0.9),
+    ]);
+    expect(graded.settle).toEqual({ key: 'customer_support', onFirstMessage: true });
+    // Still one of Jev's answers: the share of unknowns is about Jev.
+    expect(graded).toMatchObject({ judged: true, answers: 2 });
+    // Past a row of hers Jev never judged, too: his judged one ahead of it
+    // does not make her settle a later message.
+    expect(
+      verdict([
+        run('t', 0, 'unknown', 'unknown', 0.9, theirs),
+        run('t', 1, 'capped'),
+        run('t', 2, 'would_apply', 'sales', 0.9),
+      ]).settle,
+    ).toEqual({ key: 'sales', onFirstMessage: true });
+  });
+
+  it('is passed over by the threshold sweep', () => {
+    const runs = [
+      run('t', 0, 'applied', 'sales', 0.9, theirs),
+      run('t', 1, 'applied', 'customer_support', 0.65),
+    ];
+    expect(settleAt(runs, 0.6)).toEqual({ kind: 'settled', key: 'customer_support' });
+  });
+
+  // His five asked, then hers: at a higher bar her settle is refused and her
+  // next message was never asked — unasked, not capped, since the live job
+  // left his five out of her cap and would have asked it.
+  it('takes none of the five the cap counts', () => {
+    const runs = [
+      ...[0, 1, 2, 3, 4].map((at) => run('t', at, 'unknown', 'unknown', 0.9, theirs)),
+      run('t', 5, 'applied', 'customer_support', 0.65),
+      run('t', 6, 'after_settle'),
+    ];
+    expect(settleAt(runs, 0.7)).toEqual({ kind: 'unasked' });
+  });
+
+  it('is not where the rules read their answer', () => {
+    const runs = [
+      run('t', 0, 'would_apply', 'sales', 0.9, { ...theirs, baselineKey: 'sales' }),
+      run('t', 1, 'would_apply', 'customer_support', 0.9, { baselineKey: 'customer_support' }),
+    ];
+    expect(verdict(runs).baseline).toBe('customer_support');
+  });
+
+  // The live job may still ask about her next message, so labelling it now
+  // would make that message owned: his five do not close her window.
+  it('does not close the window the sample waits for', () => {
+    const runs = [
+      ...[0, 1, 2, 3, 4].map((at) => run('t', at, 'unknown', 'unknown', 0.9, theirs)),
+      run('t', 5, 'below_threshold', 'sales', 0.3),
+    ];
+    const tickets = new Map<string, GradingTicket>([
+      ['t', { number: 1, labellable: true, windowOpen: true }],
+    ]);
+    expect(grade(input(runs, [], { tickets })).toLabel).toEqual([]);
   });
 });
 
