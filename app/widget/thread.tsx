@@ -98,14 +98,13 @@ export function WidgetThread({
   const pickerId = useId();
   /** The last prefill actually put in the box, so a repaint does not redo it. */
   const applied = useRef(0);
-  /** A caret waiting for the value it is meant to sit at the end of. */
-  const caretPending = useRef(false);
+  /** The prefill whose caret goes at the end of the box, in the render it causes. */
+  const [caretFor, setCaretFor] = useState(0);
   /** A caret waiting to sit after an emoji just put in the focused box. */
   const caretAt = useRef<number | null>(null);
   /**
-   * Words put in the box from code with the caret at their end — a draft from
-   * the host page, or a failed send's put back — whose end the box scrolls to
-   * once it has measured them (the effect that sizes it).
+   * Words a failed send put back, with the caret at their end, which the box
+   * scrolls to once it has measured them (the effect that sizes it).
    */
   const revealEnd = useRef(false);
   /**
@@ -132,35 +131,50 @@ export function WidgetThread({
    *
    * Applying it is one thing and putting the caret after it is another, because
    * the field still holds the old value when this runs: `setDraft` has not been
-   * rendered yet. The effect below waits for the value and then places the
-   * caret, which is also what makes the case above right — the caret lands at
-   * the end of whatever the visitor kept.
+   * rendered yet. The effect below places the caret in the render this causes,
+   * once the value is in the field, which is also what makes the case above
+   * right — the caret lands at the end of whatever the visitor kept.
+   *
+   * `caretFor` is state rather than a flag in a ref so that render always
+   * happens. A box that keeps the visitor's words gives `setDraft` nothing to
+   * change, and a flag waiting for the draft's next render waited for the
+   * visitor's next keystroke instead: that one landed where they had put the
+   * caret, and then the caret was thrown to the end of the draft, so the second
+   * letter of a word typed into its middle went after its last. A flag set on
+   * the render that mounted the thread was spent there too, on the empty box.
    */
   useEffect(() => {
     if (!prefill || prefill.seq === applied.current) return;
 
     applied.current = prefill.seq;
-    caretPending.current = true;
-    revealEnd.current = true;
     setDraft((current) => (current.trim() ? current : prefill.text));
+    setCaretFor(prefill.seq);
   }, [prefill]);
 
+  /*
+   * Scrolled to the end as well as put there: Chrome scrolls a textarea to its
+   * caret when somebody types, never when code sets the value or the
+   * selection, so a draft past the cap would open on its first six lines and
+   * hide the one the caret is on. The box is already its final height: the
+   * effect that sizes it is a layout effect of this same render.
+   */
   useEffect(() => {
     const field = composer.current;
-    if (caretAt.current !== null) {
-      const at = caretAt.current;
-      caretAt.current = null;
-      // Only on the focused box: some engines focus a field to select in it,
-      // which on a phone brings the keyboard back up over the panel.
-      if (field && document.activeElement === field) field.setSelectionRange(at, at);
-    }
-
-    if (!caretPending.current) return;
-    caretPending.current = false;
-    if (!field) return;
+    if (!caretFor || !field) return;
 
     field.focus();
     field.setSelectionRange(field.value.length, field.value.length);
+    field.scrollTop = field.scrollHeight;
+  }, [caretFor]);
+
+  useEffect(() => {
+    if (caretAt.current === null) return;
+    const field = composer.current;
+    const at = caretAt.current;
+    caretAt.current = null;
+    // Only on the focused box: some engines focus a field to select in it,
+    // which on a phone brings the keyboard back up over the panel.
+    if (field && document.activeElement === field) field.setSelectionRange(at, at);
   }, [draft]);
 
   /*
@@ -180,19 +194,15 @@ export function WidgetThread({
    * to a box collapsed to nothing. `active` in the dependencies is what
    * re-measures it on the way back.
    *
-   * Past the cap the box scrolls, and words put in from code are scrolled to
-   * their end (`revealEnd`), where the caret is. Chrome scrolls a textarea to
-   * the caret when somebody types, never when code sets the value or the
-   * selection, so a prefilled draft longer than six lines, or a long message a
-   * failed send put back, showed its first six lines and hid the one the caret
-   * was on — the failure above, at the cap. Here rather than where the caret
-   * is placed, because only here is the box its final height; and a send that
-   * fails while the thread is hidden keeps the flag until it is measured again.
-   *
-   * Only once the box holds the words. A prefill that opens the thread is set
-   * in the render after it mounts, and a pass before it — React's second run of
-   * every effect in development, or a measure with nothing in the box yet —
-   * would otherwise spend the flag on an empty box.
+   * Past the cap the box scrolls, and Chrome scrolls a textarea to its caret
+   * when somebody types, never when code sets the value. So a long message a
+   * failed send put back, its caret at the end, showed its first six lines and
+   * hid the one the caret was on — the failure above, at the cap — and is
+   * scrolled to its end here (`revealEnd`). Here rather than beside the send,
+   * because the send can fail while the visitor is reading an article, and a
+   * hidden box is not measured: the flag waits for the measure on the way back.
+   * A prefill scrolls where it places its caret, since it always arrives with
+   * the thread on screen.
    */
   useLayoutEffect(() => {
     const field = composer.current;
@@ -200,7 +210,7 @@ export function WidgetThread({
 
     field.style.height = 'auto';
     field.style.height = `${Math.min(field.scrollHeight, MAX_COMPOSER_PX)}px`;
-    if (revealEnd.current && field.value) {
+    if (revealEnd.current) {
       revealEnd.current = false;
       field.scrollTop = field.scrollHeight;
     }
