@@ -23,6 +23,12 @@ CREATE EXTENSION IF NOT EXISTS unaccent;
 -- term against a long subject scores below the 0.3 threshold and matches
 -- nothing. Both `<%` and ILIKE are index-accelerated by gin_trgm_ops; verified
 -- against Postgres 16.
+--
+-- Not lock-free on a replay, unlike the rest of this file. `CREATE INDEX IF NOT
+-- EXISTS` takes SHARE on its table before it finds the index already there, so
+-- each of these waits on any open writer of its table, and then holds that
+-- table's writes off until this whole file commits (PROJECT-STATE §6.109,
+-- which also says what the fix is).
 -- --------------------------------------------------------------------------
 CREATE INDEX IF NOT EXISTS conversations_subject_trgm_idx
   ON conversations USING gin (subject gin_trgm_ops);
@@ -185,8 +191,9 @@ END $$;
 -- locked down by the next deploy whether or not anybody remembered.
 --
 -- Enabling RLS takes ACCESS EXCLUSIVE on the table, so this only touches tables
--- that do not already have it — the steady state takes no locks at all, which is
--- the rule the rest of this file follows.
+-- that do not already have it — in the steady state this loop takes no locks at
+-- all. That is the rule the rest of this file aims for; the `CREATE INDEX IF NOT
+-- EXISTS` statements at its top do not meet it (§6.109).
 -- --------------------------------------------------------------------------
 DO $$
 DECLARE
@@ -295,8 +302,8 @@ $$;
 -- `agents` held AccessShareLock for six hours and every deploy in between
 -- failed on `DROP TRIGGER IF EXISTS touch_updated_at ON agents`.
 --
--- Checking first makes the steady state lock-free: a table that already has the
--- trigger is skipped without touching it. New tables still pick it up, which is
+-- Checking first makes this loop lock-free in the steady state: a table that
+-- already has the trigger is skipped without touching it. New tables still pick it up, which is
 -- what the loop is for.
 --
 -- The trade: changing the trigger's *definition* — its timing, its events, the
@@ -308,9 +315,10 @@ $$;
 -- replaced in place with `CREATE OR REPLACE TRIGGER` under the same name —
 -- SHARE ROW EXCLUSIVE, never the DROP's ACCESS EXCLUSIVE — under a guard that
 -- compares what it is (`tgfoid`, its events), not its name, and under a
--- `lock_timeout` (`008_comment_channel_check.sql`). Giving the new one a
--- different name is not a way round this: this loop would create the generic
--- trigger again beside it.
+-- `lock_timeout` set for the transaction alone, the way
+-- `008_comment_channel_check.sql` sets one before its guarded constraint. Giving
+-- the new one a different name is not a way round this: this loop would create
+-- the generic trigger again beside it.
 DO $$
 DECLARE
   t text;

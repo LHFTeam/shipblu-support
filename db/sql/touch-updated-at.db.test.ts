@@ -147,12 +147,37 @@ describe('kb_articles.updated_at', () => {
     ['the tags', { tags: ['pickups'] }],
     ['the position', { position: 3 }],
     ['the reader floor', { minRole: 'supervisor' }],
+    // The shapes most likely to compare oddly as jsonb: a jsonb object, a
+    // nullable text, a uuid, a timestamptz and a uuid[].
+    ['the SEO fields', { seo: { title: 'Pickups' } }],
+    ['the excerpt', { excerpt: 'Book a pickup online.' }],
+    ['the translation link', { translationGroupId: '00000000-0000-4000-8000-000000000001' }],
+    ['the publication date', { publishedAt: new Date('2026-04-01T09:00:00Z') }],
+    [
+      'the companies it is shown to',
+      { visibleToCompanyIds: ['00000000-0000-4000-8000-000000000002'] },
+    ],
   ];
 
   it.each(edits)('moves when %s changes', async (_label, values) => {
     const id = await article(await folder());
 
     await db.update(kbArticles).set(values).where(eq(kbArticles.id, id));
+
+    expect((await stored(id)).updatedAt.getTime()).toBeGreaterThan(WRITTEN.getTime());
+  });
+
+  it('moves when the approver changes', async () => {
+    const id = await article(await folder());
+    const [approver] = await db
+      .insert(agents)
+      .values({ email: 'approver@example.test', name: 'Approver' })
+      .returning({ id: agents.id });
+
+    await db
+      .update(kbArticles)
+      .set({ approvedByAgentId: approver!.id })
+      .where(eq(kbArticles.id, id));
 
     expect((await stored(id)).updatedAt.getTime()).toBeGreaterThan(WRITTEN.getTime());
   });

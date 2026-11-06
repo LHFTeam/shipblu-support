@@ -100,9 +100,10 @@ asset and is shown on the English page too.
   readers. That is fixed since (§5), but the column still moves for a change of
   folder, status, visibility or tags, which is not a revision a customer reads.
   The pages read `editedAt` in `lib/kb/queries.ts` instead: the newest
-  `kb_article_versions` row, cut only when a title or body changes, or the
-  publication date, or the creation date. "Last updated", "Recently updated",
-  the folder and topic dates and the sitemap's `lastmod` all read it.
+  `kb_article_versions` row, cut when a title or body changes or a version is
+  restored, or the publication date, or the creation date. "Last updated",
+  "Recently updated", the folder and topic dates and the sitemap's `lastmod` all
+  read it.
 - `listTopicFolders` gives the front page its cards: each audience with its
   folders, and each folder's count, description and first three titles, in the
   folder page's own order. A folder with nothing the reader may open in the

@@ -1,4 +1,4 @@
-import { eq, sql } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { db } from '@/db/client';
 import { kbArticleVersions, kbArticles, kbCategories, kbFolders } from '@/db/schema';
@@ -12,6 +12,7 @@ import {
   listCategories,
   listTopicFolders,
   recentlyUpdatedArticles,
+  recordArticleView,
 } from './queries';
 import { ANONYMOUS } from './visibility';
 
@@ -58,15 +59,12 @@ async function article(
 }
 
 /**
- * What `recordArticleView` does: a write the `touch_updated_at` trigger sees,
- * and since §6.51's fix leaves `updated_at` where it was.
+ * A reader opening the article: the real `recordArticleView`, a write the
+ * `touch_updated_at` trigger sees and, since §6.51's fix, leaves `updated_at`
+ * where it was. The function itself rather than a copy of its statement, so a
+ * view that started writing another column would fail the premise below.
  */
-async function view(id: string): Promise<void> {
-  await db
-    .update(kbArticles)
-    .set({ viewCount: sql`${kbArticles.viewCount} + 1` })
-    .where(eq(kbArticles.id, id));
-}
+const view = recordArticleView;
 
 async function edit(id: string, at: Date, version: number): Promise<void> {
   await db.insert(kbArticleVersions).values({

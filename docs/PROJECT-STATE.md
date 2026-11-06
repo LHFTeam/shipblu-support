@@ -4722,8 +4722,12 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
     does not normalise it fails the build.
 
 51. ~~**`kb_articles.updated_at` is not an edit date — every page view moves
-    it.**~~ **Fixed in #466, in production from the first deploy after `dev`
-    is merged into `main`; the history below is why.** _2026-09-03._
+    it.**~~ **Fixed in code by #466.** It reaches production with the first
+    deploy after `dev` is merged into `main`, which nobody has checked yet:
+    once it has deployed, record here that `pg_get_functiondef` of
+    `touch_updated_at` names `not_an_edit` and that one view left an
+    article's `updated_at` where it was. The history below is why.
+    _2026-09-03._
     `recordArticleView` increments `view_count` on the
     article row, and `touch_updated_at` fires on any update of a table with that
     column, so a read writes the timestamp. The article page renders it as
@@ -7500,6 +7504,25 @@ dryRun=true`, then without, gives those two theirs back from their
       says which endpoints and permissions that connection offers, and nothing
       about what the account will accept. Each is a reading to take on the
       first live call, written down here, not a rule to code from.
+
+109.  **`CREATE INDEX IF NOT EXISTS` locks the table even when the index is
+      there.** _2026-11-06, found while measuring the locks for #466._ It takes
+      SHARE on the table before it looks for the index, so the eleven at the
+      top of `db/sql/001_extensions_and_triggers.sql` — on `conversations`,
+      `contacts`, `messages`, `side_conversation_messages`, `companies`,
+      `kb_articles`, `shipments` and `shipping_accounts` — each wait on any
+      open writer of their table on every replay. Measured on Postgres 16: with
+      a session holding ROW EXCLUSIVE on `kb_articles`, the statement for an
+      index that already existed failed under `lock_timeout = '1s'`. And
+      because a `db/sql` file runs as one transaction, each SHARE it is granted
+      is held until the whole file commits, so writes to those tables queue
+      behind the rest of the file. The file's own comments said its steady
+      state took no locks; they now point here. Not fixed yet: the cure is a
+      guard that asks `pg_class` and creates the index only when it is
+      missing, never `CONCURRENTLY`, which `db/sql` cannot run. Until then a
+      deploy can fail on `db:migrate` behind an open writer as §6.15's did
+      behind an open reader, and the ten-second `LOCK_TIMEOUT` in
+      `db/migrate.ts` is what turns that into a fast failure.
 
 ### Tooling notes for this environment
 
