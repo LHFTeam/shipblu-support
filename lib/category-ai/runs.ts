@@ -9,6 +9,7 @@ import {
   type SystemOneResponse,
 } from '@/lib/typesafe/client';
 import { CATEGORY_QUESTION } from './request';
+import { writtenByAnotherSql } from '@/lib/tickets/classifiable';
 
 /**
  * What the live classifier (`run.ts`) and the backfill (`backfill.ts`) share:
@@ -125,7 +126,7 @@ export function jevMayStillAsk(ticket: {
  * nothing can say was another's, so it still counts as it always did.
  */
 export function messageByAnotherThan(requester: SQL): SQL<boolean> {
-  return sql<boolean>`exists (select 1 from ${messages} where ${messages.id} = ${aiCategoryRuns.messageId} and ${messages.authorContactId} <> ${requester})`;
+  return sql<boolean>`exists (select 1 from ${messages} where ${messages.id} = ${aiCategoryRuns.messageId} and ${writtenByAnotherSql(messages.authorContactId, requester)})`;
 }
 
 /**

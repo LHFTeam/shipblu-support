@@ -601,6 +601,17 @@ describe('a run on a message the requester did not write', () => {
     ).toEqual({ key: 'sales', onFirstMessage: true });
   });
 
+  // Her comment had no words, so Jev was only ever asked about his reply: not
+  // a ticket Jev failed to settle, and in no rate.
+  it('leaves a ticket judged only on his words out of play', () => {
+    expect(verdict([run('t', 0, 'applied', 'sales', 0.9, theirs)])).toMatchObject({
+      judged: false,
+      outOfPlay: 'not_the_requesters',
+      settle: null,
+      answers: 1,
+    });
+  });
+
   it('is passed over by the threshold sweep', () => {
     const runs = [
       run('t', 0, 'applied', 'sales', 0.9, theirs),
@@ -697,7 +708,13 @@ describe('grade', () => {
       comparable: 2,
       agree: 1,
     });
-    expect(report.outOfPlay).toEqual({ owned: 1, settled_elsewhere: 0, capped: 0, failed: 0 });
+    expect(report.outOfPlay).toEqual({
+      owned: 1,
+      settled_elsewhere: 0,
+      capped: 0,
+      failed: 0,
+      not_the_requesters: 0,
+    });
   });
 
   it('grades precision on what Jev settled and recall on what people labelled', () => {

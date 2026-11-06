@@ -527,7 +527,7 @@ async function phaseOne(
   // Whose words the category stands on, asked only of a decision that reads
   // it — a ticket somebody holds, nobody may work, or whose channel stopped
   // routing is decided the same whatever it carries. `resume` is the window's
-  // end here (`settleRouting`): with no decision written yet, nothing else
+  // job here (`settleRouting`): with no decision written yet, nothing else
   // passes it.
   let setAside = false;
   if (decision.outcome === 'category' || decision.outcome === 'no_route_for_category') {
@@ -543,7 +543,14 @@ async function phaseOne(
       },
       row.messageId,
     );
-    const standing = categoryStanding(source, resume);
+    // The window's end is the window's job (`settleRouting`, `resume`), or any
+    // call once the window has closed: with that job late behind a backed-up
+    // queue, or dead, a reading left waiting would wait for good, every later
+    // answer or edit asking the same question and getting the same answer.
+    // The job run by hand before then is the window's end by definition, as
+    // it is for a ticket with nothing to wait for.
+    const atWindowEnd = resume || now.getTime() >= row.windowEndsAt.getTime();
+    const standing = categoryStanding(source, atWindowEnd);
     if (standing === 'waits') {
       // Held as `holding`, so the answer that settles it — the root's, or the
       // customer's next message's — routes it at once (`afterCategoryApplied`,

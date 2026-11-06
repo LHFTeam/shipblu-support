@@ -23,7 +23,7 @@ import {
 } from '@/lib/routing/state';
 import { afterRoutingChanged } from '@/lib/sla';
 import { isCommentTicket } from '@/lib/tickets/channel-policy';
-import { skipReason } from '@/lib/tickets/classifiable';
+import { skipReason, writtenByAnotherSql } from '@/lib/tickets/classifiable';
 import { lockedStatusCategory, statusCategoryOf } from '@/lib/tickets/status-category';
 import { afterTicketUpdate } from '@/lib/tickets/lifecycle';
 import { CHANGE_STAMP } from '@/lib/tickets/change-stamp';
@@ -720,8 +720,7 @@ async function writtenByAnother(
     .where(
       and(
         inArray(messages.id, ids),
-        isNotNull(messages.authorContactId),
-        ne(messages.authorContactId, requesterContactId),
+        writtenByAnotherSql(messages.authorContactId, requesterContactId),
       ),
     );
   return new Set(rows.map((row) => row.id));

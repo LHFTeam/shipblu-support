@@ -200,8 +200,16 @@ export type GradingInput = {
   thresholds: readonly number[];
 };
 
-/** Why a ticket with rows was never judged on an answer. */
-export type OutOfPlay = 'owned' | 'settled_elsewhere' | 'capped' | 'failed';
+/**
+ * Why a ticket with rows was never judged on an answer. `not_the_requesters`:
+ * every message Jev judged was somebody else's than the requester's — a
+ * passer-by's reply that opened a comment thread before the customer's comment
+ * took it over, the comment itself giving Jev nothing to ask about. The live
+ * job no longer counts those answers as the ticket's (`decide.ts`), so the
+ * ticket has none of its own, and grading it would count as a miss a ticket
+ * Jev was never asked about.
+ */
+export type OutOfPlay = 'owned' | 'settled_elsewhere' | 'capped' | 'failed' | 'not_the_requesters';
 
 /** One ticket as the grading sees it. */
 export type TicketVerdict = {
@@ -248,14 +256,17 @@ export function ticketVerdicts(
     const ticketRuns = [...unordered].sort(inJudgedOrder);
     const ticketEvents = eventsByTicket.get(conversationId) ?? [];
     const elsewhere = [...(elsewhereByTicket.get(conversationId) ?? [])].sort(inJudgedOrder);
-    const judged = ticketRuns.some((run) => JUDGED.has(run.outcome));
+    const own = requestersOwn(ticketRuns);
+    // Judged on the requester's own messages, as the settle reads them: a
+    // ticket judged only on a passer-by's would otherwise be graded, with no
+    // settle, as one Jev failed to settle.
+    const judged = own.some((run) => JUDGED.has(run.outcome));
     // As the cap counts them: a failure that kept its prediction — a category
     // retired during the call — is no answer anywhere else either. A
     // passer-by's answers are Jev's answers all the same, and stay in these
     // counts; only the settle and the cap pass them over.
     const predicted = ticketRuns.filter(counted);
 
-    const own = requestersOwn(ticketRuns);
     const settleIndex = own.findIndex(
       (run) => SETTLING.has(run.outcome) && run.predictedKey !== null,
     );
@@ -299,7 +310,11 @@ export function ticketVerdicts(
       conversationId,
       channel: ticketRuns[0]!.channel,
       judged,
-      outOfPlay: judged ? null : outOfPlay(ticketRuns),
+      outOfPlay: judged
+        ? null
+        : ticketRuns.some((run) => JUDGED.has(run.outcome))
+          ? 'not_the_requesters'
+          : outOfPlay(ticketRuns),
       answers: predicted.length,
       unknowns: predicted.filter((run) => run.predictedKey === UNKNOWN_CATEGORY_KEY).length,
       settle: settleRun
@@ -638,6 +653,7 @@ export function grade(input: GradingInput): Grading {
     settled_elsewhere: 0,
     capped: 0,
     failed: 0,
+    not_the_requesters: 0,
   };
   for (const verdict of verdicts) {
     if (verdict.outOfPlay) outOfPlayCounts[verdict.outOfPlay] += 1;

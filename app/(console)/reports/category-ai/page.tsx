@@ -489,8 +489,10 @@ export default async function CategoryAiReportPage({
               or a form before Jev was asked; {report.outOfPlay.settled_elsewhere} settled outside
               this run, under another version of the question, in the other mode or by a
               backfill&rsquo;s filing; {report.outOfPlay.capped} capped; {report.outOfPlay.failed}{' '}
-              whose every call failed. In no rate read off labels: {report.writtenFirst} judged
-              ticket
+              whose every call failed; {report.outOfPlay.not_the_requesters} judged only on a
+              passer-by&rsquo;s reply that opened a comment thread before the customer&rsquo;s own
+              comment, which gave Jev nothing to ask about. In no rate read off labels:{' '}
+              {report.writtenFirst} judged ticket
               {report.writtenFirst === 1 ? '' : 's'} written to by Jev, a rule or a form before
               anybody labelled {report.writtenFirst === 1 ? 'it' : 'them'},{' '}
               {report.labelledAfterWrite} labelled since &mdash; agreeing with what was written

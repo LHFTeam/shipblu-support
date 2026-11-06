@@ -1,12 +1,21 @@
 import { and, desc, eq, inArray, isNull } from 'drizzle-orm';
-import type { db } from '@/db/client';
-import { CATEGORY_AI_LIVE_LABEL, aiCategoryRuns, conversationEvents, messages } from '@/db/schema';
+import { db } from '@/db/client';
+import {
+  CATEGORY_AI_LIVE_LABEL,
+  aiCategoryRuns,
+  conversationEvents,
+  conversations,
+  messages,
+  routingDecisions,
+  ticketCategories,
+} from '@/db/schema';
 import { CATEGORY_AI_ACTOR } from '@/lib/category-ai/decide';
 import { canonicalUuid } from '@/lib/http/uuid';
 import { isCommentTicket } from '@/lib/tickets/channel-policy';
-import type { CategorySource } from './decide';
+import { writtenByAnother } from '@/lib/tickets/classifiable';
+import { categoryStanding, type CategorySource } from './decide';
 
-type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+type Executor = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 /**
  * Whose words the category a ticket carries stands on (`categoryStanding`,
@@ -15,6 +24,15 @@ type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
  * so the requester it compares against is the one adoption left
  * (`adoptRootAuthor`, whose compare-and-set takes the same row), and a root
  * comment stored by an adoption that committed is visible with it.
+ *
+ * Null — nothing to hold back — for any ticket that is not a comment thread,
+ * which costs a decision there no read at all. Only adoption makes the
+ * requester somebody other than the author of what Jev was asked about: a
+ * contact merge moves the ticket's requester and the contact's messages in one
+ * transaction (`mergeContacts`), and nothing else writes the requester of a
+ * ticket that exists. So on Web Chat, email or a direct message the answer is
+ * always "the requester's", and asking it read up to six statements under the
+ * ticket's lock and the routing row's for nothing.
  *
  * Jev's own record says which message each of its answers was about: the
  * `category_changed` event a write leaves names the message, and the live run
@@ -29,7 +47,7 @@ type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
  * how the classifiers count such a run as well.
  */
 export async function categorySource(
-  tx: Tx,
+  executor: Executor,
   ticket: {
     id: string;
     categoryId: string | null;
@@ -40,9 +58,9 @@ export async function categorySource(
   },
   openerMessageId: string | null,
 ): Promise<CategorySource | null> {
-  if (!ticket.categoryId) return null;
+  if (!ticket.categoryId || !isCommentTicket(ticket.channel, ticket.externalId)) return null;
 
-  const [last] = await tx
+  const [last] = await executor
     .select({ actorLabel: conversationEvents.actorLabel, data: conversationEvents.data })
     .from(conversationEvents)
     .where(
@@ -58,19 +76,57 @@ export async function categorySource(
   const readByJev = last?.actorLabel === CATEGORY_AI_ACTOR && last.data.to === ticket.categoryId;
   if (!readByJev) return { readByJev: false, notTheRequesters: false, awaitingRoot: false };
 
+  // Once the words are somebody else's, whether the root is still to come
+  // changes nothing `categoryStanding` answers, so it is not read.
+  const notTheRequesters = !(await requesterChose(executor, ticket));
   return {
     readByJev,
-    notTheRequesters: !(await requesterChose(tx, ticket)),
-    awaitingRoot: await awaitingRoot(tx, ticket, openerMessageId),
+    notTheRequesters,
+    awaitingRoot: notTheRequesters ? false : await awaitingRoot(executor, ticket, openerMessageId),
   };
 }
 
 /**
+ * Whether a person's or a rule's end of a hold left Jev's category owed what
+ * the router would have given it: the SLA policy's look at it and, where the
+ * ending wrote nothing of its own, the `on_update` rules (`afterHoldEnded`,
+ * `storeAgentReply`).
+ *
+ * Jev's write on a held ticket hands both to the router (`routerDecidedOn`), and
+ * while the router waits for a comment thread's root (`categoryStanding`) a
+ * person can end the hold first, through `endHold`, which decides without the
+ * category. Owed only where the window's end would have routed on it: Jev's
+ * reading of the requester's own words. A category read off a passer-by is set
+ * aside there — no pass and no policy — and a person taking the ticket first
+ * must not give it either. Not for anything the router decided itself, which
+ * ran both, nor a category a person or a rule wrote, whose write ran its own.
+ */
+export async function jevCategoryOwed(conversationId: string): Promise<boolean> {
+  const [row] = await db
+    .select({
+      outcome: routingDecisions.outcome,
+      messageId: routingDecisions.messageId,
+      categoryId: conversations.categoryId,
+      categoryKey: ticketCategories.key,
+      requesterContactId: conversations.requesterContactId,
+      channel: conversations.channel,
+      externalId: conversations.externalId,
+    })
+    .from(routingDecisions)
+    .innerJoin(conversations, eq(conversations.id, routingDecisions.conversationId))
+    .leftJoin(ticketCategories, eq(ticketCategories.id, conversations.categoryId))
+    .where(eq(routingDecisions.conversationId, conversationId));
+  if (!row || (row.outcome !== 'manual' && row.outcome !== 'rule')) return false;
+  const source = await categorySource(db, { id: conversationId, ...row }, row.messageId);
+  return source?.readByJev === true && categoryStanding(source, true) === 'routes';
+}
+
+/**
  * Whether some answer of Jev's that chose the ticket's category was about a
- * message that is not somebody else's than the requester's.
+ * message nobody other than the requester wrote (`writtenByAnother`).
  */
 async function requesterChose(
-  tx: Tx,
+  executor: Executor,
   ticket: {
     id: string;
     categoryId: string | null;
@@ -80,7 +136,7 @@ async function requesterChose(
 ): Promise<boolean> {
   if (!ticket.requesterContactId) return true;
 
-  const writes = await tx
+  const writes = await executor
     .select({ data: conversationEvents.data })
     .from(conversationEvents)
     .where(
@@ -100,7 +156,7 @@ async function requesterChose(
     .map((write) => canonicalUuid(write.data.messageId));
 
   if (ticket.categoryKey) {
-    const runs = await tx
+    const runs = await executor
       .select({ messageId: aiCategoryRuns.messageId })
       .from(aiCategoryRuns)
       .where(
@@ -118,15 +174,12 @@ async function requesterChose(
   const named = [...new Set(answered.filter((id): id is string => id !== null))];
   if (named.length === 0) return false;
 
-  const authors = await tx
+  const authors = await executor
     .select({ id: messages.id, authorContactId: messages.authorContactId })
     .from(messages)
     .where(inArray(messages.id, named));
   const byId = new Map(authors.map((row) => [row.id, row.authorContactId]));
-  return named.some((id) => {
-    const author = byId.get(id);
-    return !author || author === ticket.requesterContactId;
-  });
+  return named.some((id) => !writtenByAnother(byId.get(id), ticket.requesterContactId));
 }
 
 /**
@@ -136,19 +189,19 @@ async function requesterChose(
  * a root answers none.
  */
 async function awaitingRoot(
-  tx: Tx,
-  ticket: { id: string; channel: string; externalId: string | null },
+  executor: Executor,
+  ticket: { id: string },
   openerMessageId: string | null,
 ): Promise<boolean> {
-  if (!openerMessageId || !isCommentTicket(ticket.channel, ticket.externalId)) return false;
+  if (!openerMessageId) return false;
 
-  const [opener] = await tx
+  const [opener] = await executor
     .select({ inReplyTo: messages.inReplyTo })
     .from(messages)
     .where(eq(messages.id, openerMessageId));
   if (!opener?.inReplyTo) return false;
 
-  const [root] = await tx
+  const [root] = await executor
     .select({ id: messages.id })
     .from(messages)
     .where(

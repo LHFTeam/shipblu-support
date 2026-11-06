@@ -2426,6 +2426,89 @@ describe('a comment thread a reply opened', () => {
     });
   });
 
+  // The replier's category is set aside at the window's end, with no policy
+  // for it; a person taking the ticket first gives it none either.
+  it('chooses no policy for the replier’s category when a person takes the ticket', async () => {
+    const t = await page();
+    const lead = await agent('Laila');
+    const round = { firstResponseMins: 30, nextResponseMins: 30, resolutionMins: 240 };
+    const thread = await replyOpened(t.page, t.home.group);
+    const sales = await jevAnswers(thread, 'sales', thread.messageId);
+    await db.insert(slaPolicies).values({
+      name: 'Sales',
+      hoursSource: 'round_the_clock',
+      targets: { low: round, medium: round, high: round, urgent: round },
+      conditions: inCategory(sales),
+    });
+    await rootArrives(thread);
+    expect(await routeNow(thread.id, { label: 'jev:category' })).toBe('waiting');
+
+    await db.transaction(async (tx) => {
+      await tx
+        .update(conversations)
+        .set({ assigneeAgentId: t.home.agent })
+        .where(eq(conversations.id, thread.id));
+      return endHold(tx, thread.id, 'manual', { agentId: lead });
+    });
+    await afterHoldEnded(thread.id);
+
+    expect((await ticketRow(thread.id)).slaPolicyId).toBeNull();
+  });
+
+  // An agent's reply runs no pass of its own, so the one Jev's write handed
+  // the router is run as the reply ends the hold.
+  it('runs the pass Jev’s category handed the router when an agent’s reply ends the hold', async () => {
+    const t = await page();
+    const thread = await replyOpened(t.page, t.home.group);
+    const sales = await jevAnswers(thread, 'sales', thread.messageId);
+    await rule('on_update', 'Tag sales', inCategory(sales), [
+      { type: 'add_tags', tags: ['sales'] },
+    ]);
+    expect(await routeNow(thread.id, { label: 'jev:category' })).toBe('waiting');
+
+    await storeAgentReply(thread.id, 'facebook_comment', {
+      authorAgentId: t.home.agent,
+      bodyText: 'Sending you our rates now.',
+      bodyHtml: '<p>Sending you our rates now.</p>',
+    });
+
+    await expectDecided(thread.id, 'manual');
+    expect(await tagged(thread.id)).toBe(1);
+  });
+
+  it('runs no pass for the replier’s category when an agent’s reply ends the hold', async () => {
+    const t = await page();
+    const thread = await replyOpened(t.page, t.home.group);
+    const sales = await jevAnswers(thread, 'sales', thread.messageId);
+    await rule('on_update', 'Tag sales', inCategory(sales), [
+      { type: 'add_tags', tags: ['sales'] },
+    ]);
+    await rootArrives(thread);
+
+    await storeAgentReply(thread.id, 'facebook_comment', {
+      authorAgentId: t.home.agent,
+      bodyText: 'Looking into it.',
+      bodyHtml: '<p>Looking into it.</p>',
+    });
+
+    await expectDecided(thread.id, 'manual');
+    expect(await tagged(thread.id)).toBe(0);
+  });
+
+  // The window's job late, or dead: a call once the window has closed is its
+  // end too, or the reading would wait for good.
+  it('decides on a call made after the window has closed', async () => {
+    const t = await page();
+    const thread = await replyOpened(t.page, t.home.group);
+    await jevAnswers(thread, 'sales', thread.messageId);
+    await rootArrives(thread);
+    const past = new Date((await decision(thread.id)).windowEndsAt.getTime() + MINUTE);
+
+    expect(await routeNow(thread.id, { label: 'jev:category' }, past)).toBe('decided');
+
+    await expectDecided(thread.id, 'fallback');
+  });
+
   it('decides on the requester an adoption committing under its lock leaves', async () => {
     const t = await page();
     const thread = await replyOpened(t.page, t.home.group);

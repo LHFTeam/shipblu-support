@@ -11,6 +11,7 @@ import { filesRoutableTickets } from './filing';
 import { ROUTING_GRACE_MS } from './hold';
 import { routingModeOf, type RoutingMode } from './mode';
 import { SETTLE_ACTOR } from './settle-label';
+import { writtenByAnotherSql } from '@/lib/tickets/classifiable';
 
 /**
  * The reads behind `/reports/routing`: where each channel's new tickets went,
@@ -447,11 +448,15 @@ export type FallbackReasons = ReportChannel & {
  * the window — a Jev answer that landed late, a person filing it. The live
  * runs written by the decision say why at the window's end: Jev never asked
  * (a caption-less photo opener, a job not run yet), Jev unsure, or every call
- * failed — or Jev answered, about a message somebody other than the requester
- * wrote, and the router set the category aside: an applied run on such a
- * message, which shadow rows show as well as live ones, where the `routed`
- * event's `setAside` is live only. A ticket can be in both views: a late Jev
- * answer has no run row by the decision, so it reads as not asked there.
+ * failed — or the router set aside the category Jev read off somebody other
+ * than the requester (`categoryStanding`). A live row says so on its own
+ * `routed` event (`data.setAside`), which is what is counted, so a category an
+ * agent cleared before the window's end is a plain fallback whoever Jev had
+ * read. A shadow row has no event, so there it is read off the runs: an applied
+ * answer about a message somebody other than the requester wrote, which a
+ * cleared category or a merge since can miscount. A ticket can be in both
+ * views: a late Jev answer has no run row by the decision, so it reads as not
+ * asked there.
  *
  * `data->>'to'` is compared as text and never cast: one hand-edited event
  * would otherwise refuse the whole page.
@@ -474,7 +479,14 @@ export function fallbackStatement(window: ReportWindow, now: Date): SQL {
            count(*) filter (where runs.rows = 0)::int as "notAsked",
            count(*) filter (where runs.unsure > 0 and runs.unsure + runs.failed = runs.rows)::int as "unsure",
            count(*) filter (where runs.rows > 0 and runs.failed = runs.rows)::int as "failed",
-           count(*) filter (where runs.aside > 0)::int as "setAside"
+           count(*) filter (where case
+             when rd.shadow then runs.aside > 0
+             else exists (
+               select 1 from conversation_events aside
+                where aside.conversation_id = rd.conversation_id
+                  and aside.type = ${'routed'}
+                  and aside.data->'setAside' is not null)
+           end)::int as "setAside"
       from routing_decisions rd
       left join channels c on c.id = rd.channel_id
       left join lateral (
@@ -500,7 +512,7 @@ export function fallbackStatement(window: ReportWindow, now: Date): SQL {
                         select 1 from messages m, conversations cv
                          where m.id = run.message_id
                            and cv.id = run.conversation_id
-                           and m.author_contact_id <> cv.requester_contact_id)
+                           and ${writtenByAnotherSql(sql`m.author_contact_id`, sql`cv.requester_contact_id`)})
                   )::int as aside
              from ai_category_runs run
             where run.conversation_id = rd.conversation_id

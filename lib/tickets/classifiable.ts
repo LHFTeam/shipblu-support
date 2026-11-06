@@ -1,3 +1,4 @@
+import { sql, type SQL, type SQLWrapper } from 'drizzle-orm';
 import { isSubcategorisableMessage } from '@/lib/subcategorise/apply';
 import { isReadOnlyChannel } from '@/lib/tickets/channel-policy';
 import { hasCustomerText } from '@/lib/tickets/customer-text';
@@ -60,11 +61,7 @@ export type ClassifiableMessage = {
  */
 export function skipReason(row: ClassifiableMessage): string | null {
   if (!isSubcategorisableMessage(row.kind, row.direction)) return 'not an inbound reply';
-  if (
-    row.authorContactId &&
-    row.requesterContactId &&
-    row.authorContactId !== row.requesterContactId
-  ) {
+  if (writtenByAnother(row.authorContactId, row.requesterContactId)) {
     return 'not written by the requester';
   }
   if (!hasCustomerText(row.bodyText)) return 'no text';
@@ -108,4 +105,37 @@ export function queueableMessage(message: {
   return (
     isSubcategorisableMessage(message.kind, message.direction) && hasCustomerText(message.bodyText)
   );
+}
+
+/**
+ * Whether a message somebody other than the ticket's requester wrote: an author
+ * on record, a requester on record, and not the same contact. A message with no
+ * recorded author is nobody else's, and neither is anything on a ticket with no
+ * requester. `skipReason`'s own test, and the one statement of it every reader
+ * asks, here and as `writtenByAnotherSql`: the classifiers when they weigh runs
+ * already recorded, the router when it asks whose words a category stands on,
+ * and the reports that count either. Once a comment thread's root makes its
+ * author the requester (`adoptRootAuthor`), the reply that opened the ticket is
+ * somebody else's, and every one of them has to agree that it is.
+ */
+export function writtenByAnother(
+  authorContactId: string | null | undefined,
+  requesterContactId: string | null | undefined,
+): boolean {
+  return Boolean(authorContactId && requesterContactId && authorContactId !== requesterContactId);
+}
+
+/**
+ * `writtenByAnother` in SQL, over an author and a requester a query already
+ * names — a column, a subquery, or a requester's id. Never null, so `not()`
+ * around it keeps a message with no author: `author <> requester` alone
+ * answers null there, and a filter would silently drop the message it means to
+ * keep.
+ */
+export function writtenByAnotherSql(
+  author: SQLWrapper,
+  requester: SQLWrapper | string,
+): SQL<boolean> {
+  const theRequester = typeof requester === 'string' ? sql`${requester}::uuid` : requester;
+  return sql<boolean>`(${author} is not null and ${theRequester} is not null and ${author} <> ${theRequester})`;
 }

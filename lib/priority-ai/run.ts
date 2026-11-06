@@ -1,16 +1,4 @@
-import {
-  type SQL,
-  and,
-  asc,
-  desc,
-  eq,
-  inArray,
-  isNotNull,
-  ne,
-  not,
-  notExists,
-  sql,
-} from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, ne, not, notExists, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { aiPriorityRuns, conversationEvents, conversations, messages } from '@/db/schema';
 import { earlierMessages } from '@/lib/subcategorise-ai/context';
@@ -21,7 +9,7 @@ import { clockInputsIfInFlight, deferToRouter } from '@/lib/routing/state';
 import { onPriorityChanged, onPriorityChangedIn } from '@/lib/sla';
 import { afterTicketUpdate } from '@/lib/tickets/lifecycle';
 import { CHANGE_STAMP } from '@/lib/tickets/change-stamp';
-import { skipReason } from '@/lib/tickets/classifiable';
+import { skipReason, writtenByAnotherSql } from '@/lib/tickets/classifiable';
 import { notReaction } from '@/lib/tickets/not-reaction';
 import { PRIORITIES, isPriority, type Priority } from '@/lib/tickets/vocabulary';
 import {
@@ -503,7 +491,7 @@ async function priorityFacts(
             .where(
               and(
                 eq(messages.id, aiPriorityRuns.messageId),
-                writtenByAnotherThan(requesterContactId),
+                writtenByAnotherSql(messages.authorContactId, requesterContactId),
               ),
             ),
         ),
@@ -534,7 +522,7 @@ async function priorityFacts(
         sql`btrim(${messages.bodyText}) <> ''`,
         // A 👍 on the business's first message was not the customer opening.
         notReaction(),
-        not(writtenByAnotherThan(requesterContactId)),
+        not(writtenByAnotherSql(messages.authorContactId, requesterContactId)),
       ),
     )
     .limit(1);
@@ -546,20 +534,6 @@ async function priorityFacts(
     opening: !before,
     otherConfident: Boolean(confident),
   };
-}
-
-/**
- * A `messages` row somebody other than the requester wrote: `skipReason`'s
- * test, in SQL, so the facts set aside exactly the messages the job refuses.
- * The author's null test is spelt out rather than left to `<>`: for a message
- * with no recorded author that answers null, `not()` keeps it null, and the
- * opening test would quietly stop counting the message it counts today.
- */
-function writtenByAnotherThan(requesterContactId: string): SQL {
-  return and(
-    isNotNull(messages.authorContactId),
-    ne(messages.authorContactId, requesterContactId),
-  )!;
 }
 
 async function recordFailure(

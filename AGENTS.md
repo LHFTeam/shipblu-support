@@ -1932,7 +1932,10 @@ README says why it is a setting and not a rule. The rules:
   from the stored row ran a category's rules on a deleted ticket.
 - **On a comment thread a reply opened, Jev's category waits for the root**
   (`categoryStanding` in `lib/routing/decide.ts`, read under the ticket's lock
-  by `categorySource`). Meta delivers a thread in no order, so a passer-by's
+  by `categorySource`, and asked of comment tickets alone: nothing but
+  adoption makes a requester somebody other than the author of what Jev read,
+  since a contact merge moves both, so every other ticket's decision reads
+  nothing more for it). Meta delivers a thread in no order, so a passer-by's
   reply can open the ticket under the passer-by, and the customer's comment,
   arriving later, makes its author the requester (`adoptRootAuthor`); Jev
   answers in seconds and a decision is made once, so routing on the reply's
@@ -1945,7 +1948,9 @@ README says why it is a setting and not a rule. The rules:
   read off its event's `messageId` and off the live `applied` run, because an
   answer agreeing with the category the ticket carries writes no event. To the
   category's writer `waiting` is the router's pass still to come
-  (`routerDecidedOn`), so it runs none of its own. At the window's end a reply
+  (`routerDecidedOn`), so it runs none of its own. The window's end is
+  `settle_routing`, or any call once `window_ends_at` has passed, so a reading
+  left waiting cannot outlive a job that went `dead`. At the window's end a reply
   whose root never came — one under the Page's own comment, which ingest never
   stores — routes as any ticket does, and a category read off somebody who is
   not the requester is set aside: `fallback`, the ticket stays in its group, no
@@ -1954,9 +1959,10 @@ README says why it is a setting and not a rule. The rules:
   to replace. A category a person, a rule or a form wrote is never held back by
   this: it routes whenever the router next decides, as it always has. What it
   costs is the window's length before a ticket a reply opened is assigned; a
-  root arriving after the window's end only relabels; an agent picking the
-  category the ticket already shows writes nothing and so routes nothing;
-  while the ticket waits another writer's `on_update` pass meets a rule keyed
+  root arriving after the window's end only relabels; the console's Category
+  field saves on change, so an agent agreeing with the category shown says so
+  by moving or taking the ticket, which ends the hold as `manual`; while the
+  ticket waits another writer's `on_update` pass meets a rule keyed
   on the replier's category as on any held ticket (no active rule is keyed on
   the category, 2026-11-06); and the decision's recorded probability is the
   last write's, the replier's when the customer's answer agreed with it.
@@ -1985,8 +1991,12 @@ README says why it is a setting and not a rule. The rules:
   console's edit asks, or the router found the ticket `not_open`
   (`decidedNotOpen`, where Jev parts from the console: Jev never files a
   resolved ticket). `waiting` is a router's pass still to come, so no relabel
-  either; if a person or a rule then ends the hold first, `afterHoldEnded`
-  chooses the policy for Jev's category (`heldFollowUp`'s `policyOwed`). And a
+  either. If a person or a rule then ends the hold first, what Jev's write
+  handed the router is owed where the window's end would have routed on it —
+  Jev's reading of the requester's own words (`jevCategoryOwed`), never a
+  passer-by's, which it would set aside: `afterHoldEnded` chooses the policy,
+  and an agent's reply, which runs no pass of its own where the console's edits
+  and Hand to each run one first, runs the `on_update` pass. And a
   confident answer naming the category the ticket already carries writes
   nothing, but on a live `holding` row it routes the ticket all the same
   (`afterCategoryConfirmed`): the customer's root agreeing with what the
