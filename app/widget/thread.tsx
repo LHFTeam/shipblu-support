@@ -103,6 +103,12 @@ export function WidgetThread({
   /** A caret waiting to sit after an emoji just put in the focused box. */
   const caretAt = useRef<number | null>(null);
   /**
+   * Words put in the box from code with the caret at their end — a draft from
+   * the host page, or a failed send's put back — whose end the box scrolls to
+   * once it has measured them (the effect that sizes it).
+   */
+  const revealEnd = useRef(false);
+  /**
    * Where the next emoji goes while the box is not focused — picked from the
    * keyboard, or tapped on a phone. Setting a controlled value moves an
    * unfocused field's own selection to its end, so the field cannot remember
@@ -135,6 +141,7 @@ export function WidgetThread({
 
     applied.current = prefill.seq;
     caretPending.current = true;
+    revealEnd.current = true;
     setDraft((current) => (current.trim() ? current : prefill.text));
   }, [prefill]);
 
@@ -172,6 +179,20 @@ export function WidgetThread({
    * a `display:none` subtree, so a visitor opening an article would come back
    * to a box collapsed to nothing. `active` in the dependencies is what
    * re-measures it on the way back.
+   *
+   * Past the cap the box scrolls, and words put in from code are scrolled to
+   * their end (`revealEnd`), where the caret is. Chrome scrolls a textarea to
+   * the caret when somebody types, never when code sets the value or the
+   * selection, so a prefilled draft longer than six lines, or a long message a
+   * failed send put back, showed its first six lines and hid the one the caret
+   * was on — the failure above, at the cap. Here rather than where the caret
+   * is placed, because only here is the box its final height; and a send that
+   * fails while the thread is hidden keeps the flag until it is measured again.
+   *
+   * Only once the box holds the words. A prefill that opens the thread is set
+   * in the render after it mounts, and a pass before it — React's second run of
+   * every effect in development, or a measure with nothing in the box yet —
+   * would otherwise spend the flag on an empty box.
    */
   useLayoutEffect(() => {
     const field = composer.current;
@@ -179,6 +200,10 @@ export function WidgetThread({
 
     field.style.height = 'auto';
     field.style.height = `${Math.min(field.scrollHeight, MAX_COMPOSER_PX)}px`;
+    if (revealEnd.current && field.value) {
+      revealEnd.current = false;
+      field.scrollTop = field.scrollHeight;
+    }
   }, [draft, active]);
 
   /*
@@ -301,6 +326,7 @@ export function WidgetThread({
       // does: words typed meanwhile follow the ones put back, never replaced
       // by them. Files cannot be added meanwhile (the clip waits for the send),
       // so the ones put back are all there are.
+      revealEnd.current = true;
       setDraft((typed) => withinLimit(typed.trim() ? `${body}\n${typed}` : body));
       setFiles(attached);
       setNotice(outcome.refusal);
