@@ -202,12 +202,14 @@ export type GradingInput = {
 
 /**
  * Why a ticket with rows was never judged on an answer. `not_the_requesters`:
- * every message Jev judged was somebody else's than the requester's — a
- * passer-by's reply that opened a comment thread before the customer's comment
- * took it over, the comment itself giving Jev nothing to ask about. The live
- * job no longer counts those answers as the ticket's (`decide.ts`), so the
- * ticket has none of its own, and grading it would count as a miss a ticket
- * Jev was never asked about.
+ * every message Jev judged was somebody else's than the requester's, and the
+ * requester has no row at all — a passer-by's reply that opened a comment
+ * thread before the customer's comment took it over, the comment itself
+ * giving Jev nothing to ask about. The live job no longer counts those answers
+ * as the ticket's (`decide.ts`), so the ticket has none of its own, and
+ * grading it would count as a miss a ticket Jev was never asked about. Where
+ * the customer's comment has a row of its own, that row says why: owned,
+ * settled elsewhere, capped or failed, as on any ticket.
  */
 export type OutOfPlay = 'owned' | 'settled_elsewhere' | 'capped' | 'failed' | 'not_the_requesters';
 
@@ -290,12 +292,13 @@ export function ticketVerdicts(
 
     // A write under another label or another question is that run's filing.
     // Matched by the message's id, or by its instant once the message was
-    // deleted and the row's id with it.
-    const answered = new Set(ticketRuns.map((run) => run.messageId).filter(Boolean));
+    // deleted and the row's id with it. Only the requester's: a filing read off
+    // a passer-by's reply is Jev's work, counted in the answers above, but no
+    // filing of the ticket — the router sets it aside (`categoryStanding`), and
+    // a person replacing it has not overruled Jev on the customer's words.
+    const answered = new Set(own.map((run) => run.messageId).filter(Boolean));
     const answeredDeleted = new Set(
-      ticketRuns
-        .filter((run) => run.messageId === null)
-        .map((run) => run.messageCreatedAt.getTime()),
+      own.filter((run) => run.messageId === null).map((run) => run.messageCreatedAt.getTime()),
     );
     const answers = (write: GradingEvent) =>
       (write.messageId !== null && answered.has(write.messageId)) ||
@@ -312,9 +315,11 @@ export function ticketVerdicts(
       judged,
       outOfPlay: judged
         ? null
-        : ticketRuns.some((run) => JUDGED.has(run.outcome))
-          ? 'not_the_requesters'
-          : outOfPlay(ticketRuns),
+        : own.length > 0
+          ? outOfPlay(own)
+          : ticketRuns.some((run) => JUDGED.has(run.outcome))
+            ? 'not_the_requesters'
+            : outOfPlay(ticketRuns),
       answers: predicted.length,
       unknowns: predicted.filter((run) => run.predictedKey === UNKNOWN_CATEGORY_KEY).length,
       settle: settleRun

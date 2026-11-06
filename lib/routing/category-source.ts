@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, isNull } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import {
   CATEGORY_AI_LIVE_LABEL,
@@ -59,9 +59,27 @@ export async function categorySource(
   openerMessageId: string | null,
 ): Promise<CategorySource | null> {
   if (!ticket.categoryId || !isCommentTicket(ticket.channel, ticket.externalId)) return null;
+  const last = await lastCategoryWrite(executor, ticket);
+  return standingOf(executor, ticket, openerMessageId, last?.byJev === true);
+}
 
+/**
+ * The category's last `category_changed`: whether it is Jev's and still what
+ * the column holds, and when it was written — stamped under the ticket's lock
+ * (`CHANGE_STAMP`), so it orders against anything else written there. Only
+ * when the column still holds what Jev's write left: one moved without an
+ * event is somebody else's, as `categoryOwned` reads it.
+ */
+async function lastCategoryWrite(
+  executor: Executor,
+  ticket: { id: string; categoryId: string | null },
+): Promise<{ byJev: boolean; at: Date } | null> {
   const [last] = await executor
-    .select({ actorLabel: conversationEvents.actorLabel, data: conversationEvents.data })
+    .select({
+      actorLabel: conversationEvents.actorLabel,
+      data: conversationEvents.data,
+      createdAt: conversationEvents.createdAt,
+    })
     .from(conversationEvents)
     .where(
       and(
@@ -71,9 +89,19 @@ export async function categorySource(
     )
     .orderBy(desc(conversationEvents.createdAt), desc(conversationEvents.id))
     .limit(1);
-  // Only when the column still holds what Jev's write left: one moved without
-  // an event is somebody else's, as `categoryOwned` reads it.
-  const readByJev = last?.actorLabel === CATEGORY_AI_ACTOR && last.data.to === ticket.categoryId;
+  if (!last) return null;
+  return {
+    byJev: last.actorLabel === CATEGORY_AI_ACTOR && last.data.to === ticket.categoryId,
+    at: last.createdAt,
+  };
+}
+
+async function standingOf(
+  executor: Executor,
+  ticket: Parameters<typeof requesterChose>[1] & { id: string },
+  openerMessageId: string | null,
+  readByJev: boolean,
+): Promise<CategorySource> {
   if (!readByJev) return { readByJev: false, notTheRequesters: false, awaitingRoot: false };
 
   // Once the words are somebody else's, whether the root is still to come
@@ -89,17 +117,32 @@ export async function categorySource(
 /**
  * Whether a person's or a rule's end of a hold left Jev's category owed what
  * the router would have given it: the SLA policy's look at it and, where the
- * ending wrote nothing of its own, the `on_update` rules (`afterHoldEnded`,
- * `storeAgentReply`).
+ * ending ran no pass of its own, the `on_update` rules (`afterHoldEnded`).
  *
- * Jev's write on a held ticket hands both to the router (`routerDecidedOn`), and
- * while the router waits for a comment thread's root (`categoryStanding`) a
- * person can end the hold first, through `endHold`, which decides without the
- * category. Owed only where the window's end would have routed on it: Jev's
- * reading of the requester's own words. A category read off a passer-by is set
- * aside there — no pass and no policy — and a person taking the ticket first
- * must not give it either. Not for anything the router decided itself, which
- * ran both, nor a category a person or a rule wrote, whose write ran its own.
+ * Jev's write on a held ticket hands both to the router (`routerDecidedOn`):
+ * when `routeNow` answers `waiting` — the router waiting for a comment
+ * thread's root (`categoryStanding`) — or `failed`, or the creation pass has
+ * not yet routed (`pending`). A person can then end the hold first, through
+ * `endHold`, which decides without the category, and the router's pass and
+ * policy never come. Owed only where the window's end would have routed on it:
+ * Jev's reading of the requester's own words, which on any ticket but a
+ * comment thread is every reading of Jev's (`categorySource` answers nothing
+ * there). A category read off a passer-by is set aside at the window's end —
+ * no pass and no policy — and a person taking the ticket first must not give
+ * it either. Not for anything the router decided itself, which ran both, nor a
+ * category a person or a rule wrote, whose write ran its own.
+ *
+ * And only for a write the hold's end came after. Jev's write landing once the
+ * hold is over finds the row decided under its lock and is an ordinary
+ * relabel, which runs its pass and chooses the policy itself
+ * (`afterCategoryApplied`); owed here too, an agent's reply ending the hold a
+ * moment before would run the same rules a second time. Both stamps are taken
+ * under the ticket's lock (`CHANGE_STAMP`, the `routed` line `endHold`
+ * writes), which the two writes serialise on, so they order as the writes did.
+ *
+ * Read after the hold's end has committed and outside any lock, by
+ * `heldFollowUp` alone: one read, so the pass and the policy cannot be given
+ * different answers.
  */
 export async function jevCategoryOwed(conversationId: string): Promise<boolean> {
   const [row] = await db
@@ -116,9 +159,29 @@ export async function jevCategoryOwed(conversationId: string): Promise<boolean> 
     .innerJoin(conversations, eq(conversations.id, routingDecisions.conversationId))
     .leftJoin(ticketCategories, eq(ticketCategories.id, conversations.categoryId))
     .where(eq(routingDecisions.conversationId, conversationId));
-  if (!row || (row.outcome !== 'manual' && row.outcome !== 'rule')) return false;
-  const source = await categorySource(db, { id: conversationId, ...row }, row.messageId);
-  return source?.readByJev === true && categoryStanding(source, true) === 'routes';
+  if (!row?.categoryId || (row.outcome !== 'manual' && row.outcome !== 'rule')) return false;
+
+  const ticket = { id: conversationId, ...row };
+  const last = await lastCategoryWrite(db, ticket);
+  if (!last?.byJev) return false;
+
+  const [ended] = await db
+    .select({ at: conversationEvents.createdAt })
+    .from(conversationEvents)
+    .where(
+      and(
+        eq(conversationEvents.conversationId, conversationId),
+        eq(conversationEvents.type, 'routed'),
+        sql`${conversationEvents.data}->>'outcome' = ${row.outcome}`,
+      ),
+    )
+    .orderBy(desc(conversationEvents.createdAt), desc(conversationEvents.id))
+    .limit(1);
+  if (!ended || last.at >= ended.at) return false;
+
+  if (!isCommentTicket(row.channel, row.externalId)) return true;
+  const source = await standingOf(db, ticket, row.messageId, true);
+  return categoryStanding(source, true) === 'routes';
 }
 
 /**

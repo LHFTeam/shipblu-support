@@ -8,10 +8,11 @@ const log = logger('routing');
 
 /**
  * What a hold owed once it is over, whatever ended it — the router's decision,
- * `settle_routing`, or a person or rule through `endHold`: the SLA policy's
- * look at a category Jev wrote, when a person or a rule ended the hold before
- * the router could (`heldFollowUp`'s `policyOwed`); the assignment the
- * creation pass held back, and its out-of-hours reply, to the message the hold
+ * `settle_routing`, or a person or rule through `endHold`: what a category Jev
+ * wrote handed the router, when a person or a rule ended the hold before the
+ * router could (`heldFollowUp`'s `categoryOwed`) — the `on_update` pass, for an
+ * ending that ran none of its own (`runOwedPass`), and the SLA policy's look;
+ * the assignment the creation pass held back, and its out-of-hours reply, to the message the hold
  * kept from being acknowledged: the one that opened the ticket, which the
  * creation pass would have answered had nothing been held — or, on a comment
  * thread a passer-by's reply opened, the customer's own comment, which arrived
@@ -34,6 +35,17 @@ const log = logger('routing');
 export async function afterHoldEnded(
   conversationId: string,
   now: Date = new Date(),
+  ending: {
+    /**
+     * The `on_update` pass, for a write that ended the hold and runs none of
+     * its own: an agent's reply. Every other ending runs one after its commit,
+     * which reads the category Jev wrote before it — the console's group and
+     * assignee cases (`afterTicketUpdate`), Hand to, and an engine rule's
+     * pass, which is one. Handed in rather than imported, for the reason this
+     * module is not in `apply.ts`.
+     */
+    runOwedPass?: () => Promise<unknown>;
+  } = {},
 ): Promise<void> {
   let held: Awaited<ReturnType<typeof heldFollowUp>> = null;
   try {
@@ -42,11 +54,19 @@ export async function afterHoldEnded(
     log.error(`could not read what the hold on ${conversationId} owed`, error);
   }
 
+  // The rules, then the policy, then the assignment, as the router's own end
+  // of a hold runs them (`finish`): a person's or a rule's end of a hold whose
+  // category is Jev's leaves the policy where the creation pass chose it, and,
+  // ended by an agent's reply, the rules keyed on the category unrun
+  // (`heldFollowUp`).
   try {
-    // Before the assignment, as the router's own end of a hold chooses it
-    // (`finish`): a person's or a rule's end of a hold whose category is Jev's
-    // leaves the policy where the creation pass chose it (`heldFollowUp`).
-    if (held?.policyOwed) {
+    if (held?.categoryOwed && ending.runOwedPass) await ending.runOwedPass();
+  } catch (error) {
+    log.error(`could not run the rules ${conversationId}'s category was owed`, error);
+  }
+
+  try {
+    if (held?.categoryOwed) {
       await afterRoutingChanged(conversationId, { category: true, group: false });
     }
   } catch (error) {

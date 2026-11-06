@@ -569,9 +569,18 @@ describe('fallbackReasons', () => {
     const theirs = await decision({ channelId: id, outcome: 'fallback' });
     await run(theirs.id, 'applied', before);
     // Nor a replier's filing an agent cleared before the window's end: the
-    // router set nothing aside, though the run is still the replier's.
+    // router set nothing aside, though the run is still the replier's. Each
+    // carries the `routed` line every live decision writes, as production's
+    // do, so the count is the line's `setAside` and not the line alone.
     const cleared = await decision({ channelId: id, outcome: 'fallback' });
     await replierRun(cleared.id, before);
+    for (const ticket of [theirs, cleared]) {
+      await event(ticket.id, {
+        type: 'routed',
+        actorLabel: 'routing',
+        data: { outcome: 'fallback' },
+      });
+    }
 
     const [reasons] = await fallbackReasons(WEEK, NOW);
     expect(reasons).toMatchObject({

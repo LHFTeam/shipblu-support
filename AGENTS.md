@@ -1949,8 +1949,10 @@ README says why it is a setting and not a rule. The rules:
   answer agreeing with the category the ticket carries writes no event. To the
   category's writer `waiting` is the router's pass still to come
   (`routerDecidedOn`), so it runs none of its own. The window's end is
-  `settle_routing`, or any call once `window_ends_at` has passed, so a reading
-  left waiting cannot outlive a job that went `dead`. At the window's end a reply
+  `settle_routing`, or any call once `window_ends_at` has passed, so the next
+  call after a job that went `dead` or ran late decides rather than waits;
+  with no call at all the row stays undecided and the hold's grace lets the
+  ticket go, as for any stuck job. At the window's end a reply
   whose root never came — one under the Page's own comment, which ingest never
   stores — routes as any ticket does, and a category read off somebody who is
   not the requester is set aside: `fallback`, the ticket stays in its group, no
@@ -1987,16 +1989,25 @@ README says why it is a setting and not a rule. The rules:
   would be a second update pass assigning before the router's. Undecided shadow:
   the would-be decision recorded once begun, then the relabel. Anything else:
   the relabel. When `routeNow` answers anything but `decided`, the relabel is
-  owed unless `routerDecidedOn` says a router's pass reads the write, as the
-  console's edit asks, or the router found the ticket `not_open`
-  (`decidedNotOpen`, where Jev parts from the console: Jev never files a
-  resolved ticket). `waiting` is a router's pass still to come, so no relabel
-  either. If a person or a rule then ends the hold first, what Jev's write
-  handed the router is owed where the window's end would have routed on it —
-  Jev's reading of the requester's own words (`jevCategoryOwed`), never a
-  passer-by's, which it would set aside: `afterHoldEnded` chooses the policy,
-  and an agent's reply, which runs no pass of its own where the console's edits
-  and Hand to each run one first, runs the `on_update` pass. And a
+  owed only when a rule ended the hold in that moment, whose pass may have
+  read the ticket before the write (`relabelOwed`): not when `routerDecidedOn`
+  says a router's pass reads the write, as the console's edit asks; not when
+  the router found the ticket `not_open`, where Jev parts from the console,
+  since Jev never files a resolved ticket; and not when a person ended it,
+  whose ending owes the write a pass already (below), so a relabel ran every
+  rule keyed on the category twice. `waiting` is a router's pass still to
+  come, so no relabel either. If a person or a rule then ends the hold first,
+  what Jev's write handed the router is owed where the window's end would have
+  routed on it — Jev's reading of the requester's own words, which off a
+  comment thread is every reading of Jev's, never a passer-by's, which it
+  would set aside — and only for a write the end came after, by the stamps
+  both take under the ticket's lock: a write after it is a relabel of its own
+  (`jevCategoryOwed`, read once, in `heldFollowUp`). `afterHoldEnded` then
+  chooses the policy, and runs the `on_update` pass for an agent's reply, the
+  one ending that runs no pass of its own (`runOwedPass`); the console's edits
+  and Hand to run theirs after their end of the hold, which reads the
+  category. A failure in that read is logged and owes nothing, so the reply's
+  send is still queued. And a
   confident answer naming the category the ticket already carries writes
   nothing, but on a live `holding` row it routes the ticket all the same
   (`afterCategoryConfirmed`): the customer's root agreeing with what the
@@ -2184,14 +2195,17 @@ backfill writes under a label of its own (`backfill_category_ai mode=record`),
 judging each message as of when it arrived; its `apply` mode files open tickets
 from a record label's answers and fires nothing — the one category writer that
 owes no follow-up, through `fileBacklogCategory`, which `routing-result` lets
-only the backfill call. The question
+only the backfill call. It files only a requester's answer, asked again under
+the ticket's lock with the message's author, since a root can take the ticket
+between the candidates' read and the filing. The question
 offers the active categories by English label and description, with `unknown`
 added in code, and its fingerprint covers both, so an edit on `/admin/categories`
 is a new question no report averages with the old. `/reports/category-ai` grades
 one label, question and mode at a time, and its rules are
 `lib/category-ai/grade.ts`'s tests: one settling answer per ticket, in the order
 the live job judges messages and over the messages it counts, a passer-by's
-left out of the settle and the cap; ground truth only a person's `category_changed`
+left out of the settle, the cap and Filed by Jev, and a ticket judged on
+nothing else out of play unless the customer's own row says why; ground truth only a person's `category_changed`
 given before Jev, a rule or a form wrote the category, since agreeing with a
 write leaves no event and every label after one is a disagreement — so a ticket
 written to first is in no rate read off labels, and in `apply`, where every settle is Jev's

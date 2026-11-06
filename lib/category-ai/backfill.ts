@@ -41,7 +41,7 @@ import {
   readOnlyChannels,
   type ConversationChannel,
 } from '@/lib/tickets/channel-policy';
-import { skipReason } from '@/lib/tickets/classifiable';
+import { skipReason, writtenByAnother } from '@/lib/tickets/classifiable';
 import { lockedStatusCategory, statusCategoryOf } from '@/lib/tickets/status-category';
 import { TypeSafeApiError, typesafeModel } from '@/lib/typesafe/client';
 import { categoryBaseline } from './baseline';
@@ -800,7 +800,11 @@ function scopeOfLabel(scope: Scope): SQL[] {
 
 /**
  * One ticket filed, under its row lock, after asking again everything the
- * candidate query asked: a person may have filed it, or resolved it, since.
+ * candidate query asked: a person may have filed it, or resolved it, since —
+ * or the answered message may be somebody else's than the requester's now.
+ * A comment thread a passer-by's reply opened is taken over by its root's
+ * author when the root arrives (`adoptRootAuthor`), which can land while a
+ * run over a large label is still working through the earlier candidates.
  */
 async function fileTicket(
   conversationId: string,
@@ -820,11 +824,25 @@ async function fileTicket(
         deletedAt: conversations.deletedAt,
         mergedIntoId: conversations.mergedIntoId,
         categoryId: conversations.categoryId,
+        requesterContactId: conversations.requesterContactId,
       })
       .from(conversations)
       .where(eq(conversations.id, conversationId))
       .for('update');
     if (!read) return 'gone';
+    // The author read here rather than with the candidate, for the reason the
+    // live job reads it under its lock: a contact merge moves the requester and
+    // the messages' authors together, so only the two read as one moment left
+    // them can be compared. The candidate query names a message, always.
+    const [answered] = detail.messageId
+      ? await tx
+          .select({ authorContactId: messages.authorContactId })
+          .from(messages)
+          .where(eq(messages.id, detail.messageId))
+      : [];
+    if (writtenByAnother(answered?.authorContactId, read.requesterContactId)) {
+      return "not the requester's";
+    }
     const locked = { ...read, statusCategory: await lockedStatusCategory(tx, read) };
     const history =
       (await categoryEvents(tx, eq(conversationEvents.conversationId, conversationId))).get(

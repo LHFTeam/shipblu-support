@@ -434,9 +434,15 @@ async function afterCategoryConfirmed(
  *   router's lock — `none`, `in_flight` — or this call `failed` and the
  *   window's job is still to come, whether that decision reads this write says
  *   what is owed (`routerDecidedOn`, the console's question too): a router's
- *   does, and nothing is; a person's or a rule's does not, and this is a
- *   relabel after all. Nor after a router that found the ticket in nobody's
- *   queue, where Jev's answer parts from the console's (`decidedNotOpen`).
+ *   does, and nothing is. A person's does not, but their end of the hold owes
+ *   this write what the router would have given it (`afterHoldEnded`): every
+ *   such ending runs a pass after its commit, which reads this category, or,
+ *   an agent's reply, the one this write handed the router, and chooses the
+ *   policy for it — so a relabel here would be the same rules a second time.
+ *   A rule's does not, and this is a relabel after all: its pass may have
+ *   read the ticket before this write. Nor after a router that found the
+ *   ticket in nobody's queue, where Jev's answer parts from the console's
+ *   (`relabelOwed`).
  * - **Undecided shadow** — the rest as though routing did not exist, after
  *   recording the would-be decision once the creation pass has begun routing
  *   (`holding`); while it is `pending`, `beginRouting` records it after the
@@ -464,7 +470,7 @@ async function afterCategoryApplied(
     if (routing.stage === 'pending') return;
     const routed = await routeNow(conversationId, { label: CATEGORY_AI_ACTOR });
     if (routed === 'decided' || (await routerDecidedOn(conversationId))) return;
-    if (await decidedNotOpen(conversationId)) return;
+    if (!(await relabelOwed(conversationId))) return;
   } else if (routing?.stage === 'holding') {
     await routeNow(conversationId, { label: CATEGORY_AI_ACTOR });
   }
@@ -473,21 +479,28 @@ async function afterCategoryApplied(
 }
 
 /**
- * Whether the ticket this write found held was then decided `not_open` —
- * resolved, deleted, merged or marked spam in the moment between this write's
- * commit and the router's lock, which finds it in nobody's queue and owes it
- * nothing — or is gone, purged with its routing row in that moment. The one
- * answer where Jev's question parts from the console's (`routerDecidedOn`): a
- * person's edit on a ticket resolved in its window meets its rules as an edit
- * on any resolved ticket does, but Jev never files a resolved ticket, and a
- * relabel here would be a first pass on work that ended after Jev looked.
+ * Whether a held ticket's write is a relabel after all, once the router has
+ * said it did not decide on it (`routerDecidedOn`): only when a rule ended the
+ * hold in the moment between this write's commit and the router's lock.
+ *
+ * Not when a person did (`manual`): their end of the hold came after this
+ * write, and owes it what the router would have given it — a pass of their
+ * own after its commit, which reads this category, or the one it handed the
+ * router, and the policy (`afterHoldEnded`). Run here as well, every rule
+ * keyed on it fired twice. Not `not_open` — resolved, deleted, merged or
+ * marked spam in that moment, which the router finds in nobody's queue and
+ * owes nothing — nor a ticket gone, purged with its routing row: the answer
+ * where Jev's question parts from the console's, since a person's edit on a
+ * ticket resolved in its window meets its rules as an edit on any resolved
+ * ticket does, but Jev never files a resolved ticket, and a relabel here would
+ * be a first pass on work that ended after Jev looked.
  */
-async function decidedNotOpen(conversationId: string): Promise<boolean> {
+async function relabelOwed(conversationId: string): Promise<boolean> {
   const [row] = await db
     .select({ outcome: routingDecisions.outcome })
     .from(routingDecisions)
     .where(eq(routingDecisions.conversationId, conversationId));
-  return !row || row.outcome === 'not_open';
+  return row?.outcome === 'rule';
 }
 
 type TicketState = {

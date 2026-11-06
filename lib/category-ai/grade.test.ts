@@ -612,6 +612,32 @@ describe('a run on a message the requester did not write', () => {
     });
   });
 
+  // Her comment had words and a row of its own, which says why Jev never
+  // judged it, as it would on any ticket: not a comment that gave Jev nothing.
+  it('lets her own row say why the ticket is out of play', () => {
+    const his = run('t', 0, 'applied', 'sales', 0.9, theirs);
+    expect(verdict([his, run('t', 1, 'owned')]).outOfPlay).toBe('owned');
+    expect(verdict([his, run('t', 1, 'capped')]).outOfPlay).toBe('capped');
+    expect(verdict([his, run('t', 1, 'failed')]).outOfPlay).toBe('failed');
+    expect(verdict([his, run('t', 1, 'after_settle')]).outOfPlay).toBe('settled_elsewhere');
+  });
+
+  // Jev filed his reply as sales, and a supervisor moved the ticket on: no
+  // filing of hers overruled, so in no figure the footer says it is out of.
+  it('leaves a filing read off his words out of Filed by Jev', () => {
+    const runs = [run('t', 0, 'applied', 'sales', 0.9, theirs)];
+    const events = [jevWrite('t', 0, 'sales'), person('t', 3, 'customer_support')];
+    expect(verdict(runs, events).filed).toBeNull();
+    expect(grade(input(runs, events)).filed).toEqual([]);
+    // Hers still counts, with his ahead of it on the same ticket.
+    const both = [...runs, run('t', 1, 'applied', 'merchant_support', 0.9)];
+    const hers = [
+      jevWrite('t', 0, 'sales'),
+      jevWrite('t', 1, 'merchant_support', LABEL, messageAt('t', 1)),
+    ];
+    expect(verdict(both, hers).filed).toEqual({ key: 'merchant_support', changedTo: null });
+  });
+
   it('is passed over by the threshold sweep', () => {
     const runs = [
       run('t', 0, 'applied', 'sales', 0.9, theirs),

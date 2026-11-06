@@ -14,6 +14,7 @@ import {
   conversations,
   groupMembers,
   groups,
+  jobs,
   messages,
   routingDecisions,
   slaPolicies,
@@ -62,6 +63,22 @@ import { deferToRouter } from './state';
  * did not ask for.
  */
 
+/**
+ * Whether the read of what a hold's end owes Jev's category fails, as a lost
+ * connection would fail it, when a test asks.
+ */
+const owed = vi.hoisted(() => ({ throws: false }));
+vi.mock('./category-source', async (importOriginal) => {
+  const real = await importOriginal<typeof import('./category-source')>();
+  return {
+    ...real,
+    jevCategoryOwed: async (conversationId: string) => {
+      if (owed.throws) throw new Error('the statement was lost');
+      return real.jevCategoryOwed(conversationId);
+    },
+  };
+});
+
 withCleanDatabase();
 
 const MINUTE = 60_000;
@@ -81,6 +98,7 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
+  owed.throws = false;
   const logged = errors.mock.calls.map((call) => String(call[0]));
   vi.restoreAllMocks();
   if (!errorsExpected) expect(logged).toEqual([]);
@@ -2474,6 +2492,65 @@ describe('a comment thread a reply opened', () => {
 
     await expectDecided(thread.id, 'manual');
     expect(await tagged(thread.id)).toBe(1);
+  });
+
+  // The reply is stored by the time anything after the hold's end runs, so
+  // whatever that meets, its send is queued: a throw there left it on the
+  // timeline as "sending…" for good, and the agent's retry sent a second copy.
+  it('queues the reply’s send though what the hold owed cannot be read', async () => {
+    errorsExpected = true;
+    const t = await page();
+    const thread = await replyOpened(t.page, t.home.group);
+    const sales = await jevAnswers(thread, 'sales', thread.messageId);
+    await rule('on_update', 'Tag sales', inCategory(sales), [
+      { type: 'add_tags', tags: ['sales'] },
+    ]);
+    expect(await routeNow(thread.id, { label: 'jev:category' })).toBe('waiting');
+    owed.throws = true;
+
+    const messageId = await storeAgentReply(thread.id, 'facebook_comment', {
+      authorAgentId: t.home.agent,
+      bodyText: 'Sending you our rates now.',
+      bodyHtml: '<p>Sending you our rates now.</p>',
+    });
+
+    const queued = await db
+      .select({ type: jobs.type })
+      .from(jobs)
+      .where(eq(jobs.dedupeKey, `send:${messageId}`));
+    expect(queued).toEqual([{ type: 'send_meta' }]);
+    await expectDecided(thread.id, 'manual');
+    // The rest of what the hold owed still goes; only what the read decides
+    // is left, and said so.
+    expect((await ticketRow(thread.id)).assigneeAgentId).toBe(t.home.agent);
+    expect(await tagged(thread.id)).toBe(0);
+    expect(errors.mock.calls.map((call) => String(call[0]))).toEqual([
+      expect.stringContaining('could not read what the hold'),
+    ]);
+  });
+
+  // Jev's write once the hold is over is an ordinary relabel, which runs its
+  // own pass and chooses the policy (`afterCategoryApplied`); owed by the end
+  // as well, an agent's reply a moment before would run the same rules twice.
+  it('owes a category only what Jev wrote before the hold ended', async () => {
+    const t = await page();
+    const lead = await agent('Laila');
+    const end = (id: string) =>
+      db.transaction((tx) => endHold(tx, id, 'manual', { agentId: lead }));
+
+    const before = await replyOpened(t.page, t.home.group);
+    await jevAnswers(before, 'sales', before.messageId);
+    expect(await end(before.id)).toBe(true);
+    const owedBefore = vi.fn(async () => {});
+    await afterHoldEnded(before.id, new Date(), { runOwedPass: owedBefore });
+    expect(owedBefore).toHaveBeenCalledTimes(1);
+
+    const after = await replyOpened(t.page, t.home.group);
+    expect(await end(after.id)).toBe(true);
+    await jevAnswers(after, 'sales', after.messageId);
+    const owedAfter = vi.fn(async () => {});
+    await afterHoldEnded(after.id, new Date(), { runOwedPass: owedAfter });
+    expect(owedAfter).not.toHaveBeenCalled();
   });
 
   it('runs no pass for the replier’s category when an agent’s reply ends the hold', async () => {

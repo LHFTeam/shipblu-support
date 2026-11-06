@@ -189,7 +189,7 @@ export default async function CategoryAiReportPage({
         report.total.judged === 0 ? (
           <EmptyState
             title="Nothing in this run was judged"
-            hint="Every ticket in it was owned by a person, a rule or a form before Jev was asked, settled outside this run — under another version of the question, in the other mode or by a backfill's filing — past the cap, or every call failed."
+            hint="Every ticket in it was owned by a person, a rule or a form before Jev was asked, settled outside this run — under another version of the question, in the other mode or by a backfill's filing — past the cap, or every call failed; or Jev was asked only about a passer-by's reply that opened a comment thread, and the customer's own comment gave it nothing to ask about."
           />
         ) : (
           <>
@@ -422,7 +422,7 @@ export default async function CategoryAiReportPage({
             {report.filed.length > 0 ? (
               <Section
                 title="Filed by Jev"
-                hint="Tickets Jev wrote a category to in answer to this run's messages, and how many a person has changed since. A person who agrees changes nothing, so a ticket nobody changed may simply be one nobody looked at."
+                hint="Tickets Jev wrote a category to in answer to this run's messages from the requester, and how many a person has changed since. A person who agrees changes nothing, so a ticket nobody changed may simply be one nobody looked at. A category read off a passer-by's reply that opened a comment thread is in no figure here."
               >
                 <Table head={['Category', 'Filed', 'Changed by a person', 'Changed to']}>
                   {report.filed.map((row) => (

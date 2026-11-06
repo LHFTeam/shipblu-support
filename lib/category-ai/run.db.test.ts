@@ -19,6 +19,7 @@ import {
   jobs,
   messages,
   routingDecisions,
+  slaPolicies,
   ticketCategories,
   ticketStatuses,
 } from '@/db/schema';
@@ -28,6 +29,7 @@ import { resetEnvCache } from '@/lib/env';
 import type { NormalisedComment } from '@/lib/meta/types';
 import { settleRouting } from '@/lib/routing/apply';
 import { beginRouting } from '@/lib/routing/begin';
+import { afterHoldEnded } from '@/lib/routing/after-hold';
 import { endHold } from '@/lib/routing/end-hold';
 import { isHeld } from '@/lib/routing/hold';
 import { routingWindowValues, startRouting } from '@/lib/routing/start';
@@ -35,7 +37,9 @@ import { stubFetch } from '@/lib/testing/fetch';
 import { withCleanDatabase } from '@/lib/testing/db';
 import { holdNextTransaction, untilWaitingOnALock } from '@/lib/testing/hold-transaction';
 import { cairo } from '@/lib/testing/time';
+import { storeAgentReply } from '@/lib/tickets/agent-reply';
 import { ingestMetaComment } from '@/lib/tickets/ingest-meta';
+import { afterTicketUpdate } from '@/lib/tickets/lifecycle';
 import { CATEGORY_AI_ACTOR } from './decide';
 import { enqueueCategoryClassification } from './enqueue';
 import { requestFingerprint } from './request';
@@ -1655,15 +1659,16 @@ describe('classifyMessageCategory, on a ticket routing by category', () => {
     expect(await where(id)).toMatchObject({ groupId: r.home.group, assigneeAgentId: r.home.agent });
   });
 
-  // A person decided in the moment between the classifier's commit and the
-  // router's lock: the router has nothing left to decide, and the category
-  // Jev wrote is owed what any relabel is — or no rule keyed on it would run.
-  it('relabels a held ticket a person decided for between its commit and the router', async () => {
+  // A rule decided in the moment between the classifier's commit and the
+  // router's lock: the router has nothing left to decide, and the rule's pass
+  // may have read the ticket before Jev wrote, so the category is owed what
+  // any relabel is — or no rule keyed on it would run.
+  it('relabels a held ticket a rule decided for between its commit and the router', async () => {
     answers('sales');
     const r = await routing();
     const { id, message } = await mailTicket(r);
     betweenCommitAndRouter(async () => {
-      await db.transaction((tx) => endHold(tx, id, 'manual', { agentId: r.home.agent }));
+      await db.transaction((tx) => endHold(tx, id, 'rule', { label: 'automation:Assign' }));
     });
 
     await classifyMessageCategory(message, { baseUrl: BASE });
@@ -1671,13 +1676,118 @@ describe('classifyMessageCategory, on a ticket routing by category', () => {
     expect(await carried(id)).toBe(await categoryId('sales'));
     expect(await decisionOf(id)).toMatchObject({
       stage: 'decided',
+      outcome: 'rule',
+      decidedByLabel: 'automation:Assign',
+    });
+    expect((await eventsOf(id, 'routed')).map((event) => event.data.outcome)).toEqual(['rule']);
+    expect(await passes(id)).toBe(1);
+    // Where the rule left it, and assigned there by the relabel.
+    expect(await where(id)).toMatchObject({ groupId: r.home.group, assigneeAgentId: r.home.agent });
+  });
+
+  // A person decided in that moment instead. Their end of the hold came after
+  // Jev's write and owes it what the router would have given it: an agent's
+  // reply runs the pass the write handed the router, so a relabel here as
+  // well ran every rule keyed on the category twice.
+  it('runs one pass when an agent’s reply decides for it between its commit and the router', async () => {
+    answers('sales');
+    const r = await routing();
+    const { id, message } = await mailTicket(r);
+    betweenCommitAndRouter(async () => {
+      await storeAgentReply(id, 'email', {
+        authorAgentId: r.home.agent,
+        bodyText: 'Our business rates are attached.',
+        bodyHtml: '<p>Our business rates are attached.</p>',
+      });
+    });
+
+    await classifyMessageCategory(message, { baseUrl: BASE });
+
+    expect(await decisionOf(id)).toMatchObject({
       outcome: 'manual',
       decidedByAgentId: r.home.agent,
     });
-    expect((await eventsOf(id, 'routed')).map((event) => event.data.outcome)).toEqual(['manual']);
     expect(await passes(id)).toBe(1);
-    // Where the person left it, and assigned there by the relabel.
     expect(await where(id)).toMatchObject({ groupId: r.home.group, assigneeAgentId: r.home.agent });
+  });
+
+  // The console's assignee case: its own pass, after its end of the hold,
+  // reads the category Jev wrote before it.
+  it('runs one pass when a person takes it between its commit and the router', async () => {
+    answers('sales');
+    const r = await routing();
+    const { id, message } = await mailTicket(r);
+    betweenCommitAndRouter(async () => {
+      await db.transaction(async (tx) => {
+        await tx
+          .update(conversations)
+          .set({ assigneeAgentId: r.home.agent })
+          .where(eq(conversations.id, id));
+        await endHold(tx, id, 'manual', { agentId: r.home.agent });
+      });
+      await afterTicketUpdate(id);
+      await afterHoldEnded(id);
+    });
+
+    await classifyMessageCategory(message, { baseUrl: BASE });
+
+    expect(await decisionOf(id)).toMatchObject({ outcome: 'manual' });
+    expect(await passes(id)).toBe(1);
+  });
+
+  // Off a comment thread too: the creation pass had not yet routed when Jev
+  // wrote, so the write handed its pass and its policy to `beginRouting`, and
+  // a person ending the hold first owes the category both — the reply the
+  // pass, which it runs none of its own; a person taking the ticket before
+  // anybody has answered, the policy.
+  it('gives its category the pass after an agent’s reply ends a hold not yet routed', async () => {
+    answers('sales');
+    const r = await routing();
+    const { id, message } = await mailTicket(r, { stage: 'pending' });
+
+    await classifyMessageCategory(message, { baseUrl: BASE });
+    expect(await passes(id)).toBe(0);
+    await storeAgentReply(id, 'email', {
+      authorAgentId: r.home.agent,
+      bodyText: 'Our business rates are attached.',
+      bodyHtml: '<p>Our business rates are attached.</p>',
+    });
+
+    expect(await decisionOf(id)).toMatchObject({ outcome: 'manual' });
+    expect(await passes(id)).toBe(1);
+  });
+
+  it('gives its category the policy when a person takes a hold not yet routed', async () => {
+    answers('sales');
+    const r = await routing();
+    const round = { firstResponseMins: 30, nextResponseMins: 30, resolutionMins: 240 };
+    const [salesPolicy] = await db
+      .insert(slaPolicies)
+      .values({
+        name: 'Sales',
+        hoursSource: 'round_the_clock',
+        targets: { low: round, medium: round, high: round, urgent: round },
+        conditions: { field: 'category.id', op: 'eq', value: await categoryId('sales') },
+      })
+      .returning({ id: slaPolicies.id });
+    const { id, message } = await mailTicket(r, { stage: 'pending' });
+
+    await classifyMessageCategory(message, { baseUrl: BASE });
+    await db.transaction(async (tx) => {
+      await tx
+        .update(conversations)
+        .set({ assigneeAgentId: r.home.agent })
+        .where(eq(conversations.id, id));
+      await endHold(tx, id, 'manual', { agentId: r.home.agent });
+    });
+    await afterTicketUpdate(id);
+    await afterHoldEnded(id);
+
+    const [row] = await db
+      .select({ slaPolicyId: conversations.slaPolicyId })
+      .from(conversations)
+      .where(eq(conversations.id, id));
+    expect(row!.slaPolicyId).toBe(salesPolicy!.id);
   });
 
   // The window's end ran in the same moment, read the category Jev had just
