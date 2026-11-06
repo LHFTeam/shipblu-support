@@ -7535,12 +7535,19 @@ dryRun=true`, then without, gives those two theirs back from their
       the 1,038 stops differ in all, and apart from the colour and placement
       fixes above every difference is the radius: 4px becoming the
       element's own. `tsc` and the linters see none of this.
-      `focus-ring` now refuses four things: a focus style in no layer, or in
-      one other than `base` and `components`; an outline declared outside
-      Tailwind's layers; a suppressed outline (`outline-none`, `-hidden`, `-0`,
-      `-transparent`) beside a translucent focus ring; and an important
-      outline utility, in either spelling. It judges one class string at a
-      time, so `FIELD_BASE` is held by its comment instead.
+      `focus-ring` now refuses five things:
+      - a focus outline in no layer, or in a layer whose path does not start
+        at `base` or `components` (`overrides.base` sits wherever
+        `overrides` does);
+      - any other outline declared outside Tailwind's layers;
+      - an outline removed under a focus selector, in any layer;
+      - a suppressed outline (`outline-none`, `-hidden`, `-0`,
+        `-transparent`) in a module that draws a focus ring, of any opacity;
+      - an important outline utility, in either spelling.
+
+      It also fails when the shared rule stops declaring an outline. It
+      judges a module's class strings together, so `FIELD_BASE` and
+      `FIELD_SURFACE`, which every field is built from, are checked as one.
 
       Generally: in a Tailwind v4 stylesheet, a rule outside a layer is a
       rule no class can touch. `.kb-panel`, `.app-scroll` and the

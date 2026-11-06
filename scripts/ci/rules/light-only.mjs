@@ -1,4 +1,4 @@
-import { fail, read, scannable, scannableSource, lineOf, scan } from '../lib.mjs';
+import { fail, read, scannable, scannableSource, lineOf, scan, stripCssComments } from '../lib.mjs';
 
 /**
  * One palette. The app is light-only, everywhere, whatever the reader's
@@ -30,13 +30,10 @@ import { fail, read, scannable, scannableSource, lineOf, scan } from '../lib.mjs
 export function checkLightOnly() {
   const rule = 'light-only';
 
-  // CSS comments carry the reasoning, including the words below. Blanked the
-  // same way stripComments blanks a JS comment, newlines kept so a line number
-  // still points somewhere.
-  const stripCss = (css) => css.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' '));
-
+  // CSS comments carry the reasoning, including the words below, so they are
+  // blanked before anything is matched.
   for (const file of scannable.filter((f) => f.endsWith('.css'))) {
-    const css = stripCss(read(file));
+    const css = stripCssComments(read(file));
     for (const match of css.matchAll(/prefers-color-scheme/g)) {
       fail(
         rule,
@@ -54,7 +51,7 @@ export function checkLightOnly() {
     );
   });
 
-  const globals = stripCss(read('app/globals.css'));
+  const globals = stripCssComments(read('app/globals.css'));
   if (!/:root\s*\{[^}]*color-scheme:\s*light/.test(globals)) {
     fail(
       rule,

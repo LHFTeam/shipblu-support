@@ -2,9 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { runRule } from '../fixture.mjs';
 
 /**
- * The focus ring stays in a cascade layer, a field does not trade it for a
- * translucent box-shadow, and no outline utility carries an important suffix
- * it no longer needs.
+ * The focus ring stays in a cascade layer and keeps its outline, a field does
+ * not trade it for a box-shadow, and no outline utility carries an important
+ * suffix it no longer needs.
  *
  * The important modifier is added by `bang` (after) and `lead` (before)
  * rather than written into a class below: Tailwind scans this file like any
@@ -43,11 +43,16 @@ describe('focus-ring', () => {
     const found = await run({
       'components/ui.tsx': [
         "const FIELD = 'rounded-md border focus:border-(--color-border-focus) focus:ring-2 focus:ring-(--color-border-focus)/20';",
+        "const ROW = 'focus-visible:outline-offset-[-2px] md:rounded-lg';",
+        `const PRIMITIVE_CLASH = '${bang('w-48')} ${bang('md:rounded-lg')}';`,
+        "const OFFSET_ONLY = 'focus:ring-offset-2 focus-visible:ring-inset';",
+        '',
+      ].join('\n'),
+      'app/help/skip-target.tsx': [
         "const MAIN = 'flex-1 outline-none';",
         "const HEADING = 'text-sm font-semibold focus:outline-none';",
         "const INSIDE_A_BOX = 'resize-none bg-transparent outline-hidden';",
-        "const ROW = 'focus-visible:outline-offset-[-2px] md:rounded-lg';",
-        `const PRIMITIVE_CLASH = '${bang('w-48')} ${bang('md:rounded-lg')}';`,
+        "const NOT_A_RING = 'outline-none focus:ring-offset-2';",
         '',
       ].join('\n'),
     });
@@ -93,7 +98,119 @@ describe('focus-ring', () => {
     expect(found).toEqual([at('app/globals.css', /ring is gone/)]);
   });
 
-  it('refuses outline-none beside a translucent focus ring, in a string or a template', async () => {
+  it('refuses a shared ring whose outline has been edited away', async () => {
+    const found = await run({
+      'app/globals.css': [
+        "@import 'tailwindcss';",
+        '@layer base {',
+        `  ${RING} {`,
+        '    outline: 0;',
+        '  }',
+        '}',
+        '',
+      ].join('\n'),
+    });
+
+    expect(found).toEqual([
+      at('app/globals.css:3', /^outline: 0 under a focus selector takes the keyboard ring off/),
+      at('app/globals.css', /no longer declares an outline/),
+    ]);
+  });
+
+  it('refuses removing the outline under a focus selector in any layer, and in an @utility', async () => {
+    const found = await run({
+      'app/globals.css': [
+        LAYERED,
+        '@layer components {',
+        '  button:focus-visible { outline: none; }',
+        '  .chip:focus { outline-width: 0px; }',
+        '  .tab:focus-visible { outline: 2px solid transparent; }',
+        '  .row:focus-within { outline-style: none !important; }',
+        '  .pill:focus-visible { outline: 2px solid rgb(0 0 0); outline-offset: 0; }',
+        '}',
+        '@utility no-ring {',
+        '  &:focus-visible { outline-color: transparent; }',
+        '}',
+        '',
+      ].join('\n'),
+    });
+
+    expect(found).toEqual([
+      at('app/globals.css:10', /^outline: none under a focus selector/),
+      at('app/globals.css:11', /^outline-width: 0px under a focus selector/),
+      at('app/globals.css:12', /^outline: 2px solid transparent under a focus selector/),
+      at('app/globals.css:13', /^outline-style: none under a focus selector/),
+      at('app/globals.css:17', /^outline-color: transparent under a focus selector/),
+    ]);
+  });
+
+  it('places a nested layer by the first name of its path', async () => {
+    const found = await run({
+      'app/globals.css': [
+        LAYERED,
+        '@layer theme-overrides {',
+        '  @layer base {',
+        '    :focus-visible { outline-offset: 0; }',
+        '    .kb-article a { outline: 1px solid; }',
+        '  }',
+        '}',
+        '@layer base.forms {',
+        '  .field:focus { outline-offset: 1px; }',
+        '}',
+        '@layer components {',
+        '  @layer cards { .card:focus-within { outline-offset: 4px; } }',
+        '}',
+        '',
+      ].join('\n'),
+    });
+
+    expect(found).toEqual([
+      at('app/globals.css:11', /@layer theme-overrides\.base competes/),
+      at('app/globals.css:12', /outline declared in @layer theme-overrides\.base/),
+    ]);
+  });
+
+  it('judges outline declarations only, so a focus rule that changes a border passes anywhere', async () => {
+    const found = await run({
+      'app/globals.css': [
+        LAYERED,
+        '.kb-panel { border-color: grey; }',
+        '.kb-panel:focus-within { border-color: blue; }',
+        '',
+      ].join('\n'),
+    });
+
+    expect(found).toEqual([]);
+  });
+
+  it('reads an @utility as a utility, and a @variant or media query in a rule as that rule', async () => {
+    const found = await run({
+      'app/globals.css': [
+        LAYERED,
+        '@utility ring-inset {',
+        '  &:focus-visible { outline-offset: -2px; }',
+        '}',
+        '.card {',
+        '  @variant focus-visible { outline: none; }',
+        '}',
+        '.chip {',
+        '  @variant focus-visible { outline-offset: 4px; }',
+        '}',
+        '.pill {',
+        '  @media (hover: hover) { outline-width: 0; }',
+        '}',
+        '',
+      ].join('\n'),
+    });
+
+    expect(found).toEqual([
+      at('app/globals.css:13', /^outline: none under a focus selector/),
+      at('app/globals.css:16', /focus outline outside a cascade layer/),
+      at('app/globals.css:19', /outline declared outside a cascade layer/),
+    ]);
+  });
+
+  it('refuses outline-none beside a focus ring, in a string or a template', async () => {
     const found = await run({
       'app/(console)/admin/sla/forms.tsx': [
         'export const a =',
@@ -105,8 +222,8 @@ describe('focus-ring', () => {
     });
 
     expect(found).toEqual([
-      at('app/(console)/admin/sla/forms.tsx:2', /translucent focus ring/),
-      at('app/(console)/admin/sla/forms.tsx:4', /translucent focus ring/),
+      at('app/(console)/admin/sla/forms.tsx:2', /in a module that draws a focus ring/),
+      at('app/(console)/admin/sla/forms.tsx:4', /in a module that draws a focus ring/),
     ]);
   });
 
@@ -127,7 +244,7 @@ describe('focus-ring', () => {
     ]);
   });
 
-  it('refuses every way of removing the outline beside a translucent ring, by name', async () => {
+  it('refuses every way of removing the outline beside a ring, by name, opaque rings too', async () => {
     const found = await run({
       'app/widget/field.ts': [
         "export const a = 'border outline-hidden focus:ring-2 focus:ring-(--color-border-focus)/20';",
@@ -141,11 +258,12 @@ describe('focus-ring', () => {
     });
 
     expect(found).toEqual([
-      at('app/widget/field.ts:1', /^outline-hidden beside a translucent focus ring/),
-      at('app/widget/field.ts:2', /^outline-0 beside/),
-      at('app/widget/field.ts:3', /^focus:outline-transparent beside/),
-      at('app/widget/field.ts:5', /^md:focus:outline-none beside/),
-      at('app/widget/field.ts:6', /^outline-none beside/),
+      at('app/widget/field.ts:1', /^outline-hidden in a module that draws a focus ring/),
+      at('app/widget/field.ts:2', /^outline-0 in a module/),
+      at('app/widget/field.ts:3', /^focus:outline-transparent in a module/),
+      at('app/widget/field.ts:4', /^outline-hidden in a module/),
+      at('app/widget/field.ts:5', /^md:focus:outline-none in a module/),
+      at('app/widget/field.ts:6', /^outline-none in a module/),
     ]);
   });
 
@@ -265,18 +383,64 @@ describe('focus-ring', () => {
     expect(found).toEqual([at('app/globals.css:10', /outline declared in @layer overrides/)]);
   });
 
-  it('reads every opacity spelling as a translucent ring', async () => {
+  it('reads a ring of any colour or opacity, behind any variant naming focus, as a focus ring', async () => {
+    const rings = [
+      'focus:ring-(--color-border-focus)/[0.2]',
+      'focus:ring-(--color-focus-soft)',
+      'focus:ring-[color:rgb(0_0_0/0.2)]',
+      'focus-visible:ring-blu-500',
+      'group-focus-within:ring-2',
+      'has-[input:focus-visible]:ring-1',
+    ];
+    const files = Object.fromEntries(
+      rings.map((ring, i) => [
+        `components/ring-${i}.tsx`,
+        `export const a = 'border outline-none ${ring}';\n`,
+      ]),
+    );
+
+    const found = await run(files);
+
+    expect(found).toEqual(
+      rings.map((ring, i) =>
+        at(
+          `components/ring-${i}.tsx:1`,
+          new RegExp(
+            `^outline-none in a module that draws a focus ring \\(${ring.replace(/[[\]().*+?^$|\\/]/g, '\\$&')},`,
+          ),
+        ),
+      ),
+    );
+  });
+
+  it('sees a suppression and a ring split across the strings of one module', async () => {
     const found = await run({
-      'app/(console)/purge-panel.tsx': [
-        "export const a = 'border outline-none focus:ring-2 focus:ring-(--color-border-focus)/[0.2]';",
-        "export const b = 'border outline-none focus:ring-2 focus:ring-(--color-border-focus)/(--alpha)';",
+      'components/ui.tsx': [
+        "const FIELD_BASE = 'w-full rounded-md border outline-none';",
+        'const FIELD_SURFACE = {',
+        "  default: 'focus:border-(--color-border-focus) focus:ring-2 focus:ring-(--color-border-focus)/20',",
+        '};',
+        'export const field = (tone: keyof typeof FIELD_SURFACE) => `${FIELD_BASE} ${FIELD_SURFACE[tone]}`;',
+        '',
+      ].join('\n'),
+      'app/(console)/editor.tsx': [
+        "const RING = 'focus-visible:ring-2';",
+        "export const a = (editing: boolean) => `${RING} ${editing ? 'outline-hidden' : ''}`;",
+        "export const b = cn('outline-0', RING);",
         '',
       ].join('\n'),
     });
 
     expect(found).toEqual([
-      at('app/(console)/purge-panel.tsx:1', /translucent focus ring/),
-      at('app/(console)/purge-panel.tsx:2', /translucent focus ring/),
+      at(
+        'app/(console)/editor.tsx:2',
+        /^outline-hidden in a module that draws a focus ring \(focus-visible:ring-2, line 1\)/,
+      ),
+      at('app/(console)/editor.tsx:3', /^outline-0 in a module/),
+      at(
+        'components/ui.tsx:1',
+        /^outline-none in a module that draws a focus ring \(focus:ring-2, line 3\)/,
+      ),
     ]);
   });
 

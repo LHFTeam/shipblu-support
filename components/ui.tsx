@@ -153,7 +153,9 @@ export function Button({
  * with every other box-shadow. Suppressing the outline here did nothing while
  * the global rule was unlayered, and once it was layered it would have left
  * every field with a one-pixel border change and a read-only one with nothing
- * (docs/PROJECT-STATE.md §6.109).
+ * (docs/PROJECT-STATE.md §6.109). The `focus-ring` repo rule refuses an outline
+ * suppression anywhere in a module that draws a focus ring, so one put back
+ * here fails CI.
  */
 const FIELD_BASE =
   'w-full rounded-md border text-base sm:text-sm placeholder:text-(--color-text-tertiary) transition-colors disabled:cursor-not-allowed disabled:opacity-60 aria-invalid:border-(--color-feedback-danger-fg)';

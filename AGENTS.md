@@ -1224,12 +1224,13 @@ are easy to break by accident:
   one.** It is the one `:focus-visible` rule in `globals.css`: a 2px outline,
   which forced-colours mode keeps. A field's own border and 20% ring say "this
   box takes typing". They are not a focus indicator, since that ring is 1.35:1
-  and forced colours removes it, so suppressing the outline beside one
-  (`outline-none`, `-hidden`, `-0`, `-transparent`) is refused (`focus-ring`).
-  Suppress the outline only where focus is moved for a screen reader and
-  nothing is to be typed or pressed (the skip link's target, a thanks line),
-  or where a wrapper draws an outline for what is inside it (the widget's
-  composer box). On a surface the blue does not reach 3:1 against, recolour
+  and forced colours removes it. So `focus-ring` refuses an outline
+  suppression (`outline-none`, `-hidden`, `-0`, `-transparent`) in a module
+  that draws a focus ring, and an outline removed under a focus selector in a
+  stylesheet. Suppress the outline only where focus is moved for a screen
+  reader and nothing is to be typed or pressed (the skip link's target, a
+  thanks line), in a component that draws no ring, or where a wrapper draws an
+  outline for what is inside it (the widget's composer box). On a surface the blue does not reach 3:1 against, recolour
   the ring rather than removing it: the rail's is white (§6.109).
 
 The shared shapes live in one place each: `components/ui.tsx` (`Button`,
