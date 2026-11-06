@@ -17,12 +17,15 @@
 -- counters are all zero has nothing to copy. It reads `kb_articles` under ACCESS
 -- SHARE, which 0060's ACCESS EXCLUSIVE in the same transaction then supersedes.
 --
--- Guarded on the three columns, as 0047 is on its constraints, so that a
--- database whose counters are already gone passes straight through. One whose
--- drop was run by hand, or whose migration rows were reset after 0060, would
--- otherwise fail here with 42703 and take every migration pending beside it
--- down too. PL/pgSQL plans the INSERT only when it runs, so on such a database
--- it never reads a column that is not there.
+-- Guarded on the three columns, as AGENTS.md asks of a hand-written migration
+-- and as 0047 is on its constraints, so the copy never reads a column that is
+-- not there: PL/pgSQL plans the INSERT only when it runs. That makes 0059 safe
+-- on its own, run by hand or in a test. It does not let a database without
+-- the columns migrate. Drizzle runs 0060 in the same transaction whenever 0059
+-- is pending, and 0060's DROP COLUMN fails there with 42703, taking every
+-- pending migration with it. Such a database, its drop run by hand or its
+-- migration rows reset after 0060, needs the columns back first, as
+-- db/runbooks/kb-article-counters-restore.sql adds them.
 DO $$
 BEGIN
   IF (

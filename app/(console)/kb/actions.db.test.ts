@@ -136,6 +136,32 @@ describe('saveArticle', () => {
     expect(await written(id)).toEqual(before);
   });
 
+  // A browser posts a textarea with CRLF line breaks whatever it holds, and the
+  // handbook, the import and the formatting pass store LF.
+  it('writes nothing when the body comes back with CRLF where it is stored with LF', async () => {
+    const id = await article('<p>Current body text.</p>', 'Current body text.');
+    const twoLines = '<p>Current body text.</p>\n<p>A second line.</p>';
+    await saveArticle({ error: null }, await editorForm(id, { bodyHtml: twoLines }));
+    const before = await written(id);
+    const versions = await db
+      .select({ id: kbArticleVersions.id })
+      .from(kbArticleVersions)
+      .where(eq(kbArticleVersions.articleId, id));
+
+    await saveArticle(
+      { error: null },
+      await editorForm(id, { bodyHtml: twoLines.replace(/\n/g, '\r\n') }),
+    );
+
+    expect(await written(id)).toEqual(before);
+    expect(
+      await db
+        .select({ id: kbArticleVersions.id })
+        .from(kbArticleVersions)
+        .where(eq(kbArticleVersions.articleId, id)),
+    ).toEqual(versions);
+  });
+
   it('writes the row when one field differs', async () => {
     const id = await article('<p>Current body text.</p>', 'Current body text.');
     await saveArticle({ error: null }, await editorForm(id));

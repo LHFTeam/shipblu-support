@@ -135,16 +135,23 @@ describe('0059_kb_article_stats_copy and 0060_kb_articles_drop_counters', () => 
     expect(second).toEqual(first);
   });
 
-  // A database whose counters are already gone: the migrated test database
-  // itself, past 0060. The copy's guard lets it through without reading a
-  // column that is not there.
-  it('passes straight through a table without the columns', async () => {
+  // A table without the counters: the migrated test database, past 0060. The
+  // guard keeps 0059's copy from reading a column that is not there. It does not
+  // let such a database migrate: Drizzle runs 0060 in the same transaction
+  // whenever 0059 is pending, and its DROP COLUMN fails there, so the runbook
+  // puts the columns back before anything migrates.
+  it('copies nothing from a table without the columns, though 0060 after it fails there', async () => {
     let copied;
+    let dropped: unknown;
     await db
       .transaction(async (tx) => {
         await articleRow(tx);
         await run(tx, COPY);
         copied = await stats(tx);
+        dropped = await run(tx, DROP).then(
+          () => null,
+          (error: unknown) => error,
+        );
         throw new RolledBack();
       })
       .catch((error: unknown) => {
@@ -152,6 +159,8 @@ describe('0059_kb_article_stats_copy and 0060_kb_articles_drop_counters', () => 
       });
 
     expect(copied).toEqual({});
+    // 42703, undefined_column, on the postgres error Drizzle wraps.
+    expect((dropped as { cause?: { code?: string } } | null)?.cause?.code).toBe('42703');
   });
 
   it('loses no count to the drop that follows it', async () => {

@@ -34,10 +34,10 @@
 --   1. Turn auto-deploy off on every production service that has it on. Read
 --      each one's setting in the dashboard, since render.yaml and
 --      docs/PROJECT-STATE.md §2 can lag it; on 2026-11-06 all six had it on.
---      All six, not the web service alone. Otherwise a commit on `main` still
---      carrying 0060 drops the columns again under the old build. Only the web
---      service migrates, so a worker or cron going live on newer code would
---      also meet a schema nothing has migrated.
+--      Each has its own reason. The web service: its preDeploy is the only
+--      thing that migrates, so a commit on `main` still carrying 0060 would
+--      apply it again under the old build. The worker and the four crons: they
+--      would go live on newer code against a schema nothing has migrated.
 --   2. Deploy the earlier build to the web service. The worker and the crons
 --      can stay on the second half's code, which names none of the three and
 --      runs with them there as without.

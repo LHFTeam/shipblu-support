@@ -5,17 +5,19 @@ import { htmlToText, preview, sanitiseArticleHtml } from '@/lib/html/sanitize';
 import { normaliseArticleHtml } from '@/lib/kb/format';
 
 /**
- * The two steps every write of an article's content shares, whoever makes it:
- * the console editor, the Freshdesk import, the handbook seed, the formatting
- * pass.
+ * What the writers of an article's content share, whoever they are: the
+ * console editor, the Freshdesk import, the handbook seed, the formatting pass.
+ * Two steps every one of them takes, `articleBody` and `cutArticleVersion`,
+ * and one question two of them ask, `changesNothing`.
  *
- * Only these two. The writers' upserts look alike and are not: each keys its
- * rows on a different identity, decides its slug differently, and has its own
- * rule for when a write happens at all — the import overwrites what Freshdesk
- * says every run, the handbook leaves an edited article alone. Those rules are
- * each writer's reason for existing, so they stay with the writer; what is
- * shared here is what none of them has a reason to vary, whether a write would
- * change anything among it.
+ * No more than that. The writers' upserts look alike and are not: each keys
+ * its rows on a different identity, decides its slug differently, and has its
+ * own rule for when a write happens at all. The import overwrites with
+ * Freshdesk's version whenever it differs; the handbook leaves an edited
+ * article alone. Those rules are each writer's reason for existing, so they
+ * stay with the writer. The console's Save and the import ask `changesNothing`
+ * before an UPDATE; the handbook seed and the formatting pass compare in their
+ * own code, on the fields each owns.
  */
 
 /**

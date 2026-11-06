@@ -87,7 +87,7 @@ across. #466 went first: it reached `main` through #470, and production's
 Merged into `dev` as `62eae73`, released to `main` in #475 (`31c8973`), and
 deployed on 2026-11-06: the web service by itself at 17:58 UTC, once `main`'s
 checks had passed, and the worker by hand at 18:56. The web service deploying
-itself was not the plan: `render.yaml` says `autoDeployTrigger: 'off'` for it,
+itself was not the plan: `render.yaml` said `autoDeployTrigger: 'off'` for it,
 but the running service read `autoDeploy: yes`, `autoDeployTrigger: checksPass`
 that day. The worker and the four crons read `off` then, and were switched to
 `checksPass` from 19:43 that evening; #479 records both in `render.yaml` and
@@ -299,16 +299,22 @@ is on this build (`list_deploys`, or `/api/health`'s commit). No cron touches
 The trigger goes back to the plain stamp in the same `preDeployCommand`, the
 replay of `db/sql/001` after the migrations. From then on an UPDATE of an
 article that changes nothing moves its date, as on every other table. So the
-writers that may have nothing to say compare first (§6.59), through
-`changesNothing` (`lib/kb/article-write.ts`). `seed_console_handbook` and
-`normalise_kb_formatting` already did. PR 2 adds the console's Save, which
-wrote every field on every save, and the `import_freshdesk_kb` re-run, which
-wrote every article it found as it was: both moved the whole of what they
-touched to the top of `/kb`. Two writes still stamp a no-op, both rare and
-deliberate. One is a restore of a version identical to the current text, which
-cuts a version too. The other is a status button posted from a page drawn
-before the status changed, since the sidebar never offers the status an
-article already has.
+writers that may have nothing to say compare first (§6.59).
+`seed_console_handbook` and `normalise_kb_formatting` already did, field by
+field. PR 2 adds the console's Save and the `import_freshdesk_kb` re-run, which
+ask `changesNothing` (`lib/kb/article-write.ts`). The Save wrote every field on
+every save, and the re-run wrote every article it found as it was, so each
+moved the whole of what it touched to the top of `/kb`. The Save also folds the
+textarea's line breaks to LF before comparing. A browser posts CRLF whatever
+the box holds, so a body stored with LF, the handbook's among them, came back
+different on every unedited Save, which cut a version and moved the date.
+
+Two writes still stamp a no-op, both rare and deliberate. One is a restore of
+a version identical to the current text, which cuts a version as well. The
+other is a stale Unpublish or Archive, posted from a page drawn before the
+article reached that status: the sidebar never offers the status an article
+already has. A stale Publish is a real write, since it re-dates `publishedAt`
+and re-credits the approver.
 
 `ALTER TABLE … DROP COLUMN` takes ACCESS EXCLUSIVE on `kb_articles` and writes
 no row: a catalog change, held until the migrations' transaction commits. It
@@ -370,10 +376,11 @@ Then put the web service back on the build it ran before this release
 
 1. Turn auto-deploy off on every production service that has it on. Read the
    setting in the dashboard, since `render.yaml` and PROJECT-STATE §2 can lag
-   it; on 2026-11-06 all six had it on (#479). All six, not the web service
-   alone: otherwise a commit on `main` still carrying 0060 drops the columns
-   again under the old build. And only the web service migrates, so a worker or
-   cron going live on newer code would meet a schema nothing has migrated.
+   it; on 2026-11-06 all six had it on (#479). Each has its own reason. The web
+   service: its preDeploy is the only thing that migrates, so a commit on
+   `main` still carrying 0060 would apply it again under the old build. The
+   worker and the four crons: they would go live on newer code against a
+   schema nothing has migrated.
 2. Deploy the earlier build to the web service. The worker and the crons can
    stay on PR 2, whose code names none of the three.
 

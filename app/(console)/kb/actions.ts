@@ -136,7 +136,14 @@ export async function saveArticle(_state: KbState, formData: FormData): Promise<
   // side because an author pasting from another help desk cannot see what came
   // with the paste, and the preview beside the textarea renders their draft
   // through `.kb-article` — the same stylesheet the standard is written for.
-  const { bodyHtml, bodyText, excerpt } = articleBody(rawBody);
+  //
+  // Line breaks are folded to LF first. A browser posts a textarea's value with
+  // CRLF however the box holds it, and nothing after keeps the two apart, so a
+  // body stored with LF (the handbook's, an import's, a formatting pass's) came
+  // back different on a Save nobody edited. That save cut a version, floated
+  // the article to the top of `/kb`, and left a body the handbook seed then
+  // reported as drift.
+  const { bodyHtml, bodyText, excerpt } = articleBody(rawBody.replace(/\r\n?/g, '\n'));
 
   // The folder decides the category, and the category carries a locale. An
   // English article inside an Arabic category would be unreachable — the public

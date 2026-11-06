@@ -4801,7 +4801,8 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
     row, never when somebody reads it. The console's Save and the Freshdesk
     import's re-run compare first (`changesNothing` in
     `lib/kb/article-write.ts`), so neither writes an article it would leave as
-    it was.
+    it was; the Save folds the textarea's CRLF to LF first, since a browser
+    posts CRLF however the box holds it.
 
 52. **`current_date` in a page query is the database's date, and the database is
     UTC.** _2026-09-04._ `/reports/categories` filtered its rollups with
@@ -4956,11 +4957,15 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
     nothing but a reader's counter. Once that has deployed, the trigger is the
     plain stamp on every table again, `kb_articles` included, so the rule
     above stands for every writer, and `db/sql/touch-updated-at.db.test.ts`
-    holds the trigger to it. On `kb_articles` the writers that may have nothing
-    to say compare through `changesNothing` (`lib/kb/article-write.ts`), the
-    console's Save and the Freshdesk import's re-run among them, and
-    `seed_console_handbook` and `normalise_kb_formatting` compare field by field
-    as they always did; each is held to it by `xmin` in its database test.
+    holds the trigger to it. On `kb_articles` the console's Save and the
+    Freshdesk import's re-run compare through `changesNothing`
+    (`lib/kb/article-write.ts`), and `seed_console_handbook` and
+    `normalise_kb_formatting` compare field by field as they always did; each
+    is held to it by `xmin` in its database test. Two writes still stamp a
+    no-op: restoring a version identical to the current text, which cuts a
+    version as well, and a stale Unpublish or Archive landing on an article
+    already in that status, which only a page drawn before the change can
+    post.
 
     The measurement matters as much as the fix. The job's own tally could not
     have caught this — it was reporting the truth — and neither could
