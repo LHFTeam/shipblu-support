@@ -22,8 +22,9 @@ import trackingPin from './art/tracking-pin.webp';
  * the bytes arrive and nothing jumps.
  *
  * A plain `<img>` rather than `next/image`. These are 5–32 KB drawn at the size
- * they were exported at — the questions drawing re-exported at 280px, twice the
- * card's largest, from the design's 474px original — so the optimiser would
+ * they were exported at, or at half of it — the questions drawing re-exported at
+ * 280px, twice the card's largest, from the design's 474px original, and the
+ * tracking parcel supplied at 300px for its 150px — so the optimiser would
  * spend a request and a CPU cycle on Render to hand back what it was given.
  *
  * Every one is decoration: the words beside it say everything it does, so it
