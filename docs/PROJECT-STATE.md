@@ -4722,12 +4722,14 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
     does not normalise it fails the build.
 
 51. ~~**`kb_articles.updated_at` is not an edit date — every page view moves
-    it.**~~ **Fixed in code by #466.** It reaches production with the first
-    deploy after `dev` is merged into `main`, which nobody has checked yet:
-    once it has deployed, record here that `pg_get_functiondef` of
-    `touch_updated_at` names `not_an_edit` and that one view left an
-    article's `updated_at` where it was. The history below is why.
-    _2026-09-03._
+    it.**~~ **Fixed in code by #466, and the counters moved off the row by the
+    first half of `plans/kb-article-stats.md`.** Both reach production with the
+    first deploy after `dev` is merged into `main`, which nobody has checked
+    yet: once it has deployed, record here that `pg_get_functiondef` of
+    `touch_updated_at` names `not_an_edit`, that every article with a count on
+    the old columns has a `kb_article_stats` row, and that one view left an
+    article's `xmin` and `updated_at` where they were (the plan has the
+    queries). The history below is why. _2026-09-03._
     `recordArticleView` increments `view_count` on the
     article row, and `touch_updated_at` fires on any update of a table with that
     column, so a read writes the timestamp. The article page renders it as
@@ -4771,6 +4773,19 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
     a status change or a tag edit did. A backfill to `editedAt` would erase the
     real changes among all 39 to correct at most those 11. An article's date
     settles at its next real change.
+
+    _2026-11-06._ The counters then left the row. A view still rewrote the
+    whole article — its `search_vector` regenerated each time, and the jsonb
+    comparison reading the row twice more — and took the row lock a console
+    save waits on. `view_count`, `helpful_count` and `unhelpful_count` now live
+    in `kb_article_stats`, one row per article that no edit touches
+    (`lib/kb/stats.ts`), and `db/sql/011_kb_article_stats_backfill.sql` copies
+    what each article had (108 of 112 in production, 63,842 views). So "each
+    view and vote is one" open write above no longer holds. The old columns,
+    `touch_updated_at`'s exception for them and the `kb-edit-date` rule stay
+    for the old release's writes during a deploy, and go together in the
+    plan's second half, once the first is in production on the web service
+    and the worker.
 
 52. **`current_date` in a page query is the database's date, and the database is
     UTC.** _2026-09-04._ `/reports/categories` filtered its rollups with

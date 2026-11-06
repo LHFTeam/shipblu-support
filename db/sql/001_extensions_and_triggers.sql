@@ -305,23 +305,28 @@ END $$;
 -- backdate it. `presence_policy` depends on exactly that: its grace period is
 -- anchored on `updated_at` (`StoredPresencePolicy` in `lib/presence/idle.ts`).
 --
--- The one is `kb_articles`, because readers write to it. `recordArticleView`
--- adds one to `view_count` on every article view, and the feedback endpoint
--- adds one to `helpful_count` or `unhelpful_count` on every tap, so with the
+-- The one is `kb_articles`, because readers wrote to it. `recordArticleView`
+-- added one to `view_count` on every article view, and the feedback endpoint
+-- added one to `helpful_count` or `unhelpful_count` on every tap, so with the
 -- plain stamp the column was the date somebody last read the article, and the
 -- console's article list, which shows it and sorts by it, ordered articles by
 -- their readers (PROJECT-STATE §6.51). There an UPDATE that changes nothing
 -- but those three counters keeps the date it had, and any other change stamps
--- `now()` as everywhere else. An UPDATE that changes nothing at all keeps the
--- date too: it is no edit either, and the date it would stamp is the noise
--- §6.59 records. The column is still the trigger's: a value an UPDATE writes
--- into it is replaced either way, by the old date or by `now()`.
+-- `now()` as everywhere else. The counters have since moved to
+-- `kb_article_stats`, which has no `updated_at` and so no trigger, and no
+-- reader writes the article; the three are kept here only for the old release,
+-- which still writes them during a deploy, and go with the columns
+-- (`plans/kb-article-stats.md`, PR 2). An UPDATE that changes nothing at all
+-- keeps the date too: it is no edit either, and the date it would stamp is the
+-- noise §6.59 records. The column is still the trigger's: a value an UPDATE
+-- writes into it is replaced either way, by the old date or by `now()`.
 --
 -- The comparison is the whole row minus a deny-list rather than a list of the
 -- columns that count as an edit, so a column added to the table later counts
--- by default — a new counter has to be named here, and leaving one out costs
--- a date that moves too often, never one that misses an edit. `updated_at` is
--- left out because it is what is being decided. `search_vector` is left out
+-- by default — a counter on this table had to be named here, and leaving one
+-- out cost a date that moved too often, never one that missed an edit. A new
+-- reader counter goes in `kb_article_stats`, not on this table. `updated_at`
+-- is left out because it is what is being decided. `search_vector` is left out
 -- because it is a stored generated column, and Postgres computes those after
 -- the BEFORE triggers have run: inside this function `NEW.search_vector` is
 -- null while `OLD.search_vector` holds the old value, so leaving it in would
@@ -333,7 +338,7 @@ END $$;
 -- trigger calls is trigger DDL: `DROP TRIGGER` takes ACCESS EXCLUSIVE, which
 -- any open reader holds off (the loop below says what that cost on
 -- 2026-08-19), and `CREATE OR REPLACE TRIGGER` takes SHARE ROW EXCLUSIVE,
--- which any open writer holds off — every view and every vote is one — and
+-- which any open writer holds off — every view and every vote was one — and
 -- which then holds every write to the table off until this whole file
 -- commits, because the file runs as one transaction. A trigger of another
 -- name would also have the loop create the generic one again beside it, still

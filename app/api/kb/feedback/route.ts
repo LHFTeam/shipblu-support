@@ -1,11 +1,12 @@
 import { NextResponse } from 'next/server';
-import { eq, sql } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { db } from '@/db/client';
 import { kbArticleFeedback, kbArticles } from '@/db/schema';
 import { hasConsoleSession } from '@/lib/auth/cookie';
 import { readJsonBody } from '@/lib/http/json-body';
 import { allow, clientIp } from '@/lib/http/rate-limit';
+import { countArticleVote } from '@/lib/kb/stats';
 
 export const dynamic = 'force-dynamic';
 
@@ -64,19 +65,11 @@ export async function POST(request: Request) {
 
   if (exists.length === 0) return new NextResponse(null, { status: 204 });
 
-  // Written together so the denormalised counters on the article can never
-  // disagree with the rows they summarise.
+  // Written together so the denormalised counters in `kb_article_stats` can
+  // never disagree with the rows they summarise.
   await db.transaction(async (tx) => {
     await tx.insert(kbArticleFeedback).values({ articleId, wasHelpful, comment });
-
-    await tx
-      .update(kbArticles)
-      .set(
-        wasHelpful
-          ? { helpfulCount: sql`${kbArticles.helpfulCount} + 1` }
-          : { unhelpfulCount: sql`${kbArticles.unhelpfulCount} + 1` },
-      )
-      .where(eq(kbArticles.id, articleId));
+    await countArticleVote(tx, articleId, wasHelpful);
   });
 
   return new NextResponse(null, { status: 204 });

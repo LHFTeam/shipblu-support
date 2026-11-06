@@ -27,7 +27,7 @@ vi.mock('@/lib/csat', async (importOriginal) => ({
   recordAnswer,
   surveyByToken,
 }));
-vi.mock('@/lib/kb/queries', () => ({ recordArticleView }));
+vi.mock('@/lib/kb/stats', () => ({ recordArticleView }));
 vi.mock('@/db/client', () => ({ db: { select } }));
 
 const csat = await import('./csat/route');
