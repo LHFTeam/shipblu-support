@@ -21,11 +21,16 @@ import trackingPin from './art/tracking-pin.webp';
  * back the image's own width and height, so the page reserves its space before
  * the bytes arrive and nothing jumps.
  *
- * A plain `<img>` rather than `next/image`. These are 5–32 KB drawn at the size
- * they were exported at, or at half of it — the questions drawing re-exported at
- * 280px, twice the card's largest, from the design's 474px original, and the
- * tracking parcel supplied at 300px for its 150px — so the optimiser would
- * spend a request and a CPU cycle on Render to hand back what it was given.
+ * A plain `<img>` rather than `next/image`. These are 19–42 KB, and the
+ * redrawn ones are supplied at two to three times the size they are drawn at —
+ * 600px for a topic drawing the folder pages draw at 260px, 300px for the
+ * tracking parcel's 150px — so they stay sharp on a 2x screen, and the
+ * optimiser would spend a request and a CPU cycle on Render to save a few KB.
+ *
+ * The questions scene reaches the edges of its tile — a pedestal at one, the
+ * magnifier at the other — where `.kb-art-fade` would fade them out, so its file
+ * frames the tile in a transparent margin: the tile at 74% of the frame, as the
+ * earlier export had it.
  *
  * Every one is decoration: the words beside it say everything it does, so it
  * carries an empty `alt` and is hidden from assistive technology.
