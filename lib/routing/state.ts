@@ -261,7 +261,9 @@ const NOT_THE_ROUTERS_PASS: ReadonlySet<RoutingOutcome> = new Set(['manual', 'ru
  *   answered `waiting` because the category is Jev's reading of a comment
  *   thread still waiting for its customer (`categoryStanding`): true. Phase
  *   one, then or at the window's end, reads the ticket after this write, and
- *   the router's pass after it.
+ *   the router's pass after it — unless the window's end sets the category
+ *   aside, which owes it no pass, or a person or a rule ends the hold first,
+ *   after which `afterHoldEnded` chooses the policy for it (`policyOwed`).
  * - **Decided by the router** — its phase one read the ticket under the lock
  *   after this write committed, and its pass ran on this category or on a
  *   later writer's, whose pass it then is: true either way.

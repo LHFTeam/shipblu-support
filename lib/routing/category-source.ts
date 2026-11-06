@@ -2,6 +2,7 @@ import { and, desc, eq, inArray, isNull } from 'drizzle-orm';
 import type { db } from '@/db/client';
 import { CATEGORY_AI_LIVE_LABEL, aiCategoryRuns, conversationEvents, messages } from '@/db/schema';
 import { CATEGORY_AI_ACTOR } from '@/lib/category-ai/decide';
+import { canonicalUuid } from '@/lib/http/uuid';
 import { isCommentTicket } from '@/lib/tickets/channel-policy';
 import type { CategorySource } from './decide';
 
@@ -91,7 +92,12 @@ async function requesterChose(
     );
   const answered: (string | null)[] = writes
     .filter((write) => write.data.to === ticket.categoryId)
-    .map((write) => (typeof write.data.messageId === 'string' ? write.data.messageId : null));
+    // Spelled as the database spells an id, as `ticketFacts` reads the same
+    // field: a job run by hand with an upper-case id writes it so, and would
+    // otherwise name no message the lookup below finds. An id that is not one
+    // names no message, and so counts as the requester's, rather than refusing
+    // the whole decision with 22P02.
+    .map((write) => canonicalUuid(write.data.messageId));
 
   if (ticket.categoryKey) {
     const runs = await tx

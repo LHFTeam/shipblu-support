@@ -541,6 +541,29 @@ describe('applyCategoryRun', () => {
     expect(await eventsOf(t.id, 'sla_recalculated')).toEqual([]);
   });
 
+  // A passer-by's reply recorded while it held a comment thread, then the
+  // customer's comment taking the ticket: dated after his reply (Meta sent no
+  // created_time), it is still the settle the ticket is filed from.
+  it('files from the requester’s own earliest answer, not a passer-by’s', async () => {
+    answersInTurn('sales', 'customer_support');
+    const bob = await ticket();
+    await inbound(bob, 'بكام الشحن؟', at(20));
+    await record();
+    const [amira] = await db
+      .insert(contacts)
+      .values({ name: 'Amira' })
+      .returning({ id: contacts.id });
+    await db
+      .update(conversations)
+      .set({ requesterContactId: amira!.id })
+      .where(eq(conversations.id, bob.id));
+    await inbound({ id: bob.id, requester: amira!.id }, 'فين الشحنة بتاعتي؟', at(10));
+    await record();
+
+    expect(await apply()).toMatchObject({ status: 'ran', candidates: 1, applied: 1 });
+    expect((await carried(bob.id)).categoryId).toBe(await categoryId('customer_support'));
+  });
+
   it('leaves a ticket that is resolved, owned, filed by Jev or out of every queue', async () => {
     answersInTurn('sales');
     const tickets = {

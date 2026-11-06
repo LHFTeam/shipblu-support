@@ -1249,6 +1249,27 @@ describe('a reply-first comment thread, through Jev and the router', () => {
     });
   });
 
+  // Her answer agrees with what Bob's reply was read as, and so writes nothing:
+  // its run is what makes the category hers, and routes the ticket.
+  it('routes at once on the customer’s comment answered as Bob’s reply was', async () => {
+    const t = await page();
+    const opened = await bobFirst();
+
+    const root = await ingestMetaComment(comment({ text: 'How much to ship 30 parcels a week?' }));
+    jev('sales', 'medium');
+    expect(await judged(root.messageId)).toMatchObject({ category: { outcome: 'applied' } });
+
+    expect(await routing(opened.conversationId)).toMatchObject({
+      stage: 'decided',
+      outcome: 'category',
+    });
+    expect(await ticketOf(opened.conversationId)).toMatchObject({
+      categoryKey: 'sales',
+      groupId: t.sales.group,
+      assigneeAgentId: t.sales.agent,
+    });
+  });
+
   // Meta omitted the root's created_time, so parse.ts stamped it when it was
   // read: after Bob's reply, which is then the thread's earliest message.
   it('does the same when the customer’s comment is stamped after Bob’s reply', async () => {

@@ -1849,7 +1849,9 @@ README says why it is a setting and not a rule. The rules:
   `routed` event, and the ticket stays held. The `on_update` pass runs whenever
   the ticket carries a category, whatever the outcome but `not_open`, because
   its writer gave that pass up to the router; a ticket with none has nothing for
-  it to react to, and its hold ends in phase one. Phase three ends it; then
+  it to react to, and its hold ends in phase one — as does one whose category
+  the window's end set aside (`categoryStanding`), which owes the pass its
+  writer gave up nothing either, nor the policy. Phase three ends it; then
   `afterRoutingChanged` with whether phase one, or a write the router passed
   since, moved the group or changed the category, then assignment and the held
   reply. Rules before assignment, as in the creation pass: the other way round
@@ -1949,12 +1951,15 @@ README says why it is a setting and not a rule. The rules:
   not the requester is set aside: `fallback`, the ticket stays in its group, no
   pass and no policy for it, the `routed` event naming it under `setAside`, and
   the label left on the ticket for a person or the customer's own next answer
-  to replace. A person's, a rule's or a form's category routes at once,
-  whatever the thread's order. What it costs is the window's length before a
-  ticket a reply opened is assigned; a root arriving after the window's end
-  only relabels; and while the ticket waits another writer's `on_update` pass
-  meets a rule keyed on the replier's category as on any held ticket (no
-  active rule is keyed on the category, 2026-11-06).
+  to replace. A category a person, a rule or a form wrote is never held back by
+  this: it routes whenever the router next decides, as it always has. What it
+  costs is the window's length before a ticket a reply opened is assigned; a
+  root arriving after the window's end only relabels; an agent picking the
+  category the ticket already shows writes nothing and so routes nothing;
+  while the ticket waits another writer's `on_update` pass meets a rule keyed
+  on the replier's category as on any held ticket (no active rule is keyed on
+  the category, 2026-11-06); and the decision's recorded probability is the
+  last write's, the replier's when the customer's answer agreed with it.
 - **The creation pass is `on_create` rules, `applySlaOnCreate`, then
   `beginRouting`, and it stops on `routed`.** After the rules, so a rule gets
   the first word: its stamp has ended the hold, or its `set_category` is routed
@@ -1979,7 +1984,13 @@ README says why it is a setting and not a rule. The rules:
   owed unless `routerDecidedOn` says a router's pass reads the write, as the
   console's edit asks, or the router found the ticket `not_open`
   (`decidedNotOpen`, where Jev parts from the console: Jev never files a
-  resolved ticket).
+  resolved ticket). `waiting` is a router's pass still to come, so no relabel
+  either; if a person or a rule then ends the hold first, `afterHoldEnded`
+  chooses the policy for Jev's category (`heldFollowUp`'s `policyOwed`). And a
+  confident answer naming the category the ticket already carries writes
+  nothing, but on a live `holding` row it routes the ticket all the same
+  (`afterCategoryConfirmed`): the customer's root agreeing with what the
+  replier's reply was read as is the one ticket it reaches.
 - **What a hold kept back is owed by state, not by one caller.** Whatever ends a
   live hold — the router, `settle_routing` whatever it decides but `not_open`,
   which assigns and sends nothing (`routeNow` answers `none` for it), a caller
@@ -2117,7 +2128,9 @@ its root, a colleague copied on an email), and the job asks `skipReason` again
 under its row lock with the requester and the message's author read there; and
 every answer, applied or not,
 is a row in `ai_priority_runs` with its full distribution, because those rows
-are the only labels priority has. A new writer of `conversations.priority`
+are the only labels priority has — but for one that look under the lock finds
+to be about somebody else's message, which is thrown away unrecorded, as the
+same skip before the call would have. A new writer of `conversations.priority`
 writes the column and its `priority_changed` event in one transaction, stamps
 the event with `CHANGE_STAMP` (`lib/tickets/change-stamp.ts`) so events sort in
 the order the column was written, and calls `onPriorityChanged` after it commits

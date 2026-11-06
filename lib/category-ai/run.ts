@@ -171,9 +171,13 @@ export async function classifyMessageCategory(
   // changing: a comment thread's root arriving after a reply under it opened
   // the ticket (`adoptRootAuthor`). That makes the replier's messages a
   // passer-by's, and when this message is one of them there is nothing to
-  // record for it. So the requester is asked again of this read, and a root
-  // committed since the message was read ends the job as a skip does, with
-  // no row.
+  // record for it. So the requester is asked again here, and a root committed
+  // before that look ends the job as a skip does, with no row. One committing
+  // in the moment between that look and the insert can still leave an
+  // outcome-only row for the replier's message: it carries no answer, and the
+  // settle, the cap and the report all pass it over (`messageByAnotherThan`),
+  // so no figure moves for it — closing it would take the lock for every
+  // outcome known without asking.
   //
   // The author and the requester come from one statement (`authorship`), so a
   // contact merge — which moves the ticket's requester and the customer's
@@ -192,7 +196,18 @@ export async function classifyMessageCategory(
     wrote.requesterContactId,
   );
   if (notTheirsBefore) return { status: 'skipped', reason: notTheirsBefore };
-  const known = await ticketFacts(db, row.conversationId, current, at, mode);
+  // Judged against the requester `authorship` read, which the author was
+  // compared with: `current`'s can be the record a merge since has replaced,
+  // whose messages are then nobody's, and the settle and the cap would pass
+  // them all over and pay for an answer the look under the lock records as
+  // settled anyway.
+  const known = await ticketFacts(
+    db,
+    row.conversationId,
+    { ...current, requesterContactId: wrote.requesterContactId },
+    at,
+    mode,
+  );
   const before = preCallOutcome({ ...known, owned: known.ownedByEvent });
   if (before) {
     const inserted = await insertRun(db, {
@@ -365,9 +380,37 @@ export async function classifyMessageCategory(
       probability: prediction.probability,
     });
     await afterCategoryApplied(row.conversationId, decided.routing ?? null);
+  } else if (decided.write?.outcome === 'unchanged') {
+    await afterCategoryConfirmed(row.conversationId, decided.routing ?? null);
   }
 
   return { status: 'recorded', outcome: decided.outcome, predicted };
+}
+
+/**
+ * A confident answer naming the category the ticket already carries, on a
+ * ticket held for the router: routed now, as a write would have been, and
+ * nothing else, since nothing changed for a rule or the policy to react to.
+ *
+ * The one ticket this reaches is a comment thread a passer-by's reply opened.
+ * Jev's reading of the reply put the category there and the router waited for
+ * the thread's root (`categoryStanding`); the customer's own comment, answered
+ * the same, writes no event (`setConversationCategoryOn` writes nothing on an
+ * unchanged value), but its run makes the category the requester's, so the
+ * router routes on it — at once here, where without this the ticket stayed
+ * held, unassigned and unanswered until the window's end. Anywhere else an
+ * agreeing answer finds the ticket routed already, or not routing at all.
+ *
+ * Not while `pending`, which the creation pass's `beginRouting` routes, nor on
+ * a decision in flight, which nothing written here re-arms. In shadow too, so
+ * the would-be decision is recorded when the live one would have been made.
+ */
+async function afterCategoryConfirmed(
+  conversationId: string,
+  routing: UndecidedRouting | 'deferred' | null,
+): Promise<void> {
+  if (routing === 'deferred' || routing?.stage !== 'holding' || routing.decisionInFlight) return;
+  await routeNow(conversationId, { label: CATEGORY_AI_ACTOR });
 }
 
 /**

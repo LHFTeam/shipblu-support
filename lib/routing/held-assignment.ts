@@ -1,6 +1,7 @@
-import { and, asc, eq, ne } from 'drizzle-orm';
+import { and, asc, desc, eq, ne } from 'drizzle-orm';
 import { db } from '@/db/client';
-import { conversations, messages, routingDecisions } from '@/db/schema';
+import { conversationEvents, conversations, messages, routingDecisions } from '@/db/schema';
+import { CATEGORY_AI_ACTOR } from '@/lib/category-ai/decide';
 import { notReaction } from '@/lib/tickets/not-reaction';
 
 type Strategy = NonNullable<(typeof routingDecisions.$inferSelect)['heldStrategy']>;
@@ -92,8 +93,21 @@ export async function recordHeldAssignment(
 
 /**
  * What a hold that has ended still owes, off its routing row: the message the
- * held reply answers, and the rule's pick if one was kept. Null for a ticket
- * that never routed.
+ * held reply answers, the rule's pick if one was kept, and whether the SLA
+ * policy is still owed its look at the category. Null for a ticket that never
+ * routed.
+ *
+ * The policy is owed when a person or a rule ended the hold (`manual`, `rule`)
+ * on a ticket whose category is Jev's. Jev's write on a held ticket hands its
+ * follow-up to the router, and the router chooses the policy as it decides
+ * (`finish`); `endHold` decides without reading the category and chooses
+ * nothing. That was a gap of milliseconds while Jev's answer routed the ticket
+ * at once, and is the whole routing window since the router waits for a
+ * comment thread's root (`categoryStanding`): an agent taking the ticket in that
+ * time left it on the policy chosen before anything had read it. A category a
+ * person or a rule wrote is not owed it here — their write chose the policy
+ * itself, through `afterRoutingChanged` — and neither is the router's own
+ * decision, which did.
  *
  * The message is the one the hold kept from being acknowledged, which is the
  * one that opened the ticket only while its author is still the requester. A
@@ -112,12 +126,15 @@ export async function heldFollowUp(conversationId: string): Promise<{
   messageId: string | null;
   strategy: Strategy | null;
   actorLabel: string | null;
+  policyOwed: boolean;
 } | null> {
-  const [row] = await db
+  const [found] = await db
     .select({
       messageId: routingDecisions.messageId,
       strategy: routingDecisions.heldStrategy,
       actorLabel: routingDecisions.heldActorLabel,
+      outcome: routingDecisions.outcome,
+      categoryId: conversations.categoryId,
       requesterContactId: conversations.requesterContactId,
       openedBy: messages.authorContactId,
     })
@@ -125,9 +142,15 @@ export async function heldFollowUp(conversationId: string): Promise<{
     .innerJoin(conversations, eq(conversations.id, routingDecisions.conversationId))
     .leftJoin(messages, eq(messages.id, routingDecisions.messageId))
     .where(eq(routingDecisions.conversationId, conversationId));
-  if (!row) return null;
+  if (!found) return null;
 
-  const { requesterContactId, openedBy, ...held } = row;
+  const { outcome, categoryId, ...row } = found;
+  const policyOwed =
+    (outcome === 'manual' || outcome === 'rule') &&
+    categoryId !== null &&
+    (await categoryIsJevs(conversationId, categoryId));
+  const { requesterContactId, openedBy, ...rest } = row;
+  const held = { ...rest, policyOwed };
   if (held.messageId && openedBy === requesterContactId) return held;
 
   const [first] = await db
@@ -145,4 +168,20 @@ export async function heldFollowUp(conversationId: string): Promise<{
     .orderBy(asc(messages.createdAt), asc(messages.id))
     .limit(1);
   return { ...held, messageId: first?.id ?? held.messageId };
+}
+
+/** Whether the category the ticket carries is the one Jev's last write left. */
+async function categoryIsJevs(conversationId: string, categoryId: string): Promise<boolean> {
+  const [last] = await db
+    .select({ actorLabel: conversationEvents.actorLabel, data: conversationEvents.data })
+    .from(conversationEvents)
+    .where(
+      and(
+        eq(conversationEvents.conversationId, conversationId),
+        eq(conversationEvents.type, 'category_changed'),
+      ),
+    )
+    .orderBy(desc(conversationEvents.createdAt), desc(conversationEvents.id))
+    .limit(1);
+  return last?.actorLabel === CATEGORY_AI_ACTOR && last.data.to === categoryId;
 }

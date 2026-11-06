@@ -123,9 +123,10 @@ export type CategorySource = {
  * ticket to the team those words named, ran that category's rules, chose its
  * policy and assigned it — and a decided ticket is never routed again.
  *
- * A category somebody else wrote — a person, a rule, a form — routes at once,
- * as it always has: somebody chose it, and nothing about the thread's order
- * changes that choice. Only Jev's reading of somebody's words waits:
+ * A category somebody else wrote — a person, a rule, a form — is never held
+ * back by this: it routes whenever the router next decides, as it always has,
+ * since somebody chose it and nothing about the thread's order changes that
+ * choice. Only Jev's reading of somebody's words waits:
  *
  * 1. **Read off somebody who is not the requester now** — the replier, after
  *    the root took the ticket, while the root's own answer has not settled

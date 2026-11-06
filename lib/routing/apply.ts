@@ -40,7 +40,9 @@ type Executor = typeof db | Tx;
  *    move if there is one, the decision row and the `routed` event. The
  *    ticket's `routing_decided_at` stays null, so it is still held.
  * 2. **The `on_update` rules run**, after every decision on a ticket that
- *    carries a category, wherever the decision left it (`PhaseOne.rules`).
+ *    carries a category — one the window's end set aside as somebody else's
+ *    words (`categoryStanding`) counts as none — wherever the decision left
+ *    it (`PhaseOne.rules`).
  *    Nothing can assign in between, because the ticket is still held — neither
  *    a rule's move in this pass nor a person's write meanwhile ends the hold,
  *    as either would before phase one (`endHold`) — so "sales on the merchant
@@ -206,7 +208,10 @@ type PhaseOne = {
   outcome: DecidedOutcome;
   /** Whether phase one moved the ticket to its category's route group. */
   moved: boolean;
-  /** Whether the ticket carries a category, which re-selects the SLA policy. */
+  /**
+   * Whether the decision was made on a category — the ticket carries one, and
+   * it was not set aside (`categoryStanding`) — which re-selects the SLA policy.
+   */
   categorySettled: boolean;
   /** What the `on_update` rules are owed before the hold ends — phase two. */
   rules: Rules;
@@ -542,7 +547,8 @@ async function phaseOne(
     if (standing === 'waits') {
       // Held as `holding`, so the answer that settles it — the root's, or the
       // customer's next message's — routes it at once (`afterCategoryApplied`,
-      // the console's edit), where `pending` leaves it to a creation pass
+      // `afterCategoryConfirmed` for one agreeing with the reply's, the console's
+      // edit), where `pending` leaves it to a creation pass
       // that has already run: this is that pass's own `beginRouting`, or a
       // later caller's.
       if (row.stage === 'pending') {

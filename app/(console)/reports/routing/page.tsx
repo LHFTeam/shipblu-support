@@ -259,8 +259,10 @@ export default async function RoutingReportPage({
               hint={ofRouter(liveTotals.fallback, router)}
               explain={
                 <>
-                  Nothing had filed the ticket by the end of its window, so it stayed in its
-                  channel&rsquo;s default group. Why each ran out is under Why the window ran out.
+                  Nothing had filed the ticket by the end of its window — or only Jev, from a reply
+                  by somebody other than the customer, which the router set aside — so it stayed in
+                  its channel&rsquo;s default group. Why each ran out is under Why the window ran
+                  out.
                 </>
               }
             />

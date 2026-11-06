@@ -1,13 +1,16 @@
 import { assignConversation } from '@/lib/assignment';
 import { maybeSendAutoResponse } from '@/lib/auto-response';
 import { logger } from '@/lib/log';
+import { afterRoutingChanged } from '@/lib/sla';
 import { heldFollowUp } from './held-assignment';
 
 const log = logger('routing');
 
 /**
  * What a hold owed once it is over, whatever ended it — the router's decision,
- * `settle_routing`, or a person or rule through `endHold`: the assignment the
+ * `settle_routing`, or a person or rule through `endHold`: the SLA policy's
+ * look at a category Jev wrote, when a person or a rule ended the hold before
+ * the router could (`heldFollowUp`'s `policyOwed`); the assignment the
  * creation pass held back, and its out-of-hours reply, to the message the hold
  * kept from being acknowledged: the one that opened the ticket, which the
  * creation pass would have answered had nothing been held — or, on a comment
@@ -37,6 +40,17 @@ export async function afterHoldEnded(
     held = await heldFollowUp(conversationId);
   } catch (error) {
     log.error(`could not read what the hold on ${conversationId} owed`, error);
+  }
+
+  try {
+    // Before the assignment, as the router's own end of a hold chooses it
+    // (`finish`): a person's or a rule's end of a hold whose category is Jev's
+    // leaves the policy where the creation pass chose it (`heldFollowUp`).
+    if (held?.policyOwed) {
+      await afterRoutingChanged(conversationId, { category: true, group: false });
+    }
+  } catch (error) {
+    log.error(`could not choose the policy for ${conversationId} after its hold`, error);
   }
 
   try {

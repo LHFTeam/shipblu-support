@@ -10,6 +10,7 @@ import {
   conversationEvents,
   conversations,
   groups,
+  messages,
   routingDecisions,
   ticketCategories,
   ticketStatuses,
@@ -525,7 +526,51 @@ describe('fallbackReasons', () => {
 
     const [reasons] = await fallbackReasons(WEEK, NOW);
     // The capped one is none of the three.
-    expect(reasons).toMatchObject({ fallbacks: 7, notAsked: 3, unsure: 2, failed: 1 });
+    expect(reasons).toMatchObject({ fallbacks: 7, notAsked: 3, unsure: 2, failed: 1, setAside: 0 });
+  });
+
+  // A passer-by's reply opened a comment thread; Jev filed his words, the
+  // customer's comment then took the ticket and settled nothing, and the
+  // router set his category aside at the window's end.
+  it('says when Jev had filed it from somebody who is not the requester now', async () => {
+    const id = await channel();
+    const before = at(at(IN_WEEK, 5 * MINUTE), -MINUTE);
+    const asideTicket = await decision({ channelId: id, outcome: 'fallback' });
+    const [bob] = await db.insert(contacts).values({ name: 'Bob' }).returning({ id: contacts.id });
+    const [reply] = await db
+      .insert(messages)
+      .values({
+        conversationId: asideTicket.id,
+        direction: 'inbound',
+        kind: 'reply',
+        authorContactId: bob!.id,
+        bodyText: 'Same here, how much to Alexandria?',
+      })
+      .returning({ id: messages.id });
+    await db.insert(aiCategoryRuns).values({
+      conversationId: asideTicket.id,
+      messageId: reply!.id,
+      messageCreatedAt: at(before, -MINUTE),
+      runLabel: 'live',
+      mode: 'apply',
+      requestFingerprint: 'q-1',
+      outcome: 'applied',
+      predictedKey: 'sales',
+      channel: 'facebook_comment',
+      createdAt: before,
+    });
+    // A filing about a message nobody else wrote is not set aside.
+    const theirs = await decision({ channelId: id, outcome: 'fallback' });
+    await run(theirs.id, 'applied', before);
+
+    const [reasons] = await fallbackReasons(WEEK, NOW);
+    expect(reasons).toMatchObject({
+      fallbacks: 2,
+      notAsked: 0,
+      unsure: 0,
+      failed: 0,
+      setAside: 1,
+    });
   });
 });
 

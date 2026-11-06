@@ -2327,6 +2327,19 @@ describe('a comment thread a reply opened', () => {
     expect(await tagged(thread.id)).toBe(0);
   });
 
+  // `npm run job -- classify_category messageId=…` takes an id in capitals,
+  // and the event keeps the spelling it was given.
+  it('reads an event naming the replier’s message in capitals as his', async () => {
+    const t = await page();
+    const thread = await replyOpened(t.page, t.home.group);
+    await jevAnswers(thread, 'sales', thread.messageId.toUpperCase());
+    await rootArrives(thread);
+
+    expect(await settleRouting(thread.id)).toBe('decided');
+
+    await expectDecided(thread.id, 'fallback');
+  });
+
   it('routes on the reply’s category at the window’s end when no root came', async () => {
     const t = await page();
     await rule('on_update', 'Tag sales', always, [{ type: 'add_tags', tags: ['sales'] }]);
@@ -2374,6 +2387,43 @@ describe('a comment thread a reply opened', () => {
 
     expect(await ticketRow(thread.id)).toMatchObject({ groupId: t.care.group });
     await expectDecided(thread.id, 'category');
+  });
+
+  // The router chooses the policy as it decides; a person taking the ticket
+  // while it waits decides without the router, and so without that.
+  it('chooses the policy for Jev’s category when a person takes the ticket while it waits', async () => {
+    const t = await page();
+    const lead = await agent('Laila');
+    const round = { firstResponseMins: 30, nextResponseMins: 30, resolutionMins: 240 };
+    const thread = await replyOpened(t.page, t.home.group);
+    const sales = await jevAnswers(thread, 'sales', thread.messageId);
+    const [salesPolicy] = await db
+      .insert(slaPolicies)
+      .values({
+        name: 'Sales',
+        hoursSource: 'round_the_clock',
+        targets: { low: round, medium: round, high: round, urgent: round },
+        conditions: inCategory(sales),
+      })
+      .returning({ id: slaPolicies.id });
+    expect(await routeNow(thread.id, { label: 'jev:category' })).toBe('waiting');
+
+    // The lib half of the console's assignee case.
+    const ended = await db.transaction(async (tx) => {
+      await tx
+        .update(conversations)
+        .set({ assigneeAgentId: t.home.agent })
+        .where(eq(conversations.id, thread.id));
+      return endHold(tx, thread.id, 'manual', { agentId: lead });
+    });
+    expect(ended).toBe(true);
+    await afterHoldEnded(thread.id);
+
+    await expectDecided(thread.id, 'manual');
+    expect(await ticketRow(thread.id)).toMatchObject({
+      assigneeAgentId: t.home.agent,
+      slaPolicyId: salesPolicy!.id,
+    });
   });
 
   it('decides on the requester an adoption committing under its lock leaves', async () => {

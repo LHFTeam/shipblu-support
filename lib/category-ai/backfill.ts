@@ -9,7 +9,9 @@ import {
   isNull,
   lt,
   ne,
+  not,
   notInArray,
+  sql,
   type SQL,
 } from 'drizzle-orm';
 import { db } from '@/db/client';
@@ -65,6 +67,7 @@ import {
   categorySkipReason,
   classifiableColumns,
   insertRun,
+  messageByAnotherThan,
   queueRefusal,
   recordFailure,
   type Executor,
@@ -643,7 +646,11 @@ export async function applyCategoryRun(run: ApplyRun): Promise<ApplyResult> {
 
   // One per ticket: the earliest settling answer, by when its message
   // arrived. A message deleted since cannot be named in the event, so its
-  // answer is passed over.
+  // answer is passed over. So is one about a message somebody other than the
+  // ticket's requester now wrote: a passer-by's reply recorded while it held a
+  // comment thread whose root had not arrived (`adoptRootAuthor`). The live
+  // job no longer counts it as settling anything, nor does the report, and
+  // filed here it would put a stranger's words on the customer's ticket.
   const settling = await db
     .selectDistinctOn([aiCategoryRuns.conversationId], {
       messageId: aiCategoryRuns.messageId,
@@ -666,6 +673,7 @@ export async function applyCategoryRun(run: ApplyRun): Promise<ApplyResult> {
         eq(aiCategoryRuns.runLabel, run.fromLabel),
         eq(aiCategoryRuns.outcome, 'would_apply'),
         isNotNull(aiCategoryRuns.messageId),
+        not(messageByAnotherThan(sql`${conversations.requesterContactId}`)),
         ...scopeOfLabel(run),
       ),
     )
