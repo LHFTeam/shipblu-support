@@ -13,7 +13,7 @@
  * override written after this string would win only some of the time.
  */
 export const WIDGET_FIELD =
-  'w-full min-w-0 rounded-md border border-(--color-border-subtle) bg-(--color-background-surface) text-base text-(--color-text-primary) outline-none transition-colors placeholder:text-(--color-text-tertiary) hover:border-(--color-border-default) focus:border-(--color-border-focus) focus:ring-2 focus:ring-(--color-border-focus)/20 aria-invalid:border-(--color-feedback-danger-fg) aria-invalid:focus:ring-(--color-feedback-danger-fg)/20';
+  'w-full min-w-0 rounded-md border border-(--color-border-subtle) bg-(--color-background-surface) text-base text-(--color-text-primary) transition-colors placeholder:text-(--color-text-tertiary) hover:border-(--color-border-default) focus:border-(--color-border-focus) focus:ring-2 focus:ring-(--color-border-focus)/20 aria-invalid:border-(--color-feedback-danger-fg) aria-invalid:focus:ring-(--color-feedback-danger-fg)/20';
 
 /**
  * The composer's box: the field's border, surface and focus ring, drawn around
@@ -22,8 +22,14 @@ export const WIDGET_FIELD =
  * whenever anything in it holds focus, the buttons included, which is what a
  * single bordered field looks like to the person using it.
  *
+ * While the textarea itself has focus the box also draws the keyboard ring,
+ * the global one's width, offset and colour round the whole box: the ring a
+ * `WIDGET_FIELD` keeps, where the textarea keeps none of its own. The 20%
+ * ring is 1.35:1 and forced colours removes it; an outline survives both. Not
+ * for the two buttons, which draw their own ring inside the box.
+ *
  * The textarea inside carries no border of its own, and keeps the 16px text
  * `WIDGET_FIELD` gives for Safari's zoom.
  */
 export const WIDGET_COMPOSER_BOX =
-  'flex min-w-0 flex-1 items-end rounded-md border border-(--color-border-subtle) bg-(--color-background-surface) transition-colors hover:border-(--color-border-default) focus-within:border-(--color-border-focus) focus-within:ring-2 focus-within:ring-(--color-border-focus)/20';
+  'flex min-w-0 flex-1 items-end rounded-md border border-(--color-border-subtle) bg-(--color-background-surface) transition-colors hover:border-(--color-border-default) focus-within:border-(--color-border-focus) focus-within:ring-2 focus-within:ring-(--color-border-focus)/20 has-[textarea:focus-visible]:outline-(length:--focus-width) has-[textarea:focus-visible]:outline-offset-(--focus-offset) has-[textarea:focus-visible]:outline-(--focus-color)';

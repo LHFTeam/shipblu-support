@@ -23,6 +23,12 @@ CREATE EXTENSION IF NOT EXISTS unaccent;
 -- term against a long subject scores below the 0.3 threshold and matches
 -- nothing. Both `<%` and ILIKE are index-accelerated by gin_trgm_ops; verified
 -- against Postgres 16.
+--
+-- Not lock-free on a replay, unlike the rest of this file. `CREATE INDEX IF NOT
+-- EXISTS` takes SHARE on its table before it finds the index already there, so
+-- each of these waits on any open writer of its table, and then holds that
+-- table's writes off until this whole file commits (PROJECT-STATE §6.110,
+-- which also says what the fix is).
 -- --------------------------------------------------------------------------
 CREATE INDEX IF NOT EXISTS conversations_subject_trgm_idx
   ON conversations USING gin (subject gin_trgm_ops);
@@ -185,8 +191,9 @@ END $$;
 -- locked down by the next deploy whether or not anybody remembered.
 --
 -- Enabling RLS takes ACCESS EXCLUSIVE on the table, so this only touches tables
--- that do not already have it — the steady state takes no locks at all, which is
--- the rule the rest of this file follows.
+-- that do not already have it — in the steady state this loop takes no locks at
+-- all. That is the rule the rest of this file aims for; the `CREATE INDEX IF NOT
+-- EXISTS` statements at its top do not meet it (§6.110).
 -- --------------------------------------------------------------------------
 DO $$
 DECLARE
@@ -218,11 +225,67 @@ END $$;
 -- these bodies rely on and have it run with the definer's reach. Everything
 -- referenced here lives in pg_catalog, which is always searched implicitly, so
 -- pinning the path costs nothing.
+--
+-- On every table but one this stamps `now()` on any UPDATE at all, values
+-- changed or not, and an UPDATE cannot set the column itself: whatever it
+-- writes there is replaced by its own transaction's `now()`, so no writer can
+-- backdate it. `presence_policy` depends on exactly that: its grace period is
+-- anchored on `updated_at` (`StoredPresencePolicy` in `lib/presence/idle.ts`).
+--
+-- The one is `kb_articles`, because readers write to it. `recordArticleView`
+-- adds one to `view_count` on every article view, and the feedback endpoint
+-- adds one to `helpful_count` or `unhelpful_count` on every tap, so with the
+-- plain stamp the column was the date somebody last read the article, and the
+-- console's article list, which shows it and sorts by it, ordered articles by
+-- their readers (PROJECT-STATE §6.51). There an UPDATE that changes nothing
+-- but those three counters keeps the date it had, and any other change stamps
+-- `now()` as everywhere else. An UPDATE that changes nothing at all keeps the
+-- date too: it is no edit either, and the date it would stamp is the noise
+-- §6.59 records. The column is still the trigger's: a value an UPDATE writes
+-- into it is replaced either way, by the old date or by `now()`.
+--
+-- The comparison is the whole row minus a deny-list rather than a list of the
+-- columns that count as an edit, so a column added to the table later counts
+-- by default — a new counter has to be named here, and leaving one out costs
+-- a date that moves too often, never one that misses an edit. `updated_at` is
+-- left out because it is what is being decided. `search_vector` is left out
+-- because it is a stored generated column, and Postgres computes those after
+-- the BEFORE triggers have run: inside this function `NEW.search_vector` is
+-- null while `OLD.search_vector` holds the old value, so leaving it in would
+-- make every row look changed. It is derived from the title and the body,
+-- which are compared on their own.
+--
+-- Here, in the one shared function, rather than in a trigger of its own on
+-- `kb_articles`, because of the locks. Changing which function the table's
+-- trigger calls is trigger DDL: `DROP TRIGGER` takes ACCESS EXCLUSIVE, which
+-- any open reader holds off (the loop below says what that cost on
+-- 2026-08-19), and `CREATE OR REPLACE TRIGGER` takes SHARE ROW EXCLUSIVE,
+-- which any open writer holds off — every view and every vote is one — and
+-- which then holds every write to the table off until this whole file
+-- commits, because the file runs as one transaction. A trigger of another
+-- name would also have the loop create the generic one again beside it, still
+-- stamping. `CREATE OR REPLACE FUNCTION` locks no table at all, and every
+-- replay installs the current body, so the change reaches a running database
+-- on the next deploy with nothing to guard. Undoing it is the same statement
+-- with the old body.
 CREATE OR REPLACE FUNCTION touch_updated_at() RETURNS trigger
 LANGUAGE plpgsql
 SET search_path = ''
 AS $$
+DECLARE
+  -- The columns a reader writes, and the two that are not part of what an
+  -- edit compares. See the comment above for why each is here.
+  not_an_edit constant text[] := ARRAY[
+    'updated_at', 'search_vector', 'view_count', 'helpful_count', 'unhelpful_count'
+  ];
 BEGIN
+  IF TG_TABLE_SCHEMA = 'public' AND TG_TABLE_NAME = 'kb_articles' THEN
+    IF (to_jsonb(NEW) - not_an_edit) = (to_jsonb(OLD) - not_an_edit) THEN
+      NEW.updated_at = OLD.updated_at;
+      RETURN NEW;
+    END IF;
+  END IF;
+
   NEW.updated_at = now();
   RETURN NEW;
 END;
@@ -230,21 +293,32 @@ $$;
 
 -- Only tables that do not already have the trigger.
 --
--- This file is replayed on every deploy, and trigger DDL — DROP or CREATE alike
--- — needs ACCESS EXCLUSIVE on the table. Dropping and recreating an identical
--- trigger every time therefore asked for an exclusive lock on every busy table
--- in the schema to do nothing, and any concurrent *reader* was enough to make
--- it wait: on 2026-08-19 two connections left mid-transaction on `agents` held
--- AccessShareLock for six hours and every deploy in between failed on
--- `DROP TRIGGER IF EXISTS touch_updated_at ON agents`.
+-- This file is replayed on every deploy, and trigger DDL locks the table:
+-- `DROP TRIGGER` takes ACCESS EXCLUSIVE, and `CREATE TRIGGER` SHARE ROW
+-- EXCLUSIVE, which waits on any open writer. Dropping and recreating an
+-- identical trigger every time therefore asked for an exclusive lock on every
+-- busy table in the schema to do nothing, and any concurrent *reader* was
+-- enough to make it wait: on 2026-08-19 two connections left mid-transaction on
+-- `agents` held AccessShareLock for six hours and every deploy in between
+-- failed on `DROP TRIGGER IF EXISTS touch_updated_at ON agents`.
 --
--- Checking first makes the steady state lock-free: a table that already has the
--- trigger is skipped without touching it. New tables still pick it up, which is
+-- Checking first makes this loop lock-free in the steady state: a table that
+-- already has the trigger is skipped without touching it. New tables still pick it up, which is
 -- what the loop is for.
 --
--- The trade: changing the trigger's *definition* is no longer picked up by a
--- replay, because only its presence is checked. Drop it explicitly (or give the
--- new one a different name) when that day comes.
+-- The trade: changing the trigger's *definition* — its timing, its events, the
+-- function it calls — is no longer picked up by a replay, because only its
+-- presence is checked. What it does is not part of that definition: the body of
+-- `touch_updated_at()` above is installed by `CREATE OR REPLACE FUNCTION` on
+-- every replay, which locks no table, so a change of behaviour belongs there,
+-- as the `kb_articles` case does. A trigger that really must change is
+-- replaced in place with `CREATE OR REPLACE TRIGGER` under the same name —
+-- SHARE ROW EXCLUSIVE, never the DROP's ACCESS EXCLUSIVE — under a guard that
+-- compares what it is (`tgfoid`, its events), not its name, and under a
+-- `lock_timeout` set for the transaction alone, the way
+-- `008_comment_channel_check.sql` sets one before its guarded constraint. Giving
+-- the new one a different name is not a way round this: this loop would create
+-- the generic trigger again beside it.
 DO $$
 DECLARE
   t text;

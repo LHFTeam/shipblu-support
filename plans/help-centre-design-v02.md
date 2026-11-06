@@ -94,13 +94,16 @@ asset and is shown on the English page too.
   in full. It also returns the newest edit among them for "Last updated".
   `getFolder` returns the same date. Every count and list is in the page's own
   locale, so a topic never says "12 articles" over six rows.
-- **An edit date is read from the versions, never from `updated_at`.**
-  `touch_updated_at` moves `kb_articles.updated_at` on every view and every
-  feedback tap (PROJECT-STATE §6.51), so the date there follows readers. The
-  pages read `editedAt` in `lib/kb/queries.ts` instead: the newest
-  `kb_article_versions` row, cut only when a title or body changes, or the
-  publication date, or the creation date. "Last updated", "Recently updated",
-  the folder and topic dates and the sitemap's `lastmod` all read it.
+- **An edit date is read from the versions, never from `updated_at`.** When
+  this was written `touch_updated_at` moved `kb_articles.updated_at` on every
+  view and every feedback tap (PROJECT-STATE §6.51), so the date there followed
+  readers. That is fixed since (§5), but the column still moves for a change of
+  folder, status, visibility or tags, which is not a revision a customer reads.
+  The pages read `editedAt` in `lib/kb/queries.ts` instead: the newest
+  `kb_article_versions` row, cut when a title or body changes or a version is
+  restored, or the publication date, or the creation date. "Last updated",
+  "Recently updated", the folder and topic dates and the sitemap's `lastmod` all
+  read it.
 - `listTopicFolders` gives the front page its cards: each audience with its
   folders, and each folder's count, description and first three titles, in the
   folder page's own order. A folder with nothing the reader may open in the
@@ -149,10 +152,13 @@ asset and is shown on the English page too.
   screen with a gate on the recipient's phone digits and actions that change a
   delivery. The earlier plan explains why neither is built. The tracking page
   keeps its current layout under the new chrome.
-- **`updated_at` itself still moves on every view.** The help centre no longer
-  reads it (§3), but the console's article list and anything else that does
-  still follows readers once the help centre is live. The fix is a trigger
-  change in `db/sql/`, with its locking care, queued as its own task.
+- ~~**`updated_at` itself still moves on every view.**~~ **Done, in its own
+  PR.** The help centre no longer reads it (§3), and the console's article list,
+  which shows it and sorts by it, would have followed readers once the help
+  centre was live. `touch_updated_at()` in `db/sql/001` now keeps the date on
+  `kb_articles` when an UPDATE changes only `view_count`, `helpful_count` or
+  `unhelpful_count`. It is a change to the function body alone, so it locks no
+  table and every replay of `db/sql` installs it (PROJECT-STATE §6.51).
 - **An audience on the article**, if the design's chips are wanted beyond what
   the two categories already give.
 - **The addresses** of the merchant dashboard, the status page and the terms and

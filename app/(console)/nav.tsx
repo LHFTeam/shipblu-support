@@ -195,6 +195,9 @@ function RailLink({ item, active }: { item: NavItem; active: boolean }) {
       // the accessibility tree too — without this the link was named only by
       // its count, or by nothing at all.
       aria-label={linkName(item)}
+      // A white focus ring, 13.4:1 on the navy, where the global blue is 2.5:1.
+      // It applies only since the global rule moved into `@layer base`; before
+      // that the rule outranked this class and the rail drew the blue.
       className="group relative flex size-11 items-center justify-center rounded-lg text-(--color-text-rail-muted) transition-colors hover:bg-(--color-rail-hover) hover:text-(--color-text-rail) focus-visible:outline-(--color-text-rail) aria-[current=page]:bg-(--color-rail-active) aria-[current=page]:text-(--color-text-rail)"
     >
       {/* The active marker is a bar on the rail edge rather than only a filled

@@ -33,6 +33,7 @@ import { checkLikePatternsUseTheBuilder } from './rules/like-patterns.mjs';
 import { checkConsolePagesScroll } from './rules/console-scroll.mjs';
 import { checkScrollContainersArePositioned } from './rules/scroll-positioned.mjs';
 import { checkLightOnly } from './rules/light-only.mjs';
+import { checkFocusRing } from './rules/focus-ring.mjs';
 import { checkFramingHeaders } from './rules/framing.mjs';
 import { checkNextAgentRulesOff } from './rules/next-agent-rules.mjs';
 import { checkNoCommittedEnvFiles } from './rules/secrets.mjs';
@@ -50,6 +51,7 @@ import { checkFormsDoNotReset } from './rules/form-reset.mjs';
 import { checkActionsRevalidate } from './rules/action-revalidates.mjs';
 import { checkButtonTypeIsFixed } from './rules/button-type.mjs';
 import { checkRoutingResultKept } from './rules/routing-result.mjs';
+import { checkKbEditDate } from './rules/kb-edit-date.mjs';
 
 export const RULES = [
   ['env-parity', checkEnvParity],
@@ -72,6 +74,7 @@ export const RULES = [
   ['shipment-payload', checkShipmentPayloadConfinement],
   ['credential-confinement', checkCredentialConfinement],
   ['pool-confinement', checkPoolConfinement],
+  ['kb-edit-date', checkKbEditDate],
   // ---------------------------------------------------------------------------
   // Source conventions that are one grep away from being enforced
   // ---------------------------------------------------------------------------
@@ -90,6 +93,7 @@ export const RULES = [
   ['page-db', checkPagesDoNotImportTheDatabase],
   ['admin-sections', checkAdminSections],
   ['light-only', checkLightOnly],
+  ['focus-ring', checkFocusRing],
   ['framing', checkFramingHeaders],
   ['next-agent-rules', checkNextAgentRulesOff],
   ['secrets', checkNoCommittedEnvFiles],

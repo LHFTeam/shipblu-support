@@ -79,7 +79,13 @@ export default async function ConsoleLayout({ children }: { children: React.Reac
       <Rail
         items={items}
         brand={
-          <Link href="/inbox" aria-label="ShipBlu Support">
+          // The rail's white ring, as its links have: the global blue is
+          // 2.5:1 against the navy, under the 3:1 a focus ring needs.
+          <Link
+            href="/inbox"
+            aria-label="ShipBlu Support"
+            className="block rounded-logo focus-visible:outline-(--color-text-rail)"
+          >
             <ShipBluLogo className="size-9" />
           </Link>
         }

@@ -83,6 +83,7 @@ export default async function CategoryPage({
         meta={<TopicMeta locale={locale} count={total} updatedAt={category.lastUpdatedAt} />}
         art={
           <TopicArtImage
+            locale={locale}
             art={topicArt(category.name, category.slug)}
             className="kb-art-fade w-[260px]"
             priority

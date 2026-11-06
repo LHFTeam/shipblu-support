@@ -24,10 +24,13 @@ if (!url) {
 /**
  * How long a statement will wait for a lock before giving up.
  *
- * The post-migration files drop and recreate triggers, which needs
- * `ACCESS EXCLUSIVE` on the table and therefore waits behind every open
- * transaction touching it — including a *read*. One abandoned connection left
- * mid-transaction by the pooler is enough: on 2026-08-19 two of them sat on
+ * The post-migration files take table locks. The worst was the `DROP TRIGGER`
+ * they once ran on every replay: it needs `ACCESS EXCLUSIVE` on the table and
+ * therefore waits behind every open transaction touching it — including a
+ * *read*. `db/sql/001` no longer drops one, but a lock is still taken where a
+ * statement needs one, and the timeout is the same answer to any of them. One
+ * abandoned connection left mid-transaction by the pooler is enough to wait
+ * on: on 2026-08-19 two of them sat on
  * `agents` for six hours, and every deploy in between died on
  * `DROP TRIGGER IF EXISTS touch_updated_at ON agents` after burning the full
  * two-minute `statement_timeout`, with an error naming only the timeout.

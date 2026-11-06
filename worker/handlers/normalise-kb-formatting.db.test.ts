@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { db } from '@/db/client';
 import { kbArticleVersions, kbArticles, kbCategories, kbFolders } from '@/db/schema';
@@ -83,18 +83,23 @@ describe('normaliseKbFormatting, on text derived in the old form', () => {
       excerpt: 'Returns Book a pickup.',
     };
     const id = await article(current);
-    const [before] = await db
-      .select({ updatedAt: kbArticles.updatedAt })
-      .from(kbArticles)
-      .where(eq(kbArticles.id, id));
+    // `xmin` is the transaction that wrote the row's current version, so it is
+    // what proves the job issued no UPDATE at all. `updated_at` no longer can:
+    // since §6.51's fix the trigger keeps it on an UPDATE that changes nothing,
+    // so a job that rewrote every current article with its own text would
+    // leave it where it was.
+    const written = async () =>
+      (
+        await db
+          .select({ xmin: sql<string>`xmin::text`, updatedAt: kbArticles.updatedAt })
+          .from(kbArticles)
+          .where(eq(kbArticles.id, id))
+      )[0]!;
+    const before = await written();
 
     await normaliseKbFormatting(job());
 
-    const [after] = await db
-      .select({ updatedAt: kbArticles.updatedAt })
-      .from(kbArticles)
-      .where(eq(kbArticles.id, id));
     expect(await stored(id)).toEqual(current);
-    expect(after!.updatedAt).toEqual(before!.updatedAt);
+    expect(await written()).toEqual(before);
   });
 });

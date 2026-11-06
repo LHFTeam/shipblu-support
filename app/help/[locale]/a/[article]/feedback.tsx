@@ -60,10 +60,9 @@ export function ArticleFeedback({ articleId, locale }: { articleId: string; loca
         <p
           ref={thanks}
           tabIndex={-1}
-          // `!` because the global `[tabindex]:focus-visible` ring is unlayered
-          // and beats a utility (§6.93): focus is moved here only so the next
-          // Tab lands on what follows, and a ring made the line read as a field.
-          className="flex items-center gap-2 text-sm text-(--color-text-secondary) outline-none!"
+          // No ring: focus is moved here only so the next Tab lands on what
+          // follows, and a ring made the line read as a field.
+          className="flex items-center gap-2 text-sm text-(--color-text-secondary) outline-none"
         >
           {/* The design's circle-check, drawn as a ring round the plain tick. */}
           <span className="flex size-4 shrink-0 items-center justify-center rounded-full border-[1.5px] border-current text-(--color-feedback-success-fg)">
@@ -76,7 +75,7 @@ export function ArticleFeedback({ articleId, locale }: { articleId: string; loca
           <p
             ref={thanks}
             tabIndex={-1}
-            className="min-w-0 flex-[1_1_15rem] text-sm text-(--color-text-secondary) outline-none!"
+            className="min-w-0 flex-[1_1_15rem] text-sm text-(--color-text-secondary) outline-none"
           >
             {t(locale, 'feedbackThanksNo')}
           </p>

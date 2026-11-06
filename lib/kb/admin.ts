@@ -65,6 +65,16 @@ export type AdminArticleRow = {
   minRole: AgentRole | null;
   folderName: string;
   categoryName: string;
+  /**
+   * When anybody last changed the row — the title, the body, the status, the
+   * folder, the tags, the translation link — and never when somebody read it
+   * or voted on it, or saved it unchanged (`touch_updated_at`, PROJECT-STATE
+   * §6.51). Not the help centre's `editedAt`, which moves when a version is
+   * cut or the article is published and for nothing else, because the list is
+   * where the team looks for what it last touched. Neither date contains the
+   * other: a folder move moves only this one, and restoring a version
+   * identical to the current text cuts a version row, moving only `editedAt`.
+   */
   updatedAt: Date;
   viewCount: number;
   helpfulCount: number;

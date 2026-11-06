@@ -121,6 +121,15 @@ export function stripComments(contents) {
     .replace(/(^|[^:])\/\/[^\n]*/g, (m, p) => p + ' '.repeat(m.length - p.length));
 }
 
+/**
+ * A stylesheet's comments blanked the same way, newlines kept. CSS has no `//`
+ * comment, and `stripComments` would blank the rest of the line after a
+ * protocol-relative `url(//…)`, so the CSS rules use this one.
+ */
+export function stripCssComments(css) {
+  return css.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' '));
+}
+
 export function scan(files, pattern, onMatch) {
   for (const file of files) {
     const raw = readFileSync(path.join(ROOT, file), 'utf8');

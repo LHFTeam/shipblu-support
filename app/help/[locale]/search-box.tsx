@@ -125,7 +125,7 @@ export function SearchBox({
 
 /** The surface and focus ring are the design system's field, the same as `Input`'s. */
 const FIELD =
-  'w-full rounded-md border border-(--color-border-subtle) bg-(--color-background-surface) text-(--color-text-primary) outline-none transition-colors placeholder:text-(--color-text-tertiary) hover:border-(--color-border-default) focus:border-(--color-border-focus) focus:ring-2 focus:ring-(--color-border-focus)/20';
+  'w-full rounded-md border border-(--color-border-subtle) bg-(--color-background-surface) text-(--color-text-primary) transition-colors placeholder:text-(--color-text-tertiary) hover:border-(--color-border-default) focus:border-(--color-border-focus) focus:ring-2 focus:ring-(--color-border-focus)/20';
 
 /**
  * Chromium keeps room for a `type="search"` field's clear button even while the

@@ -46,7 +46,11 @@ export function LocaleToggle({
           type="button"
           aria-pressed={value === option}
           onClick={() => onChange(option)}
-          className={`px-2 py-1.5 text-xs transition-colors sm:py-1 ${
+          // The focus ring drawn inside the segment, as the help centre's
+          // language switch draws it: the group clips its overflow for the
+          // rounded corners, and the ring, offset outwards, was cut away to a
+          // 2px bar on the neighbouring segment.
+          className={`px-2 py-1.5 text-xs transition-colors focus-visible:outline-offset-[-2px] sm:py-1 ${
             value === option
               ? 'bg-(--color-background-selected) font-medium text-(--color-text-brand)'
               : 'text-(--color-text-secondary) hover:bg-(--color-background-hover)'

@@ -669,11 +669,11 @@ export function WidgetThread({
                 up is the fix that does not also disable pinch-zoom for the
                 visitor.
 
-                No outline of its own, `!` because the shared focus outline is
-                unlayered CSS and so outranks any utility: the box round it
-                draws the focus ring for everything inside it.
+                No outline of its own: the box round it draws the keyboard ring
+                while the textarea has focus (`WIDGET_COMPOSER_BOX`), so the
+                whole control is ringed rather than the text area inside it.
               */
-              className="min-w-0 flex-1 resize-none bg-transparent px-1 py-2.5 font-conversation text-base text-(--color-text-primary) outline-none! placeholder:text-(--color-text-tertiary)"
+              className="min-w-0 flex-1 resize-none bg-transparent px-1 py-2.5 font-conversation text-base text-(--color-text-primary) outline-none placeholder:text-(--color-text-tertiary)"
             />
 
             <button

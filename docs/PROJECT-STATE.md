@@ -4721,8 +4721,14 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
     `scripts/ci/repo-rules.mjs`: a write path that sanitises an article body and
     does not normalise it fails the build.
 
-51. **`kb_articles.updated_at` is not an edit date — every page view moves
-    it.** _2026-09-03._ `recordArticleView` increments `view_count` on the
+51. ~~**`kb_articles.updated_at` is not an edit date — every page view moves
+    it.**~~ **Fixed in code by #466.** It reaches production with the first
+    deploy after `dev` is merged into `main`, which nobody has checked yet:
+    once it has deployed, record here that `pg_get_functiondef` of
+    `touch_updated_at` names `not_an_edit` and that one view left an
+    article's `updated_at` where it was. The history below is why.
+    _2026-09-03._
+    `recordArticleView` increments `view_count` on the
     article row, and `touch_updated_at` fires on any update of a table with that
     column, so a read writes the timestamp. The article page renders it as
     "Updated <date>" under the title, which means a busy article tells every
@@ -4733,6 +4739,38 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
     — or dropping. And nothing should reason about content freshness from this
     column: 99 of the 112 articles read 2026-08-19, the import date, and the
     handful that read later are the ones somebody happened to open.
+
+    The help centre took the first way out in #460: every date a customer sees
+    is `editedAt` in `lib/kb/queries.ts`, read from `kb_article_versions`. The
+    column itself is fixed in the trigger. `touch_updated_at()` in
+    `db/sql/001_extensions_and_triggers.sql` now keeps the old date on
+    `kb_articles` when an UPDATE changes nothing but `view_count`,
+    `helpful_count` and `unhelpful_count`, comparing the whole row minus those
+    three, `updated_at` and the generated `search_vector` (which reads null in
+    a BEFORE trigger) as jsonb, so a column added later counts as an edit by
+    default. Every other table keeps the plain stamp, which `presence_policy`'s
+    grace period depends on. It is a change to the function body only:
+    `CREATE OR REPLACE FUNCTION` locks no table and every replay of `db/sql`
+    installs it. Pointing the trigger at another function would lock the
+    table: `DROP TRIGGER` takes ACCESS EXCLUSIVE, which any open reader holds
+    off (§6.15's deploy failures), and `CREATE OR REPLACE TRIGGER` takes SHARE
+    ROW EXCLUSIVE, which every open write holds off — each view and vote is
+    one — and which then holds the table's writes off until the whole of
+    `db/sql/001` commits. `db/sql/touch-updated-at.db.test.ts` holds both
+    halves. So `/kb`, which shows the column and sorts by it, now orders by the
+    last change anybody made — a metadata edit included, which is why the help
+    centre still reads `editedAt` instead.
+
+    The existing values were left as they are. On 2026-11-05, 39 of the 112
+    articles had an `updated_at` newer than their last version and their
+    publication. 24 of those share 2026-09-29, the day `normalise_kb_formatting`
+    rebuilt the derived text of 25 articles without cutting a version (§7,
+    #321), a change the new trigger counts too; 4 still carry 2026-08-19, the
+    import. The other 11 are spread from 2026-09-05 to the day of the fix, and
+    the rows cannot say which of those a reader wrote and which a folder move,
+    a status change or a tag edit did. A backfill to `editedAt` would erase the
+    real changes among all 39 to correct at most those 11. An article's date
+    settles at its next real change.
 
 52. **`current_date` in a page query is the database's date, and the database is
     UTC.** _2026-09-04._ `/reports/categories` filtered its rollups with
@@ -4880,6 +4918,11 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
     already records that this column is not an edit date, which is exactly the
     confusion a job moving it for nothing deepens. An idempotent writer has to
     compare before it writes, field by field.
+
+    Since §6.51's fix `kb_articles` is the one exception: there the trigger
+    keeps the date on an UPDATE that changes nothing, or nothing but a
+    reader's counter. Every other table still stamps a no-op, `kb_folders` and
+    `canned_responses` included, so the rule above stands for writers.
 
     The measurement matters as much as the fix. The job's own tally could not
     have caught this — it was reporting the truth — and neither could
@@ -6929,6 +6972,12 @@ still waiting for it` one whose outcome is not known yet.
     (`Input tone="note"`), and check the result in a browser — `tsc` and the
     linters cannot see it.
 
+    That is a contest between two utilities. The keyboard focus ring is not
+    one, since 2026-11-05: its rule in `app/globals.css` is in `@layer base`,
+    so a plain utility adjusts its outline, offset and radius, and no `!` is
+    needed against it (§6.109). Several comments cited this entry for "an
+    unlayered rule outranks a utility", which it never said; that is §6.109.
+
 94. **One WhatsApp message has more than one wamid.** A wamid is `wamid.` and
     the base64 of WhatsApp's message key, a Thrift compact struct of the chat,
     `fromMe` and the message's own id — and the chat is whose copy it names. On
@@ -7461,6 +7510,112 @@ dryRun=true`, then without, gives those two theirs back from their
       says which endpoints and permissions that connection offers, and nothing
       about what the account will accept. Each is a reading to take on the
       first live call, written down here, not a rule to code from.
+
+109.  **An unlayered focus rule outranked every utility, so the classes
+      written against it did nothing.** _2026-11-05, raised in #460's review._
+      The shared `:focus-visible` rule in `app/globals.css` was unlayered.
+      Tailwind v4 puts its utilities in `@layer utilities`, and an unlayered
+      declaration beats a layered one whatever the specificity, so the rule's
+      zero-specificity `:where()` was no help. No class could change a
+      focused element's outline, offset or radius without `!`, and every
+      focused element took the rule's 4px radius, which squared off pills,
+      chips, cards and rail tiles while they had focus. The call sites that
+      noticed carried a `!`, in seven files. The ones that did not shipped
+      classes with no effect, and nothing reports a class with no effect:
+
+      - **`outline-none` on thirteen field class strings.** These were the
+        shared `FIELD_BASE`, the admin builders' and forms' own inputs, the
+        purge panel, the help centre's search and tracking boxes and the
+        widget's fields. Each was written to swap the outline for a soft ring
+        (`focus:ring-2` at 20%). Moved into a layer as it was, the rule would
+        have let every one apply. That ring is 1.35:1 against the white
+        surface, under the 3:1 WCAG 1.4.11 asks of a focus indicator, and
+        forced-colours mode removes every box-shadow. Each field would have
+        been left with a one-pixel border change. A read-only field, which
+        has no focus classes at all, would have drawn nothing. The
+        suppressions were dropped instead: the global ring is the field's
+        ring.
+      - **The rail's `focus-visible:outline-(--color-text-rail)`.** The rail
+        drew the blue ring on navy, 2.53:1, never the white one the class
+        asks for (13.41:1). The logo link above it had no override at all,
+        and now has the white one too.
+      - **The note composer's amber focus.** Its comment promised one, and
+        the box drew a blue ring. It is amber now, 5.62:1 against the note's
+        amber paper.
+      - **The skip link's `focus:rounded-md`**, and every other `rounded-*`
+        on something focusable.
+
+      Two focus targets lose their ring, and both meant to: the help centre's
+      `main`, which the skip link moves focus to (`outline-none`), and the
+      WhatsApp onboarding card's heading, focused when the card opens
+      (`focus:outline-none`). Each is `tabIndex={-1}`, so Tab never lands on
+      it. Focus is put there so the next Tab starts in the right place and a
+      screen reader reads it, and there is nothing to type or press. The
+      feedback thanks line is the third such element, and it had its `!`.
+
+      Two weak indicators had nothing to do with the layer and were fixed
+      beside it, because the layer made each a one-class change. The widget
+      composer's box drew only the 20% ring round its textarea, and nothing
+      at all in forced colours: it now draws the global ring's outline while
+      the textarea has focus (`has-[textarea:focus-visible]`). The console's
+      article and canned-reply language toggle clipped its segments' ring to
+      a 2px bar, as the help centre's language switch did before it drew its
+      ring inside.
+
+      Measured in Chromium with Playwright. A script tabbed through 36
+      surfaces with the real keyboard: the console inbox, a ticket's sidebar,
+      composer, note and knowledge panel, the purge panel, the admin
+      builders, the widget, and the help centre in both languages at desktop
+      and phone width. That is 1,038 focus stops, in normal colours and under
+      emulated forced colours. For each stop it recorded the computed
+      outline, offset, radius and box-shadow, and the before and after runs
+      were compared stop by stop. Before, one stop had no ring in normal
+      colours (the feedback thanks line, by design) and three under forced
+      colours (that line and the widget composer twice). After, four stops
+      have no ring in either mode: that line, the help centre's `main` in
+      both languages and the onboarding heading. All four are the deliberate
+      ones above. Every field and the composer have a ring in both. 670 of
+      the 1,038 stops differ in all, and apart from the colour and placement
+      fixes above every difference is the radius: 4px becoming the
+      element's own. `tsc` and the linters see none of this.
+      `focus-ring` now refuses five things:
+      - a focus outline in no layer, or in a layer whose path does not start
+        at `base` or `components` (`overrides.base` sits wherever
+        `overrides` does);
+      - any other outline declared outside Tailwind's layers;
+      - an outline removed under a focus selector, in any layer;
+      - a suppressed outline (`outline-none`, `-hidden`, `-0`,
+        `-transparent`) in a module that draws a focus ring, of any opacity;
+      - an important outline utility, in either spelling.
+
+      It also fails when the shared rule stops declaring an outline. It
+      judges a module's class strings together, so `FIELD_BASE` and
+      `FIELD_SURFACE`, which every field is built from, are checked as one.
+
+      Generally: in a Tailwind v4 stylesheet, a rule outside a layer is a
+      rule no class can touch. `.kb-panel`, `.app-scroll` and the
+      `[dir='rtl']` text alignment are still unlayered. The `!` beside
+      `.kb-panel` in `home.tsx` is for that, and §6.81 says why
+      `.app-scroll` stays as it is.
+
+110.  **`CREATE INDEX IF NOT EXISTS` locks the table even when the index is
+      there.** _2026-11-06, found while measuring the locks for #466._ It takes
+      SHARE on the table before it looks for the index, so the eleven at the
+      top of `db/sql/001_extensions_and_triggers.sql` — on `conversations`,
+      `contacts`, `messages`, `side_conversation_messages`, `companies`,
+      `kb_articles`, `shipments` and `shipping_accounts` — each wait on any
+      open writer of their table on every replay. Measured on Postgres 16: with
+      a session holding ROW EXCLUSIVE on `kb_articles`, the statement for an
+      index that already existed failed under `lock_timeout = '1s'`. And
+      because a `db/sql` file runs as one transaction, each SHARE it is granted
+      is held until the whole file commits, so writes to those tables queue
+      behind the rest of the file. The file's own comments said its steady
+      state took no locks; they now point here. Not fixed yet: the cure is a
+      guard that asks `pg_class` and creates the index only when it is
+      missing, never `CONCURRENTLY`, which `db/sql` cannot run. Until then a
+      deploy can fail on `db:migrate` behind an open writer as §6.15's did
+      behind an open reader, and the ten-second `LOCK_TIMEOUT` in
+      `db/migrate.ts` is what turns that into a fast failure.
 
 ### Tooling notes for this environment
 
