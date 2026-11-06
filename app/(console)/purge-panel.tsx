@@ -150,7 +150,7 @@ export function PurgePanel({
           onChange={(event) => setTyped(event.target.value)}
           autoComplete="off"
           disabled={pending}
-          className="w-full rounded-md border border-(--color-border-subtle) bg-(--color-background-surface) px-2 py-1.5 text-base outline-none hover:border-(--color-border-default) focus:border-(--color-feedback-danger-fg) focus:ring-2 focus:ring-(--color-feedback-danger-fg)/20 sm:text-xs"
+          className="w-full rounded-md border border-(--color-border-subtle) bg-(--color-background-surface) px-2 py-1.5 text-base hover:border-(--color-border-default) focus:border-(--color-feedback-danger-fg) focus:ring-2 focus:ring-(--color-feedback-danger-fg)/20 sm:text-xs"
         />
 
         <div className="flex items-center gap-2">

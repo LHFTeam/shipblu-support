@@ -49,9 +49,7 @@ export function ConversationRow({
   trailing?: ReactNode;
 }) {
   const mark = channel ? { ...channelInfo(channel), className: channelMarkClass(channel) } : null;
-  // The radius is important for the same reason as the focus offset below: the
-  // focus rule's own radius would otherwise square the row off as it takes focus.
-  const fill = marker === 'fill' ? 'md:mx-2 md:my-0.5 md:rounded-lg! md:border-b-0 md:px-3' : '';
+  const fill = marker === 'fill' ? 'md:mx-2 md:my-0.5 md:rounded-lg md:border-b-0 md:px-3' : '';
 
   return (
     <Link
@@ -59,10 +57,8 @@ export function ConversationRow({
       prefetch={false}
       aria-current={active ? 'page' : undefined}
       // The focus ring drawn inside the row: the list scrolls, and an outline
-      // offset outward is clipped by the scroll box on a full-bleed row. With
-      // `!` because the console's one focus rule in globals.css is unlayered,
-      // and an unlayered rule outranks every utility that is not important.
-      className={`relative flex items-start gap-3 border-b border-(--color-border-subtle) bg-(--color-background-surface) px-(--density-row-x) py-(--density-row-y) transition-colors hover:bg-(--color-background-hover) focus-visible:outline-offset-[-2px]! aria-[current=page]:bg-(--color-background-selected) ${fill}`}
+      // offset outward is clipped by the scroll box on a full-bleed row.
+      className={`relative flex items-start gap-3 border-b border-(--color-border-subtle) bg-(--color-background-surface) px-(--density-row-x) py-(--density-row-y) transition-colors hover:bg-(--color-background-hover) focus-visible:outline-offset-[-2px] aria-[current=page]:bg-(--color-background-selected) ${fill}`}
     >
       {/* The open row is marked on its edge, which survives the hover state
           and reads at a glance down a long list. */}

@@ -234,7 +234,7 @@ function ValueInput({
           value={item.value}
           onChange={(event) => onChange(event.target.value)}
           placeholder="tag, another tag"
-          className="w-56 rounded-md border border-(--color-border-subtle) bg-(--color-background-surface) px-2 py-1.5 text-base outline-none transition-colors hover:border-(--color-border-default) focus:border-(--color-border-focus) focus:ring-2 focus:ring-(--color-border-focus)/20 sm:text-sm"
+          className="w-56 rounded-md border border-(--color-border-subtle) bg-(--color-background-surface) px-2 py-1.5 text-base transition-colors hover:border-(--color-border-default) focus:border-(--color-border-focus) focus:ring-2 focus:ring-(--color-border-focus)/20 sm:text-sm"
         />
       );
   }

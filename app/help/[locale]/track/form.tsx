@@ -70,7 +70,7 @@ export function TrackForm({
              smaller when it takes focus and never zooms back out. Aligned to
              the page's start edge on an Arabic page while still typed
              left-to-right, so the number sits under its label. */
-          className={`${height} w-full rounded-md border border-(--color-border-subtle) bg-(--color-background-surface) px-3 text-base text-(--color-text-primary) tabular-nums outline-none transition-colors placeholder:text-(--color-text-tertiary) hover:border-(--color-border-default) focus:border-(--color-border-focus) focus:ring-2 focus:ring-(--color-border-focus)/20 rtl:text-right`}
+          className={`${height} w-full rounded-md border border-(--color-border-subtle) bg-(--color-background-surface) px-3 text-base text-(--color-text-primary) tabular-nums transition-colors placeholder:text-(--color-text-tertiary) hover:border-(--color-border-default) focus:border-(--color-border-focus) focus:ring-2 focus:ring-(--color-border-focus)/20 rtl:text-right`}
         />
       </div>
 

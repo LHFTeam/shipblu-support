@@ -50,14 +50,14 @@ function Fields({ schedule }: { schedule?: Schedule }) {
                 type="time"
                 name={`${day.key}_start`}
                 defaultValue={range?.start ?? ''}
-                className="rounded-md border border-(--color-border-subtle) bg-(--color-background-surface) px-2 py-1 text-base outline-none transition-colors hover:border-(--color-border-default) focus:border-(--color-border-focus) focus:ring-2 focus:ring-(--color-border-focus)/20 sm:text-sm"
+                className="rounded-md border border-(--color-border-subtle) bg-(--color-background-surface) px-2 py-1 text-base transition-colors hover:border-(--color-border-default) focus:border-(--color-border-focus) focus:ring-2 focus:ring-(--color-border-focus)/20 sm:text-sm"
               />
               <span className="text-xs text-(--color-text-secondary)">to</span>
               <input
                 type="time"
                 name={`${day.key}_end`}
                 defaultValue={range?.end ?? ''}
-                className="rounded-md border border-(--color-border-subtle) bg-(--color-background-surface) px-2 py-1 text-base outline-none transition-colors hover:border-(--color-border-default) focus:border-(--color-border-focus) focus:ring-2 focus:ring-(--color-border-focus)/20 sm:text-sm"
+                className="rounded-md border border-(--color-border-subtle) bg-(--color-background-surface) px-2 py-1 text-base transition-colors hover:border-(--color-border-default) focus:border-(--color-border-focus) focus:ring-2 focus:ring-(--color-border-focus)/20 sm:text-sm"
               />
               <label className="flex items-center gap-1.5 text-xs text-(--color-text-secondary)">
                 <input
