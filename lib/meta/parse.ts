@@ -11,6 +11,7 @@ import type {
   MetaRawAttachment,
   MetaReferral,
   MetaWebhookPayload,
+  NormalisedAppRole,
   NormalisedComment,
   NormalisedFeedback,
   NormalisedInteraction,
@@ -20,8 +21,9 @@ import type {
 
 /**
  * Flattens a Meta webhook batch into direct messages, comments, receipts, the
- * interactions that open a messaging window without being messages, and the
- * answers to a satisfaction survey.
+ * interactions that open a messaging window without being messages, the
+ * answers to a satisfaction survey, and the changes to which app a Page or an
+ * account routes its conversations to.
  *
  * Nothing here throws. A part we cannot read is left out, because a throw
  * here loses the whole batch: this runs in the worker before any item does, so
@@ -50,6 +52,7 @@ export function parseMetaWebhook(
     receipts: [],
     interactions: [],
     feedbacks: [],
+    appRoles: [],
     echoes: 0,
     emptyCards: 0,
   };
@@ -60,10 +63,21 @@ export function parseMetaWebhook(
   const platform = platformOf(body.object);
   if (!platform) return result;
 
-  for (const entry of body.entry ?? []) {
+  for (const entry of listOf(body.entry)) {
     const accountId = entry.id ?? null;
 
-    for (const event of entry.messaging ?? []) {
+    // Read from both arrays: production has only ever delivered one in
+    // `messaging`, and an app's role is no less a fact for arriving in standby.
+    // Ahead of `readMessagingEvent`, which reads an event with no message as
+    // an interaction and would drop this one as nothing.
+    for (const event of [...listOf(entry.messaging), ...listOf(entry.standby)]) {
+      if (isObject(event) && event.app_roles !== undefined) {
+        result.appRoles.push(...readAppRoles(event, platform, entry));
+      }
+    }
+
+    for (const event of listOf(entry.messaging)) {
+      if (isObject(event) && event.app_roles !== undefined) continue;
       readMessagingEvent(event, platform, connection, accountId, false, result);
     }
 
@@ -74,17 +88,59 @@ export function parseMetaWebhook(
     // other one. Losing it here is what let a reply be composed against a
     // thread this app cannot send on, and Graph refuses that with nothing but
     // "An unknown error has occurred."
-    for (const event of entry.standby ?? []) {
+    for (const event of listOf(entry.standby)) {
+      if (isObject(event) && event.app_roles !== undefined) continue;
       readMessagingEvent(event, platform, connection, accountId, true, result);
     }
 
-    for (const change of entry.changes ?? []) {
+    for (const change of listOf(entry.changes)) {
       const comment = readComment(change, platform, connection, entry);
       if (comment) result.comments.push(comment);
     }
   }
 
   return result;
+}
+
+/**
+ * One row per app an `app_roles` event names.
+ *
+ * The roles are kept exactly as listed, a string read as a list of one, since
+ * the two objects spell them differently — `"default_app"` on `instagram`,
+ * `["default_app"]` on `page` — and what a role means is decided where the row
+ * is read, not here. An event with no instant is left out rather than given the
+ * current one, as `fromEpoch` would: the instant is the whole fact, weighed
+ * against when a customer's message was sent, and "now" would make a switch
+ * replayed from a retry look newer than every message since it.
+ *
+ * `db/sql/012_meta_app_role_backfill.sql` reads stored deliveries the same way,
+ * in SQL, and `meta-app-role-backfill.db.test.ts` holds the two to one answer.
+ */
+function readAppRoles(
+  event: MetaMessagingEvent,
+  platform: MetaPlatform,
+  entry: MetaEntry,
+): NormalisedAppRole[] {
+  const named = event.app_roles;
+  if (!isObject(named)) return [];
+
+  const accountId = entry.id ?? event.recipient?.id;
+  if (!accountId) return [];
+
+  const at = epochOrNull(event.timestamp) ?? epochOrNull(entry.time);
+  if (!at) return [];
+
+  return Object.entries(named)
+    .filter(([appId]) => appId.length > 0)
+    .map(([appId, listed]) => ({
+      platform,
+      accountId,
+      appId,
+      roles: (Array.isArray(listed) ? listed : [listed]).filter(
+        (role): role is string => typeof role === 'string' && role.length > 0,
+      ),
+      at,
+    }));
 }
 
 function platformOf(object: string | undefined): MetaPlatform | null {
@@ -496,10 +552,25 @@ function readComment(
 const MILLISECOND_THRESHOLD = 1_000_000_000_000;
 
 function fromEpoch(value: number | undefined): Date {
-  if (!value || !Number.isFinite(value)) return new Date();
+  return epochOrNull(value) ?? new Date();
+}
+
+/** `fromEpoch` without the fallback, for a reader that must not invent an instant. */
+function epochOrNull(value: unknown): Date | null {
+  if (typeof value !== 'number' || !value || !Number.isFinite(value)) return null;
   const ms = value < MILLISECOND_THRESHOLD ? value * 1000 : value;
   const date = new Date(ms);
-  return Number.isNaN(date.getTime()) ? new Date() : date;
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+/**
+ * An array the payload says is one, or nothing. `for…of` over an object Meta
+ * sent where a list belongs throws, and a throw here loses the whole batch (the
+ * header); `db/sql/012_meta_app_role_backfill.sql` reads such a field as empty
+ * too, and its test found the parser did not.
+ */
+function listOf<T>(value: T[] | undefined): T[] {
+  return Array.isArray(value) ? value : [];
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {

@@ -79,6 +79,13 @@ export type MetaThreadInput = {
    * only rules out a send over the connection that reported it.
    */
   inboundConnection: MetaConnection | null;
+  /**
+   * Since when this app has been the account's default app, where that moves
+   * threads (`defaultAppSince`, `lib/meta/app-roles.ts`), or null. Here only for
+   * the words: a `standby` it supersedes never reaches this function as one, so
+   * a `standby` that does, with this set, arrived after the switch.
+   */
+  defaultAppSince?: Date | null;
 };
 
 export function metaThreadState(input: MetaThreadInput): MetaThreadState {
@@ -219,17 +226,29 @@ export function metaThreadState(input: MetaThreadInput): MetaThreadState {
             first reached a Unified Login ticket, this app had been the default
             app since that morning, and every flag it was refusing on predated
             the switch (§6.111). A `standby` says who owned the thread when the
-            message was sent, not who owns it now, and the only newer fact a
-            route without take-control ever gets is the customer's next message
-            — so that is what the sentence says.
+            message was sent, not who owns it now. Without take-control the
+            newer facts are the account's switch of default app, which
+            supersedes a `standby` before it (`metaThreadStateFromMessage`), and
+            the customer's next message. So a `standby` reaching here is either
+            newer than a switch, or there is no switch on record.
           */
-          `When this customer last wrote, another app owned this ${product} thread — the ` +
-          `message arrived in the standby channel, which is what says so — and ${product} ` +
-          `accepts a reply only from the thread's owner. Over ` +
-          `${CONNECTION_LABEL[input.connection]} the owner is the account's default app, ` +
-          `set in the Page's Advanced messaging settings, and thread control cannot be taken ` +
-          `from here. If this app is the default app now, the thread has probably passed to ` +
-          `it since, but nothing here can show that until the customer writes again.`,
+          input.defaultAppSince
+          ? // Another app took the thread after the switch: Meta Business
+            // Suite's inbox does when somebody replies there. Only a newer
+            // message arriving as this app's says it came back.
+            `This app is the account's default app, but this customer's last message ` +
+            `arrived in the standby channel after it became so: another app has taken this ` +
+            `${product} thread since, and ${product} accepts a reply only from the thread's ` +
+            `owner. Thread control cannot be taken from here. Answer it in the app that holds ` +
+            `it, or here once the customer writes again and the message arrives as this app's.`
+          : `When this customer last wrote, another app owned this ${product} thread — the ` +
+            `message arrived in the standby channel, which is what says so — and ${product} ` +
+            `accepts a reply only from the thread's owner. Over ` +
+            `${CONNECTION_LABEL[input.connection]} the owner is the account's default app, ` +
+            `set in the Page's Advanced messaging settings, and thread control cannot be ` +
+            `taken from here. Nothing here says this app is the default app now; once Meta ` +
+            `reports that it is, a thread the customer last wrote on before then opens here ` +
+            `again.`,
     };
   }
 
@@ -255,9 +274,20 @@ export function metaThreadStateFromMessage(input: {
    * When this app last took thread control of the conversation, if it ever has.
    */
   controlTakenAt?: Date | null;
+  /**
+   * Since when this app has been the account's default app, where that moves
+   * threads, or null (`threadOwnershipFacts`, `lib/tickets/meta-thread.ts`).
+   * Required, so that no reader of the verdict can leave it out: the ticket page
+   * weighing it and `send_meta` not is a reply box over a send that is refused.
+   */
+  defaultAppSince: Date | null;
 }): MetaThreadState {
   const meta = input.lastInboundMeta ?? {};
   const accountId = typeof meta.accountId === 'string' ? meta.accountId : null;
+  // Either newer fact says the thread is ours now.
+  const superseded =
+    holdsControl(input.controlTakenAt, input.lastInboundAt) ||
+    holdsControl(input.defaultAppSince, input.lastInboundAt);
 
   return metaThreadState({
     platform: input.platform,
@@ -266,8 +296,9 @@ export function metaThreadStateFromMessage(input: {
     configuredAccountId: input.configuredAccountId,
     // Absent on every row written before the flag was recorded. Those threads
     // were answerable, so a missing value must not read as "cannot send".
-    standby: meta.standby === true && !holdsControl(input.controlTakenAt, input.lastInboundAt),
+    standby: meta.standby === true && !superseded,
     inboundConnection: readConnection(meta.connection),
+    defaultAppSince: input.defaultAppSince,
   });
 }
 
@@ -288,8 +319,17 @@ export function metaThreadStateFromMessage(input: {
  * timestamp past ours, which puts the refusal straight back without anybody
  * having to notice.
  *
- * The two instants come from different clocks: a message carries Meta's `sentAt`
- * and the event carries ours. Seconds of skew are the whole error, and the
+ * Asked of two facts. One is `thread_control_taken`, an agent pressing the
+ * button. The other is the account's switch of default app to this one
+ * (`defaultAppSince`, Instagram only), which moved every thread open at the
+ * time: on 2026-11-05 a send went through twenty seconds after it, on a thread
+ * whose last message had arrived in `standby` two minutes before, and no
+ * Instagram message has arrived in `standby` since (`docs/PROJECT-STATE.md`
+ * §6.111). The switch is Meta's own timestamp, on the clock a message's `sentAt`
+ * is on.
+ *
+ * The event's two instants come from different clocks: a message carries Meta's
+ * `sentAt` and the event carries ours. Seconds of skew are the whole error, and the
  * quantity being compared is the gap between a customer's message and an agent
  * pressing a button — minutes at the very least. A tie counts as *not* held,
  * because the message is the fact we were given and control is the one we

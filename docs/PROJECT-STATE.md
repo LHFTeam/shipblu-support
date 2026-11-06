@@ -7782,22 +7782,40 @@ dryRun=true`, then without, gives those two theirs back from their
       had been done that morning; it says the flag is about when the customer
       last wrote.
 
-      **What it leaves.** On 2026-11-06, 94 of the 98 open Instagram direct
-      message tickets had a newest inbound recorded in `standby` before this
-      app became the account's default app at 10:30:24 UTC on the 5th, and
-      they still refuse. The fact is probably stale: ticket 13791 sent past
-      such a flag 20 seconds after the switch, and no Instagram `standby` has
-      arrived since. But nothing here can read the switch. The `app_roles`
-      webhook announcing it is parsed by nothing, and its only copy is
-      `webhook_events` row `f7cb5701-8aea-41e0-8b69-7cd095a8337d`, which the
-      30-day cleanup removes around 2026-12-05. Reading a `standby` older than
-      the switch as superseded, as `holdsControl` reads one older than a
-      `thread_control_taken`, needs that fact stored first. It would unblock
-      nothing today, though: none of the 94 was inside 24 hours (87 were past
-      seven days, 7 between), and a reply after 24 hours needs Human Agent
-      (§5.2). The composer now prints the window under a `standby` refusal
-      once the seven days are gone, so the agent sees that blocker too. A customer's next message, delivered
-      in `messaging`, reopens a ticket by itself.
+      **What it left, and the same PR then stored.** On 2026-11-06, 94 of
+      the 98 open Instagram direct message tickets had a newest inbound
+      recorded in `standby` before this app became the account's default app
+      at 10:30:24 UTC on the 5th. The flag was stale: ticket 13791 sent past
+      one 20 seconds after the switch, and no Instagram `standby` has arrived
+      since. But the `app_roles` webhook announcing the switch was parsed by
+      nothing, and its only copy was `webhook_events` row
+      `f7cb5701-8aea-41e0-8b69-7cd095a8337d`, which the 30-day cleanup removes
+      around 2026-12-05.
+
+      So it is stored. `meta_app_role_events` (migration 0058) is written by
+      `process_meta_webhook` for every `app_roles` event from now on, and by
+      `db/sql/012_meta_app_role_backfill.sql` for the two delivered before:
+      the Page's at 10:30:12 and Instagram's at 10:30:24. `defaultAppSince`
+      (`lib/meta/app-roles.ts`) reads it into the verdict, which supersedes an
+      Instagram `standby` older than the switch as it supersedes one older
+      than a `thread_control_taken`. It is Instagram only. The Page's event
+      named this app `default_app` too, yet the 23 Messenger messages received
+      in the day after it all arrived in `standby`. A `standby` newer than the
+      switch still refuses, worded as another app having taken the thread
+      since.
+
+      It unblocks no reply today: none of the 94 was inside 24 hours (87 were
+      past seven days, 7 between), and a reply after 24 hours needs Human
+      Agent (§5.2). What changes is that a ticket the window blocks says so
+      rather than blaming another app. A ticket still inside seven days shows
+      the reply box, and its tagged reply is refused by Meta as every Human
+      Agent send is today. The composer prints the window under a `standby`
+      refusal once the seven days are gone.
+
+      **It has to deploy before 2026-12-05**, or the backfill finds the
+      delivery gone and nothing records the switch. After the deploy,
+      `select platform, account_id, roles, at from meta_app_role_events`
+      shows the two rows.
 
 ### Tooling notes for this environment
 

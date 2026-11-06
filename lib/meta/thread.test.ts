@@ -110,6 +110,7 @@ describe('metaThreadStateFromMessage', () => {
       connection: 'facebook_page',
       configuredAccountId: PAGE,
       lastInboundMeta: { accountId: OTHER_PAGE, standby: true, metaKind: 'direct_message' },
+      defaultAppSince: null,
     });
 
     expect(state.canSend).toBe(false);
@@ -122,6 +123,7 @@ describe('metaThreadStateFromMessage', () => {
       connection: 'facebook_page',
       configuredAccountId: PAGE,
       lastInboundMeta: { accountId: PAGE, metaKind: 'direct_message' },
+      defaultAppSince: null,
     });
 
     expect(state.canSend).toBe(true);
@@ -133,6 +135,7 @@ describe('metaThreadStateFromMessage', () => {
       connection: 'facebook_page',
       configuredAccountId: PAGE,
       lastInboundMeta: null,
+      defaultAppSince: null,
     });
 
     expect(state.canSend).toBe(true);
@@ -145,6 +148,7 @@ describe('metaThreadStateFromMessage', () => {
       connection: 'facebook_page',
       configuredAccountId: PAGE,
       lastInboundMeta: { accountId: PAGE, standby: 'yes' },
+      defaultAppSince: null,
     });
 
     expect(state.canSend).toBe(true);
@@ -337,7 +341,7 @@ describe('metaThreadState across the two Instagram connections', () => {
 
     expect(state.explanation).not.toContain('make this app');
     expect(state.explanation).toContain('cannot be taken from here');
-    expect(state.explanation).toContain('until the customer writes again');
+    expect(state.explanation).toContain('once Meta reports that it is');
   });
 
   it('does not let a standby the direct connection recorded refuse a Unified Login send', () => {
@@ -373,6 +377,7 @@ describe('metaThreadStateFromMessage and the connection on the row', () => {
         connection: 'facebook_page',
         metaKind: 'direct_message',
       },
+      defaultAppSince: null,
     });
 
     expect(state.canSend).toBe(true);
@@ -385,6 +390,7 @@ describe('metaThreadStateFromMessage and the connection on the row', () => {
       connection: 'facebook_page',
       configuredAccountId: IG_ACCOUNT,
       lastInboundMeta: { accountId: IG_ACCOUNT, standby: true, connection: 'whatsapp' },
+      defaultAppSince: null,
     });
 
     expect(state.canSend).toBe(false);
@@ -411,6 +417,7 @@ describe('metaThreadStateFromMessage and control taken since', () => {
       lastInboundMeta: inbound,
       lastInboundAt,
       controlTakenAt,
+      defaultAppSince: null,
     });
   }
 
@@ -456,9 +463,58 @@ describe('metaThreadStateFromMessage and control taken since', () => {
       lastInboundMeta: { accountId: OTHER_PAGE, standby: true, metaKind: 'direct_message' },
       lastInboundAt: new Date('2026-09-06T18:48:16Z'),
       controlTakenAt: new Date('2026-09-06T18:52:00Z'),
+      defaultAppSince: null,
     });
 
     expect(state.canSend).toBe(false);
     expect(state.reason).toBe('other_account');
+  });
+});
+
+describe('the switch of default app, against a standby', () => {
+  // 2026-11-05: this app became the Instagram account's default app at
+  // 10:30:24 UTC, and every Instagram message before it had arrived in standby
+  // (docs/PROJECT-STATE.md §6.111).
+  const SWITCH = new Date('2026-11-05T10:30:24Z');
+
+  const onUnified = (lastInboundAt: Date, defaultAppSince: Date | null, controlTakenAt?: Date) =>
+    metaThreadStateFromMessage({
+      platform: 'instagram',
+      connection: 'unified_login',
+      configuredAccountId: IG_ACCOUNT,
+      lastInboundMeta: { accountId: IG_ACCOUNT, standby: true, connection: 'facebook_page' },
+      lastInboundAt,
+      controlTakenAt,
+      defaultAppSince,
+    });
+
+  it('supersedes a standby from before it', () => {
+    // Ticket 86324's last message, 4 November at 22:57.
+    const state = onUnified(new Date('2026-11-04T22:57:23Z'), SWITCH);
+
+    expect(state.canSend).toBe(true);
+    expect(state.reason).toBe('ours');
+  });
+
+  it('still refuses on a standby from after it, and says another app took the thread', () => {
+    const state = onUnified(new Date('2026-11-20T09:00:00Z'), SWITCH);
+
+    expect(state.canSend).toBe(false);
+    expect(state.reason).toBe('standby');
+    expect(state.canTakeControl).toBe(false);
+    expect(state.explanation).toContain('after it became so');
+    expect(state.explanation).not.toContain('make this app');
+  });
+
+  it('counts a tie as not superseded, as it does for taking control', () => {
+    expect(onUnified(SWITCH, SWITCH).canSend).toBe(false);
+  });
+
+  it('is one of two newer facts, and either is enough', () => {
+    const before = new Date('2026-11-04T22:57:23Z');
+
+    expect(onUnified(before, null).canSend).toBe(false);
+    expect(onUnified(before, null, new Date('2026-11-05T09:00:00Z')).canSend).toBe(true);
+    expect(onUnified(before, SWITCH, new Date('2026-11-04T09:00:00Z')).canSend).toBe(true);
   });
 });

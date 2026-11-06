@@ -75,6 +75,13 @@ export type MetaMessagingEvent = {
   referral?: MetaReferral;
   delivery?: { mids?: string[]; watermark?: number };
   read?: { mids?: string[]; watermark?: number };
+  /**
+   * Which app the Page or account now routes conversations to, sent when an
+   * admin changes it in the Page's Advanced messaging settings. Keyed by app
+   * id. Seen in production as a role string on the `instagram` object and as
+   * an array of them on the `page` object, a minute apart (2026-11-05).
+   */
+  app_roles?: Record<string, unknown>;
 };
 
 export type MetaReferral = {
@@ -270,12 +277,29 @@ export type NormalisedFeedback = {
   source: 'meta_feedback' | 'meta_quick_reply';
 };
 
+/**
+ * One app's roles on a Page or an Instagram account, as an `app_roles` event
+ * stated them at one instant. Stored as it came (`meta_app_role_events`); what
+ * it means for a thread is `lib/meta/app-roles.ts`'s to say.
+ */
+export type NormalisedAppRole = {
+  platform: MetaPlatform;
+  /** The Page or Instagram account the event is about. */
+  accountId: string;
+  appId: string;
+  /** Strings only, as listed; empty when the event listed none. */
+  roles: string[];
+  /** The event's own timestamp, or its entry's when it carried none. */
+  at: Date;
+};
+
 export type NormalisedMetaWebhook = {
   messages: NormalisedDirectMessage[];
   comments: NormalisedComment[];
   receipts: NormalisedReceipt[];
   interactions: NormalisedInteraction[];
   feedbacks: NormalisedFeedback[];
+  appRoles: NormalisedAppRole[];
   /** Echoes of our own outbound messages, counted but never ingested. */
   echoes: number;
   /**

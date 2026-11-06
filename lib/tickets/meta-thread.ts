@@ -1,6 +1,7 @@
 import { and, desc, eq } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { conversationEvents, messages } from '@/db/schema';
+import { defaultAppSince } from '@/lib/meta/app-roles';
 import { configuredAccountId } from '@/lib/meta/client';
 import { metaConnection } from '@/lib/meta/connection';
 import { metaThreadStateFromMessage, type MetaThreadState } from '@/lib/meta/thread';
@@ -26,7 +27,7 @@ export async function metaReplyTarget(
   conversationId: string,
   platform: MetaPlatform,
 ): Promise<MetaReplyTarget> {
-  const [rows, controlTakenAt] = await Promise.all([
+  const [rows, facts] = await Promise.all([
     db
       .select({
         fromAddress: messages.fromAddress,
@@ -37,7 +38,7 @@ export async function metaReplyTarget(
       .where(and(eq(messages.conversationId, conversationId), eq(messages.direction, 'inbound')))
       .orderBy(desc(messages.createdAt))
       .limit(1),
-    threadControlTakenAt(conversationId),
+    threadOwnershipFacts(conversationId, platform),
   ]);
 
   const row = rows[0];
@@ -50,8 +51,43 @@ export async function metaReplyTarget(
       configuredAccountId: configuredAccountId(platform),
       lastInboundMeta: (row?.meta ?? null) as Record<string, unknown> | null,
       lastInboundAt: row?.createdAt ?? null,
-      controlTakenAt,
+      controlTakenAt: facts.controlTakenAt,
+      defaultAppSince: facts.defaultAppSince,
     }),
+  };
+}
+
+export type ThreadOwnershipFacts = {
+  /** When this app last took thread control of the conversation, or null. */
+  controlTakenAt: Date | null;
+  /**
+   * Since when this app has been the account's default app in the sense that
+   * moves threads — Instagram's, never Messenger's — or null
+   * (`defaultAppSince`, `lib/meta/app-roles.ts`).
+   */
+  defaultAppSince: Date | null;
+};
+
+/**
+ * The two facts that can be newer than a message's `standby` and say the
+ * thread is this app's now, read once for the ticket page and once for
+ * `metaReplyTarget` — the composer, the reply and take-control actions, and
+ * `send_meta` — so the console and the worker weigh the same two and cannot
+ * disagree about whether a reply may go (`docs/PROJECT-STATE.md` §6.111).
+ *
+ * One after the other rather than at once: the ticket page calls this from
+ * inside `allLimited`'s eight places, where a second query of its own would be
+ * a ninth. `platform` is null for a ticket that is not a Meta direct message,
+ * which reads only the first and asks nothing of the second.
+ */
+export async function threadOwnershipFacts(
+  conversationId: string,
+  platform: MetaPlatform | null,
+): Promise<ThreadOwnershipFacts> {
+  const controlTakenAt = await threadControlTakenAt(conversationId);
+  return {
+    controlTakenAt,
+    defaultAppSince: platform ? await defaultAppSince(platform) : null,
   };
 }
 
@@ -78,7 +114,7 @@ export const THREAD_CONTROL_TAKEN = 'thread_control_taken';
  * loads: that list is capped at fifty events, and the one event whose absence
  * silently re-refuses every reply is not one to leave to a cap.
  */
-export async function threadControlTakenAt(conversationId: string): Promise<Date | null> {
+async function threadControlTakenAt(conversationId: string): Promise<Date | null> {
   const rows = await db
     .select({ createdAt: conversationEvents.createdAt })
     .from(conversationEvents)

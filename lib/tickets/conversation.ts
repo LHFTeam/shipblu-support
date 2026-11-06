@@ -24,7 +24,7 @@ import { metaConnection } from '@/lib/meta/connection';
 import { metaThreadStateFromMessage, type MetaThreadState } from '@/lib/meta/thread';
 import { parseCoexistence } from '@/lib/whatsapp/coexistence';
 import type { CustomFieldValues } from './custom-fields';
-import { threadControlTakenAt } from './meta-thread';
+import { threadOwnershipFacts } from './meta-thread';
 import {
   hiddenChannels,
   isCommentTicket,
@@ -354,17 +354,7 @@ export async function getConversation(
     .limit(1);
   const unverifiedSubmitter = unverified.length > 0;
 
-  const [
-    timeline,
-    files,
-    events,
-    shipments,
-    accounts,
-    sides,
-    subcategories,
-    controlTakenAt,
-    survey,
-  ] =
+  const [timeline, files, events, shipments, accounts, sides, subcategories, ownership, survey] =
     // Nine reads on a pool of eight places: at most the pool at once, so one
     // ticket page can fill it but never queue behind itself (AGENTS.md,
     // Database) — one wave, as before, plus the ninth.
@@ -430,7 +420,16 @@ export async function getConversation(
       () => shippingAccountsForConversation(row.conversation.id),
       () => sideConversationsForConversation(row.conversation.id),
       () => subcategoriesForConversation(row.conversation.id),
-      () => threadControlTakenAt(row.conversation.id),
+      () =>
+        threadOwnershipFacts(
+          row.conversation.id,
+          // The switch of default app is read only where the verdict is drawn
+          // (below), so an email or a comment ticket asks nothing of it.
+          isMetaChannel(row.conversation.channel) &&
+            !isCommentTicket(row.conversation.channel, row.conversation.externalId)
+            ? metaPlatformOf(row.conversation.channel)
+            : null,
+        ),
       () => ticketSurveyState(row.conversation.id, row.conversation.channel),
     ]);
 
@@ -500,7 +499,8 @@ export async function getConversation(
       // above is capped at fifty and this is the fact whose absence silently
       // re-refuses every reply on the ticket.
       lastInboundAt: lastInbound?.message.createdAt ?? null,
-      controlTakenAt,
+      controlTakenAt: ownership.controlTakenAt,
+      defaultAppSince: ownership.defaultAppSince,
     });
   }
 
