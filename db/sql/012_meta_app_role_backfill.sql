@@ -18,12 +18,25 @@
 --   unsigned POST naming this app the default would otherwise unblock replies;
 -- - `page` is `facebook`, `instagram` is itself, any other object is nothing;
 -- - events from `messaging` and from `standby` both;
--- - the account is the entry's id, else the event's recipient, and never '';
+-- - an entry or an event that is not an object, and a list that is not an
+--   array, holds nothing;
+-- - the account is the entry's id, else the event's recipient, either only as
+--   a non-empty string;
 -- - one row per app the event names, its roles the strings listed, a single
 --   string read as a list of one, anything else left out;
--- - the instant is the event's timestamp, else the entry's time, seconds below
---   10^12 and milliseconds above, truncated to the millisecond as a JavaScript
---   `Date` is, and an event with neither is left out rather than dated now.
+-- - the instant is the event's timestamp, else the entry's time: seconds below
+--   10^12 and milliseconds above, in float8 as JavaScript's numbers are,
+--   truncated to the millisecond as a `Date` is, and taken only after 1970 and
+--   before 3000 (`storableInstant`). An event with neither is left out rather
+--   than dated now.
+--
+-- **This file must never raise**, since a replay that fails stops every
+-- deploy until the delivery ages out. So nothing is cast before its type is
+-- checked, each check in a CASE of its own (Postgres does not promise the order
+-- in which the halves of an AND are evaluated), a number is range-checked as
+-- numeric before it becomes a float8 (which refuses 1e-400), and only an
+-- instant inside the window becomes a bigint and an interval, where a thousand
+-- times it is exact.
 --
 -- `meta-app-role-backfill.db.test.ts` holds the two to one answer on every one
 -- of those shapes.
@@ -43,7 +56,7 @@
 insert into meta_app_role_events (platform, account_id, app_id, roles, at, webhook_event_id)
 select
   case w.payload->>'object' when 'page' then 'facebook' else 'instagram' end,
-  coalesce(entry.value->>'id', event.value->'recipient'->>'id'),
+  account.id,
   role.key,
   array(
     select listed.value #>> '{}'
@@ -53,9 +66,7 @@ select
     where jsonb_typeof(listed.value) = 'string' and listed.value #>> '{}' <> ''
     order by listed.n
   ),
-  timestamptz 'epoch'
-    + trunc(case when stamp.value < 1e12 then stamp.value * 1000 else stamp.value end)::bigint
-      * interval '1 millisecond',
+  timestamptz 'epoch' + stamp.ms::bigint * interval '1 millisecond',
   w.id
 from webhook_events w
 cross join lateral jsonb_array_elements(
@@ -87,15 +98,34 @@ cross join lateral jsonb_each(
 cross join lateral (
   select coalesce(
     case
-      when jsonb_typeof(event.value->'timestamp') = 'number'
-        and (event.value->>'timestamp')::numeric <> 0
-      then (event.value->>'timestamp')::numeric
+      when jsonb_typeof(entry.value->'id') = 'string' then nullif(entry.value->>'id', '')
     end,
     case
-      when jsonb_typeof(entry.value->'time') = 'number' and (entry.value->>'time')::numeric <> 0
-      then (entry.value->>'time')::numeric
+      when jsonb_typeof(event.value->'recipient'->'id') = 'string'
+      then nullif(event.value->'recipient'->>'id', '')
     end
-  ) as value
+  ) as id
+) as account
+cross join lateral (
+  select converted.ms
+  from (values (1, event.value->'timestamp'), (2, entry.value->'time')) as given(n, raw)
+  cross join lateral (
+    select
+      case when jsonb_typeof(given.raw) = 'number' then
+        case
+          when (given.raw #>> '{}')::numeric > 1e-300 and (given.raw #>> '{}')::numeric < 1e300
+          then trunc(
+            case
+              when (given.raw #>> '{}')::float8 < 1e12 then (given.raw #>> '{}')::float8 * 1000
+              else (given.raw #>> '{}')::float8
+            end
+          )
+        end
+      end as ms
+  ) as converted
+  where converted.ms > 0 and converted.ms < 32503680000000
+  order by given.n
+  limit 1
 ) as stamp
 where w.provider = 'meta'
   and w.signature_verified
@@ -105,6 +135,5 @@ where w.provider = 'meta'
     or w.payload @? '$.entry[*].standby[*].app_roles'
   )
   and role.key <> ''
-  and coalesce(entry.value->>'id', event.value->'recipient'->>'id') <> ''
-  and stamp.value is not null
+  and account.id is not null
 on conflict (platform, account_id, at, app_id) do nothing;

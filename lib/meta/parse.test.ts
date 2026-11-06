@@ -1003,6 +1003,7 @@ describe('a list Meta sent as something else', () => {
       { object: 'instagram', entry: [{ id: 'A', messaging: { timestamp: 1 } }] },
       { object: 'instagram', entry: [{ id: 'A', standby: 'x' }] },
       { object: 'page', entry: [{ id: 'A', changes: {} }] },
+      { object: 'instagram', entry: [null, 'x', 7] },
     ]) {
       expect(() => parseMetaWebhook(payload, null)).not.toThrow();
     }

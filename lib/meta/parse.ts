@@ -64,6 +64,9 @@ export function parseMetaWebhook(
   if (!platform) return result;
 
   for (const entry of listOf(body.entry)) {
+    // A null or a string where an entry belongs would throw on `entry.id` and
+    // lose the batch; the backfill reads one as having nothing in it.
+    if (!isObject(entry)) continue;
     const accountId = entry.id ?? null;
 
     // Read from both arrays: production has only ever delivered one in
@@ -111,7 +114,10 @@ export function parseMetaWebhook(
  * is read, not here. An event with no instant is left out rather than given the
  * current one, as `fromEpoch` would: the instant is the whole fact, weighed
  * against when a customer's message was sent, and "now" would make a switch
- * replayed from a retry look newer than every message since it.
+ * replayed from a retry look newer than every message since it. An instant
+ * outside 1970–3000 is no instant either (`storableInstant`), and the account
+ * is a non-empty string or nothing: the backfill casts what it reads, and
+ * anything it would take differently from this is a second row for one event.
  *
  * `db/sql/012_meta_app_role_backfill.sql` reads stored deliveries the same way,
  * in SQL, and `meta-app-role-backfill.db.test.ts` holds the two to one answer.
@@ -124,10 +130,10 @@ function readAppRoles(
   const named = event.app_roles;
   if (!isObject(named)) return [];
 
-  const accountId = entry.id ?? event.recipient?.id;
+  const accountId = nonEmptyString(entry.id) ?? nonEmptyString(event.recipient?.id);
   if (!accountId) return [];
 
-  const at = epochOrNull(event.timestamp) ?? epochOrNull(entry.time);
+  const at = storableInstant(event.timestamp) ?? storableInstant(entry.time);
   if (!at) return [];
 
   return Object.entries(named)
@@ -561,6 +567,31 @@ function epochOrNull(value: unknown): Date | null {
   const ms = value < MILLISECOND_THRESHOLD ? value * 1000 : value;
   const date = new Date(ms);
   return Number.isNaN(date.getTime()) ? null : date;
+}
+
+/** The first instant `storableInstant` refuses: 3000-01-01T00:00:00Z. */
+const LAST_STORABLE_MS = Date.UTC(3000, 0, 1);
+
+/**
+ * `epochOrNull` for an instant that is going to be stored, and so must be one
+ * Postgres takes and the backfill computes alike. After 1970 and before 3000.
+ *
+ * A JavaScript `Date` reaches years Postgres refuses as drizzle writes them
+ * (`+011476-…`), which threw on every retry of the batch, and the backfill's
+ * SQL raised on some of the same values, which fails every deploy until the
+ * delivery is cleaned up. Inside this window the two agree to the millisecond:
+ * the SQL does the same float64 arithmetic and truncation, and a millisecond
+ * count this small times a thousand is exact in the interval it builds.
+ */
+function storableInstant(value: unknown): Date | null {
+  const date = epochOrNull(value);
+  if (!date) return null;
+  const ms = date.getTime();
+  return ms > 0 && ms < LAST_STORABLE_MS ? date : null;
+}
+
+function nonEmptyString(value: unknown): string | null {
+  return typeof value === 'string' && value.length > 0 ? value : null;
 }
 
 /**

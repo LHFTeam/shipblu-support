@@ -216,9 +216,10 @@ export function metaThreadState(input: MetaThreadInput): MetaThreadState {
         ? `Another app holds thread control on this ${product} inbox, so this ticket is ` +
           `readable here but cannot be answered from here — ${product} accepts a reply only ` +
           `from the app that owns the thread. The messages arrive in the handover protocol's ` +
-          `standby channel, which is what says so. Answer in whichever tool is the primary ` +
-          `receiver, or make this app the Page's default app in its Advanced messaging ` +
-          `settings.`
+          `standby channel, which is what says so. Answer it in the tool that holds the ` +
+          `thread, or take thread control of it from here. Making this app the Page's ` +
+          `default app does not move it: the Page named this app its default app on ` +
+          `2026-11-05, and Messenger's messages kept arriving in standby.`
         : /*
             Instagram's sentence, on either route, since the button is offered
             on neither (`offersThreadControl`). Not "make this app the default
@@ -284,10 +285,14 @@ export function metaThreadStateFromMessage(input: {
 }): MetaThreadState {
   const meta = input.lastInboundMeta ?? {};
   const accountId = typeof meta.accountId === 'string' ? meta.accountId : null;
-  // Either newer fact says the thread is ours now.
+  // Either newer fact says the thread is ours now. The switch only for a
+  // message on the account it was read for, the one this deployment sends
+  // from: a message on another is refused as `other_account`, which still has
+  // to say when that account is in standby too.
+  const onConfiguredAccount = accountId === null || accountId === input.configuredAccountId;
   const superseded =
     holdsControl(input.controlTakenAt, input.lastInboundAt) ||
-    holdsControl(input.defaultAppSince, input.lastInboundAt);
+    (onConfiguredAccount && holdsControl(input.defaultAppSince, input.lastInboundAt));
 
   return metaThreadState({
     platform: input.platform,

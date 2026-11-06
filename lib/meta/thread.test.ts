@@ -518,3 +518,35 @@ describe('the switch of default app, against a standby', () => {
     expect(onUnified(before, SWITCH, new Date('2026-11-04T09:00:00Z')).canSend).toBe(true);
   });
 });
+
+describe('the switch, on a message from another account', () => {
+  // The switch was read for the account this deployment sends from, so it says
+  // nothing about another: that message is refused as other_account, and the
+  // refusal must still say the other account is in standby too.
+  it('leaves the other account in standby', () => {
+    const state = metaThreadStateFromMessage({
+      platform: 'instagram',
+      connection: 'unified_login',
+      configuredAccountId: IG_ACCOUNT,
+      lastInboundMeta: {
+        accountId: '17840000000000000',
+        standby: true,
+        connection: 'facebook_page',
+      },
+      lastInboundAt: new Date('2026-11-04T22:57:23Z'),
+      defaultAppSince: new Date('2026-11-05T10:30:24Z'),
+    });
+
+    expect(state.reason).toBe('other_account');
+    expect(state.explanation).toContain('standby');
+  });
+});
+
+describe("Messenger's standby sentence", () => {
+  it('sends the agent to the other tool or the button, not to a setting that moved nothing', () => {
+    const state = metaThreadState(onPage({ standby: true }));
+
+    expect(state.explanation).toContain('take thread control');
+    expect(state.explanation).not.toContain('or make this app');
+  });
+});

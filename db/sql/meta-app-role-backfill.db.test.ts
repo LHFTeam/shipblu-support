@@ -194,6 +194,50 @@ describe('012_meta_app_role_backfill.sql', () => {
         object: 'instagram',
         entry: [{ id: IG, messaging: { timestamp: 1, app_roles: { '10': 'a' } } }],
       },
+      // From review: instants Postgres cannot hold, or that a float and an
+      // exact product would round apart. Each falls back to the entry's time
+      // or is left out, and none makes the file raise, which would stop every
+      // deploy.
+      ...[1e30, -3e11, 9e15, 3e14, 1e-320, '1793874624'].map((timestamp, i) => ({
+        object: 'instagram',
+        entry: [
+          {
+            id: IG,
+            time: 1793874628267,
+            messaging: [{ timestamp, app_roles: { [`range-${i}`]: 'default_app' } }],
+          },
+        ],
+      })),
+      {
+        object: 'instagram',
+        entry: [
+          { id: IG, messaging: [{ timestamp: 1793874624.0509999, app_roles: { frac: 'x' } }] },
+        ],
+      },
+      // Ids that are not a non-empty string: the recipient's, or nothing.
+      ...[0, false, true, { a: 1 }, 123, ''].map((id, i) => ({
+        object: 'page',
+        entry: [
+          {
+            id,
+            messaging: [
+              {
+                recipient: { id: PAGE },
+                timestamp: 1793874600,
+                app_roles: { [`id-${i}`]: 'default_app' },
+              },
+            ],
+          },
+        ],
+      })),
+      // A null entry beside a real one.
+      {
+        object: 'instagram',
+        entry: [
+          null,
+          { id: IG, messaging: [{ timestamp: 1793874624, app_roles: { beside: 'default_app' } }] },
+        ],
+      },
     ];
 
     const expected = [];
