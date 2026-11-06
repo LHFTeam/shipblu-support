@@ -2141,7 +2141,12 @@ both (**Routing by category**). What it may not do is decided in
 `lib/category-ai/decide.ts`, whose rules are tests. It asks about the first five
 customer messages on a ticket nobody has answered; the earliest message with a
 confident answer settles the ticket, and the rest are
-recorded `after_settle` without a call; `unknown` never settles however sure;
+recorded `after_settle` without a call — messages of the requester's as they
+are now, so a run on one somebody else wrote neither settles the ticket nor
+takes one of the five (a passer-by's reply that opened a comment thread before
+its root), and the job asks `skipReason` again before it records an outcome
+known without asking and under its row lock, reading the message's author with
+the requester each time, since a contact merge moves both; `unknown` never settles however sure;
 and a category a person, a rule, a form's default or an agent opening the ticket
 chose is owned and never touched, read off the `category_changed` events and the
 column together, under the ticket's row lock once the call is over (before it,
@@ -2162,7 +2167,8 @@ added in code, and its fingerprint covers both, so an edit on `/admin/categories
 is a new question no report averages with the old. `/reports/category-ai` grades
 one label, question and mode at a time, and its rules are
 `lib/category-ai/grade.ts`'s tests: one settling answer per ticket, in the order
-the live job judges messages; ground truth only a person's `category_changed`
+the live job judges messages and over the messages it counts, a passer-by's
+left out of the settle and the cap; ground truth only a person's `category_changed`
 given before Jev, a rule or a form wrote the category, since agreeing with a
 write leaves no event and every label after one is a disagreement — so a ticket
 written to first is in no rate read off labels, and in `apply`, where every settle is Jev's
