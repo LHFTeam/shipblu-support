@@ -11,8 +11,8 @@
 -- carried across at cutover would be gone.
 --
 -- Each article with any count is given a stats row holding them. An article
--- with none is left without one, as an article nobody has opened or rated is
--- everywhere else: the readers read a missing row as zero.
+-- with none is left without one, since the readers read a missing row as zero
+-- and a view or a vote creates it when there is something to count.
 --
 -- **Never overwrites.** `ON CONFLICT DO NOTHING`, so a row the new code has
 -- written since — the first view after the deploy creates one — is left as it

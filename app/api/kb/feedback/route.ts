@@ -65,8 +65,8 @@ export async function POST(request: Request) {
 
   if (exists.length === 0) return new NextResponse(null, { status: 204 });
 
-  // Written together so the denormalised counters in `kb_article_stats` can
-  // never disagree with the rows they summarise.
+  // Written together, so a vote's count in `kb_article_stats` and its feedback
+  // row are stored together or not at all.
   await db.transaction(async (tx) => {
     await tx.insert(kbArticleFeedback).values({ articleId, wasHelpful, comment });
     await countArticleVote(tx, articleId, wasHelpful);

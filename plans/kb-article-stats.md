@@ -22,10 +22,10 @@ raised in #466's review and decided then to remove:
   save waits on.
 
 The counters therefore move to `kb_article_stats`, one row per article, which no
-edit touches. It takes two pull requests, because the column drop must not reach
-production while code that reads or counts into the columns is still running
-there. Even PR 1's code names them in an article INSERT, which leaves PR 2's
-deploy one short window of its own (below).
+console edit touches. It takes two pull requests, because the column drop must
+not reach production while code that reads or counts into the columns is still
+running there. Even PR 1's code names them in an article INSERT, which leaves PR
+2's deploy one short window of its own (below).
 
 ## What production held
 
@@ -42,11 +42,12 @@ Freshdesk at cutover. No `kb_article_stats` table yet.
   `updated_at`, so the `touch_updated_at` loop attaches no trigger: it is a
   counter, not content. RLS comes from the loop in `db/sql/001`, as for every
   table.
-- **Rows are created lazily.** Nothing writes one when an article is written. A
-  view or a vote creates it if it is the first; the Freshdesk import writes one
-  for every article it brings in, its counts carried across. Every reader reads
-  a missing row as zero.
-- **Every writer and every reader's SQL is in `lib/kb/stats.ts`.**
+- **Rows are created lazily.** No console write creates one. A view or a vote
+  creates it if it is the first; the Freshdesk import writes one for every
+  article it brings in, its counts carried across, zeros included. Every reader
+  reads a missing row as zero.
+- **Every write that counts is in `lib/kb/stats.ts`**, with the join and the
+  zero-for-missing counts the readers share; `011` is the one-off copy.
   - `recordArticleView` inserts from a read of `kb_articles` where the id
     matches, `ON CONFLICT (article_id) DO UPDATE` adding one, so a view of an
     article that no longer exists inserts nothing and raises nothing, as the
@@ -76,8 +77,9 @@ Freshdesk at cutover. No `kb_article_stats` table yet.
 
 Adds the table, moves every writer and reader to it, and copies today's counts
 across. Into `dev`; it reaches production on the first deploy after `dev` is
-merged into `main`. #466 is on `dev` and not yet on `main`, so unless a release
-goes out between them the two deploy together.
+merged into `main`. #466 went first: it reached `main` through #470, and
+production's `touch_updated_at` named `not_an_edit` when read on 2026-11-06 at
+15:52 UTC.
 
 - **The copy** is `db/sql/011_kb_article_stats_backfill.sql`: `INSERT … SELECT`
   from `kb_articles` for every article with a non-zero count,
@@ -158,15 +160,11 @@ Read-only, once it has deployed:
 
 Redeploy the build before it. The table and migration 0057 stay — the old code
 never names them — and so does `011`, which only the new code's deploys replay.
-If that build is `main` as it stands today, it is from before #466 as well: its
-replay of `db/sql/001` puts back the trigger that stamps every UPDATE, so the
-rollback undoes #466 too, and a view moves `updated_at` again.
 
 The old code reads the old columns, which hold the counts as of the copy plus
 the deploy window's; every view and vote since lives only in
-`kb_article_stats`. Either copy them back onto the article rows **before
-triggering the rollback deploy**, while #466's function is still installed, or
-accept their loss:
+`kb_article_stats`. Either copy them back onto the article rows just before
+triggering the rollback deploy, or accept their loss:
 
 ```sql
 update kb_articles a
@@ -176,10 +174,13 @@ from kb_article_stats s
 where s.article_id = a.id;
 ```
 
-That UPDATE changes only the three counters, so #466's trigger leaves every
-`updated_at` where it was; run after a pre-#466 build's replay, the same UPDATE
-stamps every one of those articles with the time of the rollback. Views and
-votes between the copy and the old build going live are lost. Rolling forward
+That UPDATE changes only the three counters, so #466's trigger, which the build
+before this one has too, leaves every `updated_at` where it was. A rollback to a
+build from before #466 would put the plain stamp back in its replay of
+`db/sql/001`, and the same UPDATE run after that would date every one of those
+articles to the rollback, so it runs before the deploy, not during it. Views and
+votes between the copy and the old build going live are lost: run afterwards, it
+would overwrite what the old build had counted by then. Rolling forward
 again afterwards, `011` leaves the existing stats rows as they are, so the old
 code's counts from the rollback are lost unless copied the other way by hand.
 

@@ -10,16 +10,18 @@ import { isForeignKeyViolation } from '@/lib/db/errors';
  * On the article's own row every view rewrote the whole row, its stored
  * `search_vector` regenerated from the title and the body each time, and took
  * the row lock a console save waits on (PROJECT-STATE §6.51). Here a view
- * writes one narrow row that no edit writes or locks. An article's first view
- * inserts that row, and the insert's foreign-key check takes a KEY SHARE lock
- * on the article for the length of the statement, which a save waits on only
- * when it changes the slug or the locale (a key a foreign key could name), and
- * a delete always; every later view updates the stats row alone and leaves the
- * article's row untouched.
+ * writes one narrow row that no console edit writes or locks. An article's
+ * first view inserts that row, and the insert's foreign-key check takes a KEY
+ * SHARE lock on the article for the length of the statement, which a save
+ * waits on only when it changes the slug or the locale (a key a foreign key
+ * could name), and a delete always; every later view updates the stats row
+ * alone and leaves the article's row untouched.
  *
- * Every writer of the counters is in this module, so nothing writes the three
- * columns of the same names still on `kb_articles`, which the release after
- * this one drops (`plans/kb-article-stats.md`).
+ * Every write that counts is in this module — `db/sql/011` is the one-off
+ * copy — so nothing counts into the three columns of the same names still on
+ * `kb_articles`, which PR 2 of `plans/kb-article-stats.md` drops. An INSERT
+ * of an article still names them, with `default`, as drizzle names every
+ * column; the plan says what that costs the drop.
  */
 
 type Executor = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -92,7 +94,9 @@ export async function recordArticleView(articleId: string): Promise<void> {
  * One reader said the article helped, or did not.
  *
  * Takes the transaction its caller writes the `kb_article_feedback` row in, so
- * the counters can never disagree with the rows they summarise. The caller
+ * a vote's count and its feedback row are stored together or not at all. The
+ * counters are not a count of those rows: they also carry Freshdesk's totals,
+ * which a re-import replaces (`setArticleStats`). The caller
  * has read the article first, and the feedback row's own foreign key refuses
  * one gone since, so this inserts from the id rather than from a read.
  */

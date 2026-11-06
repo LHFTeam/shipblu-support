@@ -150,8 +150,8 @@ export async function listArticlesForAdmin(
 /**
  * Every column of an article but the three counters `kb_article_stats` took
  * over. They are still on the row until the release after this one drops them
- * (`plans/kb-article-stats.md`), and nothing writes them any more, so a read
- * that carried them would hand the editor numbers frozen at the move.
+ * (`plans/kb-article-stats.md`), and nothing counts into them any more, so a
+ * read that carried them would hand the editor numbers frozen at the move.
  */
 const {
   viewCount: _views,

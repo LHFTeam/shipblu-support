@@ -185,12 +185,13 @@ export const kbArticles = pgTable(
  * regenerated from the title and the body each time — and held the row lock a
  * console save waits on, and the date the console sorts by followed readers
  * until `touch_updated_at` was taught an exception for it (PROJECT-STATE
- * §6.51). Here a view rewrites one narrow row that no edit writes or locks.
+ * §6.51). Here a view rewrites one narrow row that no console edit writes or
+ * locks.
  *
- * Nothing creates a row when an article is written. A view or a vote creates
- * it if it is the first, and the Freshdesk import writes one for each article
- * it brings in, so an article nobody has opened or rated usually has none, and
- * every reader reads a missing row as zero (`lib/kb/stats.ts`). There is
+ * No console write creates a row. A view or a vote creates it if it is the
+ * first, and the Freshdesk import writes one for each article it brings in,
+ * zeros included, so an article nobody has opened or rated usually has none,
+ * and every reader reads a missing row as zero (`lib/kb/stats.ts`). There is
  * deliberately no `updated_at`, so the `touch_updated_at` loop in `db/sql/001`
  * attaches no trigger: this is a counter, not content, and a trigger here
  * would only add work to the hottest write the knowledge base has.

@@ -4722,14 +4722,16 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
     does not normalise it fails the build.
 
 51. ~~**`kb_articles.updated_at` is not an edit date — every page view moves
-    it.**~~ **Fixed in code by #466, and the counters moved off the row by the
-    first half of `plans/kb-article-stats.md`.** Both reach production with the
-    first deploy after `dev` is merged into `main`, which nobody has checked
-    yet: once it has deployed, record here that `pg_get_functiondef` of
-    `touch_updated_at` names `not_an_edit`, that every article with a count on
-    the old columns has a `kb_article_stats` row, and that one view left an
-    article's `xmin` and `updated_at` where they were (the plan has the
-    queries). The history below is why. _2026-09-03._
+    it.**~~ **Fixed by #466, which is in production: on 2026-11-06 at 15:52 UTC
+    `pg_get_functiondef` of `touch_updated_at` named `not_an_edit`.** The view
+    counts did not move between 15:14 and 15:53 that day, so that a view leaves
+    the date where it was is still to be seen there. The counters then moved off
+    the row with the first half of `plans/kb-article-stats.md`, which reaches
+    production on the first deploy after `dev` is next merged into `main`: once
+    it has, record here that every article with a count on the old columns has a
+    `kb_article_stats` row, and that one view left an article's `xmin` and
+    `updated_at` where they were (the plan has the queries). The history below
+    is why. _2026-09-03._
     `recordArticleView` increments `view_count` on the
     article row, and `touch_updated_at` fires on any update of a table with that
     column, so a read writes the timestamp. The article page renders it as
@@ -4778,7 +4780,7 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
     whole article — its `search_vector` regenerated each time, and the jsonb
     comparison reading the row twice more — and took the row lock a console
     save waits on. `view_count`, `helpful_count` and `unhelpful_count` now live
-    in `kb_article_stats`, one row per article that no edit touches
+    in `kb_article_stats`, one row per article that no console edit touches
     (`lib/kb/stats.ts`), and `db/sql/011_kb_article_stats_backfill.sql` copies
     what each article had (108 of 112 in production, 63,842 views). So "each
     view and vote is one" open write above no longer holds. The old columns,
