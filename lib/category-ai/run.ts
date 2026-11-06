@@ -382,7 +382,7 @@ export async function classifyMessageCategory(
     });
     await afterCategoryApplied(row.conversationId, decided.routing ?? null);
   } else if (decided.write?.outcome === 'unchanged') {
-    await afterCategoryConfirmed(row.conversationId, decided.routing ?? null);
+    await afterCategoryConfirmed(row.conversationId, messageId, decided.routing ?? null);
   }
 
   return { status: 'recorded', outcome: decided.outcome, predicted };
@@ -403,9 +403,9 @@ export async function classifyMessageCategory(
  *   `beginRouting` routes, nor on a decision in flight, which nothing written
  *   here re-arms. In shadow too, so the would-be decision is recorded when
  *   the live one would have been made.
- * - **Decided** — the SLA policy's look, on her answer for a category the
- *   window's end set aside, which chose no policy for it
- *   (`setAsideCategoryAgreed`). Her answer agreeing is the category becoming
+ * - **Decided** — the SLA policy's look, on her first answer for a category
+ *   the window's end set aside, which chose no policy for it, while nothing
+ *   has re-chosen the policy since (`setAsideCategoryAgreed`). Her answer agreeing is the category becoming
  *   hers, and owes the look a changed write would have had; otherwise an
  *   agreeing answer was treated worse than a disagreeing one. Nowhere else:
  *   the category had its look already, and a second one owed for nothing
@@ -416,6 +416,7 @@ export async function classifyMessageCategory(
  */
 async function afterCategoryConfirmed(
   conversationId: string,
+  messageId: string,
   routing: UndecidedRouting | 'deferred' | null,
 ): Promise<void> {
   if (routing === 'deferred') return;
@@ -425,7 +426,7 @@ async function afterCategoryConfirmed(
     }
     return;
   }
-  if (await setAsideCategoryAgreed(conversationId)) {
+  if (await setAsideCategoryAgreed(conversationId, messageId)) {
     await afterRoutingChanged(conversationId, { category: true, group: false });
   }
 }

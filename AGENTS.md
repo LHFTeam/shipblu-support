@@ -1967,9 +1967,12 @@ README says why it is a setting and not a rule. The rules:
   by moving or taking the ticket, which ends the hold as `manual`; while the
   ticket waits another writer's `on_update` pass meets a rule keyed
   on the replier's category as on any held ticket (no active rule is keyed on
-  the category, 2026-11-06); a hold the console's assignee case ended while
-  the words were still the replier's leaves his category on the policy chosen
-  before it, until a move or the next writer re-chooses it; and the decision's
+  the category, 2026-11-06); a hold a person or a rule ended without moving
+  the ticket — the console's assignee case, an agent's reply, an
+  `assign_agent` rule — while the words were still the replier's leaves his
+  category on the policy chosen before it, until a move or the next writer
+  re-chooses it (no active policy is keyed on the category either,
+  2026-11-06); and the decision's
   recorded probability is the last write's, the replier's when the customer's
   answer agreed with it.
 - **The creation pass is `on_create` rules, `applySlaOnCreate`, then
@@ -2016,12 +2019,13 @@ README says why it is a setting and not a rule. The rules:
   already carries writes nothing, but on a live `holding` row it routes the
   ticket all the same (`afterCategoryConfirmed`): the customer's root agreeing
   with what the replier's reply was read as is the one ticket it reaches. On
-  a ticket whose window's end set that reading aside, her answer gives the
-  policy its look (`setAsideCategoryAgreed`), as a write would
-  have — and nowhere else, since everywhere else the category had its look,
-  and a second owed for nothing takes up a priority her opening lowered; no
-  pass, since the customer's message already ran one with the category on
-  the ticket.
+  a ticket whose window's end set that reading aside, her first such answer
+  gives the policy its look (`setAsideCategoryAgreed`), as a write would
+  have, while nothing — a move, a category write, a re-selection — has
+  re-chosen the policy since: everywhere else the category had its look, or
+  is the cost above, and a second look owed for nothing takes up a priority
+  changed meanwhile; no pass, since the customer's message already ran one
+  with the category on the ticket.
 - **What a hold kept back is owed by state, not by one caller.** Whatever ends a
   live hold — the router, `settle_routing` whatever it decides but `not_open`,
   which assigns and sends nothing (`routeNow` answers `none` for it), a caller

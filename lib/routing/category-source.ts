@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import {
   CATEGORY_AI_LIVE_LABEL,
@@ -12,7 +12,7 @@ import {
 import { CATEGORY_AI_ACTOR } from '@/lib/category-ai/decide';
 import { canonicalUuid } from '@/lib/http/uuid';
 import { isCommentTicket } from '@/lib/tickets/channel-policy';
-import { writtenByAnother } from '@/lib/tickets/classifiable';
+import { writtenByAnother, writtenByAnotherSql } from '@/lib/tickets/classifiable';
 import { categoryStanding, type CategorySource } from './decide';
 
 type Executor = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -191,34 +191,52 @@ export async function jevCategoryOwed(conversationId: string): Promise<boolean> 
 
 /**
  * Whether a confident answer of the requester's, naming the category her
- * ticket already carries, is her word on a category the window's end set
- * aside. Such an answer writes nothing (`setConversationCategoryOn`, on an
- * unchanged value), and the set-aside chose no policy for the category
- * (`categoryStanding`): her answer makes the category hers, and is owed the
- * policy's look a write would have had (`afterCategoryConfirmed`).
+ * ticket already carries, is the first word of hers on a category the window's
+ * end set aside, with nothing having re-chosen the policy since. Such an answer
+ * writes nothing (`setConversationCategoryOn`, on an unchanged value), and the
+ * set-aside chose no policy for the category (`categoryStanding`): her answer
+ * makes the category hers, and is owed the policy's look a write would have had
+ * (`afterCategoryConfirmed`).
  *
- * Only there. Everywhere else the category already had its look — the
- * passer-by's own write relabelled a ticket that never routed, the router's
- * decision chose the policy, a shadow row's relabel did — and a second one
- * owed for nothing takes up whatever has moved since, a priority lowered by
- * her opening among it, as though the category had changed. So the ticket's
- * live decision is a `fallback` whose `routed` line names this very category
- * under `setAside`.
+ * Only while that look is still owed. Everywhere else the category already had
+ * its look, and a second one owed for nothing takes up whatever has moved
+ * since — a priority her opening lowered, or one a later message raised, which
+ * by rule re-chooses no policy (`onPriorityChanged`) — as though the category
+ * had changed. So:
  *
- * And so once: her confident answer settles the ticket, after which the live
- * job asks Jev about none of her messages (`after_settle`), and a category a
- * person or a rule writes since is theirs, which Jev never answers for
- * (`categoryOwned`). A hold the console's assignee case ended while the words
+ * - the ticket's live decision is a `fallback` whose `routed` line names this
+ *   very category under `setAside` — not a ticket that never routed, whose
+ *   passer-by's write relabelled it, nor a decision that routed on his
+ *   reading, nor a shadow row, each of which looked;
+ * - nothing has re-chosen the policy since that line: no move (a person's,
+ *   Hand to's or a rule's, each of which re-chooses it with the category on
+ *   the ticket and writes its `group_changed`), no category write, and no
+ *   `sla_recalculated`;
+ * - and no other answer of hers names the category, which would have given
+ *   the look already, or found it owed nothing — her later messages are
+ *   `after_settle` once one settles, but an earlier one answered late is
+ *   answered again (`ticketFacts`).
+ *
+ * A hold a person or a rule ended without moving the ticket — the console's
+ * assignee case, an agent's reply, an `assign_agent` rule — while the words
  * were still the replier's is not reached: its category keeps the policy
  * chosen before it, until a move or the next writer re-chooses it (AGENTS.md,
  * the costs).
  */
-export async function setAsideCategoryAgreed(conversationId: string): Promise<boolean> {
+export async function setAsideCategoryAgreed(
+  conversationId: string,
+  messageId: string,
+): Promise<boolean> {
   const [aside] = await db
-    .select({ id: conversationEvents.id })
+    .select({
+      id: conversationEvents.id,
+      categoryKey: ticketCategories.key,
+      requesterContactId: conversations.requesterContactId,
+    })
     .from(conversationEvents)
     .innerJoin(conversations, eq(conversations.id, conversationEvents.conversationId))
     .innerJoin(routingDecisions, eq(routingDecisions.conversationId, conversations.id))
+    .innerJoin(ticketCategories, eq(ticketCategories.id, conversations.categoryId))
     .where(
       and(
         eq(conversationEvents.conversationId, conversationId),
@@ -230,7 +248,40 @@ export async function setAsideCategoryAgreed(conversationId: string): Promise<bo
       ),
     )
     .limit(1);
-  return aside !== undefined;
+  if (!aside) return false;
+
+  const [since] = await db
+    .select({ id: conversationEvents.id })
+    .from(conversationEvents)
+    .where(
+      and(
+        eq(conversationEvents.conversationId, conversationId),
+        inArray(conversationEvents.type, ['group_changed', 'category_changed', 'sla_recalculated']),
+        sql`${conversationEvents.createdAt} > (select decided.created_at from conversation_events decided where decided.id = ${aside.id})`,
+      ),
+    )
+    .limit(1);
+  if (since) return false;
+
+  const [another] = await db
+    .select({ id: aiCategoryRuns.id })
+    .from(aiCategoryRuns)
+    .innerJoin(messages, eq(messages.id, aiCategoryRuns.messageId))
+    .where(
+      and(
+        eq(aiCategoryRuns.conversationId, conversationId),
+        eq(aiCategoryRuns.runLabel, CATEGORY_AI_LIVE_LABEL),
+        eq(aiCategoryRuns.outcome, 'applied'),
+        eq(aiCategoryRuns.predictedKey, aside.categoryKey),
+        ne(aiCategoryRuns.messageId, messageId),
+        // Hers: with no requester, nobody's message is somebody else's.
+        aside.requesterContactId
+          ? sql`not ${writtenByAnotherSql(messages.authorContactId, aside.requesterContactId)}`
+          : undefined,
+      ),
+    )
+    .limit(1);
+  return !another;
 }
 
 /**

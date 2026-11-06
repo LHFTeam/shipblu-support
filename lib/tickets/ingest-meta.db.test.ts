@@ -24,6 +24,7 @@ import { forgetCategoryAiSettings } from '@/lib/category-ai/settings';
 import { resetEnvCache } from '@/lib/env';
 import { classifyMessagePriority } from '@/lib/priority-ai/run';
 import { settleRouting } from '@/lib/routing/apply';
+import { handToRouteGroup } from '@/lib/routing/hand-to';
 import { stubFetch } from '@/lib/testing/fetch';
 import type {
   NormalisedComment,
@@ -1466,6 +1467,112 @@ describe('a reply-first comment thread, through Jev and the router', () => {
 
     expect(await ticketOf(opened.conversationId)).toMatchObject({ priority: 'low' });
     expect(await policyOn(opened.conversationId)).toBe(salesPolicy);
+  });
+
+  // Set aside, then handed to Sales: the move chose the Sales policy with the
+  // category on the ticket. Her answer raising the priority and agreeing on
+  // the category is no second look, which would take the raise up as though
+  // the category had changed.
+  it('gives a set-aside category no look once a move has chosen its policy', async () => {
+    const t = await page();
+    await policy('Urgent', { field: 'priority', op: 'eq', value: 'urgent' }, 0);
+    const salesPolicy = await policy(
+      'Sales',
+      { field: 'category.id', op: 'eq', value: await categoryNamed('sales') },
+      1,
+    );
+    const opened = await ingestMetaComment(
+      comment({
+        commentId: 'post-1_c2',
+        parentCommentId: 'post-1_c1',
+        from: BOB,
+        fromName: 'Bob',
+        text: 'How much to ship to Alexandria?',
+        createdAt: LATER,
+      }),
+    );
+    jev('sales', 'high');
+    await judged(opened.messageId);
+    await ingestMetaComment(comment({ text: '' }));
+    expect(await settleRouting(opened.conversationId)).toBe('decided');
+    expect(await ticketOf(opened.conversationId)).toMatchObject({
+      groupId: t.care.group,
+      assigneeAgentId: t.care.agent,
+    });
+    const handed = await handToRouteGroup(
+      opened.conversationId,
+      { agentId: t.care.agent },
+      { expectedGroupId: t.sales.group, expectedAssigneeId: t.care.agent },
+    );
+    expect(handed).toMatchObject({ ok: true });
+    expect(await policyOn(opened.conversationId)).toBe(salesPolicy);
+
+    const hers = await ingestMetaComment(
+      comment({
+        commentId: 'post-1_c3',
+        parentCommentId: 'post-1_c1',
+        text: 'Please, today: 30 parcels are waiting',
+        createdAt: new Date(LATER.getTime() + 60_000),
+      }),
+    );
+    jev('sales', 'urgent');
+    expect(await judged(hers.messageId)).toMatchObject({
+      priority: { outcome: 'applied' },
+      category: { outcome: 'applied' },
+    });
+    expect(await ticketOf(opened.conversationId)).toMatchObject({ priority: 'urgent' });
+    expect(await policyOn(opened.conversationId)).toBe(salesPolicy);
+  });
+
+  // Two of her comments read as sales, judged out of order: the later one's
+  // answer gave the look, which found no policy, and the earlier one,
+  // answered late, is answered again — no second look for it, which would
+  // take up the priority it raised.
+  it('gives a set-aside category its look on her first answer only, whichever is judged first', async () => {
+    await page();
+    await policy('Urgent', { field: 'priority', op: 'eq', value: 'urgent' }, 0);
+    const opened = await ingestMetaComment(
+      comment({
+        commentId: 'post-1_c2',
+        parentCommentId: 'post-1_c1',
+        from: BOB,
+        fromName: 'Bob',
+        text: 'How much to ship to Alexandria?',
+        createdAt: LATER,
+      }),
+    );
+    jev('sales', 'high');
+    await judged(opened.messageId);
+    await ingestMetaComment(comment({ text: '' }));
+    expect(await settleRouting(opened.conversationId)).toBe('decided');
+
+    const earlier = await ingestMetaComment(
+      comment({
+        commentId: 'post-1_c3',
+        parentCommentId: 'post-1_c1',
+        text: 'Please, today: 30 parcels are waiting',
+        createdAt: new Date(LATER.getTime() + 60_000),
+      }),
+    );
+    const later = await ingestMetaComment(
+      comment({
+        commentId: 'post-1_c4',
+        parentCommentId: 'post-1_c1',
+        text: 'How much to ship 30 parcels a week?',
+        createdAt: new Date(LATER.getTime() + 120_000),
+      }),
+    );
+    jev('sales', 'medium');
+    expect(await judged(later.messageId)).toMatchObject({ category: { outcome: 'applied' } });
+    expect(await policyOn(opened.conversationId)).toBeNull();
+
+    jev('sales', 'urgent');
+    expect(await judged(earlier.messageId)).toMatchObject({
+      priority: { outcome: 'applied' },
+      category: { outcome: 'applied' },
+    });
+    expect(await ticketOf(opened.conversationId)).toMatchObject({ priority: 'urgent' });
+    expect(await policyOn(opened.conversationId)).toBeNull();
   });
 
   it('routes on nothing of Bob’s when the answers about the customer’s comment are unsure', async () => {
