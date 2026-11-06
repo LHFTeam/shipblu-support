@@ -1368,6 +1368,106 @@ describe('a reply-first comment thread, through Jev and the router', () => {
     expect(await policyOf()).toBe(salesPolicy!.id);
   });
 
+  /** A policy for every priority, under `conditions`, at `position`. */
+  async function policy(name: string, conditions: unknown, position: number) {
+    const round = { firstResponseMins: 30, nextResponseMins: 30, resolutionMins: 240 };
+    const [row] = await db
+      .insert(slaPolicies)
+      .values({
+        name,
+        hoursSource: 'round_the_clock',
+        targets: { low: round, medium: round, high: round, urgent: round },
+        conditions,
+        position,
+      })
+      .returning({ id: slaPolicies.id });
+    return row!.id;
+  }
+
+  async function categoryNamed(key: string) {
+    const [row] = await db
+      .select({ id: ticketCategories.id })
+      .from(ticketCategories)
+      .where(eq(ticketCategories.key, key));
+    return row!.id;
+  }
+
+  async function policyOn(conversationId: string) {
+    const [row] = await db
+      .select({ slaPolicyId: conversations.slaPolicyId })
+      .from(conversations)
+      .where(eq(conversations.id, conversationId));
+    return row!.slaPolicyId;
+  }
+
+  // The Page not routing: Bob's reply was filed and its write chose the Sales
+  // policy. Her comment, read the same, lowers the priority as her opening
+  // and writes no category: a second look then would take up the lowered
+  // priority as though the category had changed, and move the ticket's
+  // clocks off the policy its category chose.
+  it('gives a category that already had its look no second one when her comment agrees', async () => {
+    await page();
+    await db.update(channels).set({ routingMode: 'default_group' });
+    await policy('Low priority', { field: 'priority', op: 'eq', value: 'low' }, 0);
+    const salesPolicy = await policy(
+      'Sales',
+      { field: 'category.id', op: 'eq', value: await categoryNamed('sales') },
+      1,
+    );
+    const opened = await ingestMetaComment(
+      comment({
+        commentId: 'post-1_c2',
+        parentCommentId: 'post-1_c1',
+        from: BOB,
+        fromName: 'Bob',
+        text: 'How much to ship to Alexandria?',
+        createdAt: LATER,
+      }),
+    );
+    jev('sales', 'urgent');
+    await judged(opened.messageId);
+    expect(await policyOn(opened.conversationId)).toBe(salesPolicy);
+
+    const root = await ingestMetaComment(comment({ text: 'How much to ship 30 parcels a week?' }));
+    jev('sales', 'low');
+    expect(await judged(root.messageId)).toMatchObject({
+      priority: { outcome: 'applied' },
+      category: { outcome: 'applied' },
+    });
+
+    expect(await ticketOf(opened.conversationId)).toMatchObject({ priority: 'low' });
+    expect(await policyOn(opened.conversationId)).toBe(salesPolicy);
+  });
+
+  // No root came in the window, so its end routed on Bob's reading as the
+  // customer's and chose the Sales policy. Her comment then lowers the
+  // priority as her opening and agrees on the category: no second look,
+  // which would take the lowered priority up as though the category had
+  // changed.
+  it('gives a category the window’s end routed on no second look when her comment agrees', async () => {
+    await page();
+    await policy('Low priority', { field: 'priority', op: 'eq', value: 'low' }, 0);
+    const salesPolicy = await policy(
+      'Sales',
+      { field: 'category.id', op: 'eq', value: await categoryNamed('sales') },
+      1,
+    );
+    const opened = await bobFirst();
+    expect(await settleRouting(opened.conversationId)).toBe('decided');
+    expect(await routing(opened.conversationId)).toMatchObject({ outcome: 'category' });
+    expect(await policyOn(opened.conversationId)).toBe(salesPolicy);
+
+    const root = await ingestMetaComment(comment({ text: 'How much to ship 30 parcels a week?' }));
+    jev('sales', 'low');
+    expect(await judged(root.messageId)).toMatchObject({
+      priority: { outcome: 'applied' },
+      category: { outcome: 'applied' },
+    });
+
+    expect(await ticketOf(opened.conversationId)).toMatchObject({ priority: 'low' });
+    expect(await policyOn(opened.conversationId)).toBe(salesPolicy);
+  });
+
   it('routes on nothing of Bob’s when the answers about the customer’s comment are unsure', async () => {
     const t = await page();
     const opened = await bobFirst();

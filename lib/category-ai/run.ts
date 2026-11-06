@@ -15,7 +15,7 @@ import { errorMessage } from '@/lib/errors';
 import { canonicalUuid } from '@/lib/http/uuid';
 import { logger } from '@/lib/log';
 import { routeNow } from '@/lib/routing/apply';
-import { categoryReadOffAnother } from '@/lib/routing/category-source';
+import { setAsideCategoryAgreed } from '@/lib/routing/category-source';
 import {
   deferToRouter,
   routerDecidedOn,
@@ -403,15 +403,16 @@ export async function classifyMessageCategory(
  *   `beginRouting` routes, nor on a decision in flight, which nothing written
  *   here re-arms. In shadow too, so the would-be decision is recorded when
  *   the live one would have been made.
- * - **Decided, or never routed** — the SLA policy's look, when the category
- *   is still the passer-by's reading (`categoryReadOffAnother`): set aside at
- *   the window's end, which chose no policy for it, or past a hold a person
- *   ended while the words were still his. Her answer agreeing is the
- *   category becoming hers, and owes the look a changed write would have had;
- *   otherwise an agreeing answer was treated worse than a disagreeing one.
- *   No pass: the rules keyed on the category already ran on her message's
- *   own update pass, with the category on the ticket (`afterInboundMessage`).
- *   A look that finds the same policy changes nothing.
+ * - **Decided** — the SLA policy's look, on her answer for a category the
+ *   window's end set aside, which chose no policy for it
+ *   (`setAsideCategoryAgreed`). Her answer agreeing is the category becoming
+ *   hers, and owes the look a changed write would have had; otherwise an
+ *   agreeing answer was treated worse than a disagreeing one. Nowhere else:
+ *   the category had its look already, and a second one owed for nothing
+ *   takes up a priority her opening lowered as though the category had
+ *   changed. No pass: the rules keyed on the category already ran on her
+ *   message's own update pass, with the category on the ticket
+ *   (`afterInboundMessage`).
  */
 async function afterCategoryConfirmed(
   conversationId: string,
@@ -424,7 +425,7 @@ async function afterCategoryConfirmed(
     }
     return;
   }
-  if (await categoryReadOffAnother(conversationId)) {
+  if (await setAsideCategoryAgreed(conversationId)) {
     await afterRoutingChanged(conversationId, { category: true, group: false });
   }
 }

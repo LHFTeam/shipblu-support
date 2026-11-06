@@ -155,6 +155,13 @@ export type GradingEvent = {
   messageId: string | null;
   /** When that message arrived, which a write keeps after the message is deleted. */
   messageCreatedAt: Date | null;
+  /**
+   * The message a Jev write answered was written by somebody other than the
+   * ticket's requester now — a passer-by's reply, read before the customer's
+   * comment took the ticket over. Read off the message, not off this view's
+   * runs, since his run can sit in another view of the label.
+   */
+  onAnothersMessage?: boolean;
 };
 
 /** What the sample needs to know of a ticket. */
@@ -202,10 +209,11 @@ export type GradingInput = {
 
 /**
  * Why a ticket with rows was never judged on an answer. `not_the_requesters`:
- * every message Jev judged was somebody else's than the requester's, and the
- * requester has no row of her own but one his answer settled — a passer-by's
- * reply that opened a comment thread before the customer's comment took it
- * over, the comment itself giving Jev nothing to ask about. The live job no longer counts those answers
+ * every message Jev judged was somebody else's than the requester's — a
+ * passer-by's reply that opened a comment thread before the customer's comment
+ * took it over — and the comment itself either gave Jev nothing to ask about,
+ * or was passed over because his answer had settled the ticket (rows from
+ * before the live job stopped counting his). The live job no longer counts those answers
  * as the ticket's (`decide.ts`), so the ticket has none of its own, and
  * grading it would count as a miss a ticket Jev was never asked about. Where
  * the customer's comment has a row of its own, that row says why: owned,
@@ -306,16 +314,10 @@ export function ticketVerdicts(
     const agreedWith = new Set(
       own.filter((run) => run.outcome === 'applied').map((run) => run.predictedKey),
     );
-    const theirsAnswered = new Set(
-      ticketRuns.filter((run) => run.byNonRequester).map((run) => run.messageId),
-    );
     const answers = (write: GradingEvent) =>
       (write.messageId !== null && answered.has(write.messageId)) ||
       (write.messageCreatedAt !== null && answeredDeleted.has(write.messageCreatedAt.getTime())) ||
-      (write.messageId !== null &&
-        theirsAnswered.has(write.messageId) &&
-        write.key !== null &&
-        agreedWith.has(write.key));
+      (write.onAnothersMessage === true && write.key !== null && agreedWith.has(write.key));
     const lastJev =
       jev.filter((write) => write.runLabel === runLabel && answers(write)).at(-1) ?? null;
     const changedAfter = lastJev

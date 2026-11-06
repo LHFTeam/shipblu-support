@@ -190,38 +190,47 @@ export async function jevCategoryOwed(conversationId: string): Promise<boolean> 
 }
 
 /**
- * Whether the category a comment ticket carries is Jev's reading of a message
- * somebody other than the requester wrote: a passer-by's reply that opened the
- * thread, read before the customer's comment took the ticket over
- * (`adoptRootAuthor`). Asked of a confident answer of the requester's naming
- * that same category, which writes nothing (`setConversationCategoryOn`, on an
- * unchanged value) and so would otherwise leave the ticket as the passer-by's
- * reading left it: set aside at the window's end with no policy, or past a
- * hold a person ended while the words were still his. The answer makes the
- * category hers, and is owed the policy's look a write would have had
- * (`afterCategoryConfirmed`).
+ * Whether a confident answer of the requester's, naming the category her
+ * ticket already carries, is her word on a category the window's end set
+ * aside. Such an answer writes nothing (`setConversationCategoryOn`, on an
+ * unchanged value), and the set-aside chose no policy for the category
+ * (`categoryStanding`): her answer makes the category hers, and is owed the
+ * policy's look a write would have had (`afterCategoryConfirmed`).
  *
- * Off a comment thread every reading of Jev's is the requester's, so false.
+ * Only there. Everywhere else the category already had its look — the
+ * passer-by's own write relabelled a ticket that never routed, the router's
+ * decision chose the policy, a shadow row's relabel did — and a second one
+ * owed for nothing takes up whatever has moved since, a priority lowered by
+ * her opening among it, as though the category had changed. So the ticket's
+ * live decision is a `fallback` whose `routed` line names this very category
+ * under `setAside`.
+ *
+ * And so once: her confident answer settles the ticket, after which the live
+ * job asks Jev about none of her messages (`after_settle`), and a category a
+ * person or a rule writes since is theirs, which Jev never answers for
+ * (`categoryOwned`). A hold the console's assignee case ended while the words
+ * were still the replier's is not reached: its category keeps the policy
+ * chosen before it, until a move or the next writer re-chooses it (AGENTS.md,
+ * the costs).
  */
-export async function categoryReadOffAnother(conversationId: string): Promise<boolean> {
-  const [ticket] = await db
-    .select({
-      categoryId: conversations.categoryId,
-      requesterContactId: conversations.requesterContactId,
-      channel: conversations.channel,
-      externalId: conversations.externalId,
-    })
-    .from(conversations)
-    .where(eq(conversations.id, conversationId));
-  if (!ticket?.categoryId || !isCommentTicket(ticket.channel, ticket.externalId)) return false;
-
-  const last = await lastCategoryWrite(db, { id: conversationId, categoryId: ticket.categoryId });
-  if (!last?.byJev || !last.messageId) return false;
-  const [read] = await db
-    .select({ authorContactId: messages.authorContactId })
-    .from(messages)
-    .where(eq(messages.id, last.messageId));
-  return writtenByAnother(read?.authorContactId, ticket.requesterContactId);
+export async function setAsideCategoryAgreed(conversationId: string): Promise<boolean> {
+  const [aside] = await db
+    .select({ id: conversationEvents.id })
+    .from(conversationEvents)
+    .innerJoin(conversations, eq(conversations.id, conversationEvents.conversationId))
+    .innerJoin(routingDecisions, eq(routingDecisions.conversationId, conversations.id))
+    .where(
+      and(
+        eq(conversationEvents.conversationId, conversationId),
+        eq(conversationEvents.type, 'routed'),
+        eq(routingDecisions.shadow, false),
+        eq(routingDecisions.stage, 'decided'),
+        eq(routingDecisions.outcome, 'fallback'),
+        sql`${conversationEvents.data}->'setAside'->>'categoryId' = ${conversations.categoryId}::text`,
+      ),
+    )
+    .limit(1);
+  return aside !== undefined;
 }
 
 /**

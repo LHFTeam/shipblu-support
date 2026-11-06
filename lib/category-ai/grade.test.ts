@@ -632,7 +632,10 @@ describe('a run on a message the requester did not write', () => {
   // filing of hers overruled, so in no figure the footer says it is out of.
   it('leaves a filing read off his words out of Filed by Jev', () => {
     const runs = [run('t', 0, 'applied', 'sales', 0.9, theirs)];
-    const events = [jevWrite('t', 0, 'sales'), person('t', 3, 'customer_support')];
+    const events = [
+      { ...jevWrite('t', 0, 'sales'), onAnothersMessage: true },
+      person('t', 3, 'customer_support'),
+    ];
     expect(verdict(runs, events).filed).toBeNull();
     expect(grade(input(runs, events)).filed).toEqual([]);
     // Hers still counts, with his ahead of it on the same ticket.
@@ -648,18 +651,23 @@ describe('a run on a message the requester did not write', () => {
   // the filing the ticket stands on, and the router routed on it, so a
   // supervisor moving it on overruled Jev on her words.
   it('counts his filing when her own answer agreed with it', () => {
-    const runs = [
-      run('t', 0, 'applied', 'sales', 0.9, theirs),
-      run('t', 1, 'applied', 'sales', 0.9),
+    const his = run('t', 0, 'applied', 'sales', 0.9, theirs);
+    const runs = [his, run('t', 1, 'applied', 'sales', 0.9)];
+    const events = [
+      { ...jevWrite('t', 0, 'sales'), onAnothersMessage: true },
+      person('t', 3, 'customer_support'),
     ];
-    const events = [jevWrite('t', 0, 'sales'), person('t', 3, 'customer_support')];
-    expect(verdict(runs, events).filed).toEqual({
-      key: 'sales',
-      changedTo: { key: 'customer_support' },
-    });
-    // Not when she was read otherwise and nothing of hers was written.
-    const unsure = [runs[0]!, run('t', 1, 'below_threshold', 'merchant_support', 0.4)];
+    const overruled = { key: 'sales', changedTo: { key: 'customer_support' } };
+    expect(verdict(runs, events).filed).toEqual(overruled);
+    // His run in another view of the label — the question edited between his
+    // reply and her comment: the write still names his message.
+    expect(verdict(runs.slice(1), events).filed).toEqual(overruled);
+    // Not when she was only unsure, though of the same category, nor when
+    // she was read as another.
+    const unsure = [his, run('t', 1, 'below_threshold', 'sales', 0.4)];
     expect(verdict(unsure, events).filed).toBeNull();
+    const another = [his, run('t', 1, 'below_threshold', 'merchant_support', 0.4)];
+    expect(verdict(another, events).filed).toBeNull();
   });
 
   it('is passed over by the threshold sweep', () => {
