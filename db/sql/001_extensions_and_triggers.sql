@@ -44,24 +44,29 @@ CREATE EXTENSION IF NOT EXISTS unaccent;
 -- after it. A missing index is still built as before, under SHARE on its table
 -- until the file commits.
 --
--- `IF NOT EXISTS` stays inside the statement the guard runs. Two replays at
--- once can both find the index missing, and the second must then skip it, not
--- fail. And the `db-sql` repo rule refuses a CREATE INDEX without it, string or
--- not. Each index is named once, in the list below, and the guard and the
--- statement are both built from that one name, so they cannot drift apart. A
--- guard asking for a name the statement never creates would build nothing and
--- read as success, and a statement creating a name the guard never asks for
--- would take its lock on every replay again. `db/sql/replay-locks.db.test.ts`
--- replays the file behind a writer on every table in the schema, and replays it
--- again with the guard taken out, to show that the writer is what the guard
--- avoids.
+-- `IF NOT EXISTS` stays inside the statement the guard runs. The `db-sql` repo
+-- rule refuses a CREATE INDEX without it, string or not. It also skips an index
+-- another replay committed after this one's guard looked. It does not make two
+-- replays whose transactions overlap safe. Neither sees the other's uncommitted
+-- index, and SHARE does not conflict with SHARE, so both build it. The second
+-- then fails on the catalog's unique name (23505) once the first commits, or on
+-- the lock timeout. It failed the same way before the guard, and nothing here
+-- relies on it: only the web service's preDeploy runs `db:migrate`.
+--
+-- Each index is named once, in the list below, and the guard and the statement
+-- are both built from that one name, so they cannot drift apart. A guard asking
+-- for a name the statement never creates would build nothing and read as
+-- success. A statement creating a name the guard never asks for would take its
+-- lock on every replay again. `db/sql/replay-locks.db.test.ts` replays every
+-- file behind a writer and a vacuum on every table in the schema. It then
+-- replays this one with the guard taken out, to show that the writer is what
+-- the guard avoids.
 --
 -- Do NOT reach for CREATE INDEX CONCURRENTLY here. db/migrate.ts sends each file
 -- as one sql.unsafe(contents), which wraps it in an implicit transaction, and
 -- CONCURRENTLY cannot run inside one. The shipments indexes were built on tables
--- that were empty at first deploy, so the blocking build cost nothing. A new
--- index on a table the size of `messages` needs its own migration, not this
--- file: its first build would hold the table's writes for as long as it runs.
+-- that were empty at first deploy, so the blocking build cost nothing; an index
+-- on a table the size of `messages` needs its own migration, not this file.
 -- --------------------------------------------------------------------------
 DO $$
 DECLARE

@@ -42,13 +42,21 @@
 -- thresholds below decide it on absolute churn instead, which is the thing that
 -- is actually large here.
 --
--- Each option is written once, as Postgres stores it: `reloptions` holds
--- `name=value` text exactly as the SET was given it. Both the comparison and
--- the ALTER are built from that one list, so changing a value here cannot
--- leave the guard comparing against the old one. A guard written out
--- separately would find the old value still stored and never apply the new
--- one. Options set on `jobs` by hand, and not named here, are left alone, as
--- the plain SET left them.
+-- Each option is written once, as `name=value` text in the form Postgres stores
+-- it in `reloptions`. That is the parsed value, not the text as typed. A
+-- number keeps its spelling (`0.02` stays `0.02`, `.02` stays `.02`). A quoted
+-- value loses its quotes, a keyword is lowercased (`TRUE` is stored as
+-- `true`), and a unary `+` is dropped. So write each entry as an unquoted
+-- lowercase word or an unsigned number. Written any other way, the ALTER still
+-- sets it, but the comparison never matches, the ALTER runs on every replay,
+-- and the first case of `db/sql/replay-locks.db.test.ts` names the lock that
+-- brings back.
+--
+-- Both the comparison and the ALTER are built from that one list, so changing
+-- a value here cannot leave the guard comparing against the old one. A guard
+-- written out separately would find the old value still stored and never
+-- apply the new one. Options set on `jobs` by hand, and not named here, are
+-- left alone, as the plain SET left them.
 DO $$
 DECLARE
   wanted constant text[] := ARRAY[

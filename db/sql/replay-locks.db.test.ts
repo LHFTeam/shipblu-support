@@ -21,12 +21,20 @@ import { withCleanDatabase } from '@/lib/testing/db';
  * So the rule: in the steady state no file takes a table lock stronger than
  * ROW EXCLUSIVE, the lock every INSERT, UPDATE and DELETE takes. Reads, writes
  * and vacuums never hold one off, and nothing a deploy is likely to meet can
- * hold off one of them. The first case checks every file, and its failure names
- * the file, the table and the mode. The others replay a file behind a session
- * standing in for what it used to wait on, as the deploy would meet it. Then
- * they take the file's guard out and show the same replay failing, so the
- * stand-in is known to be one the guard avoids, and not one nothing waits on.
- * Last, the guards still do their job when there is something to do.
+ * hold off one of them. It is checked two ways, over every file:
+ *
+ * - **By the locks a replay holds**, read from `pg_locks` before it commits,
+ *   so a failure names the file, the table and the mode.
+ * - **By contention.** Every file is replayed behind a writer and a vacuum on
+ *   every table, which together conflict with every mode stronger than ROW
+ *   EXCLUSIVE. This catches what the first misses. A lock taken inside a
+ *   `BEGIN ... EXCEPTION` block whose statement then failed is released with
+ *   its subtransaction, before the snapshot, but it waited all the same.
+ *
+ * Then each guard is taken out and the same replay fails behind the one
+ * stand-in its file used to wait on, then runs once that stand-in has gone.
+ * So the stand-in is known to be one the guard avoids, and not one nothing
+ * waits on. Last, the guards still do their job when there is something to do.
  *
  * The stand-ins take their lock with `LOCK TABLE`, in the mode a writer or a
  * vacuum holds until it ends, because a table lock conflicts by mode alone.
@@ -79,11 +87,11 @@ afterAll(async () => {
  * transaction, on a session whose `lock_timeout` is set. Answers the error,
  * or null.
  */
-async function replay(text: string): Promise<{ code?: string } | null> {
+async function replay(text: string): Promise<{ code?: string; message?: string } | null> {
   await replayer.unsafe(`SET lock_timeout = '${LOCK_TIMEOUT}'`);
   return replayer.unsafe(text).then(
     () => null,
-    (error: unknown) => error as { code?: string },
+    (error: unknown) => error as { code?: string; message?: string },
   );
 }
 
@@ -109,16 +117,25 @@ async function whileHolding<T>(statement: string, run: () => Promise<T>): Promis
   }
 }
 
-/** An open writer on every table in the schema, which is every table any file indexes. */
-async function everyTableWritten(): Promise<string> {
+/** The statements taking each of `modes` on every table in the schema. */
+async function everyTable(...modes: string[]): Promise<string> {
   const tables = await holder<{ name: string }[]>`
     select format('%I.%I', schemaname, tablename) as name
     from pg_tables where schemaname = 'public'`;
-  return `LOCK TABLE ${tables.map((t) => t.name).join(', ')} IN ROW EXCLUSIVE MODE`;
+  const names = tables.map((t) => t.name).join(', ');
+  return modes.map((mode) => `LOCK TABLE ${names} IN ${mode} MODE;`).join('\n');
 }
 
-/** What a vacuum or an analyze of `jobs` holds, and a `REINDEX CONCURRENTLY` of it. */
-const JOBS_VACUUMED = 'LOCK TABLE public.jobs IN SHARE UPDATE EXCLUSIVE MODE';
+/** What an open INSERT, UPDATE or DELETE holds until it commits. */
+const WRITER = 'ROW EXCLUSIVE';
+
+/**
+ * What a vacuum or an analyze holds, and a `REINDEX CONCURRENTLY`. One session
+ * can hold it beside `WRITER`, since the two do not conflict.
+ */
+const VACUUM = 'SHARE UPDATE EXCLUSIVE';
+
+const JOBS_VACUUMED = `LOCK TABLE public.jobs IN ${VACUUM} MODE`;
 
 describe('a replay of db/sql with nothing to do', () => {
   it('takes no table lock stronger than a write takes, in any file', async () => {
@@ -148,18 +165,23 @@ describe('a replay of db/sql with nothing to do', () => {
     expect(taken).toEqual([]);
   });
 
-  it('runs 001 through behind an open writer on every table it indexes', async () => {
-    const error = await whileHolding(await everyTableWritten(), () =>
-      replay(EXTENSIONS_AND_TRIGGERS),
-    );
+  it('runs every file through behind an open writer and a vacuum on every table', async () => {
+    const failed = await whileHolding(await everyTable(WRITER, VACUUM), async () => {
+      const failures: string[] = [];
+      for (const file of FILES) {
+        const error = await replay(read(file));
+        if (error) failures.push(`${file}: ${error.code} ${error.message}`);
+      }
+      return failures;
+    });
 
-    expect(error).toBeNull();
+    expect(failed).toEqual([]);
   });
 
-  it("fails behind the same writer with 001's index guard taken out, and only then", async () => {
+  it("fails behind a writer with 001's index guard taken out, and only then", async () => {
     const before = unguarded(EXTENSIONS_AND_TRIGGERS, INDEX_GUARD);
 
-    const error = await whileHolding(await everyTableWritten(), () => replay(before));
+    const error = await whileHolding(await everyTable(WRITER), () => replay(before));
     // 55P03 is lock_not_available: the replay waited on the writer, and it is
     // the writer that `db/migrate.ts` reports as the reason.
     expect(error?.code).toBe('55P03');
@@ -169,12 +191,13 @@ describe('a replay of db/sql with nothing to do', () => {
     expect(await replay(before)).toBeNull();
   });
 
-  it('runs 005 through behind a vacuum of jobs, and fails behind it with the guard taken out', async () => {
-    expect(await whileHolding(JOBS_VACUUMED, () => replay(STORAGE_PARAMETERS))).toBeNull();
-
+  it("fails behind a vacuum of jobs with 005's options guard taken out, and only then", async () => {
     const before = unguarded(STORAGE_PARAMETERS, OPTIONS_GUARD);
+
     const error = await whileHolding(JOBS_VACUUMED, () => replay(before));
     expect(error?.code).toBe('55P03');
+
+    expect(await replay(before)).toBeNull();
   });
 });
 

@@ -7622,12 +7622,17 @@ dryRun=true`, then without, gives those two theirs back from their
       the statement are built from the one name. A guard asking for a name the
       statement never creates would build nothing and read as success, and the
       reverse would take the lock on every replay again. `IF NOT EXISTS` stays
-      in the statement for two replays running at once. The `db-sql` repo rule
-      also insists on it: it strips only comments, so it reads the string
-      inside `EXECUTE` as a statement. The block uses no `CONCURRENTLY`, which
-      `db/sql` cannot run. A missing index is still built as before, under
-      SHARE until the file commits, which is why a new index on a large table
-      belongs in a migration of its own.
+      in the statement because the `db-sql` repo rule insists on it. The rule
+      strips only comments, so it reads the string inside `EXECUTE` as a
+      statement. It also skips an index another replay committed after this
+      one's guard looked. It does not make two overlapping replays safe, and
+      never did. Neither sees the other's uncommitted index, and SHARE does not
+      conflict with SHARE, so both build it. The second then fails on
+      `pg_class`'s unique name (23505) once the first commits, or on the lock
+      timeout. Only the web service's preDeploy runs `db:migrate`, so that
+      takes two overlapping deploys or a hand-run migrate. The block uses no
+      `CONCURRENTLY`, which `db/sql` cannot run. A missing index is still built
+      as before, under SHARE until the file commits.
 
       **The same audit found one more.** `005_storage_parameters.sql`'s
       `ALTER TABLE jobs SET (...)` took SHARE UPDATE EXCLUSIVE on `jobs` on
@@ -7639,9 +7644,16 @@ dryRun=true`, then without, gives those two theirs back from their
       never cancelled, and on the hand-run reindex the file itself recommends.
       It now compares `pg_class.reloptions` with the four options first. That
       comparison takes no lock, and the ALTER runs only when one differs. The
-      comparison and the ALTER are built from one list, because `reloptions`
-      stores `name=value` exactly as the SET was given it. Written out twice,
-      a changed value would find the old one stored and never be applied.
+      comparison and the ALTER are built from one list, so a changed value
+      cannot leave the guard comparing against the old one. Written out twice,
+      the new value would find the old one stored and never be applied. Each
+      entry must be spelled the way `reloptions` stores it, which is the parsed
+      value, not the text as typed. A number keeps its spelling (`.02` stays
+      `.02`), but quotes are stripped, a keyword is lowercased (`TRUE` becomes
+      `true`) and a unary `+` is dropped. So each entry is an unquoted
+      lowercase word or an unsigned number. Spelled any other way, the
+      comparison never matches and the ALTER runs on every replay again, which
+      the test below names.
 
       Nothing else in `db/sql` takes a lock in the steady state stronger than
       ROW EXCLUSIVE, the lock every write takes. Measured by replaying each
@@ -7649,25 +7661,35 @@ dryRun=true`, then without, gives those two theirs back from their
       backfill UPDATEs in 003, 004, 006, 007, 009 and 010 take ROW EXCLUSIVE,
       which no reader or writer conflicts with. In production each matched no
       row on 2026-11-06, except 010, which had not shipped yet; its first
-      deploy fills the folders it names. `CREATE OR REPLACE FUNCTION` and
-      `CREATE EXTENSION IF NOT EXISTS` lock no table. Production (17.6) had all
+      deploy fills the folders it names. `CREATE EXTENSION IF NOT EXISTS` and
+      a PL/pgSQL `CREATE OR REPLACE FUNCTION` lock no table. A `LANGUAGE sql`
+      one, such as 006's `next_agent_avatar_color()`, takes ACCESS SHARE on
+      `agents` while its body is checked, which only an ACCESS EXCLUSIVE holder
+      waits on. 006's loop takes the same lock anyway. Production (17.6) had all
       eleven indexes on their tables, and `jobs`' four options stored as 005
       writes them. So the first deploy of the fix replays both files as no-ops.
 
       `db/sql/replay-locks.db.test.ts` holds it:
-      - every file, replayed, takes no lock stronger than ROW EXCLUSIVE on any
-        relation that is not a catalog, and the failure names the file, the
-        table and the mode;
-      - 001 replays under a 1 s `lock_timeout` behind ROW EXCLUSIVE on every
-        table in the schema, and with its guard replaced by `true` the same
-        replay fails with 55P03, then runs once the writer commits;
-      - 005 does the same behind SHARE UPDATE EXCLUSIVE on `jobs`;
+      - every file, replayed, holds no lock stronger than ROW EXCLUSIVE on any
+        relation that is not a catalog when it commits, and the failure names
+        the file, the table and the mode;
+      - every file replays under a 1 s `lock_timeout` behind one session
+        holding ROW EXCLUSIVE and SHARE UPDATE EXCLUSIVE on every table in the
+        schema. That is a writer and a vacuum, which between them conflict with
+        every stronger mode. This catches what the first case cannot: a lock
+        taken inside a `BEGIN ... EXCEPTION` block whose statement failed is
+        released with its subtransaction before the snapshot, though it
+        waited. A probe file in the `EXCEPTION WHEN duplicate_object` shape
+        passed the first case and failed this one with 55P03;
+      - with 001's guard replaced by `true`, 001 fails with 55P03 behind a
+        writer on every table, then runs once the writer commits. With 005's
+        guard replaced, 005 does the same behind a vacuum of `jobs`;
       - a dropped index is built again to its old definition, and a changed or
         missing option is set again, keeping one set by hand.
 
       Against `dev`'s 001 and 005 the first case lists eight SHARE locks and
-      two SHARE UPDATE EXCLUSIVE locks (on `jobs` and its TOAST table), and both
-      races fail with 55P03.
+      two SHARE UPDATE EXCLUSIVE locks (on `jobs` and its TOAST table), and the
+      contention case fails with 55P03 on both files.
 
 ### Tooling notes for this environment
 
