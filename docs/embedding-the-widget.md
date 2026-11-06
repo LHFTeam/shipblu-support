@@ -123,10 +123,29 @@ shared machine in a merchant's warehouse, the next person to sign in would
 otherwise open the chat onto the previous one's conversation. `clear()` throws
 that token away and starts a clean session.
 
-The server does not rely on the host page remembering. An identity naming a
-different account than the one already on the session is refused, and the widget
-answers by opening a fresh session by itself — `clear()` is the fast path, not
-the only guard.
+The widget does not rely on the host page remembering, or on the clear
+arriving: a sign-out that leaves the page at once can lose it. Before the panel
+reopens a stored conversation, it checks who your page says is reading: the
+account id with the email, or with the phone when there is no email. That has
+to be the person the conversation was last identified as. If not, the panel
+starts clean without fetching anything of the old conversation. Three things
+follow for a host page:
+
+- **Give the identity before the panel can open**, in `shipbluChatSettings` or
+  through `identify()` before `open()`. The panel decides when it opens, from
+  what the page holds then. A page that names nobody at that moment does not
+  reopen a conversation identified as somebody.
+- **Send the identifying fields together, the same way every time.** An email
+  changed between sessions starts clean, and so does one added to an identity
+  that had none.
+- **An anonymous page does not open a merchant's chat.** Other pages on your
+  site share the panel's storage, so a conversation identified on the
+  dashboard is not reopened on a page that never says who is reading.
+
+`clear()` still matters: it removes the token at sign-out, instead of leaving
+it to be refused at the next open. The server checks too, afterwards: an
+identity naming a different account than the one already on the session is
+refused, and the widget answers by opening a fresh session by itself.
 
 ## Proving the identity (optional, recommended)
 

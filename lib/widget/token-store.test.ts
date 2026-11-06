@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { clearToken, readToken, writeToken } from './token-store';
+import {
+  clearToken,
+  readToken,
+  readTokenPerson,
+  writeToken,
+  writeTokenPerson,
+} from './token-store';
 
 /**
  * The widget in a third-party iframe with storage blocked, which is where the
@@ -40,6 +46,34 @@ describe('the widget token store', () => {
     expect(readToken()).toBeNull();
   });
 
+  it('answers who a token was vouched for only for that token', () => {
+    const store = memoryStore();
+    install({ value: store });
+
+    writeToken('t-1');
+    writeTokenPerson('t-1', 'digest-of-nour');
+    expect(readTokenPerson('t-1')).toBe('digest-of-nour');
+    // A record left for one token never vouches for the one after it.
+    expect(readTokenPerson('t-2')).toBeNull();
+
+    clearToken();
+    expect(readToken()).toBeNull();
+    expect(readTokenPerson('t-1')).toBeNull();
+    expect(store.length).toBe(0);
+  });
+
+  it('reads a record it cannot make sense of as none', () => {
+    const store = memoryStore();
+    install({ value: store });
+
+    store.setItem('shipblu.widget.person', 'not json');
+    expect(readTokenPerson('t-1')).toBeNull();
+    store.setItem('shipblu.widget.person', JSON.stringify({ v: 2, token: 't-1', person: 'x' }));
+    expect(readTokenPerson('t-1')).toBeNull();
+    store.setItem('shipblu.widget.person', JSON.stringify({ v: 1, token: 't-1', person: '' }));
+    expect(readTokenPerson('t-1')).toBeNull();
+  });
+
   it('reads as no token, and never throws, when the property itself is refused', () => {
     install({
       get() {
@@ -63,5 +97,7 @@ describe('the widget token store', () => {
     expect(readToken()).toBeNull();
     expect(() => writeToken('t-1')).not.toThrow();
     expect(() => clearToken()).not.toThrow();
+    expect(readTokenPerson('t-1')).toBeNull();
+    expect(() => writeTokenPerson('t-1', 'digest')).not.toThrow();
   });
 });

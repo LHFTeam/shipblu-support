@@ -102,7 +102,9 @@ export async function GET() {
    * has a session to attach it to. The frame is only built on first open, so an
    * identity handed over at page load waits — which is the right way round: an
    * eager frame would cost every dashboard page view a request for a chat
-   * nobody opened.
+   * nobody opened. Its identifying half also goes ahead of the session, on the
+   * answer to the frame's 'hello' (visibility()), because the frame decides
+   * from it whether a stored conversation is this visitor's to reopen.
    */
   var identity = identityFrom(settings);
   var signature = typeof settings.signature === 'string' ? settings.signature : null;
@@ -654,10 +656,51 @@ export async function GET() {
     // conversation would never be badged for the reply that arrives after they
     // look away.
     if (open) badge.style.display = 'none';
-    frame.contentWindow.postMessage(
-      { source: SOURCE.host, type: open ? HOST_SAYS.opened : HOST_SAYS.closed },
-      BASE
-    );
+    frame.contentWindow.postMessage(visibility(), BASE);
+  }
+
+  /*
+   * 'opened' or 'closed', and who the page says is reading.
+   *
+   * The person rides on these two because they are what the frame hears first:
+   * the answer to its 'hello' is one of them, and a new frame waits for that
+   * answer before it reopens a stored conversation. It reopens it only for the
+   * person that conversation was last vouched for (lib/widget/person.ts),
+   * which is what keeps the next merchant at a shared machine out of the last
+   * one's chat when a sign-out's clear() never reached the frame. A copy of
+   * this snippet from before the field sends neither, and the frame reads the
+   * missing property as "this page does not say".
+   */
+  function visibility() {
+    return {
+      source: SOURCE.host,
+      type: open ? HOST_SAYS.opened : HOST_SAYS.closed,
+      person: personField()
+    };
+  }
+
+  /*
+   * The identifying half only, and only as plain values: the frame needs no
+   * name or meta to decide, and a settings object holding a function would
+   * make postMessage throw inside whatever click opened the panel. Null once
+   * clear() has run, or when the page never said, so the frame can tell a page
+   * that names nobody from one that names somebody else.
+   */
+  function personField() {
+    if (!identity) return null;
+    var account =
+      identity.accountId !== undefined && identity.accountId !== null
+        ? identity.accountId
+        : identity.account_id;
+    return {
+      accountId: plain(account),
+      email: plain(identity.email),
+      phone: plain(identity.phone)
+    };
+  }
+
+  function plain(value) {
+    return typeof value === 'string' || typeof value === 'number' ? value : null;
   }
 
   launcher.addEventListener('click', function () {
@@ -732,11 +775,10 @@ export async function GET() {
     if (data.type === WIDGET_SAYS.hello) {
       frameLoaded = true;
 
+      // With who is reading, which the frame waits for before it reopens a
+      // stored conversation (visibility()).
       if (iframe && iframe.contentWindow) {
-        iframe.contentWindow.postMessage(
-          { source: SOURCE.host, type: open ? HOST_SAYS.opened : HOST_SAYS.closed },
-          BASE
-        );
+        iframe.contentWindow.postMessage(visibility(), BASE);
       }
 
       // After the visibility answer, so the panel knows it is on screen before

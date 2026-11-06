@@ -33,10 +33,49 @@ export function writeToken(token: string): void {
   }
 }
 
-export function clearToken(): void {
+/**
+ * Who a token was last vouched for, as `lib/widget/person.ts`'s digest, kept
+ * beside the token and bound to it.
+ *
+ * Bound by carrying the token itself: a record answers only for the token it
+ * was written with, so one left by an older frame in another tab, or by a
+ * token since replaced, cannot vouch for the next one. The token is already
+ * stored in plain text under the key above, so repeating it here exposes
+ * nothing that was not there; the person is a digest, never the email.
+ *
+ * The key is never renamed: a frame from before a rename would read every
+ * record as missing and refuse every stored conversation.
+ */
+const PERSON_KEY = 'shipblu.widget.person';
+
+export function readTokenPerson(token: string): string | null {
   try {
-    localStorage.removeItem(STORAGE_KEY);
+    const raw = localStorage.getItem(PERSON_KEY);
+    if (!raw) return null;
+    const record = JSON.parse(raw) as { v?: unknown; token?: unknown; person?: unknown } | null;
+    if (!record || record.v !== 1 || record.token !== token) return null;
+    return typeof record.person === 'string' && record.person ? record.person : null;
   } catch {
-    // Nothing stored is nothing to remove.
+    return null;
+  }
+}
+
+export function writeTokenPerson(token: string, person: string): void {
+  try {
+    localStorage.setItem(PERSON_KEY, JSON.stringify({ v: 1, token, person }));
+  } catch {
+    // Unrecorded, the token is refused at the next identified open: a fresh
+    // chat, which is the safe side of a storage that will not keep anything.
+  }
+}
+
+/** Both keys: a record outliving its token would vouch for nothing, and is noise. */
+export function clearToken(): void {
+  for (const key of [STORAGE_KEY, PERSON_KEY]) {
+    try {
+      localStorage.removeItem(key);
+    } catch {
+      // Nothing stored is nothing to remove.
+    }
   }
 }

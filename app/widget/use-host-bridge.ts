@@ -52,6 +52,7 @@ export function useHostBridge({
   compose,
   sendIdentity,
   startFreshSession,
+  hearHost,
 }: {
   hostOrigins: string[];
   token: string | null;
@@ -65,6 +66,7 @@ export function useHostBridge({
   compose: (text: string) => void;
   sendIdentity: (forToken: string) => Promise<void>;
   startFreshSession: () => void;
+  hearHost: (person: unknown, carried: boolean) => void;
 }) {
   /*
    * A reply is unread until the visitor is actually looking at it.
@@ -97,6 +99,12 @@ export function useHostBridge({
       }
       hostOrigin = event.origin;
 
+      // Each also says who the page holds as its visitor, which the session
+      // waits for before it reopens a stored conversation. The property's
+      // absence is a statement of its own: a snippet older than the field.
+      if (event.data.type === HOST_SAYS.opened || event.data.type === HOST_SAYS.closed) {
+        hearHost(event.data.person, Object.prototype.hasOwnProperty.call(event.data, 'person'));
+      }
       if (event.data.type === HOST_SAYS.opened) setPanelOpen(true);
       if (event.data.type === HOST_SAYS.closed) setPanelOpen(false);
 
@@ -145,6 +153,7 @@ export function useHostBridge({
     return () => window.removeEventListener('message', onHostMessage);
   }, [
     compose,
+    hearHost,
     hostOrigins,
     identityRef,
     resetsRef,
