@@ -7599,23 +7599,75 @@ dryRun=true`, then without, gives those two theirs back from their
       `.app-scroll` stays as it is.
 
 110.  **`CREATE INDEX IF NOT EXISTS` locks the table even when the index is
-      there.** _2026-11-06, found while measuring the locks for #466._ It takes
-      SHARE on the table before it looks for the index, so the eleven at the
-      top of `db/sql/001_extensions_and_triggers.sql` — on `conversations`,
-      `contacts`, `messages`, `side_conversation_messages`, `companies`,
-      `kb_articles`, `shipments` and `shipping_accounts` — each wait on any
-      open writer of their table on every replay. Measured on Postgres 16: with
-      a session holding ROW EXCLUSIVE on `kb_articles`, the statement for an
-      index that already existed failed under `lock_timeout = '1s'`. And
-      because a `db/sql` file runs as one transaction, each SHARE it is granted
-      is held until the whole file commits, so writes to those tables queue
-      behind the rest of the file. The file's own comments said its steady
-      state took no locks; they now point here. Not fixed yet: the cure is a
-      guard that asks `pg_class` and creates the index only when it is
-      missing, never `CONCURRENTLY`, which `db/sql` cannot run. Until then a
-      deploy can fail on `db:migrate` behind an open writer as §6.15's did
-      behind an open reader, and the ten-second `LOCK_TIMEOUT` in
-      `db/migrate.ts` is what turns that into a fast failure.
+      there.** _2026-11-06, found while measuring the locks for #466, and
+      fixed the same day._ It takes SHARE on the table before it looks for the
+      index. So the eleven at the top of
+      `db/sql/001_extensions_and_triggers.sql`, on `conversations`, `contacts`,
+      `messages`, `side_conversation_messages`, `companies`, `kb_articles`,
+      `shipments` and `shipping_accounts`, each waited on any open writer of
+      their table on every replay. Measured on Postgres 16: with a session
+      holding ROW EXCLUSIVE on `kb_articles`, the statement for an index that
+      already existed failed under `lock_timeout = '1s'`. And because a
+      `db/sql` file runs as one transaction, each SHARE it was granted was
+      held until the whole file committed, so writes to those tables queued
+      behind the rest of the file. A deploy could fail on `db:migrate` behind
+      an open writer, as §6.15's did behind an open reader.
+
+      **The fix asks the catalog first.** One `DO` block lists each index once,
+      by name, table and column. For each index `to_regclass` does not find, it
+      runs `CREATE INDEX IF NOT EXISTS` through `EXECUTE format(...)`. The
+      guard asks the question `IF NOT EXISTS` asks, whether any relation of
+      that name is in the schema, but it asks it without a lock. So a replay
+      that finds every index touches none of the eight tables. The guard and
+      the statement are built from the one name. A guard asking for a name the
+      statement never creates would build nothing and read as success, and the
+      reverse would take the lock on every replay again. `IF NOT EXISTS` stays
+      in the statement for two replays running at once. The `db-sql` repo rule
+      also insists on it: it strips only comments, so it reads the string
+      inside `EXECUTE` as a statement. The block uses no `CONCURRENTLY`, which
+      `db/sql` cannot run. A missing index is still built as before, under
+      SHARE until the file commits, which is why a new index on a large table
+      belongs in a migration of its own.
+
+      **The same audit found one more.** `005_storage_parameters.sql`'s
+      `ALTER TABLE jobs SET (...)` took SHARE UPDATE EXCLUSIVE on `jobs` on
+      every replay, and rewrote its `pg_class` row with the same values. That
+      lock holds off no read or write, but it is the one VACUUM and
+      `REINDEX CONCURRENTLY` hold. So a deploy landing during an autovacuum of
+      `jobs` cancelled that vacuum after `deadlock_timeout`, on the one table
+      the file tunes autovacuum for. It waited on a wraparound vacuum, which is
+      never cancelled, and on the hand-run reindex the file itself recommends.
+      It now compares `pg_class.reloptions` with the four options first. That
+      comparison takes no lock, and the ALTER runs only when one differs. The
+      comparison and the ALTER are built from one list, because `reloptions`
+      stores `name=value` exactly as the SET was given it. Written out twice,
+      a changed value would find the old one stored and never be applied.
+
+      Nothing else in `db/sql` takes a lock in the steady state stronger than
+      ROW EXCLUSIVE, the lock every write takes. Measured by replaying each
+      file in a transaction and reading `pg_locks` before it committed. The
+      backfill UPDATEs in 003, 004, 006, 007, 009 and 010 take ROW EXCLUSIVE,
+      which no reader or writer conflicts with. In production each matched no
+      row on 2026-11-06, except 010, which had not shipped yet; its first
+      deploy fills the folders it names. `CREATE OR REPLACE FUNCTION` and
+      `CREATE EXTENSION IF NOT EXISTS` lock no table. Production (17.6) had all
+      eleven indexes on their tables, and `jobs`' four options stored as 005
+      writes them. So the first deploy of the fix replays both files as no-ops.
+
+      `db/sql/replay-locks.db.test.ts` holds it:
+      - every file, replayed, takes no lock stronger than ROW EXCLUSIVE on any
+        relation that is not a catalog, and the failure names the file, the
+        table and the mode;
+      - 001 replays under a 1 s `lock_timeout` behind ROW EXCLUSIVE on every
+        table in the schema, and with its guard replaced by `true` the same
+        replay fails with 55P03, then runs once the writer commits;
+      - 005 does the same behind SHARE UPDATE EXCLUSIVE on `jobs`;
+      - a dropped index is built again to its old definition, and a changed or
+        missing option is set again, keeping one set by hand.
+
+      Against `dev`'s 001 and 005 the first case lists eight SHARE locks and
+      two SHARE UPDATE EXCLUSIVE locks (on `jobs` and its TOAST table), and both
+      races fail with 55P03.
 
 ### Tooling notes for this environment
 
