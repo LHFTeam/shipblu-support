@@ -116,10 +116,8 @@ describe('a view', () => {
   /**
    * The one way a view can still meet the foreign key: the article's delete
    * commits while the view is between reading the article and checking the
-   * key. Held open here so the order is certain — the view reads the article
-   * from before the delete, then waits on the delete's row lock in its check —
-   * and answered as though the delete had come first, as the UPDATE it
-   * replaced answered. The second case is the same race met through the
+   * key (`whileDeleting`). Answered as though the delete had come first, as the
+   * UPDATE it replaced answered. The second case is the same race met through the
    * cascade: the view's upsert waits on the stats row the delete is removing.
    */
   it.each([
@@ -129,28 +127,8 @@ describe('a view', () => {
     const id = await article();
     if (seen) await recordArticleView(id);
 
-    let deleted!: () => void;
-    let release!: () => void;
-    const didDelete = new Promise<void>((resolve) => (deleted = resolve));
-    const held = new Promise<void>((resolve) => (release = resolve));
-    const deleting = db.transaction(async (tx) => {
-      await tx.delete(kbArticles).where(eq(kbArticles.id, id));
-      deleted();
-      await held;
-    });
-    await didDelete;
+    await expect(whileDeleting(id, () => recordArticleView(id))).resolves.toBeUndefined();
 
-    const viewing = recordArticleView(id);
-    try {
-      await waitForALockWait();
-    } finally {
-      // Whatever the wait found, so a failed one does not leave the delete
-      // holding the article's row lock past the end of the test.
-      release();
-      await deleting;
-    }
-
-    await expect(viewing).resolves.toBeUndefined();
     expect(await db.select().from(kbArticleStats)).toEqual([]);
   });
 });
@@ -185,6 +163,22 @@ describe('a feedback tap', () => {
     expect(await stats(id)).toEqual({ viewCount: 1, helpfulCount: 0, unhelpfulCount: 1 });
   });
 
+  /**
+   * The endpoint reads the article before it writes, so the race is the
+   * article's delete committing after that read, while the feedback row's
+   * foreign key waits on it — and the answer is the 204 a vote on an article
+   * already gone gets, with nothing written.
+   */
+  it('racing the delete of its article answers 204 and writes nothing', async () => {
+    const id = await article();
+    await recordArticleView(id);
+
+    await whileDeleting(id, () => tap(id, true, '203.0.113.41'));
+
+    expect(await db.select().from(kbArticleFeedback)).toEqual([]);
+    expect(await db.select().from(kbArticleStats)).toEqual([]);
+  });
+
   it('for an article that does not exist writes nothing', async () => {
     await tap(MISSING, true, '203.0.113.31');
 
@@ -192,6 +186,38 @@ describe('a feedback tap', () => {
     expect(await db.select().from(kbArticleFeedback)).toEqual([]);
   });
 });
+
+/**
+ * Runs `write` while the article's delete is held open, and answers what it
+ * answered once the delete has committed.
+ *
+ * Held so the order is certain: the delete has run and holds the article's
+ * row, `write` starts and reads the article as it was before the delete, and
+ * only once `write` is waiting on that row is the delete let commit.
+ */
+async function whileDeleting<T>(id: string, write: () => Promise<T>): Promise<T> {
+  let deleted!: () => void;
+  let release!: () => void;
+  const didDelete = new Promise<void>((resolve) => (deleted = resolve));
+  const held = new Promise<void>((resolve) => (release = resolve));
+  const deleting = db.transaction(async (tx) => {
+    await tx.delete(kbArticles).where(eq(kbArticles.id, id));
+    deleted();
+    await held;
+  });
+  await didDelete;
+
+  const writing = write();
+  try {
+    await waitForALockWait();
+  } finally {
+    // Whatever the wait found, so a failed one does not leave the delete
+    // holding the article's row lock past the end of the test.
+    release();
+    await deleting;
+  }
+  return writing;
+}
 
 /**
  * Until a backend of this database is waiting on a lock, for about two seconds

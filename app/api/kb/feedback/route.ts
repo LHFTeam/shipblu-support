@@ -2,11 +2,11 @@ import { NextResponse } from 'next/server';
 import { eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { db } from '@/db/client';
-import { kbArticleFeedback, kbArticles } from '@/db/schema';
+import { kbArticles } from '@/db/schema';
 import { hasConsoleSession } from '@/lib/auth/cookie';
 import { readJsonBody } from '@/lib/http/json-body';
 import { allow, clientIp } from '@/lib/http/rate-limit';
-import { countArticleVote } from '@/lib/kb/stats';
+import { recordArticleVote } from '@/lib/kb/stats';
 
 export const dynamic = 'force-dynamic';
 
@@ -65,12 +65,9 @@ export async function POST(request: Request) {
 
   if (exists.length === 0) return new NextResponse(null, { status: 204 });
 
-  // Written together, so a vote's count in `kb_article_stats` and its feedback
-  // row are stored together or not at all.
-  await db.transaction(async (tx) => {
-    await tx.insert(kbArticleFeedback).values({ articleId, wasHelpful, comment });
-    await countArticleVote(tx, articleId, wasHelpful);
-  });
+  // The feedback row and its count, together. An article deleted between the
+  // read above and this write is answered as one gone before it.
+  await recordArticleVote(articleId, wasHelpful, comment);
 
   return new NextResponse(null, { status: 204 });
 }

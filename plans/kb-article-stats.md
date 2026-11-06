@@ -54,11 +54,14 @@ Freshdesk at cutover. No `kb_article_stats` table yet.
     UPDATE it replaces did. A view racing the article's delete can still meet
     the foreign key — the delete committing between the statement's read and
     its check — and that 23503 is answered as though the delete came first.
-  - `countArticleVote` is the feedback route's, in the transaction that writes
-    its `kb_article_feedback` row.
+  - `recordArticleVote` is the feedback route's: its `kb_article_feedback` row
+    and the counter in one transaction, the same delete race answered the same
+    way.
   - `setArticleStats` is the Freshdesk import's, in the transaction that writes
-    the article, replacing what is there: a re-import carries Freshdesk's
-    running totals, as it always did.
+    the article. Each counter takes the greater of what is there and
+    Freshdesk's running total: the import used to replace them, which would
+    now throw away everything counted here since cutover, and zero a
+    translation whose payload carries no counts.
   - The readers join through `statsOfArticle` and read `articleViews`,
     `articleHelpful` and `articleUnhelpful`, each a `coalesce(…, 0)`, through a
     left join — `folderNeighbours`' related list, `listArticlesForAdmin`,
@@ -93,9 +96,10 @@ production's `touch_updated_at` named `not_an_edit` when read on 2026-11-06 at
   is lost for an article already copied. Not written twice: `view_count` orders a
   shortlist and is never a business metric (`popularArticles`), and a vote's
   `kb_article_feedback` row is kept regardless. The worker deploys by hand after
-  the web service, so an `import_freshdesk_kb` run on the old worker in between
-  would write its counts to the old columns too; it is a cutover job, run by
-  hand and on no schedule.
+  the web service, and an `import_freshdesk_kb` run on the old worker in between
+  would write its counts only to the old columns, where for an article already
+  copied they never reach `kb_article_stats`. It is a cutover job, run by hand
+  and on no schedule: **do not run it until the worker is on this build.**
 - **Left alone:** the three old columns, the `kb_articles` exception in
   `touch_updated_at()` and the `kb-edit-date` rule. During the deploy window
   the old code still writes those columns, and the exception still keeps its
@@ -211,7 +215,8 @@ It does, in one change:
   `AdminArticleRow.updatedAt` comment in `lib/kb/admin.ts`;
 - deletes `scripts/ci/rules/kb-edit-date.mjs`, its test and its entry in `RULES`;
 - drops the destructuring that leaves the three columns out of
-  `getArticleForEdit`'s select, and the `Omit` on `EditableArticle`.
+  `getArticleForEdit`'s select, and with it the `Pick` that `EditableArticle`
+  takes from it.
 
 **Its own deploy window.** PR 1's code still names the three columns in every
 INSERT into `kb_articles` — `saveArticle`'s for a new article, the Freshdesk

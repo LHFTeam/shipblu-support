@@ -127,11 +127,15 @@ export const kbArticles = pgTable(
     seo: jsonb('seo').$type<{ title?: string; description?: string }>().notNull().default({}),
 
     /**
-     * Superseded by `kb_article_stats`, and still here on purpose: nothing
-     * reads these three or counts into them any more, and they are dropped
-     * once every service runs code that does not (`plans/kb-article-stats.md`,
-     * PR 2). An INSERT still names them, as drizzle names every column, with
-     * `default`; the plan says what that costs the drop.
+     * Superseded by `kb_article_stats`, and still here on purpose: no page,
+     * action or job reads these three or counts into them any more, and they
+     * are dropped once every service runs code that does not
+     * (`plans/kb-article-stats.md`, PR 2). Two things still name them, and go
+     * in the same change as the columns or before: `db/sql/011`, which reads
+     * them on every deploy to copy them, so a replay after the drop fails it,
+     * and `touch_updated_at()`'s `not_an_edit`. An INSERT names them too, as
+     * drizzle names every column, with `default`; the plan says what that
+     * costs the drop.
      *
      * Not in the same release, because migrations run in `preDeployCommand`
      * while the old web release still serves, and the worker deploys by hand

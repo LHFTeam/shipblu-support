@@ -160,10 +160,8 @@ const {
   ...articleColumns
 } = getTableColumns(kbArticles);
 
-export type EditableArticle = Omit<
-  typeof kbArticles.$inferSelect,
-  'viewCount' | 'helpfulCount' | 'unhelpfulCount'
-> & {
+/** The row as `articleColumns` selects it, so the type follows the destructure above. */
+export type EditableArticle = Pick<typeof kbArticles.$inferSelect, keyof typeof articleColumns> & {
   categoryId: string;
   /** The floor in force, folder included — what the editor shows and re-saves. */
   effectiveMinRole: AgentRole | null;

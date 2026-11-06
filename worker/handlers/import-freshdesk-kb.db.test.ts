@@ -365,9 +365,12 @@ describe('importFreshdeskKb', () => {
     serve(account());
     await importFreshdeskKb();
     const before = await articles();
-    // A view counted here between the two runs. Freshdesk's total replaces it,
-    // since the total is what Freshdesk has counted, not what it has added.
+    // Views counted here between the two runs. Freshdesk's total of 150 is
+    // more than the 121 here, so it wins; the translation's payload carries no
+    // counts, so its two views here are more, and stay.
     await recordArticleView(byExternalId(before, '31:ar').id);
+    await recordArticleView(byExternalId(before, '31:en').id);
+    await recordArticleView(byExternalId(before, '31:en').id);
 
     serve(
       account({
@@ -392,9 +395,10 @@ describe('importFreshdeskKb', () => {
       viewCount: 150,
       translationGroupId: byExternalId(before, '31:ar').translationGroupId,
     });
-    expect(byExternalId(after, '31:en').translationGroupId).toBe(
-      byExternalId(before, '31:ar').translationGroupId,
-    );
+    expect(byExternalId(after, '31:en')).toMatchObject({
+      translationGroupId: byExternalId(before, '31:ar').translationGroupId,
+      viewCount: 2,
+    });
     expect(await categories()).toHaveLength(2);
     expect(await folders()).toHaveLength(3);
   });

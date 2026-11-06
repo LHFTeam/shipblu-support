@@ -1,6 +1,6 @@
 import { eq, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
-import { kbArticleStats, kbArticles } from '@/db/schema';
+import { kbArticleFeedback, kbArticleStats, kbArticles } from '@/db/schema';
 import { isForeignKeyViolation } from '@/lib/db/errors';
 
 /**
@@ -29,6 +29,9 @@ type Executor = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 /** `kb_article_stats.article_id`'s foreign key, as migration 0057 named it. */
 const STATS_ARTICLE_FK = 'kb_article_stats_article_id_kb_articles_id_fk';
+
+/** `kb_article_feedback.article_id`'s, as migration 0000 named it. */
+const FEEDBACK_ARTICLE_FK = 'kb_article_feedback_article_id_kb_articles_id_fk';
 
 /**
  * The join from an article to its counters. Always a left join where the
@@ -92,37 +95,60 @@ export async function recordArticleView(articleId: string): Promise<void> {
 }
 
 /**
- * One reader said the article helped, or did not.
+ * One reader said the article helped, or did not: the `kb_article_feedback`
+ * row, with its comment, and one more on the matching counter.
  *
- * Takes the transaction its caller writes the `kb_article_feedback` row in, so
- * a vote's count and its feedback row are stored together or not at all. The
- * counters are not a count of those rows: they also carry Freshdesk's totals,
- * which a re-import replaces (`setArticleStats`). The caller
- * has read the article first, and the feedback row's own foreign key refuses
- * one gone since, so this inserts from the id rather than from a read.
+ * In one transaction, so a vote's count and its feedback row are stored
+ * together or not at all. The counters are not a count of those rows: they
+ * also carry Freshdesk's totals (`setArticleStats`).
+ *
+ * The feedback endpoint reads the article first and answers a vote on one
+ * already gone without calling this. An article deleted after that read, while
+ * the vote is on its way in, meets the feedback row's foreign key or the
+ * counter's, and that is answered as though the delete had come first — the
+ * endpoint's 204 — as `recordArticleView` answers the same race.
  */
-export async function countArticleVote(
-  tx: Executor,
+export async function recordArticleVote(
   articleId: string,
   wasHelpful: boolean,
+  comment: string | null,
 ): Promise<void> {
-  await tx
-    .insert(kbArticleStats)
-    .values(wasHelpful ? { articleId, helpfulCount: 1 } : { articleId, unhelpfulCount: 1 })
-    .onConflictDoUpdate({
-      target: kbArticleStats.articleId,
-      set: wasHelpful
-        ? { helpfulCount: sql`${kbArticleStats.helpfulCount} + 1` }
-        : { unhelpfulCount: sql`${kbArticleStats.unhelpfulCount} + 1` },
+  try {
+    await db.transaction(async (tx) => {
+      await tx.insert(kbArticleFeedback).values({ articleId, wasHelpful, comment });
+      await tx
+        .insert(kbArticleStats)
+        .values(wasHelpful ? { articleId, helpfulCount: 1 } : { articleId, unhelpfulCount: 1 })
+        .onConflictDoUpdate({
+          target: kbArticleStats.articleId,
+          set: wasHelpful
+            ? { helpfulCount: sql`${kbArticleStats.helpfulCount} + 1` }
+            : { unhelpfulCount: sql`${kbArticleStats.unhelpfulCount} + 1` },
+        });
     });
+  } catch (error) {
+    if (
+      isForeignKeyViolation(error, FEEDBACK_ARTICLE_FK) ||
+      isForeignKeyViolation(error, STATS_ARTICLE_FK)
+    ) {
+      return;
+    }
+    throw error;
+  }
 }
 
 /**
- * The counters as another system counted them, replacing whatever is here.
+ * The counters as another system counted them: the Freshdesk import's, so
+ * "most read" ordering does not reset to zero on cutover.
  *
- * The Freshdesk import's, so "most read" ordering does not reset to zero on
- * cutover. Replacing rather than adding, because a re-import carries
- * Freshdesk's running totals, which already include what the last one carried.
+ * Each counter takes the greater of what is here and what Freshdesk says,
+ * never the sum and never Freshdesk's alone. A re-import carries Freshdesk's
+ * running totals, which already include what the last import carried, so
+ * adding would count them twice. Replacing, as the import once did, threw
+ * away every view and vote counted here since cutover, which start from
+ * Freshdesk's totals and only grow — and zeroed a translation, whose payload
+ * usually carries no counts at all. The greater is Freshdesk's on a rehearsal,
+ * where its totals are the ones still growing, and ours after cutover.
  */
 export async function setArticleStats(
   tx: Executor,
@@ -132,5 +158,12 @@ export async function setArticleStats(
   await tx
     .insert(kbArticleStats)
     .values({ articleId, ...counts })
-    .onConflictDoUpdate({ target: kbArticleStats.articleId, set: counts });
+    .onConflictDoUpdate({
+      target: kbArticleStats.articleId,
+      set: {
+        viewCount: sql`greatest(${kbArticleStats.viewCount}, excluded.view_count)`,
+        helpfulCount: sql`greatest(${kbArticleStats.helpfulCount}, excluded.helpful_count)`,
+        unhelpfulCount: sql`greatest(${kbArticleStats.unhelpfulCount}, excluded.unhelpful_count)`,
+      },
+    });
 }
