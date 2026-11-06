@@ -559,6 +559,12 @@ export async function GET() {
           : null;
 
     pushIdentity();
+
+    // Who is reading changed, and the frame may hold a stored conversation it
+    // is deciding about now: told only on 'ready', as pushIdentity() is, it
+    // would decide on the person named before this one. A frame still loading
+    // drops this, and hears the same thing in the answer to its 'hello'.
+    if (iframe && iframe.contentWindow) iframe.contentWindow.postMessage(visibility(), BASE);
   }
 
   /**

@@ -7786,22 +7786,38 @@ dryRun=true`, then without, gives those two theirs back from their
       **The fix is in the frame, at the next open**, because that is the one
       moment every one of those cases passes through, and a fix at sign-out
       can only cover some of them. The snippet's `opened` and `closed` now
-      carry `person`, the identifying half of what the page holds. The frame
-      waits for the first of them before it resumes a stored token. It resumes
-      the token only when the token's record (`shipblu.widget.person`, a
-      SHA-256 digest bound to the token) names that person. Otherwise it
-      throws the token away without asking the server anything
-      (`lib/widget/person.ts`, `use-widget-session.ts`). A token with no
-      record is refused to a page that names somebody, which is every token
-      from before the deploy. Each of those had survived a sign-out, so a
-      merchant mid-conversation starts a fresh widget chat once; the ticket
-      stays. A recorded token is refused to a page that names nobody, since
-      other pages on the site share the frame's storage partition. A snippet
-      cached from before the field (up to five minutes) sends no `person` and
-      resumes as before. The person check then runs again on its first
+      carry `person`, the identifying half of what the page holds, and
+      `identify()` sends one at once rather than waiting for `ready`. The
+      frame waits for the page's first word before it resumes a stored token,
+      and takes the decision again when the request comes back, so a page
+      that names somebody else meanwhile is drawn nothing. One function,
+      `judge()` in `lib/widget/person.ts`, decides for the resume, the mint
+      and the identity sent after them, against the token's record
+      (`shipblu.widget.person`: the account, email and phone as separate
+      SHA-256 digests, bound to the token):
+      - a page naming somebody else has the token thrown away, unasked;
+      - a page naming nobody, or saying less than the record (the email
+        before the account), has it left in storage and not reopened. It
+        reopens when the page says the rest;
+      - a page adding a field to the record is the same person, and the
+        record takes it up. Agreeing on the account alone never claims a
+        person, so colleagues of one merchant stay apart;
+      - a token with no record is thrown away for a page that names
+        somebody. That is every token from before the deploy, and each had
+        survived a sign-out, so a merchant mid-conversation starts a fresh
+        widget chat once; the ticket stays. A token minted in the same page
+        load is the exception: it belongs to whoever was reading then.
+
+      A snippet cached from before the field (up to five minutes) sends no
+      `person` and resumes as before. The check then runs on its first
       `identify`, before the server is told anything. Same-account colleagues
       now get separate widget contacts, which is what `clear()` always
-      promised a host page.
+      promised a host page. The review of #476 found the first version
+      deleting a token it only had to set aside, relabelling a reopened token
+      with a statement heard after its request, deciding on a person
+      `identify()` had already replaced, and reading a field added in the same
+      page load as somebody else. Each case is a test in
+      `use-widget-session.test.ts`.
 
       With the fix, through the real widget and the same harness: a
       colleague, another merchant and a pre-deploy token each opened onto a

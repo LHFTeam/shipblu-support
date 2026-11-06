@@ -1,3 +1,5 @@
+import type { PersonPrint } from './person';
+
 /**
  * Where the widget keeps the visitor's token between page loads.
  *
@@ -34,33 +36,43 @@ export function writeToken(token: string): void {
 }
 
 /**
- * Who a token was last vouched for, as `lib/widget/person.ts`'s digest, kept
- * beside the token and bound to it.
+ * Who a token was last vouched for, as `lib/widget/person.ts`'s per-field
+ * digests, kept beside the token and bound to it.
  *
  * Bound by carrying the token itself: a record answers only for the token it
  * was written with, so one left by an older frame in another tab, or by a
  * token since replaced, cannot vouch for the next one. The token is already
  * stored in plain text under the key above, so repeating it here exposes
- * nothing that was not there; the person is a digest, never the email.
+ * nothing that was not there; the person is digests, never the email.
  *
  * The key is never renamed: a frame from before a rename would read every
  * record as missing and refuse every stored conversation.
  */
 const PERSON_KEY = 'shipblu.widget.person';
 
-export function readTokenPerson(token: string): string | null {
+const field = (value: unknown): string | null =>
+  typeof value === 'string' && value ? value : null;
+
+export function readTokenPerson(token: string): PersonPrint | null {
   try {
     const raw = localStorage.getItem(PERSON_KEY);
     if (!raw) return null;
     const record = JSON.parse(raw) as { v?: unknown; token?: unknown; person?: unknown } | null;
     if (!record || record.v !== 1 || record.token !== token) return null;
-    return typeof record.person === 'string' && record.person ? record.person : null;
+    const person = record.person as Record<string, unknown> | null;
+    if (!person || typeof person !== 'object') return null;
+    const print = {
+      account: field(person.account),
+      email: field(person.email),
+      phone: field(person.phone),
+    };
+    return print.account || print.email || print.phone ? print : null;
   } catch {
     return null;
   }
 }
 
-export function writeTokenPerson(token: string, person: string): void {
+export function writeTokenPerson(token: string, person: PersonPrint): void {
   try {
     localStorage.setItem(PERSON_KEY, JSON.stringify({ v: 1, token, person }));
   } catch {

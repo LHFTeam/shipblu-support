@@ -109,6 +109,9 @@ export function useHostBridge({
       if (event.data.type === HOST_SAYS.closed) setPanelOpen(false);
 
       if (event.data.type === HOST_SAYS.identify) {
+        // A statement of who is reading as much as `opened` is, so the session
+        // never decides on the person the page named before this one.
+        hearHost(event.data.identity, true);
         identityRef.current = {
           identity: event.data.identity,
           signature: typeof event.data.signature === 'string' ? event.data.signature : null,

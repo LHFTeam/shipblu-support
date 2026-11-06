@@ -435,6 +435,35 @@ describe('who the page says is reading', () => {
     });
   });
 
+  /*
+   * Before 'ready' the snippet pushes no identity, so a person changed by
+   * identify() alone reached the frame only at the next toggle, and a frame
+   * deciding about a stored conversation meanwhile decided on the person
+   * named before.
+   */
+  it('tells a frame that is not ready yet at once when identify() changes the person', async () => {
+    const source = await (await GET()).text();
+    const page = fakePage({ phone: false });
+    Object.assign(page.window, { shipbluChatSettings: { email: 'nour@merchant.example' } });
+
+    page.load(source);
+    const api = page.window.shipbluChat!;
+    api.open!();
+    const frame = page.body.childNodes.find((node) => node.id === 'shipblu-chat-frame')!;
+    const before = visibility(frame).length;
+
+    api.identify!({ accountId: 4471, email: 'omar@merchant.example' });
+
+    expect(visibility(frame)).toHaveLength(before + 1);
+    expect(visibility(frame).at(-1)).toEqual({
+      source: SOURCE.host,
+      type: HOST_SAYS.opened,
+      person: { accountId: 4471, email: 'omar@merchant.example', phone: null },
+    });
+    // No identity was posted: that still waits for 'ready'.
+    expect(frame.received.some((message) => message.type === HOST_SAYS.identify)).toBe(false);
+  });
+
   it('says nobody, rather than nothing, on a page that never named anyone', async () => {
     const source = await (await GET()).text();
     const page = fakePage({ phone: false });

@@ -126,21 +126,25 @@ that token away and starts a clean session.
 The widget does not rely on the host page remembering, or on the clear
 arriving: a sign-out that leaves the page at once can lose it. Before the panel
 reopens a stored conversation, it checks who your page says is reading: the
-account id with the email, or with the phone when there is no email. That has
-to be the person the conversation was last identified as. If not, the panel
-starts clean without fetching anything of the old conversation. Three things
-follow for a host page:
+account id, the email, and the phone when there is no email. That has to be
+the person the conversation was last identified as. If your page names
+somebody else, the panel starts clean without fetching anything of the old
+conversation, and throws it away. What that means for a host page:
 
-- **Give the identity before the panel can open**, in `shipbluChatSettings` or
-  through `identify()` before `open()`. The panel decides when it opens, from
-  what the page holds then. A page that names nobody at that moment does not
-  reopen a conversation identified as somebody.
-- **Send the identifying fields together, the same way every time.** An email
-  changed between sessions starts clean, and so does one added to an identity
-  that had none.
+- **Give the identity as early as you have it**, in `shipbluChatSettings` or
+  through `identify()`. A conversation identified as somebody is not reopened
+  while your page names nobody, or names less than it was identified with
+  (the email without the account). It is kept, and reopened as soon as your
+  page says the rest.
+- **Adding a field is fine; changing one is a different person.** An account
+  id handed over after the email keeps the conversation. A changed email or
+  account starts clean. So does an email added to an identity that only ever
+  had the account, because any of that account's people could be the one
+  reading.
 - **An anonymous page does not open a merchant's chat.** Other pages on your
   site share the panel's storage, so a conversation identified on the
-  dashboard is not reopened on a page that never says who is reading.
+  dashboard is not reopened on a page that never says who is reading. It is
+  still there when the merchant is back on the dashboard.
 
 `clear()` still matters: it removes the token at sign-out, instead of leaving
 it to be refused at the next open. The server checks too, afterwards: an

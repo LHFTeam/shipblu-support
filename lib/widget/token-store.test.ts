@@ -50,9 +50,10 @@ describe('the widget token store', () => {
     const store = memoryStore();
     install({ value: store });
 
+    const nour = { account: 'a'.repeat(64), email: 'b'.repeat(64), phone: null };
     writeToken('t-1');
-    writeTokenPerson('t-1', 'digest-of-nour');
-    expect(readTokenPerson('t-1')).toBe('digest-of-nour');
+    writeTokenPerson('t-1', nour);
+    expect(readTokenPerson('t-1')).toEqual(nour);
     // A record left for one token never vouches for the one after it.
     expect(readTokenPerson('t-2')).toBeNull();
 
@@ -70,7 +71,9 @@ describe('the widget token store', () => {
     expect(readTokenPerson('t-1')).toBeNull();
     store.setItem('shipblu.widget.person', JSON.stringify({ v: 2, token: 't-1', person: 'x' }));
     expect(readTokenPerson('t-1')).toBeNull();
-    store.setItem('shipblu.widget.person', JSON.stringify({ v: 1, token: 't-1', person: '' }));
+    store.setItem('shipblu.widget.person', JSON.stringify({ v: 1, token: 't-1', person: 'x' }));
+    expect(readTokenPerson('t-1')).toBeNull();
+    store.setItem('shipblu.widget.person', JSON.stringify({ v: 1, token: 't-1', person: {} }));
     expect(readTokenPerson('t-1')).toBeNull();
   });
 
@@ -98,6 +101,8 @@ describe('the widget token store', () => {
     expect(() => writeToken('t-1')).not.toThrow();
     expect(() => clearToken()).not.toThrow();
     expect(readTokenPerson('t-1')).toBeNull();
-    expect(() => writeTokenPerson('t-1', 'digest')).not.toThrow();
+    expect(() =>
+      writeTokenPerson('t-1', { account: 'a'.repeat(64), email: null, phone: null }),
+    ).not.toThrow();
   });
 });
