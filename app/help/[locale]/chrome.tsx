@@ -290,11 +290,11 @@ export function ArticleRow({
         The focus ring is drawn inside the row. The list card clips its overflow
         to keep the rounded corners, so the global ring, offset outwards, was
         cut away on three sides and left a keyboard reader with a 2px line or
-        nothing. The `!` is needed against that unlayered global rule (§6.93).
+        nothing.
       */}
       <Link
         href={href}
-        className="group flex items-center gap-4 px-4 py-3.5 transition-colors hover:bg-(--color-background-hover) focus-visible:bg-(--color-background-hover) focus-visible:outline-offset-[-2px]!"
+        className="group flex items-center gap-4 px-4 py-3.5 transition-colors hover:bg-(--color-background-hover) focus-visible:bg-(--color-background-hover) focus-visible:outline-offset-[-2px]"
       >
         <BookIcon
           size={18}

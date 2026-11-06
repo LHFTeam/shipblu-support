@@ -27,7 +27,7 @@ CREATE EXTENSION IF NOT EXISTS unaccent;
 -- Not lock-free on a replay, unlike the rest of this file. `CREATE INDEX IF NOT
 -- EXISTS` takes SHARE on its table before it finds the index already there, so
 -- each of these waits on any open writer of its table, and then holds that
--- table's writes off until this whole file commits (PROJECT-STATE §6.109,
+-- table's writes off until this whole file commits (PROJECT-STATE §6.110,
 -- which also says what the fix is).
 -- --------------------------------------------------------------------------
 CREATE INDEX IF NOT EXISTS conversations_subject_trgm_idx
@@ -193,7 +193,7 @@ END $$;
 -- Enabling RLS takes ACCESS EXCLUSIVE on the table, so this only touches tables
 -- that do not already have it — in the steady state this loop takes no locks at
 -- all. That is the rule the rest of this file aims for; the `CREATE INDEX IF NOT
--- EXISTS` statements at its top do not meet it (§6.109).
+-- EXISTS` statements at its top do not meet it (§6.110).
 -- --------------------------------------------------------------------------
 DO $$
 DECLARE

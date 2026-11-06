@@ -33,6 +33,7 @@ import { checkLikePatternsUseTheBuilder } from './rules/like-patterns.mjs';
 import { checkConsolePagesScroll } from './rules/console-scroll.mjs';
 import { checkScrollContainersArePositioned } from './rules/scroll-positioned.mjs';
 import { checkLightOnly } from './rules/light-only.mjs';
+import { checkFocusRing } from './rules/focus-ring.mjs';
 import { checkFramingHeaders } from './rules/framing.mjs';
 import { checkNextAgentRulesOff } from './rules/next-agent-rules.mjs';
 import { checkNoCommittedEnvFiles } from './rules/secrets.mjs';
@@ -92,6 +93,7 @@ export const RULES = [
   ['page-db', checkPagesDoNotImportTheDatabase],
   ['admin-sections', checkAdminSections],
   ['light-only', checkLightOnly],
+  ['focus-ring', checkFocusRing],
   ['framing', checkFramingHeaders],
   ['next-agent-rules', checkNextAgentRulesOff],
   ['secrets', checkNoCommittedEnvFiles],

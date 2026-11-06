@@ -6972,6 +6972,12 @@ still waiting for it` one whose outcome is not known yet.
     (`Input tone="note"`), and check the result in a browser — `tsc` and the
     linters cannot see it.
 
+    That is a contest between two utilities. The keyboard focus ring is not
+    one, since 2026-11-05: its rule in `app/globals.css` is in `@layer base`,
+    so a plain utility adjusts its outline, offset and radius, and no `!` is
+    needed against it (§6.109). Several comments cited this entry for "an
+    unlayered rule outranks a utility", which it never said; that is §6.109.
+
 94. **One WhatsApp message has more than one wamid.** A wamid is `wamid.` and
     the base64 of WhatsApp's message key, a Thrift compact struct of the chat,
     `fromMe` and the message's own id — and the chat is whose copy it names. On
@@ -7505,7 +7511,94 @@ dryRun=true`, then without, gives those two theirs back from their
       about what the account will accept. Each is a reading to take on the
       first live call, written down here, not a rule to code from.
 
-109.  **`CREATE INDEX IF NOT EXISTS` locks the table even when the index is
+109.  **An unlayered focus rule outranked every utility, so the classes
+      written against it did nothing.** _2026-11-05, raised in #460's review._
+      The shared `:focus-visible` rule in `app/globals.css` was unlayered.
+      Tailwind v4 puts its utilities in `@layer utilities`, and an unlayered
+      declaration beats a layered one whatever the specificity, so the rule's
+      zero-specificity `:where()` was no help. No class could change a
+      focused element's outline, offset or radius without `!`, and every
+      focused element took the rule's 4px radius, which squared off pills,
+      chips, cards and rail tiles while they had focus. The call sites that
+      noticed carried a `!`, in seven files. The ones that did not shipped
+      classes with no effect, and nothing reports a class with no effect:
+
+      - **`outline-none` on thirteen field class strings.** These were the
+        shared `FIELD_BASE`, the admin builders' and forms' own inputs, the
+        purge panel, the help centre's search and tracking boxes and the
+        widget's fields. Each was written to swap the outline for a soft ring
+        (`focus:ring-2` at 20%). Moved into a layer as it was, the rule would
+        have let every one apply. That ring is 1.35:1 against the white
+        surface, under the 3:1 WCAG 1.4.11 asks of a focus indicator, and
+        forced-colours mode removes every box-shadow. Each field would have
+        been left with a one-pixel border change. A read-only field, which
+        has no focus classes at all, would have drawn nothing. The
+        suppressions were dropped instead: the global ring is the field's
+        ring.
+      - **The rail's `focus-visible:outline-(--color-text-rail)`.** The rail
+        drew the blue ring on navy, 2.53:1, never the white one the class
+        asks for (13.41:1). The logo link above it had no override at all,
+        and now has the white one too.
+      - **The note composer's amber focus.** Its comment promised one, and
+        the box drew a blue ring. It is amber now, 5.62:1 against the note's
+        amber paper.
+      - **The skip link's `focus:rounded-md`**, and every other `rounded-*`
+        on something focusable.
+
+      Two focus targets lose their ring, and both meant to: the help centre's
+      `main`, which the skip link moves focus to (`outline-none`), and the
+      WhatsApp onboarding card's heading, focused when the card opens
+      (`focus:outline-none`). Each is `tabIndex={-1}`, so Tab never lands on
+      it. Focus is put there so the next Tab starts in the right place and a
+      screen reader reads it, and there is nothing to type or press. The
+      feedback thanks line is the third such element, and it had its `!`.
+
+      Two weak indicators had nothing to do with the layer and were fixed
+      beside it, because the layer made each a one-class change. The widget
+      composer's box drew only the 20% ring round its textarea, and nothing
+      at all in forced colours: it now draws the global ring's outline while
+      the textarea has focus (`has-[textarea:focus-visible]`). The console's
+      article and canned-reply language toggle clipped its segments' ring to
+      a 2px bar, as the help centre's language switch did before it drew its
+      ring inside.
+
+      Measured in Chromium with Playwright. A script tabbed through 36
+      surfaces with the real keyboard: the console inbox, a ticket's sidebar,
+      composer, note and knowledge panel, the purge panel, the admin
+      builders, the widget, and the help centre in both languages at desktop
+      and phone width. That is 1,038 focus stops, in normal colours and under
+      emulated forced colours. For each stop it recorded the computed
+      outline, offset, radius and box-shadow, and the before and after runs
+      were compared stop by stop. Before, one stop had no ring in normal
+      colours (the feedback thanks line, by design) and three under forced
+      colours (that line and the widget composer twice). After, four stops
+      have no ring in either mode: that line, the help centre's `main` in
+      both languages and the onboarding heading. All four are the deliberate
+      ones above. Every field and the composer have a ring in both. 670 of
+      the 1,038 stops differ in all, and apart from the colour and placement
+      fixes above every difference is the radius: 4px becoming the
+      element's own. `tsc` and the linters see none of this.
+      `focus-ring` now refuses five things:
+      - a focus outline in no layer, or in a layer whose path does not start
+        at `base` or `components` (`overrides.base` sits wherever
+        `overrides` does);
+      - any other outline declared outside Tailwind's layers;
+      - an outline removed under a focus selector, in any layer;
+      - a suppressed outline (`outline-none`, `-hidden`, `-0`,
+        `-transparent`) in a module that draws a focus ring, of any opacity;
+      - an important outline utility, in either spelling.
+
+      It also fails when the shared rule stops declaring an outline. It
+      judges a module's class strings together, so `FIELD_BASE` and
+      `FIELD_SURFACE`, which every field is built from, are checked as one.
+
+      Generally: in a Tailwind v4 stylesheet, a rule outside a layer is a
+      rule no class can touch. `.kb-panel`, `.app-scroll` and the
+      `[dir='rtl']` text alignment are still unlayered. The `!` beside
+      `.kb-panel` in `home.tsx` is for that, and §6.81 says why
+      `.app-scroll` stays as it is.
+
+110.  **`CREATE INDEX IF NOT EXISTS` locks the table even when the index is
       there.** _2026-11-06, found while measuring the locks for #466._ It takes
       SHARE on the table before it looks for the index, so the eleven at the
       top of `db/sql/001_extensions_and_triggers.sql` — on `conversations`,

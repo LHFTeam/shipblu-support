@@ -91,9 +91,7 @@ export function HomeHero({
                 <Link
                   key={tag}
                   href={`/${locale}/search?q=${encodeURIComponent(tag)}`}
-                  // `focus-visible:rounded-full!`: the global focus rule sets a
-                  // 4px radius, which squared the pill off while focused.
-                  className="max-w-full truncate rounded-full border border-(--color-border-subtle) bg-(--color-background-surface) px-2.5 py-1 text-xs text-(--color-text-secondary) transition-colors hover:border-(--color-border-default) hover:bg-(--color-background-hover) hover:text-(--color-text-primary) focus-visible:rounded-full!"
+                  className="max-w-full truncate rounded-full border border-(--color-border-subtle) bg-(--color-background-surface) px-2.5 py-1 text-xs text-(--color-text-secondary) transition-colors hover:border-(--color-border-default) hover:bg-(--color-background-hover) hover:text-(--color-text-primary)"
                 >
                   {tag}
                 </Link>
@@ -224,7 +222,7 @@ function TopicGrid({ children }: { children: ReactNode }) {
  * The border turns the action blue while the pointer is anywhere on the card,
  * or the keyboard is on one of its links, as the design has it: the card is one
  * object with three ways in, and the whole of it answers. `!` because
- * `.kb-panel` is unlayered CSS and outranks a utility (§6.93).
+ * `.kb-panel` is unlayered CSS and outranks a utility (§6.109).
  */
 function TopicCard({
   locale,
@@ -246,9 +244,8 @@ function TopicCard({
       <Link
         href={href}
         // Ring drawn inside: the card clips its overflow for the rounded
-        // corners, and the global ring, offset outwards, was cut away (§6.93
-        // for the `!`).
-        className={`flex items-center gap-2 border-b border-(--color-border-subtle) bg-(--color-background-brand-subtle) pt-5 pb-4 ps-5 text-(--color-text-primary) focus-visible:outline-offset-[-2px]! ${
+        // corners, and the global ring, offset outwards, was cut away.
+        className={`flex items-center gap-2 border-b border-(--color-border-subtle) bg-(--color-background-brand-subtle) pt-5 pb-4 ps-5 text-(--color-text-primary) focus-visible:outline-offset-[-2px] ${
           drawn ? 'min-h-37 pe-2' : 'pe-5'
         }`}
       >

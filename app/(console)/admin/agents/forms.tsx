@@ -643,7 +643,7 @@ function AgentRow({
               onKeyDown={(event) => {
                 if (event.key === 'Enter') capacitySent.current = event.currentTarget.value;
               }}
-              className="w-16 rounded-md border border-(--color-border-subtle) bg-(--color-background-surface) px-1.5 py-1 text-base outline-none hover:border-(--color-border-default) focus:border-(--color-border-focus) focus:ring-2 focus:ring-(--color-border-focus)/20 sm:text-xs"
+              className="w-16 rounded-md border border-(--color-border-subtle) bg-(--color-background-surface) px-1.5 py-1 text-base hover:border-(--color-border-default) focus:border-(--color-border-focus) focus:ring-2 focus:ring-(--color-border-focus)/20 sm:text-xs"
             />
           </form>
 
