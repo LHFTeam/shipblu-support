@@ -7634,6 +7634,23 @@ dryRun=true`, then without, gives those two theirs back from their
       `CONCURRENTLY`, which `db/sql` cannot run. A missing index is still built
       as before, under SHARE until the file commits.
 
+      **An index found under its name is checked against its entry**, from
+      the review of #471. It must be a valid gin `gin_trgm_ops` index on that
+      table's one column, or the replay fails with a message saying so and a
+      hint: rebuild it by hand, outside a transaction, with
+      `DROP INDEX CONCURRENTLY` and `CREATE INDEX CONCURRENTLY`, then deploy
+      again. `IF NOT EXISTS` alone checked only the name and skipped anything
+      found under it, in silence. That covered two cases. An entry edited to
+      another column changed nothing on a database that already had the old
+      index. And an index left INVALID by a failed concurrent build was skipped
+      on every replay, leaving the search it serves unindexed. Rebuilding
+      either from this file would hold the table's writes for the whole build,
+      so the file stops the deploy and says what to run. The previous release
+      keeps serving meanwhile. The check reads only the catalog. A fresh
+      database never meets it, since every index there is built from its
+      entry. On 2026-11-06 all eleven in production passed it (read-only
+      query), so the first deploy does not stop on it.
+
       **The same audit found one more.** `005_storage_parameters.sql`'s
       `ALTER TABLE jobs SET (...)` took SHARE UPDATE EXCLUSIVE on `jobs` on
       every replay, and rewrote its `pg_class` row with the same values. That
@@ -7674,18 +7691,37 @@ dryRun=true`, then without, gives those two theirs back from their
         relation that is not a catalog when it commits, and the failure names
         the file, the table and the mode;
       - every file replays under a 1 s `lock_timeout` behind one session
-        holding ROW EXCLUSIVE and SHARE UPDATE EXCLUSIVE on every table in the
-        schema. That is a writer and a vacuum, which between them conflict with
-        every stronger mode. This catches what the first case cannot: a lock
-        taken inside a `BEGIN ... EXCEPTION` block whose statement failed is
-        released with its subtransaction before the snapshot, though it
-        waited. A probe file in the `EXCEPTION WHEN duplicate_object` shape
-        passed the first case and failed this one with 55P03;
+        holding a writer's locks and a vacuum's on every relation in the
+        schema, which between them conflict with every stronger mode. The
+        writer is an UPDATE matching no row on each table, which takes ROW
+        EXCLUSIVE on the table and every index of it, plus `nextval` on each
+        sequence; `LOCK TABLE` reaches neither. The vacuum is SHARE UPDATE
+        EXCLUSIVE on each table. The case fails if a kind of relation it does
+        not hold, such as a view, is added. It catches what the first case
+        cannot. A lock taken inside a `BEGIN ... EXCEPTION` block whose
+        statement failed is released with its subtransaction before the
+        snapshot, though it waited. Probe files in the
+        `EXCEPTION WHEN duplicate_object` shape, and with an
+        `ALTER INDEX ... SET` that takes ACCESS EXCLUSIVE on the index alone,
+        passed the first case and failed this one with 55P03. The one mode it
+        cannot hold is SHARE UPDATE EXCLUSIVE on an index, as an index rename
+        takes; no read or write waits on that one;
       - with 001's guard replaced by `true`, 001 fails with 55P03 behind a
         writer on every table, then runs once the writer commits. With 005's
         guard replaced, 005 does the same behind a vacuum of `jobs`;
       - a dropped index is built again to its old definition, and a changed or
-        missing option is set again, keeping one set by hand.
+        missing option is set again, keeping one set by hand;
+      - an index under an entry's name on another column fails the replay, and
+        so does the defined index marked INVALID.
+
+      Each replay states its own `lock_timeout`. The short 1 s is used only
+      behind a stand-in. One with work to do takes SHARE or stronger, which an
+      autovacuum of the table holds off until the waiter reaches
+      `deadlock_timeout` (also 1 s) and cancels it. So those replays use
+      `db/migrate.ts`'s 10 s, where 1 s would race the cancellation. The suite
+      runs against the seeded baseline, not production's rows. A guard whose
+      condition reads table data is not exercised by it, and needs a test of
+      its own with the rows that open it.
 
       Against `dev`'s 001 and 005 the first case lists eight SHARE locks and
       two SHARE UPDATE EXCLUSIVE locks (on `jobs` and its TOAST table), and the

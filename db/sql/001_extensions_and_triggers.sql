@@ -54,13 +54,26 @@ CREATE EXTENSION IF NOT EXISTS unaccent;
 -- relies on it: only the web service's preDeploy runs `db:migrate`.
 --
 -- Each index is named once, in the list below, and the guard and the statement
--- are both built from that one name, so they cannot drift apart. A guard asking
--- for a name the statement never creates would build nothing and read as
--- success. A statement creating a name the guard never asks for would take its
--- lock on every replay again. `db/sql/replay-locks.db.test.ts` replays every
--- file behind a writer and a vacuum on every table in the schema. It then
--- replays this one with the guard taken out, to show that the writer is what
--- the guard avoids.
+-- are both built from that one name, so the two cannot ask about different
+-- indexes. A guard asking for a name the statement never creates would build
+-- nothing and read as success. A statement creating a name the guard never asks
+-- for would take its lock on every replay again.
+--
+-- A name is not a definition, so an index found under its name is also checked
+-- against its entry: a valid gin `gin_trgm_ops` index on that table's one
+-- column. Anything else fails the replay. `IF NOT EXISTS` alone skipped it in
+-- silence. That would leave an entry edited to another column changing nothing
+-- on a database that has the old index, and an index left INVALID by a failed
+-- `CREATE INDEX CONCURRENTLY` skipped on every replay, with the search it
+-- serves unindexed. Neither can be repaired here: rebuilding an index in this
+-- file holds its table's writes for the whole build. So the error says how to
+-- rebuild it by hand, and the deploy waits until somebody has. The check reads
+-- only the catalog, so it locks nothing either. A fresh database never meets
+-- it, since every index there is built from its entry.
+--
+-- `db/sql/replay-locks.db.test.ts` replays every file behind a writer and a
+-- vacuum on every relation in the schema. It then replays this one with the
+-- guard taken out, to show that the writer is what the guard avoids.
 --
 -- Do NOT reach for CREATE INDEX CONCURRENTLY here. db/migrate.ts sends each file
 -- as one sql.unsafe(contents), which wraps it in an implicit transaction, and
@@ -71,6 +84,7 @@ CREATE EXTENSION IF NOT EXISTS unaccent;
 DO $$
 DECLARE
   wanted record;
+  existing oid;
 BEGIN
   FOR wanted IN
     SELECT * FROM (VALUES
@@ -105,11 +119,37 @@ BEGIN
       ('shipping_accounts_name_trgm_idx', 'shipping_accounts', 'name')
     ) AS trigram (index_name, table_name, column_name)
   LOOP
-    IF to_regclass(format('public.%I', wanted.index_name)) IS NULL THEN
+    existing := to_regclass(format('public.%I', wanted.index_name));
+
+    IF existing IS NULL THEN
       EXECUTE format(
         'CREATE INDEX IF NOT EXISTS %I ON public.%I USING gin (%I gin_trgm_ops)',
         wanted.index_name, wanted.table_name, wanted.column_name
       );
+    ELSIF NOT EXISTS (
+      SELECT 1
+      FROM pg_index i
+      JOIN pg_class ic ON ic.oid = i.indexrelid
+      JOIN pg_am am ON am.oid = ic.relam
+      JOIN pg_opclass opc ON opc.oid = i.indclass[0]
+      JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = i.indkey[0]
+      WHERE i.indexrelid = existing
+        AND i.indrelid = to_regclass(format('public.%I', wanted.table_name))
+        AND i.indnatts = 1
+        AND a.attname = wanted.column_name
+        AND am.amname = 'gin'
+        AND opc.opcname = 'gin_trgm_ops'
+        AND i.indexprs IS NULL
+        AND i.indpred IS NULL
+        AND i.indisvalid
+    ) THEN
+      RAISE EXCEPTION 'public.% is not the index db/sql/001 defines: a valid gin (% gin_trgm_ops) on public.%',
+          wanted.index_name, wanted.column_name, wanted.table_name
+        USING HINT = 'This file builds a missing index and never rebuilds one, because that '
+          'would hold the table''s writes for the whole build. Rebuild it by hand, outside '
+          'a transaction: drop it with DROP INDEX CONCURRENTLY, and build it again '
+          'concurrently with the definition in the message. Then deploy again '
+          '(PROJECT-STATE §6.110).';
     END IF;
   END LOOP;
 END $$;
