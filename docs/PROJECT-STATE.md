@@ -4722,9 +4722,8 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
     does not normalise it fails the build.
 
 51. ~~**`kb_articles.updated_at` is not an edit date — every page view moves
-    it.**~~ **Fixed on branch `fix/kb-updated-at-readers`, in production from
-    the first deploy after `dev` is merged into `main`; the history below is
-    why.** _2026-09-03._
+    it.**~~ **Fixed in #466, in production from the first deploy after `dev`
+    is merged into `main`; the history below is why.** _2026-09-03._
     `recordArticleView` increments `view_count` on the
     article row, and `touch_updated_at` fires on any update of a table with that
     column, so a read writes the timestamp. The article page renders it as
