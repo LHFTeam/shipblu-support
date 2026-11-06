@@ -1,4 +1,16 @@
-import { and, asc, desc, eq, inArray, ne, sql } from 'drizzle-orm';
+import {
+  type SQL,
+  and,
+  asc,
+  desc,
+  eq,
+  inArray,
+  isNotNull,
+  ne,
+  not,
+  notExists,
+  sql,
+} from 'drizzle-orm';
 import { db } from '@/db/client';
 import { aiPriorityRuns, conversationEvents, conversations, messages } from '@/db/schema';
 import { earlierMessages } from '@/lib/subcategorise-ai/context';
@@ -32,7 +44,11 @@ const log = logger('classify_priority');
  *
  * Everything the enqueue side checked is checked again here, because the job can
  * run minutes later, after a retry, or after the switch was turned off; and
- * because a job row is something anybody with `npm run job` can write.
+ * because a job row is something anybody with `npm run job` can write. Who the
+ * requester is, a third time, under the ticket's lock: a comment thread's root
+ * arriving after a reply under it moves the requester to its author
+ * (`adoptRootAuthor`), and a job that read the ticket before that committed
+ * would otherwise go on to judge the replier's words as the customer's.
  */
 
 /**
@@ -168,18 +184,52 @@ export async function classifyMessagePriority(
   // already over — and it is the same row an agent's priority change locks.
   const written = await db.transaction(async (tx) => {
     const [ticket] = await tx
-      .select({ priority: conversations.priority })
+      .select({
+        priority: conversations.priority,
+        requesterContactId: conversations.requesterContactId,
+      })
       .from(conversations)
       .where(eq(conversations.id, row.conversationId))
       .for('update')
       .limit(1);
     if (!ticket) return null;
 
+    // The requester as it stands under the lock, not as the read above found
+    // it. A thread's root stored while this job asked the provider makes its
+    // own author the requester (`adoptRootAuthor`), and the reply this job is
+    // about — a passer-by's, filed while it was the only comment on the
+    // ticket — is then somebody else's words: written, it would set the
+    // customer's priority from them, and count as having judged her opening.
+    // The answer is thrown away unrecorded, as the skip before the call would
+    // have, had the job run a moment later; the provider call is the cost of
+    // the race.
+    //
+    // The author is read again too, in a statement of its own once the lock is
+    // held, so it is as current as the requester it is compared with. A contact
+    // merge moves both in one transaction (`mergeContacts`), and the author the
+    // read above found would be the record merged away: the customer's own
+    // message, refused as somebody else's. Not a join in the locked read, whose
+    // recheck after waiting on the lock re-reads the ticket's row alone. The
+    // rest of the row is as the read above found it, and passed.
+    const [message] = await tx
+      .select({ authorContactId: messages.authorContactId })
+      .from(messages)
+      .where(eq(messages.id, messageId))
+      .limit(1);
+    if (!message) return null;
+    const stale = skipReason({
+      ...row,
+      authorContactId: message.authorContactId,
+      requesterContactId: ticket.requesterContactId,
+    });
+    if (stale) return { skipped: stale };
+
     const facts = await priorityFacts(tx, {
       conversationId: row.conversationId,
       mode,
       messageId,
       createdAt: row.createdAt,
+      requesterContactId: ticket.requesterContactId,
     });
 
     // Shadow mode writes nothing, so left alone every later message on a ticket
@@ -203,7 +253,8 @@ export async function classifyMessagePriority(
       // Opening by timestamp *and* by evidence: jobs run concurrently and retry
       // out of order, so the opening message can be answered after a later one
       // has already raised the ticket. Without the second test its "hello"
-      // would then lower a ticket another message made urgent.
+      // would then lower a ticket another message made urgent. Both read the
+      // requester's messages only (`priorityFacts`).
       firstMessage: facts.opening && !facts.otherConfident,
     });
 
@@ -280,9 +331,11 @@ export async function classifyMessagePriority(
   });
 
   // A ticket deleted between the two reads cascades its run rows with it, so
-  // there is nothing to record and nothing to tell anybody.
+  // there is nothing to record and nothing to tell anybody; a message deleted
+  // since is the same answer the first read gives one already gone.
   if (written === null) return { status: 'gone' };
   if (written === 'duplicate') return { status: 'already_classified' };
+  if (written.skipped !== undefined) return { status: 'skipped', reason: written.skipped };
   const { outcome, deferred, retimed } = written;
 
   if (outcome === 'applied') {
@@ -335,7 +388,32 @@ type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
  * What the ticket's history says about who owns its priority.
  *
  * Read inside the transaction that holds the ticket row, so the answer cannot be
- * stale by the time it is acted on.
+ * stale by the time it is acted on — `requesterContactId` included, which comes
+ * from the locked read and not from the one the job began with.
+ *
+ * Whether the opening has been judged, and which message was the opening, are
+ * questions about the requester's own messages: a message somebody else wrote
+ * on the ticket — `skipReason`'s "not written by the requester", asked of who
+ * the requester is now — is neither. That matters once the requester moves. A
+ * passer-by's reply under a customer's comment can be stored before the
+ * comment, open the ticket under its own author, and be asked about and
+ * applied as the opening; when the comment arrives its author becomes the
+ * requester (`adoptRootAuthor`), and her own first words are her opening.
+ * Counted, the replier's run would leave her answer unable to lower what his
+ * words raised, and his reply, dated before a root Meta sent with no
+ * `created_time` (stamped when parsed), would take her opening from her. His
+ * level stays on the column — what was applied is not undone — and her opening
+ * may lower it or raise it. An opening of hers that gave Jev nothing to act on,
+ * a comment with no words or an answer below the threshold, leaves it to be
+ * raised and never lowered, as any customer's would leave the default.
+ *
+ * A message with no recorded author is nobody else's, as in `skipReason`. The
+ * runs are filtered by whether their message exists *and* is somebody else's,
+ * never by a join to it, so a run whose message has been deleted since is
+ * weighed exactly as it was before the requester was asked about. There is
+ * always a requester to ask about — the column is `not null` — so the type
+ * says so, and a change that let it be null would have to decide here what a
+ * ticket with nobody's name on it counts.
  */
 async function priorityFacts(
   tx: Tx,
@@ -344,11 +422,13 @@ async function priorityFacts(
     mode,
     messageId,
     createdAt,
+    requesterContactId,
   }: {
     conversationId: string;
     mode: Exclude<PriorityAiMode, 'off'>;
     messageId: string;
     createdAt: Date;
+    requesterContactId: string;
   },
 ): Promise<{
   ownedElsewhere: boolean;
@@ -416,16 +496,31 @@ async function priorityFacts(
         eq(aiPriorityRuns.conversationId, conversationId),
         ne(aiPriorityRuns.messageId, messageId),
         inArray(aiPriorityRuns.outcome, [...CONFIDENT_OUTCOMES]),
+        notExists(
+          tx
+            .select({ id: messages.id })
+            .from(messages)
+            .where(
+              and(
+                eq(messages.id, aiPriorityRuns.messageId),
+                writtenByAnotherThan(requesterContactId),
+              ),
+            ),
+        ),
       ),
     )
     .limit(1);
 
-  // The customer's opening message: no other inbound reply at or before it.
-  // At, and not only before: WhatsApp stamps a message to the whole second, so
-  // a burst shares one, and the strict `<` that is right for choosing context
-  // would let each message of the burst count as the opening — and lower. With
-  // a tie neither does, which is the direction rule 3 errs in. A caption-less
-  // photo counts: it was the opening, though there was nothing to ask about it.
+  // The requester's opening message: no other inbound reply of theirs at or
+  // before it. At, and not only before: WhatsApp stamps a message to the whole
+  // second, so a burst shares one, and the strict `<` that is right for
+  // choosing context would let each message of the burst count as the opening
+  // — and lower. With a tie neither does, which is the direction rule 3 errs
+  // in. A caption-less photo counts: it was the opening, though there was
+  // nothing to ask about it. Somebody else's message does not, on any
+  // channel: a passer-by's reply stamped before the customer's comment, and a
+  // colleague copied on an email thread who wrote before the customer, each
+  // leave the customer's own first words the opening.
   const [before] = await tx
     .select({ id: messages.id })
     .from(messages)
@@ -439,6 +534,7 @@ async function priorityFacts(
         sql`btrim(${messages.bodyText}) <> ''`,
         // A 👍 on the business's first message was not the customer opening.
         notReaction(),
+        not(writtenByAnotherThan(requesterContactId)),
       ),
     )
     .limit(1);
@@ -450,6 +546,20 @@ async function priorityFacts(
     opening: !before,
     otherConfident: Boolean(confident),
   };
+}
+
+/**
+ * A `messages` row somebody other than the requester wrote: `skipReason`'s
+ * test, in SQL, so the facts set aside exactly the messages the job refuses.
+ * The author's null test is spelt out rather than left to `<>`: for a message
+ * with no recorded author that answers null, `not()` keeps it null, and the
+ * opening test would quietly stop counting the message it counts today.
+ */
+function writtenByAnotherThan(requesterContactId: string): SQL {
+  return and(
+    isNotNull(messages.authorContactId),
+    ne(messages.authorContactId, requesterContactId),
+  )!;
 }
 
 async function recordFailure(
