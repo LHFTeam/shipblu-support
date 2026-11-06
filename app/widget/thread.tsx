@@ -682,9 +682,13 @@ export function WidgetThread({
                 wrapped. On a 320px phone "Type your message…" is wider than the
                 box, and Chrome counts a wrapped placeholder in `scrollHeight`,
                 so the effect above grew the empty box to two lines and put the
-                words above the buttons again.
+                words above the buttons again. `text-ellipsis` on the textarea
+                as well as on its placeholder: Chrome reads a textarea
+                placeholder's `text-overflow` off the textarea, and without it
+                cut the hint off mid-letter. Typed text still wraps, so it
+                never overflows a line for the ellipsis to act on.
               */
-              className="min-w-0 flex-1 resize-none bg-transparent px-1 py-2.5 font-conversation text-base text-(--color-text-primary) outline-none placeholder:truncate placeholder:text-(--color-text-tertiary)"
+              className="min-w-0 flex-1 resize-none bg-transparent px-1 py-2.5 font-conversation text-base text-ellipsis text-(--color-text-primary) outline-none placeholder:truncate placeholder:text-(--color-text-tertiary)"
             />
 
             <button
