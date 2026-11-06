@@ -1226,6 +1226,63 @@ describe('classifyMessageCategory, once the first comment took the ticket from a
   });
 });
 
+// A contact merge moves the ticket's requester and the customer's messages to
+// the record it keeps, in one transaction. Compared with the author the job's
+// first read found, either half read afterwards would refuse the customer's own
+// message as somebody else's.
+describe('classifyMessageCategory, a merge of the customer while it asks', () => {
+  async function merged(requester: string, survivor: string, executor: Pick<typeof db, 'update'>) {
+    // What `mergeContacts` does to her tickets and then to her messages.
+    await executor
+      .update(conversations)
+      .set({ requesterContactId: survivor })
+      .where(eq(conversations.requesterContactId, requester));
+    await executor
+      .update(messages)
+      .set({ authorContactId: survivor })
+      .where(eq(messages.authorContactId, requester));
+  }
+
+  async function herMessage() {
+    const { id, requester } = await ticket();
+    const messageId = await inbound(id, 'بكام الشحن للاسكندرية؟', { authorContactId: requester });
+    const [survivor] = await db
+      .insert(contacts)
+      .values({ name: 'Amira Hassan' })
+      .returning({ id: contacts.id });
+    return { id, messageId, requester, survivor: survivor!.id };
+  }
+
+  it('still files her message when the merge commits while Jev is asked', async () => {
+    const her = await herMessage();
+    answers('sales');
+
+    let raced: Promise<unknown> | undefined;
+    await db.transaction(async (tx) => {
+      await merged(her.requester, her.survivor, tx);
+      raced = classifyMessageCategory(her.messageId, { baseUrl: BASE });
+      await untilSomebodyWaits();
+    });
+
+    expect(await raced).toEqual({ status: 'recorded', outcome: 'applied', predicted: 'sales' });
+    expect(await carried(her.id)).toBe(await categoryId('sales'));
+  });
+
+  it('still asks about her message when the merge commits before its first look', async () => {
+    const her = await herMessage();
+    const calls = answers('sales');
+    between.next = () => merged(her.requester, her.survivor, db);
+
+    await expect(classifyMessageCategory(her.messageId, { baseUrl: BASE })).resolves.toEqual({
+      status: 'recorded',
+      outcome: 'applied',
+      predicted: 'sales',
+    });
+    expect(between.next).toBeNull();
+    expect(calls).toHaveBeenCalledOnce();
+  });
+});
+
 /** Resolves once another session is waiting on a lock this test holds. */
 async function untilSomebodyWaits(): Promise<void> {
   for (let tries = 0; tries < 200; tries++) {

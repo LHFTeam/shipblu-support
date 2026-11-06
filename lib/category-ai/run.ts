@@ -174,11 +174,23 @@ export async function classifyMessageCategory(
   // record for it. So the requester is asked again of this read, and a root
   // committed since the message was read ends the job as a skip does, with
   // no row.
+  //
+  // The author and the requester come from one statement (`authorship`), so a
+  // contact merge — which moves the ticket's requester and the customer's
+  // messages to the record it keeps, in one transaction — is read on both
+  // sides or on neither. Compared with the author the first read found, a
+  // merge committing in between made the customer's own message read as
+  // somebody else's.
   const current = await readTicket(db, row.conversationId, false);
   if (!current) return { status: 'gone' };
   const leftBefore = queueRefusal(current);
   if (leftBefore) return { status: 'skipped', reason: leftBefore };
-  const notTheirsBefore = skipAgainst(row, current.requesterContactId);
+  const wrote = await authorship(db, messageId);
+  if (!wrote) return { status: 'gone' };
+  const notTheirsBefore = skipAgainst(
+    { ...row, authorContactId: wrote.authorContactId },
+    wrote.requesterContactId,
+  );
   if (notTheirsBefore) return { status: 'skipped', reason: notTheirsBefore };
   const known = await ticketFacts(db, row.conversationId, current, at, mode);
   const before = preCallOutcome({ ...known, owned: known.ownedByEvent });
@@ -251,7 +263,21 @@ export async function classifyMessageCategory(
     // message here, read as the customer's a moment ago. Written, his answer
     // would file her ticket on his words; recorded, it would be a row for a
     // message the job no longer asks about. A skip records nothing.
-    const notTheirs = skipAgainst(row, ticket.requesterContactId);
+    //
+    // The author is read again too, once the lock is held, for the merge's
+    // sake (above): a merge that committed before the lock moved both, and one
+    // still to come waits on this lock for the ticket's half of its write.
+    // Not a join in the locked read, whose recheck after waiting on the lock
+    // re-reads the ticket's row alone.
+    const [message] = await tx
+      .select({ authorContactId: messages.authorContactId })
+      .from(messages)
+      .where(eq(messages.id, messageId));
+    if (!message) return null;
+    const notTheirs = skipAgainst(
+      { ...row, authorContactId: message.authorContactId },
+      ticket.requesterContactId,
+    );
     if (notTheirs) return { kind: 'left' as const, reason: notTheirs };
 
     // The switch as it is now, not as it was before the call: an admin who
@@ -444,6 +470,25 @@ function skipAgainst(
   requesterContactId: string | null,
 ): string | null {
   return skipReason({ ...row, requesterContactId }) ?? categorySkipReason(row);
+}
+
+/**
+ * Who wrote the message, and who its ticket's requester is, read in one
+ * statement so that both are as one moment left them; null when either is gone.
+ */
+async function authorship(
+  executor: Executor,
+  messageId: string,
+): Promise<{ authorContactId: string | null; requesterContactId: string | null } | null> {
+  const [found] = await executor
+    .select({
+      authorContactId: messages.authorContactId,
+      requesterContactId: conversations.requesterContactId,
+    })
+    .from(messages)
+    .innerJoin(conversations, eq(conversations.id, messages.conversationId))
+    .where(eq(messages.id, messageId));
+  return found ?? null;
 }
 
 /**
