@@ -414,3 +414,27 @@ BEGIN
       ADD CONSTRAINT agent_changes_field_known CHECK (field IN ('role', 'email'));
   END IF;
 END $$;
+
+-- --------------------------------------------------------------------------
+-- meta_app_role_events names a platform as the rest of the system spells it
+--
+-- Text, as agent_changes' field is, and this is what stops it being any text:
+-- `defaultAppStanding` reads 'instagram' rows, so a row spelled 'page' — the
+-- webhook's own `object` value, easy to confuse with it — by a hand fix or a
+-- later writer would be a switch of default app that is stored and never
+-- weighed, and the Instagram tickets it supersedes would go on refusing. The
+-- writers are `recordAppRole` and db/sql/012, which both map the object to the
+-- platform (docs/PROJECT-STATE.md §6.111).
+-- --------------------------------------------------------------------------
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'meta_app_role_events_platform_known'
+      AND conrelid = 'public.meta_app_role_events'::regclass
+  ) THEN
+    ALTER TABLE meta_app_role_events
+      ADD CONSTRAINT meta_app_role_events_platform_known
+      CHECK (platform IN ('facebook', 'instagram'));
+  END IF;
+END $$;

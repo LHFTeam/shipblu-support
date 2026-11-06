@@ -84,6 +84,60 @@ export const webhookEvents = pgTable(
 );
 
 /**
+ * Every change Meta reports to which app a Page or an Instagram account routes
+ * its conversations to — the `app_roles` messaging event — as it was reported.
+ *
+ * A table of its own because the delivery that carries one is deleted with the
+ * rest of `webhook_events` after thirty days (`cleanup`), and the fact it states
+ * is needed for as long as the threads it changed are open. On 2026-11-05 at
+ * 10:30:24 UTC one said this app had become the Instagram account's default
+ * app, and every Instagram `standby` older than that is superseded by it: read
+ * by `defaultAppSince` (`lib/meta/app-roles.ts`), which the thread verdict
+ * weighs against a message's `standby` as it weighs a `thread_control_taken`
+ * (`docs/PROJECT-STATE.md` §6.111). Without the row, the only record of that
+ * switch would have gone with its delivery on about 2026-12-05.
+ *
+ * Append-only, one row per app named in an event, written by
+ * `process_meta_webhook` and, for what arrived before that, by
+ * `db/sql/012_meta_app_role_backfill.sql`. The unique key is what makes both
+ * safe to run again: a Meta batch is retried whole, and the backfill replays on
+ * every deploy.
+ */
+export const metaAppRoleEvents = pgTable(
+  'meta_app_role_events',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+
+    /**
+     * `facebook` for a Page's event, `instagram` for an Instagram account's —
+     * the platform the webhook's `object` names, as everywhere else.
+     */
+    platform: text('platform').notNull(),
+    /** The Page or Instagram account the event is about: the entry's id. */
+    accountId: text('account_id').notNull(),
+    appId: text('app_id').notNull(),
+    /**
+     * The roles Meta listed for that app, as it listed them — `default_app`,
+     * `primary_receiver`, `secondary_receiver`. Empty when it listed none.
+     */
+    roles: text('roles').array().notNull().default([]),
+    /** Meta's own timestamp for the event, the clock a message's `sentAt` is on. */
+    at: timestamp('at', { withTimezone: true }).notNull(),
+    /**
+     * The delivery it was read from. No foreign key: that row is deleted after
+     * thirty days and this one is the reason to outlive it.
+     */
+    webhookEventId: uuid('webhook_event_id'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    // The dedupe key, and the index the reader walks newest-first for one
+    // account.
+    uniqueIndex('meta_app_role_events_key').on(t.platform, t.accountId, t.at, t.appId),
+  ],
+);
+
+/**
  * Postgres-backed job queue, consumed with FOR UPDATE SKIP LOCKED.
  *
  * Chosen over Redis because at this volume it buys nothing but an extra service

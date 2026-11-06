@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { takeThreadControlRequest, TAKE_CONTROL_METADATA } from './handover';
+import { offersThreadControl, takeThreadControlRequest, TAKE_CONTROL_METADATA } from './handover';
 
 /*
   The only check there is on this shape.
@@ -40,5 +40,19 @@ describe('takeThreadControlRequest', () => {
       'metadata',
       'recipient',
     ]);
+  });
+});
+
+describe('offersThreadControl', () => {
+  // The verdict offers the button by it and takeThreadControl refuses by it, so
+  // this table is both at once (docs/PROJECT-STATE.md §6.111).
+  it('is a Messenger thread over the Page connection and nothing else', () => {
+    expect(offersThreadControl('facebook', 'facebook_page')).toBe(true);
+
+    // The Page route would address the Instagram account's node, which Meta
+    // does not document for this call; the other two have no handover at all.
+    expect(offersThreadControl('instagram', 'facebook_page')).toBe(false);
+    expect(offersThreadControl('instagram', 'unified_login')).toBe(false);
+    expect(offersThreadControl('instagram', 'instagram_login')).toBe(false);
   });
 });

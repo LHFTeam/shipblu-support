@@ -9,6 +9,7 @@ import {
   jobs,
   messages,
   ticketStatuses,
+  metaAppRoleEvents,
   webhookEvents,
 } from '@/db/schema';
 import { sendSurvey } from '@/lib/csat';
@@ -308,5 +309,50 @@ describe('processWebhook — a Meta batch with an item that failed', () => {
       { payload: { messageId: message!.id, url: first, index: 0, source: 'meta' } },
       { payload: { messageId: message!.id, url: second, index: 1, source: 'meta' } },
     ]);
+  });
+});
+
+describe('an app_roles event in a batch retried whole', () => {
+  // The switch of default app is stored once, however many times the batch
+  // runs: here a direct message beside it fails once, so the delivery is run
+  // twice (docs/PROJECT-STATE.md §6.111).
+  it('is stored once, with the delivery it came in', async () => {
+    const at = Date.parse('2026-11-05T10:30:24Z');
+    failing.mids.add('m_beside');
+    const id = await store([
+      {
+        recipient: { id: ACCOUNT },
+        timestamp: at,
+        app_roles: { '1009187740467732': 'default_app' },
+      },
+      dm('igsid-1', 'm_beside', at + MINUTE),
+    ]);
+
+    await expect(run(id)).rejects.toThrow('m_beside');
+    await run(id);
+
+    expect(
+      await db
+        .select({
+          platform: metaAppRoleEvents.platform,
+          accountId: metaAppRoleEvents.accountId,
+          appId: metaAppRoleEvents.appId,
+          roles: metaAppRoleEvents.roles,
+          at: metaAppRoleEvents.at,
+          webhookEventId: metaAppRoleEvents.webhookEventId,
+        })
+        .from(metaAppRoleEvents),
+    ).toEqual([
+      {
+        platform: 'instagram',
+        accountId: ACCOUNT,
+        appId: '1009187740467732',
+        roles: ['default_app'],
+        at: new Date(at),
+        webhookEventId: id,
+      },
+    ]);
+    // Nothing else came of it: the message beside it is the only one filed.
+    expect(await storedMids()).toEqual(['m_beside']);
   });
 });

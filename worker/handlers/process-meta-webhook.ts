@@ -1,4 +1,5 @@
 import { recordMetaFeedback } from '@/lib/csat/meta-feedback';
+import { recordAppRole } from '@/lib/meta/app-roles';
 import { isMetaConnection, type MetaConnection } from '@/lib/meta/connection';
 import { parseMetaWebhook } from '@/lib/meta/parse';
 import {
@@ -32,7 +33,9 @@ const log = logger('meta');
  * - an interaction by its instant on the ticket (`applyMetaInteraction`);
  * - a survey answer by `recordAnswer`'s first-answer-wins, and only a first
  *   answer is thanked (`recordMetaFeedback`);
- * - a receipt moves a message forward only (`applyMetaReceipt`).
+ * - a receipt moves a message forward only (`applyMetaReceipt`);
+ * - an app's role by its account, app and instant (`recordAppRole`), which
+ *   moves no ticket at all — its instant is read against each ticket's own.
  *
  * Instagram, delivered on both of its connections, already ran its items
  * twice; on Facebook a second run is new, which is why each item type's dedupe
@@ -59,6 +62,7 @@ export async function processMetaWebhook(event: {
   let receipts = 0;
   let interactions = 0;
   let answers = 0;
+  let appRoles = 0;
   // Interactions that found no live ticket, or had already been recorded, and
   // survey answers that recorded nothing — a second copy, an unknown survey,
   // somebody other than the requester. For the log line only; on a retry it
@@ -119,6 +123,22 @@ export async function processMetaWebhook(event: {
     }
   }
 
+  // Logged one by one: a switch of default app changes which tickets can be
+  // answered at all, and the line is how somebody finds when it happened.
+  for (const role of parsed.appRoles) {
+    try {
+      const stored = await recordAppRole(role, event.id);
+      if (stored) appRoles += 1;
+      log.info(
+        `${role.platform} app_roles on ${role.accountId}: app ${role.appId} is ` +
+          `${role.roles.join(', ') || 'given no role'} as of ${role.at.toISOString()} → ` +
+          `${stored ? 'recorded' : 'already recorded'}`,
+      );
+    } catch (error) {
+      failures.push(`app_roles for ${role.appId}: ${errorMessage(error)}`);
+    }
+  }
+
   for (const receipt of parsed.receipts) {
     try {
       receipts += await applyMetaReceipt(receipt);
@@ -131,6 +151,7 @@ export async function processMetaWebhook(event: {
     `${event.id} via ${event.connection ?? 'an unrecorded connection'}: ` +
       `${messages} message(s), ${comments} comment(s), ${receipts} receipt(s), ` +
       `${interactions} interaction(s), ${answers} survey answer(s) (${skipped} skipped), ` +
+      `${appRoles} app role(s), ` +
       `${parsed.echoes} echo(es) ignored, ` +
       `${parsed.emptyCards} empty card(s) ignored` +
       (failures.length ? `, ${failures.length} failed` : ''),

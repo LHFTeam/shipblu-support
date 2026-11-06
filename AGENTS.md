@@ -621,7 +621,7 @@ two for every Instagram call while it is set. It is minted by the login
 behind `admin.channels.connect`), shown to the admin once and set on Render by
 hand — nothing stores it; `plans/instagram-unified-login.md` has the Meta-side
 steps and the activation order. `lib/meta/connection.ts` names the three and
-decides which one a call goes out over; nothing else may re-derive that. Three
+decides which one a call goes out over; nothing else may re-derive that. These
 rules follow, each of which has already cost a customer channel:
 
 - **Both app secrets are tried on every `instagram` delivery, and neither can be
@@ -631,6 +631,22 @@ rules follow, each of which has already cost a customer channel:
 - **`standby` is a fact about one connection, not about the account.** The
   handover protocol belongs to the Page, so a Page delivery arriving in `standby`
   says nothing about a reply sent with the Instagram account's own token.
+- **A message's `standby` is a fact about when it was sent, and a newer fact
+  supersedes it.** Two do. `thread_control_taken` is the console's button,
+  Messenger only (`offersThreadControl`). The other is the Instagram account's
+  switch of default app to this one: Meta reports it as an `app_roles` event,
+  `process_meta_webhook` stores it in `meta_app_role_events`, and
+  `defaultAppStanding` reads it. A switch away is the newer fact the other way:
+  a thread whose customer last wrote before it is the new default's, and
+  refuses. The Page's own switch supersedes nothing: it named this app
+  `default_app` on 2026-11-05 too, and every Messenger message in the day after
+  it still arrived in `standby`, since Freshworks holds that inbox as primary
+  receiver (§6.111). Every reader of a stored message takes both facts from
+  `threadOwnershipFacts`, and `metaThreadStateFromMessage` takes the standing
+  as a required argument, so the console and `send_meta` cannot weigh different
+  ones. The one reader that takes neither is the survey's thanks, which judges a
+  tap by the tap's own `standby`: Meta set it as it delivered the tap, after any
+  switch.
 - **A Meta doc example proves nothing until you check which host its URL names.**
   The two connections differ in the host, the token, the ids _and_ the field
   vocabulary — §6.35. The referral webhook field is the smallest instance:
