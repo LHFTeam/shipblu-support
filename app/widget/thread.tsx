@@ -131,9 +131,10 @@ export function WidgetThread({
    *
    * Applying it is one thing and putting the caret after it is another, because
    * the field still holds the old value when this runs: `setDraft` has not been
-   * rendered yet. The effect below places the caret in the render this causes,
-   * once the value is in the field, which is also what makes the case above
-   * right — the caret lands at the end of whatever the visitor kept.
+   * rendered yet. An effect further down places the caret in the render this
+   * causes, once the value is in the field and the box is measured, which is
+   * also what makes the case above right — the caret lands at the end of
+   * whatever the visitor kept.
    *
    * `caretFor` is state rather than a flag in a ref so that render always
    * happens. A box that keeps the visitor's words gives `setDraft` nothing to
@@ -150,22 +151,6 @@ export function WidgetThread({
     setDraft((current) => (current.trim() ? current : prefill.text));
     setCaretFor(prefill.seq);
   }, [prefill]);
-
-  /*
-   * Scrolled to the end as well as put there: Chrome scrolls a textarea to its
-   * caret when somebody types, never when code sets the value or the
-   * selection, so a draft past the cap would open on its first six lines and
-   * hide the one the caret is on. The box is already its final height: the
-   * effect that sizes it is a layout effect of this same render.
-   */
-  useEffect(() => {
-    const field = composer.current;
-    if (!caretFor || !field) return;
-
-    field.focus();
-    field.setSelectionRange(field.value.length, field.value.length);
-    field.scrollTop = field.scrollHeight;
-  }, [caretFor]);
 
   useEffect(() => {
     if (caretAt.current === null) return;
@@ -215,6 +200,29 @@ export function WidgetThread({
       field.scrollTop = field.scrollHeight;
     }
   }, [draft, active]);
+
+  /*
+   * A prefill's caret, at the end of the box (`caretFor`, above), and the box
+   * scrolled to it: Chrome scrolls a textarea to its caret when somebody
+   * types, never when code sets the value or the selection, so a draft past
+   * the cap would open on its first six lines and hide the one the caret is
+   * on.
+   *
+   * A layout effect, and declared after the one that sizes the box. Layout, so
+   * the scroll lands before the browser paints the words: as a plain effect it
+   * ran after a paint about half the time a prefill opened the thread, and a
+   * long draft flashed its first six lines for a frame before jumping to its
+   * end. After the sizing, because that sets `height: auto` first, which puts
+   * the scroll back to the top.
+   */
+  useLayoutEffect(() => {
+    const field = composer.current;
+    if (!caretFor || !field) return;
+
+    field.focus();
+    field.setSelectionRange(field.value.length, field.value.length);
+    field.scrollTop = field.scrollHeight;
+  }, [caretFor]);
 
   /*
    * Out of hours, ask before the message rather than after it.
