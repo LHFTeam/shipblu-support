@@ -47,9 +47,9 @@ import { logger } from '@/lib/log';
  * never written, so it keeps its date — the trigger also keeps the date on an
  * UPDATE that changes nothing, but not issuing one is cheaper and does not
  * depend on it. On the help centre the date is `editedAt` in
- * `lib/kb/queries.ts`, which only a version row moves, so a body this rewrites
- * dates the article by the version it cuts, and a text-only rebuild, which cuts
- * none, dates nothing.
+ * `lib/kb/queries.ts`, which only a version row or a publication moves, and
+ * this job publishes nothing: a body it rewrites dates the article by the
+ * version it cuts, and a text-only rebuild, which cuts none, dates nothing.
  */
 
 type Tally = {

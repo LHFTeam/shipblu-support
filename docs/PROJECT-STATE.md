@@ -4722,8 +4722,9 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
     does not normalise it fails the build.
 
 51. ~~**`kb_articles.updated_at` is not an edit date — every page view moves
-    it.**~~ **Fixed 2026-11-05 on `dev`, in production from the first deploy
-    after `dev` is merged into `main`; the history below is why.** _2026-09-03._
+    it.**~~ **Fixed on branch `fix/kb-updated-at-readers`, in production from
+    the first deploy after `dev` is merged into `main`; the history below is
+    why.** _2026-09-03._
     `recordArticleView` increments `view_count` on the
     article row, and `touch_updated_at` fires on any update of a table with that
     column, so a read writes the timestamp. The article page renders it as
@@ -4759,10 +4760,14 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
 
     The existing values were left as they are. On 2026-11-05, 39 of the 112
     articles had an `updated_at` newer than their last version and their
-    publication, and the rows cannot say which of those dates a reader wrote
-    and which a folder move, a status change or a tag edit did — 24 of them
-    share 2026-09-29 and no version row. A backfill would erase the second kind
-    to correct the first. An article's date settles at its next real change.
+    publication. 24 of those share 2026-09-29, the day `normalise_kb_formatting`
+    rebuilt the derived text of 25 articles without cutting a version (§7,
+    #321), a change the new trigger counts too; 4 still carry 2026-08-19, the
+    import. The other 11 are spread from 2026-09-05 to the day of the fix, and
+    the rows cannot say which of those a reader wrote and which a folder move,
+    a status change or a tag edit did. A backfill to `editedAt` would erase the
+    real changes among all 39 to correct at most those 11. An article's date
+    settles at its next real change.
 
 52. **`current_date` in a page query is the database's date, and the database is
     UTC.** _2026-09-04._ `/reports/categories` filtered its rollups with

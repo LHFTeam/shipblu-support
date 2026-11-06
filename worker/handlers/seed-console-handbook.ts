@@ -326,8 +326,10 @@ async function upsertArticle(
 
   // Everything this job owns structurally, compared before it is written. The
   // three of them together are the audience guarantee — an article that drifted
-  // out of its folder has left the floor behind — but re-asserting values that
-  // already hold costs an `updated_at` per row per run.
+  // out of its folder has left the floor behind — and nothing is written when
+  // they already hold. The trigger would keep `updated_at` on such a write now
+  // (§6.51, see the header), but it would be a write all the same, on every row,
+  // every run.
   const misfiled =
     folderId !== null &&
     (row.folderId !== folderId || row.visibility !== 'agents_only' || row.position !== position);

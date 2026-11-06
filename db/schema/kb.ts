@@ -137,12 +137,13 @@ export const kbArticles = pgTable(
 
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     /**
-     * When the row last changed, set by the `touch_updated_at` trigger
-     * (`db/sql/001`) and not by any writer: an UPDATE that changes nothing but
-     * the three counters above keeps it, so a view or a feedback tap is not an
-     * edit (PROJECT-STATE §6.51), and any other change stamps it. A counter
-     * added to this table is named in that function's deny-list too, or every
-     * write to it moves this date again.
+     * When the row last changed. An INSERT takes the writer's value or the
+     * default; after that the `touch_updated_at` trigger (`db/sql/001`) sets it
+     * on every UPDATE, whatever the UPDATE writes there. An UPDATE that changes
+     * nothing but the three counters above keeps it, so a view or a feedback
+     * tap is not an edit (PROJECT-STATE §6.51), and any other change stamps it.
+     * A counter added to this table is named in that function's deny-list too,
+     * or every write to it moves this date again.
      */
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 
