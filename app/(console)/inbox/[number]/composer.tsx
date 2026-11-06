@@ -6,6 +6,7 @@ import { useNow } from '@/components/use-now';
 import type { ConversationDetail } from '@/lib/tickets/conversation';
 import type { CannedResponseOption } from '@/lib/tickets/lookups';
 import type { CannedLocale } from '@/lib/tickets/canned';
+import { takeControlRefusal } from '@/lib/meta/take-control';
 import { describeWindow, metaWindowState } from '@/lib/meta/window';
 import {
   consoleReplyNotice,
@@ -158,9 +159,8 @@ export function Composer({
   const notice = replyBlocked
     ? consoleReplyNotice(conversation.channel)
     : threadBlocked
-      ? metaThread?.reason === 'standby'
-        ? 'Another app owns this inbox — this ticket can be read here but not answered'
-        : 'This ticket cannot be answered from here — see the message below'
+      ? // Worded by the verdict, which the header chip reads too (§6.111).
+        `${metaThread?.headline ?? 'Cannot reply from here'} — see the message below`
       : isWhatsApp && now !== null
         ? state.isOpen
           ? `24h window: ${formatRemaining(state.remainingMs)}`
@@ -301,13 +301,30 @@ export function Composer({
               <div className="rounded-md border border-(--color-border-subtle) bg-(--color-background-surface-sunken) p-3 text-sm text-(--color-text-secondary)">
                 <p className="whitespace-pre-line">{metaThread?.explanation}</p>
                 {/*
-                  Only under the standby refusal. The other two the thread state
-                  can give — a page this deployment cannot address, an account id
-                  that is not set — are not thread control and would not be fixed
-                  by taking it; offering the button there would send an agent
-                  pressing it at a refusal that has nothing to do with handover.
+                  The clock as well, under a standby refusal, once the seven days
+                  are gone. The notice beside the tabs gives the thread verdict
+                  precedence, rightly, but a thread this app owned would still
+                  be past its window here, and that is the blocker no thread
+                  control removes: of the 94 Instagram tickets refusing on a
+                  standby on 2026-11-06, 87 were past seven days (§6.111). Not
+                  between 24 hours and seven days, where `describeWindow` says
+                  replies go out tagged as a human agent — under "cannot be
+                  answered from here" that reads as a contradiction.
                 */}
-                {metaThread?.reason === 'standby' ? (
+                {metaThread?.reason === 'standby' && now !== null && metaState.isClosed ? (
+                  <p className="mt-2">{describeWindow(metaState)}</p>
+                ) : null}
+                {/*
+                  Only where pressing it can help, by the function the action
+                  refuses by (`takeControlRefusal`), so the button and the action
+                  cannot disagree: keyed on the reason alone, the button appeared
+                  on Instagram tickets and threw on every press (§6.111). Not
+                  under a refusal taking control would not fix, nor once the
+                  seven days are gone. Before mount the window is unknown and
+                  taken as open, as everywhere here.
+                */}
+                {metaThread &&
+                takeControlRefusal(metaThread, now === null ? null : metaState) === null ? (
                   <ThreadControl conversationId={conversation.id} />
                 ) : null}
               </div>

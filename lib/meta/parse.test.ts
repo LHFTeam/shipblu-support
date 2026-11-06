@@ -850,3 +850,190 @@ describe('satisfaction survey answers', () => {
     expect(parsed.echoes).toBe(1);
   });
 });
+
+describe('app_roles events', () => {
+  // The two deliveries production holds, from 2026-11-05, ids and all: the
+  // Page's a minute before the Instagram account's, each spelling the role its
+  // own way (docs/PROJECT-STATE.md §6.111).
+  const PAGE_EVENT = {
+    object: 'page',
+    entry: [
+      {
+        id: '101449698657189',
+        time: 1793874614469,
+        messaging: [
+          {
+            recipient: { id: '101449698657189' },
+            timestamp: 1793874612,
+            app_roles: { '1009187740467732': ['default_app'] },
+          },
+        ],
+      },
+    ],
+  };
+  const INSTAGRAM_EVENT = {
+    object: 'instagram',
+    entry: [
+      {
+        id: '17841448759001625',
+        time: 1793874628267,
+        messaging: [
+          {
+            recipient: { id: '17841448759001625' },
+            timestamp: 1793874624,
+            app_roles: { '1009187740467732': 'default_app' },
+          },
+        ],
+      },
+    ],
+  };
+
+  it('reads both spellings of the role, on the instant the event names', () => {
+    expect(parseMetaWebhook(INSTAGRAM_EVENT, 'facebook_page').appRoles).toEqual([
+      {
+        platform: 'instagram',
+        accountId: '17841448759001625',
+        appId: '1009187740467732',
+        roles: ['default_app'],
+        at: new Date('2026-11-05T10:30:24Z'),
+      },
+    ]);
+    expect(parseMetaWebhook(PAGE_EVENT, 'facebook_page').appRoles).toEqual([
+      {
+        platform: 'facebook',
+        accountId: '101449698657189',
+        appId: '1009187740467732',
+        roles: ['default_app'],
+        at: new Date('2026-11-05T10:30:12Z'),
+      },
+    ]);
+  });
+
+  it('files nothing else for it', () => {
+    // An event with no message used to fall through to the interactions, which
+    // made nothing of it; it must not start appearing as one.
+    const parsed = parseMetaWebhook(INSTAGRAM_EVENT, 'facebook_page');
+
+    expect(parsed.messages).toEqual([]);
+    expect(parsed.interactions).toEqual([]);
+    expect(parsed.receipts).toEqual([]);
+    expect(parsed.feedbacks).toEqual([]);
+  });
+
+  it('still reads a message that rides on the same event', () => {
+    // Skipping every event with an app_roles key dropped this message, with no
+    // failure to retry it.
+    const parsed = parseMetaWebhook(
+      {
+        object: 'instagram',
+        entry: [
+          {
+            id: '17841448759001625',
+            messaging: [
+              {
+                sender: { id: 'igsid-1' },
+                recipient: { id: '17841448759001625' },
+                timestamp: 1793874624000,
+                app_roles: null,
+                message: { mid: 'm_riding', text: 'Where is my parcel?' },
+              },
+            ],
+          },
+        ],
+      },
+      'facebook_page',
+    );
+
+    expect(parsed.messages.map((message) => message.mid)).toEqual(['m_riding']);
+    expect(parsed.appRoles).toEqual([]);
+  });
+
+  it('reads one in standby too, one row per app named', () => {
+    const parsed = parseMetaWebhook(
+      {
+        object: 'instagram',
+        entry: [
+          {
+            id: '17841448759001625',
+            standby: [
+              {
+                timestamp: 1793874624000,
+                app_roles: { '1': ['secondary_receiver'], '2': 'default_app', '3': [] },
+              },
+            ],
+          },
+        ],
+      },
+      'facebook_page',
+    );
+
+    expect(parsed.appRoles.map((role) => [role.appId, role.roles])).toEqual([
+      ['1', ['secondary_receiver']],
+      ['2', ['default_app']],
+      ['3', []],
+    ]);
+    // Milliseconds read as milliseconds.
+    expect(parsed.appRoles[0]!.at).toEqual(new Date('2026-11-05T10:30:24Z'));
+  });
+
+  it("falls back to the entry's time, and invents none", () => {
+    const withEntryTime = parseMetaWebhook(
+      {
+        object: 'instagram',
+        entry: [
+          { id: 'A', time: 1793874628267, messaging: [{ app_roles: { '1': 'default_app' } }] },
+        ],
+      },
+      null,
+    );
+    expect(withEntryTime.appRoles[0]!.at).toEqual(new Date(1793874628267));
+
+    // Nothing to date it by: left out, not dated "now", which would make a
+    // retried delivery's switch look newer than every message since.
+    const undated = parseMetaWebhook(
+      {
+        object: 'instagram',
+        entry: [{ id: 'A', messaging: [{ app_roles: { '1': 'default_app' } }] }],
+      },
+      null,
+    );
+    expect(undated.appRoles).toEqual([]);
+  });
+
+  it('keeps only string roles, and leaves out what is not an app_roles object', () => {
+    const parsed = parseMetaWebhook(
+      {
+        object: 'instagram',
+        entry: [
+          {
+            id: 'A',
+            messaging: [
+              { timestamp: 1793874624, app_roles: { '1': ['default_app', 7, null, ''] } },
+              { timestamp: 1793874624, app_roles: 'default_app' },
+              { timestamp: 1793874624, app_roles: ['default_app'] },
+            ],
+          },
+        ],
+      },
+      null,
+    );
+
+    expect(parsed.appRoles.map((role) => role.roles)).toEqual([['default_app']]);
+  });
+});
+
+describe('a list Meta sent as something else', () => {
+  // A throw here loses the whole batch, so a field that is not the array it
+  // should be is read as empty — as db/sql/012 reads it.
+  it('is read as empty rather than thrown on', () => {
+    for (const payload of [
+      { object: 'instagram', entry: { id: 'A' } },
+      { object: 'instagram', entry: [{ id: 'A', messaging: { timestamp: 1 } }] },
+      { object: 'instagram', entry: [{ id: 'A', standby: 'x' }] },
+      { object: 'page', entry: [{ id: 'A', changes: {} }] },
+      { object: 'instagram', entry: [null, 'x', 7] },
+    ]) {
+      expect(() => parseMetaWebhook(payload, null)).not.toThrow();
+    }
+  });
+});

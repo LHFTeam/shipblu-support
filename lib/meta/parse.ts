@@ -11,6 +11,7 @@ import type {
   MetaRawAttachment,
   MetaReferral,
   MetaWebhookPayload,
+  NormalisedAppRole,
   NormalisedComment,
   NormalisedFeedback,
   NormalisedInteraction,
@@ -20,8 +21,9 @@ import type {
 
 /**
  * Flattens a Meta webhook batch into direct messages, comments, receipts, the
- * interactions that open a messaging window without being messages, and the
- * answers to a satisfaction survey.
+ * interactions that open a messaging window without being messages, the
+ * answers to a satisfaction survey, and the changes to which app a Page or an
+ * account routes its conversations to.
  *
  * Nothing here throws. A part we cannot read is left out, because a throw
  * here loses the whole batch: this runs in the worker before any item does, so
@@ -50,6 +52,7 @@ export function parseMetaWebhook(
     receipts: [],
     interactions: [],
     feedbacks: [],
+    appRoles: [],
     echoes: 0,
     emptyCards: 0,
   };
@@ -60,10 +63,25 @@ export function parseMetaWebhook(
   const platform = platformOf(body.object);
   if (!platform) return result;
 
-  for (const entry of body.entry ?? []) {
+  for (const entry of listOf(body.entry)) {
+    // A null or a string where an entry belongs would throw on `entry.id` and
+    // lose the batch; the backfill reads one as having nothing in it.
+    if (!isObject(entry)) continue;
     const accountId = entry.id ?? null;
 
-    for (const event of entry.messaging ?? []) {
+    // Read from both arrays: production has only ever delivered one in
+    // `messaging`, and an app's role is no less a fact for arriving in standby.
+    // The events still go through `readMessagingEvent` below, which makes
+    // nothing of a bare app_roles event (it has no sender), and reads anything
+    // else one carries: skipping them there dropped a message that happened to
+    // ride on such an event, with no failure to retry it.
+    for (const event of [...listOf(entry.messaging), ...listOf(entry.standby)]) {
+      if (isObject(event) && event.app_roles !== undefined) {
+        result.appRoles.push(...readAppRoles(event, platform, entry));
+      }
+    }
+
+    for (const event of listOf(entry.messaging)) {
       readMessagingEvent(event, platform, connection, accountId, false, result);
     }
 
@@ -74,17 +92,61 @@ export function parseMetaWebhook(
     // other one. Losing it here is what let a reply be composed against a
     // thread this app cannot send on, and Graph refuses that with nothing but
     // "An unknown error has occurred."
-    for (const event of entry.standby ?? []) {
+    for (const event of listOf(entry.standby)) {
       readMessagingEvent(event, platform, connection, accountId, true, result);
     }
 
-    for (const change of entry.changes ?? []) {
+    for (const change of listOf(entry.changes)) {
       const comment = readComment(change, platform, connection, entry);
       if (comment) result.comments.push(comment);
     }
   }
 
   return result;
+}
+
+/**
+ * One row per app an `app_roles` event names.
+ *
+ * The roles are kept exactly as listed, a string read as a list of one, since
+ * the two objects spell them differently — `"default_app"` on `instagram`,
+ * `["default_app"]` on `page` — and what a role means is decided where the row
+ * is read, not here. An event with no instant is left out rather than given the
+ * current one, as `fromEpoch` would: the instant is the whole fact, weighed
+ * against when a customer's message was sent, and "now" would make a switch
+ * replayed from a retry look newer than every message since it. An instant
+ * outside 1970–3000 is no instant either (`storableInstant`), and the account
+ * is a non-empty string or nothing: the backfill casts what it reads, and
+ * anything it would take differently from this is a second row for one event.
+ *
+ * `db/sql/012_meta_app_role_backfill.sql` reads stored deliveries the same way,
+ * in SQL, and `meta-app-role-backfill.db.test.ts` holds the two to one answer.
+ */
+function readAppRoles(
+  event: MetaMessagingEvent,
+  platform: MetaPlatform,
+  entry: MetaEntry,
+): NormalisedAppRole[] {
+  const named = event.app_roles;
+  if (!isObject(named)) return [];
+
+  const accountId = nonEmptyString(entry.id) ?? nonEmptyString(event.recipient?.id);
+  if (!accountId) return [];
+
+  const at = storableInstant(event.timestamp) ?? storableInstant(entry.time);
+  if (!at) return [];
+
+  return Object.entries(named)
+    .filter(([appId]) => appId.length > 0)
+    .map(([appId, listed]) => ({
+      platform,
+      accountId,
+      appId,
+      roles: (Array.isArray(listed) ? listed : [listed]).filter(
+        (role): role is string => typeof role === 'string' && role.length > 0,
+      ),
+      at,
+    }));
 }
 
 function platformOf(object: string | undefined): MetaPlatform | null {
@@ -496,10 +558,50 @@ function readComment(
 const MILLISECOND_THRESHOLD = 1_000_000_000_000;
 
 function fromEpoch(value: number | undefined): Date {
-  if (!value || !Number.isFinite(value)) return new Date();
+  return epochOrNull(value) ?? new Date();
+}
+
+/** `fromEpoch` without the fallback, for a reader that must not invent an instant. */
+function epochOrNull(value: unknown): Date | null {
+  if (typeof value !== 'number' || !value || !Number.isFinite(value)) return null;
   const ms = value < MILLISECOND_THRESHOLD ? value * 1000 : value;
   const date = new Date(ms);
-  return Number.isNaN(date.getTime()) ? new Date() : date;
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+/** The first instant `storableInstant` refuses: 3000-01-01T00:00:00Z. */
+const LAST_STORABLE_MS = Date.UTC(3000, 0, 1);
+
+/**
+ * `epochOrNull` for an instant that is going to be stored, and so must be one
+ * Postgres takes and the backfill computes alike. After 1970 and before 3000.
+ *
+ * A JavaScript `Date` reaches years Postgres refuses as drizzle writes them
+ * (`+011476-…`), which threw on every retry of the batch, and the backfill's
+ * SQL raised on some of the same values, which fails every deploy until the
+ * delivery is cleaned up. Inside this window the two agree to the millisecond:
+ * the SQL does the same float64 arithmetic and truncation, and a millisecond
+ * count this small times a thousand is exact in the interval it builds.
+ */
+function storableInstant(value: unknown): Date | null {
+  const date = epochOrNull(value);
+  if (!date) return null;
+  const ms = date.getTime();
+  return ms > 0 && ms < LAST_STORABLE_MS ? date : null;
+}
+
+function nonEmptyString(value: unknown): string | null {
+  return typeof value === 'string' && value.length > 0 ? value : null;
+}
+
+/**
+ * An array the payload says is one, or nothing. `for…of` over an object Meta
+ * sent where a list belongs throws, and a throw here loses the whole batch (the
+ * header); `db/sql/012_meta_app_role_backfill.sql` reads such a field as empty
+ * too, and its test found the parser did not.
+ */
+function listOf<T>(value: T[] | undefined): T[] {
+  return Array.isArray(value) ? value : [];
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {

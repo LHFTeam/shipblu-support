@@ -17,6 +17,8 @@ import {
 import { describeProfileRefresh, refreshChannelProfile } from '@/lib/meta/profile-refresh';
 import { MetaApiError, takeThreadControl } from '@/lib/meta/client';
 import { explainTakeControlError } from '@/lib/meta/errors';
+import { takeControlRefusal } from '@/lib/meta/take-control';
+import { metaWindowState } from '@/lib/meta/window';
 import { isCommentTicket, isMetaChannel, metaPlatformOf } from '@/lib/tickets/channel-policy';
 import { metaReplyTarget, THREAD_CONTROL_TAKEN } from '@/lib/tickets/meta-thread';
 import { loadConversation, refresh, refuseIfReadOnly } from '@/lib/tickets/console-guards';
@@ -274,6 +276,23 @@ export async function claimThreadControl(
           'This ticket cannot be answered from here, and not because of thread control.'),
     };
   }
+
+  // The composer draws the button from the same function, but what it answers
+  // can change between a page's render and the press: a page drawn before the
+  // verdict carried `canTakeControl`, or before the route moved —
+  // `INSTAGRAM_UNIFIED_LOGIN_TOKEN` set or unset and the service restarted —
+  // or before the seven days ran out. So this is not dead code once old tabs
+  // are gone. Without it such a press reaches `takeThreadControl`'s guard,
+  // which throws a plain Error rather than the MetaApiError caught below, and
+  // five presses on three Instagram tickets were five 500s
+  // (`docs/PROJECT-STATE.md` §6.111). The guard stays a throw, since a caller
+  // that skipped this check is a bug to see. Ahead of the recipient check, which
+  // answers a thread with no customer message better than the window would.
+  const refusal = takeControlRefusal(
+    thread,
+    metaWindowState(row.conversation.lastCustomerMessageAt),
+  );
+  if (refusal) return { error: refusal };
 
   if (!recipientId) {
     return { error: 'This ticket has no inbound message, so there is no thread to take.' };

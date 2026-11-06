@@ -24,7 +24,7 @@ import { metaConnection } from '@/lib/meta/connection';
 import { metaThreadStateFromMessage, type MetaThreadState } from '@/lib/meta/thread';
 import { parseCoexistence } from '@/lib/whatsapp/coexistence';
 import type { CustomFieldValues } from './custom-fields';
-import { threadControlTakenAt } from './meta-thread';
+import { threadOwnershipFacts } from './meta-thread';
 import {
   hiddenChannels,
   isCommentTicket,
@@ -354,17 +354,17 @@ export async function getConversation(
     .limit(1);
   const unverifiedSubmitter = unverified.length > 0;
 
-  const [
-    timeline,
-    files,
-    events,
-    shipments,
-    accounts,
-    sides,
-    subcategories,
-    controlTakenAt,
-    survey,
-  ] =
+  // A Meta direct message's platform, or null: worked out once, because it
+  // decides both whether the switch of default app is read (in the reads below)
+  // and whether the verdict is drawn (after them), and two copies of the test
+  // would draw a verdict without the switch the moment one was edited.
+  const dmPlatform =
+    isMetaChannel(row.conversation.channel) &&
+    !isCommentTicket(row.conversation.channel, row.conversation.externalId)
+      ? metaPlatformOf(row.conversation.channel)
+      : null;
+
+  const [timeline, files, events, shipments, accounts, sides, subcategories, ownership, survey] =
     // Nine reads on a pool of eight places: at most the pool at once, so one
     // ticket page can fill it but never queue behind itself (AGENTS.md,
     // Database) — one wave, as before, plus the ninth.
@@ -430,7 +430,7 @@ export async function getConversation(
       () => shippingAccountsForConversation(row.conversation.id),
       () => sideConversationsForConversation(row.conversation.id),
       () => subcategoriesForConversation(row.conversation.id),
-      () => threadControlTakenAt(row.conversation.id),
+      () => threadOwnershipFacts(row.conversation.id, dmPlatform),
       () => ticketSurveyState(row.conversation.id, row.conversation.channel),
     ]);
 
@@ -483,12 +483,9 @@ export async function getConversation(
     endpoints, which are addressed by comment id and are not page-scoped, so
     neither of the two refusals applies to it.
   */
-  const channel = row.conversation.channel;
-  const isCommentThread = isCommentTicket(channel, row.conversation.externalId);
-
   let metaThread: MetaThreadState | null = null;
-  if (isMetaChannel(channel) && !isCommentThread) {
-    const platform = metaPlatformOf(channel);
+  if (dmPlatform) {
+    const platform = dmPlatform;
     const lastInbound = timeline.filter((entry) => entry.message.direction === 'inbound').at(-1);
 
     metaThread = metaThreadStateFromMessage({
@@ -500,7 +497,8 @@ export async function getConversation(
       // above is capped at fifty and this is the fact whose absence silently
       // re-refuses every reply on the ticket.
       lastInboundAt: lastInbound?.message.createdAt ?? null,
-      controlTakenAt,
+      controlTakenAt: ownership.controlTakenAt,
+      defaultApp: ownership.defaultApp,
     });
   }
 

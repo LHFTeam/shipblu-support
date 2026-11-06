@@ -407,6 +407,13 @@
       "when": 1793977205481,
       "tag": "0057_kb_article_stats",
       "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1793986730040,
+      "tag": "0058_meta_app_role_events",
+      "breakpoints": true
     }
   ]
 }
