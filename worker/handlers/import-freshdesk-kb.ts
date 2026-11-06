@@ -3,6 +3,7 @@ import type { PgColumn } from 'drizzle-orm/pg-core';
 import { db } from '@/db/client';
 import { kbArticles, kbCategories, kbFolders, kbRedirects } from '@/db/schema';
 import { env } from '@/lib/env';
+import { setArticleStats } from '@/lib/kb/stats';
 import {
   discoverLanguageCode,
   FreshdeskError,
@@ -547,12 +548,17 @@ async function upsertArticle(
         ? { description: article.seo_data.meta_description }
         : {}),
     },
-    // Carried across so "most read" ordering does not reset to zero on cutover
-    // and lose years of signal about which articles matter.
+    updatedAt: new Date(),
+  };
+
+  // Carried across so "most read" ordering does not reset to zero on cutover
+  // and lose years of signal about which articles matter. Into
+  // `kb_article_stats`, in the transaction that writes the article, so a run
+  // that stops between the two leaves neither.
+  const counts = {
     viewCount: article.hits ?? 0,
     helpfulCount: article.thumbs_up ?? 0,
     unhelpfulCount: article.thumbs_down ?? 0,
-    updatedAt: new Date(),
   };
 
   const existing = await db
@@ -567,17 +573,21 @@ async function upsertArticle(
     .limit(1);
 
   if (existing[0]) {
+    const id = existing[0].id;
     // The slug is deliberately not recomputed. It is the public URL, and a
     // title tweak in Freshdesk between rehearsal and cutover must not silently
     // move a page that is already linked to.
-    await db
-      .update(kbArticles)
-      .set({
-        ...values,
-        externalId,
-        ...(translationGroupId ? { translationGroupId } : {}),
-      })
-      .where(eq(kbArticles.id, existing[0].id));
+    await db.transaction(async (tx) => {
+      await tx
+        .update(kbArticles)
+        .set({
+          ...values,
+          externalId,
+          ...(translationGroupId ? { translationGroupId } : {}),
+        })
+        .where(eq(kbArticles.id, id));
+      await setArticleStats(tx, id, counts);
+    });
 
     return {
       id: existing[0].id,
@@ -590,24 +600,27 @@ async function upsertArticle(
     .from(kbArticles)
     .where(eq(kbArticles.locale, locale));
 
-  const inserted = await db
-    .insert(kbArticles)
-    .values({
-      ...values,
-      slug: uniqueSlug(
-        slugify(article.title, `article-${article.id}`),
-        taken.map((row) => row.slug),
-      ),
-      // Freshdesk's folder visibility is the real gate; an article inherits it,
-      // and the folder check on the public side enforces it again.
-      visibility: 'public',
-      ...(translationGroupId ? { translationGroupId } : {}),
-      sourceSystem: 'freshdesk',
-      externalId,
-    })
-    .returning({ id: kbArticles.id, translationGroupId: kbArticles.translationGroupId });
-
-  return inserted[0]!;
+  return db.transaction(async (tx) => {
+    const inserted = await tx
+      .insert(kbArticles)
+      .values({
+        ...values,
+        slug: uniqueSlug(
+          slugify(article.title, `article-${article.id}`),
+          taken.map((row) => row.slug),
+        ),
+        // Freshdesk's folder visibility is the real gate; an article inherits it,
+        // and the folder check on the public side enforces it again.
+        visibility: 'public',
+        ...(translationGroupId ? { translationGroupId } : {}),
+        sourceSystem: 'freshdesk',
+        externalId,
+      })
+      .returning({ id: kbArticles.id, translationGroupId: kbArticles.translationGroupId });
+    const row = inserted[0]!;
+    await setArticleStats(tx, row.id, counts);
+    return row;
+  });
 }
 
 /**

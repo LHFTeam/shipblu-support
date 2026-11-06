@@ -1,8 +1,16 @@
 import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
-import { kbArticleVersions, kbArticles, kbCategories, kbFolders, kbRedirects } from '@/db/schema';
+import {
+  kbArticleStats,
+  kbArticleVersions,
+  kbArticles,
+  kbCategories,
+  kbFolders,
+  kbRedirects,
+} from '@/db/schema';
 import type { Locale } from './locale';
 import { hybridMatch, hybridRank } from './rank';
+import { articleHelpful, statsOfArticle } from './stats';
 import { ANONYMOUS, articleVisibleTo, folderVisibleTo, type KbViewer } from './visibility';
 
 /**
@@ -27,10 +35,10 @@ import { ANONYMOUS, articleVisibleTo, folderVisibleTo, type KbViewer } from './v
  * are ordered by.
  *
  * Not `kb_articles.updated_at`. That column once moved on every view, because
- * `recordArticleView` writes the row and the `touch_updated_at` trigger stamped
+ * `recordArticleView` wrote the row and the `touch_updated_at` trigger stamped
  * every write, so a busy article told each customer it was revised today
- * (PROJECT-STATE §6.51). The trigger now leaves the date alone when only a
- * reader's counter changes, but the column still moves for a change of folder,
+ * (PROJECT-STATE §6.51). Readers' counters now live in `kb_article_stats` and
+ * leave the article's row alone, but the column still moves for a change of folder,
  * status, visibility or tags, none of which is a revision a customer reads, and
  * on an imported article it starts at the import, not at the last edit. A
  * version is cut when the title or the body changes and when a version is
@@ -208,16 +216,19 @@ export type RankedArticle = {
 /**
  * The most-read articles in this locale.
  *
- * `view_count` is written by `recordArticleView`, which the article page beacons
- * and which is rate limited — so this is "what people opened", inflated a little
- * by whatever got past the limiter, and never a business metric. It is a good
- * enough ordering for a shortlist on the front page and is not used for anything
- * else.
+ * `kb_article_stats.view_count` is written by `recordArticleView`, which the
+ * article page beacons and which is rate limited — so this is "what people
+ * opened", inflated a little by whatever got past the limiter, and never a
+ * business metric. It is a good enough ordering for a shortlist on the front
+ * page and is not used for anything else.
  *
  * Articles nobody has opened are excluded rather than tie-broken to the bottom.
  * A list headed "most read" whose entries all have zero reads is furniture, and
  * the caller hides the section when this comes back empty — which is exactly
- * what a freshly imported knowledge base should do.
+ * what a freshly imported knowledge base should do. So the counters are an
+ * inner join, the one reader that is not a left join (`statsOfArticle`): an
+ * article with no stats row has never been opened, and is the article the
+ * `> 0` leaves out.
  */
 export async function popularArticles(
   viewer: KbViewer,
@@ -234,15 +245,16 @@ export async function popularArticles(
     .from(kbArticles)
     .innerJoin(kbFolders, eq(kbFolders.id, kbArticles.folderId))
     .innerJoin(kbCategories, eq(kbCategories.id, kbFolders.categoryId))
+    .innerJoin(kbArticleStats, statsOfArticle)
     .where(
       and(
         eq(kbArticles.locale, locale),
         articleVisibleTo(viewer),
         folderVisibleTo(viewer),
-        sql`${kbArticles.viewCount} > 0`,
+        sql`${kbArticleStats.viewCount} > 0`,
       ),
     )
-    .orderBy(desc(kbArticles.viewCount), asc(kbArticles.title))
+    .orderBy(desc(kbArticleStats.viewCount), asc(kbArticles.title))
     .limit(limit);
 }
 
@@ -677,9 +689,10 @@ export async function folderNeighbours(
       title: kbArticles.title,
       slug: kbArticles.slug,
       excerpt: kbArticles.excerpt,
-      helpfulCount: kbArticles.helpfulCount,
+      helpfulCount: articleHelpful,
     })
     .from(kbArticles)
+    .leftJoin(kbArticleStats, statsOfArticle)
     .where(
       and(
         eq(kbArticles.folderId, folderId),
@@ -798,20 +811,6 @@ export async function findRedirect(fromPath: string): Promise<string | null> {
   if (!row) return null;
   if (row.articleSlug) return `/${row.articleLocale}/a/${row.articleSlug}`;
   return row.toPath;
-}
-
-/**
- * Fire-and-forget view counter.
- *
- * A plain increment, with no per-visitor deduplication: this drives "most read"
- * ordering for the team, not billing, and the alternative is a visitor table
- * and a cookie on a site that otherwise sets none.
- */
-export async function recordArticleView(articleId: string): Promise<void> {
-  await db
-    .update(kbArticles)
-    .set({ viewCount: sql`${kbArticles.viewCount} + 1` })
-    .where(eq(kbArticles.id, articleId));
 }
 
 /**

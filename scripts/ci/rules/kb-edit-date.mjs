@@ -14,10 +14,14 @@ const SCHEMA = 'db/schema/kb.ts';
  * changed. Each of those passes every test that does not happen to name it.
  *
  * So every name in the list is a column of the table, every integer column
- * named `*_count` is in it (the shape the three reader counters have, and the
- * one a fourth would take), and so is every generated column. A counter that a
- * person edits, if one is ever added, is renamed or the rule is changed here
- * with its reason.
+ * named `*_count` is in it (the shape the three reader counters have), and so
+ * is every generated column. A counter that a person edits, if one is ever
+ * added, is renamed or the rule is changed here with its reason.
+ *
+ * Readers now count in `kb_article_stats`, so the three columns this guards
+ * are written only by the old release during a deploy, and a new reader
+ * counter belongs in that table rather than on `kb_articles`. The rule goes
+ * with those columns (`plans/kb-article-stats.md`, PR 2).
  */
 export function checkKbEditDate() {
   const rule = 'kb-edit-date';

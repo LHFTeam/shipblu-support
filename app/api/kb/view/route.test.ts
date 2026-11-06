@@ -8,7 +8,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
  */
 
 const recordArticleView = vi.fn(async () => {});
-vi.mock('@/lib/kb/queries', () => ({ recordArticleView }));
+vi.mock('@/lib/kb/stats', () => ({ recordArticleView }));
 
 const { POST } = await import('./route');
 
