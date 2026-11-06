@@ -383,9 +383,16 @@ without one answers through a pseudo-terminal (Python's `pty`), each answer
 named in advance, as Stage 2.B's `0046` was, and never by editing the SQL it
 writes. Files in `db/sql/` must be idempotent and must not use
 `CREATE INDEX CONCURRENTLY`; the whole file runs in one implicit transaction.
-New tables get RLS enabled by a loop in `db/sql/` — do not add it by hand. All
-three are checked, the first two by replaying the files and the last by asking
-the database which tables ended up covered. A lock that must outlive one
+Once a file has nothing to do, its replay takes no table lock stronger than
+the ROW EXCLUSIVE a write takes. A statement needing more waits on somebody's
+open transaction and then holds the table until the file commits, so it runs
+behind a catalog lookup, as the indexes, triggers, constraints and storage
+options there do. `CREATE INDEX IF NOT EXISTS` on its own does not count: it
+takes SHARE before it finds the index (`docs/PROJECT-STATE.md` §6.110). New
+tables get RLS enabled by a loop in `db/sql/` — do not add it by hand. All four
+are checked. The first two are checked by replaying the files, the locks by
+`db/sql/replay-locks.db.test.ts`, and the last by asking the database which
+tables ended up covered. A lock that must outlive one
 statement belongs to a transaction: an advisory lock is `pg_advisory_xact_lock`
 taken inside `db.transaction` (`lockThread` in
 `lib/tickets/live-conversation.ts`), never `pg_advisory_lock`, because the

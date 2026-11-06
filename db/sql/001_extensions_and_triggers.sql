@@ -3,6 +3,14 @@
 -- Every statement here MUST be idempotent. db/migrate.ts re-runs this file after
 -- every drizzle migration, so it doubles as the place to keep database-level
 -- behaviour in sync without hand-editing generated migrations.
+--
+-- And once it has nothing to do, it must take no lock on a table stronger than
+-- the ones reads and writes take (ROW EXCLUSIVE), since anything stronger waits
+-- on somebody's open transaction. The file runs as one transaction, so a lock
+-- it is granted is held until its last statement commits. A statement that
+-- needs a stronger lock is guarded by a catalog lookup and runs only when there
+-- is something to change. `db/sql/replay-locks.db.test.ts` holds every file in
+-- `db/sql` to that.
 
 -- --------------------------------------------------------------------------
 -- Extensions
@@ -24,62 +32,127 @@ CREATE EXTENSION IF NOT EXISTS unaccent;
 -- nothing. Both `<%` and ILIKE are index-accelerated by gin_trgm_ops; verified
 -- against Postgres 16.
 --
--- Not lock-free on a replay, unlike the rest of this file. `CREATE INDEX IF NOT
--- EXISTS` takes SHARE on its table before it finds the index already there, so
--- each of these waits on any open writer of its table, and then holds that
--- table's writes off until this whole file commits (PROJECT-STATE §6.110,
--- which also says what the fix is).
--- --------------------------------------------------------------------------
-CREATE INDEX IF NOT EXISTS conversations_subject_trgm_idx
-  ON conversations USING gin (subject gin_trgm_ops);
-
-CREATE INDEX IF NOT EXISTS contacts_name_trgm_idx
-  ON contacts USING gin (name gin_trgm_ops);
-
-CREATE INDEX IF NOT EXISTS contacts_email_trgm_idx
-  ON contacts USING gin (primary_email gin_trgm_ops);
-
--- The inbox search reaches these two as well. Phone is how a WhatsApp customer
--- is looked up at all — most of them have no email — and message text is the
--- only place a chat's actual content lives, because the messaging channels give
--- every ticket a subject picked from a short list of canned categories.
-CREATE INDEX IF NOT EXISTS contacts_phone_trgm_idx
-  ON contacts USING gin (primary_phone gin_trgm_ops);
-
-CREATE INDEX IF NOT EXISTS messages_body_trgm_idx
-  ON messages USING gin (body_text gin_trgm_ops);
-
--- The hub's answer is searchable for the same reason a message body is: it is
--- where "driver attempted twice, phone off" is written down, and that sentence
--- is what an agent half-remembers three weeks later. Agents only ever see this
--- table, so there is no visibility question to answer here.
-CREATE INDEX IF NOT EXISTS side_conversation_messages_body_trgm_idx
-  ON side_conversation_messages USING gin (body_text gin_trgm_ops);
-
-CREATE INDEX IF NOT EXISTS companies_name_trgm_idx
-  ON companies USING gin (name gin_trgm_ops);
-
-CREATE INDEX IF NOT EXISTS kb_articles_title_trgm_idx
-  ON kb_articles USING gin (title gin_trgm_ops);
-
--- Shipments and shipping accounts. The unique btree on each canonical value
--- carries every exact lookup — the sidebar, the shipment page, `track:` search,
--- and the future platform endpoint. These carry the other half: the partial
--- number an agent types from memory ("...8154?"), which a btree cannot serve.
+-- Each index is looked for before it is created, because `CREATE INDEX IF NOT
+-- EXISTS` alone is not a no-op on a replay: it takes SHARE on its table before
+-- it finds the index already there (PROJECT-STATE §6.110). Every open writer
+-- of that table holds SHARE off, so the replay waited on each of them, and the
+-- SHARE it was granted held that table's writes off until this whole file
+-- committed, because the file runs as one transaction. The guard asks the
+-- catalog, which takes no lock on the table, so a replay that finds the index
+-- touches nothing. It asks the question `IF NOT EXISTS` asks, whether any
+-- relation of that name is in the schema, only before the lock rather than
+-- after it. A missing index is still built as before, under SHARE on its table
+-- until the file commits.
+--
+-- `IF NOT EXISTS` stays inside the statement the guard runs. The `db-sql` repo
+-- rule refuses a CREATE INDEX without it, string or not. It also skips an index
+-- another replay committed after this one's guard looked. It does not make two
+-- replays whose transactions overlap safe. Neither sees the other's uncommitted
+-- index, and SHARE does not conflict with SHARE, so both build it. The second
+-- then fails on the catalog's unique name (23505) once the first commits, or on
+-- the lock timeout. It failed the same way before the guard, and nothing here
+-- relies on it: only the web service's preDeploy runs `db:migrate`.
+--
+-- Each index is named once, in the list below, and the guard and the statement
+-- are both built from that one name, so the two cannot ask about different
+-- indexes. A guard asking for a name the statement never creates would build
+-- nothing and read as success. A statement creating a name the guard never asks
+-- for would take its lock on every replay again.
+--
+-- A name is not a definition, so an index found under its name is also checked
+-- against its entry: a valid gin `gin_trgm_ops` index on that table's one
+-- column. Anything else fails the replay. `IF NOT EXISTS` alone skipped it in
+-- silence. That would leave an entry edited to another column changing nothing
+-- on a database that has the old index, and an index left INVALID by a failed
+-- `CREATE INDEX CONCURRENTLY` skipped on every replay, with the search it
+-- serves unindexed. Neither can be repaired here: rebuilding an index in this
+-- file holds its table's writes for the whole build. So the error says how to
+-- rebuild it by hand, and the deploy waits until somebody has. The check reads
+-- only the catalog, so it locks nothing either. A fresh database never meets
+-- it, since every index there is built from its entry.
+--
+-- `db/sql/replay-locks.db.test.ts` replays every file behind a writer and a
+-- vacuum on every relation in the schema. It then replays this one with the
+-- guard taken out, to show that the writer is what the guard avoids.
 --
 -- Do NOT reach for CREATE INDEX CONCURRENTLY here. db/migrate.ts sends each file
 -- as one sql.unsafe(contents), which wraps it in an implicit transaction, and
--- CONCURRENTLY cannot run inside one. These three build on tables that are empty
--- at first deploy so the blocking build costs nothing; an index on a table the
--- size of `messages` needs its own migration, not this file.
-CREATE INDEX IF NOT EXISTS shipments_tracking_trgm_idx
-  ON shipments USING gin (tracking_number gin_trgm_ops);
+-- CONCURRENTLY cannot run inside one. The shipments indexes were built on tables
+-- that were empty at first deploy, so the blocking build cost nothing; an index
+-- on a table the size of `messages` needs its own migration, not this file.
+-- --------------------------------------------------------------------------
+DO $$
+DECLARE
+  wanted record;
+  existing oid;
+BEGIN
+  FOR wanted IN
+    SELECT * FROM (VALUES
+      ('conversations_subject_trgm_idx', 'conversations', 'subject'),
+      ('contacts_name_trgm_idx', 'contacts', 'name'),
+      ('contacts_email_trgm_idx', 'contacts', 'primary_email'),
 
-CREATE INDEX IF NOT EXISTS shipping_accounts_sbid_trgm_idx
-  ON shipping_accounts USING gin (sbid gin_trgm_ops);
+      -- The inbox search reaches these two as well. Phone is how a WhatsApp
+      -- customer is looked up at all, since most of them have no email. Message
+      -- text is the only place a chat's actual content lives, because the
+      -- messaging channels give every ticket a subject picked from a short list
+      -- of canned categories.
+      ('contacts_phone_trgm_idx', 'contacts', 'primary_phone'),
+      ('messages_body_trgm_idx', 'messages', 'body_text'),
 
-CREATE INDEX IF NOT EXISTS shipping_accounts_name_trgm_idx
-  ON shipping_accounts USING gin (name gin_trgm_ops);
+      -- The hub's answer is searchable for the same reason a message body is:
+      -- it is where "driver attempted twice, phone off" is written down, and
+      -- that sentence is what an agent half-remembers three weeks later. Agents
+      -- only ever see this table, so there is no visibility question to answer.
+      ('side_conversation_messages_body_trgm_idx', 'side_conversation_messages', 'body_text'),
+
+      ('companies_name_trgm_idx', 'companies', 'name'),
+      ('kb_articles_title_trgm_idx', 'kb_articles', 'title'),
+
+      -- Shipments and shipping accounts. The unique btree on each canonical
+      -- value carries every exact lookup: the sidebar, the shipment page,
+      -- `track:` search, and the future platform endpoint. These carry the other
+      -- half, the partial number an agent types from memory ("...8154?"), which
+      -- a btree cannot serve.
+      ('shipments_tracking_trgm_idx', 'shipments', 'tracking_number'),
+      ('shipping_accounts_sbid_trgm_idx', 'shipping_accounts', 'sbid'),
+      ('shipping_accounts_name_trgm_idx', 'shipping_accounts', 'name')
+    ) AS trigram (index_name, table_name, column_name)
+  LOOP
+    existing := to_regclass(format('public.%I', wanted.index_name));
+
+    IF existing IS NULL THEN
+      EXECUTE format(
+        'CREATE INDEX IF NOT EXISTS %I ON public.%I USING gin (%I gin_trgm_ops)',
+        wanted.index_name, wanted.table_name, wanted.column_name
+      );
+    ELSIF NOT EXISTS (
+      SELECT 1
+      FROM pg_index i
+      JOIN pg_class ic ON ic.oid = i.indexrelid
+      JOIN pg_am am ON am.oid = ic.relam
+      JOIN pg_opclass opc ON opc.oid = i.indclass[0]
+      JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = i.indkey[0]
+      WHERE i.indexrelid = existing
+        AND i.indrelid = to_regclass(format('public.%I', wanted.table_name))
+        AND i.indnatts = 1
+        AND a.attname = wanted.column_name
+        AND am.amname = 'gin'
+        AND opc.opcname = 'gin_trgm_ops'
+        AND i.indexprs IS NULL
+        AND i.indpred IS NULL
+        AND i.indisvalid
+    ) THEN
+      RAISE EXCEPTION 'public.% is not the index db/sql/001 defines: a valid gin (% gin_trgm_ops) on public.%',
+          wanted.index_name, wanted.column_name, wanted.table_name
+        USING HINT = 'This file builds a missing index and never rebuilds one, because that '
+          'would hold the table''s writes for the whole build. Rebuild it by hand, outside '
+          'a transaction: drop it with DROP INDEX CONCURRENTLY, and build it again '
+          'concurrently with the definition in the message. Then deploy again '
+          '(PROJECT-STATE §6.110).';
+    END IF;
+  END LOOP;
+END $$;
 
 -- --------------------------------------------------------------------------
 -- Deferred foreign key
@@ -192,8 +265,8 @@ END $$;
 --
 -- Enabling RLS takes ACCESS EXCLUSIVE on the table, so this only touches tables
 -- that do not already have it — in the steady state this loop takes no locks at
--- all. That is the rule the rest of this file aims for; the `CREATE INDEX IF NOT
--- EXISTS` statements at its top do not meet it (§6.110).
+-- all. That is the rule for every statement in this file. The trigram indexes at
+-- its top meet it the same way, by asking the catalog first (§6.110).
 -- --------------------------------------------------------------------------
 DO $$
 DECLARE
