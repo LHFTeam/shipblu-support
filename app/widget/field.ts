@@ -31,5 +31,17 @@ export const WIDGET_FIELD =
  * The textarea inside carries no border of its own, and keeps the 16px text
  * `WIDGET_FIELD` gives for Safari's zoom.
  */
+/**
+ * The send button beside the composer's box: as tall as the box at one line —
+ * the 44px of the buttons inside it and the box's 1px `border` above and below
+ * — and square, so its edges meet the box's and its centre is theirs, which a
+ * 44px button on the row's bottom edge missed by a pixel. Here because the
+ * 2px is the box's border: a change to one is a change to the other.
+ *
+ * `!` on the height because the shared `Button` sets its own per size.
+ */
+export const WIDGET_SEND_SIZE =
+  'min-h-[calc(var(--tap-min)+2px)]! min-w-[calc(var(--tap-min)+2px)]';
+
 export const WIDGET_COMPOSER_BOX =
   'flex min-w-0 flex-1 items-end rounded-md border border-(--color-border-subtle) bg-(--color-background-surface) transition-colors hover:border-(--color-border-default) focus-within:border-(--color-border-focus) focus-within:ring-2 focus-within:ring-(--color-border-focus)/20 has-[textarea:focus-visible]:outline-(length:--focus-width) has-[textarea:focus-visible]:outline-offset-(--focus-offset) has-[textarea:focus-visible]:outline-(--focus-color)';

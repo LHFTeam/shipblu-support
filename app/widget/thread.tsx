@@ -29,7 +29,7 @@ import {
 } from '@/lib/widget/files';
 import type { WidgetCopy } from './copy';
 import { EmojiPicker, type PickedWith } from './emoji-picker';
-import { WIDGET_COMPOSER_BOX, WIDGET_FIELD } from './field';
+import { WIDGET_COMPOSER_BOX, WIDGET_FIELD, WIDGET_SEND_SIZE } from './field';
 import { WidgetFiles } from './message-files';
 import { SurveyCard, type SurveyResult } from './survey-card';
 import type { ArticleLink, Message } from '@/lib/widget/types';
@@ -98,8 +98,15 @@ export function WidgetThread({
   const pickerId = useId();
   /** The last prefill actually put in the box, so a repaint does not redo it. */
   const applied = useRef(0);
-  /** A caret waiting for the value it is meant to sit at the end of. */
-  const caretPending = useRef(false);
+  /**
+   * Words put in the box from code with the caret at their end — a draft from
+   * the host page, or a failed send's put back — counted, and shown by the
+   * effect that sizes the box once it has measured them. A prefill also takes
+   * focus and the caret there; a failed send leaves both where they are.
+   */
+  const [reveal, setReveal] = useState({ count: 0, focus: false });
+  /** The last `reveal` the box has shown, so a re-measure does not redo it. */
+  const revealed = useRef(0);
   /** A caret waiting to sit after an emoji just put in the focused box. */
   const caretAt = useRef<number | null>(null);
   /**
@@ -126,43 +133,44 @@ export function WidgetThread({
    *
    * Applying it is one thing and putting the caret after it is another, because
    * the field still holds the old value when this runs: `setDraft` has not been
-   * rendered yet. The effect below waits for the value and then places the
-   * caret, which is also what makes the case above right — the caret lands at
-   * the end of whatever the visitor kept.
+   * rendered yet. The effect that sizes the box places the caret in the render
+   * this causes (`reveal`), once the value is in the field and measured, which
+   * is also what makes the case above right — the caret lands at the end of
+   * whatever the visitor kept.
+   *
+   * `reveal` is state rather than a flag in a ref so that render always
+   * happens. A box that keeps the visitor's words gives `setDraft` nothing to
+   * change, and a flag waiting for the draft's next render waited for the
+   * visitor's next keystroke instead: that one landed where they had put the
+   * caret, and then the caret was thrown to the end of the draft, so the second
+   * letter of a word typed into its middle went after its last. A flag set on
+   * the render that mounted the thread was spent there too, on the empty box.
    */
   useEffect(() => {
     if (!prefill || prefill.seq === applied.current) return;
 
     applied.current = prefill.seq;
-    caretPending.current = true;
     setDraft((current) => (current.trim() ? current : prefill.text));
+    setReveal((last) => ({ count: last.count + 1, focus: true }));
   }, [prefill]);
 
   useEffect(() => {
+    if (caretAt.current === null) return;
     const field = composer.current;
-    if (caretAt.current !== null) {
-      const at = caretAt.current;
-      caretAt.current = null;
-      // Only on the focused box: some engines focus a field to select in it,
-      // which on a phone brings the keyboard back up over the panel.
-      if (field && document.activeElement === field) field.setSelectionRange(at, at);
-    }
-
-    if (!caretPending.current) return;
-    caretPending.current = false;
-    if (!field) return;
-
-    field.focus();
-    field.setSelectionRange(field.value.length, field.value.length);
+    const at = caretAt.current;
+    caretAt.current = null;
+    // Only on the focused box: some engines focus a field to select in it,
+    // which on a phone brings the keyboard back up over the panel.
+    if (field && document.activeElement === field) field.setSelectionRange(at, at);
   }, [draft]);
 
   /*
    * The composer grows with what is in it, up to a point.
    *
-   * Two fixed rows is right for an empty box and wrong the moment something is
-   * already in one: a prefilled draft shows its first two lines and hides the
-   * line the caret is on, so the visitor cannot see where they are about to
-   * type — which reads as the button having half worked.
+   * One fixed row is right for an empty box and wrong the moment something is
+   * already in one: a prefilled draft shows its first line and hides the line
+   * the caret is on, so the visitor cannot see where they are about to type —
+   * which reads as the button having half worked.
    *
    * Measured rather than counted off the newlines. The panel is 380px wide and
    * `Tracking number: 1755021358719` wraps in it, so the lines that decide the
@@ -172,6 +180,23 @@ export function WidgetThread({
    * a `display:none` subtree, so a visitor opening an article would come back
    * to a box collapsed to nothing. `active` in the dependencies is what
    * re-measures it on the way back.
+   *
+   * Past the cap the box scrolls, and Chrome scrolls a textarea to its caret
+   * when somebody types, never when code sets the value or the selection. So
+   * words put in from code with the caret at their end — a prefill longer than
+   * six lines, a long message a failed send put back — opened on their first
+   * six lines and hid the one the caret was on, the failure above at the cap.
+   * Each such change is a `reveal`, and the box is scrolled to its end here,
+   * once it has measured them. Resizing alone never moves the scroll: the
+   * `auto` pass only shrinks the box, which lowers no limit on it, so a box the
+   * visitor scrolled stays where they left it.
+   *
+   * Here, because this is a layout effect: the scroll lands before the browser
+   * paints the words, where a plain effect ran after a paint about half the
+   * time a prefill opened the thread, and a long draft flashed its first six
+   * lines for a frame before jumping to its end. And because a send can fail
+   * while the visitor is reading an article: a hidden box is not measured, and
+   * its `reveal` waits for the measure on the way back.
    */
   useLayoutEffect(() => {
     const field = composer.current;
@@ -179,7 +204,15 @@ export function WidgetThread({
 
     field.style.height = 'auto';
     field.style.height = `${Math.min(field.scrollHeight, MAX_COMPOSER_PX)}px`;
-  }, [draft, active]);
+
+    if (reveal.count === revealed.current) return;
+    revealed.current = reveal.count;
+    if (reveal.focus) {
+      field.focus();
+      field.setSelectionRange(field.value.length, field.value.length);
+    }
+    field.scrollTop = field.scrollHeight;
+  }, [draft, active, reveal]);
 
   /*
    * Out of hours, ask before the message rather than after it.
@@ -300,8 +333,13 @@ export function WidgetThread({
       // A send with files can take a minute, and the box stays open while it
       // does: words typed meanwhile follow the ones put back, never replaced
       // by them. Files cannot be added meanwhile (the clip waits for the send),
-      // so the ones put back are all there are.
-      setDraft((typed) => withinLimit(typed.trim() ? `${body}\n${typed}` : body));
+      // so the ones put back are all there are. A send of files alone put no
+      // words back: what was typed meanwhile stands as it is, rather than after
+      // an empty first line, and keeps its own caret.
+      if (body) {
+        setDraft((typed) => withinLimit(typed.trim() ? `${body}\n${typed}` : body));
+        setReveal((last) => ({ count: last.count + 1, focus: false }));
+      }
       setFiles(attached);
       setNotice(outcome.refusal);
     }
@@ -656,8 +694,13 @@ export function WidgetThread({
                 }
               }}
               /* The floor, and what the box is before the effect above has
-                 measured it. */
-              rows={2}
+                 measured it. One line: 24px of 16px text inside 10px of
+                 padding each side is the 44px of the buttons beside it, so
+                 the placeholder and the caret sit on the line the smile and
+                 the clip sit on. Two rows put the words on the first line
+                 and the buttons, held to the box's bottom so they stay
+                 beside the last line as it grows, on the second. */
+              rows={1}
               maxLength={MAX_WIDGET_MESSAGE_CHARS}
               placeholder={copy.placeholder}
               dir="auto"
@@ -672,8 +715,18 @@ export function WidgetThread({
                 No outline of its own: the box round it draws the keyboard ring
                 while the textarea has focus (`WIDGET_COMPOSER_BOX`), so the
                 whole control is ringed rather than the text area inside it.
+
+                The placeholder is held to one line and cut short rather than
+                wrapped. On a 320px phone "Type your message…" is wider than the
+                box, and Chrome counts a wrapped placeholder in `scrollHeight`,
+                so the effect above grew the empty box to two lines and put the
+                words above the buttons again. `text-ellipsis` on the textarea
+                as well as on its placeholder: Chrome reads a textarea
+                placeholder's `text-overflow` off the textarea, and without it
+                cut the hint off mid-letter. Typed text still wraps, so it
+                never overflows a line for the ellipsis to act on.
               */
-              className="min-w-0 flex-1 resize-none bg-transparent px-1 py-2.5 font-conversation text-base text-(--color-text-primary) outline-none placeholder:text-(--color-text-tertiary)"
+              className="min-w-0 flex-1 resize-none bg-transparent px-1 py-2.5 font-conversation text-base text-ellipsis text-(--color-text-primary) outline-none placeholder:truncate placeholder:text-(--color-text-tertiary)"
             />
 
             <button
@@ -711,7 +764,7 @@ export function WidgetThread({
             spends its width on what the visitor is typing. `!` on the box because
             the shared button's height and padding are set per size, and a second
             utility on the same property wins or loses by Tailwind's order, not
-            this one's.
+            this one's. As tall as the box beside it (`WIDGET_SEND_SIZE`).
           */}
           <Button
             type="submit"
@@ -719,7 +772,7 @@ export function WidgetThread({
             loading={sending}
             aria-label={copy.send}
             icon={<SendIcon size={18} />}
-            className="min-h-(--tap-min)! min-w-(--tap-min) px-0!"
+            className={`${WIDGET_SEND_SIZE} px-0!`}
           />
         </div>
 
