@@ -159,10 +159,10 @@ export function WidgetThread({
   /*
    * The composer grows with what is in it, up to a point.
    *
-   * Two fixed rows is right for an empty box and wrong the moment something is
-   * already in one: a prefilled draft shows its first two lines and hides the
-   * line the caret is on, so the visitor cannot see where they are about to
-   * type — which reads as the button having half worked.
+   * One fixed row is right for an empty box and wrong the moment something is
+   * already in one: a prefilled draft shows its first line and hides the line
+   * the caret is on, so the visitor cannot see where they are about to type —
+   * which reads as the button having half worked.
    *
    * Measured rather than counted off the newlines. The panel is 380px wide and
    * `Tracking number: 1755021358719` wraps in it, so the lines that decide the
@@ -656,8 +656,13 @@ export function WidgetThread({
                 }
               }}
               /* The floor, and what the box is before the effect above has
-                 measured it. */
-              rows={2}
+                 measured it. One line: 24px of 16px text inside 10px of
+                 padding each side is the 44px of the buttons beside it, so
+                 the placeholder and the caret sit on the line the smile and
+                 the clip sit on. Two rows put the words on the first line
+                 and the buttons, held to the box's bottom so they stay
+                 beside the last line as it grows, on the second. */
+              rows={1}
               maxLength={MAX_WIDGET_MESSAGE_CHARS}
               placeholder={copy.placeholder}
               dir="auto"
@@ -672,8 +677,14 @@ export function WidgetThread({
                 No outline of its own: the box round it draws the keyboard ring
                 while the textarea has focus (`WIDGET_COMPOSER_BOX`), so the
                 whole control is ringed rather than the text area inside it.
+
+                The placeholder is held to one line and cut short rather than
+                wrapped. On a 320px phone "Type your message…" is wider than the
+                box, and Chrome counts a wrapped placeholder in `scrollHeight`,
+                so the effect above grew the empty box to two lines and put the
+                words above the buttons again.
               */
-              className="min-w-0 flex-1 resize-none bg-transparent px-1 py-2.5 font-conversation text-base text-(--color-text-primary) outline-none placeholder:text-(--color-text-tertiary)"
+              className="min-w-0 flex-1 resize-none bg-transparent px-1 py-2.5 font-conversation text-base text-(--color-text-primary) outline-none placeholder:truncate placeholder:text-(--color-text-tertiary)"
             />
 
             <button
