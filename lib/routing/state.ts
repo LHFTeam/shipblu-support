@@ -257,9 +257,11 @@ const NOT_THE_ROUTERS_PASS: ReadonlySet<RoutingOutcome> = new Set(['manual', 'ru
  * written twice. False, and the pass is the writer's.
  *
  * - **Undecided** — a phase one written since, which some caller is finishing
- *   (`in_flight`), or none yet, the writer's own `routeNow` having `failed`:
- *   true. Phase one, then or at the window's end, reads the ticket after this
- *   write, and the router's pass after it.
+ *   (`in_flight`), or none yet, the writer's own `routeNow` having `failed`, or
+ *   answered `waiting` because the category is Jev's reading of a comment
+ *   thread still waiting for its customer (`categoryStanding`): true. Phase
+ *   one, then or at the window's end, reads the ticket after this write, and
+ *   the router's pass after it.
  * - **Decided by the router** — its phase one read the ticket under the lock
  *   after this write committed, and its pass ran on this category or on a
  *   later writer's, whose pass it then is: true either way.

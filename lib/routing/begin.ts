@@ -31,7 +31,10 @@ const log = logger('routing');
  * - **A category is settled** — by a rule, or by Jev answering before the pass
  *   got here, which wrote only the category and left the rest to this. A live
  *   ticket is routed now (`routeNow`); a shadow one has its would-be decision
- *   recorded and the pass carries on.
+ *   recorded and the pass carries on. Unless the category is Jev's reading of
+ *   a comment thread a reply opened, whose customer may still arrive
+ *   (`categoryStanding`): the router answers `waiting` and moves the row to
+ *   `holding` itself, and the pass carries on as though nothing had settled.
  * - **Otherwise the row moves to `holding`**, so Jev's answer, when it comes,
  *   routes the ticket itself; and the pass carries on into assignment and the
  *   reply, which the hold skips.

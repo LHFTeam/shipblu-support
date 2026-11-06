@@ -3,6 +3,7 @@ import { PgDatabase } from 'drizzle-orm/pg-core';
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 import { db } from '@/db/client';
 import {
+  aiCategoryRuns,
   agents,
   autoResponses,
   automationRules,
@@ -2056,5 +2057,352 @@ describe('the held reply, on the clock the router is handed', () => {
     expect(await routeNow(id, { label: 'jev:category' }, NIGHT)).toBe('decided');
 
     expect(await acknowledgements(id)).toHaveLength(1);
+  });
+});
+
+// --- A comment thread a reply opened ---------------------------------------
+
+/**
+ * Meta delivers a comment thread in no order, so a passer-by's reply under a
+ * customer's comment can be stored first and open the ticket under the
+ * passer-by; the customer's comment, when it comes, makes its author the
+ * requester (`adoptRootAuthor`). Jev answers within seconds, so the router
+ * would otherwise decide on the passer-by's words before the customer's could
+ * arrive, and a decided ticket is never routed again (`categoryStanding`).
+ *
+ * The tickets here are built as `ingestMetaComment` leaves them — a comment
+ * ticket on the Facebook Page's row, the reply's `in_reply_to` naming the root
+ * — and the root's arrival as adoption leaves it: the requester moved, and the
+ * root stored, in one transaction. `ingest-meta.db.test.ts` drives the same
+ * thread through the real ingest and both classifiers.
+ */
+describe('a comment thread a reply opened', () => {
+  let threads = 0;
+
+  /** The Page's row, routing by category; comment tickets are filed under it. */
+  async function facebookPage(defaultGroupId: string): Promise<string> {
+    const [row] = await db
+      .insert(channels)
+      .values({
+        type: 'facebook',
+        name: 'Facebook Page',
+        config: {},
+        defaultGroupId,
+        routingMode: 'category',
+      })
+      .returning({ id: channels.id });
+    return row!.id;
+  }
+
+  async function person(name: string): Promise<string> {
+    people += 1;
+    const [row] = await db
+      .insert(contacts)
+      .values({ name, primaryEmail: `${name.toLowerCase()}${people}@customer.example` })
+      .returning({ id: contacts.id });
+    return row!.id;
+  }
+
+  type Thread = Held & { rootId: string; bob: string; amira: string; repliedAt: Date };
+
+  /**
+   * Bob's reply under Amira's comment, stored first: the ticket is Bob's, held,
+   * and begun as the creation pass begins it.
+   */
+  async function replyOpened(channelId: string, groupId: string): Promise<Thread> {
+    threads += 1;
+    const rootId = `root-${threads}`;
+    const bob = await person('Bob');
+    const amira = await person('Amira');
+    const opened = new Date();
+    const plan = { start: 'live', channelId, windowMinutes: 5 } as const;
+    const [ticket] = await db
+      .insert(conversations)
+      .values({
+        channel: 'facebook_comment',
+        channelId,
+        groupId,
+        statusId: await status('Open'),
+        requesterContactId: bob,
+        subject: 'Same here, nobody answers',
+        externalId: `facebook:comment:${rootId}`,
+        lastMessageAt: opened,
+        lastCustomerMessageAt: opened,
+        ...routingWindowValues(plan, {}, opened),
+      })
+      .returning({ id: conversations.id });
+    const id = ticket!.id;
+    const [message] = await db
+      .insert(messages)
+      .values({
+        conversationId: id,
+        direction: 'inbound',
+        kind: 'reply',
+        authorContactId: bob,
+        bodyText: 'Same here, how much is the delivery to Alexandria?',
+        channelMessageId: `reply-${threads}`,
+        inReplyTo: rootId,
+        meta: { metaKind: 'comment', platform: 'facebook', commentId: `reply-${threads}` },
+        createdAt: opened,
+      })
+      .returning({ id: messages.id });
+    await db.transaction((tx) =>
+      startRouting(tx, plan, { conversationId: id, messageId: message!.id, groupId }, opened),
+    );
+    expect(await beginRouting(id)).toBe('continue');
+    return { id, messageId: message!.id, rootId, bob, amira, repliedAt: opened };
+  }
+
+  /** Amira's comment arriving: adoption's move and the root's insert, one transaction. */
+  async function rootArrives(thread: Thread, executor: Pick<typeof db, 'transaction'> = db) {
+    return executor.transaction(async (tx) => rootArrivesIn(tx, thread));
+  }
+
+  async function rootArrivesIn(
+    tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
+    thread: Thread,
+  ): Promise<string> {
+    await tx
+      .update(conversations)
+      .set({ requesterContactId: thread.amira, requesterKind: null })
+      .where(eq(conversations.id, thread.id));
+    await tx.insert(conversationEvents).values({
+      conversationId: thread.id,
+      type: 'requester_changed',
+      actorLabel: 'inbound_facebook',
+      data: { reason: 'thread_root', from: thread.bob, to: thread.amira },
+    });
+    const [root] = await tx
+      .insert(messages)
+      .values({
+        conversationId: thread.id,
+        direction: 'inbound',
+        kind: 'reply',
+        authorContactId: thread.amira,
+        bodyText: 'My shop’s COD payments from last week never arrived.',
+        channelMessageId: thread.rootId,
+        meta: { metaKind: 'comment', platform: 'facebook', commentId: thread.rootId },
+        // Written before the reply under it, as Meta's created_time says.
+        createdAt: new Date(thread.repliedAt.getTime() - MINUTE),
+      })
+      .returning({ id: messages.id });
+    return root!.id;
+  }
+
+  /**
+   * Jev's confident answer about one message, as the live job leaves it: the
+   * run row, and the write with its event naming the message — which writes
+   * nothing when the ticket already carries the category.
+   */
+  async function jevAnswers(thread: Thread, key: string, messageId: string): Promise<string> {
+    const [category] = await db
+      .select({ id: ticketCategories.id })
+      .from(ticketCategories)
+      .where(eq(ticketCategories.key, key));
+    await db.transaction(async (tx) => {
+      await tx.insert(aiCategoryRuns).values({
+        conversationId: thread.id,
+        messageId,
+        messageCreatedAt: new Date(),
+        runLabel: 'live',
+        mode: 'apply',
+        requestFingerprint: 'test',
+        predictedKey: key,
+        probability: 0.9,
+        outcome: 'applied',
+        channel: 'facebook_comment',
+      });
+      await setConversationCategoryOn(
+        tx,
+        thread.id,
+        category!.id,
+        { label: 'jev:category' },
+        {
+          probability: 0.9,
+          model: 'test',
+          messageId,
+          messageCreatedAt: new Date().toISOString(),
+          runLabel: 'live',
+        },
+      );
+    });
+    return category!.id;
+  }
+
+  async function page() {
+    const t = await teams();
+    await routeTo('sales', t.sales.group);
+    await routeTo('merchant_support', t.care.group);
+    return { ...t, page: await facebookPage(t.home.group) };
+  }
+
+  /** Still held, in the group it arrived in, with no decision written. */
+  async function expectWaiting(thread: Thread, homeGroup: string) {
+    expect(await decision(thread.id)).toMatchObject({
+      stage: 'holding',
+      outcome: null,
+      phaseOneAt: null,
+    });
+    expect(await ticketRow(thread.id)).toMatchObject({
+      groupId: homeGroup,
+      assigneeAgentId: null,
+      routingDecidedAt: null,
+    });
+    expect(await events(thread.id, 'routed')).toEqual([]);
+  }
+
+  it('does not route on Jev’s reading of the reply while the root may still come', async () => {
+    const t = await page();
+    const thread = await replyOpened(t.page, t.home.group);
+    await jevAnswers(thread, 'sales', thread.messageId);
+
+    expect(await routeNow(thread.id, { label: 'jev:category' })).toBe('waiting');
+
+    await expectWaiting(thread, t.home.group);
+  });
+
+  it('routes on the root author’s own answer once the root has arrived', async () => {
+    const t = await page();
+    const thread = await replyOpened(t.page, t.home.group);
+    await jevAnswers(thread, 'sales', thread.messageId);
+    expect(await routeNow(thread.id, { label: 'jev:category' })).toBe('waiting');
+
+    const root = await rootArrives(thread);
+    const care = await jevAnswers(thread, 'merchant_support', root);
+
+    expect(await routeNow(thread.id, { label: 'jev:category' })).toBe('decided');
+    expect(await ticketRow(thread.id)).toMatchObject({
+      groupId: t.care.group,
+      assigneeAgentId: t.care.agent,
+      categoryId: care,
+    });
+    expect(await expectDecided(thread.id, 'category')).toMatchObject({ categoryId: care });
+  });
+
+  it('routes at the window’s end on the root’s answer that agreed with the reply’s, which wrote nothing', async () => {
+    const t = await page();
+    const thread = await replyOpened(t.page, t.home.group);
+    const sales = await jevAnswers(thread, 'sales', thread.messageId);
+    const root = await rootArrives(thread);
+    // Her answer is the category the ticket already carries: a run, and no
+    // event naming her message.
+    await jevAnswers(thread, 'sales', root);
+    expect(await events(thread.id, 'category_changed')).toHaveLength(1);
+
+    expect(await settleRouting(thread.id)).toBe('decided');
+
+    expect(await ticketRow(thread.id)).toMatchObject({ groupId: t.sales.group });
+    expect(await expectDecided(thread.id, 'category')).toMatchObject({ categoryId: sales });
+  });
+
+  it('sets the replier’s category aside at the window’s end when the root settled nothing', async () => {
+    const t = await page();
+    await rule('on_update', 'Tag sales', always, [{ type: 'add_tags', tags: ['sales'] }]);
+    const thread = await replyOpened(t.page, t.home.group);
+    const sales = await jevAnswers(thread, 'sales', thread.messageId);
+    // Her root had no words, or an answer below the threshold: nothing of hers.
+    await rootArrives(thread);
+
+    // Before the window's end it waits: her next message may still settle it.
+    expect(await routeNow(thread.id, { label: 'jev:category' })).toBe('waiting');
+    expect(await settleRouting(thread.id)).toBe('decided');
+
+    expect(await ticketRow(thread.id)).toMatchObject({
+      groupId: t.home.group,
+      assigneeAgentId: t.home.agent,
+      // A label still, for a person or her own next answer to replace.
+      categoryId: sales,
+    });
+    expect(await expectDecided(thread.id, 'fallback')).toMatchObject({
+      toGroupId: t.home.group,
+      categoryId: null,
+      probability: null,
+    });
+    expect((await events(thread.id, 'routed'))[0]!.data).toMatchObject({
+      outcome: 'fallback',
+      setAside: { categoryId: sales, key: 'sales' },
+    });
+    expect((await events(thread.id, 'routed'))[0]!.data).not.toHaveProperty('categoryId');
+    // No pass for a category the decision was not made on.
+    expect(await tagged(thread.id)).toBe(0);
+  });
+
+  it('routes on the reply’s category at the window’s end when no root came', async () => {
+    const t = await page();
+    await rule('on_update', 'Tag sales', always, [{ type: 'add_tags', tags: ['sales'] }]);
+    const thread = await replyOpened(t.page, t.home.group);
+    // A reply under the Page's own comment, which ingest never stores: the
+    // replier is the customer.
+    const sales = await jevAnswers(thread, 'sales', thread.messageId);
+
+    expect(await settleRouting(thread.id)).toBe('decided');
+
+    expect(await ticketRow(thread.id)).toMatchObject({
+      groupId: t.sales.group,
+      assigneeAgentId: t.sales.agent,
+    });
+    expect(await expectDecided(thread.id, 'category')).toMatchObject({ categoryId: sales });
+    expect(await tagged(thread.id)).toBe(1);
+  });
+
+  it('leaves a category Jev filed before the creation pass for the root, held as holding', async () => {
+    const t = await page();
+    // The reply's ticket as the insert leaves it, Jev answering before the
+    // creation pass reaches `beginRouting`.
+    const thread = await replyOpened(t.page, t.home.group);
+    await db
+      .update(routingDecisions)
+      .set({ stage: 'pending' })
+      .where(eq(routingDecisions.conversationId, thread.id));
+    await jevAnswers(thread, 'sales', thread.messageId);
+
+    expect(await beginRouting(thread.id)).toBe('continue');
+
+    // `holding`, so the root's answer routes it at once rather than leaving
+    // it to a creation pass that has already run.
+    await expectWaiting(thread, t.home.group);
+  });
+
+  it('routes at once on a person’s category, root or no root', async () => {
+    const t = await page();
+    const thread = await replyOpened(t.page, t.home.group);
+    await jevAnswers(thread, 'sales', thread.messageId);
+    const care = await routeTo('merchant_support', t.care.group);
+
+    expect(await consoleFiles(thread.id, care, t.home.agent)).toBe(false);
+    expect(await routeNow(thread.id, { agentId: t.home.agent, label: 'agent' })).toBe('decided');
+
+    expect(await ticketRow(thread.id)).toMatchObject({ groupId: t.care.group });
+    await expectDecided(thread.id, 'category');
+  });
+
+  it('decides on the requester an adoption committing under its lock leaves', async () => {
+    const t = await page();
+    const thread = await replyOpened(t.page, t.home.group);
+    await jevAnswers(thread, 'sales', thread.messageId);
+
+    // Amira's comment arriving at the window's end: the move and the root
+    // written and not yet committed, the router's phase one waiting on the
+    // ticket's row behind them.
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => (release = resolve));
+    let arrived!: () => void;
+    const hasArrived = new Promise<void>((resolve) => (arrived = resolve));
+    const adopting = db.transaction(async (tx) => {
+      await rootArrivesIn(tx, thread);
+      arrived();
+      await released;
+    });
+    await hasArrived;
+    const settling = settleRouting(thread.id);
+    await untilWaitingOnALock(db);
+    release();
+    await adopting;
+
+    expect(await settling).toBe('decided');
+    // Read after the adoption: the reply's category is a stranger's now, and
+    // set aside, where a read before it would have routed on it to Sales.
+    expect(await ticketRow(thread.id)).toMatchObject({ groupId: t.home.group });
+    await expectDecided(thread.id, 'fallback');
   });
 });

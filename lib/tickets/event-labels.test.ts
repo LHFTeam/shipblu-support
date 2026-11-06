@@ -359,6 +359,15 @@ describe('describeEvent', () => {
     expect(describeEvent('routed', { outcome: 'fallback', ...stayed })).toBe(
       'kept the ticket in Customer Care: nothing had said what it is about by the end of the routing window',
     );
+    expect(
+      describeEvent('routed', {
+        outcome: 'fallback',
+        ...stayed,
+        setAside: { categoryId: 'c-sales', key: 'sales', label: 'Sales' },
+      }),
+    ).toBe(
+      'kept the ticket in Customer Care: its category, Sales, was read off a comment by somebody other than the requester, so it decided nothing',
+    );
     expect(describeEvent('routed', { outcome: 'taken', ...stayed })).toBe(
       'kept the ticket in Customer Care: somebody had already taken it',
     );

@@ -52,8 +52,16 @@ function describeRouted(data: Record<string, unknown>): string {
         : `moved the ticket from ${from} to ${to}, where ${category} routes`;
     case 'no_route_for_category':
       return `kept the ticket in ${to}: ${category} routes to no other group`;
-    case 'fallback':
-      return `kept the ticket in ${to}: nothing had said what it is about by the end of the routing window`;
+    case 'fallback': {
+      // Jev's reading of a reply by somebody who is no longer the requester
+      // (`categoryStanding`): the ticket carries the category as a label, and
+      // without this the sentence beside it would say nothing had read one.
+      const aside = data.setAside as Record<string, unknown> | undefined;
+      const asideName = aside && typeof aside === 'object' ? aside.label || aside.key : null;
+      return asideName
+        ? `kept the ticket in ${to}: its category, ${String(asideName)}, was read off a comment by somebody other than the requester, so it decided nothing`
+        : `kept the ticket in ${to}: nothing had said what it is about by the end of the routing window`;
+    }
     case 'taken':
       return `kept the ticket in ${to}: somebody had already taken it`;
     case 'not_open':

@@ -88,6 +88,81 @@ export function decide(input: DecideInput): Decision {
 }
 
 /**
+ * Whose words the category a ticket carries stands on, as the router reads it
+ * under the ticket's lock (`categorySource`, `lib/routing/category-source.ts`).
+ * Null for a ticket with no category.
+ */
+export type CategorySource = {
+  /** The category was last written by Jev answering one of the ticket's messages. */
+  readByJev: boolean;
+  /**
+   * No answer of Jev's about a message the ticket's requester wrote — as the
+   * requester is now — chose it: every one that did was about somebody else's
+   * words. Only `readByJev` makes this a question at all.
+   */
+  notTheRequesters: boolean;
+  /**
+   * A comment thread a reply opened, whose root comment is not on the ticket
+   * yet: the customer whose comment the reply answers may still arrive and take
+   * the ticket over (`adoptRootAuthor`, `lib/tickets/ingest-meta.ts`).
+   */
+  awaitingRoot: boolean;
+};
+
+/**
+ * What a decision that would read the ticket's category does with it: `routes`
+ * on it, `waits` — decides nothing yet, and leaves the ticket held for the
+ * window's end or a later answer — or sets it `set_aside`, deciding as though
+ * no category had settled (`fallback`).
+ *
+ * Meta delivers a comment thread in no order, so a passer-by's reply under a
+ * customer's comment can be stored first and open the ticket under the
+ * passer-by; the customer's comment, when it comes, makes its author the
+ * requester. Jev answers within seconds, so without this the router decided
+ * on the passer-by's words before the customer's could arrive — moved the
+ * ticket to the team those words named, ran that category's rules, chose its
+ * policy and assigned it — and a decided ticket is never routed again.
+ *
+ * A category somebody else wrote — a person, a rule, a form — routes at once,
+ * as it always has: somebody chose it, and nothing about the thread's order
+ * changes that choice. Only Jev's reading of somebody's words waits:
+ *
+ * 1. **Read off somebody who is not the requester now** — the replier, after
+ *    the root took the ticket, while the root's own answer has not settled
+ *    anything (unknown, below the threshold, a root with no words). Before the
+ *    window's end it waits, since the customer's next message may still settle
+ *    the ticket; at the window's end it is set aside, and the ticket stays in
+ *    the group it arrived in. The category stays on the ticket as a label, for
+ *    a person or the customer's own next answer to replace.
+ * 2. **Read off the requester, on a thread still waiting for its root** —
+ *    waits before the window's end; at the window's end it routes, since
+ *    nobody else has arrived to take the ticket, and a reply whose root never
+ *    comes — one under the Page's own comment, which ingest never stores, or
+ *    under a comment older than the subscription — is the customer's own.
+ * 3. **Anything else** routes.
+ *
+ * Waiting costs a ticket a reply opened the window's length before it is
+ * assigned, where a ticket its root opened is routed as soon as Jev answers.
+ * A root arriving after the window's end changes nothing the router did: the
+ * decision is made once, and the root's answer only relabels the ticket. And
+ * while it waits, the ticket carries the replier's category, so another
+ * writer's `on_update` pass in that time — the priority classifier's, a
+ * customer's message's — meets a rule keyed on that category as it would on
+ * any held ticket, and an `assign_group` there ends the hold as `rule`.
+ * Accepted: no active rule is keyed on the category (2026-11-06), and a team
+ * that adds one decides through it rather than through the router.
+ */
+export function categoryStanding(
+  source: CategorySource | null,
+  atWindowEnd: boolean,
+): 'routes' | 'waits' | 'set_aside' {
+  if (!source?.readByJev) return 'routes';
+  if (source.notTheRequesters) return atWindowEnd ? 'set_aside' : 'waits';
+  if (source.awaitingRoot && !atWindowEnd) return 'waits';
+  return 'routes';
+}
+
+/**
  * Whether anybody may still work the ticket: open or pending, and not spam,
  * deleted or merged — what `not_open` answers the absence of. The one copy of
  * that rule, asked in five places so that none of them can come to read it
