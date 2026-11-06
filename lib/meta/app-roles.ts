@@ -3,7 +3,7 @@ import { db } from '@/db/client';
 import { metaAppRoleEvents } from '@/db/schema';
 import { env } from '@/lib/env';
 import { configuredAccountId } from './client';
-import type { MetaPlatform, NormalisedAppRole } from './types';
+import type { DefaultAppStanding, MetaPlatform, NormalisedAppRole } from './types';
 
 /**
  * Which app a Page or an Instagram account routes its conversations to, as
@@ -44,6 +44,24 @@ const DEFAULT_APP_OWNS_THREADS: Record<MetaPlatform, boolean> = {
 /** Enough to cover every switch an account has had; they are a few a year. */
 const READ_LIMIT = 50;
 
+const NO_STANDING: DefaultAppStanding = { since: null, lostAt: null };
+
+/**
+ * One fact per account that changes a few times a year, read by every
+ * Instagram ticket render, reply, take-control press and `send_meta` job — so
+ * memoised for thirty seconds per process, as `lib/presence/policy.ts` is.
+ * Recording a new event here forgets it, so the worker that stored a switch
+ * weighs it at once; another process sees it within the thirty seconds, which
+ * is the trade. An error is not cached, so the next read tries again.
+ */
+const STANDING_TTL_MS = 30_000;
+let standingMemo = new Map<string, { at: number; value: DefaultAppStanding }>();
+
+/** Drop the memo: after a write here, and between database tests. */
+export function forgetDefaultAppStanding(): void {
+  standingMemo = new Map();
+}
+
 /**
  * Stores one app's roles as an event stated them, or nothing if that event is
  * already stored — a Meta batch is retried whole, and the backfill writes the
@@ -73,64 +91,79 @@ export async function recordAppRole(
     })
     .returning({ id: metaAppRoleEvents.id });
 
+  if (rows.length > 0) forgetDefaultAppStanding();
   return rows.length > 0;
 }
 
 export type AppRoleEvent = { appId: string; roles: string[]; at: Date };
 
 /**
- * Since when this app has been the account's default app, without a break, in
- * the sense that moves threads — or null.
+ * Where this app stands as the account's default app, in the sense that moves
+ * threads: since when it has been the default without a break, or since when
+ * it has not been.
  *
- * Read newest first. The stretch ends, going back, at an event giving this app
- * no `default_app`, or one giving it to another app; the answer is the oldest
- * event of this app's inside it. The start, not the latest event of it: a
- * message received in `standby` between the switch and a later event that
- * still names this app the default says another app took that thread in the
- * meantime, and a second statement of the same role is no evidence that it
- * gave the thread back.
+ * Read newest first. The newest event that names this app, or names another
+ * app the default, is the newest switch. If it gives this app `default_app`,
+ * `since` is the start of the stretch: going back, the stretch ends at an event
+ * giving this app no `default_app`, or one giving it to another app, and the
+ * answer is the oldest event of this app's inside it. The start, not the latest
+ * event of it: a message received in `standby` between the switch and a later
+ * event that still names this app the default says another app took that
+ * thread in the meantime, and a second statement of the same role is no
+ * evidence that it gave the thread back.
  *
- * Null whenever it cannot be sure the default is this app now — no app id, no
- * event, the latest naming another app — so a ticket refuses as it did before
- * the switch was stored, the safe side of every mistake here.
+ * If the newest switch gives this app no `default_app`, or gives it to another
+ * app, `lostAt` is that switch: by the same evidence that a switch to this app
+ * moved the threads open at the time (`docs/PROJECT-STATE.md` §6.111), a switch
+ * away moves them to the new default, and a reply to a customer who last wrote
+ * before it would be refused `2534037`.
+ *
+ * Both null whenever there is nothing to go on — no app id, no event, Messenger
+ * (`DEFAULT_APP_OWNS_THREADS`) — so a ticket is judged by its messages alone, as
+ * it was before the switch was stored.
  */
-export function defaultAppSinceFrom(
+export function defaultAppStandingFrom(
   platform: MetaPlatform,
   events: AppRoleEvent[],
   appId: string | null,
-): Date | null {
-  if (!DEFAULT_APP_OWNS_THREADS[platform] || !appId) return null;
+): DefaultAppStanding {
+  if (!DEFAULT_APP_OWNS_THREADS[platform] || !appId) return NO_STANDING;
 
   const newestFirst = [...events].sort((a, b) => b.at.getTime() - a.at.getTime());
-  let since: Date | null = null;
+  const isDefault = (event: AppRoleEvent) => event.roles.includes(DEFAULT_APP);
+  const isSwitch = (event: AppRoleEvent) => event.appId === appId || isDefault(event);
 
-  for (const event of newestFirst) {
-    const isDefault = event.roles.includes(DEFAULT_APP);
+  const newest = newestFirst.find(isSwitch);
+  if (!newest) return NO_STANDING;
+  if (newest.appId !== appId || !isDefault(newest)) return { since: null, lostAt: newest.at };
 
-    if (event.appId === appId) {
-      if (!isDefault) break;
-      since = event.at;
-    } else if (isDefault) {
-      break;
-    }
+  let since = newest.at;
+  for (const event of newestFirst.slice(newestFirst.indexOf(newest) + 1)) {
+    if (!isSwitch(event)) continue;
+    if (event.appId !== appId || !isDefault(event)) break;
+    since = event.at;
   }
-
-  return since;
+  return { since, lostAt: null };
 }
 
 /**
- * `defaultAppSinceFrom` over the stored events for the account this deployment
- * sends from — the only account whose threads the verdict judges, since a
- * message received on another is refused as `other_account` first.
+ * `defaultAppStandingFrom` over the stored events for the account this
+ * deployment sends from — the only account whose threads the verdict judges by
+ * it, since a message received on another is refused as `other_account` first.
  *
- * Messenger answers null without a query (`DEFAULT_APP_OWNS_THREADS`).
+ * Messenger answers nothing without a query (`DEFAULT_APP_OWNS_THREADS`), and an
+ * Instagram answer is memoised (`STANDING_TTL_MS`).
  */
-export async function defaultAppSince(platform: MetaPlatform): Promise<Date | null> {
-  if (!DEFAULT_APP_OWNS_THREADS[platform]) return null;
+export async function defaultAppStanding(platform: MetaPlatform): Promise<DefaultAppStanding> {
+  if (!DEFAULT_APP_OWNS_THREADS[platform]) return NO_STANDING;
 
   const appId = env().META_APP_ID || null;
   const accountId = configuredAccountId(platform);
-  if (!appId || !accountId) return null;
+  if (!appId || !accountId) return NO_STANDING;
+
+  const key = `${platform}|${accountId}|${appId}`;
+  const memo = standingMemo.get(key);
+  if (memo && Date.now() - memo.at < STANDING_TTL_MS) return memo.value;
 
   const events = await db
     .select({
@@ -145,5 +178,7 @@ export async function defaultAppSince(platform: MetaPlatform): Promise<Date | nu
     .orderBy(desc(metaAppRoleEvents.at))
     .limit(READ_LIMIT);
 
-  return defaultAppSinceFrom(platform, events, appId);
+  const value = defaultAppStandingFrom(platform, events, appId);
+  standingMemo.set(key, { at: Date.now(), value });
+  return value;
 }

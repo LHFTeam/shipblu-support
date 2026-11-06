@@ -1,6 +1,6 @@
 import { CONNECTION_LABEL, isMetaConnection, type MetaConnection } from './connection';
 import { offersThreadControl } from './handover';
-import type { MetaPlatform } from './types';
+import type { DefaultAppStanding, MetaPlatform } from './types';
 
 /**
  * Whether a Messenger or Instagram thread is *ours to answer at all*.
@@ -81,11 +81,23 @@ export type MetaThreadInput = {
   inboundConnection: MetaConnection | null;
   /**
    * Since when this app has been the account's default app, where that moves
-   * threads (`defaultAppSince`, `lib/meta/app-roles.ts`), or null. Here only for
-   * the words: a `standby` it supersedes never reaches this function as one, so
-   * a `standby` that does, with this set, arrived after the switch.
+   * threads (`defaultAppStanding`, `lib/meta/app-roles.ts`), or null. Here only
+   * for the words: a `standby` it supersedes never reaches this function as
+   * one, so a `standby` that does, with this set, arrived after the switch.
    */
   defaultAppSince?: Date | null;
+  /**
+   * When the default moved away from this app, set only when that is newer than
+   * the customer's last message (`metaThreadStateFromMessage` decides), which
+   * makes the thread the new default's.
+   *
+   * Both of these are optional because one caller judges a delivery's own flag
+   * rather than a stored message: the survey's thanks reads the tap's
+   * `standby`, which Meta set as it delivered the tap, after any switch. Every
+   * reader of a stored message goes through `metaThreadStateFromMessage`, where
+   * the standing is required.
+   */
+  defaultAppLostAt?: Date | null;
 };
 
 export function metaThreadState(input: MetaThreadInput): MetaThreadState {
@@ -201,6 +213,35 @@ export function metaThreadState(input: MetaThreadInput): MetaThreadState {
     (input.connection === 'facebook_page' || input.connection === 'unified_login') &&
     (input.inboundConnection === null || input.inboundConnection === 'facebook_page');
 
+  /*
+    The default moved away from this app after the customer last wrote: the
+    same reading that lets a switch to this app supersede an older `standby`
+    (§6.111) says a switch away hands the thread to the new default, and a
+    reply would be refused `2534037` and land on the timeline as failed, the
+    composer having offered the box and the automations having queued it. Only
+    over the routes the default decides; the direct connection answers past it
+    (§6.29). Only ever set for Instagram, which `offersThreadControl` never
+    offers, so there is no button to draw.
+  */
+  if (
+    input.defaultAppLostAt &&
+    (input.connection === 'facebook_page' || input.connection === 'unified_login')
+  ) {
+    return {
+      canSend: false,
+      reason: 'standby',
+      route: input.connection,
+      canTakeControl: false,
+      headline: 'Another app owns this thread',
+      explanation:
+        `Meta reported that another app became this ${product} account's default app after ` +
+        `this customer last wrote, so the thread is that app's now, and ${product} accepts ` +
+        `a reply only from the thread's owner. Thread control cannot be taken from here. ` +
+        `Answer it in that app, or make this app the account's default app again in the ` +
+        `Page's Advanced messaging settings, which moves the thread back.`,
+    };
+  }
+
   if (standbyBlocks) {
     const canTakeControl = offersThreadControl(input.platform, input.connection);
 
@@ -209,18 +250,27 @@ export function metaThreadState(input: MetaThreadInput): MetaThreadState {
       reason: 'standby',
       route: input.connection,
       canTakeControl,
-      headline: canTakeControl
-        ? 'Another app owns this inbox'
-        : 'Another app owned this thread when the customer last wrote',
+      // Short: the header's chip does not wrap, and a phone is where the
+      // console is read. The explanation below says when.
+      headline: canTakeControl ? 'Another app owns this inbox' : 'Another app owned this thread',
       explanation: canTakeControl
         ? `Another app holds thread control on this ${product} inbox, so this ticket is ` +
           `readable here but cannot be answered from here — ${product} accepts a reply only ` +
           `from the app that owns the thread. The messages arrive in the handover protocol's ` +
           `standby channel, which is what says so. Answer it in the tool that holds the ` +
-          `thread, or take thread control of it from here. Making this app the Page's ` +
-          `default app does not move it: the Page named this app its default app on ` +
-          `2026-11-05, and Messenger's messages kept arriving in standby.`
+          `thread or, while the customer can still be answered, take thread control of it ` +
+          `here. Making this app the Page's default app does not move a thread held through ` +
+          `the handover protocol.`
         : /*
+            The evidence for the last sentence, kept here rather than in it, since
+            it is one deployment's history: on 2026-11-05 the Page named this app
+            its default app, and every Messenger message in the day after still
+            arrived in standby (§6.111). "While the customer can still be
+            answered", because the button is withheld once the seven days are
+            gone (`takeControlRefusal`), and this sentence is built without the
+            clock.
+
+
             Instagram's sentence, on either route, since the button is offered
             on neither (`offersThreadControl`). Not "make this app the default
             app", which the sentence above ends on: on the evening that sentence
@@ -276,12 +326,12 @@ export function metaThreadStateFromMessage(input: {
    */
   controlTakenAt?: Date | null;
   /**
-   * Since when this app has been the account's default app, where that moves
-   * threads, or null (`threadOwnershipFacts`, `lib/tickets/meta-thread.ts`).
-   * Required, so that no reader of the verdict can leave it out: the ticket page
-   * weighing it and `send_meta` not is a reply box over a send that is refused.
+   * Where this app stands as the account's default app (`threadOwnershipFacts`,
+   * `lib/tickets/meta-thread.ts`). Required, so that no reader of a stored
+   * message can leave it out: the ticket page weighing it and `send_meta` not is
+   * a reply box over a send that is refused, or the other way round.
    */
-  defaultAppSince: Date | null;
+  defaultApp: DefaultAppStanding;
 }): MetaThreadState {
   const meta = input.lastInboundMeta ?? {};
   const accountId = typeof meta.accountId === 'string' ? meta.accountId : null;
@@ -290,9 +340,14 @@ export function metaThreadStateFromMessage(input: {
   // from: a message on another is refused as `other_account`, which still has
   // to say when that account is in standby too.
   const onConfiguredAccount = accountId === null || accountId === input.configuredAccountId;
+  const since = onConfiguredAccount ? input.defaultApp.since : null;
+  const lostAt = onConfiguredAccount ? input.defaultApp.lostAt : null;
   const superseded =
     holdsControl(input.controlTakenAt, input.lastInboundAt) ||
-    (onConfiguredAccount && holdsControl(input.defaultAppSince, input.lastInboundAt));
+    holdsControl(since, input.lastInboundAt);
+  // A switch away newer than the customer's last message is the newer fact the
+  // other way: the thread is the new default's (`metaThreadState`).
+  const lost = holdsControl(lostAt, input.lastInboundAt);
 
   return metaThreadState({
     platform: input.platform,
@@ -303,7 +358,8 @@ export function metaThreadStateFromMessage(input: {
     // were answerable, so a missing value must not read as "cannot send".
     standby: meta.standby === true && !superseded,
     inboundConnection: readConnection(meta.connection),
-    defaultAppSince: input.defaultAppSince,
+    defaultAppSince: since,
+    defaultAppLostAt: lost ? lostAt : null,
   });
 }
 
@@ -326,7 +382,7 @@ export function metaThreadStateFromMessage(input: {
  *
  * Asked of two facts. One is `thread_control_taken`, an agent pressing the
  * button. The other is the account's switch of default app to this one
- * (`defaultAppSince`, Instagram only), which moved every thread open at the
+ * (`defaultAppStanding`, Instagram only), which moved every thread open at the
  * time: on 2026-11-05 a send went through twenty seconds after it, on a thread
  * whose last message had arrived in `standby` two minutes before, and no
  * Instagram message has arrived in `standby` since (`docs/PROJECT-STATE.md`

@@ -636,12 +636,17 @@ rules follow, each of which has already cost a customer channel:
   Messenger only (`offersThreadControl`). The other is the Instagram account's
   switch of default app to this one: Meta reports it as an `app_roles` event,
   `process_meta_webhook` stores it in `meta_app_role_events`, and
-  `defaultAppSince` reads it. The Page's own switch supersedes nothing: it named
-  this app `default_app` on 2026-11-05 too, and every Messenger message in the
-  day after it still arrived in `standby`, since Freshworks holds that inbox as
-  primary receiver (§6.111). Every reader of the verdict takes both facts from
-  `threadOwnershipFacts`, and `metaThreadStateFromMessage` takes the switch as a
-  required argument, so the console and `send_meta` cannot weigh different ones.
+  `defaultAppStanding` reads it. A switch away is the newer fact the other way:
+  a thread whose customer last wrote before it is the new default's, and
+  refuses. The Page's own switch supersedes nothing: it named this app
+  `default_app` on 2026-11-05 too, and every Messenger message in the day after
+  it still arrived in `standby`, since Freshworks holds that inbox as primary
+  receiver (§6.111). Every reader of a stored message takes both facts from
+  `threadOwnershipFacts`, and `metaThreadStateFromMessage` takes the standing
+  as a required argument, so the console and `send_meta` cannot weigh different
+  ones. The one reader that takes neither is the survey's thanks, which judges a
+  tap by the tap's own `standby`: Meta set it as it delivered the tap, after any
+  switch.
 - **A Meta doc example proves nothing until you check which host its URL names.**
   The two connections differ in the host, the token, the ids _and_ the field
   vocabulary — §6.35. The referral webhook field is the smallest instance:

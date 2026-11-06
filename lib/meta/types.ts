@@ -293,6 +293,24 @@ export type NormalisedAppRole = {
   at: Date;
 };
 
+/**
+ * Where this app stands as an account's default app, as the stored `app_roles`
+ * events say (`defaultAppStanding`, `lib/meta/app-roles.ts`). At most one of
+ * the two is set: the newest switch is either to this app or away from it.
+ */
+export type DefaultAppStanding = {
+  /**
+   * Since when this app has been the default app without a break, where that
+   * moves threads; a `standby` older than this is superseded.
+   */
+  since: Date | null;
+  /**
+   * When the default last moved away from this app, if that is the newest
+   * switch; a thread whose customer last wrote before it is another app's now.
+   */
+  lostAt: Date | null;
+};
+
 export type NormalisedMetaWebhook = {
   messages: NormalisedDirectMessage[];
   comments: NormalisedComment[];

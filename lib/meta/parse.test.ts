@@ -920,6 +920,34 @@ describe('app_roles events', () => {
     expect(parsed.feedbacks).toEqual([]);
   });
 
+  it('still reads a message that rides on the same event', () => {
+    // Skipping every event with an app_roles key dropped this message, with no
+    // failure to retry it.
+    const parsed = parseMetaWebhook(
+      {
+        object: 'instagram',
+        entry: [
+          {
+            id: '17841448759001625',
+            messaging: [
+              {
+                sender: { id: 'igsid-1' },
+                recipient: { id: '17841448759001625' },
+                timestamp: 1793874624000,
+                app_roles: null,
+                message: { mid: 'm_riding', text: 'Where is my parcel?' },
+              },
+            ],
+          },
+        ],
+      },
+      'facebook_page',
+    );
+
+    expect(parsed.messages.map((message) => message.mid)).toEqual(['m_riding']);
+    expect(parsed.appRoles).toEqual([]);
+  });
+
   it('reads one in standby too, one row per app named', () => {
     const parsed = parseMetaWebhook(
       {

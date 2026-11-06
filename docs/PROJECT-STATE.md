@@ -7802,7 +7802,12 @@ dryRun=true`, then without, gives those two theirs back from their
       named this app `default_app` too, yet the 23 Messenger messages received
       in the day after it all arrived in `standby`. A `standby` newer than the
       switch still refuses, worded as another app having taken the thread
-      since.
+      since. A switch away from this app is weighed the other way: a thread
+      whose customer last wrote before it reads as the new default's, and
+      refuses (`defaultAppStanding` answers the newest switch in either
+      direction). A CHECK in `db/sql/003` holds `platform` to `facebook` or
+      `instagram`, since a row spelled `page` would be a switch stored and
+      never read.
 
       It unblocks no reply today: none of the 94 was inside 24 hours (87 were
       past seven days, 7 between), and a reply after 24 hours needs Human
@@ -7815,7 +7820,9 @@ dryRun=true`, then without, gives those two theirs back from their
       **It has to deploy before 2026-12-05**, or the backfill finds the
       delivery gone and nothing records the switch. After the deploy,
       `select platform, account_id, roles, at from meta_app_role_events`
-      shows the two rows.
+      shows the two rows. Once it has run and that date has passed,
+      `db/sql/012` and its test are deleted, since nothing is left for it to
+      copy.
 
 ### Tooling notes for this environment
 

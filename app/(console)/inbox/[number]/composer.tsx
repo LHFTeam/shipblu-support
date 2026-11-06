@@ -6,6 +6,7 @@ import { useNow } from '@/components/use-now';
 import type { ConversationDetail } from '@/lib/tickets/conversation';
 import type { CannedResponseOption } from '@/lib/tickets/lookups';
 import type { CannedLocale } from '@/lib/tickets/canned';
+import { takeControlRefusal } from '@/lib/meta/take-control';
 import { describeWindow, metaWindowState } from '@/lib/meta/window';
 import {
   consoleReplyNotice,
@@ -314,18 +315,16 @@ export function Composer({
                   <p className="mt-2">{describeWindow(metaState)}</p>
                 ) : null}
                 {/*
-                  Only where taking control can change the verdict, which the
-                  verdict says itself (`canTakeControl`, read by the action too).
-                  Not under the other two refusals — a page this deployment
-                  cannot address, an account id that is not set — which taking
-                  control would not fix, and not on an Instagram ticket, where
-                  nothing here can take the thread: keyed on the reason alone,
-                  the button appeared on those and threw on every press (§6.111).
-                  Nor once the seven days are gone: nothing could be sent on the
-                  thread, and taking it would only take it from the other tool.
-                  Before mount the window is assumed open, as everywhere here.
+                  Only where pressing it can help, by the function the action
+                  refuses by (`takeControlRefusal`), so the button and the action
+                  cannot disagree: keyed on the reason alone, the button appeared
+                  on Instagram tickets and threw on every press (§6.111). Not
+                  under a refusal taking control would not fix, nor once the
+                  seven days are gone. Before mount the window is unknown and
+                  taken as open, as everywhere here.
                 */}
-                {metaThread?.canTakeControl && (now === null || !metaState.isClosed) ? (
+                {metaThread &&
+                takeControlRefusal(metaThread, now === null ? null : metaState) === null ? (
                   <ThreadControl conversationId={conversation.id} />
                 ) : null}
               </div>

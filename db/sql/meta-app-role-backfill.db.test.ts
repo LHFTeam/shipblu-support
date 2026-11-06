@@ -1,10 +1,10 @@
 import { readFileSync } from 'node:fs';
 import { asc, sql } from 'drizzle-orm';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { db } from '@/db/client';
 import { metaAppRoleEvents, webhookEvents } from '@/db/schema';
 import { resetEnvCache } from '@/lib/env';
-import { defaultAppSince, recordAppRole } from '@/lib/meta/app-roles';
+import { defaultAppStanding, forgetDefaultAppStanding, recordAppRole } from '@/lib/meta/app-roles';
 import { parseMetaWebhook } from '@/lib/meta/parse';
 import { withCleanDatabase } from '@/lib/testing/db';
 
@@ -287,8 +287,11 @@ describe('012_meta_app_role_backfill.sql', () => {
   });
 });
 
-describe('defaultAppSince over what the backfill stored', () => {
+describe('defaultAppStanding over what the backfill stored', () => {
   const saved = { ...process.env };
+
+  // Memoised per process; each test starts from what its own rows say.
+  beforeEach(() => forgetDefaultAppStanding());
 
   beforeAll(() => {
     process.env.META_APP_ID = US;
@@ -307,10 +310,10 @@ describe('defaultAppSince over what the backfill stored', () => {
     await store(INSTAGRAM_EVENT);
     await run();
 
-    expect(await defaultAppSince('instagram')).toEqual(SWITCH);
+    expect(await defaultAppStanding('instagram')).toEqual({ since: SWITCH, lostAt: null });
     // Named default twelve seconds earlier, and Messenger's messages kept
     // arriving in standby: it supersedes nothing.
-    expect(await defaultAppSince('facebook')).toBeNull();
+    expect(await defaultAppStanding('facebook')).toEqual({ since: null, lostAt: null });
   });
 
   it('answers nothing for an account this deployment does not send from', async () => {
@@ -320,7 +323,7 @@ describe('defaultAppSince over what the backfill stored', () => {
     process.env.INSTAGRAM_ACCOUNT_ID = '17840000000000000';
     resetEnvCache();
     try {
-      expect(await defaultAppSince('instagram')).toBeNull();
+      expect(await defaultAppStanding('instagram')).toEqual({ since: null, lostAt: null });
     } finally {
       process.env.INSTAGRAM_ACCOUNT_ID = IG;
       resetEnvCache();

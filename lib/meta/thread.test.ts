@@ -110,7 +110,7 @@ describe('metaThreadStateFromMessage', () => {
       connection: 'facebook_page',
       configuredAccountId: PAGE,
       lastInboundMeta: { accountId: OTHER_PAGE, standby: true, metaKind: 'direct_message' },
-      defaultAppSince: null,
+      defaultApp: { since: null, lostAt: null },
     });
 
     expect(state.canSend).toBe(false);
@@ -123,7 +123,7 @@ describe('metaThreadStateFromMessage', () => {
       connection: 'facebook_page',
       configuredAccountId: PAGE,
       lastInboundMeta: { accountId: PAGE, metaKind: 'direct_message' },
-      defaultAppSince: null,
+      defaultApp: { since: null, lostAt: null },
     });
 
     expect(state.canSend).toBe(true);
@@ -135,7 +135,7 @@ describe('metaThreadStateFromMessage', () => {
       connection: 'facebook_page',
       configuredAccountId: PAGE,
       lastInboundMeta: null,
-      defaultAppSince: null,
+      defaultApp: { since: null, lostAt: null },
     });
 
     expect(state.canSend).toBe(true);
@@ -148,7 +148,7 @@ describe('metaThreadStateFromMessage', () => {
       connection: 'facebook_page',
       configuredAccountId: PAGE,
       lastInboundMeta: { accountId: PAGE, standby: 'yes' },
-      defaultAppSince: null,
+      defaultApp: { since: null, lostAt: null },
     });
 
     expect(state.canSend).toBe(true);
@@ -307,7 +307,7 @@ describe('metaThreadState across the two Instagram connections', () => {
         standby: true,
         inboundConnection: 'facebook_page',
       }).headline,
-    ).toBe('Another app owned this thread when the customer last wrote');
+    ).toBe('Another app owned this thread');
     expect(metaThreadState(onPage({ inboundAccountId: OTHER_PAGE })).headline).toBe(
       'Cannot reply from here',
     );
@@ -377,7 +377,7 @@ describe('metaThreadStateFromMessage and the connection on the row', () => {
         connection: 'facebook_page',
         metaKind: 'direct_message',
       },
-      defaultAppSince: null,
+      defaultApp: { since: null, lostAt: null },
     });
 
     expect(state.canSend).toBe(true);
@@ -390,7 +390,7 @@ describe('metaThreadStateFromMessage and the connection on the row', () => {
       connection: 'facebook_page',
       configuredAccountId: IG_ACCOUNT,
       lastInboundMeta: { accountId: IG_ACCOUNT, standby: true, connection: 'whatsapp' },
-      defaultAppSince: null,
+      defaultApp: { since: null, lostAt: null },
     });
 
     expect(state.canSend).toBe(false);
@@ -417,7 +417,7 @@ describe('metaThreadStateFromMessage and control taken since', () => {
       lastInboundMeta: inbound,
       lastInboundAt,
       controlTakenAt,
-      defaultAppSince: null,
+      defaultApp: { since: null, lostAt: null },
     });
   }
 
@@ -463,7 +463,7 @@ describe('metaThreadStateFromMessage and control taken since', () => {
       lastInboundMeta: { accountId: OTHER_PAGE, standby: true, metaKind: 'direct_message' },
       lastInboundAt: new Date('2026-09-06T18:48:16Z'),
       controlTakenAt: new Date('2026-09-06T18:52:00Z'),
-      defaultAppSince: null,
+      defaultApp: { since: null, lostAt: null },
     });
 
     expect(state.canSend).toBe(false);
@@ -477,7 +477,7 @@ describe('the switch of default app, against a standby', () => {
   // (docs/PROJECT-STATE.md §6.111).
   const SWITCH = new Date('2026-11-05T10:30:24Z');
 
-  const onUnified = (lastInboundAt: Date, defaultAppSince: Date | null, controlTakenAt?: Date) =>
+  const onUnified = (lastInboundAt: Date, since: Date | null, controlTakenAt?: Date) =>
     metaThreadStateFromMessage({
       platform: 'instagram',
       connection: 'unified_login',
@@ -485,7 +485,7 @@ describe('the switch of default app, against a standby', () => {
       lastInboundMeta: { accountId: IG_ACCOUNT, standby: true, connection: 'facebook_page' },
       lastInboundAt,
       controlTakenAt,
-      defaultAppSince,
+      defaultApp: { since, lostAt: null },
     });
 
   it('supersedes a standby from before it', () => {
@@ -534,7 +534,7 @@ describe('the switch, on a message from another account', () => {
         connection: 'facebook_page',
       },
       lastInboundAt: new Date('2026-11-04T22:57:23Z'),
-      defaultAppSince: new Date('2026-11-05T10:30:24Z'),
+      defaultApp: { since: new Date('2026-11-05T10:30:24Z'), lostAt: null },
     });
 
     expect(state.reason).toBe('other_account');
@@ -548,5 +548,52 @@ describe("Messenger's standby sentence", () => {
 
     expect(state.explanation).toContain('take thread control');
     expect(state.explanation).not.toContain('or make this app');
+    // One deployment's history stays in the comment, not in every Page's words.
+    expect(state.explanation).not.toContain('2026');
+  });
+});
+
+describe('a switch of default app away from this app', () => {
+  // The reading that lets a switch to this app supersede an older standby says a
+  // switch away hands the thread to the new default; a reply then is refused
+  // 2534037 and lands failed on the timeline.
+  const LOST = new Date('2026-12-01T09:00:00Z');
+
+  const instagram = (
+    lastInboundAt: Date,
+    connection: MetaThreadInput['connection'] = 'unified_login',
+    accountId = IG_ACCOUNT,
+  ) =>
+    metaThreadStateFromMessage({
+      platform: 'instagram',
+      connection,
+      configuredAccountId: IG_ACCOUNT,
+      lastInboundMeta: { accountId, connection: 'facebook_page' },
+      lastInboundAt,
+      defaultApp: { since: null, lostAt: LOST },
+    });
+
+  it('refuses a thread whose customer last wrote before it', () => {
+    const state = instagram(new Date('2026-11-30T12:00:00Z'));
+
+    expect(state.canSend).toBe(false);
+    expect(state.reason).toBe('standby');
+    expect(state.canTakeControl).toBe(false);
+    expect(state.headline).toBe('Another app owns this thread');
+    expect(state.explanation).toContain("became this Instagram account's default app after");
+  });
+
+  it('leaves a thread the customer wrote on afterwards, as this app’s', () => {
+    expect(instagram(new Date('2026-12-02T12:00:00Z')).canSend).toBe(true);
+  });
+
+  it('leaves the direct connection alone, which answers past the default', () => {
+    expect(instagram(new Date('2026-11-30T12:00:00Z'), 'instagram_login').canSend).toBe(true);
+  });
+
+  it('says nothing about a message on another account', () => {
+    expect(
+      instagram(new Date('2026-11-30T12:00:00Z'), 'unified_login', '17840000000000000').reason,
+    ).toBe('other_account');
   });
 });

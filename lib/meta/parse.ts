@@ -71,8 +71,10 @@ export function parseMetaWebhook(
 
     // Read from both arrays: production has only ever delivered one in
     // `messaging`, and an app's role is no less a fact for arriving in standby.
-    // Ahead of `readMessagingEvent`, which reads an event with no message as
-    // an interaction and would drop this one as nothing.
+    // The events still go through `readMessagingEvent` below, which makes
+    // nothing of a bare app_roles event (it has no sender), and reads anything
+    // else one carries: skipping them there dropped a message that happened to
+    // ride on such an event, with no failure to retry it.
     for (const event of [...listOf(entry.messaging), ...listOf(entry.standby)]) {
       if (isObject(event) && event.app_roles !== undefined) {
         result.appRoles.push(...readAppRoles(event, platform, entry));
@@ -80,7 +82,6 @@ export function parseMetaWebhook(
     }
 
     for (const event of listOf(entry.messaging)) {
-      if (isObject(event) && event.app_roles !== undefined) continue;
       readMessagingEvent(event, platform, connection, accountId, false, result);
     }
 
@@ -92,7 +93,6 @@ export function parseMetaWebhook(
     // thread this app cannot send on, and Graph refuses that with nothing but
     // "An unknown error has occurred."
     for (const event of listOf(entry.standby)) {
-      if (isObject(event) && event.app_roles !== undefined) continue;
       readMessagingEvent(event, platform, connection, accountId, true, result);
     }
 

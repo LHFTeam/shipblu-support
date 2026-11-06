@@ -53,6 +53,14 @@
 -- No lock beyond what an insert needs: ROW EXCLUSIVE on `meta_app_role_events`
 -- and a read of `webhook_events`, neither of which a writer or a vacuum waits on
 -- (#471's replay-locks test).
+--
+-- **Delete it, with its test, once it has run in production and 2026-12-05 has
+-- passed.** By then every delivery it could copy has been cleaned up, the worker
+-- has stored every switch since, and it only costs the scan and the duty of
+-- agreeing with the parser. Not a test that fails on that date: a CI failure set
+-- off by the calendar would land on whichever unrelated pull request ran first.
+-- `select count(*) from meta_app_role_events` answering 2 or more in production
+-- says it has run.
 insert into meta_app_role_events (platform, account_id, app_id, roles, at, webhook_event_id)
 select
   case w.payload->>'object' when 'page' then 'facebook' else 'instagram' end,
