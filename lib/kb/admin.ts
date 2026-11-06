@@ -1,10 +1,35 @@
-import { and, asc, desc, eq, ne, notInArray, or, sql, type SQL } from 'drizzle-orm';
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  getTableColumns,
+  ne,
+  notInArray,
+  or,
+  sql,
+  type SQL,
+} from 'drizzle-orm';
 import { db } from '@/db/client';
-import { agents, kbArticleVersions, kbArticles, kbCategories, kbFolders } from '@/db/schema';
+import {
+  agents,
+  kbArticleStats,
+  kbArticleVersions,
+  kbArticles,
+  kbCategories,
+  kbFolders,
+} from '@/db/schema';
 import type { AgentRole } from '@/lib/auth/permissions';
 import { folderFloor, meetsFloor } from './floors';
 import type { ArticleVisibility } from './floors';
 import { effectiveFloor, effectiveVisibility, readableByRole } from './internal';
+import {
+  articleHelpful,
+  articleUnhelpful,
+  articleViews,
+  statsOfArticle,
+  type ArticleStats,
+} from './stats';
 import { cleanQuery, textMatches, textPatterns } from '@/lib/search/text';
 
 /**
@@ -68,12 +93,13 @@ export type AdminArticleRow = {
   /**
    * When anybody last changed the row — the title, the body, the status, the
    * folder, the tags, the translation link — and never when somebody read it
-   * or voted on it, or saved it unchanged (`touch_updated_at`, PROJECT-STATE
-   * §6.51). Not the help centre's `editedAt`, which moves when a version is
-   * cut or the article is published and for nothing else, because the list is
-   * where the team looks for what it last touched. Neither date contains the
-   * other: a folder move moves only this one, and restoring a version
-   * identical to the current text cuts a version row, moving only `editedAt`.
+   * or voted on it, which counts in `kb_article_stats` and leaves the row
+   * alone, or saved it unchanged (`touch_updated_at`, PROJECT-STATE §6.51).
+   * Not the help centre's `editedAt`, which moves when a version is cut or the
+   * article is published and for nothing else, because the list is where the
+   * team looks for what it last touched. Neither date contains the other: a
+   * folder move moves only this one, and restoring a version identical to the
+   * current text cuts a version row, moving only `editedAt`.
    */
   updatedAt: Date;
   viewCount: number;
@@ -108,19 +134,34 @@ export async function listArticlesForAdmin(
       folderName: kbFolders.name,
       categoryName: kbCategories.name,
       updatedAt: kbArticles.updatedAt,
-      viewCount: kbArticles.viewCount,
-      helpfulCount: kbArticles.helpfulCount,
-      unhelpfulCount: kbArticles.unhelpfulCount,
+      viewCount: articleViews,
+      helpfulCount: articleHelpful,
+      unhelpfulCount: articleUnhelpful,
     })
     .from(kbArticles)
     .innerJoin(kbFolders, eq(kbFolders.id, kbArticles.folderId))
     .innerJoin(kbCategories, eq(kbCategories.id, kbFolders.categoryId))
+    .leftJoin(kbArticleStats, statsOfArticle)
     .where(and(...where))
     .orderBy(desc(kbArticles.updatedAt))
     .limit(200);
 }
 
-export type EditableArticle = typeof kbArticles.$inferSelect & {
+/**
+ * Every column of an article but the three counters `kb_article_stats` took
+ * over. They are still on the row until the release after this one drops them
+ * (`plans/kb-article-stats.md`), and nothing counts into them any more, so a
+ * read that carried them would hand the editor numbers frozen at the move.
+ */
+const {
+  viewCount: _views,
+  helpfulCount: _helpful,
+  unhelpfulCount: _unhelpful,
+  ...articleColumns
+} = getTableColumns(kbArticles);
+
+/** The row as `articleColumns` selects it, so the type follows the destructure above. */
+export type EditableArticle = Pick<typeof kbArticles.$inferSelect, keyof typeof articleColumns> & {
   categoryId: string;
   /** The floor in force, folder included — what the editor shows and re-saves. */
   effectiveMinRole: AgentRole | null;
@@ -132,6 +173,8 @@ export type EditableArticle = typeof kbArticles.$inferSelect & {
    * anything offering a public URL reads this one.
    */
   effectiveVisibility: ArticleVisibility;
+  /** What readers did with it, from `kb_article_stats`; zero where it has no row. */
+  stats: ArticleStats;
 };
 
 /**
@@ -149,13 +192,15 @@ export async function getArticleForEdit(
 ): Promise<EditableArticle | null> {
   const rows = await db
     .select({
-      article: kbArticles,
+      article: articleColumns,
       categoryId: kbFolders.categoryId,
       effectiveMinRole: effectiveFloor,
       effectiveVisibility,
+      stats: { views: articleViews, helpful: articleHelpful, unhelpful: articleUnhelpful },
     })
     .from(kbArticles)
     .innerJoin(kbFolders, eq(kbFolders.id, kbArticles.folderId))
+    .leftJoin(kbArticleStats, statsOfArticle)
     .where(and(eq(kbArticles.id, id), readableByRole(role)))
     .limit(1);
 
@@ -166,6 +211,7 @@ export async function getArticleForEdit(
         categoryId: row.categoryId,
         effectiveMinRole: row.effectiveMinRole,
         effectiveVisibility: row.effectiveVisibility,
+        stats: row.stats,
       }
     : null;
 }

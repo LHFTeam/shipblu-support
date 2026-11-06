@@ -126,6 +126,23 @@ export const kbArticles = pgTable(
     tags: text('tags').array().notNull().default([]),
     seo: jsonb('seo').$type<{ title?: string; description?: string }>().notNull().default({}),
 
+    /**
+     * Superseded by `kb_article_stats`, and still here on purpose: no page,
+     * action or job reads these three or counts into them any more, and they
+     * are dropped once every service runs code that does not
+     * (`plans/kb-article-stats.md`, PR 2). Two things still name them, and go
+     * in the same change as the columns or before: `db/sql/011`, which reads
+     * them on every deploy to copy them, so a replay after the drop fails it,
+     * and `touch_updated_at()`'s `not_an_edit`. An INSERT names them too, as
+     * drizzle names every column, with `default`; the plan says what that
+     * costs the drop.
+     *
+     * Not in the same release, because migrations run in `preDeployCommand`
+     * while the old web release still serves, and the worker deploys by hand
+     * after it: dropping them there would fail every view, vote and Freshdesk
+     * import the old code still makes until the last service was redeployed.
+     * Reading one now gets a count frozen at the move.
+     */
     viewCount: integer('view_count').notNull().default(0),
     helpfulCount: integer('helpful_count').notNull().default(0),
     unhelpfulCount: integer('unhelpful_count').notNull().default(0),
@@ -140,10 +157,12 @@ export const kbArticles = pgTable(
      * When the row last changed. An INSERT takes the writer's value or the
      * default; after that the `touch_updated_at` trigger (`db/sql/001`) sets it
      * on every UPDATE, whatever the UPDATE writes there. An UPDATE that changes
-     * nothing but the three counters above keeps it, so a view or a feedback
-     * tap is not an edit (PROJECT-STATE §6.51), and any other change stamps it.
-     * A counter added to this table is named in that function's deny-list too,
-     * or every write to it moves this date again.
+     * nothing, or nothing but the three superseded counters above, keeps it,
+     * and any other change stamps it (PROJECT-STATE §6.51). A view or a
+     * feedback tap no longer writes this row at all: readers count in
+     * `kb_article_stats`, and a new reader counter goes there, not here. The
+     * counters' half of the exception is for the old release, which still
+     * writes them during a deploy, and goes when they do.
      */
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 
@@ -159,6 +178,39 @@ export const kbArticles = pgTable(
     index('kb_articles_search_idx').using('gin', t.searchVector),
   ],
 );
+
+/**
+ * What readers do to an article: how often it was opened, and how often a
+ * reader said it helped or did not.
+ *
+ * A table of its own rather than three columns on `kb_articles`, because
+ * readers write these and only editors should write the article. On the
+ * article row every view rewrote the whole row — its stored `search_vector`
+ * regenerated from the title and the body each time — and held the row lock a
+ * console save waits on, and the date the console sorts by followed readers
+ * until `touch_updated_at` was taught an exception for it (PROJECT-STATE
+ * §6.51). Here a view rewrites one narrow row that no console edit writes or
+ * locks.
+ *
+ * No console write creates a row. A view or a vote creates it if it is the
+ * first, and the Freshdesk import writes one for each article it brings in,
+ * zeros included, so an article nobody has opened or rated usually has none,
+ * and every reader reads a missing row as zero (`lib/kb/stats.ts`). There is
+ * deliberately no `updated_at`, so the `touch_updated_at` loop in `db/sql/001`
+ * attaches no trigger: this is a counter, not content, and a trigger here
+ * would only add work to the hottest write the knowledge base has.
+ *
+ * The three columns of the same names on `kb_articles` are what this replaced
+ * (`plans/kb-article-stats.md`).
+ */
+export const kbArticleStats = pgTable('kb_article_stats', {
+  articleId: uuid('article_id')
+    .primaryKey()
+    .references(() => kbArticles.id, { onDelete: 'cascade' }),
+  viewCount: integer('view_count').notNull().default(0),
+  helpfulCount: integer('helpful_count').notNull().default(0),
+  unhelpfulCount: integer('unhelpful_count').notNull().default(0),
+});
 
 export const kbArticleVersions = pgTable(
   'kb_article_versions',

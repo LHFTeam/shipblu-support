@@ -4722,12 +4722,16 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
     does not normalise it fails the build.
 
 51. ~~**`kb_articles.updated_at` is not an edit date — every page view moves
-    it.**~~ **Fixed in code by #466.** It reaches production with the first
-    deploy after `dev` is merged into `main`, which nobody has checked yet:
-    once it has deployed, record here that `pg_get_functiondef` of
-    `touch_updated_at` names `not_an_edit` and that one view left an
-    article's `updated_at` where it was. The history below is why.
-    _2026-09-03._
+    it.**~~ **Fixed by #466, which is in production: on 2026-11-06 at 15:52 UTC
+    `pg_get_functiondef` of `touch_updated_at` named `not_an_edit`.** The view
+    counts did not move between 15:14 and 15:53 that day, so that a view leaves
+    the date where it was is still to be seen there. The counters then moved off
+    the row with the first half of `plans/kb-article-stats.md`, which reaches
+    production on the first deploy after `dev` is next merged into `main`: once
+    it has, record here that every article with a count on the old columns has a
+    `kb_article_stats` row, and that one view left an article's `xmin` and
+    `updated_at` where they were (the plan has the queries). The history below
+    is why. _2026-09-03._
     `recordArticleView` increments `view_count` on the
     article row, and `touch_updated_at` fires on any update of a table with that
     column, so a read writes the timestamp. The article page renders it as
@@ -4771,6 +4775,19 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
     a status change or a tag edit did. A backfill to `editedAt` would erase the
     real changes among all 39 to correct at most those 11. An article's date
     settles at its next real change.
+
+    _2026-11-06._ The counters then left the row. A view still rewrote the
+    whole article — its `search_vector` regenerated each time, and the jsonb
+    comparison reading the row twice more — and took the row lock a console
+    save waits on. `view_count`, `helpful_count` and `unhelpful_count` now live
+    in `kb_article_stats`, one row per article that no console edit touches
+    (`lib/kb/stats.ts`), and `db/sql/011_kb_article_stats_backfill.sql` copies
+    what each article had (108 of 112 in production, 63,842 views). So "each
+    view and vote is one" open write above no longer holds. The old columns,
+    `touch_updated_at`'s exception for them and the `kb-edit-date` rule stay
+    for the old release's writes during a deploy, and go together in the
+    plan's second half, once the first is in production on the web service
+    and the worker.
 
 52. **`current_date` in a page query is the database's date, and the database is
     UTC.** _2026-09-04._ `/reports/categories` filtered its rollups with
@@ -7599,23 +7616,133 @@ dryRun=true`, then without, gives those two theirs back from their
       `.app-scroll` stays as it is.
 
 110.  **`CREATE INDEX IF NOT EXISTS` locks the table even when the index is
-      there.** _2026-11-06, found while measuring the locks for #466._ It takes
-      SHARE on the table before it looks for the index, so the eleven at the
-      top of `db/sql/001_extensions_and_triggers.sql` — on `conversations`,
-      `contacts`, `messages`, `side_conversation_messages`, `companies`,
-      `kb_articles`, `shipments` and `shipping_accounts` — each wait on any
-      open writer of their table on every replay. Measured on Postgres 16: with
-      a session holding ROW EXCLUSIVE on `kb_articles`, the statement for an
-      index that already existed failed under `lock_timeout = '1s'`. And
-      because a `db/sql` file runs as one transaction, each SHARE it is granted
-      is held until the whole file commits, so writes to those tables queue
-      behind the rest of the file. The file's own comments said its steady
-      state took no locks; they now point here. Not fixed yet: the cure is a
-      guard that asks `pg_class` and creates the index only when it is
-      missing, never `CONCURRENTLY`, which `db/sql` cannot run. Until then a
-      deploy can fail on `db:migrate` behind an open writer as §6.15's did
-      behind an open reader, and the ten-second `LOCK_TIMEOUT` in
-      `db/migrate.ts` is what turns that into a fast failure.
+      there.** _2026-11-06, found while measuring the locks for #466, and
+      fixed the same day._ It takes SHARE on the table before it looks for the
+      index. So the eleven at the top of
+      `db/sql/001_extensions_and_triggers.sql`, on `conversations`, `contacts`,
+      `messages`, `side_conversation_messages`, `companies`, `kb_articles`,
+      `shipments` and `shipping_accounts`, each waited on any open writer of
+      their table on every replay. Measured on Postgres 16: with a session
+      holding ROW EXCLUSIVE on `kb_articles`, the statement for an index that
+      already existed failed under `lock_timeout = '1s'`. And because a
+      `db/sql` file runs as one transaction, each SHARE it was granted was
+      held until the whole file committed, so writes to those tables queued
+      behind the rest of the file. A deploy could fail on `db:migrate` behind
+      an open writer, as §6.15's did behind an open reader.
+
+      **The fix asks the catalog first.** One `DO` block lists each index once,
+      by name, table and column. For each index `to_regclass` does not find, it
+      runs `CREATE INDEX IF NOT EXISTS` through `EXECUTE format(...)`. The
+      guard asks the question `IF NOT EXISTS` asks, whether any relation of
+      that name is in the schema, but it asks it without a lock. So a replay
+      that finds every index touches none of the eight tables. The guard and
+      the statement are built from the one name. A guard asking for a name the
+      statement never creates would build nothing and read as success, and the
+      reverse would take the lock on every replay again. `IF NOT EXISTS` stays
+      in the statement because the `db-sql` repo rule insists on it. The rule
+      strips only comments, so it reads the string inside `EXECUTE` as a
+      statement. It also skips an index another replay committed after this
+      one's guard looked. It does not make two overlapping replays safe, and
+      never did. Neither sees the other's uncommitted index, and SHARE does not
+      conflict with SHARE, so both build it. The second then fails on
+      `pg_class`'s unique name (23505) once the first commits, or on the lock
+      timeout. Only the web service's preDeploy runs `db:migrate`, so that
+      takes two overlapping deploys or a hand-run migrate. The block uses no
+      `CONCURRENTLY`, which `db/sql` cannot run. A missing index is still built
+      as before, under SHARE until the file commits.
+
+      **An index found under its name is checked against its entry**, from
+      the review of #471. It must be a valid gin `gin_trgm_ops` index on that
+      table's one column, or the replay fails with a message saying so and a
+      hint: rebuild it by hand, outside a transaction, with
+      `DROP INDEX CONCURRENTLY` and `CREATE INDEX CONCURRENTLY`, then deploy
+      again. `IF NOT EXISTS` alone checked only the name and skipped anything
+      found under it, in silence. That covered two cases. An entry edited to
+      another column changed nothing on a database that already had the old
+      index. And an index left INVALID by a failed concurrent build was skipped
+      on every replay, leaving the search it serves unindexed. Rebuilding
+      either from this file would hold the table's writes for the whole build,
+      so the file stops the deploy and says what to run. The previous release
+      keeps serving meanwhile. The check reads only the catalog. A fresh
+      database never meets it, since every index there is built from its
+      entry. On 2026-11-06 all eleven in production passed it (read-only
+      query), so the first deploy does not stop on it.
+
+      **The same audit found one more.** `005_storage_parameters.sql`'s
+      `ALTER TABLE jobs SET (...)` took SHARE UPDATE EXCLUSIVE on `jobs` on
+      every replay, and rewrote its `pg_class` row with the same values. That
+      lock holds off no read or write, but it is the one VACUUM and
+      `REINDEX CONCURRENTLY` hold. So a deploy landing during an autovacuum of
+      `jobs` cancelled that vacuum after `deadlock_timeout`, on the one table
+      the file tunes autovacuum for. It waited on a wraparound vacuum, which is
+      never cancelled, and on the hand-run reindex the file itself recommends.
+      It now compares `pg_class.reloptions` with the four options first. That
+      comparison takes no lock, and the ALTER runs only when one differs. The
+      comparison and the ALTER are built from one list, so a changed value
+      cannot leave the guard comparing against the old one. Written out twice,
+      the new value would find the old one stored and never be applied. Each
+      entry must be spelled the way `reloptions` stores it, which is the parsed
+      value, not the text as typed. A number keeps its spelling (`.02` stays
+      `.02`), but quotes are stripped, a keyword is lowercased (`TRUE` becomes
+      `true`) and a unary `+` is dropped. So each entry is an unquoted
+      lowercase word or an unsigned number. Spelled any other way, the
+      comparison never matches and the ALTER runs on every replay again, which
+      the test below names.
+
+      Nothing else in `db/sql` takes a lock in the steady state stronger than
+      ROW EXCLUSIVE, the lock every write takes. Measured by replaying each
+      file in a transaction and reading `pg_locks` before it committed. The
+      backfill UPDATEs in 003, 004, 006, 007, 009 and 010 take ROW EXCLUSIVE,
+      which no reader or writer conflicts with. In production each matched no
+      row on 2026-11-06, except 010, which had not shipped yet; its first
+      deploy fills the folders it names. `CREATE EXTENSION IF NOT EXISTS` and
+      a PL/pgSQL `CREATE OR REPLACE FUNCTION` lock no table. A `LANGUAGE sql`
+      one, such as 006's `next_agent_avatar_color()`, takes ACCESS SHARE on
+      `agents` while its body is checked, which only an ACCESS EXCLUSIVE holder
+      waits on. 006's loop takes the same lock anyway. Production (17.6) had all
+      eleven indexes on their tables, and `jobs`' four options stored as 005
+      writes them. So the first deploy of the fix replays both files as no-ops.
+
+      `db/sql/replay-locks.db.test.ts` holds it:
+      - every file, replayed, holds no lock stronger than ROW EXCLUSIVE on any
+        relation that is not a catalog when it commits, and the failure names
+        the file, the table and the mode;
+      - every file replays under a 1 s `lock_timeout` behind one session
+        holding a writer's locks and a vacuum's on every relation in the
+        schema, which between them conflict with every stronger mode. The
+        writer is an UPDATE matching no row on each table, which takes ROW
+        EXCLUSIVE on the table and every index of it, plus `nextval` on each
+        sequence; `LOCK TABLE` reaches neither. The vacuum is SHARE UPDATE
+        EXCLUSIVE on each table. The case fails if a kind of relation it does
+        not hold, such as a view, is added. It catches what the first case
+        cannot. A lock taken inside a `BEGIN ... EXCEPTION` block whose
+        statement failed is released with its subtransaction before the
+        snapshot, though it waited. Probe files in the
+        `EXCEPTION WHEN duplicate_object` shape, and with an
+        `ALTER INDEX ... SET` that takes ACCESS EXCLUSIVE on the index alone,
+        passed the first case and failed this one with 55P03. The one mode it
+        cannot hold is SHARE UPDATE EXCLUSIVE on an index, as an index rename
+        takes; no read or write waits on that one;
+      - with 001's guard replaced by `true`, 001 fails with 55P03 behind a
+        writer on every table, then runs once the writer commits. With 005's
+        guard replaced, 005 does the same behind a vacuum of `jobs`;
+      - a dropped index is built again to its old definition, and a changed or
+        missing option is set again, keeping one set by hand;
+      - an index under an entry's name on another column fails the replay, and
+        so does the defined index marked INVALID.
+
+      Each replay states its own `lock_timeout`. The short 1 s is used only
+      behind a stand-in. One with work to do takes SHARE or stronger, which an
+      autovacuum of the table holds off until the waiter reaches
+      `deadlock_timeout` (also 1 s) and cancels it. So those replays use
+      `db/migrate.ts`'s 10 s, where 1 s would race the cancellation. The suite
+      runs against the seeded baseline, not production's rows. A guard whose
+      condition reads table data is not exercised by it, and needs a test of
+      its own with the rows that open it.
+
+      Against `dev`'s 001 and 005 the first case lists eight SHARE locks and
+      two SHARE UPDATE EXCLUSIVE locks (on `jobs` and its TOAST table), and the
+      contention case fails with 55P03 on both files.
 
 ### Tooling notes for this environment
 

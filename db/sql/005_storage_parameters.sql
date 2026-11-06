@@ -1,9 +1,18 @@
 -- Per-table storage parameters: autovacuum tuned for one table that churns.
 --
--- Every statement here MUST be idempotent, like the rest of db/sql. These are
--- naturally so — `ALTER TABLE ... SET (...)` assigns a value rather than adding
--- an object, so a replay writes the same number again and takes no lock worth
--- naming (it is a catalogue update, not a rewrite).
+-- Every statement here MUST be idempotent, like the rest of db/sql, and must
+-- take no lock once there is nothing to change (001's header says why). An
+-- `ALTER TABLE ... SET (...)` is idempotent on its own, since it assigns a
+-- value rather than adding an object. It still is not free on a replay. It
+-- takes SHARE UPDATE EXCLUSIVE on the table every time, and rewrites the
+-- table's catalog row with the same values. That lock is the one VACUUM holds.
+-- A deploy that landed during an autovacuum of `jobs`, the very table this
+-- file tunes autovacuum for, cancelled it after `deadlock_timeout`. Or, if it
+-- was a wraparound vacuum, which is never cancelled, the deploy waited on it.
+-- The replay also waited on any `REINDEX ... CONCURRENTLY` of the table, which
+-- is the reclaim recommended below (PROJECT-STATE §6.110). So the
+-- options are compared with what `pg_class.reloptions` already holds first,
+-- which takes no lock, and set only when one of them differs.
 --
 -- Why only `jobs`. On 2026-09-09 it held **1,150 live rows in 52 MB**, 30 MB of
 -- that in indexes, with `jobs_dedupe_idx` alone at 15 MB — the one table the
@@ -32,9 +41,35 @@
 -- either just-vacuumed or far past due, depending on the burst. The fixed
 -- thresholds below decide it on absolute churn instead, which is the thing that
 -- is actually large here.
-ALTER TABLE jobs SET (
-  autovacuum_vacuum_scale_factor = 0.02,
-  autovacuum_vacuum_threshold = 200,
-  autovacuum_analyze_scale_factor = 0.02,
-  autovacuum_analyze_threshold = 200
-);
+--
+-- Each option is written once, as `name=value` text in the form Postgres stores
+-- it in `reloptions`. That is the parsed value, not the text as typed. A
+-- number keeps its spelling (`0.02` stays `0.02`, `.02` stays `.02`). A quoted
+-- value loses its quotes, a keyword is lowercased (`TRUE` is stored as
+-- `true`), and a unary `+` is dropped. So write each entry as an unquoted
+-- lowercase word or an unsigned number. Written any other way, the ALTER still
+-- sets it, but the comparison never matches, the ALTER runs on every replay,
+-- and the first case of `db/sql/replay-locks.db.test.ts` names the lock that
+-- brings back.
+--
+-- Both the comparison and the ALTER are built from that one list, so changing
+-- a value here cannot leave the guard comparing against the old one. A guard
+-- written out separately would find the old value still stored and never
+-- apply the new one. Options set on `jobs` by hand, and not named here, are
+-- left alone, as the plain SET left them.
+DO $$
+DECLARE
+  wanted constant text[] := ARRAY[
+    'autovacuum_vacuum_scale_factor=0.02',
+    'autovacuum_vacuum_threshold=200',
+    'autovacuum_analyze_scale_factor=0.02',
+    'autovacuum_analyze_threshold=200'
+  ];
+BEGIN
+  IF NOT coalesce(
+    (SELECT reloptions @> wanted FROM pg_class WHERE oid = 'public.jobs'::regclass),
+    false
+  ) THEN
+    EXECUTE format('ALTER TABLE public.jobs SET (%s)', array_to_string(wanted, ', '));
+  END IF;
+END $$;

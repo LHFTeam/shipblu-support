@@ -193,11 +193,7 @@ export default async function ArticlePage({ params }: { params: Promise<{ id: st
         translationCandidates={translationCandidates}
         publicUrl={publicUrl}
         versions={versions}
-        stats={{
-          views: article.viewCount,
-          helpful: article.helpfulCount,
-          unhelpful: article.unhelpfulCount,
-        }}
+        stats={article.stats}
       />
     </div>
   );

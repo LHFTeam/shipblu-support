@@ -1,8 +1,9 @@
+import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { db } from '@/db/client';
-import { kbArticles, kbCategories, kbFolders } from '@/db/schema';
+import { kbArticleStats, kbArticles, kbCategories, kbFolders } from '@/db/schema';
 import { withCleanDatabase } from '@/lib/testing/db';
-import { listArticlesForAdmin, parseArticleFilters } from './admin';
+import { getArticleForEdit, listArticlesForAdmin, parseArticleFilters } from './admin';
 
 /**
  * The console's article list search. Titles are mostly Arabic and written by
@@ -56,5 +57,40 @@ describe('listArticlesForAdmin', () => {
     const rows = await listArticlesForAdmin('admin', parseArticleFilters({ q: '\u200F' }));
 
     expect(rows.map((row) => row.id).sort()).toEqual([one, two].sort());
+  });
+});
+
+describe('what readers did, as the console shows it', () => {
+  it('reads the stats row, and an article with none as zero', async () => {
+    const read = await article('Cash on delivery', 'cash-on-delivery');
+    const unread = await article('Returns', 'returns');
+    await db
+      .insert(kbArticleStats)
+      .values({ articleId: read, viewCount: 31, helpfulCount: 4, unhelpfulCount: 2 });
+    // The columns of the same names still on the row, frozen at the move: what
+    // is drawn must never be these.
+    await db
+      .update(kbArticles)
+      .set({ viewCount: 900, helpfulCount: 90, unhelpfulCount: 9 })
+      .where(eq(kbArticles.id, unread));
+
+    const rows = await listArticlesForAdmin('admin', parseArticleFilters({}));
+    const counts = (id: string) => {
+      const row = rows.find((candidate) => candidate.id === id)!;
+      return [row.viewCount, row.helpfulCount, row.unhelpfulCount];
+    };
+    expect(counts(read)).toEqual([31, 4, 2]);
+    expect(counts(unread)).toEqual([0, 0, 0]);
+
+    expect((await getArticleForEdit(read, 'admin'))?.stats).toEqual({
+      views: 31,
+      helpful: 4,
+      unhelpful: 2,
+    });
+    const editable = await getArticleForEdit(unread, 'admin');
+    expect(editable?.stats).toEqual({ views: 0, helpful: 0, unhelpful: 0 });
+    expect(editable).not.toHaveProperty('viewCount');
+    expect(editable).not.toHaveProperty('helpfulCount');
+    expect(editable).not.toHaveProperty('unhelpfulCount');
   });
 });

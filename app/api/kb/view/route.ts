@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { hasConsoleSession } from '@/lib/auth/cookie';
 import { readJsonBody } from '@/lib/http/json-body';
 import { allow, clientIp } from '@/lib/http/rate-limit';
-import { recordArticleView } from '@/lib/kb/queries';
+import { recordArticleView } from '@/lib/kb/stats';
 
 export const dynamic = 'force-dynamic';
 
@@ -33,7 +33,7 @@ export async function POST(request: Request) {
     return new NextResponse(null, { status: 400 });
   }
 
-  // A non-existent id updates zero rows, so an invented one is a no-op rather
+  // A non-existent id inserts nothing, so an invented one is a no-op rather
   // than an error worth reporting back.
   await recordArticleView(articleId);
 

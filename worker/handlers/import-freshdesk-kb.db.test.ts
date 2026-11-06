@@ -1,9 +1,16 @@
 import { asc, eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { db } from '@/db/client';
-import { kbArticles, kbCategories, kbFolders, kbRedirects } from '@/db/schema';
+import { kbArticleStats, kbArticles, kbCategories, kbFolders, kbRedirects } from '@/db/schema';
 import { resetEnvCache } from '@/lib/env';
 import type { FreshdeskArticle, FreshdeskCategory, FreshdeskFolder } from '@/lib/freshdesk/client';
+import {
+  articleHelpful,
+  articleUnhelpful,
+  articleViews,
+  recordArticleView,
+  statsOfArticle,
+} from '@/lib/kb/stats';
 import { withCleanDatabase } from '@/lib/testing/db';
 import { stubFetch } from '@/lib/testing/fetch';
 import { importFreshdeskKb } from './import-freshdesk-kb';
@@ -204,13 +211,15 @@ async function articles() {
       visibility: kbArticles.visibility,
       tags: kbArticles.tags,
       seo: kbArticles.seo,
-      viewCount: kbArticles.viewCount,
-      helpfulCount: kbArticles.helpfulCount,
-      unhelpfulCount: kbArticles.unhelpfulCount,
+      // Where the readers read them, a missing row as zero.
+      viewCount: articleViews,
+      helpfulCount: articleHelpful,
+      unhelpfulCount: articleUnhelpful,
       sourceSystem: kbArticles.sourceSystem,
       externalId: kbArticles.externalId,
     })
     .from(kbArticles)
+    .leftJoin(kbArticleStats, statsOfArticle)
     .orderBy(asc(kbArticles.externalId));
 }
 
@@ -326,6 +335,19 @@ describe('importFreshdeskKb', () => {
       visibility: 'public',
     });
 
+    // The counts went to `kb_article_stats` alone: the columns of the same
+    // names still on the article are what it replaced, and nothing counts into
+    // them.
+    const onTheRow = await db
+      .select({
+        viewCount: kbArticles.viewCount,
+        helpfulCount: kbArticles.helpfulCount,
+        unhelpfulCount: kbArticles.unhelpfulCount,
+      })
+      .from(kbArticles)
+      .where(eq(kbArticles.id, where.id));
+    expect(onTheRow).toEqual([{ viewCount: 0, helpfulCount: 0, unhelpfulCount: 0 }]);
+
     // Three legacy URL shapes per primary-language article, none for the translation.
     const redirects = await db
       .select({ fromPath: kbRedirects.fromPath, articleId: kbRedirects.articleId })
@@ -343,6 +365,12 @@ describe('importFreshdeskKb', () => {
     serve(account());
     await importFreshdeskKb();
     const before = await articles();
+    // Views counted here between the two runs. Freshdesk's total of 150 is
+    // more than the 121 here, so it wins; the translation's payload carries no
+    // counts, so its two views here are more, and stay.
+    await recordArticleView(byExternalId(before, '31:ar').id);
+    await recordArticleView(byExternalId(before, '31:en').id);
+    await recordArticleView(byExternalId(before, '31:en').id);
 
     serve(
       account({
@@ -367,9 +395,10 @@ describe('importFreshdeskKb', () => {
       viewCount: 150,
       translationGroupId: byExternalId(before, '31:ar').translationGroupId,
     });
-    expect(byExternalId(after, '31:en').translationGroupId).toBe(
-      byExternalId(before, '31:ar').translationGroupId,
-    );
+    expect(byExternalId(after, '31:en')).toMatchObject({
+      translationGroupId: byExternalId(before, '31:ar').translationGroupId,
+      viewCount: 2,
+    });
     expect(await categories()).toHaveLength(2);
     expect(await folders()).toHaveLength(3);
   });

@@ -1,9 +1,7 @@
 import { eq, sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
-import { POST as feedback } from '@/app/api/kb/feedback/route';
 import { db } from '@/db/client';
 import { agents, kbArticles, kbCategories, kbFolders, presencePolicy } from '@/db/schema';
-import { recordArticleView } from '@/lib/kb/queries';
 import { withCleanDatabase } from '@/lib/testing/db';
 
 /**
@@ -17,9 +15,14 @@ import { withCleanDatabase } from '@/lib/testing/db';
  *
  * Each row is inserted with its date in the past, since only an INSERT can put
  * one there, so "moved" and "kept" are told apart by the date itself rather
- * than by how many microseconds separate two statements. The readers are the
- * real ones — `recordArticleView` and the feedback endpoint's `POST` — so a
- * writer that started touching another column would fail here.
+ * than by how many microseconds separate two statements.
+ *
+ * The readers' writes here are the statements the release before
+ * `kb_article_stats` ran, and the old release still runs them during a
+ * deploy's window, after the migrations and before the new code is live. The
+ * real writers now count in `kb_article_stats` and leave the article's row
+ * alone, which `app/api/kb/stats.db.test.ts` holds them to. This exception, and
+ * these tests, go when the columns do (`plans/kb-article-stats.md`, PR 2).
  */
 
 withCleanDatabase();
@@ -71,24 +74,32 @@ async function stored(id: string) {
   return row!;
 }
 
-/** A tap on "Was this helpful?", as the help centre's article page sends it. */
-async function tap(articleId: string, wasHelpful: boolean, ip: string): Promise<void> {
-  const response = await feedback(
-    new Request('http://help.test/api/kb/feedback', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-forwarded-for': ip },
-      body: JSON.stringify({ articleId, wasHelpful }),
-    }),
-  );
-  expect(response.status).toBe(204);
+/** A view, as the release before `kb_article_stats` counted one. */
+async function view(id: string): Promise<void> {
+  await db
+    .update(kbArticles)
+    .set({ viewCount: sql`${kbArticles.viewCount} + 1` })
+    .where(eq(kbArticles.id, id));
+}
+
+/** A tap on "Was this helpful?", as the release before `kb_article_stats` counted one. */
+async function tap(id: string, wasHelpful: boolean): Promise<void> {
+  await db
+    .update(kbArticles)
+    .set(
+      wasHelpful
+        ? { helpfulCount: sql`${kbArticles.helpfulCount} + 1` }
+        : { unhelpfulCount: sql`${kbArticles.unhelpfulCount} + 1` },
+    )
+    .where(eq(kbArticles.id, id));
 }
 
 describe('kb_articles.updated_at', () => {
-  it('stays where it was when the article is viewed', async () => {
+  it('stays where it was when the old release counts a view', async () => {
     const id = await article(await folder());
 
-    await recordArticleView(id);
-    await recordArticleView(id);
+    await view(id);
+    await view(id);
 
     const row = await stored(id);
     // The premise: the write happened.
@@ -99,11 +110,11 @@ describe('kb_articles.updated_at', () => {
     expect(row.searchVector).toContain("'pickups'");
   });
 
-  it('stays where it was on a helpful and on an unhelpful tap', async () => {
+  it('stays where it was when the old release counts a helpful and an unhelpful tap', async () => {
     const id = await article(await folder());
 
-    await tap(id, true, '203.0.113.1');
-    await tap(id, false, '203.0.113.2');
+    await tap(id, true);
+    await tap(id, false);
 
     const row = await stored(id);
     expect(row.helpfulCount).toBe(1);
@@ -123,8 +134,9 @@ describe('kb_articles.updated_at', () => {
     const id = await article(await folder());
 
     // The console's save, status and restore actions and the Freshdesk import
-    // set `updatedAt: new Date()` beside what they change, so a re-import that
-    // only refreshes the counters is this statement, and it is not an edit.
+    // set `updatedAt: new Date()` beside what they change, and the old
+    // release's import still carries the counters on the row, so its re-import
+    // that only refreshes them is this statement, and it is not an edit.
     await db
       .update(kbArticles)
       .set({ viewCount: 500, updatedAt: new Date('2030-01-01T00:00:00Z') })

@@ -1,7 +1,13 @@
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { db } from '@/db/client';
-import { kbArticleVersions, kbArticles, kbCategories, kbFolders } from '@/db/schema';
+import {
+  kbArticleStats,
+  kbArticleVersions,
+  kbArticles,
+  kbCategories,
+  kbFolders,
+} from '@/db/schema';
 import { withCleanDatabase } from '@/lib/testing/db';
 import {
   allPublishedArticles,
@@ -11,9 +17,10 @@ import {
   getFolder,
   listCategories,
   listTopicFolders,
+  popularArticles,
   recentlyUpdatedArticles,
-  recordArticleView,
 } from './queries';
+import { recordArticleView } from './stats';
 import { ANONYMOUS } from './visibility';
 
 /**
@@ -59,12 +66,20 @@ async function article(
 }
 
 /**
- * A reader opening the article: the real `recordArticleView`, a write the
- * `touch_updated_at` trigger sees and, since §6.51's fix, leaves `updated_at`
- * where it was. The function itself rather than a copy of its statement, so a
- * view that started writing another column would fail the premise below.
+ * A reader opening the article: the real `recordArticleView`, which counts in
+ * `kb_article_stats` and leaves the article's row, `updated_at` included,
+ * alone. The function itself rather than a copy of its statement, so a view
+ * that started writing the article again would fail the premise below.
  */
 const view = recordArticleView;
+
+/** What readers did with an article, as its stats row holds it. */
+async function counted(
+  articleId: string,
+  counts: Partial<Omit<typeof kbArticleStats.$inferInsert, 'articleId'>>,
+): Promise<void> {
+  await db.insert(kbArticleStats).values({ articleId, ...counts });
+}
 
 async function edit(id: string, at: Date, version: number): Promise<void> {
   await db.insert(kbArticleVersions).values({
@@ -80,22 +95,26 @@ describe('the edit date', () => {
   it('is the publication date for an article only ever read', async () => {
     const folderId = await folder('en', 'shipping');
     const id = await article(folderId, 'pickups');
+    // `xmin` beside the date: `touch_updated_at` still keeps the date on an
+    // UPDATE of the old counters, so the date alone would not show a view that
+    // had started writing the article again.
     const written = async () =>
       (
         await db
-          .select({ updatedAt: kbArticles.updatedAt })
+          .select({ xmin: sql<string>`xmin::text`, updatedAt: kbArticles.updatedAt })
           .from(kbArticles)
           .where(eq(kbArticles.id, id))
-      )[0]!.updatedAt;
+      )[0]!;
     const before = await written();
     await view(id);
 
     // The premise: the row's own date is not the publication date. It is when
     // the row was written, after `PUBLISHED`, and the view leaves it there —
-    // a view is no edit (§6.51) — so a date read back as `PUBLISHED` can only
-    // have come from `editedAt`, never from the column.
+    // a view counts in `kb_article_stats` and never writes the article — so a
+    // date read back as `PUBLISHED` can only have come from `editedAt`, never
+    // from the column.
     expect(await written()).toEqual(before);
-    expect(before.getTime()).toBeGreaterThan(PUBLISHED.getTime());
+    expect(before.updatedAt.getTime()).toBeGreaterThan(PUBLISHED.getTime());
 
     const read = await getArticle(ANONYMOUS, 'en', 'pickups');
     expect(read?.updatedAt).toEqual(PUBLISHED);
@@ -161,17 +180,27 @@ describe('the locale filter', () => {
 describe('folderNeighbours', () => {
   it('answers the next article in order and the rest by helpful votes', async () => {
     const folderId = await folder('en', 'shipping');
-    const one = await article(folderId, 'one', { position: 1, helpfulCount: 1 });
-    await article(folderId, 'two', { position: 2, helpfulCount: 9 });
-    await article(folderId, 'three', { position: 3, helpfulCount: 2 });
-    await article(folderId, 'four', { position: 4, helpfulCount: 2 });
-    await article(folderId, 'draft', { position: 5, status: 'draft' });
+    const one = await article(folderId, 'one', { position: 1 });
+    await counted(one, { helpfulCount: 1 });
+    await counted(await article(folderId, 'two', { position: 2 }), { helpfulCount: 9 });
+    await counted(await article(folderId, 'three', { position: 3 }), { helpfulCount: 2 });
+    await counted(await article(folderId, 'four', { position: 4 }), { helpfulCount: 2 });
+    // Never rated: no stats row at all, which reads as no helpful votes.
+    await article(folderId, 'five', { position: 5 });
+    // Rated, but only ever unhelpful, and read often: neither is a helpful vote.
+    await counted(await article(folderId, 'six', { position: 6 }), {
+      viewCount: 40,
+      unhelpfulCount: 3,
+    });
+    await counted(await article(folderId, 'seven', { position: 7 }), { helpfulCount: 3 });
+    await article(folderId, 'draft', { position: 8, status: 'draft' });
 
     const { next, related } = await folderNeighbours(ANONYMOUS, 'en', folderId, one);
 
     expect(next?.slug).toBe('two');
-    // Two is already offered as Next; three and four tie and keep the order.
-    expect(related.map((a) => a.slug)).toEqual(['three', 'four']);
+    // Two is already offered as Next; three and four tie and keep the order,
+    // as do five and six with none, below every article somebody found useful.
+    expect(related.map((a) => a.slug)).toEqual(['seven', 'three', 'four', 'five', 'six']);
   });
 
   it('offers no next article on the last one rather than wrapping round', async () => {
@@ -183,6 +212,58 @@ describe('folderNeighbours', () => {
 
     expect(next).toBeNull();
     expect(related.map((a) => a.slug)).toEqual(['one']);
+  });
+});
+
+describe('popularArticles', () => {
+  it('orders by views, a tie by title, and leaves out every article nobody opened', async () => {
+    const folderId = await folder('en', 'shipping');
+    // A tie, whose slugs sort the other way round from its titles, so a tie
+    // broken by anything but the title is caught.
+    await counted(await article(folderId, 'a-pickups', { title: 'Pickups' }), { viewCount: 5 });
+    await counted(await article(folderId, 'returns', { title: 'Returns' }), { viewCount: 12 });
+    await counted(await article(folderId, 'cod', { title: 'Cash on delivery' }), { viewCount: 5 });
+    // A stats row with no views — rated, never opened — is still unread.
+    await counted(await article(folderId, 'rated', { title: 'Rated' }), { helpfulCount: 4 });
+    // No stats row at all.
+    await article(folderId, 'unread', { title: 'Unread' });
+    // Read, but not something a customer may open.
+    await counted(await article(folderId, 'draft', { title: 'Draft', status: 'draft' }), {
+      viewCount: 99,
+    });
+
+    const rows = await popularArticles(ANONYMOUS, 'en');
+
+    expect(rows.map((row) => row.slug)).toEqual(['returns', 'cod', 'a-pickups']);
+    expect(rows[0]).toEqual({
+      id: expect.any(String),
+      title: 'Returns',
+      slug: 'returns',
+      categoryName: 'shipping',
+    });
+  });
+
+  it('counts the views `recordArticleView` writes', async () => {
+    const folderId = await folder('en', 'shipping');
+    const once = await article(folderId, 'once');
+    const twice = await article(folderId, 'twice');
+    await article(folderId, 'never');
+
+    await view(once);
+    await view(twice);
+    await view(twice);
+
+    expect((await popularArticles(ANONYMOUS, 'en')).map((row) => row.slug)).toEqual([
+      'twice',
+      'once',
+    ]);
+  });
+
+  it('answers nothing for a knowledge base nobody has read yet', async () => {
+    const folderId = await folder('en', 'shipping');
+    await article(folderId, 'pickups');
+
+    expect(await popularArticles(ANONYMOUS, 'en')).toEqual([]);
   });
 });
 
