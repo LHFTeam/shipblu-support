@@ -42,16 +42,29 @@ export function holdNextTransaction(at: 'before' | 'after') {
   return { atHold: atHold.then(() => spy.mockRestore()), release };
 }
 
-/** Resolves once some session is waiting on a lock, so a release lands behind it. */
-export async function untilWaitingOnALock(executor: {
-  execute: (query: ReturnType<typeof sql>) => Promise<unknown>;
-}): Promise<void> {
+/**
+ * Resolves once some session is waiting on a lock, so a release lands behind
+ * it: true then, and false if none was after two seconds. `statement`, a
+ * Postgres regular expression, narrows it to a session waiting in a statement
+ * whose text matches.
+ *
+ * A test whose point is the wait asserts the answer, and names the statement
+ * when which one waited is the point: an unlocked read followed by an UPDATE
+ * queues too, on the UPDATE, having read the row before the writer it waited
+ * on committed.
+ */
+export async function untilWaitingOnALock(
+  executor: { execute: (query: ReturnType<typeof sql>) => Promise<unknown> },
+  statement?: string,
+): Promise<boolean> {
+  const matching = statement ? sql`and query ~* ${statement}` : sql``;
   for (let i = 0; i < 100; i++) {
     const [{ waiting }] = (await executor.execute(
       sql`select count(*)::int as waiting from pg_stat_activity
-          where datname = current_database() and wait_event_type = 'Lock'`,
+          where datname = current_database() and wait_event_type = 'Lock' ${matching}`,
     )) as unknown as [{ waiting: number }];
-    if (waiting > 0) return;
+    if (waiting > 0) return true;
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
+  return false;
 }

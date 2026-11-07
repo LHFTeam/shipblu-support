@@ -8156,6 +8156,51 @@ dryRun=true`, then without, gives those two theirs back from their
       Not yet seen on an iPhone with the patched files: the evidence is
       WebKit's source, the metrics and the simulation.
 
+114.  **Every SLA clock writer dropped its work when the ticket's status
+      changed while it waited for the lock.** _2026-11-07, found by reading
+      `lib/sla/` for the shape #429 fixed in the category classifier, where
+      it read a ticket as gone and sent the job to `dead`._ Under READ
+      COMMITTED a `SELECT … FOR UPDATE OF conversations` that waits on another
+      writer re-checks the newest version of the row it waited for against
+      the rows it joined before waiting (Postgres's EvalPlanQual).
+      `loadConversation` in `lib/sla/index.ts`, which every clock writer reads
+      the ticket through under `withTicketLocked`, joined the ticket to
+      `ticket_statuses`, and left-joined `contacts` and `ticket_forms`, in that
+      locked statement. A writer that changed `status_id` meanwhile — an
+      agent's reply that resolves the ticket or sets it pending, a
+      `set_status` rule, a merge — failed the join to the old status, the read
+      answered no row, and `withTicketLocked` ran nothing. Whichever was owed
+      was dropped, with no line in the log: a new ticket's first clocks, a
+      re-time for its priority or group, the policy chosen again before the
+      first response, a pause's resume, the reply clock. A writer that changed
+      the requester — a contact merge, `adoptRootAuthor` on a comment thread —
+      kept the row but null-extended the join to `contacts`, so a policy keyed
+      on `requester.email` was chosen against no address at all. How often it
+      happened in production is not known: a lost re-time writes nothing, so
+      there is nothing to count.
+
+      `loadConversation` now locks the row in one statement and reads it in
+      the next. The second statement takes its snapshot once the lock is held,
+      so it reads the ticket as the writer it waited on left it, joined to
+      what the ticket names now. #429's shape, the status through a correlated
+      subquery (`statusCategoryOf`), fixes the status and not the requester,
+      and needs `lockedStatusCategory`'s second read for a status created
+      during the wait, since the subquery runs in the locked statement's older
+      snapshot. `lib/sla/locked-read.db.test.ts` holds each clock writer to it.
+      Every case fails against the joined read, and the requester and
+      new-status cases fail against the subquery shape. The lesson: a
+      row-locking read joins nothing the locked row points at. Lock, then read.
+
+      A second, smaller one came from the test. Its precondition, that the
+      clock writer is queued in a locked read rather than on its `UPDATE`,
+      first matched `for update` in `pg_stat_activity.query`. That column
+      keeps only the first `track_activity_query_size` bytes, 1kB by default,
+      and the old read of the whole ticket row with its joins is longer than
+      that. So the check matched only the short lock statement, and failed
+      for the wrong reason against the read it was meant to catch. It now
+      matches a `select` at the start of the statement: a plain read never
+      waits on a writer.
+
 ### Tooling notes for this environment
 
 Supabase and Render MCP tools work and are the fastest way to check real state —
