@@ -123,6 +123,47 @@ export function categoryChangedEvent(
 }
 
 /**
+ * The `category_agreed` row for a classifier's confident answer naming the
+ * category the ticket already carries: what `setConversationCategoryOn`, which
+ * writes nothing on an unchanged value, does not record. Jev answers once per
+ * message under a label (the run's unique index), so this is one row per
+ * answer, never the repeat a rule matching every fifteen minutes would leave.
+ *
+ * Its own type rather than a `category_changed` from a category to itself:
+ * everything that reads `category_changed` — whose category it is
+ * (`categoryOwned`), what arrived after a routing decision, a person's label
+ * when Jev is graded — reads a write, and nothing was written. What it is for
+ * is which message the category stands on: on a comment thread a passer-by's
+ * reply opened, Jev's reading of the reply put the category there, and the
+ * customer's own comment, read the same, makes it hers (`requesterChose`,
+ * `setAsideCategoryAgreed`, the grade's Filed by Jev). Read off this row, where
+ * it was read off the run table, which says nothing of when the answer landed
+ * against anything the ticket's lock orders.
+ *
+ * Stamped with `CHANGE_STAMP`, taken under the ticket's lock as a write's is,
+ * so it orders against the writes and decisions around it.
+ */
+export function categoryAgreedEvent(
+  conversationId: string,
+  category: HeldCategory,
+  actor: { label: string },
+  detail: CategoryEventDetail,
+) {
+  return {
+    conversationId,
+    type: 'category_agreed',
+    actorLabel: actor.label,
+    createdAt: CHANGE_STAMP,
+    data: {
+      categoryId: category.id,
+      key: category.key,
+      label: category.labelEn,
+      ...detail,
+    },
+  };
+}
+
+/**
  * What a classifier's write adds to its event: the evidence a `priority_changed`
  * from Jev carries — the probability, which the timeline already renders, and
  * the model — and which message the answer was about, and when it was written,

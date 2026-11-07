@@ -9,7 +9,11 @@ import {
   routingDecisions,
   ticketCategories,
 } from '@/db/schema';
-import { holdCategory, setConversationCategoryOn } from '@/lib/categories/write';
+import {
+  categoryAgreedEvent,
+  holdCategory,
+  setConversationCategoryOn,
+} from '@/lib/categories/write';
 import { earlierMessages } from '@/lib/subcategorise-ai/context';
 import { errorMessage } from '@/lib/errors';
 import { canonicalUuid } from '@/lib/http/uuid';
@@ -322,8 +326,9 @@ export async function classifyMessageCategory(
     const categoryId =
       outcome === 'applied' || outcome === 'would_apply' ? built.keyToId[predicted] : undefined;
     let error: string | null = null;
+    let held: Awaited<ReturnType<typeof holdCategory>> | null = null;
     if (categoryId) {
-      const held = await holdCategory(tx, categoryId);
+      held = await holdCategory(tx, categoryId);
       if (typeof held === 'string') {
         outcome = 'failed';
         error = `category ${predicted} was ${held === 'retired_category' ? 'retired' : 'removed'} while Jev was asked`;
@@ -343,22 +348,35 @@ export async function classifyMessageCategory(
       createdAt: CHANGE_STAMP,
     });
     if (!inserted) return 'duplicate' as const;
-    if (outcome !== 'applied' || !categoryId)
+    if (outcome !== 'applied' || !categoryId || !held || typeof held === 'string')
       return { kind: 'decided' as const, outcome, write: null };
 
+    const detail = {
+      probability: prediction.probability,
+      model: response.model,
+      messageId,
+      messageCreatedAt: row.createdAt.toISOString(),
+      runLabel: CATEGORY_AI_LIVE_LABEL,
+    };
     const write = await setConversationCategoryOn(
       tx,
       row.conversationId,
       categoryId,
       { label: CATEGORY_AI_ACTOR },
-      {
-        probability: prediction.probability,
-        model: response.model,
-        messageId,
-        messageCreatedAt: row.createdAt.toISOString(),
-        runLabel: CATEGORY_AI_LIVE_LABEL,
-      },
+      detail,
     );
+    // An answer naming the category the ticket carries wrote nothing; it is
+    // recorded all the same, because which message the category stands on is
+    // read off Jev's events (`categoryAgreedEvent`).
+    const [agreed] =
+      write.outcome === 'unchanged'
+        ? await tx
+            .insert(conversationEvents)
+            .values(
+              categoryAgreedEvent(row.conversationId, held, { label: CATEGORY_AI_ACTOR }, detail),
+            )
+            .returning({ id: conversationEvents.id })
+        : [];
     // Under the lock the write holds, because the stage moves under it. A
     // decision in flight takes the write's pass over there and then
     // (`deferToRouter`); otherwise where the routing stands says what is owed.
@@ -366,7 +384,7 @@ export async function classifyMessageCategory(
       write.outcome === 'changed' && (await deferToRouter(tx, row.conversationId))
         ? ('deferred' as const)
         : await undecidedRouting(tx, row.conversationId);
-    return { kind: 'decided' as const, outcome, write, routing };
+    return { kind: 'decided' as const, outcome, write, routing, agreedEventId: agreed?.id };
   });
 
   if (decided === null) return { status: 'gone' };
@@ -382,7 +400,13 @@ export async function classifyMessageCategory(
     });
     await afterCategoryApplied(row.conversationId, decided.routing ?? null);
   } else if (decided.write?.outcome === 'unchanged') {
-    await afterCategoryConfirmed(row.conversationId, messageId, decided.routing ?? null);
+    if (decided.agreedEventId) {
+      await afterCategoryConfirmed(
+        row.conversationId,
+        decided.agreedEventId,
+        decided.routing ?? null,
+      );
+    }
   }
 
   return { status: 'recorded', outcome: decided.outcome, predicted };
@@ -390,13 +414,13 @@ export async function classifyMessageCategory(
 
 /**
  * A confident answer naming the category the ticket already carries, which
- * writes no event (`setConversationCategoryOn` writes nothing on an unchanged
- * value), and is owed something only on a comment thread a passer-by's reply
- * opened, where Jev's reading of the reply put the category there and the
- * customer's own comment, answered the same, makes it the requester's:
+ * writes nothing but its `category_agreed` (`categoryAgreedEvent`), and is
+ * owed something only on a comment thread a passer-by's reply opened, where
+ * Jev's reading of the reply put the category there and the customer's own
+ * comment, answered the same, makes it the requester's:
  *
  * - **Held** — routed now, as a write would have been: the router waited for
- *   the thread's root (`categoryStanding`), and the answer's run makes the
+ *   the thread's root (`categoryStanding`), and the answer's event makes the
  *   category hers (`requesterChose`), so it routes on it — at once here, where
  *   without this the ticket stayed held, unassigned and unanswered until the
  *   window's end. Not while `pending`, which the creation pass's
@@ -416,7 +440,7 @@ export async function classifyMessageCategory(
  */
 async function afterCategoryConfirmed(
   conversationId: string,
-  messageId: string,
+  agreedEventId: string,
   routing: UndecidedRouting | 'deferred' | null,
 ): Promise<void> {
   if (routing === 'deferred') return;
@@ -426,7 +450,7 @@ async function afterCategoryConfirmed(
     }
     return;
   }
-  if (await setAsideCategoryAgreed(conversationId, messageId)) {
+  if (await setAsideCategoryAgreed(conversationId, agreedEventId)) {
     await afterRoutingChanged(conversationId, { category: true, group: false });
   }
 }

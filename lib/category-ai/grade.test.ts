@@ -87,6 +87,17 @@ function jevWrite(
   };
 }
 
+/** Jev's answer naming the category the ticket already carried: no write. */
+function jevAgreed(
+  conversationId: string,
+  at: number,
+  key: string,
+  messageId: string,
+  runLabel = LABEL,
+): GradingEvent {
+  return { ...jevWrite(conversationId, at, key, runLabel, messageId), agreed: true };
+}
+
 function rule(conversationId: string, at: number, key: string): GradingEvent {
   return {
     conversationId,
@@ -632,10 +643,7 @@ describe('a run on a message the requester did not write', () => {
   // filing of hers overruled, so in no figure the footer says it is out of.
   it('leaves a filing read off his words out of Filed by Jev', () => {
     const runs = [run('t', 0, 'applied', 'sales', 0.9, theirs)];
-    const events = [
-      { ...jevWrite('t', 0, 'sales'), onAnothersMessage: true },
-      person('t', 3, 'customer_support'),
-    ];
+    const events = [jevWrite('t', 0, 'sales'), person('t', 3, 'customer_support')];
     expect(verdict(runs, events).filed).toBeNull();
     expect(grade(input(runs, events)).filed).toEqual([]);
     // Hers still counts, with his ahead of it on the same ticket.
@@ -647,27 +655,46 @@ describe('a run on a message the requester did not write', () => {
     expect(verdict(both, hers).filed).toEqual({ key: 'merchant_support', changedTo: null });
   });
 
-  // Her comment was read as his reply was, which wrote nothing: his write is
-  // the filing the ticket stands on, and the router routed on it, so a
-  // supervisor moving it on overruled Jev on her words.
-  it('counts his filing when her own answer agreed with it', () => {
+  // Her comment was read as his reply was, which wrote nothing but its
+  // `category_agreed`: that answer is the filing the ticket stands on, and the
+  // router routed on it, so a supervisor moving it on overruled Jev on her
+  // words.
+  it('counts her answer agreeing with his filing as Jev’s filing', () => {
     const his = run('t', 0, 'applied', 'sales', 0.9, theirs);
     const runs = [his, run('t', 1, 'applied', 'sales', 0.9)];
     const events = [
-      { ...jevWrite('t', 0, 'sales'), onAnothersMessage: true },
+      jevWrite('t', 0, 'sales'),
+      jevAgreed('t', 2, 'sales', messageAt('t', 1)),
       person('t', 3, 'customer_support'),
     ];
     const overruled = { key: 'sales', changedTo: { key: 'customer_support' } };
     expect(verdict(runs, events).filed).toEqual(overruled);
     // His run in another view of the label — the question edited between his
-    // reply and her comment: the write still names his message.
+    // reply and her comment: her answer is in this one.
     expect(verdict(runs.slice(1), events).filed).toEqual(overruled);
-    // Not when she was only unsure, though of the same category, nor when
-    // she was read as another.
-    const unsure = [his, run('t', 1, 'below_threshold', 'sales', 0.4)];
-    expect(verdict(unsure, events).filed).toBeNull();
-    const another = [his, run('t', 1, 'below_threshold', 'merchant_support', 0.4)];
-    expect(verdict(another, events).filed).toBeNull();
+    // Under another label her agreement is that run's, not this one's.
+    const elsewhere = [
+      jevWrite('t', 0, 'sales'),
+      jevAgreed('t', 2, 'sales', messageAt('t', 1), 'archive-1'),
+      person('t', 3, 'customer_support'),
+    ];
+    expect(verdict(runs, elsewhere).filed).toBeNull();
+  });
+
+  // An agreement wrote nothing: no write the labels are cut at, and no write
+  // of Jev's on the ticket.
+  it('does not read an agreement as a write', () => {
+    const runs = [run('t', 0, 'would_apply', 'sales', 0.9)];
+    const graded = verdict(runs, [
+      jevAgreed('t', 0, 'sales', messageAt('t', 0), 'archive-1'),
+      person('t', 2, 'sales'),
+    ]);
+    expect(graded).toMatchObject({
+      written: false,
+      writtenByJev: false,
+      label: { key: 'sales' },
+      labelledAfterWrite: false,
+    });
   });
 
   it('is passed over by the threshold sweep', () => {

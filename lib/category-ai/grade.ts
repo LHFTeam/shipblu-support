@@ -140,7 +140,11 @@ export type GradingRun = {
   byNonRequester: boolean;
 };
 
-/** One `category_changed` event on a ticket the runs name. */
+/**
+ * One `category_changed` event on a ticket the runs name, or one of Jev's
+ * `category_agreed`: an answer naming the category the ticket already carried,
+ * which wrote nothing (`categoryAgreedEvent`).
+ */
 export type GradingEvent = {
   conversationId: string;
   createdAt: Date;
@@ -156,12 +160,12 @@ export type GradingEvent = {
   /** When that message arrived, which a write keeps after the message is deleted. */
   messageCreatedAt: Date | null;
   /**
-   * The message a Jev write answered was written by somebody other than the
-   * ticket's requester now — a passer-by's reply, read before the customer's
-   * comment took the ticket over. Read off the message, not off this view's
-   * runs, since his run can sit in another view of the label.
+   * A `category_agreed`: Jev's answer, which wrote nothing. Never a person's,
+   * and no write, so neither ground truth nor what the labels are cut at; but
+   * the filing the ticket stands on when it is the customer's own answer
+   * agreeing with what a passer-by's reply was read as.
    */
-  onAnothersMessage?: boolean;
+  agreed?: boolean;
 };
 
 /** What the sample needs to know of a ticket. */
@@ -240,7 +244,11 @@ export type TicketVerdict = {
   labelledAfterWrite: boolean;
   /** Any person `category_changed` at all — what keeps a ticket out of the sample. */
   touchedByPerson: boolean;
-  /** Jev's last write answering one of these rows, and the person's change after it. */
+  /**
+   * Jev's last answer on the record for one of these rows — a write, or one
+   * agreeing with the category the ticket carried — and the person's change
+   * after it.
+   */
   filed: { key: string | null; changedTo: { key: string | null } | null } | null;
   /** Jev wrote to the ticket under any label. */
   writtenByJev: boolean;
@@ -289,8 +297,13 @@ export function ticketVerdicts(
     const firstJudged = own.findIndex((run) => JUDGED.has(run.outcome));
 
     const people = ticketEvents.filter((event) => event.agentId !== null);
-    const written = ticketEvents.filter((event) => event.agentId === null);
+    const written = ticketEvents.filter((event) => event.agentId === null && !event.agreed);
     const jev = written.filter((event) => event.actorLabel === CATEGORY_AI_ACTOR);
+    // Jev's answers on the record: its writes, and those agreeing with the
+    // category the ticket carried, which wrote nothing.
+    const jevAnswers = ticketEvents.filter(
+      (event) => event.agentId === null && event.actorLabel === CATEGORY_AI_ACTOR,
+    );
     const lastPerson = people.at(-1) ?? null;
     const firstWrite = written[0] ?? null;
     const label =
@@ -304,22 +317,19 @@ export function ticketVerdicts(
     // a passer-by's reply is Jev's work, counted in the answers above, but no
     // filing of the ticket — the router sets it aside (`categoryStanding`), and
     // a person replacing it has not overruled Jev on the customer's words —
-    // unless her own answer agreed with it. That answer wrote nothing, since
-    // the ticket already carried the category, so the passer-by's write is the
-    // filing it stands on: the router routes on it (`requesterChose`).
+    // unless her own answer agreed with it. That answer wrote nothing but its
+    // `category_agreed`, which names her message, and is the filing her ticket
+    // stands on: the router routes on it (`requesterChose`), and a person
+    // changing the category after it overrules Jev on her words.
     const answered = new Set(own.map((run) => run.messageId).filter(Boolean));
     const answeredDeleted = new Set(
       own.filter((run) => run.messageId === null).map((run) => run.messageCreatedAt.getTime()),
     );
-    const agreedWith = new Set(
-      own.filter((run) => run.outcome === 'applied').map((run) => run.predictedKey),
-    );
     const answers = (write: GradingEvent) =>
       (write.messageId !== null && answered.has(write.messageId)) ||
-      (write.messageCreatedAt !== null && answeredDeleted.has(write.messageCreatedAt.getTime())) ||
-      (write.onAnothersMessage === true && write.key !== null && agreedWith.has(write.key));
+      (write.messageCreatedAt !== null && answeredDeleted.has(write.messageCreatedAt.getTime()));
     const lastJev =
-      jev.filter((write) => write.runLabel === runLabel && answers(write)).at(-1) ?? null;
+      jevAnswers.filter((write) => write.runLabel === runLabel && answers(write)).at(-1) ?? null;
     const changedAfter = lastJev
       ? (people.filter((event) => event.createdAt > lastJev.createdAt).at(-1) ?? null)
       : null;

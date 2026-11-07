@@ -1,4 +1,4 @@
-import { and, desc, eq, isNull, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import {
   channels,
@@ -536,7 +536,6 @@ async function phaseOne(
       {
         id: conversationId,
         categoryId: ticket.categoryId,
-        categoryKey: category?.key ?? null,
         requesterContactId: ticket.requesterContactId,
         channel: ticket.channel,
         externalId: ticket.externalId,
@@ -1014,7 +1013,13 @@ async function phaseThree(
   });
 }
 
-/** Jev's probability, when the category on the ticket is Jev's answer. */
+/**
+ * Jev's probability, when the category on the ticket is Jev's answer: the
+ * latest answer's, a write or one agreeing with the category the ticket
+ * carried (`categoryAgreedEvent`) — on a comment thread a passer-by's reply
+ * opened, the customer's own answer agreeing with the reading of his, which is
+ * the one the decision stands on.
+ */
 async function categoryProbability(tx: Tx, conversationId: string): Promise<number | null> {
   const [latest] = await tx
     .select({ data: conversationEvents.data })
@@ -1022,10 +1027,10 @@ async function categoryProbability(tx: Tx, conversationId: string): Promise<numb
     .where(
       and(
         eq(conversationEvents.conversationId, conversationId),
-        eq(conversationEvents.type, 'category_changed'),
+        inArray(conversationEvents.type, ['category_changed', 'category_agreed']),
       ),
     )
-    .orderBy(desc(conversationEvents.createdAt))
+    .orderBy(desc(conversationEvents.createdAt), desc(conversationEvents.id))
     .limit(1);
   const probability = latest?.data.probability;
   return typeof probability === 'number' ? probability : null;

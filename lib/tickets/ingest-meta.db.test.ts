@@ -1259,6 +1259,12 @@ describe('a reply-first comment thread, through Jev and the router', () => {
     const root = await ingestMetaComment(comment({ text: 'How much to ship 30 parcels a week?' }));
     jev('sales', 'medium');
     expect(await judged(root.messageId)).toMatchObject({ category: { outcome: 'applied' } });
+    // No write, and the answer on the record naming her comment.
+    const events = await eventsOf(opened.conversationId);
+    expect(events.filter((event) => event.type === 'category_changed')).toHaveLength(1);
+    expect(events.filter((event) => event.type === 'category_agreed')).toMatchObject([
+      { actorLabel: 'jev:category', data: { key: 'sales', messageId: root.messageId } },
+    ]);
 
     expect(await routing(opened.conversationId)).toMatchObject({
       stage: 'decided',

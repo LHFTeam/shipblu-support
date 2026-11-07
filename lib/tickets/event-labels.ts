@@ -129,6 +129,19 @@ export function describeEvent(type: string, data: Record<string, unknown>): stri
         : named;
     }
     /*
+     * Jev's answer naming the category the ticket already had, which changed
+     * nothing and is still worth a line: on a comment thread a passer-by's
+     * reply opened, it is what makes the category the customer's own, and the
+     * ticket then routes on it. Its only writer answers about the requester's
+     * message, so "the customer's" is what it read.
+     */
+    case 'category_agreed': {
+      const named = `read the customer’s message as ${String(data.label ?? data.key ?? 'its category')} too, the category the ticket already had`;
+      return typeof data.probability === 'number'
+        ? `${named} (${Math.round(data.probability * 100)}% likely)`
+        : named;
+    }
+    /*
      * The two ways a ticket becomes a WhatsApp number's owner's say so, because
      * otherwise "why is this hers?" has no answer on the page: nobody clicked
      * anything, and the actor printed ahead of the sentence is a mechanism.
