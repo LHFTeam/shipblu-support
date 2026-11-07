@@ -8185,16 +8185,20 @@ dryRun=true`, then without, gives those two theirs back from their
       `loadConversation` now locks the row in one statement and reads it in
       the next. The second statement takes its snapshot once the lock is held,
       so it reads the ticket as the writer it waited on left it, joined to
-      what the ticket names now. #429's shape, the status through a correlated
+      what the ticket names now. The lock is `FOR NO KEY UPDATE`, where the
+      joined read took `FOR UPDATE`: every clock writer writes only columns
+      no foreign key points at, and `FOR UPDATE` made each customer message on
+      the ticket wait for the re-time to commit (§6.106). #429's shape, the status through a correlated
       subquery (`statusCategoryOf`), fixes the status and not the requester,
       and needs `lockedStatusCategory`'s second read for a status created
       during the wait, since the subquery runs in the locked statement's older
       snapshot. `lib/sla/locked-read.db.test.ts` holds each clock writer to it.
       Every case fails against the joined read, and the requester and
       new-status cases fail against the subquery shape. The lesson, now under
-      **Database** in AGENTS.md: a row-locking read joins nothing the locked
-      row points at, and an uncorrelated `IN (select …)` is planned as a join.
-      Lock, then read.
+      **Database** in AGENTS.md: a row-locking read joins nothing through a
+      column another writer can change, and an uncorrelated `IN (select …)` is
+      planned as a join. Lock, then read. The WhatsApp handover still has the
+      `IN` shape (#490).
 
       A second, smaller one came from the test. Its precondition, that the
       clock writer is queued in a locked read rather than on its `UPDATE`,
@@ -8203,8 +8207,9 @@ dryRun=true`, then without, gives those two theirs back from their
       and the old read of the whole ticket row with its joins is longer than
       that. So the check matched only the short lock statement, and failed
       for the wrong reason against the read it was meant to catch. It now
-      matches a `select` at the start of the statement: a plain read never
-      waits on a writer.
+      matches a `select` at the start of the statement, waiting on a row
+      (`wait_event` `transactionid` or `tuple`): a plain read never waits on
+      a row, though it can wait on a table behind a TRUNCATE or other DDL.
 
 ### Tooling notes for this environment
 

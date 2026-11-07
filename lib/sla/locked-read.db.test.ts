@@ -1,4 +1,4 @@
-import { and, eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { db } from '@/db/client';
 import {
@@ -7,13 +7,14 @@ import {
   conversationEvents,
   conversations,
   groups,
+  messages,
   slaPolicies,
   ticketCategories,
   ticketStatuses,
 } from '@/db/schema';
 import { forgetHoursCatalog } from '@/lib/hours/catalog';
 import { withCleanDatabase } from '@/lib/testing/db';
-import { untilWaitingOnALock } from '@/lib/testing/hold-transaction';
+import { holdNextTransaction, untilWaitingOnALock } from '@/lib/testing/hold-transaction';
 import {
   afterRoutingChanged,
   applySlaOnCreate,
@@ -66,8 +67,8 @@ const flat = (firstResponseMins: number, resolutionMins: number) => {
 type TicketValues = Partial<typeof conversations.$inferInsert>;
 
 /**
- * A read waiting on a lock, which can only be one that locks rows: a plain
- * read never waits on a writer. Matched at the start of the statement, because
+ * A read waiting on a row, which can only be one that locks rows: a plain read
+ * never waits on a row. Matched at the start of the statement, because
  * `pg_stat_activity` keeps only its first kilobyte by default
  * (`track_activity_query_size`), and a read of the whole ticket joined to its
  * status is longer than that — its `for update` is cut off.
@@ -187,7 +188,7 @@ async function behindAWriter(
   const waiting = waiter();
   let queued = false;
   try {
-    queued = await untilWaitingOnALock(db, LOCKED_READ);
+    queued = await untilWaitingOnALock(db, { rowLockIn: LOCKED_READ });
     if (thenWrite) last = await thenWrite();
   } finally {
     release();
@@ -423,5 +424,44 @@ describe('a clock writer that waited on a writer moving the ticket to a status a
     );
 
     expect((await sla(id)).slaPolicyId).toBe(sales!.id);
+  });
+});
+
+describe('a customer’s message, while a clock writer holds the ticket', () => {
+  // Every ingest path continuing a ticket inserts the message, whose foreign
+  // key takes KEY SHARE on the ticket's row, and then updates the ticket.
+  // FOR UPDATE conflicts with that KEY SHARE, NO KEY UPDATE does not
+  // (`docs/PROJECT-STATE.md` §6.106): the clock writer's lock serialises it
+  // against every other writer of the row, and must not make the customer's
+  // message wait for a re-time to commit.
+  it('is stored without waiting for the re-time to commit', async () => {
+    await defaultPolicy();
+    const id = await ticket();
+    await db.update(conversations).set({ priority: 'urgent' }).where(eq(conversations.id, id));
+
+    // The re-time held open after its last statement, its lock still taken.
+    const hold = holdNextTransaction('after');
+    const retiming = onPriorityChanged(id);
+    let refused: unknown = null;
+    try {
+      await hold.atHold;
+      await db.transaction(async (tx) => {
+        await tx.execute(sql`set local lock_timeout = '1s'`);
+        await tx.insert(messages).values({
+          conversationId: id,
+          direction: 'inbound',
+          kind: 'reply',
+          bodyText: 'Hello? Anybody there?',
+        });
+      });
+    } catch (error) {
+      refused = error;
+    } finally {
+      hold.release();
+      await retiming;
+    }
+
+    expect(refused).toBeNull();
+    expect(await events(id, 'sla_recalculated')).toHaveLength(1);
   });
 });

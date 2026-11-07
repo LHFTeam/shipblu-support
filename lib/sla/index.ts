@@ -134,6 +134,13 @@ type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
  * statement's older snapshot, would not find. Nothing can move the row between
  * the two statements, since this transaction holds its lock.
  * `locked-read.db.test.ts` holds every clock writer to this.
+ *
+ * The lock is FOR NO KEY UPDATE. Every clock writer under it updates columns
+ * no foreign key points at and inserts events, which is all NO KEY UPDATE
+ * covers, and it waits on every other writer of the row just the same. FOR
+ * UPDATE, which this took before, also conflicts with the KEY SHARE that a
+ * message inserted for the ticket takes through its foreign key, so the
+ * customer's next message waited for the re-time to commit (§6.106).
  */
 async function loadConversation(
   conversationId: string,
@@ -145,7 +152,7 @@ async function loadConversation(
       .select({ id: conversations.id })
       .from(conversations)
       .where(eq(conversations.id, conversationId))
-      .for('update');
+      .for('no key update');
     if (!locked) return null;
   }
 
