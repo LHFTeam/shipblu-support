@@ -2563,7 +2563,8 @@ and that map (it does not compile without both), the key and the CHECK in one
 commit, and its web half is live before a rollup writes the new slices, because
 an old reader meeting them double-counts until it is replaced. A merge into
 `main` deploys every service at once, about a quarter of an hour after it
-lands, and the crons go live a minute or two before the web service
+lands, and the crons wait only for the migration, which the web service's
+preDeploy applies a minute or so before the web service is live
 (`docs/PROJECT-STATE.md` §2). So the 00:00 UTC nightly writes the slices early
 if it fires in that gap, or at any time while a failed web deploy leaves the
 old reader serving, and a `rollup_metrics` run by hand can write them whenever
@@ -2728,13 +2729,14 @@ integration branch; **never push to `dev` or `main`**. Commit → push → PR in
 names `branch: main` — so a change merged into `dev` reaches staging and
 production only once `dev` is merged into `main`. **That merge is the deploy:**
 every production service deploys itself once the checks on `main` pass, all six
-at once, so nothing orders the migration ahead of the worker and the crons
-(`docs/PROJECT-STATE.md` §2). Verify the deploy then, not at the merge into
-`dev`, and say in a stage's plan which of the two a step waits for. CI runs on
-every pull request whatever its base, and on a push to `main`, and that run is
-what releases the deploy: red there, nothing deploys. A merge into `dev` runs
-nothing after it, so the pull request's own run is the only one a change gets
-before `main`.
+at once, and only the web service's preDeploy migrates, so the worker and the
+crons wait at startup until it has applied their build's migrations
+(`worker/schema-gate.ts`, `docs/PROJECT-STATE.md` §2). Verify the deploy then,
+not at the merge into `dev`, and say in a stage's plan which of the two a step
+waits for. CI runs on every pull request whatever its base, and on a push to
+`main`, and that run is what releases the deploy: red there, nothing deploys. A
+merge into `dev` runs nothing after it, so the pull request's own run is the
+only one a change gets before `main`.
 
 More than one agent session works on this repo at once and they share no
 context. Two sessions have already fixed the same bug independently and a whole

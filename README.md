@@ -513,6 +513,6 @@ Render does not accept `sync: false` inside a group.
 
 Every production service deploys itself once the checks on `main` pass, so merging `dev`
 into `main` is the release; staging, suspended, deploys on every commit. Migrations run
-automatically via the web service's `preDeployCommand` before its traffic shifts — not
-before the worker's or the crons', which deploy alongside it and can go live first
-(`docs/PROJECT-STATE.md` §2).
+automatically via the web service's `preDeployCommand` before its traffic shifts; the
+worker and the crons, which deploy alongside it, wait at startup until it has applied
+them (`worker/schema-gate.ts`, `docs/PROJECT-STATE.md` §2).

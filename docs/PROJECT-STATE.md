@@ -21,7 +21,8 @@ each other, so nothing ordered them: the four crons were live at 20:02:38, the
 worker at 20:04:00, and the web service at 20:04:51. Its preDeploy applied
 `0058_meta_app_role_events` and replayed `db/sql/` from 20:04:00 to 20:04:02,
 so the crons ran the new code against the old schema for a minute and a half,
-which this release does not mind and another might (§2). Checked at 20:13:
+which this release did not mind and another would. The worker and the crons
+now wait for the migration at startup (§2). Checked at 20:13:
 `meta_app_role_events` holds the Page's switch and the Instagram account's,
 written by `012` at 20:04:01; since the deploy neither the web service nor the
 worker has logged an error, the web service has answered no 5xx and no job has
@@ -978,28 +979,32 @@ nothing. Three things follow, and each is easy to miss:
   service — before concluding a change is live, and before enqueueing a job
   whose handler only exists in the new code: the running worker would take it,
   find no handler, and kill it.
-- **Nothing orders the six.** They start together and go live as their builds
-  finish. On `eb69c8c` the crons, which build with `npm ci` alone, were live a
-  minute and a half in, the worker at three minutes, and the web service, whose
-  preDeploy migrates, at almost four. So a release's new crons and worker can
-  run before its migration has applied, which a deploy by hand avoided by going
-  web first. That is not a small gap: a worker whose schema has a column the
-  database lacks fails every insert into that table, because Drizzle names
-  every column, and every whole-row select of it (deploy rule 1 of
-  `plans/ticket-category-routing.md`). And those minutes are the good case.
-  The six deploys are separate, so when the web service's build or its
+- **Nothing orders the six, so the worker and the crons wait for the
+  migration.** They start together and go live as their builds finish. On
+  `eb69c8c` the crons, which build with `npm ci` alone, were live a minute and
+  a half in, the worker at three minutes, and the web service, whose preDeploy
+  migrates, at almost four. A worker whose schema has a column the database
+  lacks fails every insert into that table, because Drizzle names every
+  column, and every whole-row select of it (deploy rule 1 of
+  `plans/ticket-category-routing.md`). And when the web service's build or its
   preDeploy fails — a migration's `lock_timeout`, a `db/sql/` replay that
-  raises — Render abandons that one and the old web release keeps serving,
-  while the worker and the crons stay live on the new code against the old
-  schema until somebody looks. `main` is green, so nothing reports it. Under
-  hand deploys, a failed migration stopped the release before the worker
-  moved. The way out is a dashboard rollback of the worker and the crons to the
-  commit the web service still runs, or a fix that gets the web deploy
-  through. So worker or cron code that needs a new table or column needs its
-  migration live already, from an earlier release, or must tolerate its
-  absence for as long as that can last; and a change whose web half must be
-  live before a cron writes something new (`metrics_daily`'s dimensions, in
-  AGENTS.md) is timed so that cron cannot run between the two.
+  raises — Render abandons that deploy alone and the old web release keeps
+  serving, with `main` green. A deploy by hand avoided all of that by going web
+  first. So the worker, and every `npm run job`, which is what the crons run,
+  waits at startup until the database has the newest migration in its own
+  build's journal, asked the way Drizzle's migrator asks it
+  (`worker/schema-gate.ts`). While it waits nothing is claimed and jobs queue.
+  After fifteen minutes it gives up, so a web deploy that never migrates shows
+  as a worker Render keeps restarting and as cron runs that fail, each naming
+  the migration. The way out then is a fix that gets the web deploy through, or
+  a dashboard rollback of the worker and the crons to the commit the web
+  service still runs. Two things the wait does not hold. It waits for the
+  migrations, not for the `db/sql/` replay after them, which nothing records:
+  worker or cron code that needs something a release adds there must do
+  without it for the seconds the replay takes, and for good if the replay
+  fails. And it orders schema, not readers and writers: a change whose web half
+  must be live before a cron writes something new (`metrics_daily`'s
+  dimensions, in AGENTS.md) is timed so that cron cannot run between the two.
 - **A merge into `main` is a production change**, as `trigger_deploy` was:
   what it carries reaches customers a quarter of an hour later, with no second
   step at which to stop it. The brake is a service's auto-deploy setting,
