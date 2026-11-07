@@ -52,11 +52,9 @@ export type Requester =
   | {
       kind: 'agent';
       /**
-       * The customer's address as the agent typed it, and the name beside it.
-       * An address rather than a contact, so the contact is resolved here once
-       * every refusal has been made (`resolveRequester`): resolving inserts a
-       * contact for an address nobody has written from, and an action that
-       * resolved it first left one behind for every submission refused after.
+       * The customer's address as the agent typed it, and the name beside it:
+       * an address rather than a contact, so the contact is resolved only after
+       * every refusal (`resolveRequester` says why).
        */
       email: string;
       name: string | null;
@@ -84,7 +82,10 @@ export type SubmitResult =
   | { ok: false; reason: 'missing'; keys: string[] }
   /** The same, for answers a field's own rules refused. */
   | { ok: false; reason: 'invalid'; keys: string[] }
-  /** An anonymous form that cannot tell who is writing. */
+  /**
+   * A requester named by an address that is not one: the address an anonymous
+   * visitor claimed, or the one an agent typed.
+   */
   | { ok: false; reason: 'requester' }
   | { ok: false; reason: 'files'; refusal: FileRefusal };
 
@@ -178,10 +179,11 @@ function readAnswers(
  * `unverified_submitter`: the agent typed the address of somebody they were
  * speaking to, and the ticket already says which agent opened it.
  *
- * Called only once every refusal `submitForm` can answer has been made, for
- * both requesters that name the customer by an address: both branches insert a
- * contact and its identity for an address nobody has written from, and a
- * refusal after that leaves a customer record behind for a ticket never opened.
+ * Called only after every other refusal `submitForm` can answer, and each
+ * branch that names the customer by an address refuses one that is not an
+ * address before it resolves anything: both insert a contact and its identity
+ * for an address nobody has written from, and a refusal after that leaves a
+ * customer record behind for a ticket never opened.
  */
 async function resolveRequester(
   requester: Requester,

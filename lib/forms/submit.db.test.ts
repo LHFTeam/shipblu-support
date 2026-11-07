@@ -13,7 +13,7 @@ import {
 import { appendReply } from '@/lib/portal/tickets';
 import { withCleanDatabase } from '@/lib/testing/db';
 import { getFormBySlug, type LoadedForm } from './queries';
-import { submitForm, type Requester } from './submit';
+import { submitForm, type Requester, type SubmitResult } from './submit';
 
 /**
  * The category a form opens a ticket with, and the contact it is filed under,
@@ -286,27 +286,44 @@ describe('submitForm: the category a form opens a ticket with', () => {
 });
 
 describe('submitForm: the contact a ticket is filed under', () => {
-  const byAgent = async (): Promise<Requester> => ({
+  const byAgent = async (email = 'amira@example.test'): Promise<Requester> => ({
     kind: 'agent',
-    email: 'amira@example.test',
+    email,
     name: 'Amira',
     agentId: await agent(),
   });
 
+  const blank = (values: FormData) => values.delete('system.description');
+  const missing: SubmitResult = { ok: false, reason: 'missing', keys: ['system:description'] };
+
   // Both requesters named by an address resolve it by inserting a contact and
   // its identity when nobody owns it yet, so a refusal after that would leave a
-  // customer record behind for a ticket never opened.
-  it.each<[string, () => Promise<Requester>]>([
-    ['an anonymous visitor', helpCentre.anonymous],
-    ['an agent', byAgent],
-  ])('refuses %s a question left blank before writing a contact', async (_name, requester) => {
+  // customer record behind for a ticket never opened. The address itself is
+  // refused inside `resolveRequester`, before `resolveContact`; the console
+  // action refuses a bad one before calling, so only this reaches the agent's.
+  it.each<[string, () => Promise<Requester>, (values: FormData) => void, SubmitResult]>([
+    ['an anonymous visitor a question left blank', helpCentre.anonymous, blank, missing],
+    ['an agent a question left blank', () => byAgent(), blank, missing],
+    [
+      'an anonymous visitor an address that is not one',
+      helpCentre.anonymous,
+      (values) => values.set('system.requester_email', 'amira'),
+      { ok: false, reason: 'requester' },
+    ],
+    [
+      'an agent an address that is not one',
+      () => byAgent('amira'),
+      () => {},
+      { ok: false, reason: 'requester' },
+    ],
+  ])('refuses %s before writing a contact', async (_name, requester, change, refusal) => {
     const loaded = await form(null);
     const values = answers();
-    values.delete('system.description');
+    change(values);
 
     expect(
       await submitForm({ loaded, values, requester: await requester(), locale: 'en' }),
-    ).toEqual({ ok: false, reason: 'missing', keys: ['system:description'] });
+    ).toEqual(refusal);
 
     expect(await db.select({ id: contacts.id }).from(contacts)).toEqual([]);
     expect(await db.select({ id: contactIdentities.id }).from(contactIdentities)).toEqual([]);
