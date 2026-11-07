@@ -993,12 +993,26 @@ nothing. Three things follow, and each is easy to miss:
   first. So the worker, and every `npm run job`, which is what the crons run,
   waits at startup until the database has the newest migration in its own
   build's journal, asked the way Drizzle's migrator asks it
-  (`worker/schema-gate.ts`). While it waits nothing is claimed and jobs queue.
-  After fifteen minutes it gives up, so a web deploy that never migrates shows
-  as a worker Render keeps restarting and as cron runs that fail, each naming
-  the migration. The way out then is a fix that gets the web deploy through, or
-  a dashboard rollback of the worker and the crons to the commit the web
-  service still runs. Two things the wait does not hold. It waits for the
+  (`worker/schema-gate.ts`). While it waits the worker runs no job at all, not
+  only those the new schema touches — no send on any channel, no CSAT, no
+  sweep and no automation — and the crons wait too, `snapshot_backlog`'s hourly
+  sample and the nightly rollup with them. On a release that migrates cleanly
+  that is the gap between the worker starting and the migration committing,
+  less the minute Render keeps the old worker running beside the new one; on
+  `eb69c8c` the two landed in the same second. After fifteen minutes it gives
+  up, so a web deploy that never migrates shows as a worker Render keeps
+  restarting and as cron runs that fail, each naming the migration, and it
+  lasts until somebody acts: every hour of it is a backlog snapshot nobody can
+  take afterwards. The way out is a fix that gets the web deploy through, or a
+  dashboard rollback of the worker and the crons to the commit the web service
+  still runs. That is the trade the wait makes, a stop everybody sees where
+  code against the wrong schema fails only what touches the changed tables,
+  quietly. A job run by hand refuses at once rather than waiting, and a job
+  chained after one that gave up in the same cron run does not wait again
+  (`jobWaitPolicy`). A rollback runbook that deletes a migration's row
+  (`db/runbooks/`) makes the database older than the build, so it rolls the
+  worker and the crons back with the web service. Two things the wait does not
+  hold. It waits for the
   migrations, not for the `db/sql/` replay after them, which nothing records:
   worker or cron code that needs something a release adds there must do
   without it for the seconds the replay takes, and for good if the replay

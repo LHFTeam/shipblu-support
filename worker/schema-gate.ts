@@ -1,4 +1,6 @@
-import { readFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { readFile, writeFile } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { sql } from 'drizzle-orm';
 import { db } from '@/db/client';
@@ -33,10 +35,29 @@ const log = logger('schema_gate');
  * `preDeployCommand`, and is not waited for, because nothing records that it
  * ran.
  *
- * While it waits, nothing is claimed: jobs queue rather than fail. It gives up
- * after `GATE_TIMEOUT_MS` by throwing, so a web deploy that never migrates is a
- * worker Render keeps restarting and cron runs that fail, each saying which
- * migration it waited for, rather than a quiet stop.
+ * While it waits, the worker runs no job at all, not only the ones the new
+ * schema touches: no send on any channel, no CSAT, no sweep and no automation,
+ * and the crons wait too, `snapshot_backlog`'s hourly sample and the nightly
+ * rollup with them. On a release that migrates cleanly that is the gap between
+ * the worker starting and the migration committing, less the minute Render
+ * keeps the old worker running beside the new one; on `eb69c8c` the two landed
+ * in the same second. On a web deploy that fails, it lasts until somebody
+ * fixes that deploy or rolls the worker and the crons back, and every hour of
+ * it is a backlog snapshot nobody can take afterwards. That is the trade: a
+ * stop everybody sees, where code running against the wrong schema fails only
+ * what touches the changed tables — quietly, and for a column on
+ * `conversations` nearly everything.
+ *
+ * It gives up after `GATE_TIMEOUT_MS` by throwing, so a web deploy that never
+ * migrates is a worker Render keeps restarting and cron runs that fail, each
+ * naming the migration. A job somebody runs by hand does not wait at all, and a
+ * job later in the same cron run does not wait again for a migration an
+ * earlier one gave up on (`jobWaitPolicy`).
+ *
+ * A rollback runbook that deletes a migration's row (`db/runbooks/`) makes the
+ * database older than every build carrying that migration, so this refuses
+ * them: the runbook puts the worker and the crons back on the earlier build
+ * with the web service.
  */
 
 /** Long enough for a web build and its migrations; a failed one is not waited out. */
@@ -59,7 +80,37 @@ type GateDeps = {
   sleep: (ms: number) => Promise<void>;
   now: () => number;
   timeoutMs?: number;
+  /** Set when this caller does not wait: why, for the refusal. */
+  notWaiting?: string;
 };
+
+type WaitPolicy = Pick<GateDeps, 'timeoutMs' | 'notWaiting'>;
+
+/**
+ * How long `npm run job` waits for the migration.
+ *
+ * A cron waits as the worker does, since a cron's build is live before the web
+ * service's migration on every release that has one. A person at a terminal
+ * gets the answer at once: the wait exists for a deploy in flight, and a
+ * fifteen-minute hang with a line a minute is no way to say "this checkout is
+ * a migration ahead of that database". And a job after one that gave up — a
+ * cron chained with `;`, as the template sync and the backlog snapshot are —
+ * would only wait the same fifteen minutes for the same answer.
+ */
+export function jobWaitPolicy(interactive: boolean, gaveUpEarlier: boolean): WaitPolicy {
+  if (interactive) {
+    return {
+      timeoutMs: 0,
+      notWaiting:
+        'it was run by hand: apply the migration first (the web deploy of this ' +
+        'commit, or `npm run db:migrate`), or run the job from the build the database is on',
+    };
+  }
+  if (gaveUpEarlier) {
+    return { timeoutMs: 0, notWaiting: 'a job earlier in this run already waited for it' };
+  }
+  return { timeoutMs: GATE_TIMEOUT_MS };
+}
 
 /** The build's own journal: the migrations this code was generated against. */
 export async function readJournal(root = process.cwd()): Promise<JournalEntry[]> {
@@ -102,6 +153,7 @@ export async function waitForMigrations({
   sleep,
   now,
   timeoutMs = GATE_TIMEOUT_MS,
+  notWaiting,
 }: GateDeps): Promise<void> {
   const newest = journal.at(-1);
   if (!newest) return;
@@ -133,10 +185,14 @@ export async function waitForMigrations({
 
     const elapsed = now() - started;
     if (elapsed >= timeoutMs) {
+      const has = applied === undefined ? 'unreadable' : describe(journal, applied);
       throw new Error(
-        `gave up after ${Math.round(timeoutMs / 60_000)} minutes waiting for migration ` +
-          `${newest.tag}, which the web service's preDeployCommand applies. ` +
-          'Is the web deploy of this commit failing?',
+        notWaiting
+          ? `the database has migration ${has} and this build needs ${newest.tag}; ` +
+              `not waiting for it, because ${notWaiting}`
+          : `gave up after ${Math.round(timeoutMs / 60_000)} minutes waiting for migration ` +
+              `${newest.tag}, which the web service's preDeployCommand applies ` +
+              `(the database has ${has}). Is the web deploy of this commit failing?`,
         { cause: lastError ?? undefined },
       );
     }
@@ -167,12 +223,39 @@ function describe(journal: readonly JournalEntry[], applied: number | null): str
   return journal.find((entry) => entry.when === applied)?.tag ?? String(applied);
 }
 
+/**
+ * A job that waited the full time leaves this behind for the jobs after it in
+ * the same run, which share the instance's temporary directory. It only skips
+ * the wait: each still reads the database once, so a run after the migration
+ * landed starts.
+ */
+function gaveUpMarker(tag: string): string {
+  return path.join(os.tmpdir(), `shipblu-schema-gate-gave-up-${tag}`);
+}
+
 /** The gate as the worker and `npm run job` call it. */
-export async function waitForSchema(): Promise<void> {
-  await waitForMigrations({
-    journal: await readJournal(),
-    readApplied: appliedThrough,
-    sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
-    now: () => Date.now(),
-  });
+export async function waitForSchema(caller: 'worker' | 'job'): Promise<void> {
+  const journal = await readJournal();
+  const marker = gaveUpMarker(journal.at(-1)?.tag ?? 'none');
+  const policy: WaitPolicy =
+    caller === 'worker'
+      ? { timeoutMs: GATE_TIMEOUT_MS }
+      : jobWaitPolicy(process.stdin.isTTY === true, existsSync(marker));
+
+  try {
+    await waitForMigrations({
+      journal,
+      readApplied: appliedThrough,
+      sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+      now: () => Date.now(),
+      ...policy,
+    });
+  } catch (error) {
+    if (caller === 'job' && policy.notWaiting === undefined) {
+      await writeFile(marker, '').catch(() => {
+        // Best-effort: without it the next job in the run waits again, as before.
+      });
+    }
+    throw error;
+  }
 }

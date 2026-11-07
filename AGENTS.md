@@ -196,7 +196,11 @@ and deletes that migration's row, and a later deploy applies the migration
 again only while it is the newest one applied. So its test reads `db/migrations/meta/_journal.json` and fails as soon
 as anything follows that migration, with a sentence saying what to do: the PR
 adding the new migration deletes the runbook and its test, and writes the way
-back from the new state into the stage's plan.
+back from the new state into the stage's plan. Because it deletes that row, it
+puts the worker and the crons back on the build before the migration, with the
+web service: they wait at startup until the database has their own build's
+newest migration (`worker/schema-gate.ts`), and would read the deleted row as
+one not yet applied.
 
 Put logic in `lib/`, not in route files. A page or action authorises, calls into
 `lib/`, and revalidates. A page never imports `db/client`, and neither does a

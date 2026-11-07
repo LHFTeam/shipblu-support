@@ -63,7 +63,7 @@ async function main() {
   // Before anything is claimed. This build can carry a migration the web
   // service's preDeploy has not applied yet, since the six deploys finish in no
   // fixed order (schema-gate.ts). A timeout throws, and Render restarts us.
-  await waitForSchema();
+  await waitForSchema('worker');
 
   // LISTEN is an optimisation, not a requirement: it lets a queued job start
   // within milliseconds instead of waiting for the next poll. The loop polls

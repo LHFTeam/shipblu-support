@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
-import { GATE_TIMEOUT_MS, readJournal, waitForMigrations } from './schema-gate';
+import { GATE_TIMEOUT_MS, jobWaitPolicy, readJournal, waitForMigrations } from './schema-gate';
 
 const JOURNAL = [
   { tag: '0059_copy', when: 1_000 },
@@ -113,12 +113,60 @@ describe('waitForMigrations', () => {
     expect((failure as Error).cause).toBe(down);
   });
 
+  it('refuses at once, saying why, when the caller does not wait', async () => {
+    const clock = fakeClock();
+    const failure = await waitForMigrations({
+      journal: JOURNAL,
+      readApplied: answers(1_000),
+      ...clock,
+      ...jobWaitPolicy(true, false),
+    }).catch((error: unknown) => error);
+
+    expect(String(failure)).toContain(
+      'the database has migration 0059_copy and this build needs 0060_drop; not waiting for it, because it was run by hand',
+    );
+    expect(clock.sleep).not.toHaveBeenCalled();
+    expect(info).not.toHaveBeenCalled();
+  });
+
+  it('starts at once without waiting when the database has the migration', async () => {
+    const clock = fakeClock();
+    await waitForMigrations({
+      journal: JOURNAL,
+      readApplied: answers(2_000),
+      ...clock,
+      ...jobWaitPolicy(true, false),
+    });
+
+    expect(clock.sleep).not.toHaveBeenCalled();
+  });
+
   it('has nothing to wait for on an empty journal', async () => {
     const clock = fakeClock();
     const readApplied = answers(null);
     await waitForMigrations({ journal: [], readApplied, ...clock });
 
     expect(readApplied).not.toHaveBeenCalled();
+  });
+});
+
+describe('jobWaitPolicy', () => {
+  it('waits the full time for a cron, as the worker does', () => {
+    expect(jobWaitPolicy(false, false)).toEqual({ timeoutMs: GATE_TIMEOUT_MS });
+  });
+
+  it('does not wait for a job somebody runs at a terminal', () => {
+    expect(jobWaitPolicy(true, false)).toMatchObject({ timeoutMs: 0 });
+    expect(jobWaitPolicy(true, false).notWaiting).toContain('run by hand');
+  });
+
+  it('does not wait again after a job earlier in the same run gave up', () => {
+    // The template sync and the backlog snapshot are chained with `;`, so the
+    // second would otherwise wait another fifteen minutes for the same answer.
+    expect(jobWaitPolicy(false, true)).toMatchObject({
+      timeoutMs: 0,
+      notWaiting: 'a job earlier in this run already waited for it',
+    });
   });
 });
 

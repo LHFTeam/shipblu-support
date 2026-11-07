@@ -19,7 +19,8 @@ describe('the schema gate on a migrated database', () => {
 
   it('lets the worker and the crons start at once', async () => {
     const started = Date.now();
-    await waitForSchema();
+    await waitForSchema('worker');
+    await waitForSchema('job');
 
     expect(Date.now() - started).toBeLessThan(5_000);
   });

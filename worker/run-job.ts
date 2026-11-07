@@ -90,8 +90,9 @@ async function main() {
 
   try {
     // A cron's build can be live before the web service has migrated, as the
-    // worker's can (schema-gate.ts). A timeout fails the run, which Render shows.
-    await waitForSchema();
+    // worker's can (schema-gate.ts). A timeout fails the run, which Render shows;
+    // a job run by hand refuses at once rather than waiting (jobWaitPolicy).
+    await waitForSchema('job');
 
     const started = Date.now();
     console.log(`[job] ${type} starting`);
