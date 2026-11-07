@@ -132,11 +132,14 @@ export function describeEvent(type: string, data: Record<string, unknown>): stri
      * Jev's answer naming the category the ticket already had, which changed
      * nothing and is still worth a line: on a comment thread a passer-by's
      * reply opened, it is what makes the category the customer's own, and the
-     * ticket then routes on it. Its only writer answers about the requester's
-     * message, so "the customer's" is what it read.
+     * ticket then routes on it. "A message", never "the customer's": its writer
+     * answers only about the requester's message, but a root comment arriving
+     * later makes somebody else the requester (`adoptRootAuthor`), and a line
+     * drawn then would name a passer-by's words the customer's — the opposite
+     * of what the router reads off the same event.
      */
     case 'category_agreed': {
-      const named = `read the customer’s message as ${String(data.label ?? data.key ?? 'its category')} too, the category the ticket already had`;
+      const named = `read a message as ${String(data.label ?? data.key ?? 'its category')} too, the category the ticket already had`;
       return typeof data.probability === 'number'
         ? `${named} (${Math.round(data.probability * 100)}% likely)`
         : named;

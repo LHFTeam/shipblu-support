@@ -136,9 +136,11 @@ export function categoryChangedEvent(
  * is which message the category stands on: on a comment thread a passer-by's
  * reply opened, Jev's reading of the reply put the category there, and the
  * customer's own comment, read the same, makes it hers (`requesterChose`,
- * `setAsideCategoryAgreed`, the grade's Filed by Jev). Read off this row, where
- * it was read off the run table, which says nothing of when the answer landed
- * against anything the ticket's lock orders.
+ * `setAsideCategoryAgreed`, the grade's Filed by Jev). On the ticket's own
+ * record, beside the writes and the routing decisions it is weighed against,
+ * so every reader of whose words a category stands on reads one table in one
+ * vocabulary, where they once also read the classifier's run table and its
+ * outcomes; and the timeline can say it happened.
  *
  * Stamped with `CHANGE_STAMP`, taken under the ticket's lock as a write's is,
  * so it orders against the writes and decisions around it.

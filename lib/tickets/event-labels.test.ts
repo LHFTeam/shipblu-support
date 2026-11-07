@@ -110,7 +110,8 @@ describe('describeEvent', () => {
 
   // Not "set the category", which nothing did, nor the default's bare
   // "category agreed": the line says what Jev read, and that it changed nothing.
-  it('says Jev read the customer’s message as the category the ticket already had', () => {
+  // Nor whose message: a root arriving later can make it a passer-by's.
+  it('says Jev read a message as the category the ticket already had', () => {
     expect(
       describeEvent('category_agreed', {
         categoryId: 'c-1',
@@ -118,11 +119,9 @@ describe('describeEvent', () => {
         label: 'Sales',
         probability: 0.874,
       }),
-    ).toBe(
-      'read the customer’s message as Sales too, the category the ticket already had (87% likely)',
-    );
+    ).toBe('read a message as Sales too, the category the ticket already had (87% likely)');
     expect(describeEvent('category_agreed', { categoryId: 'c-1', key: 'sales', label: null })).toBe(
-      'read the customer’s message as sales too, the category the ticket already had',
+      'read a message as sales too, the category the ticket already had',
     );
   });
 

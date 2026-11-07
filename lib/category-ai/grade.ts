@@ -153,11 +153,11 @@ export type GradingEvent = {
   actorLabel: string | null;
   /** The category key the event set, or null when it cleared the category. */
   key: string | null;
-  /** The run label a Jev write names. */
+  /** The run label a Jev write or agreement names. */
   runLabel: string | null;
-  /** The message a Jev write answered. */
+  /** The message a Jev write or agreement answered. */
   messageId: string | null;
-  /** When that message arrived, which a write keeps after the message is deleted. */
+  /** When that message arrived, which the event keeps after the message is deleted. */
   messageCreatedAt: Date | null;
   /**
    * A `category_agreed`: Jev's answer, which wrote nothing. Never a person's,
@@ -889,7 +889,11 @@ function sweep(
 }
 
 /**
- * Jev's writes answering this view's rows, and how many a person moved since.
+ * Jev's answers on the record for this view's rows — its writes, and its
+ * answers agreeing with the category the ticket already carried
+ * (`category_agreed`) — and how many a person moved since. An agreement in
+ * this view is this view's answer standing on the ticket, whichever answer
+ * wrote it there, so a person moving it overrules this view's answer too.
  * A person who changed it and changed it back has agreed with Jev in the end,
  * so only a last word that differs counts as a change.
  */
