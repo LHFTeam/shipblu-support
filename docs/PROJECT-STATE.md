@@ -8047,6 +8047,46 @@ dryRun=true`, then without, gives those two theirs back from their
       teardown that delivers a pending clear is still owed if the dashboard is
       to stop relying on a method the contract disclaims.
 
+113.  **On an iPhone every icon in the console sat 3px below its label,
+      because Safari laid out every line on Tajawal's metrics.** _2026-11-07,
+      from iPhone screenshots of a ticket page: the status pill's dot, the
+      window's clock, the "Direct message" lock and the "Sent" tick, each
+      circled._ `--font-console` leads with 'Tajawal Arabic', whose faces
+      carry an Arabic `unicode-range`. CSS takes a line's ascent and descent
+      from the first font whose range covers U+0020, which is the system font
+      after it, and Chrome and Firefox do. WebKit does not:
+      `FontCascadeFonts::primaryFont` falls back to the first family's first
+      range when no face there covers the space, downloading it if need be.
+      That is the code on every `safari-76xx-branch` from 7618 through 7624.
+      The spec's rule arrives in `safari-7625-branch` and `main`. So on the
+      team's iPhones the console and the widget were laid out on Tajawal's
+      `hhea` (643 / −357 / 200 per 1000) while their Latin was drawn in the
+      system font (`-apple-system`: 1980 / −432 / 0 per 2048). The baseline
+      sits (A − D)·S/2 below a line box's middle, so Latin rode 0.235em high:
+      2.8px at 12px, 3.3px at 14px. Every `items-center` icon beside a label
+      read as low, with the words looking fine on their own. Desktop Chrome
+      never showed it.
+
+      Reproduced in Chromium on the ticket page by adding a Tajawal face that
+      covers U+0020, which makes Chromium take Tajawal as the primary font as
+      WebKit does. Each chip's baseline rose 2px and the icon sat 2.2px under
+      its text's middle; natively it is 0.2px. The `ascent-override` family
+      of descriptors would fix it in CSS, but WebKit has them only on `main`,
+      behind a flag. So the three Tajawal files are Fontsource's with `hhea`
+      rewritten to the system font's ratio (967 / −211 / 0) and every other
+      table byte-identical. With them the simulated chips land where native
+      Chromium puts them. Chrome and Firefox read Tajawal's metrics only for
+      an Arabic run in a `line-height: normal` line, where its total, 1.18em
+      against 1.2em, barely changes. `app/fonts/metrics.test.ts` reads the
+      WOFF2 tables and fails on a file fresh from Fontsource.
+
+      'Rubik Arabic' leads `--font-conversation` the same way, but its own
+      metrics (935 / −250) sit within 0.013em of the system font's ratio,
+      0.2px at 15px, so message text was never visibly off and its files are
+      as shipped. Not yet seen on an iPhone with the patched files: the
+      evidence is WebKit's source, the metrics and the simulation. A font
+      added in front of a stack later needs the same test.
+
 ### Tooling notes for this environment
 
 Supabase and Render MCP tools work and are the fastest way to check real state —

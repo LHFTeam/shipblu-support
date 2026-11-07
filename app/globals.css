@@ -649,7 +649,27 @@
    console host and the help-centre host serve without a session — a file in
    public/ would be redirected to /login by proxy.ts for the widget and the
    sign-in page. The range is what lets the family lead --font-console: a
-   Latin page never downloads them. */
+   Latin page never downloads them — in Chrome and Firefox.
+
+   Safari does not skip it. CSS takes a line's metrics from the first font
+   whose range covers the space, which here is the system font, but WebKit
+   before its safari-7625 branch — what the team's iPhones ran in November
+   2026 — takes the first family's font whatever its range, downloads it, and
+   sets every line in the console and the widget on Tajawal's ascent and
+   descent. Fontsource ships those as 643 and -357
+   (and a 200 line gap) where the system font's are 0.967em and -0.211em, so
+   on an iPhone all Latin text rode about 0.23em high in its line box: every
+   icon centred beside a label — a status dot, the window's clock, a lock, a
+   receipt's tick — sat 3px below its words (docs/PROJECT-STATE.md §6.113).
+   So the three files below are Fontsource's with their `hhea` ascent,
+   descent and line gap rewritten to -apple-system's (1980, -432 and 0 at 2048
+   units, from @capsizecss/metrics), and nothing else changed: the line's
+   metrics are then the ones Safari would have taken from the system font.
+   Chrome and Firefox read them only for an Arabic run in a `line-height:
+   normal` line, where the total, 1.18em against Tajawal's 1.2em, barely moves.
+   The `ascent-override` descriptors would say this in CSS, but no shipped
+   Safari reads them. app/fonts/metrics.test.ts holds the files to it, so a
+   fresh copy from Fontsource fails the build rather than the phone. */
 @font-face {
   font-family: 'Tajawal Arabic';
   font-style: normal;
