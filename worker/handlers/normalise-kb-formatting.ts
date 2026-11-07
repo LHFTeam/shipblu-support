@@ -44,9 +44,8 @@ import { logger } from '@/lib/log';
  * the top of the console's list (`/kb` orders by that column) dated today. It is
  * not avoidable from here without disabling a trigger on a live table, and it
  * is the honest answer: the row did change. An article this leaves alone is
- * never written, so it keeps its date — the trigger also keeps the date on an
- * UPDATE that changes nothing, but not issuing one is cheaper and does not
- * depend on it. On the help centre the date is `editedAt` in
+ * never written, so it keeps its date: the trigger stamps any UPDATE, one that
+ * changes nothing included (§6.59). On the help centre the date is `editedAt` in
  * `lib/kb/queries.ts`, which only a version row or a publication moves, and
  * this job publishes nothing: a body it rewrites dates the article by the
  * version it cuts, and a text-only rebuild, which cuts none, dates nothing.

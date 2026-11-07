@@ -84,10 +84,10 @@ describe('normaliseKbFormatting, on text derived in the old form', () => {
     };
     const id = await article(current);
     // `xmin` is the transaction that wrote the row's current version, so it is
-    // what proves the job issued no UPDATE at all. `updated_at` no longer can:
-    // since §6.51's fix the trigger keeps it on an UPDATE that changes nothing,
-    // so a job that rewrote every current article with its own text would
-    // leave it where it was.
+    // what proves the job issued no UPDATE at all, without leaning on the
+    // trigger: `touch_updated_at` stamps an UPDATE that changes nothing, so
+    // `updated_at` would show one too, but only for as long as the trigger
+    // does.
     const written = async () =>
       (
         await db

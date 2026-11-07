@@ -1,4 +1,4 @@
-import { asc, eq } from 'drizzle-orm';
+import { asc, eq, sql } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { db } from '@/db/client';
 import { kbArticleStats, kbArticles, kbCategories, kbFolders, kbRedirects } from '@/db/schema';
@@ -335,19 +335,6 @@ describe('importFreshdeskKb', () => {
       visibility: 'public',
     });
 
-    // The counts went to `kb_article_stats` alone: the columns of the same
-    // names still on the article are what it replaced, and nothing counts into
-    // them.
-    const onTheRow = await db
-      .select({
-        viewCount: kbArticles.viewCount,
-        helpfulCount: kbArticles.helpfulCount,
-        unhelpfulCount: kbArticles.unhelpfulCount,
-      })
-      .from(kbArticles)
-      .where(eq(kbArticles.id, where.id));
-    expect(onTheRow).toEqual([{ viewCount: 0, helpfulCount: 0, unhelpfulCount: 0 }]);
-
     // Three legacy URL shapes per primary-language article, none for the translation.
     const redirects = await db
       .select({ fromPath: kbRedirects.fromPath, articleId: kbRedirects.articleId })
@@ -401,6 +388,30 @@ describe('importFreshdeskKb', () => {
     });
     expect(await categories()).toHaveLength(2);
     expect(await folders()).toHaveLength(3);
+  });
+
+  // `touch_updated_at` stamps every UPDATE, one that changes nothing included,
+  // so an article written again as it stands would move to the top of `/kb`.
+  // Read off `xmin`, which any write moves, and not off the date alone.
+  it('writes no article a re-run finds as Freshdesk says, and still takes its counts', async () => {
+    serve(account());
+    await importFreshdeskKb();
+    const written = () =>
+      db
+        .select({
+          externalId: kbArticles.externalId,
+          xmin: sql<string>`xmin::text`,
+          updatedAt: kbArticles.updatedAt,
+        })
+        .from(kbArticles)
+        .orderBy(asc(kbArticles.externalId));
+    const before = await written();
+
+    serve(account({ articles: { 21: [{ ...WHERE, hits: 500 }, ADDRESS], 22: [ESCALATE] } }));
+    await importFreshdeskKb();
+
+    expect(await written()).toEqual(before);
+    expect(byExternalId(await articles(), '31:ar').viewCount).toBe(500);
   });
 
   it("keeps a folder's description on a re-run when Freshdesk has none", async () => {

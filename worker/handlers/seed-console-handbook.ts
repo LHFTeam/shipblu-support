@@ -44,16 +44,12 @@ import { logger } from '@/lib/log';
  * **A run with nothing to do issues no UPDATE at all**, which is a stronger
  * claim than it sounds and has to be maintained deliberately. Every table with
  * an `updated_at` carries `touch_updated_at BEFORE UPDATE` from
- * `db/sql/001_extensions_and_triggers.sql`, and on `kb_folders`, as on every
- * table but `kb_articles`, it stamps any UPDATE, values changed or not. So an
- * unconditional `set(shape)` on a folder that already holds those values still
- * moves its timestamp — rows restamped on every run while the tally reports
- * them "already current" (§6.59). On `kb_articles` the trigger now keeps the
- * date on an UPDATE that changes nothing (§6.51), so an article re-asserted as
- * it stands would no longer jump to the top of `/kb`, which orders by
- * `updated_at desc`. The comparison is kept for articles all the same: it costs
- * less than a write the trigger then ignores, and it does not lean on a rule
- * that holds for one table. The folders still need it outright.
+ * `db/sql/001_extensions_and_triggers.sql`, and it stamps any UPDATE, values
+ * changed or not. So an unconditional `set(shape)` on a row that already holds
+ * those values still moves its timestamp — rows restamped on every run while
+ * the tally reports them "already current" (§6.59) — and an article re-asserted
+ * as it stands would jump to the top of `/kb`, which orders by `updated_at
+ * desc`. So folders and articles alike are compared field by field first.
  *
  * Idempotent, and enqueued **without a `dedupeKey`** for the reason spelled out
  * in `AGENTS.md`: a key is spent for good rather than until the job finishes,
@@ -327,9 +323,8 @@ async function upsertArticle(
   // Everything this job owns structurally, compared before it is written. The
   // three of them together are the audience guarantee — an article that drifted
   // out of its folder has left the floor behind — and nothing is written when
-  // they already hold. The trigger would keep `updated_at` on such a write now
-  // (§6.51, see the header), but it would be a write all the same, on every row,
-  // every run.
+  // they already hold, since the trigger stamps `updated_at` on any write (see
+  // the header).
   const misfiled =
     folderId !== null &&
     (row.folderId !== folderId || row.visibility !== 'agents_only' || row.position !== position);

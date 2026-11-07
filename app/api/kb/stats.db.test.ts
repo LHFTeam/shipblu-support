@@ -18,11 +18,10 @@ import { withCleanDatabase } from '@/lib/testing/db';
  *
  * The writers are the real ones, `recordArticleView` and the feedback
  * endpoint's `POST`, so a writer that started touching the article again fails
- * here. "Never on the
- * article's row" is read off `xmin`, the transaction that wrote the row's
- * current version: an UPDATE that changed nothing, which `touch_updated_at`
- * would leave dated as it was, still moves it. Here rather than in `lib/kb/`
- * because the feedback endpoint is a route, and `lib/` may not import one.
+ * here. "Never on the article's row" is read off `xmin`, the transaction that
+ * wrote the row's current version, which no write leaves where it was. Here
+ * rather than in `lib/kb/` because the feedback endpoint is a route, and
+ * `lib/` may not import one.
  */
 
 withCleanDatabase();
