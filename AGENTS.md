@@ -2562,9 +2562,15 @@ never a list of nulls typed out again. A new dimension goes into `DIMENSIONS`
 and that map (it does not compile without both), the key and the CHECK in one
 commit, and its web half is live before a rollup writes the new slices, because
 an old reader meeting them double-counts until it is replaced. A merge into
-`main` deploys every service at once and the crons go live first
-(`docs/PROJECT-STATE.md` §2), so such a change is not merged in the minutes
-before the 00:00 UTC nightly. The rollup
+`main` deploys every service at once, about a quarter of an hour after it
+lands, and the crons go live a minute or two before the web service
+(`docs/PROJECT-STATE.md` §2). So the 00:00 UTC nightly writes the slices early
+if it fires in that gap, or at any time while a failed web deploy leaves the
+old reader serving, and a `rollup_metrics` run by hand can write them whenever
+it is run. Such a change is therefore not merged in the half hour before 00:00
+UTC, a failed web deploy is rolled back or fixed before the next nightly, and a
+hand-run rollup waits until `list_deploys` shows the web service on the commit.
+The rollup
 asks `reconcileFailure` of a day before it writes it, and writes nothing for a
 day that fails. A category figure follows the ticket's category as it stands
 when its day is rolled up, as the group's does: the nightly recomputes three

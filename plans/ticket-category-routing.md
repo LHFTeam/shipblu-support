@@ -2421,9 +2421,15 @@ before assignment.
 
 ## Deploy rules every stage obeys
 
-No production service deploys itself. Only web runs migrations, as its
-preDeploy (`render.yaml:286-288`). The worker and the four crons each build and
-run their own copy of the code: `shipblu-sla-sweep`, which runs `assign_sweep`;
+Written while no production service deployed itself, and kept as the record of
+how Stages 1 to 6 shipped. Since 2026-11-06 every production service deploys
+once the checks on `main` pass, all six at once (`docs/PROJECT-STATE.md` §2), so
+rule 1's order, and rule 3's argument from it, are not ones a merge can keep: a
+stage after that date releases a migration before the worker and cron code
+that needs it, or makes that code work without it, and rule 4 holds as written.
+Only web runs migrations, as its preDeploy (`render.yaml:286-288`). The worker
+and the four crons each build and run their own copy of the code:
+`shipblu-sla-sweep`, which runs `assign_sweep`;
 `shipblu-time-automations`; `shipblu-whatsapp-template-sync`; and
 `shipblu-nightly`. Their ids are in [Status and
 handoff](#working-on-this-repo-without-the-outgoing-sessions-context). Seven

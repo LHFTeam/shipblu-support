@@ -33,8 +33,8 @@ forwarding list, an origin that is not localhost).
 - [ ] Migration is safe against the version currently running — it applies in
       `preDeployCommand`, before traffic shifts, so the old code meets the new schema
 - [ ] The new worker and crons work before it has applied — a merge into `main`
-      deploys all six services at once, and they can go live before the web
-      service's `preDeployCommand` runs
+      deploys all six services at once, so they can go live before the web
+      service's `preDeployCommand` runs, and stay live on the old schema if it fails
 - [ ] `db/sql/` additions are idempotent, take no lock in the steady state, and
       use no `CREATE INDEX CONCURRENTLY`
 - [ ] New tables end up with RLS enabled by the loop in `db/sql/`, never `FORCE`

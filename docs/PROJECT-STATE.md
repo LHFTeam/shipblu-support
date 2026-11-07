@@ -25,7 +25,15 @@ which this release does not mind and another might (§2). Checked at 20:13:
 `meta_app_role_events` holds the Page's switch and the Instagram account's,
 written by `012` at 20:04:01; since the deploy neither the web service nor the
 worker has logged an error, the web service has answered no 5xx and no job has
-failed. Its way back is reverting #473 on `main`, which deploys itself as well.
+failed. Its way back is a rollback from the Render dashboard of each service to
+the deploy before it: `31c8973` on the web service and the worker, `cfd10ca` on
+the four crons. A dashboard rollback turns that service's auto-deploy off
+(Render's rollback docs; one made through the API does not), so the next merge
+cannot undo it, and §2's brake then applies. The old code never names
+`meta_app_role_events`, so the table stays. A plain revert of #473 is not a way
+back: it deletes migration 0058, which `generated-files` refuses, so its run on
+`main` would go red and deploy nothing. A code-only revert that keeps 0058 and
+the schema's table would work, through `dev` like any other change.
 
 Six releases reached production between `1062f5e` and it that this file does
 not record: `bb85b01` (#459), `53911b4` (#461) and `cfd10ca` (#463) on
@@ -978,15 +986,32 @@ nothing. Three things follow, and each is easy to miss:
   web first. That is not a small gap: a worker whose schema has a column the
   database lacks fails every insert into that table, because Drizzle names
   every column, and every whole-row select of it (deploy rule 1 of
-  `plans/ticket-category-routing.md`). So worker or cron code that needs a new
-  table or column needs its migration live already, from an earlier release,
-  or must tolerate its absence for those minutes; and a change whose web half
-  must be live before a cron writes something new (`metrics_daily`'s
-  dimensions, in AGENTS.md) is not merged in the minutes before that cron runs.
+  `plans/ticket-category-routing.md`). And those minutes are the good case.
+  The six deploys are separate, so when the web service's build or its
+  preDeploy fails — a migration's `lock_timeout`, a `db/sql/` replay that
+  raises — Render abandons that one and the old web release keeps serving,
+  while the worker and the crons stay live on the new code against the old
+  schema until somebody looks. `main` is green, so nothing reports it. Under
+  hand deploys, a failed migration stopped the release before the worker
+  moved. The way out is a dashboard rollback of the worker and the crons to the
+  commit the web service still runs, or a fix that gets the web deploy
+  through. So worker or cron code that needs a new table or column needs its
+  migration live already, from an earlier release, or must tolerate its
+  absence for as long as that can last; and a change whose web half must be
+  live before a cron writes something new (`metrics_daily`'s dimensions, in
+  AGENTS.md) is timed so that cron cannot run between the two.
 - **A merge into `main` is a production change**, as `trigger_deploy` was:
   what it carries reaches customers a quarter of an hour later, with no second
-  step at which to stop it. The brake is a service's auto-deploy setting in the
-  dashboard, and `render.yaml` changes with it in the same commit.
+  step at which to stop it. The brake is a service's auto-deploy setting,
+  turned off in the dashboard first, since a change to `render.yaml` reaches
+  `main` only through CI and stopping a release cannot wait for that. The file
+  then follows, saying `'off'` for the same services, as the next change merged
+  into `main`. That merge deploys nothing to the services already off, and
+  nothing else should reach `main` before it, because a Blueprint sync applies
+  the file: whether a push syncs is not established (`eb69c8c` reached `main`
+  with `'off'` in the file while the dashboard said `checksPass`, and all six
+  still said `checksPass` at 20:16), but a file saying `checksPass` would turn
+  the brake back off on the first sync that runs.
 
 **Staging is suspended, tracks `main`, and deploys itself.** The running
 service says `branch: main` and `autoDeployTrigger: commit` — on every commit,
