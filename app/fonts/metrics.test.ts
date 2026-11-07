@@ -4,36 +4,87 @@ import { brotliDecompressSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
 
 /**
- * The console's Arabic faces carry the system font's line metrics, not their
- * own.
+ * A self-hosted face that leads a font stack sets Safari's line metrics, so its
+ * baseline must sit where the system font's would.
  *
  * WebKit before its safari-7625 branch takes the first family in a stack as
- * the line's primary font even when its `unicode-range` leaves the space out,
- * so on an iPhone every line in the console and the widget is laid out on
- * 'Tajawal Arabic''s ascent and descent, and Latin text drawn in the system
- * font rides on that baseline. Fontsource's files give 643 / -357 / 200 per
- * 1000; that put Latin about 0.23em high in its line box, and every icon
- * centred beside a label — a status dot, a clock, a lock, a tick — 3px low
- * (`app/globals.css`, above the faces). The files in this directory are
- * Fontsource's with only `hhea` rewritten to -apple-system's, which is what
- * this holds them to: a fresh copy dropped in from Fontsource fails here,
- * where the phone would only have looked slightly wrong.
+ * the line's primary font even when its `unicode-range` leaves the space out.
+ * On an iPhone every console and widget line was laid out on 'Tajawal
+ * Arabic''s ascent and descent, with Latin drawn in the system font on that
+ * baseline. Fontsource's files give 643 / -357 / 200 per 1000, which put Latin
+ * 0.235em high in its line box and every icon centred beside a label — a
+ * status dot, a clock, a lock, a tick — 3px low (`app/globals.css`, above the
+ * faces; docs/PROJECT-STATE.md §6.113).
+ *
+ * So this reads `globals.css` rather than a list of files. Any stack whose
+ * first family is declared there is checked, face by face, wherever a face's
+ * range leaves out U+0020, which is exactly when Safari and the spec disagree.
+ * A face covering the space is the primary font in every browser, and a family
+ * self-hosted nowhere here (Geist, the system font) leads nothing this reads.
+ * A Tajawal file fresh from Fontsource, a new weight of it, or a new family put
+ * at the head of a stack then fails CI rather than an iPhone.
  */
 
 // -apple-system (.SFNS) per @capsizecss/metrics: ascent 1980, descent -432,
-// line gap 0, at 2048 units per em. Tajawal is drawn at 1000.
-const SYSTEM = { ascent: 1980, descent: -432, lineGap: 0, unitsPerEm: 2048 };
-const EXPECTED = {
-  ascent: Math.round((SYSTEM.ascent * 1000) / SYSTEM.unitsPerEm),
-  descent: Math.round((SYSTEM.descent * 1000) / SYSTEM.unitsPerEm),
-  lineGap: 0,
-};
+// line gap 0, at 2048 units per em.
+const SYSTEM = { ascent: 1980, descent: -432, unitsPerEm: 2048 };
 
-const TAJAWAL = [
-  'tajawal-arabic-400.woff2',
-  'tajawal-arabic-500.woff2',
-  'tajawal-arabic-700.woff2',
-];
+/**
+ * Where a font puts the baseline below the middle of a line box, in ems:
+ * half-leading plus the ascent is L/2 + (A + D)/2·S with D signed, so the
+ * font's own part is (A + D)/2 — (A − |D|)/2.
+ */
+const baselineOffset = (ascent: number, descent: number, unitsPerEm: number) =>
+  (ascent + descent) / 2 / unitsPerEm;
+
+const SYSTEM_OFFSET = baselineOffset(SYSTEM.ascent, SYSTEM.descent, SYSTEM.unitsPerEm);
+
+/**
+ * How far a leading face may sit from the system font: under a pixel at any
+ * size up to 20px. Rubik's Arabic faces, as shipped, are 0.035em away, half a
+ * pixel at the 15px message size, and nobody has seen it; Fontsource's Tajawal
+ * was 0.235em away, and everybody did.
+ */
+const TOLERANCE_EM = 0.05;
+
+const APP = join(import.meta.dirname, '..');
+const CSS = readFileSync(join(APP, 'globals.css'), 'utf8');
+
+/** The first family of every `--font-*` stack, unquoted. */
+function leadingFamilies(css: string): Set<string> {
+  const families = new Set<string>();
+  for (const [, stack] of css.matchAll(/--font-[\w-]+:\s*([^;{}]+);/g)) {
+    families.add(
+      stack!
+        .split(',')[0]!
+        .trim()
+        .replace(/^['"]|['"]$/g, ''),
+    );
+  }
+  return families;
+}
+
+type Face = { family: string; weight: string; file: string; range: string | null };
+
+function faces(css: string): Face[] {
+  return [...css.matchAll(/@font-face\s*{([^}]*)}/g)].map(([, body]) => ({
+    family: /font-family:\s*['"]?([^'";]+)/.exec(body!)![1]!.trim(),
+    weight: /font-weight:\s*([^;]+);/.exec(body!)?.[1]?.trim() ?? 'normal',
+    file: /url\(['"]?\.\/([^'")]+)['"]?\)/.exec(body!)![1]!,
+    range: /unicode-range:\s*([^;]+);/.exec(body!)?.[1] ?? null,
+  }));
+}
+
+/** Whether a `unicode-range` covers the space; no range covers everything. */
+function coversSpace(range: string | null): boolean {
+  if (range === null) return true;
+  return range.split(',').some((token) => {
+    const [from, to = from] = token.trim().replace(/^U\+/i, '').split('-') as [string, string?];
+    const lo = parseInt(from.replace(/\?/g, '0'), 16);
+    const hi = parseInt(to.replace(/\?/g, 'F'), 16);
+    return lo <= 0x20 && 0x20 <= hi;
+  });
+}
 
 /**
  * WOFF2's known-table tags, in the order its table directory indexes them
@@ -99,19 +150,44 @@ function woff2Tables(file: Buffer): Map<string, Buffer> {
   return tables;
 }
 
-describe('the Arabic faces under the console stack', () => {
-  it.each(TAJAWAL)('%s carries the system font’s line metrics', (name) => {
-    const tables = woff2Tables(readFileSync(join(process.cwd(), 'app/fonts', name)));
+const leading = leadingFamilies(CSS);
+const checked = faces(CSS).filter((face) => leading.has(face.family) && !coversSpace(face.range));
+
+describe('a face leading a font stack', () => {
+  it('is found: the stacks and their faces still read the way this parses them', () => {
+    expect(leading).toContain('Tajawal Arabic');
+    expect(checked.map((face) => face.family)).toContain('Tajawal Arabic');
+  });
+
+  it.each(checked)('$family $weight puts the baseline where the system font does', (face) => {
+    const tables = woff2Tables(readFileSync(join(APP, face.file)));
     const head = tables.get('head')!;
     const hhea = tables.get('hhea')!;
 
     expect(head.readUInt32BE(12)).toBe(0x5f0f3cf5); // head's magic number: the slice is right
-    expect(head.readUInt16BE(18)).toBe(1000);
     expect(hhea.readUInt32BE(0)).toBe(0x00010000);
-    expect({
-      ascent: hhea.readInt16BE(4),
-      descent: hhea.readInt16BE(6),
-      lineGap: hhea.readInt16BE(8),
-    }).toEqual(EXPECTED);
+
+    const offset = baselineOffset(hhea.readInt16BE(4), hhea.readInt16BE(6), head.readUInt16BE(18));
+    expect(Math.abs(offset - SYSTEM_OFFSET)).toBeLessThan(TOLERANCE_EM);
+  });
+});
+
+describe('what the check reads', () => {
+  it('takes a stack’s first family, quoted or not', () => {
+    expect(
+      leadingFamilies("--font-a: 'Tajawal Arabic', ui-sans-serif;\n--font-b: Geist, x;"),
+    ).toEqual(new Set(['Tajawal Arabic', 'Geist']));
+  });
+
+  it('reads a range as covering the space only when one of its spans does', () => {
+    expect(coversSpace('U+0600-06FF, U+200C-200E, U+204F')).toBe(false);
+    expect(coversSpace('U+0000-00FF')).toBe(true);
+    expect(coversSpace('U+0020')).toBe(true);
+    expect(coversSpace('U+00??')).toBe(true);
+    expect(coversSpace(null)).toBe(true);
+  });
+
+  it('measures Fontsource’s Tajawal, 643 / -357 per 1000, as 0.235em from the system font', () => {
+    expect(SYSTEM_OFFSET - baselineOffset(643, -357, 1000)).toBeCloseTo(0.235, 3);
   });
 });

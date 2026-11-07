@@ -8062,8 +8062,9 @@ dryRun=true`, then without, gives those two theirs back from their
       team's iPhones the console and the widget were laid out on Tajawal's
       `hhea` (643 / −357 / 200 per 1000) while their Latin was drawn in the
       system font (`-apple-system`: 1980 / −432 / 0 per 2048). The baseline
-      sits (A − D)·S/2 below a line box's middle, so Latin rode 0.235em high:
-      2.8px at 12px, 3.3px at 14px. Every `items-center` icon beside a label
+      sits (A − |D|)·S/2 below a line box's middle, with A and D the primary
+      font's ascent and descent in ems: 0.378em for the system font, 0.143em
+      for Tajawal. So Latin rode 0.235em high: 2.8px at 12px, 3.3px at 14px. Every `items-center` icon beside a label
       read as low, with the words looking fine on their own. Desktop Chrome
       never showed it.
 
@@ -8073,19 +8074,36 @@ dryRun=true`, then without, gives those two theirs back from their
       its text's middle; natively it is 0.2px. The `ascent-override` family
       of descriptors would fix it in CSS, but WebKit has them only on `main`,
       behind a flag. So the three Tajawal files are Fontsource's with `hhea`
-      rewritten to the system font's ratio (967 / −211 / 0) and every other
-      table byte-identical. With them the simulated chips land where native
-      Chromium puts them. Chrome and Firefox read Tajawal's metrics only for
-      an Arabic run in a `line-height: normal` line, where its total, 1.18em
-      against 1.2em, barely changes. `app/fonts/metrics.test.ts` reads the
-      WOFF2 tables and fails on a file fresh from Fontsource.
+      rewritten to the system font's ratio (967 / −211 / 0). Every other table
+      is identical but for `head`'s checksum, though the WOFF2 directory lists
+      them in another order. With them the simulated chips land where native
+      Chromium puts them. Only those three numbers move: WebKit reads them
+      through CoreText from `hhea` (`FontCoreText.cpp`; OS/2's typo metrics
+      only for a font with a MATH table). Safari still takes Tajawal's
+      x-height, OS/2 `sxHeight` 0.454em against 0.508em since the subset has
+      no "x", for `vertical-align: middle` and `ex`, and its `post` underline
+      position and thickness. Chrome and Firefox read Tajawal's metrics only
+      for an Arabic run in a `line-height: normal` line, where its total,
+      1.18em against 1.2em, barely changes.
 
-      'Rubik Arabic' leads `--font-conversation` the same way, but its own
-      metrics (935 / −250) sit within 0.013em of the system font's ratio,
-      0.2px at 15px, so message text was never visibly off and its files are
-      as shipped. Not yet seen on an iPhone with the patched files: the
-      evidence is WebKit's source, the metrics and the simulation. A font
-      added in front of a stack later needs the same test.
+      What it costs: Tajawal's Arabic reaches below the system font's descent
+      (isolated ج −375, ي −355, م −315 per 1000, against −211), so a
+      `truncate` line now trims the bottom of those tails on an iPhone, as
+      desktop Chrome always has. Measured at 3× on an Arabic name: 0.7px at
+      16px/24px and 0.3px at 14px/20px, with the dots and the letters' shape
+      intact. The shipped metrics clipped nothing, because they rode the
+      text high.
+
+      `app/fonts/metrics.test.ts` reads `globals.css`, takes the first family
+      of every `--font-*` stack, and checks every face of it that is self-hosted
+      there and leaves U+0020 out of its range. Each must put the baseline
+      within 0.05em of the system font's, under a pixel at 20px. So a file
+      fresh from Fontsource, a new weight, or a new family put at the head of
+      a stack fails CI. 'Rubik Arabic' leads `--font-conversation` the same
+      way, and its own metrics (935 / −250) sit 0.035em from the system font's:
+      0.5px at 15px, which nobody has seen. Its files are as shipped and pass.
+      Not yet seen on an iPhone with the patched files: the evidence is
+      WebKit's source, the metrics and the simulation.
 
 ### Tooling notes for this environment
 

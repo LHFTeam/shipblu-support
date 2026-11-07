@@ -663,13 +663,20 @@
    receipt's tick — sat 3px below its words (docs/PROJECT-STATE.md §6.113).
    So the three files below are Fontsource's with their `hhea` ascent,
    descent and line gap rewritten to -apple-system's (1980, -432 and 0 at 2048
-   units, from @capsizecss/metrics), and nothing else changed: the line's
-   metrics are then the ones Safari would have taken from the system font.
-   Chrome and Firefox read them only for an Arabic run in a `line-height:
-   normal` line, where the total, 1.18em against Tajawal's 1.2em, barely moves.
-   The `ascent-override` descriptors would say this in CSS, but no shipped
-   Safari reads them. app/fonts/metrics.test.ts holds the files to it, so a
-   fresh copy from Fontsource fails the build rather than the phone. */
+   units, from @capsizecss/metrics). Every table is otherwise identical, bar
+   `head`'s checksum, though the WOFF2 directory lists them in another order.
+   That makes the ascent, descent and line gap the ones Safari would have
+   taken from the system font, and only those: WebKit reads them through
+   CoreText, which reads `hhea` (OS/2's typo metrics only for a font with a
+   MATH table), but it still takes the x-height from Tajawal (OS/2 sxHeight,
+   0.454em to the system font's 0.508em, since the subset has no "x"), which
+   `vertical-align: middle` and `ex` read, and the underline's position and
+   thickness from its `post` table. Chrome and Firefox read the three only for
+   an Arabic run in a `line-height: normal` line, where the total, 1.18em
+   against Tajawal's 1.2em, barely moves. The `ascent-override` descriptors
+   would say this in CSS, but no shipped Safari reads them.
+   app/fonts/metrics.test.ts reads this file and checks every face that leads
+   a stack, so a fresh copy from Fontsource fails CI rather than the phone. */
 @font-face {
   font-family: 'Tajawal Arabic';
   font-style: normal;

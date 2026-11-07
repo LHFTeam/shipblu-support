@@ -1281,7 +1281,9 @@ would set Latin in Tajawal too (§6.92). Its files are not Fontsource's as
 shipped: their `hhea` line metrics are the system font's, because Safari lays
 out every console line on the first family's metrics, `unicode-range` or not,
 and Tajawal's own put every icon 3px below its label on an iPhone (§6.113).
-`app/fonts/metrics.test.ts` fails on a fresh copy. Message text is the one exception:
+`app/fonts/metrics.test.ts` reads `globals.css` and checks every self-hosted
+face that leads a stack, so a fresh copy, a new weight or a new leading family
+fails CI. Message text is the one exception:
 bubbles, reply boxes and a conversation row's message lines take
 `font-conversation`, which sets Arabic in `'Rubik Arabic'` (self-hosted beside
 it, Arabic range only) and leaves Latin on the surface's own face, so a draft
