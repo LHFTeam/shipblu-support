@@ -8,6 +8,7 @@ import {
   aiPriorityRuns,
   automationRules,
   channels,
+  contactIdentities,
   contacts,
   conversationEvents,
   conversations,
@@ -24,6 +25,7 @@ import { resetEnvCache } from '@/lib/env';
 import { runAutomations } from '@/lib/automations';
 import { setConversationCategory } from '@/lib/categories/write';
 import { forgetCategoryAiSettings } from '@/lib/category-ai/settings';
+import type { NormalisedComment } from '@/lib/meta/types';
 import { createTicket } from '@/lib/portal/tickets';
 import { routeNow, type RouteResult } from '@/lib/routing/apply';
 import { beginRouting } from '@/lib/routing/begin';
@@ -32,9 +34,10 @@ import { applySlaOnCreate } from '@/lib/sla';
 import { stubFetch } from '@/lib/testing/fetch';
 import { withCleanDatabase } from '@/lib/testing/db';
 import { holdNextTransaction } from '@/lib/testing/hold-transaction';
+import { ingestMetaComment } from '@/lib/tickets/ingest-meta';
 import type { Priority } from '@/lib/tickets/vocabulary';
 import { enqueuePriorityClassification } from './enqueue';
-import { PRIORITY_AI_ACTOR, classifyMessagePriority } from './run';
+import { PRIORITY_AI_ACTOR, classifyMessagePriority, type ClassifyResult } from './run';
 
 /**
  * The classifier against Postgres, with TypeSafe answered by the test.
@@ -448,6 +451,252 @@ describe('classifyMessagePriority: apply', () => {
     expect(await classifyMessagePriority(next, { baseUrl: BASE })).toMatchObject({
       outcome: 'unchanged',
     });
+  });
+});
+
+/*
+ * Meta delivers a thread's comments in no order, so a passer-by's reply under a
+ * customer's comment can be stored first and open the ticket under its own
+ * author, who is then the requester and has his words asked about as the
+ * opening. When the customer's comment arrives she becomes the requester
+ * (`adoptRootAuthor`), and from then on his run judged somebody else: it is
+ * neither her opening nor an answer that judged it (`priorityFacts`). What he
+ * raised stays on the column; her own opening may lower it.
+ *
+ * Built through the real ingest, so the move is the one `ingestMetaComment`
+ * makes and the messages carry the authors and dates it gives them.
+ */
+describe('classifyMessagePriority: a comment thread whose first comment arrives after a reply', () => {
+  const AMIRA = '1122334455';
+  const BOB = '9988776655';
+
+  /** Amira's comment, the thread's root, dated five minutes ago unless told otherwise. */
+  function comment(overrides: Partial<NormalisedComment> = {}): NormalisedComment {
+    return {
+      platform: 'facebook',
+      connection: 'facebook_page',
+      commentId: 'post-1_c1',
+      parentCommentId: null,
+      postId: 'post-1',
+      from: AMIRA,
+      fromName: 'Amira Hassan',
+      text: 'ازاي اغير عنوان التوصيل؟',
+      createdAt: new Date(Date.now() - 5 * MINUTE),
+      verb: 'add',
+      raw: {},
+      ...overrides,
+    };
+  }
+
+  /** Bob's reply under it, which Meta's created_time puts after it. */
+  function bobsReply(overrides: Partial<NormalisedComment> = {}): NormalisedComment {
+    return comment({
+      commentId: 'post-1_c2',
+      parentCommentId: 'post-1_c1',
+      from: BOB,
+      fromName: 'Bob',
+      text: 'نصابين، هرفع قضية عليكم كلكم',
+      createdAt: new Date(Date.now() - 2 * MINUTE),
+      ...overrides,
+    });
+  }
+
+  /** Another comment of Amira's under her own, `minutesAgo` ago. */
+  function amirasReply(n: number, text: string, minutesAgo: number): NormalisedComment {
+    return comment({
+      commentId: `post-1_c${n}`,
+      parentCommentId: 'post-1_c1',
+      text,
+      createdAt: new Date(Date.now() - minutesAgo * MINUTE),
+    });
+  }
+
+  async function contactOf(identifier: string): Promise<string> {
+    const [row] = await db
+      .select({ id: contactIdentities.contactId })
+      .from(contactIdentities)
+      .where(eq(contactIdentities.identifier, identifier));
+    return row!.id;
+  }
+
+  async function requesterOf(conversationId: string): Promise<string> {
+    const [row] = await db
+      .select({ requester: conversations.requesterContactId })
+      .from(conversations)
+      .where(eq(conversations.id, conversationId));
+    return row!.requester;
+  }
+
+  /** Bob's reply opens the ticket and raises it to `level`, as he was its requester. */
+  async function openedByBob(level: Priority): Promise<{ id: string; bobsMessage: string }> {
+    const opened = await ingestMetaComment(bobsReply());
+    expect(await requesterOf(opened.conversationId)).toBe(await contactOf(BOB));
+    answers(level);
+    expect(await classifyMessagePriority(opened.messageId, { baseUrl: BASE })).toMatchObject({
+      outcome: 'applied',
+      predicted: level,
+    });
+    return { id: opened.conversationId, bobsMessage: opened.messageId };
+  }
+
+  /** Amira's comment arrives and takes the ticket from Bob. */
+  async function rootArrives(overrides: Partial<NormalisedComment> = {}): Promise<string> {
+    const root = await ingestMetaComment(comment(overrides));
+    expect(root.createdConversation).toBe(false);
+    expect(await requesterOf(root.conversationId)).toBe(await contactOf(AMIRA));
+    return root.messageId;
+  }
+
+  it('lets her comment, dated before his reply, lower what his reply raised', async () => {
+    const { id, bobsMessage } = await openedByBob('urgent');
+    const root = await rootArrives();
+
+    // His `applied` run is not an answer that judged her ticket, so hers is
+    // the opening's answer and may set any level.
+    answers('low', 0.9);
+    expect(await classifyMessagePriority(root, { baseUrl: BASE })).toMatchObject({
+      outcome: 'applied',
+      predicted: 'low',
+    });
+    expect(await priorityOf(id)).toBe('low');
+    expect((await eventsOf(id, 'priority_changed')).map((event) => event.data)).toEqual([
+      expect.objectContaining({ from: 'medium', to: 'urgent', messageId: bobsMessage }),
+      expect.objectContaining({ from: 'urgent', to: 'low', messageId: root }),
+    ]);
+
+    // And his words after the move are a passer-by's, as anybody else's are.
+    const later = await ingestMetaComment(
+      bobsReply({ commentId: 'post-1_c3', text: 'لسه محدش رد؟', createdAt: new Date() }),
+    );
+    answers('urgent', 0.95);
+    expect(await classifyMessagePriority(later.messageId, { baseUrl: BASE })).toEqual({
+      status: 'skipped',
+      reason: 'not written by the requester',
+    });
+    expect(await runOf(later.messageId)).toBeUndefined();
+    expect(await priorityOf(id)).toBe('low');
+  });
+
+  // Meta can send a comment without `created_time`, and `lib/meta/parse.ts`
+  // then stamps it when it is parsed — after the reply under it. His reply is
+  // still not her opening.
+  it('lets her comment lower it though, sent with no time, it is dated after his reply', async () => {
+    const { id, bobsMessage } = await openedByBob('urgent');
+    const root = await rootArrives({ createdAt: new Date() });
+
+    const dated = await db
+      .select({ id: messages.id, createdAt: messages.createdAt })
+      .from(messages)
+      .where(inArray(messages.id, [root, bobsMessage]));
+    const at = new Map(dated.map((row) => [row.id, row.createdAt.getTime()]));
+    expect(at.get(root)!).toBeGreaterThan(at.get(bobsMessage)!);
+
+    answers('low', 0.9);
+    expect(await classifyMessagePriority(root, { baseUrl: BASE })).toMatchObject({
+      outcome: 'applied',
+      predicted: 'low',
+    });
+    expect(await priorityOf(id)).toBe('low');
+  });
+
+  // His job read the ticket while he held it, asked the provider, and came to
+  // its lock while her comment's ingest was moving the requester to her. Under
+  // the lock he is a passer-by, so his answer is thrown away: no run that would
+  // count as having judged her opening, and no write of his words' level.
+  it('throws away the answer of a job that read the ticket before her comment took it', async () => {
+    const opened = await ingestMetaComment(bobsReply());
+    const [amira] = await db
+      .insert(contacts)
+      .values({ name: 'Amira Hassan' })
+      .returning({ id: contacts.id });
+    const mock = answers('urgent', 0.95);
+
+    let raced: Promise<ClassifyResult> | undefined;
+    await db.transaction(async (tx) => {
+      // What `adoptRootAuthor` writes, ahead of the root's own message insert.
+      await tx
+        .update(conversations)
+        .set({ requesterContactId: amira!.id, requesterKind: null })
+        .where(eq(conversations.id, opened.conversationId));
+      raced = classifyMessagePriority(opened.messageId, { baseUrl: BASE });
+      await untilSomebodyWaits();
+    });
+
+    expect(await raced).toEqual({ status: 'skipped', reason: 'not written by the requester' });
+    // It got past the first read — Bob was the requester still — and asked.
+    expect(mock).toHaveBeenCalledOnce();
+    expect(await runOf(opened.messageId)).toBeUndefined();
+    expect(await priorityOf(opened.conversationId)).toBe('medium');
+    expect(await eventsOf(opened.conversationId, 'priority_changed')).toEqual([]);
+  });
+
+  // Pinned, and accepted: her comment had no words, so nothing asked about
+  // it, but it was her opening all the same, and her later words may raise and
+  // never lower — what any customer's caption-less photo leaves. Bob raised to
+  // high rather than urgent, so a raise after it can be seen.
+  it('leaves what his reply raised when her comment had no words, and still lets her raise it', async () => {
+    const { id, bobsMessage } = await openedByBob('high');
+    const root = await rootArrives({ text: '' });
+
+    const [stored] = await db
+      .select({ bodyText: messages.bodyText })
+      .from(messages)
+      .where(eq(messages.id, root));
+    expect(stored!.bodyText).toBe('[empty comment]');
+    // Ingest queued his reply and not her comment; run by hand, it asks nothing.
+    const queued = (
+      await db
+        .select({ payload: jobs.payload })
+        .from(jobs)
+        .where(eq(jobs.type, 'classify_priority'))
+    ).map((job) => job.payload);
+    expect(queued).toContainEqual({ messageId: bobsMessage });
+    expect(queued).not.toContainEqual({ messageId: root });
+    answers('low', 0.95);
+    expect(await classifyMessagePriority(root, { baseUrl: BASE })).toEqual({
+      status: 'skipped',
+      reason: 'no text',
+    });
+
+    const thanks = await ingestMetaComment(amirasReply(3, 'تمام شكرا', 1));
+    answers('low', 0.95);
+    expect(await classifyMessagePriority(thanks.messageId, { baseUrl: BASE })).toMatchObject({
+      outcome: 'not_raised',
+    });
+    expect(await priorityOf(id)).toBe('high');
+
+    const threat = await ingestMetaComment(amirasReply(4, 'هرفع قضية لو الفلوس موصلتش', 0));
+    answers('urgent', 0.95);
+    expect(await classifyMessagePriority(threat.messageId, { baseUrl: BASE })).toMatchObject({
+      outcome: 'applied',
+    });
+    expect(await priorityOf(id)).toBe('urgent');
+  });
+
+  // Pinned, and accepted: her comment was her opening, and was asked about —
+  // too unsure to act on, which leaves his level. Rule 3 is about which
+  // message was the opening, not which one Jev was sure of, so her next words
+  // may raise and never lower, as on any ticket whose opening was unsure.
+  it('leaves what his reply raised when the answer to her comment was unsure', async () => {
+    const { id } = await openedByBob('urgent');
+    const root = await rootArrives();
+
+    answers('low', 0.5);
+    expect(await classifyMessagePriority(root, { baseUrl: BASE })).toMatchObject({
+      outcome: 'below_threshold',
+    });
+    expect(await runOf(root)).toMatchObject({
+      outcome: 'below_threshold',
+      priorityBefore: 'urgent',
+    });
+    expect(await priorityOf(id)).toBe('urgent');
+
+    const thanks = await ingestMetaComment(amirasReply(3, 'تمام شكرا', 1));
+    answers('low', 0.95);
+    expect(await classifyMessagePriority(thanks.messageId, { baseUrl: BASE })).toMatchObject({
+      outcome: 'not_raised',
+    });
+    expect(await priorityOf(id)).toBe('urgent');
   });
 });
 
@@ -1145,6 +1394,46 @@ describe('classifyMessagePriority: shadow, skips and failures', () => {
     expect(JSON.stringify(body.state)).not.toContain('هرفع قضية');
   });
 
+  // The job compares the message's author with the requester again under the
+  // ticket's lock. A merge of the customer into another record, committing
+  // while the job asked the provider, moves both; the author the job first
+  // read is the record merged away, and compared with the new requester it
+  // would refuse the customer's own words as somebody else's.
+  it('still answers the customer whose record was merged while it asked', async () => {
+    const id = await ticket();
+    const [opened] = await db
+      .select({ requester: conversations.requesterContactId })
+      .from(conversations)
+      .where(eq(conversations.id, id));
+    const requester = opened!.requester;
+    const messageId = await inbound(id, 'هرفع قضية لو الفلوس موصلتش', {
+      authorContactId: requester,
+    });
+    const [survivor] = await db
+      .insert(contacts)
+      .values({ name: 'Amira Hassan' })
+      .returning({ id: contacts.id });
+    answers('urgent', 0.95);
+
+    let raced: Promise<ClassifyResult> | undefined;
+    await db.transaction(async (tx) => {
+      // What `mergeContacts` does to her tickets and then to her messages.
+      await tx
+        .update(conversations)
+        .set({ requesterContactId: survivor!.id })
+        .where(eq(conversations.requesterContactId, requester));
+      await tx
+        .update(messages)
+        .set({ authorContactId: survivor!.id })
+        .where(eq(messages.authorContactId, requester));
+      raced = classifyMessagePriority(messageId, { baseUrl: BASE });
+      await untilSomebodyWaits();
+    });
+
+    expect(await raced).toEqual({ status: 'recorded', outcome: 'applied', predicted: 'urgent' });
+    expect(await priorityOf(id)).toBe('urgent');
+  });
+
   it('classifies a person writing from a mailing-list address', async () => {
     // `isAutomated` is set by a List-Id header; a merchant's Google Group has one.
     const id = await ticket({ channel: 'email' });
@@ -1368,4 +1657,20 @@ async function routeWithAnswerBetween({
   } finally {
     spy.mockRestore();
   }
+}
+
+/**
+ * Resolves once another session is waiting on a lock this test holds — a copy
+ * of the one in `lib/csat/meta-feedback.db.test.ts`.
+ */
+async function untilSomebodyWaits(): Promise<void> {
+  for (let tries = 0; tries < 200; tries++) {
+    const [row] = await db.execute<{ waiting: number }>(
+      sql`select count(*)::int as waiting from pg_stat_activity
+          where datname = current_database() and wait_event_type = 'Lock'`,
+    );
+    if (row && row.waiting > 0) return;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error('nothing came to wait on the lock this test holds');
 }

@@ -3,6 +3,7 @@ import { PgDatabase } from 'drizzle-orm/pg-core';
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 import { db } from '@/db/client';
 import {
+  aiCategoryRuns,
   agents,
   autoResponses,
   automationRules,
@@ -13,6 +14,7 @@ import {
   conversations,
   groupMembers,
   groups,
+  jobs,
   messages,
   routingDecisions,
   slaPolicies,
@@ -61,6 +63,22 @@ import { deferToRouter } from './state';
  * did not ask for.
  */
 
+/**
+ * Whether the read of what a hold's end owes Jev's category fails, as a lost
+ * connection would fail it, when a test asks.
+ */
+const owed = vi.hoisted(() => ({ throws: false }));
+vi.mock('./category-source', async (importOriginal) => {
+  const real = await importOriginal<typeof import('./category-source')>();
+  return {
+    ...real,
+    jevCategoryOwed: async (conversationId: string) => {
+      if (owed.throws) throw new Error('the statement was lost');
+      return real.jevCategoryOwed(conversationId);
+    },
+  };
+});
+
 withCleanDatabase();
 
 const MINUTE = 60_000;
@@ -80,6 +98,7 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
+  owed.throws = false;
   const logged = errors.mock.calls.map((call) => String(call[0]));
   vi.restoreAllMocks();
   if (!errorsExpected) expect(logged).toEqual([]);
@@ -1926,6 +1945,28 @@ describe('the held out-of-hours reply', () => {
     expect(await acknowledgements(id)).toHaveLength(1);
   });
 
+  // The read of what Jev's category is owed is the hold's end's own question,
+  // and losing it costs only its answer: the customer is still told the team
+  // is closed.
+  it('goes once though what the category is owed cannot be read', async () => {
+    errorsExpected = true;
+    const t = await teams();
+    const lead = await agent('Laila');
+    const { id } = await heldTicket(t.channel, t.home.group);
+    owed.throws = true;
+
+    await db.transaction(async (tx) => {
+      await tx.update(conversations).set({ groupId: t.care.group }).where(eq(conversations.id, id));
+      return endHold(tx, id, 'manual', { agentId: lead });
+    });
+    await afterHoldEnded(id);
+
+    expect(await acknowledgements(id)).toHaveLength(1);
+    expect(errors.mock.calls.map((call) => String(call[0]))).toEqual([
+      expect.stringContaining('category was owed'),
+    ]);
+  });
+
   it('does not go after an agent answered during the hold', async () => {
     const t = await teams();
     const { id } = await heldTicket(t.channel, t.home.group);
@@ -2056,5 +2097,544 @@ describe('the held reply, on the clock the router is handed', () => {
     expect(await routeNow(id, { label: 'jev:category' }, NIGHT)).toBe('decided');
 
     expect(await acknowledgements(id)).toHaveLength(1);
+  });
+});
+
+// --- A comment thread a reply opened ---------------------------------------
+
+/**
+ * Meta delivers a comment thread in no order, so a passer-by's reply under a
+ * customer's comment can be stored first and open the ticket under the
+ * passer-by; the customer's comment, when it comes, makes its author the
+ * requester (`adoptRootAuthor`). Jev answers within seconds, so the router
+ * would otherwise decide on the passer-by's words before the customer's could
+ * arrive, and a decided ticket is never routed again (`categoryStanding`).
+ *
+ * The tickets here are built as `ingestMetaComment` leaves them — a comment
+ * ticket on the Facebook Page's row, the reply's `in_reply_to` naming the root
+ * — and the root's arrival as adoption leaves it: the requester moved, and the
+ * root stored, in one transaction. `ingest-meta.db.test.ts` drives the same
+ * thread through the real ingest and both classifiers.
+ */
+describe('a comment thread a reply opened', () => {
+  let threads = 0;
+
+  /** The Page's row, routing by category; comment tickets are filed under it. */
+  async function facebookPage(defaultGroupId: string): Promise<string> {
+    const [row] = await db
+      .insert(channels)
+      .values({
+        type: 'facebook',
+        name: 'Facebook Page',
+        config: {},
+        defaultGroupId,
+        routingMode: 'category',
+      })
+      .returning({ id: channels.id });
+    return row!.id;
+  }
+
+  async function person(name: string): Promise<string> {
+    people += 1;
+    const [row] = await db
+      .insert(contacts)
+      .values({ name, primaryEmail: `${name.toLowerCase()}${people}@customer.example` })
+      .returning({ id: contacts.id });
+    return row!.id;
+  }
+
+  type Thread = Held & { rootId: string; bob: string; amira: string; repliedAt: Date };
+
+  /**
+   * Bob's reply under Amira's comment, stored first: the ticket is Bob's, held,
+   * and begun as the creation pass begins it.
+   */
+  async function replyOpened(channelId: string, groupId: string): Promise<Thread> {
+    threads += 1;
+    const rootId = `root-${threads}`;
+    const bob = await person('Bob');
+    const amira = await person('Amira');
+    const opened = new Date();
+    const plan = { start: 'live', channelId, windowMinutes: 5 } as const;
+    const [ticket] = await db
+      .insert(conversations)
+      .values({
+        channel: 'facebook_comment',
+        channelId,
+        groupId,
+        statusId: await status('Open'),
+        requesterContactId: bob,
+        subject: 'Same here, nobody answers',
+        externalId: `facebook:comment:${rootId}`,
+        lastMessageAt: opened,
+        lastCustomerMessageAt: opened,
+        ...routingWindowValues(plan, {}, opened),
+      })
+      .returning({ id: conversations.id });
+    const id = ticket!.id;
+    const [message] = await db
+      .insert(messages)
+      .values({
+        conversationId: id,
+        direction: 'inbound',
+        kind: 'reply',
+        authorContactId: bob,
+        bodyText: 'Same here, how much is the delivery to Alexandria?',
+        channelMessageId: `reply-${threads}`,
+        inReplyTo: rootId,
+        meta: { metaKind: 'comment', platform: 'facebook', commentId: `reply-${threads}` },
+        createdAt: opened,
+      })
+      .returning({ id: messages.id });
+    await db.transaction((tx) =>
+      startRouting(tx, plan, { conversationId: id, messageId: message!.id, groupId }, opened),
+    );
+    expect(await beginRouting(id)).toBe('continue');
+    return { id, messageId: message!.id, rootId, bob, amira, repliedAt: opened };
+  }
+
+  /** Amira's comment arriving: adoption's move and the root's insert, one transaction. */
+  async function rootArrives(thread: Thread, executor: Pick<typeof db, 'transaction'> = db) {
+    return executor.transaction(async (tx) => rootArrivesIn(tx, thread));
+  }
+
+  async function rootArrivesIn(
+    tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
+    thread: Thread,
+  ): Promise<string> {
+    await tx
+      .update(conversations)
+      .set({ requesterContactId: thread.amira, requesterKind: null })
+      .where(eq(conversations.id, thread.id));
+    await tx.insert(conversationEvents).values({
+      conversationId: thread.id,
+      type: 'requester_changed',
+      actorLabel: 'inbound_facebook',
+      data: { reason: 'thread_root', from: thread.bob, to: thread.amira },
+    });
+    const [root] = await tx
+      .insert(messages)
+      .values({
+        conversationId: thread.id,
+        direction: 'inbound',
+        kind: 'reply',
+        authorContactId: thread.amira,
+        bodyText: 'My shop’s COD payments from last week never arrived.',
+        channelMessageId: thread.rootId,
+        meta: { metaKind: 'comment', platform: 'facebook', commentId: thread.rootId },
+        // Written before the reply under it, as Meta's created_time says.
+        createdAt: new Date(thread.repliedAt.getTime() - MINUTE),
+      })
+      .returning({ id: messages.id });
+    return root!.id;
+  }
+
+  /**
+   * Jev's confident answer about one message, as the live job leaves it: the
+   * run row, and the write with its event naming the message — which writes
+   * nothing when the ticket already carries the category.
+   */
+  async function jevAnswers(thread: Thread, key: string, messageId: string): Promise<string> {
+    const [category] = await db
+      .select({ id: ticketCategories.id })
+      .from(ticketCategories)
+      .where(eq(ticketCategories.key, key));
+    await db.transaction(async (tx) => {
+      await tx.insert(aiCategoryRuns).values({
+        conversationId: thread.id,
+        messageId,
+        messageCreatedAt: new Date(),
+        runLabel: 'live',
+        mode: 'apply',
+        requestFingerprint: 'test',
+        predictedKey: key,
+        probability: 0.9,
+        outcome: 'applied',
+        channel: 'facebook_comment',
+      });
+      await setConversationCategoryOn(
+        tx,
+        thread.id,
+        category!.id,
+        { label: 'jev:category' },
+        {
+          probability: 0.9,
+          model: 'test',
+          messageId,
+          messageCreatedAt: new Date().toISOString(),
+          runLabel: 'live',
+        },
+      );
+    });
+    return category!.id;
+  }
+
+  async function page() {
+    const t = await teams();
+    await routeTo('sales', t.sales.group);
+    await routeTo('merchant_support', t.care.group);
+    return { ...t, page: await facebookPage(t.home.group) };
+  }
+
+  /** Still held, in the group it arrived in, with no decision written. */
+  async function expectWaiting(thread: Thread, homeGroup: string) {
+    expect(await decision(thread.id)).toMatchObject({
+      stage: 'holding',
+      outcome: null,
+      phaseOneAt: null,
+    });
+    expect(await ticketRow(thread.id)).toMatchObject({
+      groupId: homeGroup,
+      assigneeAgentId: null,
+      routingDecidedAt: null,
+    });
+    expect(await events(thread.id, 'routed')).toEqual([]);
+  }
+
+  it('does not route on Jev’s reading of the reply while the root may still come', async () => {
+    const t = await page();
+    const thread = await replyOpened(t.page, t.home.group);
+    await jevAnswers(thread, 'sales', thread.messageId);
+
+    expect(await routeNow(thread.id, { label: 'jev:category' })).toBe('waiting');
+
+    await expectWaiting(thread, t.home.group);
+  });
+
+  it('routes on the root author’s own answer once the root has arrived', async () => {
+    const t = await page();
+    const thread = await replyOpened(t.page, t.home.group);
+    await jevAnswers(thread, 'sales', thread.messageId);
+    expect(await routeNow(thread.id, { label: 'jev:category' })).toBe('waiting');
+
+    const root = await rootArrives(thread);
+    const care = await jevAnswers(thread, 'merchant_support', root);
+
+    expect(await routeNow(thread.id, { label: 'jev:category' })).toBe('decided');
+    expect(await ticketRow(thread.id)).toMatchObject({
+      groupId: t.care.group,
+      assigneeAgentId: t.care.agent,
+      categoryId: care,
+    });
+    expect(await expectDecided(thread.id, 'category')).toMatchObject({ categoryId: care });
+  });
+
+  it('routes at the window’s end on the root’s answer that agreed with the reply’s, which wrote nothing', async () => {
+    const t = await page();
+    const thread = await replyOpened(t.page, t.home.group);
+    const sales = await jevAnswers(thread, 'sales', thread.messageId);
+    const root = await rootArrives(thread);
+    // Her answer is the category the ticket already carries: a run, and no
+    // event naming her message.
+    await jevAnswers(thread, 'sales', root);
+    expect(await events(thread.id, 'category_changed')).toHaveLength(1);
+
+    expect(await settleRouting(thread.id)).toBe('decided');
+
+    expect(await ticketRow(thread.id)).toMatchObject({ groupId: t.sales.group });
+    expect(await expectDecided(thread.id, 'category')).toMatchObject({ categoryId: sales });
+  });
+
+  it('sets the replier’s category aside at the window’s end when the root settled nothing', async () => {
+    const t = await page();
+    await rule('on_update', 'Tag sales', always, [{ type: 'add_tags', tags: ['sales'] }]);
+    const thread = await replyOpened(t.page, t.home.group);
+    const sales = await jevAnswers(thread, 'sales', thread.messageId);
+    // Her root had no words, or an answer below the threshold: nothing of hers.
+    await rootArrives(thread);
+
+    // Before the window's end it waits: her next message may still settle it.
+    expect(await routeNow(thread.id, { label: 'jev:category' })).toBe('waiting');
+    expect(await settleRouting(thread.id)).toBe('decided');
+
+    expect(await ticketRow(thread.id)).toMatchObject({
+      groupId: t.home.group,
+      assigneeAgentId: t.home.agent,
+      // A label still, for a person or her own next answer to replace.
+      categoryId: sales,
+    });
+    expect(await expectDecided(thread.id, 'fallback')).toMatchObject({
+      toGroupId: t.home.group,
+      categoryId: null,
+      probability: null,
+    });
+    expect((await events(thread.id, 'routed'))[0]!.data).toMatchObject({
+      outcome: 'fallback',
+      setAside: { categoryId: sales, key: 'sales' },
+    });
+    expect((await events(thread.id, 'routed'))[0]!.data).not.toHaveProperty('categoryId');
+    // No pass for a category the decision was not made on.
+    expect(await tagged(thread.id)).toBe(0);
+  });
+
+  // `npm run job -- classify_category messageId=…` takes an id in capitals,
+  // and the event keeps the spelling it was given.
+  it('reads an event naming the replier’s message in capitals as his', async () => {
+    const t = await page();
+    const thread = await replyOpened(t.page, t.home.group);
+    await jevAnswers(thread, 'sales', thread.messageId.toUpperCase());
+    await rootArrives(thread);
+
+    expect(await settleRouting(thread.id)).toBe('decided');
+
+    await expectDecided(thread.id, 'fallback');
+  });
+
+  it('routes on the reply’s category at the window’s end when no root came', async () => {
+    const t = await page();
+    await rule('on_update', 'Tag sales', always, [{ type: 'add_tags', tags: ['sales'] }]);
+    const thread = await replyOpened(t.page, t.home.group);
+    // A reply under the Page's own comment, which ingest never stores: the
+    // replier is the customer.
+    const sales = await jevAnswers(thread, 'sales', thread.messageId);
+
+    expect(await settleRouting(thread.id)).toBe('decided');
+
+    expect(await ticketRow(thread.id)).toMatchObject({
+      groupId: t.sales.group,
+      assigneeAgentId: t.sales.agent,
+    });
+    expect(await expectDecided(thread.id, 'category')).toMatchObject({ categoryId: sales });
+    expect(await tagged(thread.id)).toBe(1);
+  });
+
+  it('leaves a category Jev filed before the creation pass for the root, held as holding', async () => {
+    const t = await page();
+    // The reply's ticket as the insert leaves it, Jev answering before the
+    // creation pass reaches `beginRouting`.
+    const thread = await replyOpened(t.page, t.home.group);
+    await db
+      .update(routingDecisions)
+      .set({ stage: 'pending' })
+      .where(eq(routingDecisions.conversationId, thread.id));
+    await jevAnswers(thread, 'sales', thread.messageId);
+
+    expect(await beginRouting(thread.id)).toBe('continue');
+
+    // `holding`, so the root's answer routes it at once rather than leaving
+    // it to a creation pass that has already run.
+    await expectWaiting(thread, t.home.group);
+  });
+
+  it('routes at once on a person’s category, root or no root', async () => {
+    const t = await page();
+    const thread = await replyOpened(t.page, t.home.group);
+    await jevAnswers(thread, 'sales', thread.messageId);
+    const care = await routeTo('merchant_support', t.care.group);
+
+    expect(await consoleFiles(thread.id, care, t.home.agent)).toBe(false);
+    expect(await routeNow(thread.id, { agentId: t.home.agent, label: 'agent' })).toBe('decided');
+
+    expect(await ticketRow(thread.id)).toMatchObject({ groupId: t.care.group });
+    await expectDecided(thread.id, 'category');
+  });
+
+  // The router chooses the policy as it decides; a person taking the ticket
+  // while it waits decides without the router, and so without that.
+  it('chooses the policy for Jev’s category when a person takes the ticket while it waits', async () => {
+    const t = await page();
+    const lead = await agent('Laila');
+    const round = { firstResponseMins: 30, nextResponseMins: 30, resolutionMins: 240 };
+    const thread = await replyOpened(t.page, t.home.group);
+    const sales = await jevAnswers(thread, 'sales', thread.messageId);
+    const [salesPolicy] = await db
+      .insert(slaPolicies)
+      .values({
+        name: 'Sales',
+        hoursSource: 'round_the_clock',
+        targets: { low: round, medium: round, high: round, urgent: round },
+        conditions: inCategory(sales),
+      })
+      .returning({ id: slaPolicies.id });
+    expect(await routeNow(thread.id, { label: 'jev:category' })).toBe('waiting');
+
+    // The lib half of the console's assignee case.
+    const ended = await db.transaction(async (tx) => {
+      await tx
+        .update(conversations)
+        .set({ assigneeAgentId: t.home.agent })
+        .where(eq(conversations.id, thread.id));
+      return endHold(tx, thread.id, 'manual', { agentId: lead });
+    });
+    expect(ended).toBe(true);
+    await afterHoldEnded(thread.id);
+
+    await expectDecided(thread.id, 'manual');
+    expect(await ticketRow(thread.id)).toMatchObject({
+      assigneeAgentId: t.home.agent,
+      slaPolicyId: salesPolicy!.id,
+    });
+  });
+
+  // The replier's category is set aside at the window's end, with no policy
+  // for it; a person taking the ticket first gives it none either.
+  it('chooses no policy for the replier’s category when a person takes the ticket', async () => {
+    const t = await page();
+    const lead = await agent('Laila');
+    const round = { firstResponseMins: 30, nextResponseMins: 30, resolutionMins: 240 };
+    const thread = await replyOpened(t.page, t.home.group);
+    const sales = await jevAnswers(thread, 'sales', thread.messageId);
+    await db.insert(slaPolicies).values({
+      name: 'Sales',
+      hoursSource: 'round_the_clock',
+      targets: { low: round, medium: round, high: round, urgent: round },
+      conditions: inCategory(sales),
+    });
+    await rootArrives(thread);
+    expect(await routeNow(thread.id, { label: 'jev:category' })).toBe('waiting');
+
+    await db.transaction(async (tx) => {
+      await tx
+        .update(conversations)
+        .set({ assigneeAgentId: t.home.agent })
+        .where(eq(conversations.id, thread.id));
+      return endHold(tx, thread.id, 'manual', { agentId: lead });
+    });
+    await afterHoldEnded(thread.id);
+
+    expect((await ticketRow(thread.id)).slaPolicyId).toBeNull();
+  });
+
+  // An agent's reply runs no pass of its own, so the one Jev's write handed
+  // the router is run as the reply ends the hold.
+  it('runs the pass Jev’s category handed the router when an agent’s reply ends the hold', async () => {
+    const t = await page();
+    const thread = await replyOpened(t.page, t.home.group);
+    const sales = await jevAnswers(thread, 'sales', thread.messageId);
+    await rule('on_update', 'Tag sales', inCategory(sales), [
+      { type: 'add_tags', tags: ['sales'] },
+    ]);
+    expect(await routeNow(thread.id, { label: 'jev:category' })).toBe('waiting');
+
+    await storeAgentReply(thread.id, 'facebook_comment', {
+      authorAgentId: t.home.agent,
+      bodyText: 'Sending you our rates now.',
+      bodyHtml: '<p>Sending you our rates now.</p>',
+    });
+
+    await expectDecided(thread.id, 'manual');
+    expect(await tagged(thread.id)).toBe(1);
+  });
+
+  // The reply is stored by the time anything after the hold's end runs, so
+  // whatever that meets, its send is queued: a throw there left it on the
+  // timeline as "sending…" for good, and the agent's retry sent a second copy.
+  it('queues the reply’s send though what the hold owed cannot be read', async () => {
+    errorsExpected = true;
+    const t = await page();
+    const thread = await replyOpened(t.page, t.home.group);
+    const sales = await jevAnswers(thread, 'sales', thread.messageId);
+    await rule('on_update', 'Tag sales', inCategory(sales), [
+      { type: 'add_tags', tags: ['sales'] },
+    ]);
+    expect(await routeNow(thread.id, { label: 'jev:category' })).toBe('waiting');
+    owed.throws = true;
+
+    const messageId = await storeAgentReply(thread.id, 'facebook_comment', {
+      authorAgentId: t.home.agent,
+      bodyText: 'Sending you our rates now.',
+      bodyHtml: '<p>Sending you our rates now.</p>',
+    });
+
+    const queued = await db
+      .select({ type: jobs.type })
+      .from(jobs)
+      .where(eq(jobs.dedupeKey, `send:${messageId}`));
+    expect(queued).toEqual([{ type: 'send_meta' }]);
+    await expectDecided(thread.id, 'manual');
+    // The rest of what the hold owed still goes; only what the read decides
+    // is left, and said so.
+    expect((await ticketRow(thread.id)).assigneeAgentId).toBe(t.home.agent);
+    expect(await tagged(thread.id)).toBe(0);
+    expect(errors.mock.calls.map((call) => String(call[0]))).toEqual([
+      expect.stringContaining('category was owed'),
+    ]);
+  });
+
+  // Jev's write once the hold is over is an ordinary relabel, which runs its
+  // own pass and chooses the policy (`afterCategoryApplied`); owed by the end
+  // as well, an agent's reply a moment before would run the same rules twice.
+  it('owes a category only what Jev wrote before the hold ended', async () => {
+    const t = await page();
+    const lead = await agent('Laila');
+    const end = (id: string) =>
+      db.transaction((tx) => endHold(tx, id, 'manual', { agentId: lead }));
+
+    const before = await replyOpened(t.page, t.home.group);
+    await jevAnswers(before, 'sales', before.messageId);
+    expect(await end(before.id)).toBe(true);
+    const owedBefore = vi.fn(async () => {});
+    await afterHoldEnded(before.id, new Date(), { runOwedPass: owedBefore });
+    expect(owedBefore).toHaveBeenCalledTimes(1);
+
+    const after = await replyOpened(t.page, t.home.group);
+    expect(await end(after.id)).toBe(true);
+    await jevAnswers(after, 'sales', after.messageId);
+    const owedAfter = vi.fn(async () => {});
+    await afterHoldEnded(after.id, new Date(), { runOwedPass: owedAfter });
+    expect(owedAfter).not.toHaveBeenCalled();
+  });
+
+  it('runs no pass for the replier’s category when an agent’s reply ends the hold', async () => {
+    const t = await page();
+    const thread = await replyOpened(t.page, t.home.group);
+    const sales = await jevAnswers(thread, 'sales', thread.messageId);
+    await rule('on_update', 'Tag sales', inCategory(sales), [
+      { type: 'add_tags', tags: ['sales'] },
+    ]);
+    await rootArrives(thread);
+
+    await storeAgentReply(thread.id, 'facebook_comment', {
+      authorAgentId: t.home.agent,
+      bodyText: 'Looking into it.',
+      bodyHtml: '<p>Looking into it.</p>',
+    });
+
+    await expectDecided(thread.id, 'manual');
+    expect(await tagged(thread.id)).toBe(0);
+  });
+
+  // The window's job late, or dead: a call once the window has closed is its
+  // end too, or the reading would wait for good.
+  it('decides on a call made after the window has closed', async () => {
+    const t = await page();
+    const thread = await replyOpened(t.page, t.home.group);
+    await jevAnswers(thread, 'sales', thread.messageId);
+    await rootArrives(thread);
+    const past = new Date((await decision(thread.id)).windowEndsAt.getTime() + MINUTE);
+
+    expect(await routeNow(thread.id, { label: 'jev:category' }, past)).toBe('decided');
+
+    await expectDecided(thread.id, 'fallback');
+  });
+
+  it('decides on the requester an adoption committing under its lock leaves', async () => {
+    const t = await page();
+    const thread = await replyOpened(t.page, t.home.group);
+    await jevAnswers(thread, 'sales', thread.messageId);
+
+    // Amira's comment arriving at the window's end: the move and the root
+    // written and not yet committed, the router's phase one waiting on the
+    // ticket's row behind them.
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => (release = resolve));
+    let arrived!: () => void;
+    const hasArrived = new Promise<void>((resolve) => (arrived = resolve));
+    const adopting = db.transaction(async (tx) => {
+      await rootArrivesIn(tx, thread);
+      arrived();
+      await released;
+    });
+    await hasArrived;
+    const settling = settleRouting(thread.id);
+    await untilWaitingOnALock(db);
+    release();
+    await adopting;
+
+    expect(await settling).toBe('decided');
+    // Read after the adoption: the reply's category is a stranger's now, and
+    // set aside, where a read before it would have routed on it to Sales.
+    expect(await ticketRow(thread.id)).toMatchObject({ groupId: t.home.group });
+    await expectDecided(thread.id, 'fallback');
   });
 });

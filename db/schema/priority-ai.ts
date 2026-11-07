@@ -14,7 +14,10 @@ import { conversations, messages } from './conversations';
 import { priorityEnum } from './enums';
 
 /**
- * Every answer Jev gave about a message's priority, and what was done with it.
+ * Every answer Jev gave about a message's priority, and what was done with it —
+ * but for one the job's look under the ticket's lock finds to be about
+ * somebody else's message (a passer-by's reply, once a comment thread's root
+ * made its author the requester), which is thrown away unrecorded.
  *
  * Unlike `ai_subcategory_runs` this is not a shadow table that nothing acts on —
  * the classifier writes `conversations.priority` — but it is the only place the

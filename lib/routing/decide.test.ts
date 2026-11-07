@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { decide, isWorkable, type DecideInput, type DecidedOutcome } from './decide';
+import {
+  categoryStanding,
+  decide,
+  isWorkable,
+  type CategorySource,
+  type DecideInput,
+  type DecidedOutcome,
+} from './decide';
 
 /**
  * The router's precedence, which `apply.ts` writes under the row lock and the
@@ -208,5 +215,46 @@ describe('decide, a shadow row', () => {
       outcome: 'no_route_for_category',
       toGroupId: HOME,
     });
+  });
+});
+
+/**
+ * Whose words a category stands on, for a comment thread a passer-by's reply
+ * opened. Each case is a reading the router could otherwise make on a stranger's
+ * words, before or at the window's end.
+ */
+describe('categoryStanding', () => {
+  const jev: CategorySource = { readByJev: true, notTheRequesters: false, awaitingRoot: false };
+
+  it('routes on a ticket with no category, and on one somebody other than Jev chose', () => {
+    for (const atWindowEnd of [false, true]) {
+      expect(categoryStanding(null, atWindowEnd)).toBe('routes');
+      expect(
+        categoryStanding(
+          { readByJev: false, notTheRequesters: true, awaitingRoot: true },
+          atWindowEnd,
+        ),
+      ).toBe('routes');
+    }
+  });
+
+  it("routes on Jev's reading of the requester's own words", () => {
+    expect(categoryStanding(jev, false)).toBe('routes');
+    expect(categoryStanding(jev, true)).toBe('routes');
+  });
+
+  it('waits for the root while a reply opened the thread, and routes at the window’s end', () => {
+    const awaiting = { ...jev, awaitingRoot: true };
+    expect(categoryStanding(awaiting, false)).toBe('waits');
+    expect(categoryStanding(awaiting, true)).toBe('routes');
+  });
+
+  it('waits on a stranger’s category, and sets it aside at the window’s end', () => {
+    const stranger = { ...jev, notTheRequesters: true };
+    expect(categoryStanding(stranger, false)).toBe('waits');
+    expect(categoryStanding(stranger, true)).toBe('set_aside');
+    // Whether the root is still to come does not make a stranger's words the
+    // requester's.
+    expect(categoryStanding({ ...stranger, awaitingRoot: true }, true)).toBe('set_aside');
   });
 });

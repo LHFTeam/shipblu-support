@@ -26,6 +26,16 @@ import { UNKNOWN_CATEGORY_KEY } from '@/lib/categories/registry';
  *    acknowledgement does not end classification before the informative second
  *    message, and a ticket that has not settled by the first human reply is a
  *    person's call.
+ *
+ *    Both count the requester's messages alone. A run on a message somebody
+ *    other than the ticket's requester now wrote neither settles the ticket
+ *    nor takes one of the five: on a comment thread, a passer-by's reply
+ *    stored before the customer's comment opens the ticket under him and is
+ *    asked about as the requester's, until the comment makes its author the
+ *    requester (`adoptRootAuthor`). From then on his words are not hers —
+ *    the job no longer asks about them — and his answers, counted, would
+ *    settle or cap her ticket before her own words were weighed. A message
+ *    deleted since says nobody's, and still counts.
  * 4. **`unknown` never settles anything.** It is the answer for a greeting,
  *    thanks, a lone image, anything unrelated to ShipBlu — and a greeting is
  *    the most confident answer a classifier gives, so the escape hatch must
@@ -222,9 +232,9 @@ export function eventsKnownAt<E extends TimedCategoryEvent>(events: readonly E[]
 export type TicketFacts = {
   /** `categoryOwned` over the ticket's events and its column. */
   owned: boolean;
-  /** A message written before this one already settled the ticket. */
+  /** A message of the requester's written before this one already settled the ticket. */
   settled: boolean;
-  /** Somebody answered the ticket, or five other messages were asked about. */
+  /** Somebody answered the ticket, or five other messages of the requester's were asked about. */
   capped: boolean;
 };
 

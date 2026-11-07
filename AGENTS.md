@@ -768,7 +768,13 @@ opens the ticket under the replier, and the root, when it arrives, makes its
 author the requester, and its first line the subject, with a
 `requester_changed` event (`adoptRootAuthor` in `ingest-meta.ts`). A later
 reply never moves it, because its author is somebody under the customer's
-comment. The sender judges the message
+comment. What Jev read off the replier's words before the root arrived stays
+on the ticket but stops counting as the customer's: neither classifier counts
+a run on a message by somebody who is not the requester now as having judged
+or settled the ticket, and each re-checks the requester under its row lock,
+so the root's own answer may lower the priority the reply raised and settles
+the category; and the router waits for the root before routing on Jev's
+reading of a reply (**Routing by category**). The sender judges the message
 the lifecycle hands it by id, never the newest inbound row, which after a
 batch retry is a passer-by's reply stored before the requester's older comment. `pickRule` takes the stored channel and
 external id and reads a comment filed on its platform's channel as its comment
@@ -1845,7 +1851,9 @@ README says why it is a setting and not a rule. The rules:
   `routed` event, and the ticket stays held. The `on_update` pass runs whenever
   the ticket carries a category, whatever the outcome but `not_open`, because
   its writer gave that pass up to the router; a ticket with none has nothing for
-  it to react to, and its hold ends in phase one. Phase three ends it; then
+  it to react to, and its hold ends in phase one — as does one whose category
+  the window's end set aside (`categoryStanding`), which owes the pass its
+  writer gave up nothing either, nor the policy. Phase three ends it; then
   `afterRoutingChanged` with whether phase one, or a write the router passed
   since, moved the group or changed the category, then assignment and the held
   reply. Rules before assignment, as in the creation pass: the other way round
@@ -1924,6 +1932,51 @@ README says why it is a setting and not a rule. The rules:
   caller the job took over may only have stalled, and on waking asks the claim
   alone — so no rule runs, nobody is assigned and no reply goes, where finishing
   from the stored row ran a category's rules on a deleted ticket.
+- **On a comment thread a reply opened, Jev's category waits for the root**
+  (`categoryStanding` in `lib/routing/decide.ts`, read under the ticket's lock
+  by `categorySource`, and asked of comment tickets alone: nothing but
+  adoption makes a requester somebody other than the author of what Jev read,
+  since a contact merge moves both, so every other ticket's decision reads
+  nothing more for it). Meta delivers a thread in no order, so a passer-by's
+  reply can open the ticket under the passer-by, and the customer's comment,
+  arriving later, makes its author the requester (`adoptRootAuthor`); Jev
+  answers in seconds and a decision is made once, so routing on the reply's
+  words sent the customer's ticket to whichever team a stranger's words named.
+  Before the window's end, a decision that would read a category Jev wrote
+  answers `waiting` — the row moves to `holding` and nothing else is written —
+  while the routing row's message is a reply comment and no root comment is
+  stored, or while every answer of Jev's that chose the category was about
+  somebody who is not the requester now. Which message an answer was about is
+  read off its event's `messageId` and off the live `applied` run, because an
+  answer agreeing with the category the ticket carries writes no event. To the
+  category's writer `waiting` is the router's pass still to come
+  (`routerDecidedOn`), so it runs none of its own. The window's end is
+  `settle_routing`, or any call once `window_ends_at` has passed, so the next
+  call after a job that went `dead` or ran late decides rather than waits;
+  with no call at all the row stays undecided and the hold's grace lets the
+  ticket go, as for any stuck job. At the window's end a reply
+  whose root never came — one under the Page's own comment, which ingest never
+  stores — routes as any ticket does, and a category read off somebody who is
+  not the requester is set aside: `fallback`, the ticket stays in its group, no
+  pass and no policy for it, the `routed` event naming it under `setAside`, and
+  the label left on the ticket for a person or the customer's own next answer
+  to replace — or, agreeing with it, to make hers, when the policy then looks
+  at it (`afterCategoryConfirmed`). A category a person, a rule or a form wrote is never held back by
+  this: it routes whenever the router next decides, as it always has. What it
+  costs is the window's length before a ticket a reply opened is assigned; a
+  root arriving after the window's end only relabels; the console's Category
+  field saves on change, so an agent agreeing with the category shown says so
+  by moving or taking the ticket, which ends the hold as `manual`; while the
+  ticket waits another writer's `on_update` pass meets a rule keyed
+  on the replier's category as on any held ticket (no active rule is keyed on
+  the category, 2026-11-06); a hold a person or a rule ended without moving
+  the ticket — the console's assignee case, an agent's reply, an
+  `assign_agent` rule — while the words were still the replier's leaves his
+  category on the policy chosen before it, until a move or the next writer
+  re-chooses it (no active policy is keyed on the category either,
+  2026-11-06); and the decision's
+  recorded probability is the last write's, the replier's when the customer's
+  answer agreed with it.
 - **The creation pass is `on_create` rules, `applySlaOnCreate`, then
   `beginRouting`, and it stops on `routed`.** After the rules, so a rule gets
   the first word: its stamp has ended the hold, or its `set_category` is routed
@@ -1945,10 +1998,36 @@ README says why it is a setting and not a rule. The rules:
   would be a second update pass assigning before the router's. Undecided shadow:
   the would-be decision recorded once begun, then the relabel. Anything else:
   the relabel. When `routeNow` answers anything but `decided`, the relabel is
-  owed unless `routerDecidedOn` says a router's pass reads the write, as the
-  console's edit asks, or the router found the ticket `not_open`
-  (`decidedNotOpen`, where Jev parts from the console: Jev never files a
-  resolved ticket).
+  owed only when a rule ended the hold in that moment, whose pass may have
+  read the ticket before the write (`relabelOwed`): not when `routerDecidedOn`
+  says a router's pass reads the write, as the console's edit asks; not when
+  the router found the ticket `not_open`, where Jev parts from the console,
+  since Jev never files a resolved ticket; and not when a person ended it,
+  whose ending owes the write a pass already (below), so a relabel ran every
+  rule keyed on the category twice. `waiting` is a router's pass still to
+  come, so no relabel either. If a person or a rule then ends the hold first,
+  what Jev's write handed the router is owed where the window's end would have
+  routed on it — Jev's reading of the requester's own words, which off a
+  comment thread is every reading of Jev's, never a passer-by's, which it
+  would set aside — and only for a write the end came after, by the stamps
+  both take under the ticket's lock: a write after it is a relabel of its own
+  (`jevCategoryOwed`, read once, in `heldFollowUp`). `afterHoldEnded` then
+  chooses the policy, and runs the `on_update` pass for an agent's reply, the
+  one ending that runs no pass of its own (`runOwedPass`); the console's edits
+  and Hand to run theirs after their end of the hold, which reads the
+  category. A failure in that read is logged and owes nothing, in its own
+  guard, so the reply's send is still queued and the held reply and a rule's
+  kept pick still go. And a confident answer naming the category the ticket
+  already carries writes nothing, but on a live `holding` row it routes the
+  ticket all the same (`afterCategoryConfirmed`): the customer's root agreeing
+  with what the replier's reply was read as is the one ticket it reaches. On
+  a ticket whose window's end set that reading aside, her first such answer
+  gives the policy its look (`setAsideCategoryAgreed`), as a write would
+  have, while nothing — a move, a category write, a re-selection — has
+  re-chosen the policy since: everywhere else the category had its look, or
+  is the cost above, and a second look owed for nothing takes up a priority
+  changed meanwhile; no pass, since the customer's message already ran one
+  with the category on the ticket.
 - **What a hold kept back is owed by state, not by one caller.** Whatever ends a
   live hold — the router, `settle_routing` whatever it decides but `not_open`,
   which assigns and sends nothing (`routeNow` answers `none` for it), a caller
@@ -2078,10 +2157,17 @@ level, not an evidence grade, and one ticket in the archive had a priority set
 by hand. What it may not do is overrule anybody: `lib/priority-ai/decide.ts` is
 the only place that decides whether an answer may be written, and its rules are
 tests. A priority set by a person, a rule, a form default or an agent opening
-the ticket is never touched; only the answer to the customer's opening message
-may lower a ticket, and later ones only raise; and every answer, applied or not,
+the ticket is never touched; only the answer to the requester's opening message
+may lower a ticket, and later ones only raise — the requester's as they are now,
+so a message somebody else wrote is never the opening and its run never judged
+it, on every channel (a passer-by's reply that opened a comment thread before
+its root, a colleague copied on an email), and the job asks `skipReason` again
+under its row lock with the requester and the message's author read there; and
+every answer, applied or not,
 is a row in `ai_priority_runs` with its full distribution, because those rows
-are the only labels priority has. A new writer of `conversations.priority`
+are the only labels priority has — but for one that look under the lock finds
+to be about somebody else's message, which is thrown away unrecorded, as the
+same skip before the call would have. A new writer of `conversations.priority`
 writes the column and its `priority_changed` event in one transaction, stamps
 the event with `CHANGE_STAMP` (`lib/tickets/change-stamp.ts`) so events sort in
 the order the column was written, and calls `onPriorityChanged` after it commits
@@ -2105,7 +2191,12 @@ both (**Routing by category**). What it may not do is decided in
 `lib/category-ai/decide.ts`, whose rules are tests. It asks about the first five
 customer messages on a ticket nobody has answered; the earliest message with a
 confident answer settles the ticket, and the rest are
-recorded `after_settle` without a call; `unknown` never settles however sure;
+recorded `after_settle` without a call — messages of the requester's as they
+are now, so a run on one somebody else wrote neither settles the ticket nor
+takes one of the five (a passer-by's reply that opened a comment thread before
+its root), and the job asks `skipReason` again before it records an outcome
+known without asking and under its row lock, reading the message's author with
+the requester each time, since a contact merge moves both; `unknown` never settles however sure;
 and a category a person, a rule, a form's default or an agent opening the ticket
 chose is owned and never touched, read off the `category_changed` events and the
 column together, under the ticket's row lock once the call is over (before it,
@@ -2120,13 +2211,19 @@ backfill writes under a label of its own (`backfill_category_ai mode=record`),
 judging each message as of when it arrived; its `apply` mode files open tickets
 from a record label's answers and fires nothing — the one category writer that
 owes no follow-up, through `fileBacklogCategory`, which `routing-result` lets
-only the backfill call. The question
+only the backfill call. It files only a requester's answer, asked again under
+the ticket's lock with the message's author, since a root can take the ticket
+between the candidates' read and the filing. The question
 offers the active categories by English label and description, with `unknown`
 added in code, and its fingerprint covers both, so an edit on `/admin/categories`
 is a new question no report averages with the old. `/reports/category-ai` grades
 one label, question and mode at a time, and its rules are
 `lib/category-ai/grade.ts`'s tests: one settling answer per ticket, in the order
-the live job judges messages; ground truth only a person's `category_changed`
+the live job judges messages and over the messages it counts, a passer-by's
+left out of the settle, the cap and Filed by Jev — unless the customer's own
+answer agreed with the filing it made, which wrote nothing and so stands on his
+— and a ticket judged on nothing else out of play unless the customer's own row
+says why; ground truth only a person's `category_changed`
 given before Jev, a rule or a form wrote the category, since agreeing with a
 write leaves no event and every label after one is a disagreement — so a ticket
 written to first is in no rate read off labels, and in `apply`, where every settle is Jev's

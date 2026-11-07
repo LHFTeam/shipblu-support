@@ -189,7 +189,7 @@ export default async function CategoryAiReportPage({
         report.total.judged === 0 ? (
           <EmptyState
             title="Nothing in this run was judged"
-            hint="Every ticket in it was owned by a person, a rule or a form before Jev was asked, settled outside this run — under another version of the question, in the other mode or by a backfill's filing — past the cap, or every call failed."
+            hint="Every ticket in it was owned by a person, a rule or a form before Jev was asked, settled outside this run — under another version of the question, in the other mode or by a backfill's filing — past the cap, or every call failed; or Jev was asked only about a passer-by's reply that opened a comment thread, and the customer's own comment gave it nothing to ask about or was passed over because his answer had settled the ticket."
           />
         ) : (
           <>
@@ -422,7 +422,7 @@ export default async function CategoryAiReportPage({
             {report.filed.length > 0 ? (
               <Section
                 title="Filed by Jev"
-                hint="Tickets Jev wrote a category to in answer to this run's messages, and how many a person has changed since. A person who agrees changes nothing, so a ticket nobody changed may simply be one nobody looked at."
+                hint="Tickets Jev wrote a category to in answer to this run's messages from the requester, and how many a person has changed since. A person who agrees changes nothing, so a ticket nobody changed may simply be one nobody looked at. A category read off a passer-by's reply that opened a comment thread is in no figure here, unless the customer's own answer agreed with it."
               >
                 <Table head={['Category', 'Filed', 'Changed by a person', 'Changed to']}>
                   {report.filed.map((row) => (
@@ -489,8 +489,10 @@ export default async function CategoryAiReportPage({
               or a form before Jev was asked; {report.outOfPlay.settled_elsewhere} settled outside
               this run, under another version of the question, in the other mode or by a
               backfill&rsquo;s filing; {report.outOfPlay.capped} capped; {report.outOfPlay.failed}{' '}
-              whose every call failed. In no rate read off labels: {report.writtenFirst} judged
-              ticket
+              whose every call failed; {report.outOfPlay.not_the_requesters} judged only on a
+              passer-by&rsquo;s reply that opened a comment thread before the customer&rsquo;s own
+              comment, which gave Jev nothing to ask about or was passed over because his answer had
+              settled the ticket. In no rate read off labels: {report.writtenFirst} judged ticket
               {report.writtenFirst === 1 ? '' : 's'} written to by Jev, a rule or a form before
               anybody labelled {report.writtenFirst === 1 ? 'it' : 'them'},{' '}
               {report.labelledAfterWrite} labelled since &mdash; agreeing with what was written

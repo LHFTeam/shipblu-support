@@ -640,8 +640,16 @@ type FoundConversation = {
  * here, and the out-of-hours acknowledgement still answers by who the
  * requester is. A root Meta sent without an author makes its placeholder the
  * requester, as it does when that root opens the ticket itself. What was done
- * under the replier stays done — the priority the classifier read off their
- * words, like the acknowledgement `answersRequester` describes.
+ * under the replier stays done — the acknowledgement `answersRequester`
+ * describes, and a priority or category Jev read off their words, which no
+ * second writer outside the classifiers undoes — but none of it counts as the
+ * customer's from here on. Neither classifier counts a run on a message by
+ * somebody who is not the requester now as having judged or settled the
+ * ticket, and each asks again who the requester is under its own lock on this
+ * row, so the root's own answer may lower the priority and settles the
+ * category. And the router does not decide on Jev's reading of a reply whose
+ * root may still come, nor, at the window's end, on one read off somebody who
+ * is no longer the requester (`categoryStanding`, `lib/routing/decide.ts`).
  */
 async function adoptRootAuthor(
   tx: typeof db,

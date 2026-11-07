@@ -2019,6 +2019,22 @@ https://merchant-web-production.onrender.com`. The new merchant app's
   channel's mode back to `default_group`, which holds no new ticket and lets
   held ones settle in their window.
 
+  **Before the Facebook Page and Instagram rows leave `default_group`**, read
+  this: no `facebook_comment` or `instagram_comment` row exists, so comment
+  tickets route by those two rows (read 2026-11-06: both `default_group`, Web
+  Chat the only `category` row, 0 `routing_decisions`). A passer-by's reply
+  stored before the customer's comment opens the ticket under the passer-by
+  until the comment arrives and takes it (`adoptRootAuthor`, #417). Until the
+  change that added `categoryStanding` (2026-11-06, `lib/routing/decide.ts`)
+  the router decided within seconds on Jev's reading of the reply, and the
+  classifiers kept counting the replier's runs; now the router waits for the
+  root until the window's end and sets a category read off a non-requester
+  aside, and neither classifier counts a non-requester's run. A reply whose
+  root never comes — one under the Page's own comment, which ingest never
+  stores — is assigned up to the window's length later than a ticket its root
+  opened; 1 of 63 comment tickets was opened by a reply (read 2026-11-06), and
+  0 by a reply whose root then arrived (0 `requester_changed` events ever).
+
 ### 5.2 Live-provider verification
 
 Everything below passes unit tests. Each is a round trip, or the half of one

@@ -541,6 +541,29 @@ describe('applyCategoryRun', () => {
     expect(await eventsOf(t.id, 'sla_recalculated')).toEqual([]);
   });
 
+  // A passer-by's reply recorded while it held a comment thread, then the
+  // customer's comment taking the ticket: dated after his reply (Meta sent no
+  // created_time), it is still the settle the ticket is filed from.
+  it('files from the requester’s own earliest answer, not a passer-by’s', async () => {
+    answersInTurn('sales', 'customer_support');
+    const bob = await ticket();
+    await inbound(bob, 'بكام الشحن؟', at(20));
+    await record();
+    const [amira] = await db
+      .insert(contacts)
+      .values({ name: 'Amira' })
+      .returning({ id: contacts.id });
+    await db
+      .update(conversations)
+      .set({ requesterContactId: amira!.id })
+      .where(eq(conversations.id, bob.id));
+    await inbound({ id: bob.id, requester: amira!.id }, 'فين الشحنة بتاعتي؟', at(10));
+    await record();
+
+    expect(await apply()).toMatchObject({ status: 'ran', candidates: 1, applied: 1 });
+    expect((await carried(bob.id)).categoryId).toBe(await categoryId('customer_support'));
+  });
+
   it('leaves a ticket that is resolved, owned, filed by Jev or out of every queue', async () => {
     answersInTurn('sales');
     const tickets = {
@@ -641,6 +664,48 @@ describe('applyCategoryRun', () => {
 
     await expect(applying).resolves.toMatchObject({ status: 'ran', candidates: 1, applied: 1 });
     expect((await carried(t.id)).categoryId).toBe(await categoryId('sales'));
+  });
+
+  // The candidates are read once, with no lock, and a large label is filed
+  // for minutes after: the customer's comment can arrive in between and take
+  // the ticket from the passer-by whose reply was the candidate
+  // (`adoptRootAuthor`). The filing asks again under the ticket's lock, as the
+  // live job does, or a stranger's words go onto the customer's ticket.
+  it('leaves a passer-by’s answer when the root takes the ticket while the filing waits for it', async () => {
+    answersInTurn('sales');
+    const replied = await ticket();
+    await inbound(replied, 'بكام الشحن؟', at(10));
+    await record();
+    const [amira] = await db
+      .insert(contacts)
+      .values({ name: 'Amira' })
+      .returning({ id: contacts.id });
+
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    let adopted!: () => void;
+    const holding = new Promise<void>((resolve) => (adopted = resolve));
+    const adoption = db.transaction(async (tx) => {
+      await tx
+        .update(conversations)
+        .set({ requesterContactId: amira!.id })
+        .where(eq(conversations.id, replied.id));
+      adopted();
+      await held;
+    });
+    await holding;
+
+    const applying = apply();
+    await untilWaitingOnALock(db);
+    release();
+    await adoption;
+
+    const result = await applying;
+    expect(result).toMatchObject({ status: 'ran', candidates: 1, applied: 0 });
+    expect(result.status === 'ran' && Object.fromEntries(result.left)).toEqual({
+      "not the requester's": 1,
+    });
+    expect((await carried(replied.id)).categoryId).toBeNull();
   });
 
   it('writes nothing in a dry run', async () => {

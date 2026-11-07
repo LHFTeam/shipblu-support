@@ -1,7 +1,11 @@
 import { and, asc, eq, ne } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { conversations, messages, routingDecisions } from '@/db/schema';
+import { logger } from '@/lib/log';
 import { notReaction } from '@/lib/tickets/not-reaction';
+import { jevCategoryOwed } from './category-source';
+
+const log = logger('routing');
 
 type Strategy = NonNullable<(typeof routingDecisions.$inferSelect)['heldStrategy']>;
 
@@ -92,8 +96,24 @@ export async function recordHeldAssignment(
 
 /**
  * What a hold that has ended still owes, off its routing row: the message the
- * held reply answers, and the rule's pick if one was kept. Null for a ticket
- * that never routed.
+ * held reply answers, the rule's pick if one was kept, and whether the
+ * category is still owed what the router would have given it — the SLA
+ * policy's look and, after an ending that ran no pass, the `on_update` rules.
+ * Null for a ticket that never routed.
+ *
+ * The category is owed when a person or a rule ended the hold (`manual`,
+ * `rule`) after Jev wrote it, as its reading of the requester's own words
+ * (`jevCategoryOwed`). Jev's write on a held ticket hands its follow-up to the
+ * router, and the router runs the rules and chooses the policy as it decides
+ * (`finish`); `endHold` decides without reading the category and does
+ * neither. That was a gap of milliseconds while Jev's answer routed the
+ * ticket at once, and is the whole routing window since the router waits for
+ * a comment thread's root (`categoryStanding`): an agent taking the ticket in
+ * that time left it on the policy chosen before anything had read it. A
+ * category Jev read off a passer-by is not owed it, since the window's end
+ * would have set it aside; nor one a person or a rule wrote, whose write chose
+ * the policy itself through `afterRoutingChanged`; nor the router's own
+ * decision, which did.
  *
  * The message is the one the hold kept from being acknowledged, which is the
  * one that opened the ticket only while its author is still the requester. A
@@ -112,8 +132,9 @@ export async function heldFollowUp(conversationId: string): Promise<{
   messageId: string | null;
   strategy: Strategy | null;
   actorLabel: string | null;
+  categoryOwed: boolean;
 } | null> {
-  const [row] = await db
+  const [found] = await db
     .select({
       messageId: routingDecisions.messageId,
       strategy: routingDecisions.heldStrategy,
@@ -125,9 +146,18 @@ export async function heldFollowUp(conversationId: string): Promise<{
     .innerJoin(conversations, eq(conversations.id, routingDecisions.conversationId))
     .leftJoin(messages, eq(messages.id, routingDecisions.messageId))
     .where(eq(routingDecisions.conversationId, conversationId));
-  if (!row) return null;
+  if (!found) return null;
 
-  const { requesterContactId, openedBy, ...held } = row;
+  // Apart from the rest, so a statement lost in its reads owes the category
+  // nothing and leaves the held reply and a rule's kept pick their due.
+  let categoryOwed = false;
+  try {
+    categoryOwed = await jevCategoryOwed(conversationId);
+  } catch (error) {
+    log.error(`could not read what ${conversationId}'s category was owed`, error);
+  }
+  const { requesterContactId, openedBy, ...rest } = found;
+  const held = { ...rest, categoryOwed };
   if (held.messageId && openedBy === requesterContactId) return held;
 
   const [first] = await db

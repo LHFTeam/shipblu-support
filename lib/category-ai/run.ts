@@ -1,4 +1,4 @@
-import { and, asc, count, eq, inArray, isNotNull, ne, sql } from 'drizzle-orm';
+import { and, asc, count, eq, inArray, isNotNull, ne, not, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import {
   CATEGORY_AI_LIVE_LABEL,
@@ -12,8 +12,10 @@ import {
 import { holdCategory, setConversationCategoryOn } from '@/lib/categories/write';
 import { earlierMessages } from '@/lib/subcategorise-ai/context';
 import { errorMessage } from '@/lib/errors';
+import { canonicalUuid } from '@/lib/http/uuid';
 import { logger } from '@/lib/log';
 import { routeNow } from '@/lib/routing/apply';
+import { setAsideCategoryAgreed } from '@/lib/routing/category-source';
 import {
   deferToRouter,
   routerDecidedOn,
@@ -22,7 +24,7 @@ import {
 } from '@/lib/routing/state';
 import { afterRoutingChanged } from '@/lib/sla';
 import { isCommentTicket } from '@/lib/tickets/channel-policy';
-import { skipReason } from '@/lib/tickets/classifiable';
+import { skipReason, writtenByAnotherSql } from '@/lib/tickets/classifiable';
 import { lockedStatusCategory, statusCategoryOf } from '@/lib/tickets/status-category';
 import { afterTicketUpdate } from '@/lib/tickets/lifecycle';
 import { CHANGE_STAMP } from '@/lib/tickets/change-stamp';
@@ -47,6 +49,7 @@ import {
   categorySkipReason,
   classifiableColumns,
   insertRun,
+  messageByAnotherThan,
   queueRefusal,
   recordFailure,
   type Executor,
@@ -101,7 +104,7 @@ export async function classifyMessageCategory(
 
   if (!row) return { status: 'gone' };
 
-  const skip = skipReason(row) ?? categorySkipReason(row);
+  const skip = skipAgainst(row, row.requesterContactId);
   if (skip) return { status: 'skipped', reason: skip };
 
   // A redelivered job — the worker died after committing — finds its own row
@@ -163,11 +166,49 @@ export async function classifyMessageCategory(
   // apart from them, and a Jev write committing in between reads as a column
   // somebody else moved — final, and wrong. The look under the lock after the
   // call reads both halves in one place.
+  //
+  // Only the requester's messages settle a ticket or count towards its cap
+  // (`ticketFacts`), so the one thing that undoes either is the requester
+  // changing: a comment thread's root arriving after a reply under it opened
+  // the ticket (`adoptRootAuthor`). That makes the replier's messages a
+  // passer-by's, and when this message is one of them there is nothing to
+  // record for it. So the requester is asked again here, and a root committed
+  // before that look ends the job as a skip does, with no row. One committing
+  // in the moment between that look and the insert can still leave an
+  // outcome-only row for the replier's message: it carries no answer, and the
+  // settle, the cap and the report all pass it over (`messageByAnotherThan`),
+  // so no figure moves for it — closing it would take the lock for every
+  // outcome known without asking.
+  //
+  // The author and the requester come from one statement (`authorship`), so a
+  // contact merge — which moves the ticket's requester and the customer's
+  // messages to the record it keeps, in one transaction — is read on both
+  // sides or on neither. Compared with the author the first read found, a
+  // merge committing in between made the customer's own message read as
+  // somebody else's.
   const current = await readTicket(db, row.conversationId, false);
   if (!current) return { status: 'gone' };
   const leftBefore = queueRefusal(current);
   if (leftBefore) return { status: 'skipped', reason: leftBefore };
-  const known = await ticketFacts(db, row.conversationId, current, at, mode);
+  const wrote = await authorship(db, messageId);
+  if (!wrote) return { status: 'gone' };
+  const notTheirsBefore = skipAgainst(
+    { ...row, authorContactId: wrote.authorContactId },
+    wrote.requesterContactId,
+  );
+  if (notTheirsBefore) return { status: 'skipped', reason: notTheirsBefore };
+  // Judged against the requester `authorship` read, which the author was
+  // compared with: `current`'s can be the record a merge since has replaced,
+  // whose messages are then nobody's, and the settle and the cap would pass
+  // them all over and pay for an answer the look under the lock records as
+  // settled anyway.
+  const known = await ticketFacts(
+    db,
+    row.conversationId,
+    { ...current, requesterContactId: wrote.requesterContactId },
+    at,
+    mode,
+  );
   const before = preCallOutcome({ ...known, owned: known.ownedByEvent });
   if (before) {
     const inserted = await insertRun(db, {
@@ -230,6 +271,30 @@ export async function classifyMessageCategory(
     // is owed.
     const left = queueRefusal(ticket);
     if (left) return { kind: 'left' as const, reason: left };
+
+    // The requester as the lock reads it. Every look before this one read the
+    // ticket outside it, so a root comment whose ingest made its author the
+    // requester (`adoptRootAuthor`) and committed while Jev was asked — or
+    // while this waited for the lock that ingest held — leaves a passer-by's
+    // message here, read as the customer's a moment ago. Written, his answer
+    // would file her ticket on his words; recorded, it would be a row for a
+    // message the job no longer asks about. A skip records nothing.
+    //
+    // The author is read again too, once the lock is held, for the merge's
+    // sake (above): a merge that committed before the lock moved both, and one
+    // still to come waits on this lock for the ticket's half of its write.
+    // Not a join in the locked read, whose recheck after waiting on the lock
+    // re-reads the ticket's row alone.
+    const [message] = await tx
+      .select({ authorContactId: messages.authorContactId })
+      .from(messages)
+      .where(eq(messages.id, messageId));
+    if (!message) return null;
+    const notTheirs = skipAgainst(
+      { ...row, authorContactId: message.authorContactId },
+      ticket.requesterContactId,
+    );
+    if (notTheirs) return { kind: 'left' as const, reason: notTheirs };
 
     // The switch as it is now, not as it was before the call: an admin who
     // turns the classifier off because of what it filed stops this write too.
@@ -316,9 +381,54 @@ export async function classifyMessageCategory(
       probability: prediction.probability,
     });
     await afterCategoryApplied(row.conversationId, decided.routing ?? null);
+  } else if (decided.write?.outcome === 'unchanged') {
+    await afterCategoryConfirmed(row.conversationId, messageId, decided.routing ?? null);
   }
 
   return { status: 'recorded', outcome: decided.outcome, predicted };
+}
+
+/**
+ * A confident answer naming the category the ticket already carries, which
+ * writes no event (`setConversationCategoryOn` writes nothing on an unchanged
+ * value), and is owed something only on a comment thread a passer-by's reply
+ * opened, where Jev's reading of the reply put the category there and the
+ * customer's own comment, answered the same, makes it the requester's:
+ *
+ * - **Held** — routed now, as a write would have been: the router waited for
+ *   the thread's root (`categoryStanding`), and the answer's run makes the
+ *   category hers (`requesterChose`), so it routes on it — at once here, where
+ *   without this the ticket stayed held, unassigned and unanswered until the
+ *   window's end. Not while `pending`, which the creation pass's
+ *   `beginRouting` routes, nor on a decision in flight, which nothing written
+ *   here re-arms. In shadow too, so the would-be decision is recorded when
+ *   the live one would have been made.
+ * - **Decided** — the SLA policy's look, on her first answer for a category
+ *   the window's end set aside, which chose no policy for it, while nothing
+ *   has re-chosen the policy since (`setAsideCategoryAgreed`). Her answer agreeing is the category becoming
+ *   hers, and owes the look a changed write would have had; otherwise an
+ *   agreeing answer was treated worse than a disagreeing one. Nowhere else:
+ *   the category had its look already, and a second one owed for nothing
+ *   takes up a priority her opening lowered as though the category had
+ *   changed. No pass: the rules keyed on the category already ran on her
+ *   message's own update pass, with the category on the ticket
+ *   (`afterInboundMessage`).
+ */
+async function afterCategoryConfirmed(
+  conversationId: string,
+  messageId: string,
+  routing: UndecidedRouting | 'deferred' | null,
+): Promise<void> {
+  if (routing === 'deferred') return;
+  if (routing) {
+    if (routing.stage === 'holding' && !routing.decisionInFlight) {
+      await routeNow(conversationId, { label: CATEGORY_AI_ACTOR });
+    }
+    return;
+  }
+  if (await setAsideCategoryAgreed(conversationId, messageId)) {
+    await afterRoutingChanged(conversationId, { category: true, group: false });
+  }
 }
 
 /**
@@ -342,9 +452,15 @@ export async function classifyMessageCategory(
  *   router's lock — `none`, `in_flight` — or this call `failed` and the
  *   window's job is still to come, whether that decision reads this write says
  *   what is owed (`routerDecidedOn`, the console's question too): a router's
- *   does, and nothing is; a person's or a rule's does not, and this is a
- *   relabel after all. Nor after a router that found the ticket in nobody's
- *   queue, where Jev's answer parts from the console's (`decidedNotOpen`).
+ *   does, and nothing is. A person's does not, but their end of the hold owes
+ *   this write what the router would have given it (`afterHoldEnded`): every
+ *   such ending runs a pass after its commit, which reads this category, or,
+ *   an agent's reply, the one this write handed the router, and chooses the
+ *   policy for it — so a relabel here would be the same rules a second time.
+ *   A rule's does not, and this is a relabel after all: its pass may have
+ *   read the ticket before this write. Nor after a router that found the
+ *   ticket in nobody's queue, where Jev's answer parts from the console's
+ *   (`relabelOwed`).
  * - **Undecided shadow** — the rest as though routing did not exist, after
  *   recording the would-be decision once the creation pass has begun routing
  *   (`holding`); while it is `pending`, `beginRouting` records it after the
@@ -372,7 +488,7 @@ async function afterCategoryApplied(
     if (routing.stage === 'pending') return;
     const routed = await routeNow(conversationId, { label: CATEGORY_AI_ACTOR });
     if (routed === 'decided' || (await routerDecidedOn(conversationId))) return;
-    if (await decidedNotOpen(conversationId)) return;
+    if (!(await relabelOwed(conversationId))) return;
   } else if (routing?.stage === 'holding') {
     await routeNow(conversationId, { label: CATEGORY_AI_ACTOR });
   }
@@ -381,26 +497,34 @@ async function afterCategoryApplied(
 }
 
 /**
- * Whether the ticket this write found held was then decided `not_open` —
- * resolved, deleted, merged or marked spam in the moment between this write's
- * commit and the router's lock, which finds it in nobody's queue and owes it
- * nothing — or is gone, purged with its routing row in that moment. The one
- * answer where Jev's question parts from the console's (`routerDecidedOn`): a
- * person's edit on a ticket resolved in its window meets its rules as an edit
- * on any resolved ticket does, but Jev never files a resolved ticket, and a
- * relabel here would be a first pass on work that ended after Jev looked.
+ * Whether a held ticket's write is a relabel after all, once the router has
+ * said it did not decide on it (`routerDecidedOn`): only when a rule ended the
+ * hold in the moment between this write's commit and the router's lock.
+ *
+ * Not when a person did (`manual`): their end of the hold came after this
+ * write, and owes it what the router would have given it — a pass of their
+ * own after its commit, which reads this category, or the one it handed the
+ * router, and the policy (`afterHoldEnded`). Run here as well, every rule
+ * keyed on it fired twice. Not `not_open` — resolved, deleted, merged or
+ * marked spam in that moment, which the router finds in nobody's queue and
+ * owes nothing — nor a ticket gone, purged with its routing row: the answer
+ * where Jev's question parts from the console's, since a person's edit on a
+ * ticket resolved in its window meets its rules as an edit on any resolved
+ * ticket does, but Jev never files a resolved ticket, and a relabel here would
+ * be a first pass on work that ended after Jev looked.
  */
-async function decidedNotOpen(conversationId: string): Promise<boolean> {
+async function relabelOwed(conversationId: string): Promise<boolean> {
   const [row] = await db
     .select({ outcome: routingDecisions.outcome })
     .from(routingDecisions)
     .where(eq(routingDecisions.conversationId, conversationId));
-  return !row || row.outcome === 'not_open';
+  return row?.outcome === 'rule';
 }
 
 type TicketState = {
   categoryId: string | null;
   categoryKey: string | null;
+  requesterContactId: string | null;
   firstRespondedAt: Date | null;
   deletedAt: Date | null;
   isSpam: boolean;
@@ -409,9 +533,44 @@ type TicketState = {
 };
 
 /**
- * The ticket's category and whether anybody has answered it, and the key of
- * the category it carries; null when the ticket is gone. Locked when the
- * answer is about to be acted on.
+ * Why the message is not one Jev is asked about, with the ticket's requester as
+ * `requesterContactId` — the message's own read of it first, and then each
+ * later read's, since the requester can move under a job
+ * (`adoptRootAuthor`). The one statement of the skip, so the three looks ask
+ * the same question.
+ */
+function skipAgainst(
+  row: Parameters<typeof skipReason>[0] & Parameters<typeof categorySkipReason>[0],
+  requesterContactId: string | null,
+): string | null {
+  return skipReason({ ...row, requesterContactId }) ?? categorySkipReason(row);
+}
+
+/**
+ * Who wrote the message, and who its ticket's requester is, read in one
+ * statement so that both are as one moment left them; null when either is gone.
+ */
+async function authorship(
+  executor: Executor,
+  messageId: string,
+): Promise<{ authorContactId: string | null; requesterContactId: string | null } | null> {
+  const [found] = await executor
+    .select({
+      authorContactId: messages.authorContactId,
+      requesterContactId: conversations.requesterContactId,
+    })
+    .from(messages)
+    .innerJoin(conversations, eq(conversations.id, messages.conversationId))
+    .where(eq(messages.id, messageId));
+  return found ?? null;
+}
+
+/**
+ * The ticket's category and whether anybody has answered it, the key of the
+ * category it carries, and who its requester is now; null when the ticket is
+ * gone. Locked when the answer is about to be acted on, and then the requester
+ * is the one the job asks about the message again (`skipAgainst`) and judges
+ * the settle and the cap by (`ticketFacts`).
  * The status through `statusCategoryOf`, never a join: a writer moving the
  * ticket to another status while this waits for the lock would otherwise
  * make the ticket read as gone, and the job go to `dead`.
@@ -424,6 +583,7 @@ async function readTicket(
   const query = executor
     .select({
       categoryId: conversations.categoryId,
+      requesterContactId: conversations.requesterContactId,
       firstRespondedAt: conversations.firstRespondedAt,
       deletedAt: conversations.deletedAt,
       isSpam: conversations.isSpam,
@@ -462,6 +622,23 @@ async function readTicket(
  * written. "Earlier" is the message's own `created_at`, then its id: WhatsApp
  * stamps a burst to the same second, and the id makes exactly one of them the
  * first.
+ *
+ * Only the requester's own messages settle the ticket or count towards the
+ * cap: a run, or a Jev write, answering a message that somebody other than the
+ * ticket's requester now wrote (`skipReason`'s test, `messageByAnotherThan`)
+ * is passed over. On a comment thread that is a passer-by whose reply, stored
+ * before the customer's comment, opened the ticket under him and was asked
+ * about as the requester's; the comment, when it arrived, made its author the
+ * requester (`adoptRootAuthor`). The earliest message settling the ticket
+ * already hands the settle to her comment when it is dated first and answered
+ * confidently. Otherwise his answer, counted, keeps her own words from
+ * settling her ticket — a root Meta sent without `created_time` is dated when
+ * it was processed, after his reply; her answer was not confident; her comment
+ * had no words to ask about — and five of his cap her before she is asked
+ * once. A run or a write whose message was deleted since still counts, as it
+ * did: nothing says whose it was. The requester is the caller's read of the
+ * ticket — under the lock, the locked one, so a root that committed while the
+ * job waited is the one judged by.
  */
 async function ticketFacts(
   executor: Executor,
@@ -487,16 +664,27 @@ async function ticketFacts(
 
   const owned = categoryOwned(events, ticket.categoryId);
 
-  const settledByWrite = events.some((event) => {
-    if (event.type !== 'category_changed' || event.actorLabel !== CATEGORY_AI_ACTOR) return false;
+  // The messages Jev's writes answered, for each write on a message before
+  // this one; null for a write that names none.
+  const answeredBefore = events.flatMap((event) => {
+    if (event.type !== 'category_changed' || event.actorLabel !== CATEGORY_AI_ACTOR) return [];
     const data = event.data as Record<string, unknown> | null;
     const writtenAt = typeof data?.messageCreatedAt === 'string' ? data.messageCreatedAt : null;
     const answered = typeof data?.messageId === 'string' ? data.messageId : null;
-    return (
-      writtenAt !== null &&
-      arrivedBefore({ createdAt: new Date(writtenAt), messageId: answered }, at) < 0
-    );
+    if (writtenAt === null) return [];
+    return arrivedBefore({ createdAt: new Date(writtenAt), messageId: answered }, at) < 0
+      ? [canonicalUuid(answered)]
+      : [];
   });
+  const notTheirs = await writtenByAnother(executor, answeredBefore, ticket.requesterContactId);
+  const settledByWrite = answeredBefore.some((answered) => !answered || !notTheirs.has(answered));
+
+  // Runs on the requester's own messages, as above. No requester, and no
+  // message is anybody else's.
+  const theirs =
+    ticket.requesterContactId === null
+      ? undefined
+      : not(messageByAnotherThan(sql`${ticket.requesterContactId}::uuid`));
 
   const [settling] = await executor
     .select({ id: aiCategoryRuns.id })
@@ -511,6 +699,7 @@ async function ticketFacts(
         // tuple decides on the time alone. A deletion tied to the millisecond
         // with the message being asked about is the whole of that edge.
         sql`(${aiCategoryRuns.messageCreatedAt}, ${aiCategoryRuns.messageId}) < (${at.createdAt.toISOString()}::timestamptz, ${at.messageId}::uuid)`,
+        theirs,
       ),
     )
     .limit(1);
@@ -529,6 +718,7 @@ async function ticketFacts(
         isNotNull(aiCategoryRuns.predictedKey),
         ne(aiCategoryRuns.outcome, 'failed'),
         sql`${aiCategoryRuns.messageId} is distinct from ${at.messageId}::uuid`,
+        theirs,
       ),
     );
 
@@ -538,4 +728,31 @@ async function ticketFacts(
     settled: settledByWrite || Boolean(settling),
     capped: ticket.firstRespondedAt !== null || (asked?.value ?? 0) >= CLASSIFIED_MESSAGE_CAP,
   };
+}
+
+/**
+ * Which of `messageIds` somebody other than `requesterContactId` wrote, in one
+ * read: `messageByAnotherThan` for the messages Jev's writes name, which live
+ * in an event's `data` rather than on a row a join could reach. A message
+ * deleted since is not among them, nor one with no author, nor any when the
+ * ticket has no requester — each counts as it did. Ids arrive canonical, or
+ * null for a write naming none, which needs no read.
+ */
+async function writtenByAnother(
+  executor: Executor,
+  messageIds: readonly (string | null)[],
+  requesterContactId: string | null,
+): Promise<ReadonlySet<string>> {
+  const ids = [...new Set(messageIds.filter((id): id is string => id !== null))];
+  if (requesterContactId === null || ids.length === 0) return new Set();
+  const rows = await executor
+    .select({ id: messages.id })
+    .from(messages)
+    .where(
+      and(
+        inArray(messages.id, ids),
+        writtenByAnotherSql(messages.authorContactId, requesterContactId),
+      ),
+    );
+  return new Set(rows.map((row) => row.id));
 }
