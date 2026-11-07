@@ -104,10 +104,12 @@ PROJECT-STATE §2.
   and the new code going live lands on the old columns after they were read, and
   is lost for an article already copied. Not written twice: `view_count` orders a
   shortlist and is never a business metric (`popularArticles`), and a vote's
-  `kb_article_feedback` row is kept regardless. The worker deploys by hand after
-  the web service, and an `import_freshdesk_kb` run on the old worker in between
-  would write its counts only to the old columns, where for an article already
-  copied they never reach `kb_article_stats`. It is a cutover job, run by hand
+  `kb_article_feedback` row is kept regardless. The worker was deployed by hand
+  after the web service — for #475, the web service at 17:58 UTC on 2026-11-06
+  and the worker at 18:56 — and an `import_freshdesk_kb` run on the old worker
+  in between would write its counts only to the old columns, where for an
+  article already copied they never reach `kb_article_stats`. It is a cutover
+  job, run by hand
   and on no schedule: **do not run it until the worker is on this build.**
 - **Left alone:** the three old columns, the `kb_articles` exception in
   `touch_updated_at()` and the `kb-edit-date` rule. During the deploy window

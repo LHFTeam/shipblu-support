@@ -1599,11 +1599,14 @@ preDeploy applied both at 19:43:50 UTC on 2026-10-25.
   beside 1.2, and `447d8be` carried #396 beside 1.3. Before choosing a stage's
   deploy order, read `git log origin/main..origin/dev` and every migration in
   it (deploy rule 7).
-- **Deploys are by hand.** `autoDeploy` is off on every production service.
-  On 2026-10-23 it was `checksPass` on all six from about 13:53 to 18:25 UTC,
-  by Render's `auto_deploy_enabled` and `auto_deploy_disabled` events, and off
-  again before #397 merged. Render's workspace is
-  `tea-da1f2lgjo6nc738hobmg`:
+- **Deploys are not by hand any more.** Every stage above was deployed by hand,
+  web first, while `autoDeploy` was off on every production service. Since
+  2026-11-06 all six deploy themselves once the checks on `main` pass, together
+  and in no chosen order (`docs/PROJECT-STATE.md` §2), so deploy rule 1's
+  order (below) is not one a merge can keep. On 2026-10-23 it had been
+  `checksPass` on all six from about 13:53 to 18:25 UTC, by Render's
+  `auto_deploy_enabled` and `auto_deploy_disabled` events, and off again
+  before #397 merged. Render's workspace is `tea-da1f2lgjo6nc738hobmg`:
 
   | Service                           | Id                         | Runs                                           |
   | --------------------------------- | -------------------------- | ---------------------------------------------- |
@@ -2418,9 +2421,17 @@ before assignment.
 
 ## Deploy rules every stage obeys
 
-No production service deploys itself. Only web runs migrations, as its
-preDeploy (`render.yaml:286-288`). The worker and the four crons each build and
-run their own copy of the code: `shipblu-sla-sweep`, which runs `assign_sweep`;
+Written while no production service deployed itself, and kept as the record of
+how Stages 1 to 6 shipped. Since 2026-11-06 every production service deploys
+once the checks on `main` pass, all six at once (`docs/PROJECT-STATE.md` §2), so
+rule 1's order is not one a merge can keep. Its first half, the migration
+before the worker and the crons, is held by their wait at startup
+(`worker/schema-gate.ts`). The rest — web before the worker, rule 3's argument
+from it, and rule 2's readers before writers — is not, and rule 4 holds as
+written.
+Only web runs migrations, as its preDeploy (`render.yaml:286-288`). The worker
+and the four crons each build and run their own copy of the code:
+`shipblu-sla-sweep`, which runs `assign_sweep`;
 `shipblu-time-automations`; `shipblu-whatsapp-template-sync`; and
 `shipblu-nightly`. Their ids are in [Status and
 handoff](#working-on-this-repo-without-the-outgoing-sessions-context). Seven

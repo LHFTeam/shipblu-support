@@ -236,8 +236,11 @@ one, which is the existing precedent for a handler that writes.
   deploy (4,647 rows expected for the retention clause), and `EXPLAIN` the
   assignment sweep's statement before and after the `group_id` index — 24.1 ms is
   the number to beat.
-- After each deploy, confirm what is actually running: `autoDeploy` is `no` on
-  every Render service, so merging changes nothing until someone deploys.
+- After each deploy, confirm what is actually running: `autoDeploy` was `no` on
+  every Render service, so merging changed nothing until someone deployed.
+  Since 2026-11-06 a merge into `main` deploys itself once its checks pass
+  (`docs/PROJECT-STATE.md` §2), and the check is still owed: a red run on
+  `main` deploys nothing, and a failed deploy leaves the old release serving.
 
 ## Not doing
 

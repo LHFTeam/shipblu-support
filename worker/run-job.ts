@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { closeDb } from '@/db/client';
 import type { ClaimedJob, JobType } from '@/lib/queue';
 import { isPlannedButUnimplemented, resolveHandler } from './handlers';
+import { waitForSchema } from './schema-gate';
 
 /**
  * One-shot job runner, invoked by Render cron jobs as `npm run job -- <type>`.
@@ -87,10 +88,14 @@ async function main() {
     createdAt: new Date(),
   };
 
-  const started = Date.now();
-  console.log(`[job] ${type} starting`);
-
   try {
+    // A cron's build can be live before the web service has migrated, as the
+    // worker's can (schema-gate.ts). A timeout fails the run, which Render shows;
+    // a job run by hand refuses at once rather than waiting (jobWaitPolicy).
+    await waitForSchema('job');
+
+    const started = Date.now();
+    console.log(`[job] ${type} starting`);
     await handler(job);
     console.log(`[job] ${type} ok in ${Date.now() - started}ms`);
   } finally {

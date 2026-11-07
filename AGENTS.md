@@ -196,7 +196,11 @@ and deletes that migration's row, and a later deploy applies the migration
 again only while it is the newest one applied. So its test reads `db/migrations/meta/_journal.json` and fails as soon
 as anything follows that migration, with a sentence saying what to do: the PR
 adding the new migration deletes the runbook and its test, and writes the way
-back from the new state into the stage's plan.
+back from the new state into the stage's plan. Because it deletes that row, it
+puts the worker and the crons back on the build before the migration, with the
+web service: they wait at startup until the database has their own build's
+newest migration (`worker/schema-gate.ts`), and would read the deleted row as
+one not yet applied.
 
 Put logic in `lib/`, not in route files. A page or action authorises, calls into
 `lib/`, and revalidates. A page never imports `db/client`, and neither does a
@@ -2560,8 +2564,18 @@ agent's slice through `AGENT_SLICE`, both built by `sliceWhere` from
 `DIMENSIONS` and a column map the type holds to it (`lib/reports/rollup.ts`),
 never a list of nulls typed out again. A new dimension goes into `DIMENSIONS`
 and that map (it does not compile without both), the key and the CHECK in one
-commit, and deploys web first, because an old reader meeting the new slices
-double-counts until it is replaced. The rollup
+commit, and its web half is live before a rollup writes the new slices, because
+an old reader meeting them double-counts until it is replaced. A merge into
+`main` deploys every service at once, about a quarter of an hour after it
+lands, and the crons wait only for the migration, which the web service's
+preDeploy applies a minute or so before the web service is live
+(`docs/PROJECT-STATE.md` §2). So the 00:00 UTC nightly writes the slices early
+if it fires in that gap, or at any time while a failed web deploy leaves the
+old reader serving, and a `rollup_metrics` run by hand can write them whenever
+it is run. Such a change is therefore not merged in the half hour before 00:00
+UTC, a failed web deploy is rolled back or fixed before the next nightly, and a
+hand-run rollup waits until `list_deploys` shows the web service on the commit.
+The rollup
 asks `reconcileFailure` of a day before it writes it, and writes nothing for a
 day that fails. A category figure follows the ticket's category as it stands
 when its day is rolled up, as the group's does: the nightly recomputes three
@@ -2690,7 +2704,8 @@ in one call.
 
 The constraint is not which tool, it is what you know before you call it. Before
 any **write** — `apply_migration`, write SQL, `update_environment_variables`,
-`trigger_deploy`, a service or database change:
+`trigger_deploy`, merging into `main` (which deploys), a service or database
+change:
 
 - **Read the current state first** and quote it in your reasoning. What is the
   value now, which rows match, what does the service run today.
@@ -2716,10 +2731,15 @@ Develop on a feature branch and open the pull request against **`dev`**, the
 integration branch; **never push to `dev` or `main`**. Commit → push → PR into
 `dev` → merge. `main` is what Render builds — every service in `render.yaml`
 names `branch: main` — so a change merged into `dev` reaches staging and
-production only once `dev` is merged into `main`. Verify the deploy then, not at
-the merge into `dev`, and say in a stage's plan which of the two a step waits
-for. CI runs on every pull request whatever its base, and on a push to `main`;
-a merge into `dev` runs nothing after it, so the pull request's own run is the
+production only once `dev` is merged into `main`. **That merge is the deploy:**
+every production service deploys itself once the checks on `main` pass, all six
+at once, and only the web service's preDeploy migrates, so the worker and the
+crons wait at startup until it has applied their build's migrations
+(`worker/schema-gate.ts`, `docs/PROJECT-STATE.md` §2). Verify the deploy then,
+not at the merge into `dev`, and say in a stage's plan which of the two a step
+waits for. CI runs on every pull request whatever its base, and on a push to
+`main`, and that run is what releases the deploy: red there, nothing deploys. A
+merge into `dev` runs nothing after it, so the pull request's own run is the
 only one a change gets before `main`.
 
 More than one agent session works on this repo at once and they share no
