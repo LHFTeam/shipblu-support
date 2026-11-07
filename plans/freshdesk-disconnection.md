@@ -1,0 +1,479 @@
+# Disconnecting Freshdesk: what still depends on it, and the order to undo it
+
+The question was whether anything in the knowledge base still links to
+Freshworks. **It does: every link is clean, but every image is Freshdesk's.**
+This file records what was measured, what has to land before the Freshdesk
+account is closed, and in what order, because several of the items only work
+one way round: an image copied after the account is gone cannot be copied, and
+a domain pointed here before the legacy redirects work sends every old link to
+a 404.
+
+It covers the knowledge base and what sends a reader from it, or about it, into
+Freshworks. The Meta side of the cutover — Freshchat is still Messenger's
+primary receiver — is §5.1 of `docs/PROJECT-STATE.md` and is not repeated here;
+it is one line in the checklist.
+
+## How it was measured
+
+Read-only, 2026-11-06 and 2026-11-07, against production
+(`nqbcfnvqqyqawmffgiql`, the web service on `f89d7c1`). Four separate sweeps:
+the database, the help centre as a browser receives it (all 114 sitemap URLs
+and every other page type, full navigations only, never `?_rsc=` prefetches),
+the code and seed content, and the widget plus every host the articles link
+to. Each finding was then reproduced by a second, independent check that set
+out to refute it, and a last pass looked for surfaces nobody had covered. Every
+finding below survived. The queries under [Re-running this audit](#re-running-this-audit)
+reproduce the headline numbers in one call.
+
+"Freshworks" meant any Freshworks host (`*.freshdesk.com`, `cdn.freshdesk.com`
+and its S3 bucket, `*.freshworks.com`, `*.myfreshworks.com`, `*.freshchat.com`,
+`fw-cdn.com`, `fwcdn`, `fwusercontent`, Freshservice, Freshsales), Freshdesk's
+path shapes on any host (`/support/solutions/…`, `/a/solutions/articles/…`,
+`/support/home`, `/support/tickets/…`, `/helpdesk/attachments/…`), and
+**`support.shipblu.com`**, which is ShipBlu's name but a CNAME of
+`26fea1969c270a19570d78acb7c4fe5d.freshdesk.com` (TTL 14400) and answers as
+Freshdesk: `/` is `302 → /support/home`.
+
+**A clean `normalise_kb_formatting` run is not evidence that no Freshdesk link
+remains.** `rewriteLegacyArticleLinks` (`lib/kb/format.ts`) recognises one
+shape, `…/solutions/articles/<id>`, and leaves an id it cannot resolve as it
+was. Only a SELECT on the host answers the question.
+
+## What production held
+
+### Blocking: every image in the knowledge base is Freshdesk's
+
+- **214 `<img>` in 61 of the 112 articles** (109 in 30 Arabic, 105 in 31
+  English), and **every one** is
+  `https://s3.amazonaws.com/cdn.freshdesk.com/data/helpdesk/attachments/production/…`.
+  The knowledge base holds no image on any other host. 207 distinct URLs (7 are
+  shared by two articles), 28.8 MiB, 205 PNG and 2 JPEG, uploaded between
+  2024-10 and 2026-01. All 207 answered 200 on 2026-11-07.
+- They load on the help-centre article page
+  (`app/help/[locale]/a/[article]/page.tsx`), in the widget's article panel
+  (`/api/widget/article`, drawn by `app/widget/article.tsx`), and in the
+  console's article view and editor preview. Every one of the 61 articles is
+  public, in a public folder, with no role floor. The four `agents_only`
+  handbook articles hold no image.
+- `packaging-guidelines` and `إرشادات-التعبئة-والتغليف` are images and nothing
+  else (15 each, §7 of `docs/PROJECT-STATE.md`), so those two go blank rather
+  than lose their pictures.
+- **Why they are there:** the importer stores the article HTML Freshdesk gives
+  it (`articleBody(article.description)` in
+  `worker/handlers/import-freshdesk-kb.ts`), and the article sanitiser allows
+  `img src` on any `http`/`https` host (`sanitiseArticleHtml` in
+  `lib/html/sanitize.ts`). Nothing anywhere downloads or re-hosts an image, and
+  the console editor is an HTML source field with no upload, so a screenshot
+  added to a new article has to be hot-linked from somewhere too.
+- `kb_article_versions` holds the same 214 images in 61 rows. Copying the
+  pictures and rewriting only `kb_articles` would let any later Restore put a
+  Freshdesk URL back.
+
+Whether Freshdesk's bucket keeps serving these files after the account is
+closed or downgraded cannot be tested in advance. Plan for it not to.
+
+### Latent: three ways a Freshdesk link comes back into an article
+
+None of these is live today. Each is one ordinary action away from putting
+Freshdesk links back on the public help centre.
+
+1. **Restore.** 18 version rows hold the 29 Freshdesk links that
+   `normalise_kb_formatting` rewrote on 2026-09-03: 27 to
+   `support.shipblu.com/…/solutions/articles/<id>` and 2 to the Freshdesk agent
+   console (`shipblu72137318794432249.freshdesk.com/a/solutions/articles/…`).
+   Each is version 1 and the only version of its article, cut by that job.
+   `restoreVersion` (`app/(console)/kb/actions.ts`) re-derives the body through
+   `articleBody`, which sanitises and normalises but never calls
+   `rewriteLegacyArticleLinks`, so one Restore by anybody holding `kb.edit`
+   republishes that article's links. The version list shows titles only, so
+   nothing warns them. For all 108 versioned articles, Restore can only go back
+   to the raw Freshdesk import.
+2. **Re-import.** One click on `/admin/import` enqueues `import_freshdesk_kb`.
+   It re-derives every body from Freshdesk, which carries the absolute links,
+   so `changesNothing` is false for those 18 articles and the UPDATE runs, with
+   no version cut. It also writes the CDN images back over anything re-hosted.
+   Whether the click works today depends on `FRESHDESK_DOMAIN` and
+   `FRESHDESK_API_KEY` still being set on the worker (`render.yaml` says "They
+   can go once the migration is done"); their values were not readable. The
+   jobs table holds no `import_freshdesk_kb` row and the worker's logs for 30
+   days show no run. `plans/kb-article-stats.md` still names a re-run as a
+   cutover job, so the ordering in the checklist below matters.
+3. **Save.** Nothing on any write path — the console save, the importer,
+   Restore — refuses or flags an `href` or `src` on a Freshworks host or a
+   Freshdesk path shape.
+
+### Blocking the domain move: Freshdesk's old URLs 404 here
+
+Every legacy shape `proxy.ts` sends to `/help/legacy` answers **404**:
+`/support/solutions/articles/<id>`, the same with a `-title` suffix,
+`/a/solutions/articles/<id>`, `/solutions/articles/<id>`,
+`/<locale>/support/solutions/articles/<id>` and `/support/solutions/folders/<id>`.
+The same route called directly answers the correct 301:
+
+```text
+GET /support/solutions/articles/154000189336                      → 404
+GET /help/legacy?path=%2Fsupport%2Fsolutions%2Farticles%2F154000189336 → 301 /ar/a/إرشادات-التعبئة-والتغليف
+```
+
+The route reads `new URL(request.url).searchParams.get('path')`, and through the
+proxy's rewrite it apparently does not see the `path` the rewrite added. That
+is observed, not yet diagnosed. `kb_redirects` (174 rows: 58 ids under each of
+the three prefixes, every `to_path` null) and the importer's stored ids are the
+mapping, and nothing reaches it this way. This is the inbound side, not a link
+we publish, but it decides what happens to every Freshdesk URL in the next
+section once `support.shipblu.com` points here: today they would all 404.
+`docs/PROJECT-STATE.md` §5.2 said none of these redirects had been "followed in
+anger"; now one has, and it failed.
+
+### Outside this repository: what still sends people to Freshdesk
+
+None of these is a link stored in the knowledge base, and none is fixed by a
+change to this repository. They are what a reader meets when they follow the
+knowledge base, or what the team and the product hand customers in its place.
+
+**The phone's quick replies.** 30 outbound WhatsApp messages in 26
+conversations, 2026-10-07 to 2026-11-05 — **5 of them in the last 7 days** —
+send customers the Freshdesk copy of articles this help centre already serves.
+All are echoes typed in the WhatsApp Business app on the coexistence number
+("Nayera Mohamed" in `/admin/channels`): outbound, no author, `meta.echo`
+true. Nothing the console sends carries one. Every id has an equivalent here:
+
+| Freshdesk id | Sent | Last sent  | Same article here                                                                                                                     |
+| ------------ | ---: | ---------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| 154000228261 |    6 | 2026-10-31 | `ar/شحن-محفظتك-بشيب-بلو`, `en/charge-shipblu-wallet`                                                                                  |
+| 154000190910 |    5 | 2026-11-04 | `ar/كيفية-إنشاء-أوردر-إرجاع-فردي`, `en/how-to-create-a-single-return-order`                                                           |
+| 154000196089 |    4 | 2026-11-05 | `ar/كيفية-تسجيل-حساب-بنكي-أو-محفظة-إلكترونية-لتحويل-التحصيلات-الإسبوعية`, `en/how-to-register-a-payout-method-for-my-weekly-transfer` |
+| 154000207426 |    4 | 2026-10-22 | `ar/كيفية-إنشاء-اوردر-استبدال-فردي`, `en/how-to-create-a-single-exchange-request`                                                     |
+| 154000190907 |    4 | 2026-10-22 | `ar/كيفية-إنشاء-أوردر-توصيل-فردي`, `en/how-to-create-a-single-delivery-order`                                                         |
+| 154000245150 |    2 | 2026-11-02 | `ar/التجزئة`, `en/try-buy`                                                                                                            |
+| 154000216183 |    2 | 2026-10-31 | `ar/السحب-الفوري`, `en/instant-payout`                                                                                                |
+| 154000217447 |    2 | 2026-11-02 | `ar/شوبيفاي`, `en/shopify`                                                                                                            |
+| 154000207438 |    1 | 2026-10-14 | `ar/تحميل-طلبات-متعددة-توصيل،-إرجاع،-إستبدال،-تحصيل-نقدي`, `en/upload-multiple-orders-delivery-return-exchange-cash-collection`       |
+
+All nine were sent with Arabic links. A link here is `/<locale>/a/<slug>` on
+whichever host the help centre is served from.
+
+**The merchant dashboard, app.shipblu.com** (release v3.43.2). 16 in-product
+help links open the Freshdesk copy of 8 articles, plus 2 copies of a link to an
+older Freshdesk account (`shipblu.freshdesk.com/a/solutions/articles/80001070415`,
+which 404s). The newer merchant app on `merchant-web-production.onrender.com`
+is clean.
+
+| Freshdesk id | Same article here                                                                                                               |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------- |
+| 154000189336 | `ar/إرشادات-التعبئة-والتغليف`, `en/packaging-guidelines`                                                                        |
+| 154000196090 | `ar/دورة-تحويل-التحصيلات`, `en/billing-days-transfer-cycle-and-fees`                                                            |
+| 154000207438 | `ar/تحميل-طلبات-متعددة-توصيل،-إرجاع،-إستبدال،-تحصيل-نقدي`, `en/upload-multiple-orders-delivery-return-exchange-cash-collection` |
+| 154000209749 | `ar/شروط-واحكام-الاشتراك-بباقات-التأمين`, `en/shipblu-shield-plans-terms-conditions`                                            |
+| 154000217447 | `ar/شوبيفاي`, `en/shopify`                                                                                                      |
+| 154000222386 | `ar/ووكومرس`, `en/woocommerce`                                                                                                  |
+| 154000223217 | `ar/زامت`, `en/zammit`                                                                                                          |
+| 154000223977 | `ar/ماجنتو`, `en/magento`                                                                                                       |
+
+The dashboard also loads the **Freshchat widget** (`fw-cdn.com/11720815/…`) for
+every signed-in merchant, with no flag in front of it. That matters to the
+knowledge base because **15 public articles** (8 Arabic, 7 English — among them
+`en/claims-procedure`, `en/reaching-client-support-team` and
+`ar/التواصل-مع-الدعم-الفني`) tell merchants to use live chat in their ShipBlu
+account. Until the dashboard embeds this app's widget
+(`docs/embedding-the-widget.md`), that instruction sends them to Freshchat.
+
+**One click from an article.** 10 article links lead to pages whose "Support"
+link is `https://support.shipblu.com/`: 4 to shipblu.com (3 such links per
+page), 2 to go.shipblu.com (2 in its script bundle), and 4 to the myBlu App
+Store listing (its support URL). The Google Play listing, the Shopify app
+listing, docs.shipblu.com and the Zoho links are clean.
+
+**The parallel copy.** `support.shipblu.com` still publishes the whole
+knowledge base from Freshdesk: all 58 legacy article ids answer 200 there,
+Freshdesk-hosted images included. It is what every link above lands on.
+
+**The two addresses customers are given.** The help centre's only contact link
+is `mailto:support@shipblu.com` (footer, home page, tracking page), and 15
+articles give `help@shipblu.com`. §6.41 of `docs/PROJECT-STATE.md` records that
+only `help-support@shipblu.com` is forwarded into this app; where these two
+deliver is set in Zoho and could not be read. The domain's SPF still includes
+`email.freshdesk.com`. Treat both as "probably Freshdesk" until somebody reads
+the routing.
+
+**Wording.** `en/file-a-claim` and `ar/الشحنات-التالفة` send readers to "our
+Support Portal" / "بوابة الدعم", unlinked. The only portal customers know by
+that name is `support.shipblu.com`.
+
+### Configuration
+
+- **`KB_PUBLIC_HOST` on the web service no longer names `support.shipblu.com`.**
+  The widget script, the sitemap's 114 `<loc>`, `robots.txt`, every canonical,
+  hreflang and JSON-LD URL are on `shipblu-support.onrender.com`, and the
+  console is still served there, so the variable is unset or names the Render
+  host. Read from output, not from the dashboard. `docs/PROJECT-STATE.md` §5.1
+  said otherwise until this change.
+- **The worker's value is unverified,** and it builds the CSAT survey links
+  (`lib/csat/index.ts`) and the portal emails (`lib/portal/emails.ts`). The only
+  survey ever created, on 2026-08-31, carried a `support.shipblu.com` link. It
+  is dormant: CSAT is switched off, `csat_surveys` holds that one row and
+  `contact_tokens` none. The admin CSAT page reads the web service's value, so
+  it would not show the worker's.
+- Two links built by this app on `support.shipblu.com` were delivered in August
+  (one agent reply, one CSAT invitation) and 404 there. Nothing to do; nothing
+  like them has been sent since 2026-08-31.
+
+### Clean
+
+What was checked and found nothing, so it need not be checked again unless it
+changes:
+
+- **Every link in every article.** 58 `href` in 36 articles: 29 relative
+  `/<locale>/a/<slug>`, all resolving to published articles, and the rest on
+  play.google.com, apps.apple.com, apps.shopify.com, shipblu.com,
+  go.shipblu.com, docs.shipblu.com, sheet.zohopublic.com,
+  workdrive.zohoexternal.com and `mailto:help@shipblu.com`. No `srcset`,
+  `data-*`, `style`, `url()`, iframe, video, script or embed in any body; no
+  entity-encoded, percent-encoded, protocol-relative or `http://` link.
+- Titles, slugs, excerpts, `body_text`, tags and `seo` on all 112 articles;
+  names and descriptions on the 20 folders and 5 categories; `kb_redirects`'
+  targets; `kb_article_feedback` and `kb_article_stats`. The `freshdesk` value
+  of `source_system` on articles, folders and categories is provenance, not a
+  link.
+- Every page the help centre serves: both homes, 4 categories, 16 folders, 108
+  articles, search, tracking, sign-in and register, the CSAT preview and the
+  not-found pages, including their `<link>`, `<meta>`, JSON-LD, inline styles,
+  flight payload, script bundles and response headers. No page has
+  `og:image`. The only "Freshchat" in anything served is a comment in
+  `/widget/embed.js` (`app/widget/embed.js/route.ts`), which loads nothing.
+- The widget iframe, `/api/widget/search` and `/api/widget/article` (all 108
+  articles; the images aside, clean), and the console's knowledge panel, which
+  reads `body_text` and inserts a `requestBaseUrl()` link.
+- Seed content: `lib/kb/handbook.ts`, `lib/tickets/canned-library.ts` (its test
+  refuses any URL), `db/sql/`, `db/baseline.ts`. Production's 62 canned
+  responses, the auto-response and `channels.config`.
+- Static assets: self-hosted fonts and art only. `next.config.ts` sets no
+  `images.remotePatterns`, so `/_next/image` does not proxy Freshdesk's files.
+- A whole-schema scan of every text, varchar, jsonb and array column in
+  `public`: hits only in `kb_articles.body_html` (the images),
+  `kb_article_versions.body_html` and `kb_redirects.from_path`.
+- Staging's database holds no knowledge base rows.
+
+## Follow-up pull requests
+
+In the order they should land. Each goes into `dev`. Production has it once
+`dev` is merged into `main`, which deploys every service by itself once the
+checks on `main` pass. So "deployed" below means that merge, checked on the
+running service, not the merge into `dev`.
+
+### 1. Host the knowledge base's images here — blocking
+
+The only change that makes "the knowledge base does not depend on Freshdesk"
+true, and the only one that cannot be done once the account is closed.
+
+- **Storage.** The existing private bucket, at a path built from an id we
+  generate (`kb/<uuid>.<ext>`), never from Freshdesk's filename: AGENTS.md's
+  attachment rule. A small table, say `kb_images` (id, storage path, content
+  type read from the bytes, size, sha256, the Freshdesk URL it replaced, unique
+  on both of the last two so a second run copies nothing), gets RLS from the
+  `db/sql/` loop like every new table.
+- **Serving.** A public route under `/api/kb/` — already in `PUBLIC_PREFIXES`,
+  and `/api` passes through on the help-centre host, so one relative
+  `/api/kb/images/<id>` works on the custom domain, on the Render URL, inside the
+  widget's iframe and in the console, as `articlePath` does for links. Redirect
+  to a signed URL, as `app/api/widget/attachments/[id]/route.ts` does, rather
+  than making a bucket public; the PR decides how long the signature lives and
+  how it is cached, since these images are public and an article page asks for
+  up to 15 at once. Raster types only, judged from the bytes; all 207 today are
+  PNG or JPEG.
+- **The job**, `rehost_kb_images`, strict payload with `dryRun`, `limit` and
+  `locale`, enqueued without a `dedupeKey` (it is idempotent and must be
+  re-runnable). It downloads each distinct Freshdesk URL with a deadline
+  (`sizedTimeout`), stores it, and rewrites `src` in `kb_articles` — cutting a
+  version first, as `normalise_kb_formatting` does — **and in
+  `kb_article_versions` in place**, since the picture is the same and only its
+  address moves. A file that fails to download keeps its old URL and is
+  reported by name; the job never drops an `<img>`. It tallies per locale.
+  `JobType`, `JOB_PAYLOADS`, the handler registry and
+  `scripts/ci/db-jobs.txt` (`run: rehost_kb_images dryRun=true`) in the same
+  change.
+- **Verified by** the audit query's two `images` rows answering 0, every
+  `kb_images` row's route answering an image, and the 61 article pages fetched
+  on full navigations showing the same number of images as before.
+- **Rolled back by** Restore on the versions the job cut. The Freshdesk URLs
+  keep working until the account is closed, so a rollback before then loses
+  nothing; after it, there is no rollback, which is why it runs first.
+
+### 2. Keep Freshdesk links from coming back
+
+- **Restore** passes the restored body through `rewriteLegacyArticleLinks` and
+  the image map, or refuses a version that still names Freshdesk, with a
+  sentence saying why.
+- **Save** refuses an `href` or `src` on a Freshworks host or a Freshdesk path
+  shape, in the console action and anywhere else `articleBody` is fed. Not
+  `support.shipblu.com` as such: once the domain moves it is ours, and
+  `/<locale>/a/<slug>` there is a good link. The guard is the path shapes plus
+  Freshworks' own hosts.
+- **Import** either rewrites links and maps images on the way in, or is
+  switched off for good. Recommended: switched off once the last run is done
+  (the checklist), and retired in PR 6, because a re-import can only ever bring
+  Freshdesk's copy back.
+- Widen `rewriteLegacyArticleLinks`, or have the guard report what it does not
+  recognise (`/support/solutions/folders/<id>`, `/support/home`,
+  `/support/tickets/new`, an id with no imported row), so a clean run means
+  clean.
+
+### 3. Freshdesk's old URLs resolve through the proxy — blocking the domain move
+
+The 404 above. Find why `app/help/legacy/route.ts` does not see the `path` the
+rewrite adds, fix it so the route works both rewritten and called directly, and
+prove the six shapes 301 on a deployed build, with a test that fails on today's
+code. Record the measurement in §5.2 of `docs/PROJECT-STATE.md`.
+
+### 4. Upload an image in the article editor
+
+Not blocking the disconnection, but without it the next screenshot anybody adds
+is hot-linked from somewhere else, and PR 2's guard would have nowhere to send
+them. Stores through PR 1's table and route.
+
+### 5. The `robots.txt` sitemap line on the Render host
+
+Side observation, not Freshworks: `robots.txt` advertises
+`<base>/sitemap.xml`, which 404s on the Render host (the sitemap is
+`/help/sitemap.xml` there). On the help-centre host the proxy rewrites it and it
+works, so this resolves itself at the domain move; fix it only if the Render
+host is meant to be crawled meanwhile.
+
+### 6. Retire the Freshdesk importer — after the disconnection
+
+`import_freshdesk_kb`, its handler and test, `lib/freshdesk/`, the
+`/admin/import` card that starts it, and `FRESHDESK_DOMAIN` /
+`FRESHDESK_API_KEY` from `lib/env.ts`, `render.yaml` and `.env.example`, all in
+one commit (CI's `env-parity`, `job-registry` and `db-jobs` rules hold them
+together). Keep `kb_redirects`, `app/help/legacy`, `freshdeskArticleId` and
+the `source_system` values: they serve inbound links for as long as anybody
+holds one.
+
+## To-dos outside this repository
+
+| Owner                                | To do                                                                                                                                                                                                                          |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Support lead                         | Replace the nine Freshdesk links in the Business app's quick replies on the coexistence number with the links above, and ask the team to stop pasting `support.shipblu.com/…/solutions/…` links.                               |
+| Support lead (console)               | Reword the live-chat instruction in the 15 articles if the dashboard's chat is not replaced first, and "Support Portal" in `en/file-a-claim` and `ar/الشحنات-التالفة`.                                                         |
+| Merchant dashboard (app.shipblu.com) | Point the 16 help links at this help centre (table above) and replace the Freshchat loader with this app's widget, per `docs/embedding-the-widget.md`. `app.shipblu.com` is already in the widget's `frame-ancestors`.         |
+| Marketing site and go.shipblu.com    | Point "Support" somewhere that is not Freshdesk, or leave it on `support.shipblu.com` and let the domain move fix it.                                                                                                          |
+| App Store Connect                    | The myBlu listing's support URL, as above.                                                                                                                                                                                     |
+| Mail admin (Zoho)                    | Say where `support@shipblu.com` and `help@shipblu.com` deliver. If it is Freshdesk, forward them here or change the address the help centre gives. Remove `include:email.freshdesk.com` from SPF once Freshdesk sends nothing. |
+| DNS                                  | The `support.shipblu.com` move, in the checklist's order.                                                                                                                                                                      |
+
+## Checklist before Freshdesk is disconnected
+
+Order matters. The check beside each item is what proves it, not the merge.
+
+**Before anything is switched off**
+
+- [ ] **The last import, if any, runs first.** If the cutover re-run in
+      `plans/kb-article-stats.md` is still wanted, run `import_freshdesk_kb`
+      now, then `normalise_kb_formatting` to rewrite the 29 links again. After
+      this, nothing imports: unset `FRESHDESK_DOMAIN` and `FRESHDESK_API_KEY`
+      on the worker. _Check:_ the audit query's `links, live` row answers 0.
+- [ ] **PR 1 is deployed and its job has run** — `dryRun=true`, then for
+      real, then `dryRun=true` again reporting nothing to do. _Check:_ the
+      audit query's two `images` rows answer 0; every `kb_images` row loads
+      through its route.
+- [ ] **PR 2 is deployed.** _Check:_ its tests restore a version carrying a
+      Freshdesk link and save one carrying a Freshdesk `href` and `src`, and
+      neither reaches `kb_articles` (staging holds no knowledge base to try it
+      on).
+- [ ] **The phone stops sending Freshdesk links.** _Check:_ the audit query's
+      `phone/app sends, 7 days` row answers 0.
+- [ ] **The dashboard** links here and loads this widget, not Freshchat.
+      _Check:_ no Freshworks host in app.shipblu.com's script chunks.
+- [ ] **The marketing site, go.shipblu.com and the App Store listing** are
+      updated, or deliberately left for the domain move.
+- [ ] **Mail:** both addresses customers are given reach this app.
+      _Check:_ a test mail to each opens a ticket here.
+- [ ] **The article wording** is updated (live chat, Support Portal).
+- [ ] **Messenger's swap** per §5.1 of `docs/PROJECT-STATE.md` — Freshchat is
+      still its primary receiver, so disconnecting Freshworks without it
+      leaves Messenger unanswered.
+
+**Moving `support.shipblu.com`, if the name is kept**
+
+- [ ] **PR 3 is deployed.** _Check:_ the six legacy shapes 301 on the Render
+      host.
+- [ ] **Lower the CNAME's TTL** (14400 today) at least a TTL ahead.
+- [ ] **Add `support.shipblu.com` as a custom domain** on the
+      `shipblu-support` web service, then switch the CNAME and wait for the
+      certificate.
+- [ ] **Only then** set `KB_PUBLIC_HOST=support.shipblu.com` — a bare
+      hostname, because `proxy.ts` compares it with `Host` as written — on the
+      web service **and** the worker, which builds the survey and portal-email
+      links, and redeploy both. Set before the DNS answers here, it repeats
+      August: every published URL on a host that serves Freshdesk.
+- [ ] _Check:_ `/widget/embed.js`'s `BASE`, the sitemap and the canonicals name
+      `support.shipblu.com`; `/en/a/packaging-guidelines` answers 200 there; a
+      Freshdesk URL from the tables above 301s to its article; `/inbox` there
+      is the help centre's 404, not the console.
+
+**After the disconnection**
+
+- [ ] Re-run [the audit](#re-running-this-audit) and get zeros where it says.
+- [ ] Every `kb_images` row's route still answers an image — proof the copies,
+      not Freshdesk's bucket, are what the pages load.
+- [ ] PR 6. Remove Freshdesk from SPF.
+- [ ] `docs/PROJECT-STATE.md` §1 and §5.1 say Freshdesk is gone, with the date.
+
+## Re-running this audit
+
+One call answers the headline numbers. On 2026-11-07 it returned images 214
+in 61 rows in both tables, links 0 live and 29 in 18 version rows, and 5
+Freshdesk links sent from the phone in the last 7 days (30 in all).
+
+```sql
+select 'images, live' as what, count(*) as n, count(distinct a.id) as rows_
+from kb_articles a, regexp_matches(a.body_html, '<img[^>]*src="([^"]*)"', 'gi') m
+where m[1] ~* '(freshdesk|freshworks|freshchat|fwcdn|fw-cdn|fwusercontent)'
+union all
+select 'images, versions', count(*), count(distinct v.id)
+from kb_article_versions v, regexp_matches(v.body_html, '<img[^>]*src="([^"]*)"', 'gi') m
+where m[1] ~* '(freshdesk|freshworks|freshchat|fwcdn|fw-cdn|fwusercontent)'
+union all
+select 'links, live', count(*), count(distinct a.id)
+from kb_articles a, regexp_matches(a.body_html, 'href="([^"]*)"', 'gi') m
+where m[1] ~* '(fresh(desk|works|chat|service)|myfreshworks|fwcdn|fw-cdn|support\.shipblu\.com|/solutions/(articles|folders)/|/support/(home|tickets|solutions))'
+union all
+select 'links, versions', count(*), count(distinct v.id)
+from kb_article_versions v, regexp_matches(v.body_html, 'href="([^"]*)"', 'gi') m
+where m[1] ~* '(fresh(desk|works|chat|service)|myfreshworks|fwcdn|fw-cdn|support\.shipblu\.com|/solutions/(articles|folders)/|/support/(home|tickets|solutions))'
+union all
+select 'phone/app sends, 7 days', count(*), count(distinct conversation_id)
+from messages
+where direction = 'outbound' and created_at > now() - interval '7 days'
+  and body_text ~* '(support\.shipblu\.com/[a-z]{2}/support/|[a-z0-9-]+\.freshdesk\.com)'
+union all
+select 'phone/app sends, all time', count(*), count(distinct conversation_id)
+from messages
+where direction = 'outbound'
+  and body_text ~* '(support\.shipblu\.com/[a-z]{2}/support/|[a-z0-9-]+\.freshdesk\.com)';
+```
+
+After the domain move, `support.shipblu.com` is ours, and a link of the app's
+own shape there (`/<locale>/a/<slug>`) is fine; the link queries above would
+then need `support\.shipblu\.com` narrowed to Freshdesk's path shapes.
+
+From a shell:
+
+```bash
+curl -sS -o /dev/null -w '%{http_code} %{redirect_url}\n' https://support.shipblu.com/
+```
+
+Today `302 https://support.shipblu.com/support/home` — still Freshdesk.
+
+```bash
+curl -sS -o /dev/null -w '%{http_code} %{redirect_url}\n' https://shipblu-support.onrender.com/support/solutions/articles/154000189336
+```
+
+Today `404`; `301` to the article once PR 3 is deployed.
+
+```bash
+curl -sS https://shipblu-support.onrender.com/widget/embed.js | grep -o 'var BASE = "[^"]*"'
+```
+
+Today `https://shipblu-support.onrender.com`; the custom domain once it has
+moved.
