@@ -256,8 +256,10 @@ changes:
 
 ## Follow-up pull requests
 
-In the order they should land. Each goes into `dev`; production waits for the
-merge into `main` and a deploy.
+In the order they should land. Each goes into `dev`. Production has it once
+`dev` is merged into `main`, which deploys every service by itself once the
+checks on `main` pass. So "deployed" below means that merge, checked on the
+running service, not the merge into `dev`.
 
 ### 1. Host the knowledge base's images here — blocking
 
