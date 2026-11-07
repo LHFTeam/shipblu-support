@@ -405,6 +405,19 @@ taken inside `db.transaction` (`lockThread` in
 pooler hands the backend to another client when each transaction ends, and a
 session lock would stay behind on it, held for somebody else.
 
+**A read that locks a row joins nothing the row points at.** Under READ
+COMMITTED a `FOR UPDATE` that waited on another writer re-checks the newest
+version of the row against the rows it joined before waiting. A writer that
+moved the ticket to another status fails an inner join to the old one, and the
+read answers no row: the ticket reads as gone. A changed requester
+null-extends a left join instead. An uncorrelated `IN (select …)` is planned as
+a join too. So lock the row in one statement and read what it points at in the
+next, as `loadConversation` in `lib/sla/index.ts` does, or read a column of
+another table through a correlated subquery (`statusCategoryOf`). That
+subquery runs in the locked statement's older snapshot and finds no row
+created during the wait, so it needs `lockedStatusCategory`'s second read. In
+the SLA clocks it cost every writer its work (`docs/PROJECT-STATE.md` §6.114).
+
 **postgres.js must never pipeline through the transaction pooler.** Once every
 connection is busy, postgres.js writes the next query onto a connection still
 waiting for its answer. Supavisor v2.9 hands that backend back at the first

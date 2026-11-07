@@ -48,10 +48,15 @@ export function holdNextTransaction(at: 'before' | 'after') {
  * Postgres regular expression, narrows it to a session waiting in a statement
  * whose text matches.
  *
- * A test whose point is the wait asserts the answer, and names the statement
- * when which one waited is the point: an unlocked read followed by an UPDATE
- * queues too, on the UPDATE, having read the row before the writer it waited
- * on committed.
+ * For a test that must know which statement waited: an unlocked read followed
+ * by an UPDATE queues too, on the UPDATE, having read the row before the
+ * writer it waited on committed. Anchor `statement` at the start of the text
+ * (`'^\\s*select\\M'` for a locked read, since a plain read never waits on a
+ * writer). `pg_stat_activity.query` keeps only the first
+ * `track_activity_query_size` bytes of a statement, 1kB by default, so a
+ * `for update` at the end of a wide select is cut off, and a pattern looking
+ * for it answers false while the session waits (`docs/PROJECT-STATE.md`
+ * §6.114).
  */
 export async function untilWaitingOnALock(
   executor: { execute: (query: ReturnType<typeof sql>) => Promise<unknown> },

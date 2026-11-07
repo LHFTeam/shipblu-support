@@ -8175,9 +8175,12 @@ dryRun=true`, then without, gives those two theirs back from their
       first response, a pause's resume, the reply clock. A writer that changed
       the requester — a contact merge, `adoptRootAuthor` on a comment thread —
       kept the row but null-extended the join to `contacts`, so a policy keyed
-      on `requester.email` was chosen against no address at all. How often it
-      happened in production is not known: a lost re-time writes nothing, so
-      there is nothing to count.
+      on `requester.email` was chosen against no address at all. The joined
+      read has been in `main` since #344 (`f7eeff0`, 2026-10-09), which put
+      every clock writer under the row lock. How often it lost a write in
+      production has not been measured. A lost writer logs nothing, and what
+      it leaves behind looks like a writer with nothing to do: a ticket with
+      no policy, or a priority change with no re-time after it.
 
       `loadConversation` now locks the row in one statement and reads it in
       the next. The second statement takes its snapshot once the lock is held,
@@ -8188,8 +8191,10 @@ dryRun=true`, then without, gives those two theirs back from their
       during the wait, since the subquery runs in the locked statement's older
       snapshot. `lib/sla/locked-read.db.test.ts` holds each clock writer to it.
       Every case fails against the joined read, and the requester and
-      new-status cases fail against the subquery shape. The lesson: a
-      row-locking read joins nothing the locked row points at. Lock, then read.
+      new-status cases fail against the subquery shape. The lesson, now under
+      **Database** in AGENTS.md: a row-locking read joins nothing the locked
+      row points at, and an uncorrelated `IN (select …)` is planned as a join.
+      Lock, then read.
 
       A second, smaller one came from the test. Its precondition, that the
       clock writer is queued in a locked read rather than on its `UPDATE`,

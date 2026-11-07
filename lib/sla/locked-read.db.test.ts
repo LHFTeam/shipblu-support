@@ -92,7 +92,10 @@ async function categoryId(key: string): Promise<string> {
 
 /**
  * The default policy, round the clock so a target is a fixed number of
- * wall-clock minutes whatever the time of day the suite runs at.
+ * wall-clock minutes whatever the time of day the suite runs at. At position 1,
+ * below every keyed policy a case adds at 0: its empty conditions match every
+ * ticket, and a tie at one position would be settled by the order Postgres
+ * happens to return the rows in.
  */
 async function defaultPolicy(): Promise<string> {
   const [row] = await db
@@ -101,6 +104,7 @@ async function defaultPolicy(): Promise<string> {
       name: 'Live support',
       hoursSource: 'round_the_clock',
       targets: TARGETS,
+      position: 1,
       isDefault: true,
     })
     .returning({ id: slaPolicies.id });
