@@ -19,7 +19,8 @@ import { CHANGE_STAMP } from '@/lib/tickets/change-stamp';
 import { moveToGroupIfElsewhere } from '@/lib/tickets/move-group';
 import { lockedStatusCategory, statusCategoryOf } from '@/lib/tickets/status-category';
 import { afterHoldEnded } from './after-hold';
-import { decide, isWorkable, type DecidedOutcome } from './decide';
+import { categorySource } from './category-source';
+import { categoryStanding, decide, isWorkable, type DecidedOutcome } from './decide';
 import { endHoldOnRow } from './end-hold';
 import { ROUTING_GRACE_MS } from './hold';
 import { routingModeOf } from './mode';
@@ -39,7 +40,9 @@ type Executor = typeof db | Tx;
  *    move if there is one, the decision row and the `routed` event. The
  *    ticket's `routing_decided_at` stays null, so it is still held.
  * 2. **The `on_update` rules run**, after every decision on a ticket that
- *    carries a category, wherever the decision left it (`PhaseOne.rules`).
+ *    carries a category — one the window's end set aside as somebody else's
+ *    words (`categoryStanding`) counts as none — wherever the decision left
+ *    it (`PhaseOne.rules`).
  *    Nothing can assign in between, because the ticket is still held — neither
  *    a rule's move in this pass nor a person's write meanwhile ends the hold,
  *    as either would before phase one (`endHold`) — so "sales on the merchant
@@ -205,7 +208,10 @@ type PhaseOne = {
   outcome: DecidedOutcome;
   /** Whether phase one moved the ticket to its category's route group. */
   moved: boolean;
-  /** Whether the ticket carries a category, which re-selects the SLA policy. */
+  /**
+   * Whether the decision was made on a category — the ticket carries one, and
+   * it was not set aside (`categoryStanding`) — which re-selects the SLA policy.
+   */
   categorySettled: boolean;
   /** What the `on_update` rules are owed before the hold ends — phase two. */
   rules: Rules;
@@ -213,6 +219,13 @@ type PhaseOne = {
 
 type Step =
   | { kind: 'none' }
+  /**
+   * Nothing decided: the category the ticket carries is Jev's reading of a
+   * reply whose thread may still bring its customer, or of somebody who is no
+   * longer the requester (`categoryStanding`), and this is not the window's
+   * end. The ticket stays held for that, or for a later answer.
+   */
+  | { kind: 'waiting' }
   | { kind: 'shadow'; outcome: DecidedOutcome }
   /** Another caller is finishing the decision; `settleRouting` looks again then. */
   | { kind: 'in_flight'; lookAgainAt: Date }
@@ -232,6 +245,14 @@ export type RouteResult = Step['kind'] | 'requeued' | 'failed';
  * A decision of `not_open` answers `none` too: it is written, and the hold
  * ended, but nothing is owed a ticket nobody may work, so to the caller there
  * was nothing to route.
+ *
+ * `waiting` where the category is Jev's reading of somebody whose thread may
+ * yet bring its customer, or who is no longer the requester
+ * (`categoryStanding`): nothing is written but the row's move to `holding`,
+ * and the ticket stays held for the window's end or for an answer about the
+ * requester's own words, which routes it as this would have. To the category's
+ * writer that is the router's pass still to come (`routerDecidedOn`), so it
+ * runs no pass of its own.
  *
  * On a shadow row it records the would-be decision and nothing else, and the
  * caller carries on as though routing did not exist.
@@ -352,6 +373,9 @@ async function phaseOne(
   const [ticket] = await tx
     .select({
       channelId: conversations.channelId,
+      channel: conversations.channel,
+      externalId: conversations.externalId,
+      requesterContactId: conversations.requesterContactId,
       groupId: conversations.groupId,
       categoryId: conversations.categoryId,
       assigneeAgentId: conversations.assigneeAgentId,
@@ -484,7 +508,7 @@ async function phaseOne(
         .where(eq(ticketCategories.id, ticket.categoryId))
     : [];
 
-  const decision = decide({
+  const facts = {
     shadow: row.shadow,
     assigneeAgentId: ticket.assigneeAgentId,
     statusCategory,
@@ -493,18 +517,72 @@ async function phaseOne(
     mergedIntoId: ticket.mergedIntoId,
     mode: channel ? routingModeOf(channel) : 'default_group',
     groupId: ticket.groupId,
+  };
+  let decision = decide({
+    ...facts,
     categoryId: ticket.categoryId,
     routeGroupId: category?.routeGroupId ?? null,
   });
 
-  const categorySettled = ticket.categoryId !== null;
+  // Whose words the category stands on, asked only of a decision that reads
+  // it — a ticket somebody holds, nobody may work, or whose channel stopped
+  // routing is decided the same whatever it carries. `resume` is the window's
+  // job here (`settleRouting`): with no decision written yet, nothing else
+  // passes it.
+  let setAside = false;
+  if (decision.outcome === 'category' || decision.outcome === 'no_route_for_category') {
+    const source = await categorySource(
+      tx,
+      {
+        id: conversationId,
+        categoryId: ticket.categoryId,
+        categoryKey: category?.key ?? null,
+        requesterContactId: ticket.requesterContactId,
+        channel: ticket.channel,
+        externalId: ticket.externalId,
+      },
+      row.messageId,
+    );
+    // The window's end is the window's job (`settleRouting`, `resume`), or any
+    // call once the window has closed: with that job late behind a backed-up
+    // queue, or dead, a reading left waiting would wait for good, every later
+    // answer or edit asking the same question and getting the same answer.
+    // The job run by hand before then is the window's end by definition, as
+    // it is for a ticket with nothing to wait for.
+    const atWindowEnd = resume || now.getTime() >= row.windowEndsAt.getTime();
+    const standing = categoryStanding(source, atWindowEnd);
+    if (standing === 'waits') {
+      // Held as `holding`, so the answer that settles it — the root's, or the
+      // customer's next message's — routes it at once (`afterCategoryApplied`,
+      // `afterCategoryConfirmed` for one agreeing with the reply's, the console's
+      // edit), where `pending` leaves it to a creation pass
+      // that has already run: this is that pass's own `beginRouting`, or a
+      // later caller's.
+      if (row.stage === 'pending') {
+        await tx
+          .update(routingDecisions)
+          .set({ stage: 'holding' })
+          .where(eq(routingDecisions.id, row.id));
+      }
+      log.info('waiting for the requester before routing on the category', { conversationId });
+      return { kind: 'waiting' };
+    }
+    if (standing === 'set_aside') {
+      setAside = true;
+      decision = decide({ ...facts, categoryId: null, routeGroupId: null });
+    }
+  }
+
+  // A category set aside is not one the decision was made on: no rules are
+  // owed for it, no policy is chosen for it, and the record names none.
+  const categorySettled = ticket.categoryId !== null && !setAside;
   // Nothing is owed a ticket nobody may work, and its hold simply ends.
   const rulesOwed = categorySettled && decision.outcome !== 'not_open';
   const probability = categorySettled ? await categoryProbability(tx, conversationId) : null;
   const recorded = {
     outcome: decision.outcome,
     toGroupId: decision.toGroupId,
-    categoryId: ticket.categoryId,
+    categoryId: categorySettled ? ticket.categoryId : null,
     probability,
     decidedByAgentId: actor.agentId ?? null,
     decidedByLabel: actor.label,
@@ -585,6 +663,13 @@ async function phaseOne(
       moved,
       ...(categorySettled && category
         ? { categoryId: ticket.categoryId, key: category.key, label: category.labelEn }
+        : {}),
+      // What the timeline says when the ticket carries a category it did not
+      // move on (`describeRouted`).
+      ...(setAside && category
+        ? {
+            setAside: { categoryId: ticket.categoryId, key: category.key, label: category.labelEn },
+          }
         : {}),
       ...(probability !== null ? { probability } : {}),
     },

@@ -1725,7 +1725,8 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
   stays available and is safe to re-run — a second pass recovers nothing — so
   re-run it if the parser ever learns to read a shape it currently skips. §7 has
   the figures.
-- **Unset config:** `WIDGET_ALLOWED_ORIGINS`, `WIDGET_IDENTITY_SECRET`. The
+- **Unset config:** `WIDGET_IDENTITY_SECRET`. `WIDGET_ALLOWED_ORIGINS` has
+  been set since this list was written (below). The
   email keys that were on this list are all set. `EMAIL_API_KEY` and
   `EMAIL_FROM_ADDRESS` were confirmed by the owner on 2026-10-05, since Render's
   API does not show values, and the traffic agrees: ticket #13777's reply went
@@ -1734,11 +1735,15 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
   `shipblu-support-shared` taken from the 2026-09-26 dashboard export
   (`render.yaml`).
 
-  **Both are what stands between the widget and the merchant dashboard.** Measured 2026-08-31: `https://shipblu-support.onrender.com/widget`
-  answers `content-security-policy: frame-ancestors 'self';`, so
-  `app.shipblu.com` cannot frame it at all — the launcher would open an empty
-  box. `WIDGET_ALLOWED_ORIGINS` has to name that origin before the snippet in
-  `docs/embedding-the-widget.md` does anything. `WIDGET_IDENTITY_SECRET` is the
+  **Both were what stood between the widget and the merchant dashboard.**
+  Measured 2026-08-31, `https://shipblu-support.onrender.com/widget` answered
+  `content-security-policy: frame-ancestors 'self';`. Measured 2026-11-06 it
+  answers `frame-ancestors 'self' https://app.shipblu.com
+https://app.staging.shipblu.com https://merchant.staging.shipblu.com
+https://merchant-web-production.onrender.com`. The new merchant app's
+  production domain, `https://merchant.shipblu.com`, is not on that list,
+  although its `render.yaml` sets `NEXT_PUBLIC_SUPPORT_WIDGET_URL`: the
+  launcher there opens an empty box until the origin is added. `WIDGET_IDENTITY_SECRET` is the
   softer half: without it the dashboard can still say who its visitor is and the
   agent still sees a name, an address and a phone — the claim just never gets to
   link the person to their shipping account.
@@ -2013,6 +2018,22 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
   It is deployed since 2026-10-29. Rollback is the
   channel's mode back to `default_group`, which holds no new ticket and lets
   held ones settle in their window.
+
+  **Before the Facebook Page and Instagram rows leave `default_group`**, read
+  this: no `facebook_comment` or `instagram_comment` row exists, so comment
+  tickets route by those two rows (read 2026-11-06: both `default_group`, Web
+  Chat the only `category` row, 0 `routing_decisions`). A passer-by's reply
+  stored before the customer's comment opens the ticket under the passer-by
+  until the comment arrives and takes it (`adoptRootAuthor`, #417). Until the
+  change that added `categoryStanding` (2026-11-06, `lib/routing/decide.ts`)
+  the router decided within seconds on Jev's reading of the reply, and the
+  classifiers kept counting the replier's runs; now the router waits for the
+  root until the window's end and sets a category read off a non-requester
+  aside, and neither classifier counts a non-requester's run. A reply whose
+  root never comes — one under the Page's own comment, which ingest never
+  stores — is assigned up to the window's length later than a ticket its root
+  opened; 1 of 63 comment tickets was opened by a reply (read 2026-11-06), and
+  0 by a reply whose root then arrived (0 `requester_changed` events ever).
 
 ### 5.2 Live-provider verification
 
@@ -4722,16 +4743,19 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
     does not normalise it fails the build.
 
 51. ~~**`kb_articles.updated_at` is not an edit date — every page view moves
-    it.**~~ **Fixed by #466, which is in production: on 2026-11-06 at 15:52 UTC
-    `pg_get_functiondef` of `touch_updated_at` named `not_an_edit`.** The view
-    counts did not move between 15:14 and 15:53 that day, so that a view leaves
-    the date where it was is still to be seen there. The counters then moved off
-    the row with the first half of `plans/kb-article-stats.md`, which reaches
-    production on the first deploy after `dev` is next merged into `main`: once
-    it has, record here that every article with a count on the old columns has a
-    `kb_article_stats` row, and that one view left an article's `xmin` and
-    `updated_at` where they were (the plan has the queries). The history below
-    is why. _2026-09-03._
+    it.**~~ **Fixed by #466, and then by moving the counters off the row: the
+    first half of `plans/kb-article-stats.md` (#472) has been in production on
+    the web service and the worker since 2026-11-06. The second drops the old
+    columns and is not deployed yet; the plan says what to read once it is.**
+    On 2026-11-06 at 15:52 UTC `pg_get_functiondef` of `touch_updated_at` named
+    `not_an_edit`, and the six views the old release counted between then and
+    17:46 left every `updated_at` where it was. Once #472 had deployed, every
+    article with a count had a `kb_article_stats` row, and at 19:04 their
+    counters summed to exactly what the old columns held (63,848 views, 548
+    helpful, 2,313 unhelpful). They had not moved by 21:02, so no view had
+    reached the new release, and that one leaves an article's `xmin` where it
+    was is still to be seen in production; `app/api/kb/stats.db.test.ts` holds
+    it in CI. The history below is why. _2026-09-03._
     `recordArticleView` increments `view_count` on the
     article row, and `touch_updated_at` fires on any update of a table with that
     column, so a read writes the timestamp. The article page renders it as
@@ -4745,10 +4769,10 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
     handful that read later are the ones somebody happened to open.
 
     The help centre took the first way out in #460: every date a customer sees
-    is `editedAt` in `lib/kb/queries.ts`, read from `kb_article_versions`. The
-    column itself is fixed in the trigger. `touch_updated_at()` in
-    `db/sql/001_extensions_and_triggers.sql` now keeps the old date on
-    `kb_articles` when an UPDATE changes nothing but `view_count`,
+    is `editedAt` in `lib/kb/queries.ts`, read from `kb_article_versions`. #466
+    then fixed the column in the trigger. `touch_updated_at()` in
+    `db/sql/001_extensions_and_triggers.sql` kept the old date on
+    `kb_articles` when an UPDATE changed nothing but `view_count`,
     `helpful_count` and `unhelpful_count`, comparing the whole row minus those
     three, `updated_at` and the generated `search_vector` (which reads null in
     a BEFORE trigger) as jsonb, so a column added later counts as an edit by
@@ -4758,12 +4782,12 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
     installs it. Pointing the trigger at another function would lock the
     table: `DROP TRIGGER` takes ACCESS EXCLUSIVE, which any open reader holds
     off (§6.15's deploy failures), and `CREATE OR REPLACE TRIGGER` takes SHARE
-    ROW EXCLUSIVE, which every open write holds off — each view and vote is
+    ROW EXCLUSIVE, which every open write holds off — each view and vote was
     one — and which then holds the table's writes off until the whole of
-    `db/sql/001` commits. `db/sql/touch-updated-at.db.test.ts` holds both
-    halves. So `/kb`, which shows the column and sorts by it, now orders by the
+    `db/sql/001` commits. `db/sql/touch-updated-at.db.test.ts` held both
+    halves. So `/kb`, which shows the column and sorts by it, ordered by the
     last change anybody made — a metadata edit included, which is why the help
-    centre still reads `editedAt` instead.
+    centre reads `editedAt` instead.
 
     The existing values were left as they are. On 2026-11-05, 39 of the 112
     articles had an `updated_at` newer than their last version and their
@@ -4781,13 +4805,20 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
     comparison reading the row twice more — and took the row lock a console
     save waits on. `view_count`, `helpful_count` and `unhelpful_count` now live
     in `kb_article_stats`, one row per article that no console edit touches
-    (`lib/kb/stats.ts`), and `db/sql/011_kb_article_stats_backfill.sql` copies
-    what each article had (108 of 112 in production, 63,842 views). So "each
-    view and vote is one" open write above no longer holds. The old columns,
-    `touch_updated_at`'s exception for them and the `kb-edit-date` rule stay
-    for the old release's writes during a deploy, and go together in the
-    plan's second half, once the first is in production on the web service
-    and the worker.
+    (`lib/kb/stats.ts`), and `db/sql/011_kb_article_stats_backfill.sql` copied
+    what each article had (108 of 112 in production, 63,848 views by the time
+    it ran). The old columns, `touch_updated_at`'s exception for them and the
+    `kb-edit-date` rule stayed for the old release's writes during that deploy.
+    The plan's second half removes them together, with `011`, whose copy moves
+    into migration 0059 ahead of 0060's drop, for a database that takes both in
+    one deploy. Once it has deployed, the function is back to its one-line body,
+    so `kb_articles` stamps an UPDATE that changes nothing like every other
+    table (§6.59), and an article's date moves only when somebody writes the
+    row, never when somebody reads it. The console's Save and the Freshdesk
+    import's re-run compare first (`changesNothing` in
+    `lib/kb/article-write.ts`), so neither writes an article it would leave as
+    it was; the Save folds the textarea's CRLF to LF first, since a browser
+    posts CRLF however the box holds it.
 
 52. **`current_date` in a page query is the database's date, and the database is
     UTC.** _2026-09-04._ `/reports/categories` filtered its rollups with
@@ -4936,10 +4967,21 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
     confusion a job moving it for nothing deepens. An idempotent writer has to
     compare before it writes, field by field.
 
-    Since §6.51's fix `kb_articles` is the one exception: there the trigger
-    keeps the date on an UPDATE that changes nothing, or nothing but a
-    reader's counter. Every other table still stamps a no-op, `kb_folders` and
-    `canned_responses` included, so the rule above stands for writers.
+    From #466 until its reader counters are dropped by the second half of
+    `plans/kb-article-stats.md` (§6.51), `kb_articles` is the one exception:
+    there the trigger keeps the date on an UPDATE that changes nothing, or
+    nothing but a reader's counter. Once that has deployed, the trigger is the
+    plain stamp on every table again, `kb_articles` included, so the rule
+    above stands for every writer, and `db/sql/touch-updated-at.db.test.ts`
+    holds the trigger to it. On `kb_articles` the console's Save and the
+    Freshdesk import's re-run compare through `changesNothing`
+    (`lib/kb/article-write.ts`), and `seed_console_handbook` and
+    `normalise_kb_formatting` compare field by field as they always did; each
+    is held to it by `xmin` in its database test. Two writes still stamp a
+    no-op: restoring a version identical to the current text, which cuts a
+    version as well, and a stale Unpublish or Archive landing on an article
+    already in that status, which only a page drawn before the change can
+    post.
 
     The measurement matters as much as the fix. The job's own tally could not
     have caught this — it was reporting the truth — and neither could
@@ -7823,6 +7865,90 @@ dryRun=true`, then without, gives those two theirs back from their
       shows the two rows. Once it has run and that date has passed,
       `db/sql/012` and its test are deleted, since nothing is left for it to
       copy.
+
+112.  **The merchant dashboard's sign-out never cleared the support chat, so
+      the next person at the machine opened the last one's conversation.**
+      _2026-11-06, found from the review of ShipBlu/merchant#148 and fixed the
+      same day._ The dashboard calls `clear()` on every sign-out, as
+      `docs/embedding-the-widget.md` asks. Then, in the same React commit, the
+      gate swaps the shell for its loader, and `SupportChat`'s unmount calls
+      `destroy()` 2–7 ms later. That drops the clear in every case:
+      - a frame that had said `ready` is removed in the same task as the
+        `postMessage`, and a message queued to a frame removed in the same
+        task is never delivered;
+      - a panel not opened in that page load has no frame, so `clear()` builds
+        a hidden one that must load, resume its token over the network and
+        say `ready` before it can be told, and `destroy()` removes it first;
+      - the storage event and the 401 path would have delivered for a ready
+        frame, but `clearSupportChat()`'s own store update reaches the top
+        bar's `useSyncExternalStore` subscribers, which forces the commit
+        synchronous;
+      - every sign-out then leaves for Auth0 within tens of milliseconds;
+      - a sign-out from a page without the shell (onboarding, terms, the error
+        cards), one while `embed.js` is still downloading, and a session that
+        simply expired never reach `clear()` at all.
+
+      Measured in Chromium, with the merchant's real `SupportChat.tsx` under
+      React 19 and the widget cross-site. The visitor token survived all 12
+      sign-out variants (click, another tab's logout, a 401; panel opened or
+      not; with and without the redirect), and the in-flight case. With the
+      real `/widget`, the next person on the same merchant account opened the
+      panel onto the previous person's message. The server's reset is
+      account-first by design (`lib/widget/identity.ts`), so it never fired.
+      Another merchant was reset only after the transcript had been fetched
+      and drawn, and never if that identify request failed. The stale
+      `window.shipbluChatSettings` the other session reported was real, but
+      inert: the late script's `onload` destroyed it before it built a frame.
+
+      **The fix is in the frame, at the next open**, because that is the one
+      moment every one of those cases passes through, and a fix at sign-out
+      can only cover some of them. The snippet's `opened` and `closed` now
+      carry `person`, the identifying half of what the page holds, and
+      `identify()` sends one at once rather than waiting for `ready`. The
+      frame waits for the page's first word before it resumes a stored token,
+      and takes the decision again when the request comes back, so a page
+      that names somebody else meanwhile is drawn nothing. One function,
+      `judge()` in `lib/widget/person.ts`, decides for the resume, the mint
+      and the identity sent after them, against the token's record
+      (`shipblu.widget.person`: the account, email and phone as separate
+      SHA-256 digests, bound to the token):
+      - a page naming somebody else has the token thrown away, unasked;
+      - a page naming nobody, or saying less than the record (the email
+        before the account), has it left in storage and not reopened. It
+        reopens when the page says the rest;
+      - a page adding a field to the record is the same person, and the
+        record takes it up. Agreeing on the account alone never claims a
+        person, so colleagues of one merchant stay apart;
+      - a token with no record is thrown away for a page that names
+        somebody. That is every token from before the deploy, and each had
+        survived a sign-out, so a merchant mid-conversation starts a fresh
+        widget chat once; the ticket stays. A token minted in the same page
+        load is the exception: it belongs to whoever was reading then.
+
+      A snippet cached from before the field (up to five minutes) sends no
+      `person` and resumes as before. The check then runs on its first
+      `identify`, before the server is told anything. Same-account colleagues
+      now get separate widget contacts, which is what `clear()` always
+      promised a host page. The review of #476 found the first version
+      deleting a token it only had to set aside, relabelling a reopened token
+      with a statement heard after its request, deciding on a person
+      `identify()` had already replaced, and reading a field added in the same
+      page load as somebody else. Each case is a test in
+      `use-widget-session.test.ts`.
+
+      With the fix, through the real widget and the same harness: a
+      colleague, another merchant and a pre-deploy token each opened onto a
+      clean panel, with no `/api/widget/session` carrying the previous token.
+      The same person's reload resumed their own conversation, 472 ms after
+      the click that opened the panel. The control, run on the code before
+      the fix, showed the colleague the previous person's message.
+
+      The dashboard still calls `destroy()`, which the contract says not to,
+      and its `clear()` is still dropped. The leak no longer depends on it
+      landing. The token stays in the frame's storage until the next open,
+      where it is refused, rather than leaving at sign-out. A host-page
+      teardown that delivers a pending clear is still owed if the dashboard is
+      to stop relying on a method the contract disclaims.
 
 ### Tooling notes for this environment
 

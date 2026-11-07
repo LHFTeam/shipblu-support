@@ -1,19 +1,31 @@
 import { asc, eq, inArray, sql } from 'drizzle-orm';
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { db } from '@/db/client';
 import {
   agents,
+  aiCategoryRuns,
+  aiPriorityRuns,
   channels,
   contactIdentities,
   contacts,
   conversationEvents,
   conversations,
+  groupMembers,
   groups,
   jobs,
   messages,
+  routingDecisions,
   slaPolicies,
+  ticketCategories,
   ticketStatuses,
 } from '@/db/schema';
+import { classifyMessageCategory } from '@/lib/category-ai/run';
+import { forgetCategoryAiSettings } from '@/lib/category-ai/settings';
+import { resetEnvCache } from '@/lib/env';
+import { classifyMessagePriority } from '@/lib/priority-ai/run';
+import { settleRouting } from '@/lib/routing/apply';
+import { handToRouteGroup } from '@/lib/routing/hand-to';
+import { stubFetch } from '@/lib/testing/fetch';
 import type {
   NormalisedComment,
   NormalisedDirectMessage,
@@ -1031,5 +1043,569 @@ describe('Meta ingest, once rolling back 1.2 has moved comments back', () => {
       createdConversation: false,
     });
     expect(await conversation(root.conversationId)).toMatchObject({ channel: 'facebook' });
+  });
+});
+
+/**
+ * The thread a passer-by's reply opened, driven through the real ingest, both
+ * of Jev's classifiers (TypeSafe answered by the test) and the router, on a
+ * Facebook Page routing by category — the state the Page and Instagram rows
+ * are about to be switched to. Each classifier and the router has its own
+ * tests of the rule it follows; these are the three together, in the order
+ * production would run them: the reply stored and judged, then the root.
+ */
+describe('a reply-first comment thread, through Jev and the router', () => {
+  const BOB = '9988776655';
+  const BASE = 'https://typesafe.test';
+
+  beforeEach(async () => {
+    vi.stubEnv('TYPESAFE_API_KEY', 'test-key');
+    vi.stubEnv('PRIORITY_AI', 'apply');
+    resetEnvCache();
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    await db.execute(sql`
+      insert into category_ai_settings (id, mode, min_probability, routing_window_minutes)
+      values (1, 'apply', 0.6, 5)
+      on conflict (id) do update set mode = 'apply', min_probability = 0.6`);
+    forgetCategoryAiSettings();
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+    resetEnvCache();
+    forgetCategoryAiSettings();
+  });
+
+  /** Customer Care on the Page's row, and the two teams its categories route to. */
+  async function page() {
+    const team = async (name: string, agentName: string, email: string) => {
+      const [agent] = await db
+        .insert(agents)
+        .values({ name: agentName, email, presence: 'online', lastSeenAt: new Date() })
+        .returning({ id: agents.id });
+      const [group] = await db
+        .insert(groups)
+        .values({ name, assignmentStrategy: 'round_robin', assignWithinHoursOnly: false })
+        .returning({ id: groups.id });
+      await db.insert(groupMembers).values({ groupId: group!.id, agentId: agent!.id });
+      return { agent: agent!.id, group: group!.id };
+    };
+    const care = await team('Customer Care', 'Hana', 'hana@shipblu.test');
+    const sales = await team('Sales', 'Samir', 'samir@shipblu.test');
+    const merchants = await team('Merchant Care', 'Mona', 'mona@shipblu.test');
+    for (const [key, group] of [
+      ['sales', sales.group],
+      ['merchant_support', merchants.group],
+    ] as const) {
+      await db
+        .update(ticketCategories)
+        .set({ routeGroupId: group })
+        .where(eq(ticketCategories.key, key));
+    }
+    await db.insert(channels).values({
+      type: 'facebook',
+      name: 'Facebook Page',
+      config: {},
+      defaultGroupId: care.group,
+      routingMode: 'category',
+    });
+    return { care, sales, merchants };
+  }
+
+  /** Jev answering both questions at once; each classifier reads its own. */
+  function jev(category: string, priority: string, probability = 0.9) {
+    return stubFetch(() =>
+      Response.json({
+        model: 'jev-1.13.0',
+        answers: {
+          ticket_category: {
+            type: 'choice',
+            choice: category,
+            probabilities: { [category]: probability },
+            confidence: 0.8,
+          },
+          priority: {
+            type: 'choice',
+            choice: priority,
+            probabilities: { [priority]: probability },
+            confidence: 0.8,
+          },
+        },
+        usage: { input_tokens: 400 },
+      }),
+    );
+  }
+
+  /** Both classifiers on one message, as the two jobs it queued would. */
+  async function judged(messageId: string) {
+    return {
+      priority: await classifyMessagePriority(messageId, { baseUrl: BASE }),
+      category: await classifyMessageCategory(messageId, { baseUrl: BASE }),
+    };
+  }
+
+  async function ticketOf(conversationId: string) {
+    const [row] = await db
+      .select({
+        requesterContactId: conversations.requesterContactId,
+        priority: conversations.priority,
+        groupId: conversations.groupId,
+        assigneeAgentId: conversations.assigneeAgentId,
+        categoryKey: ticketCategories.key,
+      })
+      .from(conversations)
+      .leftJoin(ticketCategories, eq(ticketCategories.id, conversations.categoryId))
+      .where(eq(conversations.id, conversationId));
+    return row!;
+  }
+
+  async function routing(conversationId: string) {
+    const [row] = await db
+      .select({ stage: routingDecisions.stage, outcome: routingDecisions.outcome })
+      .from(routingDecisions)
+      .where(eq(routingDecisions.conversationId, conversationId));
+    return row!;
+  }
+
+  async function contactOf(identifier: string) {
+    const [row] = await db
+      .select({ id: contactIdentities.contactId })
+      .from(contactIdentities)
+      .where(eq(contactIdentities.identifier, identifier));
+    return row!.id;
+  }
+
+  /** Bob's "scammers" reply, stored before Amira's comment, judged urgent and sales. */
+  async function bobFirst() {
+    const opened = await ingestMetaComment(
+      comment({
+        commentId: 'post-1_c2',
+        parentCommentId: 'post-1_c1',
+        from: BOB,
+        fromName: 'Bob',
+        text: 'Scammers, I will sue. How much to ship to Alexandria?',
+        createdAt: LATER,
+      }),
+    );
+    expect(opened).toMatchObject({ createdConversation: true });
+    jev('sales', 'urgent');
+    expect(await judged(opened.messageId)).toMatchObject({
+      priority: { outcome: 'applied' },
+      category: { outcome: 'applied' },
+    });
+    // Held still: the root may yet arrive and take the ticket.
+    expect(await routing(opened.conversationId)).toMatchObject({
+      stage: 'holding',
+      outcome: null,
+    });
+    expect(await ticketOf(opened.conversationId)).toMatchObject({
+      priority: 'urgent',
+      categoryKey: 'sales',
+      assigneeAgentId: null,
+    });
+    return opened;
+  }
+
+  it('files, prices and routes the ticket on the customer’s own comment', async () => {
+    const t = await page();
+    const opened = await bobFirst();
+
+    const root = await ingestMetaComment(comment({ text: 'My shop’s COD payments never arrived' }));
+    expect(root.conversationId).toBe(opened.conversationId);
+    jev('merchant_support', 'low');
+    expect(await judged(root.messageId)).toMatchObject({
+      priority: { outcome: 'applied' },
+      category: { outcome: 'applied' },
+    });
+
+    expect(await ticketOf(opened.conversationId)).toMatchObject({
+      requesterContactId: await contactOf('1122334455'),
+      priority: 'low',
+      categoryKey: 'merchant_support',
+      groupId: t.merchants.group,
+      assigneeAgentId: t.merchants.agent,
+    });
+    expect(await routing(opened.conversationId)).toMatchObject({
+      stage: 'decided',
+      outcome: 'category',
+    });
+
+    // Bob's next comment is somebody under the customer's: neither asks.
+    const later = await ingestMetaComment(
+      comment({
+        commentId: 'post-1_c3',
+        parentCommentId: 'post-1_c1',
+        from: BOB,
+        fromName: 'Bob',
+        text: 'Still waiting, this is urgent',
+        createdAt: new Date(LATER.getTime() + 60_000),
+      }),
+    );
+    expect(await judged(later.messageId)).toEqual({
+      priority: { status: 'skipped', reason: 'not written by the requester' },
+      category: { status: 'skipped', reason: 'not written by the requester' },
+    });
+  });
+
+  // Her answer agrees with what Bob's reply was read as, and so writes nothing:
+  // its run is what makes the category hers, and routes the ticket.
+  it('routes at once on the customer’s comment answered as Bob’s reply was', async () => {
+    const t = await page();
+    const opened = await bobFirst();
+
+    const root = await ingestMetaComment(comment({ text: 'How much to ship 30 parcels a week?' }));
+    jev('sales', 'medium');
+    expect(await judged(root.messageId)).toMatchObject({ category: { outcome: 'applied' } });
+
+    expect(await routing(opened.conversationId)).toMatchObject({
+      stage: 'decided',
+      outcome: 'category',
+    });
+    expect(await ticketOf(opened.conversationId)).toMatchObject({
+      categoryKey: 'sales',
+      groupId: t.sales.group,
+      assigneeAgentId: t.sales.agent,
+    });
+  });
+
+  // Meta omitted the root's created_time, so parse.ts stamped it when it was
+  // read: after Bob's reply, which is then the thread's earliest message.
+  it('does the same when the customer’s comment is stamped after Bob’s reply', async () => {
+    const t = await page();
+    const opened = await bobFirst();
+
+    const root = await ingestMetaComment(
+      comment({
+        text: 'My shop’s COD payments never arrived',
+        createdAt: new Date(LATER.getTime() + 5 * 60_000),
+      }),
+    );
+    jev('merchant_support', 'low');
+    expect(await judged(root.messageId)).toMatchObject({
+      priority: { outcome: 'applied' },
+      category: { outcome: 'applied' },
+    });
+
+    expect(await ticketOf(opened.conversationId)).toMatchObject({
+      priority: 'low',
+      categoryKey: 'merchant_support',
+      groupId: t.merchants.group,
+      assigneeAgentId: t.merchants.agent,
+    });
+  });
+
+  it('routes on nothing of Bob’s when the customer’s comment has no words', async () => {
+    const t = await page();
+    const opened = await bobFirst();
+
+    // A photo: nothing to ask either classifier about.
+    const root = await ingestMetaComment(comment({ text: '' }));
+    const calls = jev('merchant_support', 'low');
+    expect(await judged(root.messageId)).toEqual({
+      priority: { status: 'skipped', reason: 'no text' },
+      category: { status: 'skipped', reason: 'no text' },
+    });
+    expect(calls).not.toHaveBeenCalled();
+
+    expect(await settleRouting(opened.conversationId)).toBe('decided');
+
+    expect(await routing(opened.conversationId)).toMatchObject({ outcome: 'fallback' });
+    expect(await ticketOf(opened.conversationId)).toMatchObject({
+      groupId: t.care.group,
+      assigneeAgentId: t.care.agent,
+      // Labels only: a person or her own next words replace them. The
+      // priority stands because her photo was her opening, and later words
+      // may raise and never lower.
+      categoryKey: 'sales',
+      priority: 'urgent',
+    });
+  });
+
+  // Set aside at the window's end, with no policy for it; her own words then
+  // read as his were, which writes nothing, and the category is hers now, so
+  // the policy keyed on it is chosen as a write's would have been.
+  it('gives the policy to the category her later words agree with, once it was set aside', async () => {
+    await page();
+    const round = { firstResponseMins: 30, nextResponseMins: 30, resolutionMins: 240 };
+    const [sales] = await db
+      .select({ id: ticketCategories.id })
+      .from(ticketCategories)
+      .where(eq(ticketCategories.key, 'sales'));
+    const [salesPolicy] = await db
+      .insert(slaPolicies)
+      .values({
+        name: 'Sales',
+        hoursSource: 'round_the_clock',
+        targets: { low: round, medium: round, high: round, urgent: round },
+        conditions: { field: 'category.id', op: 'eq', value: sales!.id },
+      })
+      .returning({ id: slaPolicies.id });
+    const opened = await bobFirst();
+    await ingestMetaComment(comment({ text: '' }));
+    expect(await settleRouting(opened.conversationId)).toBe('decided');
+    const policyOf = async () => {
+      const [row] = await db
+        .select({ slaPolicyId: conversations.slaPolicyId })
+        .from(conversations)
+        .where(eq(conversations.id, opened.conversationId));
+      return row!.slaPolicyId;
+    };
+    expect(await policyOf()).toBeNull();
+
+    const hers = await ingestMetaComment(
+      comment({
+        commentId: 'post-1_c3',
+        parentCommentId: 'post-1_c1',
+        text: 'How much to ship 30 parcels a week?',
+        createdAt: new Date(LATER.getTime() + 60_000),
+      }),
+    );
+    jev('sales', 'medium');
+    expect(await judged(hers.messageId)).toMatchObject({ category: { outcome: 'applied' } });
+
+    expect(await policyOf()).toBe(salesPolicy!.id);
+  });
+
+  /** A policy for every priority, under `conditions`, at `position`. */
+  async function policy(name: string, conditions: unknown, position: number) {
+    const round = { firstResponseMins: 30, nextResponseMins: 30, resolutionMins: 240 };
+    const [row] = await db
+      .insert(slaPolicies)
+      .values({
+        name,
+        hoursSource: 'round_the_clock',
+        targets: { low: round, medium: round, high: round, urgent: round },
+        conditions,
+        position,
+      })
+      .returning({ id: slaPolicies.id });
+    return row!.id;
+  }
+
+  async function categoryNamed(key: string) {
+    const [row] = await db
+      .select({ id: ticketCategories.id })
+      .from(ticketCategories)
+      .where(eq(ticketCategories.key, key));
+    return row!.id;
+  }
+
+  async function policyOn(conversationId: string) {
+    const [row] = await db
+      .select({ slaPolicyId: conversations.slaPolicyId })
+      .from(conversations)
+      .where(eq(conversations.id, conversationId));
+    return row!.slaPolicyId;
+  }
+
+  // The Page not routing: Bob's reply was filed and its write chose the Sales
+  // policy. Her comment, read the same, lowers the priority as her opening
+  // and writes no category: a second look then would take up the lowered
+  // priority as though the category had changed, and move the ticket's
+  // clocks off the policy its category chose.
+  it('gives a category that already had its look no second one when her comment agrees', async () => {
+    await page();
+    await db.update(channels).set({ routingMode: 'default_group' });
+    await policy('Low priority', { field: 'priority', op: 'eq', value: 'low' }, 0);
+    const salesPolicy = await policy(
+      'Sales',
+      { field: 'category.id', op: 'eq', value: await categoryNamed('sales') },
+      1,
+    );
+    const opened = await ingestMetaComment(
+      comment({
+        commentId: 'post-1_c2',
+        parentCommentId: 'post-1_c1',
+        from: BOB,
+        fromName: 'Bob',
+        text: 'How much to ship to Alexandria?',
+        createdAt: LATER,
+      }),
+    );
+    jev('sales', 'urgent');
+    await judged(opened.messageId);
+    expect(await policyOn(opened.conversationId)).toBe(salesPolicy);
+
+    const root = await ingestMetaComment(comment({ text: 'How much to ship 30 parcels a week?' }));
+    jev('sales', 'low');
+    expect(await judged(root.messageId)).toMatchObject({
+      priority: { outcome: 'applied' },
+      category: { outcome: 'applied' },
+    });
+
+    expect(await ticketOf(opened.conversationId)).toMatchObject({ priority: 'low' });
+    expect(await policyOn(opened.conversationId)).toBe(salesPolicy);
+  });
+
+  // No root came in the window, so its end routed on Bob's reading as the
+  // customer's and chose the Sales policy. Her comment then lowers the
+  // priority as her opening and agrees on the category: no second look,
+  // which would take the lowered priority up as though the category had
+  // changed.
+  it('gives a category the window’s end routed on no second look when her comment agrees', async () => {
+    await page();
+    await policy('Low priority', { field: 'priority', op: 'eq', value: 'low' }, 0);
+    const salesPolicy = await policy(
+      'Sales',
+      { field: 'category.id', op: 'eq', value: await categoryNamed('sales') },
+      1,
+    );
+    const opened = await bobFirst();
+    expect(await settleRouting(opened.conversationId)).toBe('decided');
+    expect(await routing(opened.conversationId)).toMatchObject({ outcome: 'category' });
+    expect(await policyOn(opened.conversationId)).toBe(salesPolicy);
+
+    const root = await ingestMetaComment(comment({ text: 'How much to ship 30 parcels a week?' }));
+    jev('sales', 'low');
+    expect(await judged(root.messageId)).toMatchObject({
+      priority: { outcome: 'applied' },
+      category: { outcome: 'applied' },
+    });
+
+    expect(await ticketOf(opened.conversationId)).toMatchObject({ priority: 'low' });
+    expect(await policyOn(opened.conversationId)).toBe(salesPolicy);
+  });
+
+  // Set aside, then handed to Sales: the move chose the Sales policy with the
+  // category on the ticket. Her answer raising the priority and agreeing on
+  // the category is no second look, which would take the raise up as though
+  // the category had changed.
+  it('gives a set-aside category no look once a move has chosen its policy', async () => {
+    const t = await page();
+    await policy('Urgent', { field: 'priority', op: 'eq', value: 'urgent' }, 0);
+    const salesPolicy = await policy(
+      'Sales',
+      { field: 'category.id', op: 'eq', value: await categoryNamed('sales') },
+      1,
+    );
+    const opened = await ingestMetaComment(
+      comment({
+        commentId: 'post-1_c2',
+        parentCommentId: 'post-1_c1',
+        from: BOB,
+        fromName: 'Bob',
+        text: 'How much to ship to Alexandria?',
+        createdAt: LATER,
+      }),
+    );
+    jev('sales', 'high');
+    await judged(opened.messageId);
+    await ingestMetaComment(comment({ text: '' }));
+    expect(await settleRouting(opened.conversationId)).toBe('decided');
+    expect(await ticketOf(opened.conversationId)).toMatchObject({
+      groupId: t.care.group,
+      assigneeAgentId: t.care.agent,
+    });
+    const handed = await handToRouteGroup(
+      opened.conversationId,
+      { agentId: t.care.agent },
+      { expectedGroupId: t.sales.group, expectedAssigneeId: t.care.agent },
+    );
+    expect(handed).toMatchObject({ ok: true });
+    expect(await policyOn(opened.conversationId)).toBe(salesPolicy);
+
+    const hers = await ingestMetaComment(
+      comment({
+        commentId: 'post-1_c3',
+        parentCommentId: 'post-1_c1',
+        text: 'Please, today: 30 parcels are waiting',
+        createdAt: new Date(LATER.getTime() + 60_000),
+      }),
+    );
+    jev('sales', 'urgent');
+    expect(await judged(hers.messageId)).toMatchObject({
+      priority: { outcome: 'applied' },
+      category: { outcome: 'applied' },
+    });
+    expect(await ticketOf(opened.conversationId)).toMatchObject({ priority: 'urgent' });
+    expect(await policyOn(opened.conversationId)).toBe(salesPolicy);
+  });
+
+  // Two of her comments read as sales, judged out of order: the later one's
+  // answer gave the look, which found no policy, and the earlier one,
+  // answered late, is answered again — no second look for it, which would
+  // take up the priority it raised.
+  it('gives a set-aside category its look on her first answer only, whichever is judged first', async () => {
+    await page();
+    await policy('Urgent', { field: 'priority', op: 'eq', value: 'urgent' }, 0);
+    const opened = await ingestMetaComment(
+      comment({
+        commentId: 'post-1_c2',
+        parentCommentId: 'post-1_c1',
+        from: BOB,
+        fromName: 'Bob',
+        text: 'How much to ship to Alexandria?',
+        createdAt: LATER,
+      }),
+    );
+    jev('sales', 'high');
+    await judged(opened.messageId);
+    await ingestMetaComment(comment({ text: '' }));
+    expect(await settleRouting(opened.conversationId)).toBe('decided');
+
+    const earlier = await ingestMetaComment(
+      comment({
+        commentId: 'post-1_c3',
+        parentCommentId: 'post-1_c1',
+        text: 'Please, today: 30 parcels are waiting',
+        createdAt: new Date(LATER.getTime() + 60_000),
+      }),
+    );
+    const later = await ingestMetaComment(
+      comment({
+        commentId: 'post-1_c4',
+        parentCommentId: 'post-1_c1',
+        text: 'How much to ship 30 parcels a week?',
+        createdAt: new Date(LATER.getTime() + 120_000),
+      }),
+    );
+    jev('sales', 'medium');
+    expect(await judged(later.messageId)).toMatchObject({ category: { outcome: 'applied' } });
+    expect(await policyOn(opened.conversationId)).toBeNull();
+
+    jev('sales', 'urgent');
+    expect(await judged(earlier.messageId)).toMatchObject({
+      priority: { outcome: 'applied' },
+      category: { outcome: 'applied' },
+    });
+    expect(await ticketOf(opened.conversationId)).toMatchObject({ priority: 'urgent' });
+    expect(await policyOn(opened.conversationId)).toBeNull();
+  });
+
+  it('routes on nothing of Bob’s when the answers about the customer’s comment are unsure', async () => {
+    const t = await page();
+    const opened = await bobFirst();
+
+    const root = await ingestMetaComment(comment({ text: 'Hello?' }));
+    jev('merchant_support', 'low', 0.4);
+    expect(await judged(root.messageId)).toMatchObject({
+      priority: { outcome: 'below_threshold' },
+      category: { outcome: 'below_threshold' },
+    });
+
+    expect(await settleRouting(opened.conversationId)).toBe('decided');
+
+    expect(await routing(opened.conversationId)).toMatchObject({ outcome: 'fallback' });
+    expect(await ticketOf(opened.conversationId)).toMatchObject({
+      groupId: t.care.group,
+      assigneeAgentId: t.care.agent,
+      categoryKey: 'sales',
+      priority: 'urgent',
+    });
+    expect(
+      await db
+        .select({ outcome: aiPriorityRuns.outcome })
+        .from(aiPriorityRuns)
+        .where(eq(aiPriorityRuns.messageId, root.messageId)),
+    ).toEqual([{ outcome: 'below_threshold' }]);
+    expect(
+      await db
+        .select({ outcome: aiCategoryRuns.outcome })
+        .from(aiCategoryRuns)
+        .where(eq(aiCategoryRuns.messageId, root.messageId)),
+    ).toEqual([{ outcome: 'below_threshold' }]);
   });
 });

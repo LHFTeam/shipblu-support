@@ -257,9 +257,14 @@ const NOT_THE_ROUTERS_PASS: ReadonlySet<RoutingOutcome> = new Set(['manual', 'ru
  * written twice. False, and the pass is the writer's.
  *
  * - **Undecided** — a phase one written since, which some caller is finishing
- *   (`in_flight`), or none yet, the writer's own `routeNow` having `failed`:
- *   true. Phase one, then or at the window's end, reads the ticket after this
- *   write, and the router's pass after it.
+ *   (`in_flight`), or none yet, the writer's own `routeNow` having `failed`, or
+ *   answered `waiting` because the category is Jev's reading of a comment
+ *   thread still waiting for its customer (`categoryStanding`): true. Phase
+ *   one, then or at the window's end, reads the ticket after this write, and
+ *   the router's pass after it — unless the window's end sets the category
+ *   aside, which owes it no pass, or a person or a rule ends the hold first,
+ *   after which `afterHoldEnded` chooses the policy for it, and runs the pass
+ *   after an agent's reply, which runs none of its own (`categoryOwed`).
  * - **Decided by the router** — its phase one read the ticket under the lock
  *   after this write committed, and its pass ran on this category or on a
  *   later writer's, whose pass it then is: true either way.
@@ -267,7 +272,8 @@ const NOT_THE_ROUTERS_PASS: ReadonlySet<RoutingOutcome> = new Set(['manual', 'ru
  *   `endHold` decides without reading the category, and `not_open` ran no
  *   pass; a router owing nothing is not the edit's pass having run, and a
  *   person's edit on a ticket resolved in its window meets its rules as an
- *   edit on any resolved ticket does.
+ *   edit on any resolved ticket does. Jev asks one thing more of a `manual`
+ *   one, whose ending owes its write a pass already (`relabelOwed`).
  * - **No row** — purged with its ticket in that moment: false, and the
  *   writer's own pass finds no ticket.
  */

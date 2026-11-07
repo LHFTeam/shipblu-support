@@ -1,4 +1,4 @@
-import { eq, sql } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { db } from '@/db/client';
 import { agents, kbArticles, kbCategories, kbFolders, presencePolicy } from '@/db/schema';
@@ -8,21 +8,18 @@ import { withCleanDatabase } from '@/lib/testing/db';
  * `touch_updated_at()` from `001_extensions_and_triggers.sql`, against the
  * trigger the file's loop attached.
  *
- * On `kb_articles` the date is an edit date: what readers write — a view, a
- * feedback tap — leaves it alone, and everything else moves it (PROJECT-STATE
- * §6.51). Every other table keeps the plain stamp, which no UPDATE can backdate,
- * because `presence_policy`'s grace period is anchored on it.
+ * It stamps `now()` on every UPDATE of every table, one that changes nothing
+ * included, and no UPDATE can backdate it — `presence_policy`'s grace period
+ * is anchored on that. `kb_articles` is held to it here because it was the one
+ * exception, from #466 until its reader counters were dropped
+ * (`plans/kb-article-stats.md`): the exception kept the date on an UPDATE that
+ * changed nothing but a counter, or nothing at all. Readers now count in
+ * `kb_article_stats` and never write the article, which
+ * `app/api/kb/stats.db.test.ts` holds them to by the row's `xmin`.
  *
  * Each row is inserted with its date in the past, since only an INSERT can put
  * one there, so "moved" and "kept" are told apart by the date itself rather
  * than by how many microseconds separate two statements.
- *
- * The readers' writes here are the statements the release before
- * `kb_article_stats` ran, and the old release still runs them during a
- * deploy's window, after the migrations and before the new code is live. The
- * real writers now count in `kb_article_stats` and leave the article's row
- * alone, which `app/api/kb/stats.db.test.ts` holds them to. This exception, and
- * these tests, go when the columns do (`plans/kb-article-stats.md`, PR 2).
  */
 
 withCleanDatabase();
@@ -41,13 +38,13 @@ async function folder(slug = 'shipping'): Promise<string> {
   return row!.id;
 }
 
-async function article(folderId: string): Promise<string> {
+async function article(folderId: string, slug = 'pickups'): Promise<string> {
   const [row] = await db
     .insert(kbArticles)
     .values({
       folderId,
       title: 'Pickups',
-      slug: 'pickups',
+      slug,
       bodyHtml: '<p>Book a pickup.</p>',
       bodyText: 'Book a pickup.',
       locale: 'en',
@@ -60,165 +57,46 @@ async function article(folderId: string): Promise<string> {
   return row!.id;
 }
 
-async function stored(id: string) {
+async function articleDate(id: string): Promise<Date> {
   const [row] = await db
-    .select({
-      updatedAt: kbArticles.updatedAt,
-      viewCount: kbArticles.viewCount,
-      helpfulCount: kbArticles.helpfulCount,
-      unhelpfulCount: kbArticles.unhelpfulCount,
-      searchVector: sql<string | null>`${kbArticles.searchVector}::text`,
-    })
+    .select({ updatedAt: kbArticles.updatedAt })
     .from(kbArticles)
     .where(eq(kbArticles.id, id));
-  return row!;
+  return row!.updatedAt;
 }
 
-/** A view, as the release before `kb_article_stats` counted one. */
-async function view(id: string): Promise<void> {
-  await db
-    .update(kbArticles)
-    .set({ viewCount: sql`${kbArticles.viewCount} + 1` })
-    .where(eq(kbArticles.id, id));
-}
-
-/** A tap on "Was this helpful?", as the release before `kb_article_stats` counted one. */
-async function tap(id: string, wasHelpful: boolean): Promise<void> {
-  await db
-    .update(kbArticles)
-    .set(
-      wasHelpful
-        ? { helpfulCount: sql`${kbArticles.helpfulCount} + 1` }
-        : { unhelpfulCount: sql`${kbArticles.unhelpfulCount} + 1` },
-    )
-    .where(eq(kbArticles.id, id));
-}
-
-describe('kb_articles.updated_at', () => {
-  it('stays where it was when the old release counts a view', async () => {
-    const id = await article(await folder());
-
-    await view(id);
-    await view(id);
-
-    const row = await stored(id);
-    // The premise: the write happened.
-    expect(row.viewCount).toBe(2);
-    expect(row.updatedAt).toEqual(WRITTEN);
-    // And the generated column is still computed on a row whose date was kept,
-    // although `NEW.search_vector` is null inside the trigger.
-    expect(row.searchVector).toContain("'pickups'");
-  });
-
-  it('stays where it was when the old release counts a helpful and an unhelpful tap', async () => {
-    const id = await article(await folder());
-
-    await tap(id, true);
-    await tap(id, false);
-
-    const row = await stored(id);
-    expect(row.helpfulCount).toBe(1);
-    expect(row.unhelpfulCount).toBe(1);
-    expect(row.updatedAt).toEqual(WRITTEN);
-  });
-
-  it('stays where it was on an UPDATE that changes nothing', async () => {
+describe('touch_updated_at', () => {
+  it('stamps an article on an UPDATE that changes nothing, as every table', async () => {
     const id = await article(await folder());
 
     await db.update(kbArticles).set({ title: 'Pickups' }).where(eq(kbArticles.id, id));
 
-    expect((await stored(id)).updatedAt).toEqual(WRITTEN);
+    expect((await articleDate(id)).getTime()).toBeGreaterThan(WRITTEN.getTime());
   });
 
-  it('ignores a date an UPDATE writes itself, either way', async () => {
-    const id = await article(await folder());
-
-    // The console's save, status and restore actions and the Freshdesk import
-    // set `updatedAt: new Date()` beside what they change, and the old
-    // release's import still carries the counters on the row, so its re-import
-    // that only refreshes them is this statement, and it is not an edit.
-    await db
-      .update(kbArticles)
-      .set({ viewCount: 500, updatedAt: new Date('2030-01-01T00:00:00Z') })
-      .where(eq(kbArticles.id, id));
-    expect((await stored(id)).updatedAt).toEqual(WRITTEN);
-
-    // And a backdate on a real edit is the stamp's to replace.
-    await db
-      .update(kbArticles)
-      .set({ title: 'Booking a pickup', updatedAt: new Date('2000-01-01T00:00:00Z') })
-      .where(eq(kbArticles.id, id));
-    expect((await stored(id)).updatedAt.getTime()).toBeGreaterThan(WRITTEN.getTime());
-  });
-
-  const edits: [string, Partial<typeof kbArticles.$inferInsert>][] = [
-    ['the title', { title: 'Booking a pickup' }],
-    ['the body', { bodyHtml: '<p>Book a pickup online.</p>', bodyText: 'Book a pickup online.' }],
-    ['the status', { status: 'archived' }],
-    ['the visibility', { visibility: 'agents_only' }],
-    ['the tags', { tags: ['pickups'] }],
-    ['the position', { position: 3 }],
-    ['the reader floor', { minRole: 'supervisor' }],
-    // The shapes most likely to compare oddly as jsonb: a jsonb object, a
-    // nullable text, a uuid, a timestamptz and a uuid[].
-    ['the SEO fields', { seo: { title: 'Pickups' } }],
-    ['the excerpt', { excerpt: 'Book a pickup online.' }],
-    ['the translation link', { translationGroupId: '00000000-0000-4000-8000-000000000001' }],
-    ['the publication date', { publishedAt: new Date('2026-04-01T09:00:00Z') }],
-    [
-      'the companies it is shown to',
-      { visibleToCompanyIds: ['00000000-0000-4000-8000-000000000002'] },
-    ],
-  ];
-
-  it.each(edits)('moves when %s changes', async (_label, values) => {
-    const id = await article(await folder());
-
-    await db.update(kbArticles).set(values).where(eq(kbArticles.id, id));
-
-    expect((await stored(id)).updatedAt.getTime()).toBeGreaterThan(WRITTEN.getTime());
-  });
-
-  it('moves when the approver changes', async () => {
-    const id = await article(await folder());
-    const [approver] = await db
-      .insert(agents)
-      .values({ email: 'approver@example.test', name: 'Approver' })
-      .returning({ id: agents.id });
+  it('replaces a date an UPDATE writes into an article, either way', async () => {
+    const folderId = await folder();
+    const ahead = await article(folderId, 'ahead');
+    const behind = await article(folderId, 'behind');
+    const future = new Date('9999-01-01T00:00:00Z');
 
     await db
       .update(kbArticles)
-      .set({ approvedByAgentId: approver!.id })
-      .where(eq(kbArticles.id, id));
-
-    expect((await stored(id)).updatedAt.getTime()).toBeGreaterThan(WRITTEN.getTime());
-  });
-
-  it('moves when the article moves to another folder', async () => {
-    const id = await article(await folder('shipping'));
-    const other = await folder('returns');
-
-    await db.update(kbArticles).set({ folderId: other }).where(eq(kbArticles.id, id));
-
-    expect((await stored(id)).updatedAt.getTime()).toBeGreaterThan(WRITTEN.getTime());
-  });
-
-  it('moves when a counter and the title change in one statement', async () => {
-    const id = await article(await folder());
-
+      .set({ title: 'Booking a pickup', updatedAt: future })
+      .where(eq(kbArticles.id, ahead));
     await db
       .update(kbArticles)
-      .set({ viewCount: sql`${kbArticles.viewCount} + 1`, title: 'Booking a pickup' })
-      .where(eq(kbArticles.id, id));
+      .set({ updatedAt: new Date('2000-01-01T00:00:00Z') })
+      .where(eq(kbArticles.id, behind));
 
-    const row = await stored(id);
-    expect(row.viewCount).toBe(1);
-    expect(row.updatedAt.getTime()).toBeGreaterThan(WRITTEN.getTime());
-    expect(row.searchVector).toContain("'booking'");
+    const forward = await articleDate(ahead);
+    expect(forward.getTime()).toBeGreaterThan(WRITTEN.getTime());
+    expect(forward.getTime()).toBeLessThan(future.getTime());
+    // Neither backdated nor kept at the date it was written with: the UPDATE
+    // that wrote nothing else was stamped like any other.
+    expect((await articleDate(behind)).getTime()).toBeGreaterThan(WRITTEN.getTime());
   });
-});
 
-describe('every other table', () => {
   it('stamps an agent on an UPDATE that changes nothing', async () => {
     const [agent] = await db
       .insert(agents)
@@ -234,7 +112,7 @@ describe('every other table', () => {
     expect(row!.updatedAt.getTime()).toBeGreaterThan(WRITTEN.getTime());
   });
 
-  it('stamps a knowledge-base folder too: the exception is one table, not a prefix', async () => {
+  it('stamps a knowledge-base folder on an UPDATE that changes nothing', async () => {
     const id = await folder();
 
     await db.update(kbFolders).set({ slug: 'shipping' }).where(eq(kbFolders.id, id));
@@ -246,25 +124,18 @@ describe('every other table', () => {
     expect(row!.updatedAt.getTime()).toBeGreaterThan(WRITTEN.getTime());
   });
 
-  it('never lets an UPDATE backdate the presence policy, whose grace is anchored on it', async () => {
-    await db.insert(presencePolicy).values({ id: 1, updatedAt: WRITTEN });
+  it.each<[string, Partial<typeof presencePolicy.$inferInsert>]>([
+    ['changes nothing', { autoAwayAfterMins: null }],
+    ['tries to backdate it', { updatedAt: new Date('2000-01-01T00:00:00Z') }],
+  ])(
+    'stamps the presence policy, whose grace is anchored on it, on an UPDATE that %s',
+    async (_label, values) => {
+      await db.insert(presencePolicy).values({ id: 1, updatedAt: WRITTEN });
 
-    await db
-      .update(presencePolicy)
-      .set({ autoAwayAfterMins: null })
-      .where(eq(presencePolicy.id, 1));
-    const [unchanged] = await db
-      .select({ updatedAt: presencePolicy.updatedAt })
-      .from(presencePolicy);
-    expect(unchanged!.updatedAt.getTime()).toBeGreaterThan(WRITTEN.getTime());
+      await db.update(presencePolicy).set(values).where(eq(presencePolicy.id, 1));
 
-    await db
-      .update(presencePolicy)
-      .set({ updatedAt: new Date('2000-01-01T00:00:00Z') })
-      .where(eq(presencePolicy.id, 1));
-    const [backdated] = await db
-      .select({ updatedAt: presencePolicy.updatedAt })
-      .from(presencePolicy);
-    expect(backdated!.updatedAt.getTime()).toBeGreaterThanOrEqual(unchanged!.updatedAt.getTime());
-  });
+      const [row] = await db.select({ updatedAt: presencePolicy.updatedAt }).from(presencePolicy);
+      expect(row!.updatedAt.getTime()).toBeGreaterThan(WRITTEN.getTime());
+    },
+  );
 });

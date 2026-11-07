@@ -95,6 +95,22 @@ async function message(conversationId: string, at: number, id?: string): Promise
   return row!.id;
 }
 
+/** A message `authorContactId` wrote on the ticket. */
+async function messageBy(conversationId: string, at: number, authorContactId: string | null) {
+  const [row] = await db
+    .insert(messages)
+    .values({
+      conversationId,
+      direction: 'inbound',
+      kind: 'reply',
+      bodyText: 'بكام الشحن؟',
+      authorContactId,
+      createdAt: minute(at),
+    })
+    .returning({ id: messages.id });
+  return row!.id;
+}
+
 async function statusNamed(name: string): Promise<string> {
   const [row] = await db
     .select({ id: ticketStatuses.id })
@@ -334,6 +350,102 @@ describe('categoryAiReport', () => {
       settled: 0,
       unasked: 1,
     });
+  });
+
+  // A comment thread a passer-by's reply opened: his messages were asked about
+  // while he was its requester, five in shadow and one filed in apply, until
+  // the customer's comment took the ticket over. Read as the live job reads
+  // it now, his answers settle nothing and take none of her five — in this
+  // view, and in the other views the cap counts — so her settle is the one
+  // graded, and above it her next message is unasked rather than capped.
+  it('leaves runs on a passer-by’s messages out of the settle and the cap', async () => {
+    const t = await ticket({ channel: 'facebook_comment', externalId: 'facebook:comment:p_1' });
+    const [requester] = await db
+      .select({ id: conversations.requesterContactId })
+      .from(conversations)
+      .where(eq(conversations.id, t.id));
+    const [bob] = await db.insert(contacts).values({ name: 'Bob' }).returning({ id: contacts.id });
+    const run = { channel: 'facebook_comment' } as const;
+    for (const at of [0, 1, 2, 3, 4]) {
+      await answer(t.id, at, 'unknown', 'unknown', {
+        ...run,
+        messageId: await messageBy(t.id, at, bob!.id),
+      });
+    }
+    await answer(t.id, 4.5, 'applied', 'sales', {
+      ...run,
+      mode: 'apply',
+      messageId: await messageBy(t.id, 4.5, bob!.id),
+    });
+    await answer(t.id, 5, 'applied', 'customer_support', {
+      ...run,
+      mode: 'apply',
+      probability: 0.65,
+      messageId: await messageBy(t.id, 5, requester!.id),
+    });
+    await answer(t.id, 6, 'after_settle', null, {
+      ...run,
+      mode: 'apply',
+      messageId: await messageBy(t.id, 6, null),
+    });
+
+    const report = await categoryAiReport('live', QUESTION, 'apply');
+
+    const settled = (key: string) => report.categories.find((each) => each.key === key)?.settled;
+    expect(settled('customer_support')).toBe(1);
+    expect(settled('sales')).toBe(0);
+    expect(report.sweep.find((row) => row.threshold === 0.7)).toMatchObject({
+      settled: 0,
+      unasked: 1,
+    });
+  });
+
+  // His reply was filed while he held the thread, under the question as it
+  // was then; her comment, asked the edited question, agreed and wrote
+  // nothing. The write on his message is the filing her ticket stands on, and
+  // a supervisor moving it on overruled Jev on her words.
+  it('counts the filing her agreeing answer stands on, though his run is in another view', async () => {
+    const mona = await agent();
+    const t = await ticket({ channel: 'facebook_comment', externalId: 'facebook:comment:p_2' });
+    const [requester] = await db
+      .select({ id: conversations.requesterContactId })
+      .from(conversations)
+      .where(eq(conversations.id, t.id));
+    const [bob] = await db.insert(contacts).values({ name: 'Bob' }).returning({ id: contacts.id });
+    const sales = await categoryId('sales');
+    const run = { channel: 'facebook_comment', mode: 'apply' } as const;
+    const his = await messageBy(t.id, 0, bob!.id);
+    await answer(t.id, 0, 'applied', 'sales', {
+      ...run,
+      requestFingerprint: 'q-before-the-edit',
+      messageId: his,
+    });
+    await db.insert(conversationEvents).values(
+      categoryChangedEvent(
+        t.id,
+        { from: null, to: sales, category: { id: sales, key: 'sales', labelEn: 'Sales' } },
+        { label: CATEGORY_AI_ACTOR },
+        {
+          probability: 0.9,
+          model: 'jev-1.13.0',
+          messageId: his,
+          messageCreatedAt: minute(0).toISOString(),
+          runLabel: 'live',
+        },
+      ),
+    );
+    await db.update(conversations).set({ categoryId: sales }).where(eq(conversations.id, t.id));
+    await answer(t.id, 1, 'applied', 'sales', {
+      ...run,
+      messageId: await messageBy(t.id, 1, requester!.id),
+    });
+    await setConversationCategory(t.id, await categoryId('merchant_support'), { agentId: mona });
+
+    const report = await categoryAiReport('live', QUESTION, 'apply');
+
+    expect(report.filed).toEqual([
+      { key: 'sales', filed: 1, changed: 1, changedTo: [{ key: 'merchant_support', count: 1 }] },
+    ]);
   });
 
   it('reads a message judged after the first reply as out of the window', async () => {

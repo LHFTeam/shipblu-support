@@ -357,16 +357,19 @@ export function FallbackTable({ rows }: { rows: FallbackReasons[] }) {
         <span key="asked" className="flex items-center gap-1">
           Jev never asked
           <InfoTip label="Jev never asked">
-            This and the next two say what Jev had answered when the window ran out. Never asked: no
-            answer at all — a photo with no caption, or a job that had not run yet. Unsure: every
+            This and the next three say what Jev had answered when the window ran out. Never asked:
+            no answer at all — a photo with no caption, or a job that had not run yet. Unsure: every
             answer was unknown or under the threshold, so a lower threshold might have routed it.
-            Every call failed: no answer came back. A ticket Jev answered late counts as never asked
-            here and as filed by Jev beside it; one in none of the three was answered some other
-            way, such as past the classifier&rsquo;s cap.
+            Every call failed: no answer came back. Set aside: Jev filed it from a reply by somebody
+            who is not the customer — a passer-by whose reply opened a comment thread before the
+            customer&rsquo;s own comment arrived — so the router did not route on it. A ticket Jev
+            answered late counts as never asked here and as filed by Jev beside it; one in none of
+            the four was answered some other way, such as past the classifier&rsquo;s cap.
           </InfoTip>
         </span>,
         'Jev unsure',
         'Every call failed',
+        'Set aside',
       ]}
     >
       {rows.map((row) => (
@@ -389,6 +392,7 @@ export function FallbackTable({ rows }: { rows: FallbackReasons[] }) {
           <Cell>{rate(row.notAsked, row.fallbacks)}</Cell>
           <Cell>{rate(row.unsure, row.fallbacks)}</Cell>
           <Cell>{rate(row.failed, row.fallbacks)}</Cell>
+          <Cell>{rate(row.setAside, row.fallbacks)}</Cell>
         </Row>
       ))}
     </Table>

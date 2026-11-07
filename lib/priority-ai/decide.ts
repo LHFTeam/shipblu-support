@@ -21,16 +21,20 @@ import type { PriorityAiMode } from './settings';
  * 2. **Below the threshold, nothing.** The probability is the winner's own
  *    share, the number a threshold sweep over `ai_priority_runs` is drawn from.
  *
- * 3. **Down only on the ticket's first message; up at any time.** The answer to
- *    the customer's opening message may set any level, `low` included. Every
- *    later message may raise the priority and never lower it. Not "the first
- *    *confident* answer", which is what this said first: a legal threat that
- *    splits its probability between urgent and high is below the threshold, and
- *    the "thanks" after it is the most confident answer a four-way classifier
- *    ever gives — so the first confident answer on a ticket was most often a
- *    `low` for content-free text, lowering exactly the tickets this exists to
- *    raise. Lowering is a judgement about the whole ticket, and only the opening
- *    message is the whole ticket.
+ * 3. **Down only on the requester's first message; up at any time.** The
+ *    answer to the requester's opening message may set any level, `low`
+ *    included. Every later message may raise the priority and never lower it.
+ *    Not "the first *confident* answer", which is what this said first: a legal
+ *    threat that splits its probability between urgent and high is below the
+ *    threshold, and the "thanks" after it is the most confident answer a
+ *    four-way classifier ever gives — so the first confident answer on a ticket
+ *    was most often a `low` for content-free text, lowering exactly the tickets
+ *    this exists to raise. Lowering is a judgement about the whole ticket, and
+ *    only the opening message is the whole ticket. The requester's, as they are
+ *    now: a message somebody else wrote is never the opening and never judged
+ *    it, so a passer-by's reply that opened a comment thread before the
+ *    customer's comment arrived leaves her own first words free to lower what
+ *    his raised (`priorityFacts` in `run.ts`).
  */
 
 export type PriorityOutcome =
@@ -50,13 +54,16 @@ export type PriorityOutcome =
   | 'failed';
 
 /**
- * The outcomes that judged the ticket: a confident answer about some message on
- * it that set, or confirmed, its level. Once one exists the ticket's opening has
- * been judged, whatever order the jobs ran in, so no other message's answer may
- * lower it (rule 3). `not_raised` is not one: it was refused the lowering it
- * asked for and moved nothing, so counting it would let the opening's own
- * answer be refused or not by which job ran first. Nor is `set_by_person`,
- * which says only that the answer was not allowed to act.
+ * The outcomes that judged the ticket: a confident answer about some message of
+ * the requester's that set, or confirmed, its level. Once one exists the
+ * ticket's opening has been judged, whatever order the jobs ran in, so no other
+ * message's answer may lower it (rule 3). `not_raised` is not one: it was
+ * refused the lowering it asked for and moved nothing, so counting it would let
+ * the opening's own answer be refused or not by which job ran first. Nor is
+ * `set_by_person`, which says only that the answer was not allowed to act. Nor
+ * is any of these on a message somebody other than the requester wrote — a
+ * passer-by's reply asked about while it held a comment thread, before the
+ * thread's root made its author the requester — which judged somebody else.
  */
 export const CONFIDENT_OUTCOMES = [
   'applied',
@@ -80,8 +87,8 @@ export type DecisionInput = {
   /** A person, a rule, a form or an agent-opened ticket chose the priority. */
   ownedElsewhere: boolean;
   /**
-   * This is the customer's opening message, and no other message on the ticket
-   * has had a confident answer yet — see `CONFIDENT_OUTCOMES`.
+   * This is the requester's opening message, and no other message of the
+   * requester's has had a confident answer yet — see `CONFIDENT_OUTCOMES`.
    */
   firstMessage: boolean;
 };

@@ -10,6 +10,7 @@ import {
   conversationEvents,
   conversations,
   groups,
+  messages,
   routingDecisions,
   ticketCategories,
   ticketStatuses,
@@ -525,8 +526,111 @@ describe('fallbackReasons', () => {
 
     const [reasons] = await fallbackReasons(WEEK, NOW);
     // The capped one is none of the three.
-    expect(reasons).toMatchObject({ fallbacks: 7, notAsked: 3, unsure: 2, failed: 1 });
+    expect(reasons).toMatchObject({ fallbacks: 7, notAsked: 3, unsure: 2, failed: 1, setAside: 0 });
   });
+
+  // A passer-by's reply opened a comment thread; Jev filed his words, the
+  // customer's comment then took the ticket and settled nothing, and the
+  // router set his category aside at the window's end.
+  it('says when Jev had filed it from somebody who is not the requester now', async () => {
+    const id = await channel();
+    const before = at(at(IN_WEEK, 5 * MINUTE), -MINUTE);
+    const asideTicket = await decision({ channelId: id, outcome: 'fallback' });
+    const [bob] = await db.insert(contacts).values({ name: 'Bob' }).returning({ id: contacts.id });
+    const [reply] = await db
+      .insert(messages)
+      .values({
+        conversationId: asideTicket.id,
+        direction: 'inbound',
+        kind: 'reply',
+        authorContactId: bob!.id,
+        bodyText: 'Same here, how much to Alexandria?',
+      })
+      .returning({ id: messages.id });
+    await db.insert(aiCategoryRuns).values({
+      conversationId: asideTicket.id,
+      messageId: reply!.id,
+      messageCreatedAt: at(before, -MINUTE),
+      runLabel: 'live',
+      mode: 'apply',
+      requestFingerprint: 'q-1',
+      outcome: 'applied',
+      predictedKey: 'sales',
+      channel: 'facebook_comment',
+      createdAt: before,
+    });
+    // What the router wrote is what says so on a live row.
+    await event(asideTicket.id, {
+      type: 'routed',
+      actorLabel: 'routing',
+      data: { outcome: 'fallback', setAside: { categoryId: null, key: 'sales', label: 'Sales' } },
+    });
+    // A filing about a message nobody else wrote is not set aside.
+    const theirs = await decision({ channelId: id, outcome: 'fallback' });
+    await run(theirs.id, 'applied', before);
+    // Nor a replier's filing an agent cleared before the window's end: the
+    // router set nothing aside, though the run is still the replier's. Each
+    // carries the `routed` line every live decision writes, as production's
+    // do, so the count is the line's `setAside` and not the line alone.
+    const cleared = await decision({ channelId: id, outcome: 'fallback' });
+    await replierRun(cleared.id, before);
+    for (const ticket of [theirs, cleared]) {
+      await event(ticket.id, {
+        type: 'routed',
+        actorLabel: 'routing',
+        data: { outcome: 'fallback' },
+      });
+    }
+
+    const [reasons] = await fallbackReasons(WEEK, NOW);
+    expect(reasons).toMatchObject({
+      fallbacks: 3,
+      notAsked: 0,
+      unsure: 0,
+      failed: 0,
+      setAside: 1,
+    });
+  });
+
+  // A shadow row writes no event, so its count is read off the runs.
+  it('reads a shadow row’s set-aside off the replier’s run', async () => {
+    const id = await channel();
+    const before = at(at(IN_WEEK, 5 * MINUTE), -MINUTE);
+    const shadowed = await decision({ channelId: id, outcome: 'fallback', shadow: true });
+    await replierRun(shadowed.id, before);
+
+    expect(sliceOf(await fallbackReasons(WEEK, NOW), id, true)).toMatchObject({
+      fallbacks: 1,
+      setAside: 1,
+    });
+  });
+
+  /** An applied live run on a reply by somebody who is not the ticket's requester. */
+  async function replierRun(conversationId: string, createdAt: Date) {
+    const [bob] = await db.insert(contacts).values({ name: 'Bob' }).returning({ id: contacts.id });
+    const [reply] = await db
+      .insert(messages)
+      .values({
+        conversationId,
+        direction: 'inbound',
+        kind: 'reply',
+        authorContactId: bob!.id,
+        bodyText: 'Same here, how much to Alexandria?',
+      })
+      .returning({ id: messages.id });
+    await db.insert(aiCategoryRuns).values({
+      conversationId,
+      messageId: reply!.id,
+      messageCreatedAt: at(createdAt, -MINUTE),
+      runLabel: 'live',
+      mode: 'apply',
+      requestFingerprint: 'q-1',
+      outcome: 'applied',
+      predictedKey: 'sales',
+      channel: 'facebook_comment',
+      createdAt,
+    });
+  }
 });
 
 describe('takenTickets', () => {

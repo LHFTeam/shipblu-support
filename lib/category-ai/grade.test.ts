@@ -46,9 +46,13 @@ function run(
     minProbability: 0.6,
     baselineKey: null,
     judgedAfterReply: false,
+    byNonRequester: false,
     ...extra,
   };
 }
+
+/** A run on a message somebody other than the ticket's requester now wrote. */
+const theirs = { byNonRequester: true } as const;
 
 function person(conversationId: string, at: number, key: string | null): GradingEvent {
   return {
@@ -571,6 +575,143 @@ describe('settleAt, the threshold sweep', () => {
   });
 });
 
+/**
+ * A comment thread whose ticket a passer-by's reply opened before the
+ * customer's comment took it over: his message was asked about as the
+ * requester's, and the live job no longer counts it as settling her ticket or
+ * as one of her five. Every walk here reads the ticket as the live job does.
+ */
+describe('a run on a message the requester did not write', () => {
+  it('neither settles the ticket nor is its first message', () => {
+    const graded = verdict([
+      run('t', 0, 'applied', 'sales', 0.9, theirs),
+      run('t', 1, 'applied', 'customer_support', 0.9),
+    ]);
+    expect(graded.settle).toEqual({ key: 'customer_support', onFirstMessage: true });
+    // Still one of Jev's answers: the share of unknowns is about Jev.
+    expect(graded).toMatchObject({ judged: true, answers: 2 });
+    // Past a row of hers Jev never judged, too: his judged one ahead of it
+    // does not make her settle a later message.
+    expect(
+      verdict([
+        run('t', 0, 'unknown', 'unknown', 0.9, theirs),
+        run('t', 1, 'capped'),
+        run('t', 2, 'would_apply', 'sales', 0.9),
+      ]).settle,
+    ).toEqual({ key: 'sales', onFirstMessage: true });
+  });
+
+  // Her comment had no words, so Jev was only ever asked about his reply: not
+  // a ticket Jev failed to settle, and in no rate.
+  it('leaves a ticket judged only on his words out of play', () => {
+    expect(verdict([run('t', 0, 'applied', 'sales', 0.9, theirs)])).toMatchObject({
+      judged: false,
+      outOfPlay: 'not_the_requesters',
+      settle: null,
+      answers: 1,
+    });
+  });
+
+  // Her comment had words and a row of its own, which says why Jev never
+  // judged it, as it would on any ticket: not a comment that gave Jev nothing.
+  it('lets her own row say why the ticket is out of play', () => {
+    const his = run('t', 0, 'applied', 'sales', 0.9, theirs);
+    expect(verdict([his, run('t', 1, 'owned')]).outOfPlay).toBe('owned');
+    expect(verdict([his, run('t', 1, 'capped')]).outOfPlay).toBe('capped');
+    expect(verdict([his, run('t', 1, 'failed')]).outOfPlay).toBe('failed');
+    // Hers only after_settle because his answer here settled the ticket, as
+    // the live job counted before it stopped counting his: settled on his
+    // words in this run, not outside it.
+    expect(verdict([his, run('t', 1, 'after_settle')]).outOfPlay).toBe('not_the_requesters');
+    // His only unsure, so something outside this run settled it.
+    const unsure = run('t', 0, 'unknown', 'unknown', 0.9, theirs);
+    expect(verdict([unsure, run('t', 1, 'after_settle')]).outOfPlay).toBe('settled_elsewhere');
+  });
+
+  // Jev filed his reply as sales, and a supervisor moved the ticket on: no
+  // filing of hers overruled, so in no figure the footer says it is out of.
+  it('leaves a filing read off his words out of Filed by Jev', () => {
+    const runs = [run('t', 0, 'applied', 'sales', 0.9, theirs)];
+    const events = [
+      { ...jevWrite('t', 0, 'sales'), onAnothersMessage: true },
+      person('t', 3, 'customer_support'),
+    ];
+    expect(verdict(runs, events).filed).toBeNull();
+    expect(grade(input(runs, events)).filed).toEqual([]);
+    // Hers still counts, with his ahead of it on the same ticket.
+    const both = [...runs, run('t', 1, 'applied', 'merchant_support', 0.9)];
+    const hers = [
+      jevWrite('t', 0, 'sales'),
+      jevWrite('t', 1, 'merchant_support', LABEL, messageAt('t', 1)),
+    ];
+    expect(verdict(both, hers).filed).toEqual({ key: 'merchant_support', changedTo: null });
+  });
+
+  // Her comment was read as his reply was, which wrote nothing: his write is
+  // the filing the ticket stands on, and the router routed on it, so a
+  // supervisor moving it on overruled Jev on her words.
+  it('counts his filing when her own answer agreed with it', () => {
+    const his = run('t', 0, 'applied', 'sales', 0.9, theirs);
+    const runs = [his, run('t', 1, 'applied', 'sales', 0.9)];
+    const events = [
+      { ...jevWrite('t', 0, 'sales'), onAnothersMessage: true },
+      person('t', 3, 'customer_support'),
+    ];
+    const overruled = { key: 'sales', changedTo: { key: 'customer_support' } };
+    expect(verdict(runs, events).filed).toEqual(overruled);
+    // His run in another view of the label — the question edited between his
+    // reply and her comment: the write still names his message.
+    expect(verdict(runs.slice(1), events).filed).toEqual(overruled);
+    // Not when she was only unsure, though of the same category, nor when
+    // she was read as another.
+    const unsure = [his, run('t', 1, 'below_threshold', 'sales', 0.4)];
+    expect(verdict(unsure, events).filed).toBeNull();
+    const another = [his, run('t', 1, 'below_threshold', 'merchant_support', 0.4)];
+    expect(verdict(another, events).filed).toBeNull();
+  });
+
+  it('is passed over by the threshold sweep', () => {
+    const runs = [
+      run('t', 0, 'applied', 'sales', 0.9, theirs),
+      run('t', 1, 'applied', 'customer_support', 0.65),
+    ];
+    expect(settleAt(runs, 0.6)).toEqual({ kind: 'settled', key: 'customer_support' });
+  });
+
+  // His five asked, then hers: at a higher bar her settle is refused and her
+  // next message was never asked — unasked, not capped, since the live job
+  // left his five out of her cap and would have asked it.
+  it('takes none of the five the cap counts', () => {
+    const runs = [
+      ...[0, 1, 2, 3, 4].map((at) => run('t', at, 'unknown', 'unknown', 0.9, theirs)),
+      run('t', 5, 'applied', 'customer_support', 0.65),
+      run('t', 6, 'after_settle'),
+    ];
+    expect(settleAt(runs, 0.7)).toEqual({ kind: 'unasked' });
+  });
+
+  it('is not where the rules read their answer', () => {
+    const runs = [
+      run('t', 0, 'would_apply', 'sales', 0.9, { ...theirs, baselineKey: 'sales' }),
+      run('t', 1, 'would_apply', 'customer_support', 0.9, { baselineKey: 'customer_support' }),
+    ];
+    expect(verdict(runs).baseline).toBe('customer_support');
+  });
+
+  // The live job may still ask about her next message, so labelling it now
+  // would make that message owned: his five do not close her window.
+  it('does not close the window the sample waits for', () => {
+    const runs = [
+      ...[0, 1, 2, 3, 4].map((at) => run('t', at, 'unknown', 'unknown', 0.9, theirs)),
+      run('t', 5, 'below_threshold', 'sales', 0.3),
+    ];
+    const tickets = new Map<string, GradingTicket>([
+      ['t', { number: 1, labellable: true, windowOpen: true }],
+    ]);
+    expect(grade(input(runs, [], { tickets })).toLabel).toEqual([]);
+  });
+});
+
 describe('grade', () => {
   // Five tickets on WhatsApp and one on email, each in a different cell. Every
   // stratum's labels are all its tickets, so every weight is 1.
@@ -625,7 +766,13 @@ describe('grade', () => {
       comparable: 2,
       agree: 1,
     });
-    expect(report.outOfPlay).toEqual({ owned: 1, settled_elsewhere: 0, capped: 0, failed: 0 });
+    expect(report.outOfPlay).toEqual({
+      owned: 1,
+      settled_elsewhere: 0,
+      capped: 0,
+      failed: 0,
+      not_the_requesters: 0,
+    });
   });
 
   it('grades precision on what Jev settled and recall on what people labelled', () => {

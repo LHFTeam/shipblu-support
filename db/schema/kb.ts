@@ -126,27 +126,6 @@ export const kbArticles = pgTable(
     tags: text('tags').array().notNull().default([]),
     seo: jsonb('seo').$type<{ title?: string; description?: string }>().notNull().default({}),
 
-    /**
-     * Superseded by `kb_article_stats`, and still here on purpose: no page,
-     * action or job reads these three or counts into them any more, and they
-     * are dropped once every service runs code that does not
-     * (`plans/kb-article-stats.md`, PR 2). Two things still name them, and go
-     * in the same change as the columns or before: `db/sql/011`, which reads
-     * them on every deploy to copy them, so a replay after the drop fails it,
-     * and `touch_updated_at()`'s `not_an_edit`. An INSERT names them too, as
-     * drizzle names every column, with `default`; the plan says what that
-     * costs the drop.
-     *
-     * Not in the same release, because migrations run in `preDeployCommand`
-     * while the old web release still serves, and the worker deploys by hand
-     * after it: dropping them there would fail every view, vote and Freshdesk
-     * import the old code still makes until the last service was redeployed.
-     * Reading one now gets a count frozen at the move.
-     */
-    viewCount: integer('view_count').notNull().default(0),
-    helpfulCount: integer('helpful_count').notNull().default(0),
-    unhelpfulCount: integer('unhelpful_count').notNull().default(0),
-
     position: integer('position').notNull().default(0),
 
     sourceSystem: sourceSystemEnum('source_system').notNull().default('native'),
@@ -155,14 +134,12 @@ export const kbArticles = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     /**
      * When the row last changed. An INSERT takes the writer's value or the
-     * default; after that the `touch_updated_at` trigger (`db/sql/001`) sets it
-     * on every UPDATE, whatever the UPDATE writes there. An UPDATE that changes
-     * nothing, or nothing but the three superseded counters above, keeps it,
-     * and any other change stamps it (PROJECT-STATE §6.51). A view or a
-     * feedback tap no longer writes this row at all: readers count in
-     * `kb_article_stats`, and a new reader counter goes there, not here. The
-     * counters' half of the exception is for the old release, which still
-     * writes them during a deploy, and goes when they do.
+     * default; after that the `touch_updated_at` trigger (`db/sql/001`) stamps
+     * it on every UPDATE, whatever the UPDATE writes there, one that changes
+     * nothing included — so a writer that may have nothing to say compares
+     * before it writes (PROJECT-STATE §6.59). No reader writes this row:
+     * views and votes count in `kb_article_stats`, and a new reader counter
+     * goes there, not here, or every write to it moves this date (§6.51).
      */
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 
@@ -200,8 +177,8 @@ export const kbArticles = pgTable(
  * attaches no trigger: this is a counter, not content, and a trigger here
  * would only add work to the hottest write the knowledge base has.
  *
- * The three columns of the same names on `kb_articles` are what this replaced
- * (`plans/kb-article-stats.md`).
+ * It replaced three columns of the same names on `kb_articles`, copied
+ * across and then dropped (`plans/kb-article-stats.md`).
  */
 export const kbArticleStats = pgTable('kb_article_stats', {
   articleId: uuid('article_id')

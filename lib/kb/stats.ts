@@ -18,11 +18,8 @@ import { isForeignKeyViolation } from '@/lib/db/errors';
  * import re-keying an article's external id. Every later view updates the
  * stats row alone and leaves the article's row untouched.
  *
- * Every write that counts is in this module — `db/sql/011` is the one-off
- * copy — so nothing counts into the three columns of the same names still on
- * `kb_articles`, which PR 2 of `plans/kb-article-stats.md` drops. An INSERT
- * of an article still names them, with `default`, as drizzle names every
- * column; the plan says what that costs the drop.
+ * Every write that counts is in this module. The article's own columns of the
+ * same names were copied here and dropped (`plans/kb-article-stats.md`).
  */
 
 type Executor = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];

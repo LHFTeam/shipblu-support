@@ -65,6 +65,12 @@ import {
  * - **The cap is the live job's.** It counts every answer the label holds, in
  *   any mode and to any version of the question, so the asks another view
  *   holds (`askedElsewhere`) count towards it here too.
+ * - **Only the requester's own messages settle or count towards the cap**, as
+ *   in the live job (`decide.ts`, rules 2 and 3): a run on a message somebody
+ *   other than the ticket's requester now wrote — a passer-by whose reply
+ *   opened a comment thread's ticket before the customer's comment took it
+ *   over — is passed over by the settle, the sweep, the rules' window and the
+ *   cap, here and in the other views' asks `report.ts` reads.
  * - **Unknown never settles**, so it is a share of answers, not a class.
  */
 
@@ -124,6 +130,14 @@ export type GradingRun = {
    * of Jev's window all the same.
    */
   judgedAfterReply: boolean;
+  /**
+   * The message was written by somebody other than the ticket's requester
+   * now (`messageByAnotherThan`): on a comment thread, a passer-by whose reply
+   * opened the ticket before the customer's comment took it over
+   * (`adoptRootAuthor`). The live job no longer counts such a run as settling
+   * the ticket or as one of its five, so no walk here does (`requestersOwn`).
+   */
+  byNonRequester: boolean;
 };
 
 /** One `category_changed` event on a ticket the runs name. */
@@ -141,6 +155,13 @@ export type GradingEvent = {
   messageId: string | null;
   /** When that message arrived, which a write keeps after the message is deleted. */
   messageCreatedAt: Date | null;
+  /**
+   * The message a Jev write answered was written by somebody other than the
+   * ticket's requester now — a passer-by's reply, read before the customer's
+   * comment took the ticket over. Read off the message, not off this view's
+   * runs, since his run can sit in another view of the label.
+   */
+  onAnothersMessage?: boolean;
 };
 
 /** What the sample needs to know of a ticket. */
@@ -162,7 +183,9 @@ export type GradingTicket = {
 /**
  * A message of a ticket this view grades that Jev answered under the same
  * label in another view — another mode, or another version of the question.
- * The live job's cap counts it, so the walks here count it too.
+ * The live job's cap counts it, so the walks here count it too. Read as the
+ * cap reads it: a failure, a row with no answer and a passer-by's message are
+ * left out by `report.ts`.
  */
 export type AskedElsewhere = {
   conversationId: string;
@@ -184,8 +207,19 @@ export type GradingInput = {
   thresholds: readonly number[];
 };
 
-/** Why a ticket with rows was never judged on an answer. */
-export type OutOfPlay = 'owned' | 'settled_elsewhere' | 'capped' | 'failed';
+/**
+ * Why a ticket with rows was never judged on an answer. `not_the_requesters`:
+ * every message Jev judged was somebody else's than the requester's — a
+ * passer-by's reply that opened a comment thread before the customer's comment
+ * took it over — and the comment itself either gave Jev nothing to ask about,
+ * or was passed over because his answer had settled the ticket (rows from
+ * before the live job stopped counting his). The live job no longer counts those answers
+ * as the ticket's (`decide.ts`), so the ticket has none of its own, and
+ * grading it would count as a miss a ticket Jev was never asked about. Where
+ * the customer's comment has a row of its own, that row says why: owned,
+ * settled elsewhere, capped or failed, as on any ticket.
+ */
+export type OutOfPlay = 'owned' | 'settled_elsewhere' | 'capped' | 'failed' | 'not_the_requesters';
 
 /** One ticket as the grading sees it. */
 export type TicketVerdict = {
@@ -232,20 +266,27 @@ export function ticketVerdicts(
     const ticketRuns = [...unordered].sort(inJudgedOrder);
     const ticketEvents = eventsByTicket.get(conversationId) ?? [];
     const elsewhere = [...(elsewhereByTicket.get(conversationId) ?? [])].sort(inJudgedOrder);
-    const judged = ticketRuns.some((run) => JUDGED.has(run.outcome));
+    const own = requestersOwn(ticketRuns);
+    // Judged on the requester's own messages, as the settle reads them: a
+    // ticket judged only on a passer-by's would otherwise be graded, with no
+    // settle, as one Jev failed to settle.
+    const judged = own.some((run) => JUDGED.has(run.outcome));
     // As the cap counts them: a failure that kept its prediction — a category
-    // retired during the call — is no answer anywhere else either.
+    // retired during the call — is no answer anywhere else either. A
+    // passer-by's answers are Jev's answers all the same, and stay in these
+    // counts; only the settle and the cap pass them over.
     const predicted = ticketRuns.filter(counted);
 
-    const settleIndex = ticketRuns.findIndex(
+    const settleIndex = own.findIndex(
       (run) => SETTLING.has(run.outcome) && run.predictedKey !== null,
     );
-    const settleRun = settleIndex === -1 ? null : ticketRuns[settleIndex]!;
+    const settleRun = settleIndex === -1 ? null : own[settleIndex]!;
     // The first message this run judged, which a row passed over before it —
     // a job that ran late and found the ticket answered — is not. Nor one
     // after a message judged in another view of the label: the first after a
     // category edit, or after the switch to apply, is not the ticket's first.
-    const firstJudged = ticketRuns.findIndex((run) => JUDGED.has(run.outcome));
+    // Nor a passer-by's, which the live job no longer counts as the ticket's.
+    const firstJudged = own.findIndex((run) => JUDGED.has(run.outcome));
 
     const people = ticketEvents.filter((event) => event.agentId !== null);
     const written = ticketEvents.filter((event) => event.agentId === null);
@@ -259,16 +300,24 @@ export function ticketVerdicts(
 
     // A write under another label or another question is that run's filing.
     // Matched by the message's id, or by its instant once the message was
-    // deleted and the row's id with it.
-    const answered = new Set(ticketRuns.map((run) => run.messageId).filter(Boolean));
+    // deleted and the row's id with it. Only the requester's: a filing read off
+    // a passer-by's reply is Jev's work, counted in the answers above, but no
+    // filing of the ticket — the router sets it aside (`categoryStanding`), and
+    // a person replacing it has not overruled Jev on the customer's words —
+    // unless her own answer agreed with it. That answer wrote nothing, since
+    // the ticket already carried the category, so the passer-by's write is the
+    // filing it stands on: the router routes on it (`requesterChose`).
+    const answered = new Set(own.map((run) => run.messageId).filter(Boolean));
     const answeredDeleted = new Set(
-      ticketRuns
-        .filter((run) => run.messageId === null)
-        .map((run) => run.messageCreatedAt.getTime()),
+      own.filter((run) => run.messageId === null).map((run) => run.messageCreatedAt.getTime()),
+    );
+    const agreedWith = new Set(
+      own.filter((run) => run.outcome === 'applied').map((run) => run.predictedKey),
     );
     const answers = (write: GradingEvent) =>
       (write.messageId !== null && answered.has(write.messageId)) ||
-      (write.messageCreatedAt !== null && answeredDeleted.has(write.messageCreatedAt.getTime()));
+      (write.messageCreatedAt !== null && answeredDeleted.has(write.messageCreatedAt.getTime())) ||
+      (write.onAnothersMessage === true && write.key !== null && agreedWith.has(write.key));
     const lastJev =
       jev.filter((write) => write.runLabel === runLabel && answers(write)).at(-1) ?? null;
     const changedAfter = lastJev
@@ -279,7 +328,7 @@ export function ticketVerdicts(
       conversationId,
       channel: ticketRuns[0]!.channel,
       judged,
-      outOfPlay: judged ? null : outOfPlay(ticketRuns),
+      outOfPlay: judged ? null : outOfPlayOf(own, ticketRuns),
       answers: predicted.length,
       unknowns: predicted.filter((run) => run.predictedKey === UNKNOWN_CATEGORY_KEY).length,
       settle: settleRun
@@ -305,6 +354,18 @@ export function ticketVerdicts(
   });
 }
 
+/**
+ * A ticket's rows on its requester's own messages: the ones the live job's
+ * settle and cap read (`ticketFacts` in `run.ts`), and so the ones every walk
+ * that reproduces them reads — the settle, the threshold sweep, the rules'
+ * window and the sample's count of asks. A passer-by's answer, read here,
+ * would grade the ticket on a settle the live job no longer makes, or close
+ * the window on the customer before the live job's cap did.
+ */
+function requestersOwn(runs: readonly GradingRun[]): GradingRun[] {
+  return runs.filter((run) => !run.byNonRequester);
+}
+
 /** A message, as the order the live job judges them in reads it. */
 type Arrival = Pick<GradingRun, 'messageCreatedAt' | 'messageId'>;
 
@@ -324,6 +385,26 @@ function inJudgedOrder(a: Arrival, b: Arrival): number {
     { createdAt: a.messageCreatedAt, messageId: a.messageId },
     { createdAt: b.messageCreatedAt, messageId: b.messageId },
   );
+}
+
+/**
+ * Why a ticket none of whose own rows was judged is out of play. Her own rows
+ * say why where she has any — owned, capped, failed, as on any ticket — but
+ * for one that is only `after_settle` because a passer-by's answer in this
+ * view settled the ticket, as the live job counted before it stopped counting
+ * his (rows older than that fix): settled on his words here, not outside this
+ * run. With no row of hers, a passer-by's judged answer is the reason.
+ */
+function outOfPlayOf(own: readonly GradingRun[], runs: readonly GradingRun[]): OutOfPlay {
+  const theirs = runs.filter((run) => run.byNonRequester);
+  if (own.length > 0) {
+    const reason = outOfPlay(own);
+    const settledByTheirs = theirs.some(
+      (run) => SETTLING.has(run.outcome) && run.predictedKey !== null,
+    );
+    return reason === 'settled_elsewhere' && settledByTheirs ? 'not_the_requesters' : reason;
+  }
+  return theirs.some((run) => JUDGED.has(run.outcome)) ? 'not_the_requesters' : outOfPlay(runs);
 }
 
 /**
@@ -358,11 +439,15 @@ function outOfPlay(runs: readonly GradingRun[]): OutOfPlay {
  *   and found the ticket answered can sit before a message Jev was still asked
  *   about; its message arrived inside the window, and its row holds what the
  *   detector said.
+ * - **The requester's own messages**, as Jev's window holds no others: read
+ *   on a passer-by's words, the rules would be graded on a message Jev is no
+ *   longer settled on, and his rows would take her places.
  */
 function baselineAnswer(
-  runs: readonly GradingRun[],
+  rows: readonly GradingRun[],
   elsewhere: readonly AskedElsewhere[],
 ): string | null {
+  const runs = requestersOwn(rows);
   const before = askedBefore(elsewhere);
   let places = 0;
   for (const [index, run] of runs.entries()) {
@@ -409,9 +494,10 @@ function askedBefore(elsewhere: readonly AskedElsewhere[]): (run: GradingRun) =>
  * Any row with an answer is read, whatever its outcome: an `after_settle` row
  * can hold one when its job asked before the settle landed. The cap is counted
  * as the live job counts it, every answered row — the label's other views'
- * included (`elsewhere`). An `owned` or `capped` row is passed over rather
- * than taken as the end: jobs run in no order, so one can sit before a message
- * that was still asked.
+ * included (`elsewhere`) — on the requester's own messages: a passer-by's row
+ * is passed over whole, as though his message had never been asked about. An
+ * `owned` or `capped` row is passed over rather than taken as the end: jobs
+ * run in no order, so one can sit before a message that was still asked.
  *
  * And a row whose job reached Jev is never capped here — judged, failed, or
  * answered before a settle landed. The live job counts the cap in the order
@@ -426,7 +512,7 @@ export function settleAt(
 ): { kind: 'settled'; key: string } | { kind: 'unasked' } | { kind: 'none' } {
   const before = askedBefore(elsewhere);
   let asked = 0;
-  for (const run of runs) {
+  for (const run of requestersOwn(runs)) {
     const answered = counted(run);
     if (leftTheWindow(run)) {
       if (answered) asked += 1;
@@ -601,6 +687,7 @@ export function grade(input: GradingInput): Grading {
     settled_elsewhere: 0,
     capped: 0,
     failed: 0,
+    not_the_requesters: 0,
   };
   for (const verdict of verdicts) {
     if (verdict.outOfPlay) outOfPlayCounts[verdict.outOfPlay] += 1;
@@ -873,7 +960,7 @@ function sample(
 
 /** Messages on the ticket Jev answered, as the cap counts them: in any view of the label. */
 function askedOf(verdict: TicketVerdict): number {
-  return verdict.runs.filter(counted).length + verdict.elsewhere.length;
+  return requestersOwn(verdict.runs).filter(counted).length + verdict.elsewhere.length;
 }
 
 function byId(a: { conversationId: string }, b: { conversationId: string }): number {

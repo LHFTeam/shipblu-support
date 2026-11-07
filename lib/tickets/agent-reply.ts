@@ -2,6 +2,7 @@ import { eq } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { conversations, messages } from '@/db/schema';
 import { enqueue } from '@/lib/queue';
+import { runAutomations } from '@/lib/automations';
 import { afterHoldEnded } from '@/lib/routing/after-hold';
 import { endHold } from '@/lib/routing/end-hold';
 import { onAgentReply } from '@/lib/sla';
@@ -67,7 +68,19 @@ export async function storeAgentReply(
   // only when the reply ended the hold; on a decision in flight the router's
   // own end of it pays both, after the category's rules, so the assignment
   // lands in whichever group they leave the ticket.
-  if (endedHold) await afterHoldEnded(conversationId);
+  //
+  // And, first, the `on_update` pass a category Jev wrote while the ticket was
+  // held handed to the router, which this reply has now decided for: a reply
+  // runs no pass of its own, where the console's edits and Hand to each run
+  // one after their end of the hold, so without this a rule keyed on that
+  // category never ran on the ticket (`categoryOwed`). Best-effort, as all of
+  // it is: the reply is stored, and its send below must be queued whatever
+  // these reads meet.
+  if (endedHold) {
+    await afterHoldEnded(conversationId, new Date(), {
+      runOwedPass: () => runAutomations('on_update', conversationId),
+    });
+  }
 
   // Web chat has no outbound provider: writing the row *is* delivery, because
   // the visitor's open stream reads the same table.
