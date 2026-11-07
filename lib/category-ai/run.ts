@@ -13,6 +13,7 @@ import {
   categoryAgreedEvent,
   holdCategory,
   setConversationCategoryOn,
+  type HeldCategory,
 } from '@/lib/categories/write';
 import { earlierMessages } from '@/lib/subcategorise-ai/context';
 import { errorMessage } from '@/lib/errors';
@@ -326,12 +327,14 @@ export async function classifyMessageCategory(
     const categoryId =
       outcome === 'applied' || outcome === 'would_apply' ? built.keyToId[predicted] : undefined;
     let error: string | null = null;
-    let held: Awaited<ReturnType<typeof holdCategory>> | null = null;
+    let category: HeldCategory | null = null;
     if (categoryId) {
-      held = await holdCategory(tx, categoryId);
+      const held = await holdCategory(tx, categoryId);
       if (typeof held === 'string') {
         outcome = 'failed';
         error = `category ${predicted} was ${held === 'retired_category' ? 'retired' : 'removed'} while Jev was asked`;
+      } else {
+        category = held;
       }
     }
 
@@ -348,7 +351,7 @@ export async function classifyMessageCategory(
       createdAt: CHANGE_STAMP,
     });
     if (!inserted) return 'duplicate' as const;
-    if (outcome !== 'applied' || !categoryId || !held || typeof held === 'string')
+    if (outcome !== 'applied' || !category)
       return { kind: 'decided' as const, outcome, write: null };
 
     const detail = {
@@ -361,22 +364,29 @@ export async function classifyMessageCategory(
     const write = await setConversationCategoryOn(
       tx,
       row.conversationId,
-      categoryId,
+      category.id,
       { label: CATEGORY_AI_ACTOR },
       detail,
     );
     // An answer naming the category the ticket carries wrote nothing; it is
     // recorded all the same, because which message the category stands on is
-    // read off Jev's events (`categoryAgreedEvent`).
-    const [agreed] =
-      write.outcome === 'unchanged'
-        ? await tx
-            .insert(conversationEvents)
-            .values(
-              categoryAgreedEvent(row.conversationId, held, { label: CATEGORY_AI_ACTOR }, detail),
-            )
-            .returning({ id: conversationEvents.id })
-        : [];
+    // read off Jev's events (`categoryAgreedEvent`). It re-arms nothing: a
+    // decision in flight read this category already.
+    if (write.outcome === 'unchanged') {
+      const [agreed] = await tx
+        .insert(conversationEvents)
+        .values(
+          categoryAgreedEvent(row.conversationId, category, { label: CATEGORY_AI_ACTOR }, detail),
+        )
+        .returning({ id: conversationEvents.id });
+      return {
+        kind: 'confirmed' as const,
+        outcome,
+        // `returning` answers the row the insert wrote, or the insert throws.
+        agreedEventId: agreed!.id,
+        routing: await undecidedRouting(tx, row.conversationId),
+      };
+    }
     // Under the lock the write holds, because the stage moves under it. A
     // decision in flight takes the write's pass over there and then
     // (`deferToRouter`); otherwise where the routing stands says what is owed.
@@ -384,14 +394,16 @@ export async function classifyMessageCategory(
       write.outcome === 'changed' && (await deferToRouter(tx, row.conversationId))
         ? ('deferred' as const)
         : await undecidedRouting(tx, row.conversationId);
-    return { kind: 'decided' as const, outcome, write, routing, agreedEventId: agreed?.id };
+    return { kind: 'decided' as const, outcome, write, routing };
   });
 
   if (decided === null) return { status: 'gone' };
   if (decided === 'duplicate') return { status: 'already_classified' };
   if (decided.kind === 'left') return { status: 'skipped', reason: decided.reason };
 
-  if (decided.write?.outcome === 'changed') {
+  if (decided.kind === 'confirmed') {
+    await afterCategoryConfirmed(row.conversationId, decided.agreedEventId, decided.routing);
+  } else if (decided.write?.outcome === 'changed') {
     log.info('applied', {
       messageId,
       conversationId: row.conversationId,
@@ -399,14 +411,6 @@ export async function classifyMessageCategory(
       probability: prediction.probability,
     });
     await afterCategoryApplied(row.conversationId, decided.routing ?? null);
-  } else if (decided.write?.outcome === 'unchanged') {
-    if (decided.agreedEventId) {
-      await afterCategoryConfirmed(
-        row.conversationId,
-        decided.agreedEventId,
-        decided.routing ?? null,
-      );
-    }
   }
 
   return { status: 'recorded', outcome: decided.outcome, predicted };
@@ -441,9 +445,8 @@ export async function classifyMessageCategory(
 async function afterCategoryConfirmed(
   conversationId: string,
   agreedEventId: string,
-  routing: UndecidedRouting | 'deferred' | null,
+  routing: UndecidedRouting | null,
 ): Promise<void> {
-  if (routing === 'deferred') return;
   if (routing) {
     if (routing.stage === 'holding' && !routing.decisionInFlight) {
       await routeNow(conversationId, { label: CATEGORY_AI_ACTOR });

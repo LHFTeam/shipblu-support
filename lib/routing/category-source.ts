@@ -265,7 +265,7 @@ async function requesterChose(
   if (!ticket.requesterContactId) return true;
 
   const answers = await executor
-    .select({ type: conversationEvents.type, data: conversationEvents.data })
+    .select({ data: conversationEvents.data })
     .from(conversationEvents)
     .where(
       and(
@@ -275,11 +275,7 @@ async function requesterChose(
       ),
     );
   const answered = answers
-    .filter(
-      (answer) =>
-        (answer.type === 'category_changed' ? answer.data.to : answer.data.categoryId) ===
-        ticket.categoryId,
-    )
+    .filter((answer) => answer.data.to === ticket.categoryId)
     // Spelled as the database spells an id, as `ticketFacts` reads the same
     // field: a job run by hand with an upper-case id writes it so, and would
     // otherwise name no message the lookup below finds. An id that is not one

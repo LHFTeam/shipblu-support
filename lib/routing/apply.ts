@@ -1016,9 +1016,13 @@ async function phaseThree(
 /**
  * Jev's probability, when the category on the ticket is Jev's answer: the
  * latest answer's, a write or one agreeing with the category the ticket
- * carried (`categoryAgreedEvent`) — on a comment thread a passer-by's reply
- * opened, the customer's own answer agreeing with the reading of his, which is
- * the one the decision stands on.
+ * carried (`categoryAgreedEvent`). On every ticket that is the answer that
+ * settled it: Jev applies an answer only while no earlier message of the
+ * requester's has settled the ticket (`ticketFacts`), so the latest applied
+ * answer is always about the earliest message answered so far. On a comment
+ * thread a passer-by's reply opened, that is the customer's own answer
+ * agreeing with the reading of his; on any channel, an earlier message's
+ * answered late, where the write about the later message once kept its own.
  */
 async function categoryProbability(tx: Tx, conversationId: string): Promise<number | null> {
   const [latest] = await tx

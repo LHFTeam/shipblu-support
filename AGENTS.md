@@ -1987,7 +1987,11 @@ README says why it is a setting and not a rule. The rules:
   category on the policy chosen before it, until a move or the next writer
   re-chooses it (no active policy is keyed on the category either,
   2026-11-06). The decision records the probability of Jev's latest answer, a
-  write or an agreement, so the customer's when hers agreed with the reply's.
+  write or an agreement, which on every ticket is the one that settled it: Jev
+  applies an answer only while no earlier message of the requester's has
+  settled the ticket, so the latest is always the earliest message answered so
+  far. So the customer's when hers agreed with the reply's, and on any channel
+  an earlier message's whose answer came late.
 - **The creation pass is `on_create` rules, `applySlaOnCreate`, then
   `beginRouting`, and it stops on `routed`.** After the rules, so a rule gets
   the first word: its stamp has ended the hold, or its `set_category` is routed

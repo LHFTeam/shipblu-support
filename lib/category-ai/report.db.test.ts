@@ -287,6 +287,38 @@ describe('categoryAiReport', () => {
     expect(report.labelledAfterWrite).toBe(1);
   });
 
+  // The report's `agreed` column is what keeps an agreement out of the
+  // writes: read as false, the agreement below is the ticket's first write,
+  // and the person's label after it a correction rather than ground truth.
+  // Built by hand, since the live job only agrees with a category Jev wrote
+  // first: the column is the one thing told apart here.
+  it('reads an agreement as no write, so a label after it is still ground truth', async () => {
+    const mona = await agent();
+    const t = await ticket();
+    const asked = await message(t.id, 0);
+    await answer(t.id, 0, 'would_apply', 'sales', { messageId: asked });
+    await db.insert(conversationEvents).values(
+      categoryAgreedEvent(
+        t.id,
+        { id: await categoryId('sales'), key: 'sales', labelEn: 'Sales' },
+        { label: CATEGORY_AI_ACTOR },
+        {
+          probability: 0.9,
+          model: 'jev-1.13.0',
+          messageId: asked,
+          messageCreatedAt: minute(0).toISOString(),
+          runLabel: 'archive-1',
+        },
+      ),
+    );
+    await setConversationCategory(t.id, await categoryId('sales'), { agentId: mona });
+
+    const report = await categoryAiReport('live', QUESTION, 'shadow');
+
+    expect(report.total.labelled).toBe(1);
+    expect(report.labelledAfterWrite).toBe(0);
+  });
+
   // WhatsApp stamps a burst to the second: the two rows tie on the instant,
   // and only the message ids say which came first, as the live job read them.
   it('orders two messages of the same second by their ids', async () => {

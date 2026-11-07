@@ -322,7 +322,7 @@ describe('classifyMessageCategory, writing', () => {
       {
         actorLabel: CATEGORY_AI_ACTOR,
         data: expect.objectContaining({
-          categoryId: await categoryId('sales'),
+          to: await categoryId('sales'),
           key: 'sales',
           label: 'Sales',
           probability: 0.8,

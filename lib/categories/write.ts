@@ -22,7 +22,7 @@ type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
  * it — and its id as Postgres spells it back, which is the one the writer
  * stores, in the column and in the event alike.
  */
-type HeldCategory = { id: string; key: string; labelEn: string };
+export type HeldCategory = { id: string; key: string; labelEn: string };
 
 type CategoryRead = HeldCategory | 'unknown_category' | 'retired_category';
 
@@ -157,7 +157,9 @@ export function categoryAgreedEvent(
     actorLabel: actor.label,
     createdAt: CHANGE_STAMP,
     data: {
-      categoryId: category.id,
+      // `to`, as a write names the category it left: one field for every
+      // reader that weighs Jev's writes and agreements alike.
+      to: category.id,
       key: category.key,
       label: category.labelEn,
       ...detail,

@@ -114,13 +114,13 @@ describe('describeEvent', () => {
   it('says Jev read a message as the category the ticket already had', () => {
     expect(
       describeEvent('category_agreed', {
-        categoryId: 'c-1',
+        to: 'c-1',
         key: 'sales',
         label: 'Sales',
         probability: 0.874,
       }),
     ).toBe('read a message as Sales too, the category the ticket already had (87% likely)');
-    expect(describeEvent('category_agreed', { categoryId: 'c-1', key: 'sales', label: null })).toBe(
+    expect(describeEvent('category_agreed', { to: 'c-1', key: 'sales', label: null })).toBe(
       'read a message as sales too, the category the ticket already had',
     );
   });
