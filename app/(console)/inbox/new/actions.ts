@@ -8,7 +8,6 @@ import { consoleCategoryChoice } from '@/lib/forms/category';
 import { getFormBySlug } from '@/lib/forms/queries';
 import { labelsFor, submitForm } from '@/lib/forms/submit';
 import { DEFAULT_LOCALE } from '@/lib/kb/locale';
-import { resolveContact } from '@/lib/tickets/contacts';
 import { text } from '@/lib/http/form-data';
 
 /**
@@ -47,21 +46,17 @@ export async function createTicketFromForm(
   );
   if ('error' in category) return { error: category.error };
 
-  // Resolved the same way an inbound email is, so a ticket an agent opens joins
-  // the customer's existing history rather than starting a second stranger with
-  // the same address.
-  const contact = await resolveContact({
-    channel: 'email',
-    identifier: email,
-    displayName: text(formData, 'requesterName') || null,
-  });
-
+  // The address rather than a contact, for the same reason: `submitForm`
+  // resolves it after its own refusals — a question left blank, an answer a
+  // field refuses, a file it will not take — so none of them leaves a contact
+  // behind either.
   const result = await submitForm({
     loaded,
     values: formData,
     requester: {
       kind: 'agent',
-      contactId: contact.contactId,
+      email,
+      name: text(formData, 'requesterName') || null,
       agentId: agent.id,
       categoryId: category.categoryId,
     },

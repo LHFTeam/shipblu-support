@@ -1318,6 +1318,13 @@ Three rules hold, and each closes something a request could otherwise do:
   claimed address and the client address, and the console badges it. Do not
   "improve" this by writing a display name onto an existing contact.
 
+`submitForm` resolves a requester named by an address — that claimed one, or
+the one an agent types on the console's New form — only after every refusal it
+can answer, because resolving inserts a contact and its identity for an address
+nobody has written from. So a caller hands it the address, never a contact it
+resolved first: the New form once did, and every submission refused for a
+blank question left a customer record behind for a ticket never opened.
+
 **A form's defaults are read when the ticket is created, and never again.**
 `createTicket` writes the default priority and the default category inside the
 transaction that opens the ticket, each with its event crediting `form:<slug>`

@@ -8,6 +8,7 @@ import {
   conversationEvents,
   conversations,
   ticketCategories,
+  ticketFields,
   ticketForms,
 } from '@/db/schema';
 import { NO_CATEGORY } from '@/lib/categories/choices';
@@ -18,12 +19,15 @@ import { withCleanDatabase } from '@/lib/testing/db';
  * The console's New form and its category chooser, through the action an agent
  * submits, against Postgres.
  *
- * Two things only the action shows. Every refusal of the chooser's value comes
- * before the requester is resolved, because resolving inserts a contact and its
- * identity for an address nobody has written from — a refusal after it would
- * leave a customer record behind for a ticket never opened. And the chooser's
- * three kinds of value reach the ticket credited to the right actor: a pick to
- * the agent, an untouched chooser to the form, "No category" to nobody.
+ * Three things only the action shows. Every refusal — of the chooser's value,
+ * and the form's own over an answer, a file or the address — comes before the
+ * requester is resolved, because resolving inserts a contact and its identity
+ * for an address nobody has written from: a refusal after it would leave a
+ * customer record behind for a ticket never opened, one more for each address
+ * the agent tried. A ticket that opens still joins the contact that owns the
+ * address. And the chooser's three kinds of value reach the ticket credited to
+ * the right actor: a pick to the agent, an untouched chooser to the form, "No
+ * category" to nobody.
  */
 
 const signedIn = vi.hoisted(() => ({
@@ -115,19 +119,65 @@ function submission(categoryId: string): FormData {
   return data;
 }
 
-/** Whether anything at all was written for the address: a contact, an identity, a ticket. */
+/**
+ * A console form asking everything a submission can be refused over besides
+ * the address: a required field, a field with rules of its own, and files.
+ */
+async function formWithQuestions() {
+  await db.insert(ticketFields).values([
+    { key: 'order_number', label: 'Order number', type: 'text', requiredOnCreate: true },
+    { key: 'weight', label: 'Weight', type: 'number' },
+  ]);
+  await db.insert(ticketForms).values({
+    slug: SLUG,
+    nameEn: 'Delivery',
+    elements: [
+      { kind: 'system', key: 'subject' },
+      { kind: 'system', key: 'description' },
+      { kind: 'field', key: 'order_number' },
+      { kind: 'field', key: 'weight' },
+      { kind: 'system', key: 'attachments' },
+    ],
+  });
+}
+
+/** `submission`, with every question `formWithQuestions` asks answered. */
+function answered(): FormData {
+  const data = submission('');
+  data.set('custom.order_number', 'SB-10422');
+  data.set('custom.weight', '2');
+  return data;
+}
+
+/**
+ * Whether anything at all was written: a contact, an identity, a ticket. Every
+ * row, not only the address's, so nothing filed under another spelling of it,
+ * or under an address that is not one, is missed.
+ */
 async function traces() {
   return {
-    contacts: await db
-      .select({ id: contacts.id })
-      .from(contacts)
-      .where(eq(contacts.primaryEmail, NEW_ADDRESS)),
-    identities: await db
-      .select({ id: contactIdentities.id })
-      .from(contactIdentities)
-      .where(eq(contactIdentities.identifier, NEW_ADDRESS)),
+    contacts: await db.select({ id: contacts.id }).from(contacts),
+    identities: await db.select({ id: contactIdentities.id }).from(contactIdentities),
     tickets: await db.select({ id: conversations.id }).from(conversations),
   };
+}
+
+/** The contact a ticket is filed under, and every `unverified_submitter` on it. */
+async function requesterOf(conversationId: string) {
+  const [row] = await db
+    .select({ contactId: conversations.requesterContactId })
+    .from(conversations)
+    .where(eq(conversations.id, conversationId));
+  const unverified = await db
+    .select({ id: conversationEvents.id })
+    .from(conversationEvents)
+    .where(
+      and(
+        eq(conversationEvents.conversationId, conversationId),
+        eq(conversationEvents.type, 'unverified_submitter'),
+      ),
+    );
+  return { contactId: row!.contactId, unverified };
 }
 
 /** Submits, expecting the redirect to the new ticket, and answers with the ticket's id. */
@@ -203,6 +253,105 @@ describe('createTicketFromForm refusing the chooser', () => {
       expect(await traces()).toEqual({ contacts: [], identities: [], tickets: [] });
     },
   );
+});
+
+describe('createTicketFromForm refusing the form’s answers', () => {
+  // `submitForm`'s own refusals — `missing`, `invalid`, `files` — and the
+  // address, which the action refuses first and `submitForm` again. Before the
+  // contact was resolved inside `submitForm`, each of the first three left a
+  // contact and its identity behind, one per address an agent tried.
+  it.each<[string, (data: FormData) => void, string]>([
+    [
+      'a required question left blank',
+      (data) => data.delete('custom.order_number'),
+      'Fill in Order number',
+    ],
+    [
+      'an answer the field’s own rules refuse',
+      (data) => data.set('custom.weight', 'heavy'),
+      'Check Weight',
+    ],
+    [
+      'a file the form will not take',
+      (data) =>
+        data.append(
+          'attachments',
+          new File(['MZ'], 'label.exe', { type: 'application/x-msdownload' }),
+        ),
+      'That attachment could not be accepted',
+    ],
+    [
+      'an address that is not one',
+      (data) => data.set('requesterEmail', 'nadia'),
+      'Enter the customer’s email address',
+    ],
+  ])(
+    'refuses %s with a sentence, before writing a contact for the address',
+    async (_name, change, error) => {
+      await formWithQuestions();
+      const data = answered();
+      change(data);
+
+      await expect(createTicketFromForm(INITIAL, data)).resolves.toEqual({ error });
+
+      expect(await traces()).toEqual({ contacts: [], identities: [], tickets: [] });
+    },
+  );
+
+  // The cases' control: the answers they each change once open a ticket as
+  // they stand, so each refusal above is the one thing its case changed.
+  it('opens the ticket from the same answers, under a new contact for a new address', async () => {
+    await formWithQuestions();
+
+    const ticket = await opened(answered());
+
+    const created = await db
+      .select({ id: contacts.id, name: contacts.name, primaryEmail: contacts.primaryEmail })
+      .from(contacts);
+    expect(created).toEqual([{ id: expect.any(String), name: 'Nadia', primaryEmail: NEW_ADDRESS }]);
+    expect(
+      await db
+        .select({
+          contactId: contactIdentities.contactId,
+          channel: contactIdentities.channel,
+          identifier: contactIdentities.identifier,
+        })
+        .from(contactIdentities),
+    ).toEqual([{ contactId: created[0]!.id, channel: 'email', identifier: NEW_ADDRESS }]);
+    expect(await requesterOf(ticket)).toEqual({ contactId: created[0]!.id, unverified: [] });
+  });
+});
+
+describe('createTicketFromForm filing the requester', () => {
+  // Resolved the way an inbound email is, so a ticket opened for a customer on
+  // the phone joins their history rather than starting a second stranger with
+  // the same address. The name the agent typed is only for a contact created
+  // here: `resolveContact` never renames one that exists. And an agent typing
+  // the address of somebody they are speaking to is not a stranger's claim, so
+  // there is no `unverified_submitter`.
+  it('joins the contact that owns the address, as typed in any case, and keeps its name', async () => {
+    await form();
+    const [existing] = await db
+      .insert(contacts)
+      .values({ name: 'Nadia Hassan', primaryEmail: NEW_ADDRESS })
+      .returning({ id: contacts.id });
+    await db
+      .insert(contactIdentities)
+      .values({ contactId: existing!.id, channel: 'email', identifier: NEW_ADDRESS });
+    const data = submission('');
+    data.set('requesterEmail', '  Nadia@Example.TEST ');
+    data.set('requesterName', 'N. Hassan');
+
+    const ticket = await opened(data);
+
+    expect(await requesterOf(ticket)).toEqual({ contactId: existing!.id, unverified: [] });
+    expect(await db.select({ id: contacts.id, name: contacts.name }).from(contacts)).toEqual([
+      { id: existing!.id, name: 'Nadia Hassan' },
+    ]);
+    expect(
+      await db.select({ contactId: contactIdentities.contactId }).from(contactIdentities),
+    ).toEqual([{ contactId: existing!.id }]);
+  });
 });
 
 describe('createTicketFromForm filing the chooser’s answer', () => {

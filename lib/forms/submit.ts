@@ -51,7 +51,15 @@ export type Requester =
   | { kind: 'anonymous'; ip: string | null }
   | {
       kind: 'agent';
-      contactId: string;
+      /**
+       * The customer's address as the agent typed it, and the name beside it.
+       * An address rather than a contact, so the contact is resolved here once
+       * every refusal has been made (`resolveRequester`): resolving inserts a
+       * contact for an address nobody has written from, and an action that
+       * resolved it first left one behind for every submission refused after.
+       */
+      email: string;
+      name: string | null;
       agentId: string;
       /**
        * The console's category chooser, already re-read and authorised by the
@@ -163,13 +171,37 @@ function readAnswers(
  * an address that already exists — `resolveContact` only sets one when it
  * creates the row, so a stranger cannot rename a known customer. And the
  * identity it may create is unverified, so it grants no portal sign-in.
+ *
+ * An agent's requester is resolved the same way an inbound email is, so a
+ * ticket opened for somebody on the phone joins their existing history rather
+ * than starting a second stranger with the same address. It carries no
+ * `unverified_submitter`: the agent typed the address of somebody they were
+ * speaking to, and the ticket already says which agent opened it.
+ *
+ * Called only once every refusal `submitForm` can answer has been made, for
+ * both requesters that name the customer by an address: both branches insert a
+ * contact and its identity for an address nobody has written from, and a
+ * refusal after that leaves a customer record behind for a ticket never opened.
  */
 async function resolveRequester(
   requester: Requester,
   system: SystemValues,
 ): Promise<{ contactId: string; unverifiedEmail: string | null } | null> {
-  if (requester.kind !== 'anonymous') {
+  if (requester.kind === 'session') {
     return { contactId: requester.contactId, unverifiedEmail: null };
+  }
+
+  if (requester.kind === 'agent') {
+    const email = normaliseEmail(requester.email);
+    if (!looksLikeEmail(email)) return null;
+
+    const resolved = await resolveContact({
+      channel: 'email',
+      identifier: email,
+      displayName: requester.name,
+    });
+
+    return { contactId: resolved.contactId, unverifiedEmail: null };
   }
 
   const email = normaliseEmail(system.requester_email ?? '');
