@@ -1250,8 +1250,9 @@ describe('a reply-first comment thread, through Jev and the router', () => {
     });
   });
 
-  // Her answer agrees with what Bob's reply was read as, and so writes nothing:
-  // its run is what makes the category hers, and routes the ticket.
+  // Her answer agrees with what Bob's reply was read as, and so writes no
+  // category_changed: its category_agreed, naming her comment, is what makes
+  // the category hers, and routes the ticket.
   it('routes at once on the customer’s comment answered as Bob’s reply was', async () => {
     const t = await page();
     const opened = await bobFirst();
@@ -1259,6 +1260,12 @@ describe('a reply-first comment thread, through Jev and the router', () => {
     const root = await ingestMetaComment(comment({ text: 'How much to ship 30 parcels a week?' }));
     jev('sales', 'medium');
     expect(await judged(root.messageId)).toMatchObject({ category: { outcome: 'applied' } });
+    // No write, and the answer on the record naming her comment.
+    const events = await eventsOf(opened.conversationId);
+    expect(events.filter((event) => event.type === 'category_changed')).toHaveLength(1);
+    expect(events.filter((event) => event.type === 'category_agreed')).toMatchObject([
+      { actorLabel: 'jev:category', data: { key: 'sales', messageId: root.messageId } },
+    ]);
 
     expect(await routing(opened.conversationId)).toMatchObject({
       stage: 'decided',
@@ -1325,8 +1332,9 @@ describe('a reply-first comment thread, through Jev and the router', () => {
   });
 
   // Set aside at the window's end, with no policy for it; her own words then
-  // read as his were, which writes nothing, and the category is hers now, so
-  // the policy keyed on it is chosen as a write's would have been.
+  // read as his were, which writes no category_changed but her agreement, and
+  // the category is hers now, so the policy keyed on it is chosen as a write's
+  // would have been.
   it('gives the policy to the category her later words agree with, once it was set aside', async () => {
     await page();
     const round = { firstResponseMins: 30, nextResponseMins: 30, resolutionMins: 240 };

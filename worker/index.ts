@@ -11,6 +11,7 @@ import {
 import { backoffMs, classifyFailure } from '@/lib/queue/backoff';
 import { executeJob } from './execute';
 import { effectiveConcurrency, startPool, type Pool } from './pool';
+import { waitForSchema } from './schema-gate';
 import { logger } from '@/lib/log';
 
 const log = logger('worker');
@@ -58,6 +59,11 @@ function loopDelay(error: unknown, consecutiveFailures: number): number {
 
 async function main() {
   log.info(`starting as ${workerId}`);
+
+  // Before anything is claimed. This build can carry a migration the web
+  // service's preDeploy has not applied yet, since the six deploys finish in no
+  // fixed order (schema-gate.ts). A timeout throws, and Render restarts us.
+  await waitForSchema('worker');
 
   // LISTEN is an optimisation, not a requirement: it lets a queued job start
   // within milliseconds instead of waiting for the next poll. The loop polls

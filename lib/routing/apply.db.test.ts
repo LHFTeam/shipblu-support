@@ -24,7 +24,11 @@ import {
 import { assignConversation } from '@/lib/assignment';
 import { maybeSendAutoResponse } from '@/lib/auto-response';
 import { runAutomations } from '@/lib/automations';
-import { setConversationCategory, setConversationCategoryOn } from '@/lib/categories/write';
+import {
+  categoryAgreedEvent,
+  setConversationCategory,
+  setConversationCategoryOn,
+} from '@/lib/categories/write';
 import { forgetCategoryAiSettings } from '@/lib/category-ai/settings';
 import { forgetHoursCatalog } from '@/lib/hours/catalog';
 import { withCleanDatabase } from '@/lib/testing/db';
@@ -36,6 +40,7 @@ import { afterTicketUpdate } from '@/lib/tickets/lifecycle';
 import { afterHoldEnded } from './after-hold';
 import { routeNow, settleRouting, type RouteResult } from './apply';
 import { beginRouting } from './begin';
+import { setAsideCategoryAgreed } from './category-source';
 import { endHold } from './end-hold';
 import { routingWindowValues, startRouting } from './start';
 import { deferToRouter } from './state';
@@ -2231,12 +2236,22 @@ describe('a comment thread a reply opened', () => {
 
   /**
    * Jev's confident answer about one message, as the live job leaves it: the
-   * run row, and the write with its event naming the message — which writes
-   * nothing when the ticket already carries the category.
+   * run row, and the write with its event naming the message — or, when the
+   * ticket already carries the category, which writes nothing, the
+   * `category_agreed` naming it in the write's place.
    */
-  async function jevAnswers(thread: Thread, key: string, messageId: string): Promise<string> {
+  async function jevAnswers(
+    thread: Thread,
+    key: string,
+    messageId: string,
+    probability = 0.9,
+  ): Promise<string> {
     const [category] = await db
-      .select({ id: ticketCategories.id })
+      .select({
+        id: ticketCategories.id,
+        key: ticketCategories.key,
+        labelEn: ticketCategories.labelEn,
+      })
       .from(ticketCategories)
       .where(eq(ticketCategories.key, key));
     await db.transaction(async (tx) => {
@@ -2248,23 +2263,29 @@ describe('a comment thread a reply opened', () => {
         mode: 'apply',
         requestFingerprint: 'test',
         predictedKey: key,
-        probability: 0.9,
+        probability,
         outcome: 'applied',
         channel: 'facebook_comment',
       });
-      await setConversationCategoryOn(
+      const detail = {
+        probability,
+        model: 'test',
+        messageId,
+        messageCreatedAt: new Date().toISOString(),
+        runLabel: 'live',
+      };
+      const write = await setConversationCategoryOn(
         tx,
         thread.id,
         category!.id,
         { label: 'jev:category' },
-        {
-          probability: 0.9,
-          model: 'test',
-          messageId,
-          messageCreatedAt: new Date().toISOString(),
-          runLabel: 'live',
-        },
+        detail,
       );
+      if (write.outcome === 'unchanged') {
+        await tx
+          .insert(conversationEvents)
+          .values(categoryAgreedEvent(thread.id, category!, { label: 'jev:category' }, detail));
+      }
     });
     return category!.id;
   }
@@ -2324,15 +2345,20 @@ describe('a comment thread a reply opened', () => {
     const thread = await replyOpened(t.page, t.home.group);
     const sales = await jevAnswers(thread, 'sales', thread.messageId);
     const root = await rootArrives(thread);
-    // Her answer is the category the ticket already carries: a run, and no
-    // event naming her message.
-    await jevAnswers(thread, 'sales', root);
+    // Her answer is the category the ticket already carries: no write, and an
+    // agreement naming her message.
+    await jevAnswers(thread, 'sales', root, 0.75);
     expect(await events(thread.id, 'category_changed')).toHaveLength(1);
+    expect(await events(thread.id, 'category_agreed')).toHaveLength(1);
 
     expect(await settleRouting(thread.id)).toBe('decided');
 
     expect(await ticketRow(thread.id)).toMatchObject({ groupId: t.sales.group });
-    expect(await expectDecided(thread.id, 'category')).toMatchObject({ categoryId: sales });
+    // Decided on her answer, so it records how sure Jev was of hers.
+    expect(await expectDecided(thread.id, 'category')).toMatchObject({
+      categoryId: sales,
+      probability: 0.75,
+    });
   });
 
   it('sets the replier’s category aside at the window’s end when the root settled nothing', async () => {
@@ -2365,6 +2391,87 @@ describe('a comment thread a reply opened', () => {
     expect((await events(thread.id, 'routed'))[0]!.data).not.toHaveProperty('categoryId');
     // No pass for a category the decision was not made on.
     expect(await tagged(thread.id)).toBe(0);
+  });
+
+  // An agreement says whose words the category it names stands on, and no
+  // other's: one about a category the ticket does not carry is no answer of
+  // hers on the one it does.
+  it('reads an agreement about another category as none of hers on this one', async () => {
+    const t = await page();
+    const thread = await replyOpened(t.page, t.home.group);
+    await jevAnswers(thread, 'sales', thread.messageId);
+    const root = await rootArrives(thread);
+    const [care] = await db
+      .select({
+        id: ticketCategories.id,
+        key: ticketCategories.key,
+        labelEn: ticketCategories.labelEn,
+      })
+      .from(ticketCategories)
+      .where(eq(ticketCategories.key, 'merchant_support'));
+    await db.insert(conversationEvents).values(
+      categoryAgreedEvent(
+        thread.id,
+        care!,
+        { label: 'jev:category' },
+        {
+          probability: 0.9,
+          model: 'test',
+          messageId: root,
+          messageCreatedAt: new Date().toISOString(),
+          runLabel: 'live',
+        },
+      ),
+    );
+
+    expect(await settleRouting(thread.id)).toBe('decided');
+
+    await expectDecided(thread.id, 'fallback');
+  });
+
+  // Two of her answers agreeing with a set-aside category, each committed
+  // before either's follow-up asks: the first to land under the ticket's lock
+  // is owed the policy's look, whichever asks first, and the other is not.
+  it('owes a set-aside category’s look to the first agreement stamped, whichever asks first', async () => {
+    const t = await page();
+    const thread = await replyOpened(t.page, t.home.group);
+    await jevAnswers(thread, 'sales', thread.messageId);
+    const root = await rootArrives(thread);
+    expect(await settleRouting(thread.id)).toBe('decided');
+    await expectDecided(thread.id, 'fallback');
+
+    const [next] = await db
+      .insert(messages)
+      .values({
+        conversationId: thread.id,
+        direction: 'inbound',
+        kind: 'reply',
+        authorContactId: thread.amira,
+        bodyText: 'How much to ship 30 parcels a week?',
+        channelMessageId: `${thread.rootId}-next`,
+        inReplyTo: thread.rootId,
+        meta: { metaKind: 'comment', platform: 'facebook', commentId: `${thread.rootId}-next` },
+      })
+      .returning({ id: messages.id });
+    await jevAnswers(thread, 'sales', next!.id);
+    await jevAnswers(thread, 'sales', root);
+    const [first, second] = await db
+      .select({
+        id: conversationEvents.id,
+        messageId: sql<string>`${conversationEvents.data}->>'messageId'`,
+      })
+      .from(conversationEvents)
+      .where(
+        and(
+          eq(conversationEvents.conversationId, thread.id),
+          eq(conversationEvents.type, 'category_agreed'),
+        ),
+      )
+      .orderBy(asc(conversationEvents.createdAt));
+    expect([first!.messageId, second!.messageId]).toEqual([next!.id, root]);
+
+    expect(await setAsideCategoryAgreed(thread.id, second!.id)).toBe(false);
+    expect(await setAsideCategoryAgreed(thread.id, first!.id)).toBe(true);
   });
 
   // `npm run job -- classify_category messageId=…` takes an id in capitals,

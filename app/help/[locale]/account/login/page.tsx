@@ -28,11 +28,16 @@ export default async function PortalLoginPage({
       title={t(locale, 'signInTitle')}
       intro={t(locale, 'signInIntro')}
       footer={
-        <div className="flex flex-wrap gap-x-4 gap-y-1">
+        // `justify-between`, not `ms-auto` on the second link: the two sit at
+        // either end while they fit on one line, as they do on a desktop, and
+        // each starts its own line once they wrap, as the English pair does in
+        // a phone's 358px. `ms-auto` pushed the wrapped one to the far edge, a
+        // staircase that read as misplaced.
+        <div className="flex flex-wrap justify-between gap-x-4 gap-y-2">
           <AccountLink locale={locale} path="forgot">
             {t(locale, 'forgotPassword')}
           </AccountLink>
-          <span className="ms-auto">
+          <span>
             {t(locale, 'noAccount')}{' '}
             <AccountLink locale={locale} path="register">
               {t(locale, 'createAccount')}

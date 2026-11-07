@@ -196,7 +196,11 @@ and deletes that migration's row, and a later deploy applies the migration
 again only while it is the newest one applied. So its test reads `db/migrations/meta/_journal.json` and fails as soon
 as anything follows that migration, with a sentence saying what to do: the PR
 adding the new migration deletes the runbook and its test, and writes the way
-back from the new state into the stage's plan.
+back from the new state into the stage's plan. Because it deletes that row, it
+puts the worker and the crons back on the build before the migration, with the
+web service: they wait at startup until the database has their own build's
+newest migration (`worker/schema-gate.ts`), and would read the deleted row as
+one not yet applied.
 
 Put logic in `lib/`, not in route files. A page or action authorises, calls into
 `lib/`, and revalidates. A page never imports `db/client`, and neither does a
@@ -1273,7 +1277,13 @@ thread, the portal and the widget, `components/shipment-status.tsx`
 `components/details-section.tsx`, `components/conversation-row.tsx` and
 `components/views-panel.tsx`. The console's Arabic face is its own family,
 `'Tajawal Arabic'`, self-hosted in `app/fonts/` — not next/font's Tajawal, which
-would set Latin in Tajawal too (§6.92). Message text is the one exception:
+would set Latin in Tajawal too (§6.92). Its files are not Fontsource's as
+shipped: their `hhea` line metrics are the system font's, because Safari lays
+out every console line on the first family's metrics, `unicode-range` or not,
+and Tajawal's own put every icon 3px below its label on an iPhone (§6.113).
+`app/fonts/metrics.test.ts` reads `globals.css` and checks every self-hosted
+face that leads a stack, so a fresh copy, a new weight or a new leading family
+fails CI. Message text is the one exception:
 bubbles, reply boxes and a conversation row's message lines take
 `font-conversation`, which sets Arabic in `'Rubik Arabic'` (self-hosted beside
 it, Arabic range only) and leaves Latin on the surface's own face, so a draft
@@ -1410,7 +1420,13 @@ hold:
   go through `setConversationCategory` (`lib/categories/write.ts`), which writes
   nothing when the value is unchanged, refuses a retired category, and stores
   the key and label at the change so a renamed category still reads as what was
-  chosen.
+  chosen. Jev's confident answer naming the category the ticket already carries
+  writes nothing either, and is recorded beside it as a `category_agreed`
+  (`categoryAgreedEvent`), in the same transaction and stamped the same way: the
+  message the category stands on, which the router and the grade read
+  (**Routing by category**, the classifier below). Its own type, so nothing that
+  reads `category_changed` as a write — ownership, a label, what arrived after a
+  decision — takes it for one; a person agreeing still leaves no event.
   `createTicket` is the other writer, at creation: the column in its insert and
   the event beside it, for the reason under **Ticket forms**. It cannot call
   `setConversationCategory`, whose own transaction cannot see the uncommitted
@@ -1947,8 +1963,10 @@ README says why it is a setting and not a rule. The rules:
   while the routing row's message is a reply comment and no root comment is
   stored, or while every answer of Jev's that chose the category was about
   somebody who is not the requester now. Which message an answer was about is
-  read off its event's `messageId` and off the live `applied` run, because an
-  answer agreeing with the category the ticket carries writes no event. To the
+  read off its event's `messageId`: a write's `category_changed`, or the
+  `category_agreed` an answer naming the category the ticket already carries
+  leaves in its place, so the customer's root read as the reply was makes the
+  category hers. To the
   category's writer `waiting` is the router's pass still to come
   (`routerDecidedOn`), so it runs none of its own. The window's end is
   `settle_routing`, or any call once `window_ends_at` has passed, so the next
@@ -1974,9 +1992,12 @@ README says why it is a setting and not a rule. The rules:
   `assign_agent` rule — while the words were still the replier's leaves his
   category on the policy chosen before it, until a move or the next writer
   re-chooses it (no active policy is keyed on the category either,
-  2026-11-06); and the decision's
-  recorded probability is the last write's, the replier's when the customer's
-  answer agreed with it.
+  2026-11-06). The decision records the probability of Jev's latest answer, a
+  write or an agreement, which on every ticket is the one that settled it: Jev
+  applies an answer only while no earlier message of the requester's has
+  settled the ticket, so the latest is always the earliest message answered so
+  far. So the customer's when hers agreed with the reply's, and on any channel
+  an earlier message's whose answer came late.
 - **The creation pass is `on_create` rules, `applySlaOnCreate`, then
   `beginRouting`, and it stops on `routed`.** After the rules, so a rule gets
   the first word: its stamp has ended the hold, or its `set_category` is routed
@@ -2018,13 +2039,15 @@ README says why it is a setting and not a rule. The rules:
   category. A failure in that read is logged and owes nothing, in its own
   guard, so the reply's send is still queued and the held reply and a rule's
   kept pick still go. And a confident answer naming the category the ticket
-  already carries writes nothing, but on a live `holding` row it routes the
-  ticket all the same (`afterCategoryConfirmed`): the customer's root agreeing
-  with what the replier's reply was read as is the one ticket it reaches. On
-  a ticket whose window's end set that reading aside, her first such answer
-  gives the policy its look (`setAsideCategoryAgreed`), as a write would
-  have, while nothing — a move, a category write, a re-selection — has
-  re-chosen the policy since: everywhere else the category had its look, or
+  already carries writes nothing but its `category_agreed`, and on a live
+  `holding` row it routes the ticket all the same (`afterCategoryConfirmed`):
+  the customer's root agreeing with what the replier's reply was read as is the
+  one ticket it reaches. On a ticket whose window's end set that reading aside,
+  her first such answer gives the policy its look (`setAsideCategoryAgreed`),
+  as a write would have, while nothing — a move, a category write, a
+  re-selection — has re-chosen the policy since. "First" by the agreements'
+  stamps, taken under the ticket's lock, so two landing a moment apart give
+  the look once whichever follow-up runs first: everywhere else the category had its look, or
   is the cost above, and a second look owed for nothing takes up a priority
   changed meanwhile; no pass, since the customer's message already ran one
   with the category on the ticket.
@@ -2221,11 +2244,13 @@ one label, question and mode at a time, and its rules are
 `lib/category-ai/grade.ts`'s tests: one settling answer per ticket, in the order
 the live job judges messages and over the messages it counts, a passer-by's
 left out of the settle, the cap and Filed by Jev — unless the customer's own
-answer agreed with the filing it made, which wrote nothing and so stands on his
-— and a ticket judged on nothing else out of play unless the customer's own row
-says why; ground truth only a person's `category_changed`
-given before Jev, a rule or a form wrote the category, since agreeing with a
-write leaves no event and every label after one is a disagreement — so a ticket
+answer agreed with the filing it made, whose `category_agreed` names her
+message and is the filing her ticket stands on — and a ticket judged on nothing
+else out of play unless the customer's own row says why; ground truth only a
+person's `category_changed` given before Jev, a rule or a form wrote the
+category, since a person agreeing with a write leaves no event (Jev's
+agreement is neither a label nor a write the labels are cut at) and every
+label after one is a disagreement — so a ticket
 written to first is in no rate read off labels, and in `apply`, where every settle is Jev's
 filing, Filed by Jev is the grade; rates that mix Jev's answers weighted for a
 sample drawn evenly from each; the cap counted as the live job counts it, across
@@ -2560,8 +2585,18 @@ agent's slice through `AGENT_SLICE`, both built by `sliceWhere` from
 `DIMENSIONS` and a column map the type holds to it (`lib/reports/rollup.ts`),
 never a list of nulls typed out again. A new dimension goes into `DIMENSIONS`
 and that map (it does not compile without both), the key and the CHECK in one
-commit, and deploys web first, because an old reader meeting the new slices
-double-counts until it is replaced. The rollup
+commit, and its web half is live before a rollup writes the new slices, because
+an old reader meeting them double-counts until it is replaced. A merge into
+`main` deploys every service at once, about a quarter of an hour after it
+lands, and the crons wait only for the migration, which the web service's
+preDeploy applies a minute or so before the web service is live
+(`docs/PROJECT-STATE.md` §2). So the 00:00 UTC nightly writes the slices early
+if it fires in that gap, or at any time while a failed web deploy leaves the
+old reader serving, and a `rollup_metrics` run by hand can write them whenever
+it is run. Such a change is therefore not merged in the half hour before 00:00
+UTC, a failed web deploy is rolled back or fixed before the next nightly, and a
+hand-run rollup waits until `list_deploys` shows the web service on the commit.
+The rollup
 asks `reconcileFailure` of a day before it writes it, and writes nothing for a
 day that fails. A category figure follows the ticket's category as it stands
 when its day is rolled up, as the group's does: the nightly recomputes three
@@ -2690,7 +2725,8 @@ in one call.
 
 The constraint is not which tool, it is what you know before you call it. Before
 any **write** — `apply_migration`, write SQL, `update_environment_variables`,
-`trigger_deploy`, a service or database change:
+`trigger_deploy`, merging into `main` (which deploys), a service or database
+change:
 
 - **Read the current state first** and quote it in your reasoning. What is the
   value now, which rows match, what does the service run today.
@@ -2716,10 +2752,15 @@ Develop on a feature branch and open the pull request against **`dev`**, the
 integration branch; **never push to `dev` or `main`**. Commit → push → PR into
 `dev` → merge. `main` is what Render builds — every service in `render.yaml`
 names `branch: main` — so a change merged into `dev` reaches staging and
-production only once `dev` is merged into `main`. Verify the deploy then, not at
-the merge into `dev`, and say in a stage's plan which of the two a step waits
-for. CI runs on every pull request whatever its base, and on a push to `main`;
-a merge into `dev` runs nothing after it, so the pull request's own run is the
+production only once `dev` is merged into `main`. **That merge is the deploy:**
+every production service deploys itself once the checks on `main` pass, all six
+at once, and only the web service's preDeploy migrates, so the worker and the
+crons wait at startup until it has applied their build's migrations
+(`worker/schema-gate.ts`, `docs/PROJECT-STATE.md` §2). Verify the deploy then,
+not at the merge into `dev`, and say in a stage's plan which of the two a step
+waits for. CI runs on every pull request whatever its base, and on a push to
+`main`, and that run is what releases the deploy: red there, nothing deploys. A
+merge into `dev` runs nothing after it, so the pull request's own run is the
 only one a change gets before `main`.
 
 More than one agent session works on this repo at once and they share no

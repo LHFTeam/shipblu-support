@@ -422,7 +422,7 @@ export default async function CategoryAiReportPage({
             {report.filed.length > 0 ? (
               <Section
                 title="Filed by Jev"
-                hint="Tickets Jev wrote a category to in answer to this run's messages from the requester, and how many a person has changed since. A person who agrees changes nothing, so a ticket nobody changed may simply be one nobody looked at. A category read off a passer-by's reply that opened a comment thread is in no figure here, unless the customer's own answer agreed with it."
+                hint="Tickets whose category Jev wrote, or found already there and agreed with, in answer to this run's messages from the requester, and how many a person has changed since. A person who agrees changes nothing, so a ticket nobody changed may simply be one nobody looked at. A category read off a passer-by's reply that opened a comment thread is in no figure here, unless the customer's own answer agreed with it."
               >
                 <Table head={['Category', 'Filed', 'Changed by a person', 'Changed to']}>
                   {report.filed.map((row) => (

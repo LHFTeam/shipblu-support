@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { db } from '@/db/client';
 import {
@@ -12,7 +12,11 @@ import {
   ticketCategories,
   ticketStatuses,
 } from '@/db/schema';
-import { categoryChangedEvent, setConversationCategory } from '@/lib/categories/write';
+import {
+  categoryAgreedEvent,
+  categoryChangedEvent,
+  setConversationCategory,
+} from '@/lib/categories/write';
 import { withCleanDatabase } from '@/lib/testing/db';
 import { CATEGORY_AI_ACTOR, type CategoryOutcome } from './decide';
 import { categoryAiReport, deadClassifyJobs, runQuestion, runQuestions } from './report';
@@ -283,6 +287,38 @@ describe('categoryAiReport', () => {
     expect(report.labelledAfterWrite).toBe(1);
   });
 
+  // The report's `agreed` column is what keeps an agreement out of the
+  // writes: read as false, the agreement below is the ticket's first write,
+  // and the person's label after it a correction rather than ground truth.
+  // Built by hand, since the live job only agrees with a category Jev wrote
+  // first: the column is the one thing told apart here.
+  it('reads an agreement as no write, so a label after it is still ground truth', async () => {
+    const mona = await agent();
+    const t = await ticket();
+    const asked = await message(t.id, 0);
+    await answer(t.id, 0, 'would_apply', 'sales', { messageId: asked });
+    await db.insert(conversationEvents).values(
+      categoryAgreedEvent(
+        t.id,
+        { id: await categoryId('sales'), key: 'sales', labelEn: 'Sales' },
+        { label: CATEGORY_AI_ACTOR },
+        {
+          probability: 0.9,
+          model: 'jev-1.13.0',
+          messageId: asked,
+          messageCreatedAt: minute(0).toISOString(),
+          runLabel: 'archive-1',
+        },
+      ),
+    );
+    await setConversationCategory(t.id, await categoryId('sales'), { agentId: mona });
+
+    const report = await categoryAiReport('live', QUESTION, 'shadow');
+
+    expect(report.total.labelled).toBe(1);
+    expect(report.labelledAfterWrite).toBe(0);
+  });
+
   // WhatsApp stamps a burst to the second: the two rows tie on the instant,
   // and only the message ids say which came first, as the live job read them.
   it('orders two messages of the same second by their ids', async () => {
@@ -401,10 +437,10 @@ describe('categoryAiReport', () => {
   });
 
   // His reply was filed while he held the thread, under the question as it
-  // was then; her comment, asked the edited question, agreed and wrote
-  // nothing. The write on his message is the filing her ticket stands on, and
-  // a supervisor moving it on overruled Jev on her words.
-  it('counts the filing her agreeing answer stands on, though his run is in another view', async () => {
+  // was then; her comment, asked the edited question, agreed, which wrote
+  // nothing but its `category_agreed`. That answer is the filing her ticket
+  // stands on, and a supervisor moving it on overruled Jev on her words.
+  it('counts her agreeing answer as Jev’s filing, though his run is in another view', async () => {
     const mona = await agent();
     const t = await ticket({ channel: 'facebook_comment', externalId: 'facebook:comment:p_2' });
     const [requester] = await db
@@ -435,17 +471,39 @@ describe('categoryAiReport', () => {
       ),
     );
     await db.update(conversations).set({ categoryId: sales }).where(eq(conversations.id, t.id));
-    await answer(t.id, 1, 'applied', 'sales', {
-      ...run,
-      messageId: await messageBy(t.id, 1, requester!.id),
-    });
+    const hers = await messageBy(t.id, 1, requester!.id);
+    await answer(t.id, 1, 'applied', 'sales', { ...run, messageId: hers });
+    const agreed = categoryAgreedEvent(
+      t.id,
+      { id: sales, key: 'sales', labelEn: 'Sales' },
+      { label: CATEGORY_AI_ACTOR },
+      {
+        probability: 0.8,
+        model: 'jev-1.13.0',
+        messageId: hers,
+        messageCreatedAt: minute(1).toISOString(),
+        runLabel: 'live',
+      },
+    );
+    await db.insert(conversationEvents).values(agreed);
     await setConversationCategory(t.id, await categoryId('merchant_support'), { agentId: mona });
 
-    const report = await categoryAiReport('live', QUESTION, 'apply');
-
-    expect(report.filed).toEqual([
+    const overruled = [
       { key: 'sales', filed: 1, changed: 1, changedTo: [{ key: 'merchant_support', count: 1 }] },
-    ]);
+    ];
+    expect((await categoryAiReport('live', QUESTION, 'apply')).filed).toEqual(overruled);
+
+    // Her answer is what the filing stands on: without its record, his write
+    // is a reading of somebody else's words, and no filing of her ticket.
+    await db
+      .delete(conversationEvents)
+      .where(
+        and(
+          eq(conversationEvents.conversationId, t.id),
+          eq(conversationEvents.type, 'category_agreed'),
+        ),
+      );
+    expect((await categoryAiReport('live', QUESTION, 'apply')).filed).toEqual([]);
   });
 
   it('reads a message judged after the first reply as out of the window', async () => {

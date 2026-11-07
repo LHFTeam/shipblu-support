@@ -645,9 +645,17 @@ function CannedPicker({
     return response.title;
   };
 
+  // Each part claims the width it needs (`basis-*`) and wraps when it cannot
+  // have it, rather than `flex-1`. A basis of zero never wraps: on a phone,
+  // beside Knowledge and its "3 suggested", the picker took what was left, the
+  // label shrank under its own text and the select to a sliver, and the
+  // language toggle was drawn over both. The label's 176px is its words and an
+  // "Insert…" select; the picker's 296px is that and the toggle on one line,
+  // so it takes a line of its own on a phone, keeps Knowledge beside it in the
+  // desktop composer's 528px, and below 293px drops the toggle under the select.
   return (
-    <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2 text-xs text-(--color-text-secondary)">
-      <label className="flex min-w-0 flex-1 items-center gap-2">
+    <div className="flex min-w-0 grow basis-74 flex-wrap items-center gap-2 text-xs text-(--color-text-secondary)">
+      <label className="flex min-w-0 grow basis-44 items-center gap-2">
         <span className="shrink-0">Canned reply</span>
         <Select
           // Always reads "Insert…": it is an action, not a stored value, and a

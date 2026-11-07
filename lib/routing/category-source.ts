@@ -1,18 +1,10 @@
-import { and, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
-import {
-  CATEGORY_AI_LIVE_LABEL,
-  aiCategoryRuns,
-  conversationEvents,
-  conversations,
-  messages,
-  routingDecisions,
-  ticketCategories,
-} from '@/db/schema';
+import { conversationEvents, conversations, messages, routingDecisions } from '@/db/schema';
 import { CATEGORY_AI_ACTOR } from '@/lib/category-ai/decide';
 import { canonicalUuid } from '@/lib/http/uuid';
 import { isCommentTicket } from '@/lib/tickets/channel-policy';
-import { writtenByAnother, writtenByAnotherSql } from '@/lib/tickets/classifiable';
+import { writtenByAnother } from '@/lib/tickets/classifiable';
 import { categoryStanding, type CategorySource } from './decide';
 
 type Executor = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -34,13 +26,11 @@ type Executor = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
  * always "the requester's", and asking it read up to six statements under the
  * ticket's lock and the routing row's for nothing.
  *
- * Jev's own record says which message each of its answers was about: the
- * `category_changed` event a write leaves names the message, and the live run
- * an `applied` answer leaves names it too — the second because an answer
- * agreeing with the category the ticket already carries writes no event
- * (`setConversationCategoryOn` writes nothing on an unchanged value), so the
- * customer's root answering what the replier's reply was read as would
- * otherwise read as the replier's category still.
+ * Jev's own events say which message each of its answers was about: the
+ * `category_changed` a write leaves names the message, and so does the
+ * `category_agreed` an answer naming the category the ticket already carries
+ * leaves in its place (`categoryAgreedEvent`) — the customer's root answering
+ * what the replier's reply was read as, which wrote nothing.
  *
  * An answer about a message deleted since, or one an event names no message
  * for, counts as the requester's: nothing says it was anybody else's, which is
@@ -51,7 +41,6 @@ export async function categorySource(
   ticket: {
     id: string;
     categoryId: string | null;
-    categoryKey: string | null;
     requesterContactId: string | null;
     channel: string;
     externalId: string | null;
@@ -73,7 +62,7 @@ export async function categorySource(
 async function lastCategoryWrite(
   executor: Executor,
   ticket: { id: string; categoryId: string | null },
-): Promise<{ byJev: boolean; eventId: string; messageId: string | null } | null> {
+): Promise<{ byJev: boolean; eventId: string } | null> {
   const [last] = await executor
     .select({
       id: conversationEvents.id,
@@ -93,8 +82,6 @@ async function lastCategoryWrite(
   return {
     byJev: last.actorLabel === CATEGORY_AI_ACTOR && last.data.to === ticket.categoryId,
     eventId: last.id,
-    // Spelled as the database spells an id, as `requesterChose` reads it.
-    messageId: canonicalUuid(last.data.messageId),
   };
 }
 
@@ -152,14 +139,12 @@ export async function jevCategoryOwed(conversationId: string): Promise<boolean> 
       outcome: routingDecisions.outcome,
       messageId: routingDecisions.messageId,
       categoryId: conversations.categoryId,
-      categoryKey: ticketCategories.key,
       requesterContactId: conversations.requesterContactId,
       channel: conversations.channel,
       externalId: conversations.externalId,
     })
     .from(routingDecisions)
     .innerJoin(conversations, eq(conversations.id, routingDecisions.conversationId))
-    .leftJoin(ticketCategories, eq(ticketCategories.id, conversations.categoryId))
     .where(eq(routingDecisions.conversationId, conversationId));
   if (!row?.categoryId || (row.outcome !== 'manual' && row.outcome !== 'rule')) return false;
 
@@ -193,7 +178,7 @@ export async function jevCategoryOwed(conversationId: string): Promise<boolean> 
  * Whether a confident answer of the requester's, naming the category her
  * ticket already carries, is the first word of hers on a category the window's
  * end set aside, with nothing having re-chosen the policy since. Such an answer
- * writes nothing (`setConversationCategoryOn`, on an unchanged value), and the
+ * writes nothing but its `category_agreed` (`categoryAgreedEvent`), and the
  * set-aside chose no policy for the category (`categoryStanding`): her answer
  * makes the category hers, and is owed the policy's look a write would have had
  * (`afterCategoryConfirmed`).
@@ -212,10 +197,15 @@ export async function jevCategoryOwed(conversationId: string): Promise<boolean> 
  *   Hand to's or a rule's, each of which re-chooses it with the category on
  *   the ticket and writes its `group_changed`), no category write, and no
  *   `sla_recalculated`;
- * - and no other answer of hers names the category, which would have given
- *   the look already, or found it owed nothing — her later messages are
- *   `after_settle` once one settles, but an earlier one answered late is
- *   answered again (`ticketFacts`).
+ * - and no other agreement came between that line and this one. Her later
+ *   messages are `after_settle` once one settles, but an earlier one answered
+ *   late is answered again (`ticketFacts`), and the first of the two to land
+ *   is the one owed the look. Both stamps are taken under the ticket's lock
+ *   (`CHANGE_STAMP`), so which was first does not depend on which answer's
+ *   follow-up runs first: two landing a moment apart, each read after both
+ *   had committed, give the look once. Every agreement after the line is hers:
+ *   the root had arrived by then, or never will, and a passer-by's answers are
+ *   never applied once she is the requester (`skipReason`).
  *
  * A hold a person or a rule ended without moving the ticket — the console's
  * assignee case, an agent's reply, an `assign_agent` rule — while the words
@@ -225,18 +215,13 @@ export async function jevCategoryOwed(conversationId: string): Promise<boolean> 
  */
 export async function setAsideCategoryAgreed(
   conversationId: string,
-  messageId: string,
+  agreedEventId: string,
 ): Promise<boolean> {
   const [aside] = await db
-    .select({
-      id: conversationEvents.id,
-      categoryKey: ticketCategories.key,
-      requesterContactId: conversations.requesterContactId,
-    })
+    .select({ id: conversationEvents.id })
     .from(conversationEvents)
     .innerJoin(conversations, eq(conversations.id, conversationEvents.conversationId))
     .innerJoin(routingDecisions, eq(routingDecisions.conversationId, conversations.id))
-    .innerJoin(ticketCategories, eq(ticketCategories.id, conversations.categoryId))
     .where(
       and(
         eq(conversationEvents.conversationId, conversationId),
@@ -250,88 +235,53 @@ export async function setAsideCategoryAgreed(
     .limit(1);
   if (!aside) return false;
 
+  // Compared in the database, to the microsecond `clock_timestamp()` keeps, as
+  // `jevCategoryOwed` compares its two stamps.
+  const asideAt = sql`(select decided.created_at from conversation_events decided where decided.id = ${aside.id})`;
+  const agreedAt = sql`(select agreed.created_at from conversation_events agreed where agreed.id = ${agreedEventId})`;
   const [since] = await db
     .select({ id: conversationEvents.id })
     .from(conversationEvents)
     .where(
       and(
         eq(conversationEvents.conversationId, conversationId),
-        inArray(conversationEvents.type, ['group_changed', 'category_changed', 'sla_recalculated']),
-        sql`${conversationEvents.createdAt} > (select decided.created_at from conversation_events decided where decided.id = ${aside.id})`,
+        sql`${conversationEvents.createdAt} > ${asideAt}`,
+        sql`(${conversationEvents.type} in ('group_changed', 'category_changed', 'sla_recalculated') or (${conversationEvents.type} = 'category_agreed' and ${conversationEvents.createdAt} < ${agreedAt}))`,
       ),
     )
     .limit(1);
-  if (since) return false;
-
-  const [another] = await db
-    .select({ id: aiCategoryRuns.id })
-    .from(aiCategoryRuns)
-    .innerJoin(messages, eq(messages.id, aiCategoryRuns.messageId))
-    .where(
-      and(
-        eq(aiCategoryRuns.conversationId, conversationId),
-        eq(aiCategoryRuns.runLabel, CATEGORY_AI_LIVE_LABEL),
-        eq(aiCategoryRuns.outcome, 'applied'),
-        eq(aiCategoryRuns.predictedKey, aside.categoryKey),
-        ne(aiCategoryRuns.messageId, messageId),
-        // Hers: with no requester, nobody's message is somebody else's.
-        aside.requesterContactId
-          ? sql`not ${writtenByAnotherSql(messages.authorContactId, aside.requesterContactId)}`
-          : undefined,
-      ),
-    )
-    .limit(1);
-  return !another;
+  return !since;
 }
 
 /**
- * Whether some answer of Jev's that chose the ticket's category was about a
- * message nobody other than the requester wrote (`writtenByAnother`).
+ * Whether some answer of Jev's that chose the ticket's category — a write that
+ * put it there, or an answer agreeing with it — was about a message nobody
+ * other than the requester wrote (`writtenByAnother`).
  */
 async function requesterChose(
   executor: Executor,
-  ticket: {
-    id: string;
-    categoryId: string | null;
-    categoryKey: string | null;
-    requesterContactId: string | null;
-  },
+  ticket: { id: string; categoryId: string | null; requesterContactId: string | null },
 ): Promise<boolean> {
   if (!ticket.requesterContactId) return true;
 
-  const writes = await executor
+  const answers = await executor
     .select({ data: conversationEvents.data })
     .from(conversationEvents)
     .where(
       and(
         eq(conversationEvents.conversationId, ticket.id),
-        eq(conversationEvents.type, 'category_changed'),
+        inArray(conversationEvents.type, ['category_changed', 'category_agreed']),
         eq(conversationEvents.actorLabel, CATEGORY_AI_ACTOR),
       ),
     );
-  const answered: (string | null)[] = writes
-    .filter((write) => write.data.to === ticket.categoryId)
+  const answered = answers
+    .filter((answer) => answer.data.to === ticket.categoryId)
     // Spelled as the database spells an id, as `ticketFacts` reads the same
     // field: a job run by hand with an upper-case id writes it so, and would
     // otherwise name no message the lookup below finds. An id that is not one
     // names no message, and so counts as the requester's, rather than refusing
     // the whole decision with 22P02.
-    .map((write) => canonicalUuid(write.data.messageId));
-
-  if (ticket.categoryKey) {
-    const runs = await executor
-      .select({ messageId: aiCategoryRuns.messageId })
-      .from(aiCategoryRuns)
-      .where(
-        and(
-          eq(aiCategoryRuns.conversationId, ticket.id),
-          eq(aiCategoryRuns.runLabel, CATEGORY_AI_LIVE_LABEL),
-          eq(aiCategoryRuns.outcome, 'applied'),
-          eq(aiCategoryRuns.predictedKey, ticket.categoryKey),
-        ),
-      );
-    answered.push(...runs.map((run) => run.messageId));
-  }
+    .map((answer) => canonicalUuid(answer.data.messageId));
 
   if (answered.includes(null)) return true;
   const named = [...new Set(answered.filter((id): id is string => id !== null))];

@@ -32,6 +32,9 @@ forwarding list, an origin that is not localhost).
 
 - [ ] Migration is safe against the version currently running — it applies in
       `preDeployCommand`, before traffic shifts, so the old code meets the new schema
+- [ ] The new worker and crons need nothing from this release's `db/sql/` — they
+      wait at startup for its migrations (`worker/schema-gate.ts`), not for the
+      replay after them, which can fail and leave them running
 - [ ] `db/sql/` additions are idempotent, take no lock in the steady state, and
       use no `CREATE INDEX CONCURRENTLY`
 - [ ] New tables end up with RLS enabled by the loop in `db/sql/`, never `FORCE`

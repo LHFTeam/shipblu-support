@@ -38,9 +38,14 @@
 --      thing that migrates, so a commit on `main` still carrying 0060 would
 --      apply it again under the old build. The worker and the four crons: they
 --      would go live on newer code against a schema nothing has migrated.
---   2. Deploy the earlier build to the web service. The worker and the crons
---      can stay on the second half's code, which names none of the three and
---      runs with them there as without.
+--   2. Put the web service, the worker and the four crons back on the build
+--      they ran before this release, with a rollback from the dashboard, which
+--      also leaves each one's auto-deploy off. The second half's worker and
+--      crons would run with the three columns there as without, but not with
+--      0060's row gone: they wait at startup until the database has their
+--      build's newest migration (worker/schema-gate.ts), so every cron run
+--      would wait fifteen minutes and fail, and the worker would stop at its
+--      next restart.
 --
 -- Rolling forward again is turning auto-deploy back on. The next deploy of
 -- `main` applies 0060 again, since its row is gone and it is newer than every

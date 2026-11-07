@@ -351,9 +351,10 @@ export async function completeJob(attempt: Attempt): Promise<boolean> {
  * for a provider that said no. A provider's refusal is either transient, which
  * is what retries are for, or permanent in a way a handler records on the row a
  * person reads (`send_whatsapp` marks the message failed and returns), which is
- * where an agent will see it. Nor for a job type with no handler: with
- * `autoDeploy` off, the web service can enqueue a type before the worker that
- * runs it is deployed, and a retry is exactly what rescues that job.
+ * where an agent will see it. Nor for a job type with no handler: the services
+ * deploy separately and in no fixed order, and a failed worker deploy leaves
+ * the old one running, so the web service can enqueue a type before the worker
+ * that runs it is live, and a retry is exactly what rescues that job.
  */
 export class PermanentJobError extends Error {
   override readonly name = 'PermanentJobError';
