@@ -667,6 +667,8 @@ carries an entire message timeline. Two articles have no body text at all — th
 Arabic and English packaging guides are images and nothing else — and the panel
 says so rather than showing an empty box. Those images are still hot-linked from
 `s3.amazonaws.com/cdn.freshdesk.com` and will die with the Freshdesk account.
+_Still true on 2026-11-07, and of every image in the knowledge base — 214 in 61
+articles. `plans/freshdesk-disconnection.md` is the plan for copying them._
 
 And now **the widget knows who it is talking to, and opens with answers rather
 than a blank box.** Both were found by the same question: what does a merchant
@@ -1455,6 +1457,19 @@ is code:
   the Meta inboxes are answered here or not at all, so the channel rows, the
   agents and the groups below need to be in place first rather than after.
 
+- **The knowledge base still depends on Freshdesk for every image, and closing
+  the account has a checklist.** Audited 2026-11-07: no article links to
+  Freshworks, but all 214 images in 61 of the 112 articles load from
+  Freshdesk's attachment bucket, and so do the same 214 in the version
+  history. 18 versions still hold the 29 old Freshdesk links, which one Restore
+  or one re-import puts back. Freshdesk's old article URLs 404 here through the
+  proxy (§5.2). And the phone's quick replies, the merchant dashboard and its
+  Freshchat widget still send customers to the Freshdesk copy.
+  `plans/freshdesk-disconnection.md` has the measurements, the follow-up pull
+  requests and the order: the images are copied before the account closes,
+  because afterwards there is nothing to copy them from, and the redirects work
+  before `support.shipblu.com` moves.
+
 - **Instagram through Unified Login — the next configuration task, and none of
   it is a deploy.** The direct connection's token expired on 2026-10-29 (the
   header), so Instagram answers nothing until a credential is in place, and
@@ -1861,6 +1876,18 @@ https://merchant-web-production.onrender.com`. The new merchant app's
   itself — `process_webhook` skips unverified rows — so a delivery that exhausts
   its retries needs replaying by hand.
 
+  _**No longer true on 2026-11-07, on the web service.** Every absolute URL it
+  publishes is on `shipblu-support.onrender.com` now: `/widget/embed.js`'s
+  `BASE`, all 114 sitemap `<loc>`, `robots.txt`, and every canonical, hreflang
+  and JSON-LD URL. The console is still served on that host too, so the
+  variable is unset or names the Render host. That was read from output; nobody
+  recorded the change. The worker's value is unverified, and the worker builds
+  the CSAT and portal-email links. It is dormant while CSAT is off, so check it
+  before CSAT is switched on. Set it to `support.shipblu.com` again only once
+  that name answers from this app, on both services together
+  (`plans/freshdesk-disconnection.md`). What follows is the record of
+  August and September._
+
   **`KB_PUBLIC_HOST` was on this list and should not have been. It is set, to
   `support.shipblu.com`, and that domain still serves Freshdesk.** Measured
   2026-08-28: `/widget/embed.js` on production embeds
@@ -2199,6 +2226,19 @@ shipblu.com` still serves Freshdesk, so each one took a reader out of this
   help centre and into the old portal. They are now `/{locale}/a/{slug}`
   (§6.50). The redirects still matter for inbound traffic; nothing we publish
   depends on them any more.
+
+  **Followed on 2026-11-07, and they fail through the proxy.** Every legacy
+  shape `proxy.ts` rewrites to `/help/legacy` answers 404 on production:
+  `/support/solutions/articles/<id>` with or without a title suffix or a locale
+  prefix, `/a/solutions/articles/<id>`, `/solutions/articles/<id>` and
+  `/support/solutions/folders/<id>`. The same route called directly
+  (`/help/legacy?path=%2Fsupport%2Fsolutions%2Farticles%2F154000189336`) answers
+  the right 301. So the route does not see the `path` the rewrite adds. That
+  is observed, not yet diagnosed. It has to be fixed before
+  `support.shipblu.com` moves here: 30 WhatsApp messages sent from the
+  Business app since 2026-10-07, and 16 help links in the merchant dashboard,
+  name these URLs (`plans/freshdesk-disconnection.md`, PR 3).
+
 - ~~**A WhatsApp template send outside the 24-hour window**~~ — moot: the
   console no longer replies on WhatsApp at all, template or free text
   (`consoleReplyReason` in `lib/tickets/channel-policy.ts`), and nothing else
@@ -2990,6 +3030,8 @@ message bodies — the same reasoning as the deliberately tiny `pg_notify` paylo
   `/widget/embed.js` showed the real value in a second. Article links in the
   composer and the editor now come from `requestBaseUrl()` and follow the host
   the agent is on. §5.1 carries what is still broken for everything else.
+  _(By 2026-11-07 the web service no longer publishes `support.shipblu.com`
+  either; §5.1 has the measurement.)_
 - ~~`logged_in` and `selected_companies` knowledge base articles are still not
   served.~~ Both are evaluated now. `publiclyVisible()` is gone; every query in
   `lib/kb/queries.ts` takes a `KbViewer`, resolved from the portal session by
