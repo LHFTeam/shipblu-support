@@ -29,13 +29,12 @@ import {
 import { listCategories } from '@/lib/categories/queries';
 import { CATEGORY_OUTCOMES, type CategoryOutcome } from './decide';
 import { grade, type Grading, type GradingTicket } from './grade';
-import { writtenByAnotherSql } from '@/lib/tickets/classifiable';
 import { jevMayStillAsk, messageByAnotherThan } from './runs';
 
 /**
  * The reads behind `/reports/category-ai`: which run labels and questions
  * there are to choose from, and, for the one chosen, every row, every
- * `category_changed` on the tickets they name, and those tickets' numbers.
+ * `category_changed` and `category_agreed` on the tickets they name, and those tickets' numbers.
  * `grade.ts` does the judging, so nothing here decides what counts.
  *
  * One label, one question and one mode at a time
@@ -203,17 +202,12 @@ export async function categoryAiReport(
       runLabel: sql<string | null>`${conversationEvents.data}->>'runLabel'`,
       messageId: sql<string | null>`${conversationEvents.data}->>'messageId'`,
       messageCreatedAt: sql<string | null>`${conversationEvents.data}->>'messageCreatedAt'`,
-      // The message the write names was written by somebody other than the
-      // ticket's requester now: a passer-by's reply, read before the
-      // customer's comment took the ticket over. Matched only on an id that is
-      // one, cast inside the CASE so a hand-edited event cannot refuse the
-      // page, and by the primary key.
-      onAnothersMessage: sql<boolean>`exists (select 1 from ${messages} named join ${conversations} ticket on ticket.id = ${conversationEvents.conversationId} where named.id = case when ${conversationEvents.data}->>'messageId' ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then (${conversationEvents.data}->>'messageId')::uuid end and ${writtenByAnotherSql(sql`named.author_contact_id`, sql`ticket.requester_contact_id`)})`,
+      agreed: sql<boolean>`${conversationEvents.type} = 'category_agreed'`,
     })
     .from(conversationEvents)
     .where(
       and(
-        eq(conversationEvents.type, 'category_changed'),
+        inArray(conversationEvents.type, ['category_changed', 'category_agreed']),
         inArray(conversationEvents.conversationId, named),
       ),
     )

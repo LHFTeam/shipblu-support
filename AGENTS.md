@@ -1414,7 +1414,13 @@ hold:
   go through `setConversationCategory` (`lib/categories/write.ts`), which writes
   nothing when the value is unchanged, refuses a retired category, and stores
   the key and label at the change so a renamed category still reads as what was
-  chosen.
+  chosen. Jev's confident answer naming the category the ticket already carries
+  writes nothing either, and is recorded beside it as a `category_agreed`
+  (`categoryAgreedEvent`), in the same transaction and stamped the same way: the
+  message the category stands on, which the router and the grade read
+  (**Routing by category**, the classifier below). Its own type, so nothing that
+  reads `category_changed` as a write — ownership, a label, what arrived after a
+  decision — takes it for one; a person agreeing still leaves no event.
   `createTicket` is the other writer, at creation: the column in its insert and
   the event beside it, for the reason under **Ticket forms**. It cannot call
   `setConversationCategory`, whose own transaction cannot see the uncommitted
@@ -1951,8 +1957,10 @@ README says why it is a setting and not a rule. The rules:
   while the routing row's message is a reply comment and no root comment is
   stored, or while every answer of Jev's that chose the category was about
   somebody who is not the requester now. Which message an answer was about is
-  read off its event's `messageId` and off the live `applied` run, because an
-  answer agreeing with the category the ticket carries writes no event. To the
+  read off its event's `messageId`: a write's `category_changed`, or the
+  `category_agreed` an answer naming the category the ticket already carries
+  leaves in its place, so the customer's root read as the reply was makes the
+  category hers. To the
   category's writer `waiting` is the router's pass still to come
   (`routerDecidedOn`), so it runs none of its own. The window's end is
   `settle_routing`, or any call once `window_ends_at` has passed, so the next
@@ -1978,9 +1986,12 @@ README says why it is a setting and not a rule. The rules:
   `assign_agent` rule — while the words were still the replier's leaves his
   category on the policy chosen before it, until a move or the next writer
   re-chooses it (no active policy is keyed on the category either,
-  2026-11-06); and the decision's
-  recorded probability is the last write's, the replier's when the customer's
-  answer agreed with it.
+  2026-11-06). The decision records the probability of Jev's latest answer, a
+  write or an agreement, which on every ticket is the one that settled it: Jev
+  applies an answer only while no earlier message of the requester's has
+  settled the ticket, so the latest is always the earliest message answered so
+  far. So the customer's when hers agreed with the reply's, and on any channel
+  an earlier message's whose answer came late.
 - **The creation pass is `on_create` rules, `applySlaOnCreate`, then
   `beginRouting`, and it stops on `routed`.** After the rules, so a rule gets
   the first word: its stamp has ended the hold, or its `set_category` is routed
@@ -2022,13 +2033,15 @@ README says why it is a setting and not a rule. The rules:
   category. A failure in that read is logged and owes nothing, in its own
   guard, so the reply's send is still queued and the held reply and a rule's
   kept pick still go. And a confident answer naming the category the ticket
-  already carries writes nothing, but on a live `holding` row it routes the
-  ticket all the same (`afterCategoryConfirmed`): the customer's root agreeing
-  with what the replier's reply was read as is the one ticket it reaches. On
-  a ticket whose window's end set that reading aside, her first such answer
-  gives the policy its look (`setAsideCategoryAgreed`), as a write would
-  have, while nothing — a move, a category write, a re-selection — has
-  re-chosen the policy since: everywhere else the category had its look, or
+  already carries writes nothing but its `category_agreed`, and on a live
+  `holding` row it routes the ticket all the same (`afterCategoryConfirmed`):
+  the customer's root agreeing with what the replier's reply was read as is the
+  one ticket it reaches. On a ticket whose window's end set that reading aside,
+  her first such answer gives the policy its look (`setAsideCategoryAgreed`),
+  as a write would have, while nothing — a move, a category write, a
+  re-selection — has re-chosen the policy since. "First" by the agreements'
+  stamps, taken under the ticket's lock, so two landing a moment apart give
+  the look once whichever follow-up runs first: everywhere else the category had its look, or
   is the cost above, and a second look owed for nothing takes up a priority
   changed meanwhile; no pass, since the customer's message already ran one
   with the category on the ticket.
@@ -2225,11 +2238,13 @@ one label, question and mode at a time, and its rules are
 `lib/category-ai/grade.ts`'s tests: one settling answer per ticket, in the order
 the live job judges messages and over the messages it counts, a passer-by's
 left out of the settle, the cap and Filed by Jev — unless the customer's own
-answer agreed with the filing it made, which wrote nothing and so stands on his
-— and a ticket judged on nothing else out of play unless the customer's own row
-says why; ground truth only a person's `category_changed`
-given before Jev, a rule or a form wrote the category, since agreeing with a
-write leaves no event and every label after one is a disagreement — so a ticket
+answer agreed with the filing it made, whose `category_agreed` names her
+message and is the filing her ticket stands on — and a ticket judged on nothing
+else out of play unless the customer's own row says why; ground truth only a
+person's `category_changed` given before Jev, a rule or a form wrote the
+category, since a person agreeing with a write leaves no event (Jev's
+agreement is neither a label nor a write the labels are cut at) and every
+label after one is a disagreement — so a ticket
 written to first is in no rate read off labels, and in `apply`, where every settle is Jev's
 filing, Filed by Jev is the grade; rates that mix Jev's answers weighted for a
 sample drawn evenly from each; the cap counted as the live job counts it, across

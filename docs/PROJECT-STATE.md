@@ -2131,6 +2131,15 @@ https://merchant-web-production.onrender.com`. The new merchant app's
   stores — is assigned up to the window's length later than a ticket its root
   opened; 1 of 63 comment tickets was opened by a reply (read 2026-11-06), and
   0 by a reply whose root then arrived (0 `requester_changed` events ever).
+  **And not before #481 is live on the web service and the worker alike.**
+  Since #481 the router reads whose words a category stands on off Jev's
+  events alone, and the customer's answer agreeing with the reply's reading
+  is recorded only as a `category_agreed`, which the worker writes. Before it
+  runs there, such an answer leaves a run and no event, the router reads the
+  category as the passer-by's, and the window's end sets it aside. Nothing
+  backfills those, and nothing needs to while no comment ticket routes: read
+  2026-11-07, 0 answers had ever agreed, and 0 `category_agreed` events
+  existed.
 
 ### 5.2 Live-provider verification
 

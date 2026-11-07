@@ -197,15 +197,12 @@ async function carried(conversationId: string): Promise<string | null> {
   return row!.categoryId;
 }
 
-async function categoryEvents(conversationId: string) {
+async function categoryEvents(conversationId: string, type = 'category_changed') {
   return db
     .select({ actorLabel: conversationEvents.actorLabel, data: conversationEvents.data })
     .from(conversationEvents)
     .where(
-      and(
-        eq(conversationEvents.conversationId, conversationId),
-        eq(conversationEvents.type, 'category_changed'),
-      ),
+      and(eq(conversationEvents.conversationId, conversationId), eq(conversationEvents.type, type)),
     )
     .orderBy(asc(conversationEvents.createdAt));
 }
@@ -303,6 +300,61 @@ describe('classifyMessageCategory, writing', () => {
       outcome: 'applied',
     });
     expect(await carried(id)).toBe(await categoryId('customer_support'));
+  });
+
+  // An earlier message answered late, the same as the later one that settled
+  // the ticket: nothing to write, and an answer all the same, which says which
+  // message the category stands on (`categoryAgreedEvent`).
+  it('records an answer agreeing with the category the ticket carries, writing nothing', async () => {
+    const { id } = await ticket();
+    const first = await inbound(id, 'بكام الشحن؟', { createdAt: at(2) });
+    const later = await inbound(id, 'عايز اعرف الاسعار', { createdAt: at(1) });
+    answers('sales');
+    await classifyMessageCategory(later, { baseUrl: BASE });
+
+    answers('sales', 0.8);
+    await expect(classifyMessageCategory(first, { baseUrl: BASE })).resolves.toMatchObject({
+      outcome: 'applied',
+    });
+
+    expect(await categoryEvents(id)).toHaveLength(1);
+    expect(await categoryEvents(id, 'category_agreed')).toEqual([
+      {
+        actorLabel: CATEGORY_AI_ACTOR,
+        data: expect.objectContaining({
+          to: await categoryId('sales'),
+          key: 'sales',
+          label: 'Sales',
+          probability: 0.8,
+          model: 'jev-1.13.0',
+          messageId: first,
+          runLabel: CATEGORY_AI_LIVE_LABEL,
+        }),
+      },
+    ]);
+  });
+
+  // Only an answer that would have written: one Jev was unsure of, or one in
+  // shadow, chose nothing, whatever it named.
+  it('records no agreement for an answer that would not have written', async () => {
+    const { id } = await ticket();
+    const first = await inbound(id, 'بكام الشحن؟', { createdAt: at(3) });
+    const second = await inbound(id, 'السعر كام', { createdAt: at(2) });
+    const later = await inbound(id, 'عايز اعرف الاسعار', { createdAt: at(1) });
+    answers('sales');
+    await classifyMessageCategory(later, { baseUrl: BASE });
+
+    answers('sales', 0.55);
+    await expect(classifyMessageCategory(second, { baseUrl: BASE })).resolves.toMatchObject({
+      outcome: 'below_threshold',
+    });
+    await mode('shadow');
+    answers('sales');
+    await expect(classifyMessageCategory(first, { baseUrl: BASE })).resolves.toMatchObject({
+      outcome: 'would_apply',
+    });
+
+    expect(await categoryEvents(id, 'category_agreed')).toEqual([]);
   });
 
   it('holds an answer below the threshold, and records the threshold it was held to', async () => {

@@ -22,7 +22,7 @@ type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
  * it — and its id as Postgres spells it back, which is the one the writer
  * stores, in the column and in the event alike.
  */
-type HeldCategory = { id: string; key: string; labelEn: string };
+export type HeldCategory = { id: string; key: string; labelEn: string };
 
 type CategoryRead = HeldCategory | 'unknown_category' | 'retired_category';
 
@@ -117,6 +117,51 @@ export function categoryChangedEvent(
       to: change.to,
       key: change.category?.key ?? null,
       label: change.category?.labelEn ?? null,
+      ...detail,
+    },
+  };
+}
+
+/**
+ * The `category_agreed` row for a classifier's confident answer naming the
+ * category the ticket already carries: what `setConversationCategoryOn`, which
+ * writes nothing on an unchanged value, does not record. Jev answers once per
+ * message under a label (the run's unique index), so this is one row per
+ * answer, never the repeat a rule matching every fifteen minutes would leave.
+ *
+ * Its own type rather than a `category_changed` from a category to itself:
+ * everything that reads `category_changed` — whose category it is
+ * (`categoryOwned`), what arrived after a routing decision, a person's label
+ * when Jev is graded — reads a write, and nothing was written. What it is for
+ * is which message the category stands on: on a comment thread a passer-by's
+ * reply opened, Jev's reading of the reply put the category there, and the
+ * customer's own comment, read the same, makes it hers (`requesterChose`,
+ * `setAsideCategoryAgreed`, the grade's Filed by Jev). On the ticket's own
+ * record, beside the writes and the routing decisions it is weighed against,
+ * so every reader of whose words a category stands on reads one table in one
+ * vocabulary, where they once also read the classifier's run table and its
+ * outcomes; and the timeline can say it happened.
+ *
+ * Stamped with `CHANGE_STAMP`, taken under the ticket's lock as a write's is,
+ * so it orders against the writes and decisions around it.
+ */
+export function categoryAgreedEvent(
+  conversationId: string,
+  category: HeldCategory,
+  actor: { label: string },
+  detail: CategoryEventDetail,
+) {
+  return {
+    conversationId,
+    type: 'category_agreed',
+    actorLabel: actor.label,
+    createdAt: CHANGE_STAMP,
+    data: {
+      // `to`, as a write names the category it left: one field for every
+      // reader that weighs Jev's writes and agreements alike.
+      to: category.id,
+      key: category.key,
+      label: category.labelEn,
       ...detail,
     },
   };

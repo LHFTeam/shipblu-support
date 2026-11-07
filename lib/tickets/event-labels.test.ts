@@ -108,6 +108,23 @@ describe('describeEvent', () => {
     );
   });
 
+  // Not "set the category", which nothing did, nor the default's bare
+  // "category agreed": the line says what Jev read, and that it changed nothing.
+  // Nor whose message: a root arriving later can make it a passer-by's.
+  it('says Jev read a message as the category the ticket already had', () => {
+    expect(
+      describeEvent('category_agreed', {
+        to: 'c-1',
+        key: 'sales',
+        label: 'Sales',
+        probability: 0.874,
+      }),
+    ).toBe('read a message as Sales too, the category the ticket already had (87% likely)');
+    expect(describeEvent('category_agreed', { to: 'c-1', key: 'sales', label: null })).toBe(
+      'read a message as sales too, the category the ticket already had',
+    );
+  });
+
   it('names the policy a ticket is held to, and the change that chose it again', () => {
     expect(
       describeEvent('sla_recalculated', { reason: 'policy', cause: 'category', policy: 'Sales' }),
