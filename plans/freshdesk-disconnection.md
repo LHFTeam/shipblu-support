@@ -299,6 +299,47 @@ true, and the only one that cannot be done once the account is closed.
   keep working until the account is closed, so a rollback before then loses
   nothing; after it, there is no rollback, which is why it runs first.
 
+**What was built, and the two places it departs from the above.** The code is
+in `lib/kb/image-src.ts` (reading and rewriting `src` in stored HTML),
+`lib/kb/images.ts` (the download, the type read from the bytes, the copy, the
+signed URL), `worker/handlers/rehost-kb-images.ts` and
+`app/api/kb/images/[id]/route.ts`, with migration `0061_kb_images`.
+
+- **No version is cut; versions are rewritten in place, and the way back is
+  `revert=true`.** A version cut per article would hold the Freshdesk address,
+  which is the Restore hazard this plan lists first, created 61 times over. It
+  would also keep the audit's `images, versions` row above 0, which is this
+  PR's own check. And the help centre dates an article by its newest version
+  (`editedAt`), so 61 articles would read "updated today" for a change no
+  reader can see. `kb_images.source_url` already records the address each copy
+  replaced, so `rehost_kb_images revert=true` (dry-runnable) writes those
+  addresses back into every article and version that names a copy. Like the
+  plan's rollback, it works only while Freshdesk still serves the originals.
+- **`sha256` is recorded, not unique.** Two Freshdesk URLs holding the same
+  bytes would have needed a second table to keep both addresses for the way
+  back. The second run is kept from copying again by `source_url` being
+  unique.
+- **Serving.** The route signs for 24 hours, reuses a signature while 12 hours
+  remain (in memory, per process), and lets anybody cache the redirect for an
+  hour. So after the first reader, an article page's fifteen pictures cost no
+  query and no Storage call. Only a cache miss is rate limited (600 a minute
+  per address).
+- **What it downloads.** It selects by the audit query's own pattern, so
+  everything the check counts is in scope. It downloads only over HTTPS, from
+  a Freshworks domain or from Freshdesk's bucket on S3, and refuses a redirect
+  anywhere else. The cap is 10 MB, and the type must be PNG, JPEG, GIF or WebP
+  as read from the bytes. Anything else matching the pattern is kept and named
+  in the report. Measured on 2026-11-08: 207 distinct addresses, all in
+  Freshdesk's bucket, none only in a version.
+
+To run it, after the deploy: `npm run job -- rehost_kb_images dryRun=true`
+(expect `would_copy=207` and 61 articles and 61 versions to rewrite, ar and en
+apart), then without `dryRun`, then `dryRun=true` again, which should end
+`nothing to do`. `locale=` and `limit=` narrow a cautious first run. A failed
+picture is a `kept <url>: <reason>` line and is retried by the next run. An
+article saved in the console while the job ran is a `skipped <slug>` line and
+is picked up by the next run.
+
 ### 2. Keep Freshdesk links from coming back
 
 - **Restore** passes the restored body through `rewriteLegacyArticleLinks` and

@@ -208,6 +208,52 @@ export const kbArticleVersions = pgTable(
 );
 
 /**
+ * A picture an article shows, held in our own bucket and served by
+ * `/api/kb/images/<id>` (`lib/kb/images.ts`).
+ *
+ * Every image the Freshdesk import brought in was hot-linked from Freshdesk's
+ * attachment bucket, which goes when the account does, so `rehost_kb_images`
+ * copies each one here and points the article at the copy
+ * (`plans/freshdesk-disconnection.md`, PR 1). An article stores the route's
+ * path and never the object key: the bucket is private, so the route signs a
+ * URL per request, and a key moving would otherwise mean rewriting every body.
+ *
+ * - `storage_path` is `kb/<id>.<ext>`, built from the id and the type read off
+ *   the bytes, never from the remote file's name (AGENTS.md's attachment rule).
+ * - `content_type` is that reading, not what the remote server said, because
+ *   Storage serves the object back with it.
+ * - `source_url` is the address the copy replaced, exactly as the article's
+ *   `src` held it. Unique, so a second run of the job finds every copy it
+ *   already made and downloads nothing; and it is the whole of the way back,
+ *   since `rehost_kb_images revert=true` writes it back over the route's path.
+ *   Null for an image that never lived anywhere else, which an upload in the
+ *   editor will be (PR 4).
+ * - `sha256` records what was stored, for an integrity check or a later
+ *   upload's dedupe. Not unique: two Freshdesk URLs holding the same bytes are
+ *   two rows, each with its own source, which the way back needs.
+ *
+ * No foreign key to an article. One picture can sit in several articles and in
+ * any number of their versions, and a version restored next year must still
+ * find it, so a row outlives every body that names it.
+ */
+export const kbImages = pgTable(
+  'kb_images',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    storagePath: text('storage_path').notNull(),
+    contentType: text('content_type').notNull(),
+    sizeBytes: integer('size_bytes').notNull(),
+    sha256: text('sha256').notNull(),
+    sourceUrl: text('source_url'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('kb_images_storage_path_idx').on(t.storagePath),
+    uniqueIndex('kb_images_source_url_idx').on(t.sourceUrl),
+  ],
+);
+
+/**
  * Preserves inbound links to the existing support.shipblu.com articles at
  * migration time, so no customer bookmark or search result 404s after cutover.
  */

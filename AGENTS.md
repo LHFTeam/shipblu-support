@@ -2344,6 +2344,17 @@ and it never touches a text node. Applying it to what is already stored is
 `normalise_kb_formatting`, which is idempotent and cuts a `kb_article_versions`
 row per article so the pass is undoable from the console.
 
+**An article's picture is ours, named by its route.** A picture held in the
+bucket is a `kb_images` row, and an article's `<img>` names it as
+`/api/kb/images/<id>` (`kbImageSrc` in `lib/kb/image-src.ts`). That is a path,
+not a URL, so it loads on every host an article is drawn on. It is never the
+object key, since the route signs a URL per request. `rehost_kb_images` copies
+Freshdesk's hot-linked images in (`plans/freshdesk-disconnection.md`, PR 1). It
+rewrites versions in place rather than cutting one, so no Restore can bring
+Freshdesk's address back, and its way back is `revert=true` from
+`kb_images.source_url`. Until the editor uploads (PR 4), a new screenshot is
+still hot-linked from wherever its author found it.
+
 **Who on the team may read an internal article.** `kb_visibility` answers
 whether a _customer_ may (`lib/kb/visibility.ts`); `min_role` on `kb_articles`
 and `kb_folders` answers which of _us_ may, and the two are separate axes on

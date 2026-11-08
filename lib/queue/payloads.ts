@@ -347,6 +347,20 @@ export const JOB_PAYLOADS = {
     /** One locale only, for a cautious first run. */
     locale: z.enum(LOCALES).optional(),
   }),
+  rehost_kb_images: z.strictObject({
+    /** Count what would be copied and rewritten. Downloads nothing, writes nothing. */
+    dryRun: z.boolean().optional(),
+    /** Stop after this many articles, with their versions. Absent means all of them. */
+    limit: z.number().int().positive().optional(),
+    /** One locale's articles only, for a cautious first run. */
+    locale: z.enum(LOCALES).optional(),
+    /**
+     * The way back: put the Freshdesk address each copy replaced back into the
+     * articles and versions that name the copy. Works only while Freshdesk
+     * still serves them, so never after the account is closed.
+     */
+    revert: z.boolean().optional(),
+  }),
   restore_resolved_at: z.strictObject({
     /** Report the tickets and the instants they would get, write nothing. */
     dryRun: z.boolean().optional(),
