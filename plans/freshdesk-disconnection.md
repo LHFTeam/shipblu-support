@@ -319,15 +319,27 @@ signed URL), `worker/handlers/rehost-kb-images.ts` and
   bytes would have needed a second table to keep both addresses for the way
   back. The second run is kept from copying again by `source_url` being
   unique.
-- **Serving.** The route signs for 24 hours, reuses a signature while 12 hours
-  remain (in memory, per process), and lets anybody cache the redirect for an
-  hour. So after the first reader, an article page's fifteen pictures cost no
-  query and no Storage call. Only a cache miss is rate limited (600 a minute
-  per address).
+- **Serving.** A picture goes to whoever may read an article that shows it.
+  One shown by a published article a stranger can read (all 61 on 2026-11-08)
+  is signed for 24 hours, the signature reused while 12 hours remain (in
+  memory, per process), and the redirect cacheable by anybody for an hour. So
+  after the first reader, an article page's fifteen pictures cost no query and
+  no Storage call. Any other picture is signed for five minutes, per request,
+  with private caching. It goes to a console agent, or to a signed-in
+  customer an article visible to them shows it to. Everybody else gets 404.
+  Only a cache miss is rate limited (600 a minute per address). A Storage
+  failure is logged and answered 502, uncached.
+- **Save and Restore keep the copies.** The console's Save and Restore map any
+  Freshdesk address already copied to its copy as the body is written
+  (`withCopiedImages`). So an editor tab opened before the job ran, or a
+  version cut before it, cannot put Freshdesk back. The importer is still
+  PR 2's to deal with.
 - **What it downloads.** It selects by the audit query's own pattern, so
   everything the check counts is in scope. It downloads only over HTTPS, from
-  a Freshworks domain or from Freshdesk's bucket on S3, and refuses a redirect
-  anywhere else. The cap is 10 MB, and the type must be PNG, JPEG, GIF or WebP
+  a Freshworks domain or from Freshdesk's bucket on S3, matched as the whole
+  host. It follows no redirect at all, so it never asks a host a redirect
+  names. It stops after three copies in a row that our own Storage refused.
+  The cap is 10 MB, and the type must be PNG, JPEG, GIF or WebP
   as read from the bytes. Anything else matching the pattern is kept and named
   in the report. Measured on 2026-11-08: 207 distinct addresses, all in
   Freshdesk's bucket, none only in a version.

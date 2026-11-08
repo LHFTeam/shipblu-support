@@ -55,14 +55,18 @@ describe('downloadFreshworksImage', () => {
     expect(fetched).not.toHaveBeenCalled();
   });
 
-  it('refuses a redirect that leaves Freshworks', async () => {
-    stubFetch(() => {
-      const response = new Response(PNG);
-      Object.defineProperty(response, 'redirected', { value: true });
-      Object.defineProperty(response, 'url', { value: 'https://elsewhere.example/a.png' });
-      return response;
-    });
-    await expect(downloadFreshworksImage(FRESHDESK)).rejects.toThrow(/redirected away/);
+  it('follows no redirect, and asks no host it points at', async () => {
+    // A redirect is refused as it stands: following it, even to check where it
+    // landed, would have the worker ask every host on the way first.
+    const fetched = stubFetch(
+      () =>
+        new Response(null, { status: 302, headers: { location: 'http://169.254.169.254/latest' } }),
+    );
+    await expect(downloadFreshworksImage(FRESHDESK)).rejects.toThrow(
+      'answered 302, a redirect to 169.254.169.254, which this job does not follow',
+    );
+    expect(fetched).toHaveBeenCalledTimes(1);
+    expect(fetched.mock.calls[0]![1]).toMatchObject({ redirect: 'manual' });
   });
 
   it('names the status of a refusal', async () => {

@@ -70,6 +70,9 @@ const FRESHWORKS_DOMAINS = [
  */
 const FRESHDESK_BUCKET = 'cdn.freshdesk.com';
 
+/** That bucket addressed virtual-hosted style: `cdn.freshdesk.com.s3[.region].amazonaws.com`. */
+const FRESHDESK_VIRTUAL_HOST = /^cdn\.freshdesk\.com\.s3(?:[.-][a-z0-9-]+)?\.amazonaws\.com$/;
+
 /**
  * Whether the job may download this `src`: HTTPS, on a Freshworks domain or in
  * Freshdesk's bucket on S3, addressed either way S3 allows.
@@ -100,7 +103,12 @@ export function fetchableFreshworksImage(src: string): boolean {
   if (!host.endsWith('.amazonaws.com')) return false;
   const pathStyle = host === 's3.amazonaws.com' || /^s3[.-][a-z0-9-]+\.amazonaws\.com$/.test(host);
   if (pathStyle) return url.pathname.startsWith(`/${FRESHDESK_BUCKET}/`);
-  return host.startsWith(`${FRESHDESK_BUCKET}.s3.`) || host.startsWith(`${FRESHDESK_BUCKET}.s3-`);
+  // The whole host, never a prefix of it: a bucket name may itself contain
+  // dots, so `cdn.freshdesk.com.s3.evil.s3.amazonaws.com` — somebody's bucket
+  // called `cdn.freshdesk.com.s3.evil` — starts the way Freshdesk's does. The
+  // region label between `s3` and `amazonaws.com`, when there is one, is a
+  // single label with no dot in it.
+  return FRESHDESK_VIRTUAL_HOST.test(host);
 }
 
 const IMG_TAG = /<img\b[^>]*>/gi;

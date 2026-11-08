@@ -206,8 +206,21 @@ async function planForward(bodies: Body[], dryRun: boolean): Promise<Plan> {
   // run would change; nothing it builds is written.
   const wouldBe = new Set<string>();
 
+  // Our own side failing — Storage down, the worker's credentials wrong, the
+  // database refusing — fails every picture after it the same way, so the
+  // loop stops after a few in a row rather than downloading the rest from
+  // Freshdesk to throw each one away. A picture's own failure (a 403, a
+  // non-image) says nothing about the next, and does not count.
+  let ourSideFailures = 0;
+  let stoppedBecause: string | null = null;
+
   for (const [url, labels] of where) {
     if (copies.has(url)) continue;
+
+    if (stoppedBecause) {
+      plan.failed.push({ url, reason: stoppedBecause, in: labels });
+      continue;
+    }
 
     if (!fetchableFreshworksImage(url)) {
       plan.failed.push({
@@ -228,15 +241,21 @@ async function planForward(bodies: Body[], dryRun: boolean): Promise<Plan> {
       const { id } = await storeKbImage({ ...image, sourceUrl: url });
       copies.set(url, id);
       plan.copied += 1;
+      ourSideFailures = 0;
     } catch (error) {
       // A download that failed is named and kept, as is our own storage
       // failing: either way the article keeps the address it has, and the
       // next run tries again.
-      const reason =
-        error instanceof KbImageFetchError
-          ? error.message
-          : `could not be stored: ${error instanceof Error ? error.message : String(error)}`;
+      if (error instanceof KbImageFetchError) {
+        plan.failed.push({ url, reason: error.message, in: labels });
+        continue;
+      }
+      const reason = `could not be stored: ${error instanceof Error ? error.message : String(error)}`;
       plan.failed.push({ url, reason, in: labels });
+      ourSideFailures += 1;
+      if (ourSideFailures >= STOP_AFTER_OUR_FAILURES) {
+        stoppedBecause = `not tried: the last ${STOP_AFTER_OUR_FAILURES} copies could not be stored`;
+      }
     }
   }
 
@@ -252,6 +271,9 @@ async function planForward(bodies: Body[], dryRun: boolean): Promise<Plan> {
 }
 
 const DRY_RUN_ID = '00000000-0000-0000-0000-000000000000';
+
+/** Copies in a row that our own side refused before the rest are not tried. */
+const STOP_AFTER_OUR_FAILURES = 3;
 
 /** Put back the address each copy replaced, wherever a body names the copy. */
 async function planRevert(bodies: Body[]): Promise<Plan> {
@@ -390,6 +412,13 @@ function report(
     log.info(`skipped ${label}: it changed while the job ran, run it again`);
   }
 
-  const nothing = plan.rewrites.length === 0 && plan.failed.length === 0 && plan.wouldCopy === 0;
+  // On the way back, a picture with no source to return to is still on our
+  // route, and a web build without the route would show it broken: that is
+  // something left to do, not nothing.
+  const nothing =
+    plan.rewrites.length === 0 &&
+    plan.failed.length === 0 &&
+    plan.wouldCopy === 0 &&
+    plan.noSource === 0;
   if (nothing) log.info('nothing to do');
 }

@@ -136,6 +136,23 @@ describe('fetchableFreshworksImage', () => {
     expect(fetchableFreshworksImage('https://attachment.freshworks.com/a.png')).toBe(true);
   });
 
+  it('accepts the bucket virtual-hosted in a region, and refuses a look-alike bucket', () => {
+    expect(
+      fetchableFreshworksImage('https://cdn.freshdesk.com.s3.us-east-1.amazonaws.com/data/a.png'),
+    ).toBe(true);
+    expect(
+      fetchableFreshworksImage('https://cdn.freshdesk.com.s3-us-west-2.amazonaws.com/data/a.png'),
+    ).toBe(true);
+    // A bucket name can contain dots: this is somebody's bucket called
+    // `cdn.freshdesk.com.s3.evil`, and it starts the way Freshdesk's does.
+    expect(
+      fetchableFreshworksImage('https://cdn.freshdesk.com.s3.evil.s3.amazonaws.com/data/a.png'),
+    ).toBe(false);
+    expect(
+      fetchableFreshworksImage('https://cdn.freshdesk.com.s3.amazonaws.com.evil.net/a.png'),
+    ).toBe(false);
+  });
+
   it('refuses another bucket on S3, even one the audit pattern matches', () => {
     // The audit's pattern would match this; downloading it would be fetching
     // whatever somebody else's bucket holds.

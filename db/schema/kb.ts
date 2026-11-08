@@ -223,8 +223,9 @@ export const kbArticleVersions = pgTable(
  *   the bytes, never from the remote file's name (AGENTS.md's attachment rule).
  * - `content_type` is that reading, not what the remote server said, because
  *   Storage serves the object back with it.
- * - `source_url` is the address the copy replaced, exactly as the article's
- *   `src` held it. Unique, so a second run of the job finds every copy it
+ * - `source_url` is the address the copy replaced, as the article's `src`
+ *   decodes: entities resolved, so `&amp;` in the stored body is `&` here, and
+ *   a hand-written `LIKE` against `body_html` has to encode it back. Unique, so a second run of the job finds every copy it
  *   already made and downloads nothing; and it is the whole of the way back,
  *   since `rehost_kb_images revert=true` writes it back over the route's path.
  *   Null for an image that never lived anywhere else, which an upload in the

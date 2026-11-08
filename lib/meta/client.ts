@@ -1,5 +1,6 @@
 import { env } from '@/lib/env';
 import { isTimeout } from '@/lib/http/deadline';
+import { readBodyCapped } from '@/lib/http/read-capped';
 import { commentRequest, type CommentOperation } from './comments';
 import { CONNECTION_LABEL, type MetaConnection, metaConnection } from './connection';
 import { offersThreadControl, takeThreadControlRequest } from './handover';
@@ -845,36 +846,13 @@ async function readAttachment(
     return { content: Buffer.from(await response.arrayBuffer()), contentType };
   }
 
-  const declared = Number(response.headers.get('content-length'));
-  if (Number.isFinite(declared) && declared > maxBytes) {
-    await response.body?.cancel();
-    throw new MetaContentTooLargeError(maxBytes);
-  }
-
-  const reader = response.body?.getReader();
-  // No body to stream — an empty response, or a runtime that did not give us
-  // one. `arrayBuffer` is bounded by the header check above in that case.
-  if (!reader) {
-    const content = Buffer.from(await response.arrayBuffer());
-    if (content.length > maxBytes) throw new MetaContentTooLargeError(maxBytes);
-    return { content, contentType };
-  }
-
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    if (!value) continue;
-
-    total += value.length;
-    if (total > maxBytes) {
-      await reader.cancel();
-      throw new MetaContentTooLargeError(maxBytes);
-    }
-    chunks.push(value);
-  }
-
-  return { content: Buffer.concat(chunks), contentType };
+  // Read while counting, through the one capped reader the knowledge base's
+  // image copy shares (`lib/http/read-capped.ts`, which says why the cap is
+  // enforced mid-read rather than after).
+  const content = await readBodyCapped(
+    response,
+    maxBytes,
+    () => new MetaContentTooLargeError(maxBytes),
+  );
+  return { content, contentType };
 }

@@ -315,6 +315,38 @@ describe('rehost_kb_images', () => {
     );
   });
 
+  it('stops after three copies our side refused, and names the rest as not tried', async () => {
+    const { asked, uploads } = serve(
+      { [IMG.one]: PNG, [IMG.two]: PNG, [IMG.three]: JPEG, [IMG.old]: PNG },
+      { storageRefuses: true },
+    );
+
+    await rehostKbImages(job());
+
+    // Four addresses; three downloaded and refused by Storage, the fourth
+    // never asked for, since the next would only have been refused too.
+    expect(asked).toHaveLength(3);
+    expect(uploads).toHaveLength(0);
+    const report = logs.join('\n');
+    expect(report).toContain('not tried: the last 3 copies could not be stored');
+    expect(report).toContain('failed=4');
+  });
+
+  it('keeps going past pictures that fail on their own', async () => {
+    const forbidden = () => new Response('<Error>AccessDenied</Error>', { status: 403 });
+    const { asked } = serve({
+      [IMG.one]: forbidden,
+      [IMG.two]: forbidden,
+      [IMG.three]: forbidden,
+      [IMG.old]: PNG,
+    });
+
+    await rehostKbImages(job());
+
+    // A 403 is the picture's problem, not ours: all four are asked for.
+    expect(asked).toHaveLength(4);
+    expect((await images()).map((row) => row.sourceUrl)).toEqual([IMG.old]);
+  });
   it('leaves an article an editor saved while it ran, and says to run it again', async () => {
     const edited = articleBody('<p>Rewritten by hand while the job ran.</p>').bodyHtml;
     serve({
@@ -370,5 +402,30 @@ describe('rehost_kb_images', () => {
     expect((await versionsOf(arabic))[0]!.bodyHtml).toBe(original.version);
     // The copies stay, so running forward again downloads nothing.
     expect(await images()).toHaveLength(4);
+  });
+  it('does not call a way back that leaves a picture on our route "nothing to do"', async () => {
+    // A picture recorded with no source, as an editor's upload will be: the
+    // way back has nowhere to send it, and a build without the route would
+    // show it broken, so the dry run must not read as clean.
+    const id = crypto.randomUUID();
+    await db.insert(kbImages).values({
+      id,
+      storagePath: `kb/${id}.png`,
+      contentType: 'image/png',
+      sizeBytes: 16,
+      sha256: 'b'.repeat(64),
+      sourceUrl: null,
+    });
+    await db
+      .update(kbArticles)
+      .set({ bodyHtml: articleBody(`<p><img src="/api/kb/images/${id}" /></p>`).bodyHtml })
+      .where(eq(kbArticles.id, english));
+    serve({});
+
+    await rehostKbImages(job({ revert: true, dryRun: true }));
+
+    const report = logs.join('\n');
+    expect(report).toContain('left_without_source=1');
+    expect(report).not.toContain('nothing to do');
   });
 });
