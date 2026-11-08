@@ -61,10 +61,7 @@ export async function resolveContact(input: ResolveInput): Promise<ResolvedConta
  *
  * `resolveContact` in two halves, for a caller whose contact must exist only
  * if something else it writes does: a ticket form, whose new requester would
- * otherwise outlive a ticket that failed to open (`createTicket`). The read
- * here runs before that caller's transaction opens, and only the insert runs
- * inside it, on its connection: a read on the pool from inside a held
- * transaction is the self-deadlock of `docs/PROJECT-STATE.md` §6.91.
+ * otherwise outlive a ticket that failed to open (`createTicket`).
  */
 export type PendingContact =
   | { contactId: string }
@@ -77,6 +74,12 @@ export type PendingContact =
       };
     };
 
+/**
+ * The reads half: run before the caller's transaction opens, so that only the
+ * insert (`resolveContactIn`) runs inside it, on its connection. A read on the
+ * pool from inside a held transaction is the self-deadlock of
+ * `docs/PROJECT-STATE.md` §6.91.
+ */
 export async function pendingContact(input: ResolveInput): Promise<PendingContact> {
   const identifier = normaliseIdentifier(input.channel, input.identifier);
   if (!identifier) throw new Error('Cannot resolve a contact without an identifier');

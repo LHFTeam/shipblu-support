@@ -14,6 +14,7 @@ import {
   ticketForms,
   ticketStatuses,
 } from '@/db/schema';
+import { isForeignKeyViolation } from '@/lib/db/errors';
 import { pendingContact, resolveContact } from '@/lib/tickets/contacts';
 import { withCleanDatabase } from '@/lib/testing/db';
 import { shownLabel } from './status-words';
@@ -23,8 +24,9 @@ import { appendReply, createTicket, getTicket, listTickets } from './tickets';
  * What the portal's two ingest paths write today, quirks included, so the
  * shared ingest steps of Stage 4.2 can be proven to change nothing.
  *
- * Both take the contact the portal session already resolved, and stamp their
- * own clock. `appendReply` is the one path that finds its ticket by number
+ * Both take the contact the portal session already resolved — `createTicket`
+ * may instead be handed one still to be written, below — and stamp their own
+ * clock. `appendReply` is the one path that finds its ticket by number
  * rather than by thread, and every refusal it can give is pinned here, since a
  * refusal is what stops a customer writing onto a ticket that is not theirs.
  */
@@ -452,20 +454,12 @@ describe('createTicket', () => {
         (error: unknown) => error,
       );
 
-      expect(foreignKeyViolation(failure)).toBe(true);
+      expect(isForeignKeyViolation(failure, 'conversations_group_id_groups_id_fk')).toBe(true);
       expect(await everyRow()).toEqual({ contacts: [], identities: [], tickets: [] });
       expect(await db.select({ id: messages.id }).from(messages)).toEqual([]);
     });
   });
 });
-
-/** Whether a thrown error is Postgres refusing a foreign key, however drizzle wraps it. */
-function foreignKeyViolation(error: unknown): boolean {
-  for (let at = error; at instanceof Error; at = at.cause) {
-    if ('code' in at && at.code === '23503') return true;
-  }
-  return false;
-}
 
 describe('getTicket', () => {
   it('shows a WhatsApp ticket’s messages and neither side’s reactions', async () => {

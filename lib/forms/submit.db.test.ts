@@ -11,6 +11,7 @@ import {
   ticketCategories,
   ticketForms,
 } from '@/db/schema';
+import { isForeignKeyViolation } from '@/lib/db/errors';
 import { appendReply } from '@/lib/portal/tickets';
 import { withCleanDatabase } from '@/lib/testing/db';
 import { getFormBySlug, type LoadedForm } from './queries';
@@ -297,11 +298,10 @@ describe('submitForm: the contact a ticket is filed under', () => {
   const blank = (values: FormData) => values.delete('system.description');
   const missing: SubmitResult = { ok: false, reason: 'missing', keys: ['system:description'] };
 
-  // Both requesters named by an address resolve it by inserting a contact and
-  // its identity when nobody owns it yet, so a refusal after that would leave a
-  // customer record behind for a ticket never opened. The address itself is
-  // refused inside `resolveRequester`, before `resolveContact`, on one path for
-  // both.
+  // Each refusal returns before `createTicket`, which is where a new
+  // requester's contact and identity are written, with the ticket; and the
+  // address itself is refused inside `resolveRequester` before `pendingContact`
+  // reads anything for it, on one path for both requesters named by one.
   it.each<[string, () => Promise<Requester>, (values: FormData) => void, SubmitResult]>([
     ['an anonymous visitor a question left blank', helpCentre.anonymous, blank, missing],
     ['an agent a question left blank', () => byAgent(), blank, missing],
@@ -401,17 +401,9 @@ describe('submitForm: the contact a ticket is filed under', () => {
       (error: unknown) => error,
     );
 
-    expect(foreignKeyViolation(failure)).toBe(true);
+    expect(isForeignKeyViolation(failure, 'conversations_group_id_groups_id_fk')).toBe(true);
     expect(await db.select({ id: contacts.id }).from(contacts)).toEqual([]);
     expect(await db.select({ id: contactIdentities.id }).from(contactIdentities)).toEqual([]);
     expect(await db.select({ id: conversations.id }).from(conversations)).toEqual([]);
   });
 });
-
-/** Whether a thrown error is Postgres refusing a foreign key, however drizzle wraps it. */
-function foreignKeyViolation(error: unknown): boolean {
-  for (let at = error; at instanceof Error; at = at.cause) {
-    if ('code' in at && at.code === '23503') return true;
-  }
-  return false;
-}

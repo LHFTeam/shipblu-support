@@ -1337,10 +1337,12 @@ Three rules hold, and each closes something a request could otherwise do:
 
 `submitForm` writes no contact for a requester named by an address — that
 claimed one, or the one an agent types on the console's New form. Resolving
-inserts a contact and its identity for an address nobody has written from, and
-the New form once resolved first, so every submission refused for a blank
-question, and every ticket that then failed to open, left a customer record
-behind. So a caller hands it the address, never a contact it resolved first.
+inserts a contact and its identity for an address nobody has written from. The
+New form once resolved first, so every submission refused for a blank question
+left a customer record behind; and `submitForm` itself once resolved before
+`createTicket`'s transaction, so every ticket that then failed to open did too,
+on both paths. So a caller hands it the address, never a contact it resolved
+first.
 `submitForm` refuses an address that is not one after every other refusal,
 reads the contact that owns it (`pendingContact`), and leaves a new one to
 `createTicket`, which inserts it first in the transaction that opens the ticket

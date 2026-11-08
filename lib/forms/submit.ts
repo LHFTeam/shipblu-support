@@ -171,7 +171,8 @@ function readAnswers(
  * Two things this deliberately does not do. It never writes a display name
  * onto an address that already exists — a name is set only on a contact
  * `resolveContactIn` creates, so a stranger cannot rename a known customer. And
- * the identity it may create is unverified, so it grants no portal sign-in.
+ * the identity `createTicket` may create for it is unverified, so it grants no
+ * portal sign-in.
  *
  * An agent's requester is resolved the same way an inbound email is, so a
  * ticket opened for somebody on the phone joins their existing history rather

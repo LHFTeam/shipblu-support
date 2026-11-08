@@ -34,8 +34,9 @@ export async function createTicketFromForm(
     return { error: 'That form is no longer available' };
   }
 
-  // Before the contact is resolved: that inserts a contact for a new address,
-  // and a refusal after it would leave one behind for a ticket never opened.
+  // Before `submitForm`, which writes a new customer's contact together with
+  // the ticket: a refusal has to come before that write, or it would leave a
+  // contact behind for a ticket never opened.
   const category = await consoleCategoryChoice(
     text(formData, 'categoryId'),
     can(agent, 'ticket.set_category'),
