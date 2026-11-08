@@ -43,11 +43,12 @@ export async function createTicketFromForm(
   if ('error' in category) return { error: category.error };
 
   // The address as typed rather than a contact, for the same reason:
-  // `submitForm` checks it and resolves it after its own refusals — a question
-  // left blank, an answer a field refuses, a file it will not take — so none of
-  // them leaves a contact behind either. Checked there and nowhere else, so the
-  // console and the help centre cannot come to disagree about what an address
-  // is.
+  // `submitForm` checks it after its own refusals — a question left blank, an
+  // answer a field refuses, a file it will not take — and a new customer's
+  // contact is written in the transaction that opens the ticket, so neither a
+  // refusal nor a ticket that fails to open leaves one behind. Checked there
+  // and nowhere else, so the console and the help centre cannot come to
+  // disagree about what an address is.
   const result = await submitForm({
     loaded,
     values: formData,

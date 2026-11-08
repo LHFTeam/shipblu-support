@@ -1335,12 +1335,18 @@ Three rules hold, and each closes something a request could otherwise do:
   claimed address and the client address, and the console badges it. Do not
   "improve" this by writing a display name onto an existing contact.
 
-`submitForm` resolves a requester named by an address — that claimed one, or
-the one an agent types on the console's New form — only after every refusal it
-can answer, because resolving inserts a contact and its identity for an address
-nobody has written from. So a caller hands it the address, never a contact it
-resolved first: the New form once did, and every submission refused for a
-blank question left a customer record behind for a ticket never opened.
+`submitForm` writes no contact for a requester named by an address — that
+claimed one, or the one an agent types on the console's New form. Resolving
+inserts a contact and its identity for an address nobody has written from, and
+the New form once resolved first, so every submission refused for a blank
+question, and every ticket that then failed to open, left a customer record
+behind. So a caller hands it the address, never a contact it resolved first.
+`submitForm` refuses an address that is not one after every other refusal,
+reads the contact that owns it (`pendingContact`), and leaves a new one to
+`createTicket`, which inserts it first in the transaction that opens the ticket
+(`resolveContactIn`). Anything else whose contact must not outlive the row it
+is for takes the same two halves: the read before its transaction, the insert
+inside it on `tx` — a pooled read inside a held transaction is §6.91.
 
 **A form's defaults are read when the ticket is created, and never again.**
 `createTicket` writes the default priority and the default category inside the

@@ -7,6 +7,7 @@ import {
   contacts,
   conversationEvents,
   conversations,
+  groups,
   ticketCategories,
   ticketForms,
 } from '@/db/schema';
@@ -373,4 +374,44 @@ describe('submitForm: the contact a ticket is filed under', () => {
       },
     ]);
   });
+
+  // A form read before its default group was deleted names a group that is
+  // gone, and the ticket's insert is refused. The new requester's contact is
+  // written in that same transaction, so it goes too: resolved before it, the
+  // contact stayed, and the retry the console's form offers joined the orphan.
+  it.each<[string, () => Promise<Requester>]>([
+    ['an anonymous visitor', helpCentre.anonymous],
+    ['an agent', () => byAgent()],
+  ])('leaves no contact for %s when the ticket fails to open', async (_name, requester) => {
+    const [group] = await db.insert(groups).values({ name: 'Claims' }).returning({ id: groups.id });
+    await db
+      .insert(ticketForms)
+      .values({ slug: SLUG, nameEn: 'Delivery', elements: ELEMENTS, defaultGroupId: group!.id });
+    const loaded = await load();
+    await db.delete(groups).where(eq(groups.id, group!.id));
+    const asking = await requester();
+
+    const failure = await submitForm({
+      loaded,
+      values: answers(),
+      requester: asking,
+      locale: 'en',
+    }).then(
+      (result) => result,
+      (error: unknown) => error,
+    );
+
+    expect(foreignKeyViolation(failure)).toBe(true);
+    expect(await db.select({ id: contacts.id }).from(contacts)).toEqual([]);
+    expect(await db.select({ id: contactIdentities.id }).from(contactIdentities)).toEqual([]);
+    expect(await db.select({ id: conversations.id }).from(conversations)).toEqual([]);
+  });
 });
+
+/** Whether a thrown error is Postgres refusing a foreign key, however drizzle wraps it. */
+function foreignKeyViolation(error: unknown): boolean {
+  for (let at = error; at instanceof Error; at = at.cause) {
+    if ('code' in at && at.code === '23503') return true;
+  }
+  return false;
+}

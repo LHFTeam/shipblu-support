@@ -50,6 +50,34 @@ export async function findContactByIdentity(
 }
 
 export async function resolveContact(input: ResolveInput): Promise<ResolvedContact> {
+  const pending = await pendingContact(input);
+  if ('contactId' in pending) return { contactId: pending.contactId, created: false };
+  return db.transaction((tx) => resolveContactIn(tx, pending));
+}
+
+/**
+ * A contact that exists, or the one that will be written for an identity
+ * nobody owns yet.
+ *
+ * `resolveContact` in two halves, for a caller whose contact must exist only
+ * if something else it writes does: a ticket form, whose new requester would
+ * otherwise outlive a ticket that failed to open (`createTicket`). The read
+ * here runs before that caller's transaction opens, and only the insert runs
+ * inside it, on its connection: a read on the pool from inside a held
+ * transaction is the self-deadlock of `docs/PROJECT-STATE.md` §6.91.
+ */
+export type PendingContact =
+  | { contactId: string }
+  | {
+      create: {
+        channel: ResolveInput['channel'];
+        identifier: string;
+        displayName: string | null;
+        companyId: string | null;
+      };
+    };
+
+export async function pendingContact(input: ResolveInput): Promise<PendingContact> {
   const identifier = normaliseIdentifier(input.channel, input.identifier);
   if (!identifier) throw new Error('Cannot resolve a contact without an identifier');
 
@@ -59,64 +87,77 @@ export async function resolveContact(input: ResolveInput): Promise<ResolvedConta
   // and not the other, and an interaction would then resolve to a different
   // contact than the message that created it.
   const existingId = await findContactByIdentity(input.channel, identifier);
+  if (existingId) return { contactId: existingId };
 
-  if (existingId) {
-    return { contactId: existingId, created: false };
+  const companyId = input.channel === 'email' ? await findCompanyByEmailDomain(identifier) : null;
+
+  return {
+    create: {
+      channel: input.channel,
+      identifier,
+      displayName: input.displayName ?? null,
+      companyId,
+    },
+  };
+}
+
+/**
+ * The pending contact's id, inserting it in the caller's transaction when it
+ * does not exist yet.
+ *
+ * Nothing here reads the pool, only `tx`. Called first in a transaction that
+ * goes on to take other locks, it waits on a racing writer's identity while
+ * holding none of them.
+ */
+export async function resolveContactIn(
+  tx: typeof db,
+  pending: PendingContact,
+): Promise<ResolvedContact> {
+  if ('contactId' in pending) return { contactId: pending.contactId, created: false };
+
+  const { channel, identifier, displayName, companyId } = pending.create;
+
+  const inserted = await tx
+    .insert(contacts)
+    .values({
+      name: displayName,
+      primaryEmail: channel === 'email' ? identifier : null,
+      primaryPhone: channel === 'whatsapp' ? identifier : null,
+      companyId,
+    })
+    .returning({ id: contacts.id });
+
+  const contactId = inserted[0]!.id;
+
+  // Two webhooks for the same new customer can race here, and so can anything
+  // that created the identity since `pendingContact` read it. The unique index
+  // on (channel, identifier) is the real guard; on conflict we discard the
+  // contact we just made and adopt the winner's, so one customer never ends up
+  // split across two records.
+  const identity = await tx
+    .insert(contactIdentities)
+    .values({ contactId, channel, identifier, displayName })
+    .onConflictDoNothing({
+      target: [contactIdentities.channel, contactIdentities.identifier],
+    })
+    .returning({ id: contactIdentities.id });
+
+  if (identity.length === 0) {
+    await tx.delete(contacts).where(eq(contacts.id, contactId));
+
+    const winner = await tx
+      .select({ contactId: contactIdentities.contactId })
+      .from(contactIdentities)
+      .where(
+        and(eq(contactIdentities.channel, channel), eq(contactIdentities.identifier, identifier)),
+      )
+      .limit(1);
+
+    if (!winner[0]) throw new Error('Contact identity conflict could not be resolved');
+    return { contactId: winner[0].contactId, created: false };
   }
 
-  const isEmail = input.channel === 'email';
-  const companyId = isEmail ? await findCompanyByEmailDomain(identifier) : null;
-
-  return db.transaction(async (tx) => {
-    const inserted = await tx
-      .insert(contacts)
-      .values({
-        name: input.displayName ?? null,
-        primaryEmail: isEmail ? identifier : null,
-        primaryPhone: input.channel === 'whatsapp' ? identifier : null,
-        companyId,
-      })
-      .returning({ id: contacts.id });
-
-    const contactId = inserted[0]!.id;
-
-    // Two webhooks for the same new customer can race here. The unique index on
-    // (channel, identifier) is the real guard; on conflict we discard the
-    // contact we just made and adopt the winner's, so one customer never ends up
-    // split across two records.
-    const identity = await tx
-      .insert(contactIdentities)
-      .values({
-        contactId,
-        channel: input.channel,
-        identifier,
-        displayName: input.displayName ?? null,
-      })
-      .onConflictDoNothing({
-        target: [contactIdentities.channel, contactIdentities.identifier],
-      })
-      .returning({ id: contactIdentities.id });
-
-    if (identity.length === 0) {
-      await tx.delete(contacts).where(eq(contacts.id, contactId));
-
-      const winner = await tx
-        .select({ contactId: contactIdentities.contactId })
-        .from(contactIdentities)
-        .where(
-          and(
-            eq(contactIdentities.channel, input.channel),
-            eq(contactIdentities.identifier, identifier),
-          ),
-        )
-        .limit(1);
-
-      if (!winner[0]) throw new Error('Contact identity conflict could not be resolved');
-      return { contactId: winner[0].contactId, created: false };
-    }
-
-    return { contactId, created: true };
-  });
+  return { contactId, created: true };
 }
 
 /**

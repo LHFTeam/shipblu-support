@@ -4,6 +4,7 @@ import { db } from '@/db/client';
 import {
   agents,
   channels,
+  contactIdentities,
   contacts,
   conversationEvents,
   conversations,
@@ -13,6 +14,7 @@ import {
   ticketForms,
   ticketStatuses,
 } from '@/db/schema';
+import { pendingContact, resolveContact } from '@/lib/tickets/contacts';
 import { withCleanDatabase } from '@/lib/testing/db';
 import { shownLabel } from './status-words';
 import { appendReply, createTicket, getTicket, listTickets } from './tickets';
@@ -352,7 +354,118 @@ describe('createTicket', () => {
       );
     });
   });
+
+  // A form's requester for an address nobody has written from is written in
+  // the transaction that opens the ticket, so the two exist together or not at
+  // all: resolved first, the contact outlived a ticket that failed to open.
+  describe('with a contact still to be written', () => {
+    const ADDRESS = 'nadia@example.test';
+
+    async function everyRow() {
+      return {
+        contacts: await db
+          .select({ id: contacts.id, name: contacts.name, primaryEmail: contacts.primaryEmail })
+          .from(contacts),
+        identities: await db
+          .select({
+            contactId: contactIdentities.contactId,
+            channel: contactIdentities.channel,
+            identifier: contactIdentities.identifier,
+            displayName: contactIdentities.displayName,
+          })
+          .from(contactIdentities),
+        tickets: await db
+          .select({ requesterContactId: conversations.requesterContactId })
+          .from(conversations),
+      };
+    }
+
+    it('writes the contact with the ticket, and files the ticket under it', async () => {
+      const pending = await pendingContact({
+        channel: 'email',
+        identifier: ADDRESS,
+        displayName: 'Nadia',
+      });
+      expect(await everyRow()).toEqual({ contacts: [], identities: [], tickets: [] });
+
+      const created = await createTicket(pending, { subject: 'Parcel late', body: 'A week.' });
+
+      const rows = await everyRow();
+      const contactId = rows.contacts[0]?.id;
+      expect(rows).toEqual({
+        contacts: [{ id: contactId, name: 'Nadia', primaryEmail: ADDRESS }],
+        identities: [{ contactId, channel: 'email', identifier: ADDRESS, displayName: 'Nadia' }],
+        tickets: [{ requesterContactId: contactId }],
+      });
+      expect(await messagesOf(created.conversationId)).toMatchObject([
+        { authorContactId: contactId, bodyText: 'A week.' },
+      ]);
+    });
+
+    // As an email from the same new customer would, landing between the form's
+    // read and its ticket: the unique identity decides, and the ticket joins
+    // the contact that won rather than splitting the customer in two.
+    it('adopts a contact written for the address since it was read', async () => {
+      const pending = await pendingContact({
+        channel: 'email',
+        identifier: ADDRESS,
+        displayName: 'Nadia',
+      });
+      const winner = await resolveContact({
+        channel: 'email',
+        identifier: ADDRESS,
+        displayName: 'Nadia H.',
+      });
+
+      await createTicket(pending, { subject: 'Parcel late', body: 'A week.' });
+
+      expect(await everyRow()).toEqual({
+        contacts: [{ id: winner.contactId, name: 'Nadia H.', primaryEmail: ADDRESS }],
+        identities: [
+          {
+            contactId: winner.contactId,
+            channel: 'email',
+            identifier: ADDRESS,
+            displayName: 'Nadia H.',
+          },
+        ],
+        tickets: [{ requesterContactId: winner.contactId }],
+      });
+    });
+
+    // A group that no longer exists, as a form read before the group was
+    // deleted names it: the conversation's foreign key refuses the insert, and
+    // the contact goes with it.
+    it('writes no contact when the ticket fails to open', async () => {
+      const pending = await pendingContact({
+        channel: 'email',
+        identifier: ADDRESS,
+        displayName: 'Nadia',
+      });
+
+      const failure = await createTicket(pending, {
+        subject: 'Parcel late',
+        body: 'A week.',
+        groupId: '5d1c2b3a-4e5f-4a6b-8c7d-9e0f1a2b3c4d',
+      }).then(
+        () => null,
+        (error: unknown) => error,
+      );
+
+      expect(foreignKeyViolation(failure)).toBe(true);
+      expect(await everyRow()).toEqual({ contacts: [], identities: [], tickets: [] });
+      expect(await db.select({ id: messages.id }).from(messages)).toEqual([]);
+    });
+  });
 });
+
+/** Whether a thrown error is Postgres refusing a foreign key, however drizzle wraps it. */
+function foreignKeyViolation(error: unknown): boolean {
+  for (let at = error; at instanceof Error; at = at.cause) {
+    if ('code' in at && at.code === '23503') return true;
+  }
+  return false;
+}
 
 describe('getTicket', () => {
   it('shows a WhatsApp ticket’s messages and neither side’s reactions', async () => {

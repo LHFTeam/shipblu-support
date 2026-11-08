@@ -12,6 +12,7 @@ import {
 import { categoryChangedEvent, holdCategory, type CategoryActor } from '@/lib/categories/write';
 import { logger } from '@/lib/log';
 import { readOnlyChannels } from '@/lib/tickets/channel-policy';
+import { resolveContactIn, type PendingContact } from '@/lib/tickets/contacts';
 import { notReaction } from '@/lib/tickets/not-reaction';
 import { afterInboundMessage, afterMessageStored } from '@/lib/tickets/lifecycle';
 import { reopenResolved } from '@/lib/tickets/reopen';
@@ -246,12 +247,27 @@ export type CreatedTicket = { number: number; conversationId: string; messageId:
  * Channel `portal` rather than `email`: it did not arrive by mail and has no
  * Message-ID, so filing it as email would put it in reporting's email column
  * and leave the threading code looking for a header that was never there.
+ *
+ * The requester is a contact id, or a contact still to be written for an
+ * address nobody has written from (`pendingContact`), which is inserted in the
+ * transaction that opens the ticket. Resolved before it, the contact outlived
+ * every ticket that then failed to open — a pool error, a group deleted since
+ * the form was read — and a retry joined the orphan. First in the transaction,
+ * so a wait on a racing writer's identity holds no other lock of this one.
  */
-export async function createTicket(contactId: string, input: NewTicket): Promise<CreatedTicket> {
+export async function createTicket(
+  requester: string | PendingContact,
+  input: NewTicket,
+): Promise<CreatedTicket> {
   const now = new Date();
   const portal = await portalChannel();
 
   const created = await db.transaction(async (tx) => {
+    const { contactId } = await resolveContactIn(
+      tx,
+      typeof requester === 'string' ? { contactId: requester } : requester,
+    );
+
     const statusId = await requireDefaultOpenStatusId(tx);
 
     // Read before the insert, so the column is only ever written with a live
