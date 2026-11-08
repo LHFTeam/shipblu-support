@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, isNull, ne, or, sql, type SQL } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull, ne, notInArray, sql, type SQL } from 'drizzle-orm';
 import { db } from '@/db/client';
 import {
   agents,
@@ -333,35 +333,44 @@ const MOVES_WITH_NUMBER: readonly StatusCategory[] = ['open', 'pending'];
  * nobody answers. One copy, so the count the admin is shown before the second
  * click is the set the handover then moves. The caller adds which numbers.
  *
- * The status is read through `statusCategoryOf`, a correlated scalar subquery,
- * because the handover reads these tickets under a row lock. Under READ
- * COMMITTED a locked read that waited on another writer re-checks the newest
- * version of the row against the rows it joined before waiting, and an
- * `IN (select …)` over `ticket_statuses` — what this was — is planned as a
- * join, as a correlated `EXISTS` is. A ticket an agent moved from Open to
- * Pending while the handover waited for it then failed the join to Open, was
- * left out, and stayed accountable to the previous owner for good: nothing
- * realigns an open ticket, and handing the number to the same person again
- * changes nothing (`docs/PROJECT-STATE.md` §6.114). A scalar subquery is
- * evaluated again against the row as it now is. It also locks nothing in
- * `ticket_statuses`, which a join under FOR UPDATE would, holding up every
- * ticket created in those statuses for as long as the handover ran.
+ * The status test is "not one of the statuses that stay behind", against a
+ * list read once per statement — `<> all(array(…))`, which Postgres runs as an
+ * InitPlan and never turns into a join — because the handover reads these
+ * tickets under a row lock. Under READ COMMITTED a locked read that waited on
+ * another writer re-checks the newest version of the row against the rows it
+ * joined before waiting, and the `status_id IN (select …)` this was is planned
+ * as a join. A ticket an agent moved from Open to Pending while the handover
+ * waited for it then failed the join to Open, was left out, and stayed
+ * accountable to the previous owner for good: nothing realigns an open
+ * ticket, and handing the number to the same person again changes nothing
+ * (`docs/PROJECT-STATE.md` §6.114). The list is a value of the statement, so
+ * the re-check compares the ticket's new status with it as it would any
+ * column. It also locks nothing in `ticket_statuses`, which a join under the
+ * handover's lock would: every handover would lock the same Open and Pending
+ * rows, and two numbers changing hands at once, or an admin editing one of
+ * those statuses, would wait on each other.
  *
- * It reads in the locked statement's snapshot, though, so a status created
- * while the handover waited, and given to the ticket meanwhile, is not there
- * to find, and the subquery answers null. Such a ticket is kept, and the
- * handover reads its status again once the lock is held
- * (`lockedStatusCategory`), moving it only if that is open or pending. A read
- * with no lock never meets the null: one snapshot that sees the ticket's
- * status sees the status row it names.
+ * Negative, because the list is read in the statement's snapshot. A status
+ * created while the handover waited, and given to the ticket meanwhile, is in
+ * no list read before it existed; asked "is it open or pending" the read
+ * would drop the ticket, and asked "is it resolved or closed" it keeps it, and
+ * the handover reads that status again once the lock is held
+ * (`lockedStatusCategory`), moving the ticket only if it is open or pending.
+ * One InitPlan, not a correlated subquery per ticket: this runs over every
+ * ticket the number ever had, the admin page counts it for every number on
+ * each render, and the handover runs it holding the number's lock.
  */
 function movesWithNumber() {
+  const staysBehind = db
+    .select({ id: ticketStatuses.id })
+    .from(ticketStatuses)
+    .where(notInArray(ticketStatuses.category, [...MOVES_WITH_NUMBER]));
   return and(
     ne(conversations.sourceSystem, 'import'),
     isNull(conversations.deletedAt),
     isNull(conversations.mergedIntoId),
     eq(conversations.isSpam, false),
-    or(inArray(statusCategoryOf(), [...MOVES_WITH_NUMBER]), isNull(statusCategoryOf())),
+    sql`${conversations.statusId} <> all(array(${staysBehind}))`,
   );
 }
 
@@ -491,12 +500,14 @@ export async function handOverNumber(input: {
       .set({ ownerAgentId: to?.id ?? null, updatedAt: now })
       .where(eq(channels.id, channel.id));
 
-    // FOR NO KEY UPDATE: the handover writes these tickets' accountability and
-    // assignee, no key, and their lines, so it needs nothing stronger, and it
-    // still waits on every other writer of each row. FOR UPDATE also conflicts
-    // with the KEY SHARE that a message inserted for a ticket takes through its
-    // foreign key, so every customer writing to the number while it changed
-    // hands waited for the handover to commit (§6.106).
+    // FOR NO KEY UPDATE, as every lock on a ticket's row is (§6.106): the
+    // handover writes these tickets' accountability and assignee, no key, and
+    // their lines, and it still waits on every other writer of each row. FOR
+    // UPDATE also conflicts with the KEY SHARE a row inserted for the ticket
+    // takes through its foreign key, so a reaction, an event or a classifier's
+    // run on one of the number's tickets waited for the handover too. A
+    // customer's message still does, at its ingest's update of the ticket,
+    // which is a writer of the row like any other.
     const locked = await tx
       .select({
         id: conversations.id,
@@ -509,9 +520,10 @@ export async function handOverNumber(input: {
       .where(and(eq(conversations.channelId, channel.id), movesWithNumber()))
       .for('no key update');
 
-    // The status a waited-for writer gave a ticket, where the locked read could
-    // not see it (`movesWithNumber`): a ticket moved to a status created
-    // meanwhile moves with the number only if that status is open or pending.
+    // The status a waited-for writer gave a ticket, where the locked read's
+    // snapshot could not see it (`statusCategoryOf` answers null, and
+    // `movesWithNumber` kept it): it moves with the number only if that status
+    // is open or pending.
     const tickets = [];
     for (const ticket of locked) {
       const category = await lockedStatusCategory(tx, ticket);

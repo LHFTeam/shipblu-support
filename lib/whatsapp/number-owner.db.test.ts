@@ -563,11 +563,13 @@ describe('handOverNumber', () => {
     });
   });
 
-  // Every customer writing to the number inserts a message, whose foreign key
-  // takes KEY SHARE on the ticket's row. The handover's lock on the tickets it
-  // moves must not make that wait: FOR UPDATE does, FOR NO KEY UPDATE does
-  // not, and the handover writes no key (§6.106).
-  it('lets a customer’s message on a ticket it moves through while it runs', async () => {
+  // A row inserted for a ticket — a message, a reaction, an event — takes KEY
+  // SHARE on the ticket's row through its foreign key. The handover's lock on
+  // the tickets it moves must not make that insert wait: FOR UPDATE does, FOR
+  // NO KEY UPDATE does not, and the handover writes no key (§6.106). An
+  // ingest that goes on to update the ticket still waits there, as any writer
+  // of the row does; that is not what this holds.
+  it('lets a row inserted for a ticket it moves go in while it runs', async () => {
     const admin = await agent('Mona Admin', { role: 'admin' });
     const nayera = await agent('Nayera Mohamed');
     const number = await phone('Nayera Mohamed');

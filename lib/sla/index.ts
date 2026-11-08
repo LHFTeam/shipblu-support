@@ -139,8 +139,10 @@ type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
  * no foreign key points at and inserts events, which is all NO KEY UPDATE
  * covers, and it waits on every other writer of the row just the same. FOR
  * UPDATE, which this took before, also conflicts with the KEY SHARE that a
- * message inserted for the ticket takes through its foreign key, so the
- * customer's next message waited for the re-time to commit (§6.106).
+ * row inserted for the ticket takes through its foreign key, so a reaction,
+ * an event or a classifier's run on the ticket waited for the re-time to
+ * commit (§6.106). A customer's message still does, at its ingest's update of
+ * the ticket after the insert: that is a writer of the row like any other.
  */
 async function loadConversation(
   conversationId: string,

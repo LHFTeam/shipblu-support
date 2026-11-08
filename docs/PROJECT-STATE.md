@@ -8187,8 +8187,11 @@ dryRun=true`, then without, gives those two theirs back from their
       so it reads the ticket as the writer it waited on left it, joined to
       what the ticket names now. The lock is `FOR NO KEY UPDATE`, where the
       joined read took `FOR UPDATE`: every clock writer writes only columns
-      no foreign key points at, and `FOR UPDATE` made each customer message on
-      the ticket wait for the re-time to commit (§6.106). #429's shape, the status through a correlated
+      no foreign key points at, and `FOR UPDATE` made every row inserted for
+      the ticket — a reaction, an event — wait for the re-time to commit
+      (§6.106). A customer's message still waits, at its ingest's update of
+      the ticket, which is a writer of the row like any other: what the
+      weaker lock changes is the insert, not the ingest. #429's shape, the status through a correlated
       subquery (`statusCategoryOf`), fixes the status and not the requester,
       and needs `lockedStatusCategory`'s second read for a status created
       during the wait, since the subquery runs in the locked statement's older
@@ -8196,27 +8199,37 @@ dryRun=true`, then without, gives those two theirs back from their
       Every case fails against the joined read, and the requester and
       new-status cases fail against the subquery shape. The lesson, now under
       **Database** in AGENTS.md: a row-locking read joins nothing through a
-      column another writer can change, and an `IN (select …)` or a correlated
-      `EXISTS` is planned as a join (`EXPLAIN` shows the nested loop). Lock,
-      then read.
+      column another writer can change, and an `IN (select …)` or an
+      `EXISTS (select …)` ANDed into the `WHERE` is turned into a join
+      whenever the planner can (`EXPLAIN` shows a join to the other table,
+      hash or nested loop, where a `SubPlan` or `InitPlan` would be safe).
+      Lock, then read.
 
       The WhatsApp handover had the `IN` shape (#490). `movesWithNumber()`
-      filtered a number's tickets with `status_id IN (select id from
-ticket_statuses …)` under the handover's row lock. An agent setting one
-      of them pending takes no lock on the number, since only a ticket leaving
-      resolved or closed asks who owns it, so the handover could wait on that
-      write, re-check the ticket against the Open it had read, and leave it
-      out. It then stayed accountable to the previous owner for good: nothing
-      realigns an open ticket, and handing the number to the same person again
-      changes nothing. `movesWithNumber()` now reads the category through
-      `statusCategoryOf`, keeps a ticket whose new status the locked read
-      cannot see, and reads that status again once the lock is held, moving
-      the ticket only if it is open or pending. The tickets are locked
-      `FOR NO KEY UPDATE`, so a customer writing to the number no longer waits
-      for the handover. `lib/whatsapp/number-owner.db.test.ts` holds it: a
-      ticket set pending, one moved to a pending status and one to a resolved
-      status created during the wait, and a message inserted while the
-      handover holds its tickets.
+      filtered a number's tickets with
+      `status_id IN (select id from ticket_statuses …)` under the handover's
+      row lock. An agent setting one of them pending takes no lock on the
+      number, since only a ticket leaving resolved or closed asks who owns
+      it, so the handover could wait on that write, re-check the ticket
+      against the Open it had read, and leave it out. It then stayed
+      accountable to the previous owner for good: nothing realigns an open
+      ticket, and handing the number to the same person again changes
+      nothing. `movesWithNumber()` now asks whether the status is not one
+      that stays behind, against a list read once per statement
+      (`status_id <> all(array(select …))`, an `InitPlan`), which the
+      re-check compares with the ticket's new status as with any column. It
+      asks the negative question because the list is read in the statement's
+      snapshot: a status created during the wait is in no list, so the
+      ticket is kept, and the handover reads that status again once the lock
+      is held (`lockedStatusCategory`), moving the ticket only if it is open
+      or pending. A correlated subquery per ticket did the same and cost
+      about fifteen times as much on a number with a long history, which the
+      admin page counts for every number on each render. The tickets are
+      locked `FOR NO KEY UPDATE`, for the reason the SLA lock is above.
+      `lib/whatsapp/number-owner.db.test.ts` holds it: a ticket set pending,
+      one moved to a pending status and one to a resolved status created
+      during the wait, and a row inserted for a ticket while the handover
+      holds it.
 
       A second, smaller one came from the test. Its precondition, that the
       clock writer is queued in a locked read rather than on its `UPDATE`,
