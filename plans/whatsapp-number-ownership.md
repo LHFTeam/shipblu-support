@@ -183,7 +183,12 @@ accountability is set or moved at three moments:
 - **`handOverNumber`**, in one transaction. It locks the channel row, refuses
   any type but `whatsapp` and an unknown or deactivated agent, and does nothing
   for a no-op. Then it selects the number's open and pending native tickets
-  `FOR UPDATE`, through a status subquery so the status rows stay unlocked. It
+  `FOR NO KEY UPDATE`, filtering on a list of the statuses that stay behind
+  read once per statement (`<> all(array(…))`, never a join or an `IN`), so a
+  ticket another writer set pending while the handover waited for it is judged
+  by its new status rather than dropped, and the status rows stay unlocked. A
+  status created during that wait is read again once the lock is held
+  (`lockedStatusCategory`; `docs/PROJECT-STATE.md` §6.114). It
   moves accountability on all of them, and the assignee where the previous owner
   or nobody held the ticket. It writes `accountable_changed` and `assigned`
   events and one `channel_owner_changes` row with both counts.

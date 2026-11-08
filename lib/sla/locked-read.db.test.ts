@@ -427,14 +427,15 @@ describe('a clock writer that waited on a writer moving the ticket to a status a
   });
 });
 
-describe('a customer’s message, while a clock writer holds the ticket', () => {
-  // Every ingest path continuing a ticket inserts the message, whose foreign
-  // key takes KEY SHARE on the ticket's row, and then updates the ticket.
-  // FOR UPDATE conflicts with that KEY SHARE, NO KEY UPDATE does not
-  // (`docs/PROJECT-STATE.md` §6.106): the clock writer's lock serialises it
-  // against every other writer of the row, and must not make the customer's
-  // message wait for a re-time to commit.
-  it('is stored without waiting for the re-time to commit', async () => {
+describe('a row inserted for the ticket, while a clock writer holds it', () => {
+  // A message, a reaction or an event inserted for a ticket takes KEY SHARE on
+  // the ticket's row through its foreign key. FOR UPDATE conflicts with that,
+  // NO KEY UPDATE does not (`docs/PROJECT-STATE.md` §6.106): the clock
+  // writer's lock serialises it against every other writer of the row, and
+  // must not make an insert wait for a re-time to commit. An ingest that then
+  // updates the ticket still waits there, as any writer of the row does; that
+  // is not what this holds.
+  it('goes in without waiting for the re-time to commit', async () => {
     await defaultPolicy();
     const id = await ticket();
     await db.update(conversations).set({ priority: 'urgent' }).where(eq(conversations.id, id));

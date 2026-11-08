@@ -410,13 +410,19 @@ change.** Under READ COMMITTED a `FOR UPDATE` that waited on another writer
 re-checks the newest version of the row against the rows it joined before
 waiting. A writer that moved the ticket to another status fails an inner join
 to the old one, and the read answers no row: the ticket reads as gone. A
-changed requester null-extends a left join instead. An uncorrelated
-`IN (select …)` is planned as a join too. So lock the row in one statement and
-read what it points at in the next, as `loadConversation` in
-`lib/sla/index.ts` does, or read a column of another table through a correlated
-subquery (`statusCategoryOf`). That subquery runs in the locked statement's
-older snapshot and finds no row created during the wait, so it needs
-`lockedStatusCategory`'s second read. A join on a column nothing changes is
+changed requester null-extends a left join instead. An `IN (select …)` or an
+`EXISTS (select …)` ANDed into the `WHERE` is turned into a join whenever the
+planner can: the WhatsApp handover read the number's tickets through an `IN`,
+and left a ticket set pending while it waited with the previous owner (§6.114).
+So lock the row in one statement and read what it points at in the next, as
+`loadConversation` in `lib/sla/index.ts` does; or read a column of another
+table through a correlated scalar subquery (`statusCategoryOf`); or, filtering
+many rows, compare with a list read once per statement,
+`<> all(array(select …))`, which runs as an InitPlan (`movesWithNumber` in
+`lib/whatsapp/number-owner.ts`). Those two read in the locked statement's older
+snapshot and cannot see a row created during the wait, so the filter keeps such
+a row rather than dropping it, and a second read once the lock is held decides
+(`lockedStatusCategory`). A join on a column nothing changes is
 safe: the two credential reads in `lib/whatsapp/credentials.ts` join the
 account on the credential's own primary key, and the WABA id they read cannot
 change while a credential is stored (`storedCredentialEditRefusal`). In the SLA
