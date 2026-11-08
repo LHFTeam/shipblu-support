@@ -359,6 +359,9 @@ present tense there.
 
 ### The way back from PR 2
 
+_The runbook below is gone from the tree, and stops being a way back once
+`0061_kb_images` is applied: see the end of this section before following it._
+
 `db/runbooks/kb-article-counters-restore.sql`, run by hand on the session
 connection, never the transaction pooler:
 
@@ -408,6 +411,25 @@ Driven end to end on a scratch Postgres 16 with each build's own `db:migrate`:
 The runbook's test runs it and then 0060 again on every CI run. It fails once a
 migration follows 0060, and the PR adding that migration deletes the runbook
 and writes the way back from there.
+
+**Since `0061_kb_images` it is gone from the tree.** It was deleted with its
+test in the PR that adds that migration (PR 1 of
+`plans/freshdesk-disconnection.md`). Until that release's web preDeploy has
+applied `0061` in production, the runbook still works from history,
+unchanged: `git show b1032df:db/runbooks/kb-article-counters-restore.sql`. On
+2026-11-08, `0060` was the newest migration applied in production, the three
+columns were gone, and `kb_article_stats` held 108 rows.
+
+Once `0061` is applied, PR 2 has no way back by the runbook. Deleting 0060's
+row would not make a deploy apply it again behind a newer row, and the runbook
+refuses for that reason before it changes anything. A problem found in PR 2
+after that is fixed forward, the way going back past PR 1 is (below): a
+migration of its own and a new commit.
+
+Rolling the web service back to a build from before `0061` would also strand
+the knowledge base's images. That build has no `/api/kb/images` route, so
+`rehost_kb_images revert=true` has to run first, while Freshdesk still serves
+the originals.
 
 Going back past PR 1 is not prepared here, and is no longer a revert either.
 Reverting #472 deletes 0057, which `generated-files` refuses. A redeploy of the

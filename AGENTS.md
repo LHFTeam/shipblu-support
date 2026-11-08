@@ -2348,7 +2348,8 @@ row per article so the pass is undoable from the console.
 bucket is a `kb_images` row, and an article's `<img>` names it as
 `/api/kb/images/<id>` (`kbImageSrc` in `lib/kb/image-src.ts`). That is a path,
 not a URL, so it loads on every host an article is drawn on. It is never the
-object key, since the route signs a URL per request. `rehost_kb_images` copies
+object key, since the route signs a URL for the key when it serves the
+picture. `rehost_kb_images` copies
 Freshdesk's hot-linked images in (`plans/freshdesk-disconnection.md`, PR 1). It
 rewrites versions in place rather than cutting one, so no Restore can bring
 Freshdesk's address back, and its way back is `revert=true` from

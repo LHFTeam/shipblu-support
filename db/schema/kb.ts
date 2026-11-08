@@ -215,8 +215,9 @@ export const kbArticleVersions = pgTable(
  * attachment bucket, which goes when the account does, so `rehost_kb_images`
  * copies each one here and points the article at the copy
  * (`plans/freshdesk-disconnection.md`, PR 1). An article stores the route's
- * path and never the object key: the bucket is private, so the route signs a
- * URL per request, and a key moving would otherwise mean rewriting every body.
+ * path and never the object key: the bucket is private, so the route hands out
+ * a signed URL for the key (`signKbImageUrl` in `lib/kb/images.ts` says how
+ * long one lives), and a key moving would otherwise mean rewriting every body.
  *
  * - `storage_path` is `kb/<id>.<ext>`, built from the id and the type read off
  *   the bytes, never from the remote file's name (AGENTS.md's attachment rule).

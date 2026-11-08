@@ -14,7 +14,7 @@ import { fetchableFreshworksImage } from './image-src';
  * row says where its bytes are, and the route redirects to a signed URL for
  * them. The bucket is the attachments bucket, private, because it also holds
  * customers' invoices and ID documents; these pictures are public, so the
- * signature here is long and reused (`kbImageRedirect`), where an
+ * signature here is long and reused (`signKbImageUrl`), where an
  * attachment's is five minutes and minted per view.
  */
 
@@ -61,10 +61,14 @@ export class KbImageFetchError extends Error {
  * Downloads one Freshworks image, under a deadline and a size cap.
  *
  * Refuses an address `fetchableFreshworksImage` does not accept before asking
- * for anything, and refuses a redirect that lands anywhere it would not
- * accept either, so the job reaches Freshworks and nothing else. Every failure
- * is a `KbImageFetchError` naming what went wrong; the job keeps the old
- * address and reports it.
+ * for anything, and refuses a response whose redirects end anywhere it would
+ * not accept either, so nothing is stored that did not come from Freshworks.
+ * `fetch` follows the hops before that check, so a host in the middle of a
+ * chain is still asked: a blind GET with no credentials, whose answer is
+ * discarded. None of production's 207 addresses redirects at all; an article
+ * names them, and only `kb.edit` writes one. Every failure is a
+ * `KbImageFetchError` naming what went wrong; the job keeps the old address
+ * and reports it.
  */
 export async function downloadFreshworksImage(
   url: string,
