@@ -2335,11 +2335,19 @@ shipblu.com` still serves Freshdesk, so each one took a reader out of this
   prefix, `/a/solutions/articles/<id>`, `/solutions/articles/<id>` and
   `/support/solutions/folders/<id>`. The same route called directly
   (`/help/legacy?path=%2Fsupport%2Fsolutions%2Farticles%2F154000189336`) answers
-  the right 301. So the route does not see the `path` the rewrite adds. That
-  is observed, not yet diagnosed. It has to be fixed before
-  `support.shipblu.com` moves here: 30 WhatsApp messages sent from the
-  Business app since 2026-10-07, and 16 help links in the merchant dashboard,
-  name these URLs (`plans/freshdesk-disconnection.md`, PR 3).
+  the right 301. So the route does not see the `path` the rewrite adds. It
+  has to be fixed before `support.shipblu.com` moves here: 30 WhatsApp
+  messages sent from the Business app since 2026-10-07, and 16 help links in
+  the merchant dashboard, name these URLs (`plans/freshdesk-disconnection.md`,
+  PR 3).
+
+  **Diagnosed on 2026-11-08** (§6.115): the handler is handed the URL as it
+  arrived, so the query the rewrite added never reached it. The fix, PR 3,
+  passes the path in a request header instead. A local production build of
+  the fix answers 301 for all six shapes, where the same build of `dev`
+  answered 404. Not yet measured on the deployed service: check the six
+  shapes there once it ships, with the curl in the plan's "Re-running this
+  audit".
 
 - ~~**A WhatsApp template send outside the 24-hour window**~~ — moot: the
   console no longer replies on WhatsApp at all, template or free text
@@ -8343,6 +8351,35 @@ dryRun=true`, then without, gives those two theirs back from their
       matches a `select` at the start of the statement, waiting on a row
       (`wait_event` `transactionid` or `tuple`): a plain read never waits on
       a row, though it can wait on a table behind a TRUNCATE or other DDL.
+
+115.  **A query a proxy rewrite adds never reaches a route handler, so every
+      Freshdesk URL answered 404.** _2026-11-07 found, 2026-11-08 diagnosed._
+      `proxy.ts` sent Freshdesk's old article and folder URLs to
+      `/help/legacy?path=<the path>` with `NextResponse.rewrite`, and
+      `app/help/legacy/route.ts` read `?path=`. Through the proxy every legacy
+      shape answered the route's own JSON 404, which is `{"error":"not
+found"}` and not Next's page. The same route called by its own URL
+      answered the right 301. A diagnostic build that echoed the request
+      showed why: after the rewrite, the handler's `request.url` and
+      `request.nextUrl` are both `/support/solutions/articles/<id>`, the
+      URL as it arrived (Next 16.3.1). The rewritten path decides which
+      handler runs, and its query goes nowhere the handler can read. So
+      `path` was always empty, and the lookup matched nothing.
+
+      The proxy now passes the path in a request header set on the rewrite,
+      `NextResponse.rewrite(url, { request: { headers } })`, which Next
+      sends on to the handler (`x-middleware-request-*`, listed in
+      `x-middleware-override-headers`). The route reads it through
+      `legacyPathOf` (`lib/kb/legacy-path.ts`), or `?path=` on a direct call.
+      `proxy.test.ts` holds the header on all six shapes, and
+      `app/help/legacy/route.db.test.ts` feeds the route the request Next
+      really sends. Its rewritten cases fail against the old route.
+
+      The lesson for anything else the proxy rewrites: what a rewrite adds to
+      the URL reaches a page only through the router, and a route handler not
+      at all. A value meant for a handler rides in a request header. Nothing
+      else in `proxy.ts` added a query to a rewrite. The `?next=` it adds is
+      on a redirect, which the browser follows as a new request.
 
 ### Tooling notes for this environment
 

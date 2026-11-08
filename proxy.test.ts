@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { NextRequest } from 'next/server';
+import { LEGACY_PATH_HEADER } from '@/lib/kb/legacy-path';
 import { LOCALES } from '@/lib/kb/locale';
 import { setTestEnv, withTestEnv } from '@/lib/testing/env';
 import proxy from './proxy';
@@ -81,5 +82,55 @@ describe('every other hostname', () => {
     // missing marker would say anything was wrong.
     expect(visit('http://127.0.0.1:10000/probe').status).not.toBe(307);
     expect(rewrittenTo(visit('http://127.0.0.1:10000/probe'))).toBeNull();
+  });
+});
+
+/**
+ * Freshdesk's article and folder URLs, on whichever host they arrive.
+ *
+ * The rewrite used to put the path in `?path=`, which the route handler never
+ * saw: Next hands it the request as it arrived, so every one of these answered
+ * the route's own 404 (PROJECT-STATE §6.115). What reaches the handler is a
+ * header set on the rewritten request, which Next sends as
+ * `x-middleware-request-<name>` and lists in `x-middleware-override-headers`.
+ */
+describe('Freshdesk URLs', () => {
+  const SHAPES = [
+    '/support/solutions/articles/154000189336',
+    '/support/solutions/articles/154000189336-packaging-guidelines',
+    '/a/solutions/articles/154000189336',
+    '/solutions/articles/154000189336',
+    '/en/support/solutions/articles/154000189336',
+    '/support/solutions/folders/154000050001',
+  ];
+
+  const legacyPathSent = (response: Response) =>
+    response.headers.get(`x-middleware-request-${LEGACY_PATH_HEADER}`);
+
+  for (const host of [KB_HOST, 'shipblu-support.onrender.com']) {
+    it(`hands each shape to the legacy route in a header, on ${host}`, () => {
+      setTestEnv({ KB_PUBLIC_HOST: KB_HOST });
+      for (const shape of SHAPES) {
+        const response = visit(`https://${host}${shape}`);
+        expect(rewrittenTo(response)).toBe('/help/legacy');
+        expect(legacyPathSent(response)).toBe(shape);
+        expect(response.headers.get('x-middleware-override-headers')).toContain(LEGACY_PATH_HEADER);
+      }
+    });
+  }
+
+  it('sends the path it was asked for, not one the client claimed', () => {
+    const target = new URL('https://shipblu-support.onrender.com/solutions/articles/1');
+    const headers = new Headers({ host: target.host, [LEGACY_PATH_HEADER]: '/elsewhere' });
+    expect(legacyPathSent(proxy(new NextRequest(target, { headers })))).toBe(
+      '/solutions/articles/1',
+    );
+  });
+
+  it('leaves the query off the rewrite, where nothing would read it', () => {
+    const destination = visit(
+      'https://shipblu-support.onrender.com/support/solutions/articles/1?utm=x',
+    ).headers.get('x-middleware-rewrite');
+    expect(new URL(destination!).search).toBe('');
   });
 });

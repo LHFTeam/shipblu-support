@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { and, eq, like, or } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { kbArticles, kbFolders } from '@/db/schema';
+import { legacyPathOf } from '@/lib/kb/legacy-path';
 import { DEFAULT_LOCALE } from '@/lib/kb/locale';
 import { findRedirect } from '@/lib/kb/queries';
 import { freshdeskArticleId } from '@/lib/kb/slug';
@@ -23,7 +24,10 @@ export const dynamic = 'force-dynamic';
  * whether or not anyone remembered to write a redirect.
  */
 export async function GET(request: Request) {
-  const path = new URL(request.url).searchParams.get('path') ?? '';
+  // The proxy's header, or `?path=` on a direct call. Never the query alone:
+  // through the proxy this handler is handed the URL as it arrived, which has
+  // none (`lib/kb/legacy-path.ts`, PROJECT-STATE §6.115).
+  const path = legacyPathOf(request);
 
   const explicit = await findRedirect(path);
   if (explicit) return permanent(explicit);

@@ -325,6 +325,24 @@ rewrite adds, fix it so the route works both rewritten and called directly, and
 prove the six shapes 301 on a deployed build, with a test that fails on today's
 code. Record the measurement in §5.2 of `docs/PROJECT-STATE.md`.
 
+**Diagnosed and built.** Next 16 hands a route handler the request as it
+arrived. After the proxy's rewrite, `request.url` was still
+`/support/solutions/articles/<id>`, measured on a production build, so the
+`?path=` the rewrite added was in no URL the handler could read. The proxy now
+passes the path in a request header set on the rewrite (`x-legacy-path`,
+`lib/kb/legacy-path.ts`), which is how a proxy hands a value to what it
+rewrites to. The route reads that header, or `?path=` on a direct call
+(PROJECT-STATE §6.115).
+
+- `proxy.test.ts` checks that each of the six shapes, on both hosts, is
+  rewritten with the path in the header.
+- `app/help/legacy/route.db.test.ts` builds the request Next actually hands
+  the handler. Four of its cases fail against the route as it was.
+- A production build served locally, on a database holding one bilingual
+  imported article, answered 301 for all six shapes, where the same build of
+  `dev` answered 404 for every one. On the deployed build this is still to be
+  checked; the checklist item below does that.
+
 ### 4. Upload an image in the article editor
 
 Not blocking the disconnection, but without it the next screenshot anybody adds
@@ -469,7 +487,7 @@ Today `302 https://support.shipblu.com/support/home` — still Freshdesk.
 curl -sS -o /dev/null -w '%{http_code} %{redirect_url}\n' https://shipblu-support.onrender.com/support/solutions/articles/154000189336
 ```
 
-Today `404`; `301` to the article once PR 3 is deployed.
+On 2026-11-07 `404`; `301` to the article once PR 3 is deployed.
 
 ```bash
 curl -sS https://shipblu-support.onrender.com/widget/embed.js | grep -o 'var BASE = "[^"]*"'
