@@ -8196,9 +8196,27 @@ dryRun=true`, then without, gives those two theirs back from their
       Every case fails against the joined read, and the requester and
       new-status cases fail against the subquery shape. The lesson, now under
       **Database** in AGENTS.md: a row-locking read joins nothing through a
-      column another writer can change, and an uncorrelated `IN (select …)` is
-      planned as a join. Lock, then read. The WhatsApp handover still has the
-      `IN` shape (#490).
+      column another writer can change, and an `IN (select …)` or a correlated
+      `EXISTS` is planned as a join (`EXPLAIN` shows the nested loop). Lock,
+      then read.
+
+      The WhatsApp handover had the `IN` shape (#490). `movesWithNumber()`
+      filtered a number's tickets with `status_id IN (select id from
+ticket_statuses …)` under the handover's row lock. An agent setting one
+      of them pending takes no lock on the number, since only a ticket leaving
+      resolved or closed asks who owns it, so the handover could wait on that
+      write, re-check the ticket against the Open it had read, and leave it
+      out. It then stayed accountable to the previous owner for good: nothing
+      realigns an open ticket, and handing the number to the same person again
+      changes nothing. `movesWithNumber()` now reads the category through
+      `statusCategoryOf`, keeps a ticket whose new status the locked read
+      cannot see, and reads that status again once the lock is held, moving
+      the ticket only if it is open or pending. The tickets are locked
+      `FOR NO KEY UPDATE`, so a customer writing to the number no longer waits
+      for the handover. `lib/whatsapp/number-owner.db.test.ts` holds it: a
+      ticket set pending, one moved to a pending status and one to a resolved
+      status created during the wait, and a message inserted while the
+      handover holds its tickets.
 
       A second, smaller one came from the test. Its precondition, that the
       clock writer is queued in a locked read rather than on its `UPDATE`,

@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray } from 'drizzle-orm';
+import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import { DateTime } from 'luxon';
 import postgres from 'postgres';
 import { describe, expect, it } from 'vitest';
@@ -11,6 +11,7 @@ import {
   contacts,
   conversationEvents,
   conversations,
+  messages,
   ticketStatuses,
 } from '@/db/schema';
 import { runAutomations } from '@/lib/automations';
@@ -18,8 +19,14 @@ import { computeAgentDay } from '@/lib/reports/agent-rollup';
 import { changeStatus } from '@/lib/tickets/status';
 import { reportingContext } from '@/lib/reports/rollup';
 import { withCleanDatabase } from '@/lib/testing/db';
-import { untilWaitingOnALock } from '@/lib/testing/hold-transaction';
-import { alignAccountable, handOverNumber, numberOwnership, reopenWithOwner } from './number-owner';
+import { holdNextTransaction, untilWaitingOnALock } from '@/lib/testing/hold-transaction';
+import {
+  alignAccountable,
+  handOverNumber,
+  numberOwnership,
+  reopenWithOwner,
+  type Handover,
+} from './number-owner';
 
 /**
  * Handing a WhatsApp number over, against Postgres: which of its tickets move,
@@ -113,12 +120,38 @@ async function eventsOf(id: string) {
     .orderBy(asc(conversationEvents.type));
 }
 
+/** What the session `behindAWriter` holds the ticket with writes before it commits. */
+type HeldWrite = (tx: postgres.TransactionSql) => Promise<unknown>;
+
+/**
+ * A priority change, its line stamped when written, as every writer of the
+ * column stamps it.
+ */
+const raisePriority =
+  (id: string): HeldWrite =>
+  async (tx) => {
+    await tx`update conversations set priority = 'urgent' where id = ${id}`;
+    await tx`insert into conversation_events (conversation_id, type, actor_label, data, created_at)
+             values (${id}, 'priority_changed', 'agent', '{"to":"urgent"}', clock_timestamp())`;
+  };
+
 /**
  * Runs `write` while another session holds the ticket's row, and lets that
- * session change the priority — its line stamped when written, as every
- * writer of the column stamps it — and commit once `write` waits on it.
+ * session make its change — a priority change unless told otherwise — and
+ * commit once `write` waits on it.
+ *
+ * That `write` queued in a read that locks rows is asserted rather than
+ * assumed: `untilWaitingOnALock` gives up quietly, and the races these cases
+ * are about — a locked read re-checking the row it waited for — happen only
+ * there. A select waiting on a row can only be one that locks rows, and it is
+ * matched at the start of the statement because `pg_stat_activity` keeps only
+ * the first kilobyte (`docs/PROJECT-STATE.md` §6.114).
  */
-async function behindAWriter(id: string, write: () => Promise<unknown>): Promise<void> {
+async function behindAWriter(
+  id: string,
+  write: () => Promise<unknown>,
+  change: HeldWrite = raisePriority(id),
+): Promise<void> {
   const other = postgres(process.env.TEST_DATABASE_URL!, {
     max: 1,
     prepare: false,
@@ -128,24 +161,27 @@ async function behindAWriter(id: string, write: () => Promise<unknown>): Promise
   const gate = new Promise<void>((resolve) => (release = resolve));
   let locked!: () => void;
   const isLocked = new Promise<void>((resolve) => (locked = resolve));
+  let queued = false;
   try {
     const writer = other.begin(async (tx) => {
       await tx`select id from conversations where id = ${id} for no key update`;
       locked();
       await gate;
-      await tx`update conversations set priority = 'urgent' where id = ${id}`;
-      await tx`insert into conversation_events (conversation_id, type, actor_label, data, created_at)
-               values (${id}, 'priority_changed', 'agent', '{"to":"urgent"}', clock_timestamp())`;
+      await change(tx);
     });
     await isLocked;
     const writing = write();
-    await untilWaitingOnALock(db);
-    release();
-    await writer;
-    await writing;
+    try {
+      queued = await untilWaitingOnALock(db, { rowLockIn: '^\\s*select\\M' });
+    } finally {
+      release();
+      await writer;
+      await writing;
+    }
   } finally {
     await other.end();
   }
+  expect(queued).toBe(true);
 }
 
 /** The owner's assignment and that change, as the ticket page draws them: by `created_at`. */
@@ -458,6 +494,113 @@ describe('handOverNumber', () => {
 
     expect(await holders(open)).toEqual({ accountable: nayera, assignee: nayera });
     expect(await lineOrder(open)).toEqual(['priority_changed', 'assigned']);
+  });
+
+  // The writer the handover waits on can move the ticket's status, and an
+  // agent setting it pending is the common case: the agent's write takes no
+  // lock on the number, since only a ticket coming out of resolved or closed
+  // asks who owns it. Read through a join to the status — an IN (select …),
+  // planned as one — the handover re-checked the ticket against the Open it
+  // read before waiting, left it out, and it stayed with the previous owner
+  // for good (`docs/PROJECT-STATE.md` §6.114, #490).
+  describe('against a writer moving a ticket’s status while it waits', () => {
+    async function numberHandedOver(change: (open: string) => HeldWrite) {
+      const admin = await agent('Mona Admin', { role: 'admin' });
+      const nayera = await agent('Nayera Mohamed');
+      const ali = await agent('Ali Nasser');
+      const number = await phone('Nayera Mohamed', ali);
+      const open = await ticket(number, 'Open', { accountableAgentId: ali, assigneeAgentId: ali });
+      let done: Handover | undefined;
+      await behindAWriter(
+        open,
+        async () => {
+          done = await handOverNumber({
+            channelId: number,
+            toAgentId: nayera,
+            actor: { id: admin, label: 'Mona Admin' },
+          });
+        },
+        change(open),
+      );
+      return { done, open, nayera, ali };
+    }
+
+    it('moves a ticket set pending', async () => {
+      const pending = await statusId('Pending');
+      const t = await numberHandedOver(
+        (open) => (tx) => tx`update conversations set status_id = ${pending} where id = ${open}`,
+      );
+
+      expect(t.done).toMatchObject({ ok: true, ticketsMoved: 1, ticketsReassigned: 1 });
+      expect(await holders(t.open)).toEqual({ accountable: t.nayera, assignee: t.nayera });
+    });
+
+    // A status created while the handover waited is not in the snapshot its
+    // locked read began with, so the read cannot tell what it is: the
+    // handover reads it again once the lock is held.
+    it('moves a ticket moved to a pending status added meanwhile', async () => {
+      const t = await numberHandedOver((open) => async (tx) => {
+        const [status] = await tx<{ id: string }[]>`
+          insert into ticket_statuses (name, category) values ('Waiting on the warehouse', 'pending')
+          returning id`;
+        await tx`update conversations set status_id = ${status!.id} where id = ${open}`;
+      });
+
+      expect(t.done).toMatchObject({ ok: true, ticketsMoved: 1 });
+      expect(await holders(t.open)).toEqual({ accountable: t.nayera, assignee: t.nayera });
+    });
+
+    it('leaves a ticket moved to a resolved status added meanwhile', async () => {
+      const t = await numberHandedOver((open) => async (tx) => {
+        const [status] = await tx<{ id: string }[]>`
+          insert into ticket_statuses (name, category) values ('Settled by phone', 'resolved')
+          returning id`;
+        await tx`update conversations set status_id = ${status!.id} where id = ${open}`;
+      });
+
+      expect(t.done).toMatchObject({ ok: true, ticketsMoved: 0, ticketsReassigned: 0 });
+      expect(await holders(t.open)).toEqual({ accountable: t.ali, assignee: t.ali });
+    });
+  });
+
+  // Every customer writing to the number inserts a message, whose foreign key
+  // takes KEY SHARE on the ticket's row. The handover's lock on the tickets it
+  // moves must not make that wait: FOR UPDATE does, FOR NO KEY UPDATE does
+  // not, and the handover writes no key (§6.106).
+  it('lets a customer’s message on a ticket it moves through while it runs', async () => {
+    const admin = await agent('Mona Admin', { role: 'admin' });
+    const nayera = await agent('Nayera Mohamed');
+    const number = await phone('Nayera Mohamed');
+    const open = await ticket(number, 'Open');
+
+    // The handover held open after its last statement, every lock still taken.
+    const hold = holdNextTransaction('after');
+    const handing = handOverNumber({
+      channelId: number,
+      toAgentId: nayera,
+      actor: { id: admin, label: 'Mona Admin' },
+    });
+    let refused: unknown = null;
+    try {
+      await hold.atHold;
+      await db.transaction(async (tx) => {
+        await tx.execute(sql`set local lock_timeout = '1s'`);
+        await tx.insert(messages).values({
+          conversationId: open,
+          direction: 'inbound',
+          kind: 'reply',
+          bodyText: 'Hello? Is this still the right number?',
+        });
+      });
+    } catch (error) {
+      refused = error;
+    } finally {
+      hold.release();
+      await handing;
+    }
+
+    expect(refused).toBeNull();
+    expect(await holders(open)).toEqual({ accountable: nayera, assignee: nayera });
   });
 });
 

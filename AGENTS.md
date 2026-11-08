@@ -410,8 +410,11 @@ change.** Under READ COMMITTED a `FOR UPDATE` that waited on another writer
 re-checks the newest version of the row against the rows it joined before
 waiting. A writer that moved the ticket to another status fails an inner join
 to the old one, and the read answers no row: the ticket reads as gone. A
-changed requester null-extends a left join instead. An uncorrelated
-`IN (select …)` is planned as a join too. So lock the row in one statement and
+changed requester null-extends a left join instead. An `IN (select …)` is
+planned as a join too, and so is a correlated `EXISTS`: the WhatsApp handover
+read the number's tickets through an `IN`, and left a ticket set pending while
+it waited with the previous owner (`movesWithNumber`, §6.114). So lock the row
+in one statement and
 read what it points at in the next, as `loadConversation` in
 `lib/sla/index.ts` does, or read a column of another table through a correlated
 subquery (`statusCategoryOf`). That subquery runs in the locked statement's
