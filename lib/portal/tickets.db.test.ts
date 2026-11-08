@@ -1,4 +1,5 @@
 import { and, asc, eq, sql } from 'drizzle-orm';
+import postgres from 'postgres';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { db } from '@/db/client';
 import {
@@ -17,6 +18,7 @@ import {
 import { isForeignKeyViolation } from '@/lib/db/errors';
 import { pendingContact, resolveContact } from '@/lib/tickets/contacts';
 import { withCleanDatabase } from '@/lib/testing/db';
+import { untilWaitingOnALock } from '@/lib/testing/hold-transaction';
 import { shownLabel } from './status-words';
 import { appendReply, createTicket, getTicket, listTickets } from './tickets';
 
@@ -457,6 +459,89 @@ describe('createTicket', () => {
       expect(isForeignKeyViolation(failure, 'conversations_group_id_groups_id_fk')).toBe(true);
       expect(await everyRow()).toEqual({ contacts: [], identities: [], tickets: [] });
       expect(await db.select({ id: messages.id }).from(messages)).toEqual([]);
+    });
+
+    // The race the sequential case above cannot show: the identity written by
+    // a transaction still open on a connection of its own, as a second form or
+    // an email from the same new customer would leave it. The ticket's
+    // transaction waits on that identity before it takes any lock of its own —
+    // a write to the category it is about to hold goes straight through
+    // meanwhile, which it could not once `holdCategory` had run — and then
+    // adopts the contact the other transaction committed.
+    it('waits on an identity being written, holding no category lock, then adopts it', async () => {
+      const sales = await categoryId('sales');
+      const pending = await pendingContact({
+        channel: 'email',
+        identifier: ADDRESS,
+        displayName: 'Nadia',
+      });
+      const side = postgres(process.env.TEST_DATABASE_URL!, {
+        max: 2,
+        prepare: false,
+        onnotice: () => {},
+      });
+      try {
+        let written!: () => void;
+        const writing = new Promise<void>((resolve) => (written = resolve));
+        let release!: () => void;
+        const released = new Promise<void>((resolve) => (release = resolve));
+        let winner = '';
+        const racing = side.begin(async (tx) => {
+          const [row] = await tx<{ id: string }[]>`
+            insert into contacts (name, primary_email) values ('Nadia H.', ${ADDRESS})
+            returning id`;
+          winner = row!.id;
+          await tx`
+            insert into contact_identities (contact_id, channel, identifier, display_name)
+            values (${winner}, 'email', ${ADDRESS}, 'Nadia H.')`;
+          written();
+          await released;
+        });
+        await writing;
+
+        const creating = createTicket(pending, {
+          subject: 'Parcel late',
+          body: 'A week.',
+          category: { id: sales, chosenBy: { label: 'form:claims' } },
+        });
+        expect(
+          await untilWaitingOnALock(db, { rowLockIn: '^\\s*insert into "contact_identities"' }),
+        ).toBe(true);
+
+        await side.begin(async (tx) => {
+          await tx`set local lock_timeout = '2s'`;
+          await tx`update ticket_categories set label_en = label_en where id = ${sales}`;
+        });
+
+        release();
+        await racing;
+        const created = await creating;
+
+        expect(await everyRow()).toEqual({
+          contacts: [{ id: winner, name: 'Nadia H.', primaryEmail: ADDRESS }],
+          identities: [
+            { contactId: winner, channel: 'email', identifier: ADDRESS, displayName: 'Nadia H.' },
+          ],
+          tickets: [{ requesterContactId: winner }],
+        });
+        expect(await conversation(created.conversationId)).toMatchObject({ categoryId: sales });
+      } finally {
+        await side.end({ timeout: 5 });
+      }
+    });
+
+    // A type-level case: `npm run typecheck` fails if the hand-built arm below
+    // ever compiles, since its identifier would skip `normaliseIdentifier`.
+    it('takes the arm that writes a contact only from `pendingContact`', () => {
+      const handBuilt = {
+        channel: 'email',
+        identifier: 'Nadia@Example.test',
+        displayName: null,
+        companyId: null,
+      } as const;
+      // @ts-expect-error — only `pendingContact` builds the arm that writes a contact.
+      const call = () => createTicket({ create: handBuilt }, { subject: 'x', body: 'y' });
+      expect(call).toBeTypeOf('function');
     });
   });
 });

@@ -357,9 +357,20 @@ describe('submitForm: the contact a ticket is filed under', () => {
     expect(await db.select({ id: contacts.id, name: contacts.name }).from(contacts)).toEqual([
       { id: owner!.id, name: 'Amira Saleh' },
     ]);
+    // Stamped with the ticket's own transaction time: written in the
+    // transaction that opens it, so the on-create rules run with it present
+    // and a failure after the commit cannot leave the ticket without it.
+    const [opened] = await db
+      .select({ createdAt: conversations.createdAt })
+      .from(conversations)
+      .where(eq(conversations.id, conversationId));
     expect(
       await db
-        .select({ actorLabel: conversationEvents.actorLabel, data: conversationEvents.data })
+        .select({
+          actorLabel: conversationEvents.actorLabel,
+          data: conversationEvents.data,
+          createdAt: conversationEvents.createdAt,
+        })
         .from(conversationEvents)
         .where(
           and(
@@ -371,6 +382,7 @@ describe('submitForm: the contact a ticket is filed under', () => {
       {
         actorLabel: 'form',
         data: { email: 'amira@example.test', form: SLUG, ip: '203.0.113.7' },
+        createdAt: opened!.createdAt,
       },
     ]);
   });

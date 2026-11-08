@@ -203,6 +203,16 @@ export type NewTicket = {
    */
   openedBy?: { agentId: string; form: string };
   /**
+   * The address an anonymous form's visitor claimed, the form and the client
+   * address, recorded as `unverified_submitter` — the badge saying nobody proved
+   * who sent the ticket — inside the transaction that creates it, for
+   * `openedBy`'s reason and one more. Written after `createTicket` returned, a
+   * throw there told the visitor their ticket had failed, so a retry opened a
+   * second, and the first carried no badge; and the on-create rules had already
+   * run before the event existed.
+   */
+  unverifiedSubmitter?: { email: string; form: string; ip: string | null };
+  /**
    * Who chose `priority`, recorded as its `priority_changed` in the same
    * transaction: the agent who picked it, or the form (`form:<slug>`) for its
    * default or a customer's answer. The priority classifier leaves alone a
@@ -253,7 +263,10 @@ export type CreatedTicket = { number: number; conversationId: string; messageId:
  * transaction that opens the ticket. Resolved before it, the contact outlived
  * every ticket that then failed to open — a pool error, a group deleted since
  * the form was read — and a retry joined the orphan. First in the transaction,
- * so a wait on a racing writer's identity holds no other lock of this one.
+ * so a wait on a racing writer's identity holds none of the locks the rest of
+ * it takes — the category's share lock among them — only the contact it has
+ * just inserted, which nobody else can see, and a key-share lock on that
+ * contact's company, which nothing in the app updates or deletes.
  */
 export async function createTicket(
   requester: string | PendingContact,
@@ -355,6 +368,15 @@ export async function createTicket(
         type: 'opened_by_agent',
         actorAgentId: input.openedBy.agentId,
         data: { form: input.openedBy.form },
+      });
+    }
+
+    if (input.unverifiedSubmitter) {
+      await tx.insert(conversationEvents).values({
+        conversationId: row.id,
+        type: 'unverified_submitter',
+        actorLabel: 'form',
+        data: input.unverifiedSubmitter,
       });
     }
 

@@ -63,16 +63,23 @@ export async function resolveContact(input: ResolveInput): Promise<ResolvedConta
  * if something else it writes does: a ticket form, whose new requester would
  * otherwise outlive a ticket that failed to open (`createTicket`).
  */
-export type PendingContact =
-  | { contactId: string }
-  | {
-      create: {
-        channel: ResolveInput['channel'];
-        identifier: string;
-        displayName: string | null;
-        companyId: string | null;
-      };
-    };
+export type PendingContact = { contactId: string } | { create: NewContact };
+
+/**
+ * Only `pendingContact` builds one, which the brand holds: a hand-built
+ * `create` would skip `normaliseIdentifier`, and an identifier the unique index
+ * does not recognise as the customer's is a second contact for them.
+ */
+declare const normalised: unique symbol;
+type NewContact = {
+  channel: ResolveInput['channel'];
+  identifier: string;
+  displayName: string | null;
+  companyId: string | null;
+  readonly [normalised]: true;
+};
+
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 /**
  * The reads half: run before the caller's transaction opens, so that only the
@@ -100,7 +107,7 @@ export async function pendingContact(input: ResolveInput): Promise<PendingContac
       identifier,
       displayName: input.displayName ?? null,
       companyId,
-    },
+    } as NewContact,
   };
 }
 
@@ -108,14 +115,14 @@ export async function pendingContact(input: ResolveInput): Promise<PendingContac
  * The pending contact's id, inserting it in the caller's transaction when it
  * does not exist yet.
  *
- * Nothing here reads the pool, only `tx`. Called first in a transaction that
- * goes on to take other locks, it waits on a racing writer's identity while
- * holding none of them.
+ * Nothing here reads the pool, only `tx`, and `tx` is a transaction by type:
+ * handed the pool, the three writes below would each commit alone, and a
+ * failure between them is the orphan contact this exists to prevent. Called
+ * first in a transaction that goes on to take other locks, it waits on a racing
+ * writer's identity holding none of them — only the contact it has just
+ * inserted, and a key-share lock on that contact's company.
  */
-export async function resolveContactIn(
-  tx: typeof db,
-  pending: PendingContact,
-): Promise<ResolvedContact> {
+export async function resolveContactIn(tx: Tx, pending: PendingContact): Promise<ResolvedContact> {
   if ('contactId' in pending) return { contactId: pending.contactId, created: false };
 
   const { channel, identifier, displayName, companyId } = pending.create;

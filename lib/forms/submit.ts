@@ -1,6 +1,6 @@
 import { db } from '@/db/client';
 import { isPriority, type Priority } from '@/lib/tickets/vocabulary';
-import { conversationEvents, messages } from '@/db/schema';
+import { messages } from '@/db/schema';
 import { normaliseEmail, looksLikeEmail } from '@/lib/auth/normalise';
 import type { Locale } from '@/lib/kb/locale';
 import { createTicket, type NewTicket } from '@/lib/portal/tickets';
@@ -163,10 +163,11 @@ function readAnswers(
  *
  * The answer is not to confirm the address before creating the ticket, which
  * loses every customer who could not be bothered and which no helpdesk in this
- * category does. It is to say so on the ticket: `submitForm` writes an
- * `unverified_submitter` event carrying the claimed address and the client
- * address, and the console shows it, so an agent reads the ticket knowing
- * nobody proved who sent it.
+ * category does. It is to say so on the ticket: an `unverified_submitter`
+ * event carrying the claimed address and the client address, written in the
+ * transaction that opens the ticket (`NewTicket.unverifiedSubmitter`), and the
+ * console shows it, so an agent reads the ticket knowing nobody proved who sent
+ * it.
  *
  * Two things this deliberately does not do. It never writes a display name
  * onto an address that already exists — a name is set only on a contact
@@ -337,20 +338,14 @@ export async function submitForm(input: {
       input.requester.kind === 'agent'
         ? { agentId: input.requester.agentId, form: form.slug }
         : undefined,
+    unverifiedSubmitter: requester.unverifiedEmail
+      ? {
+          email: requester.unverifiedEmail,
+          form: form.slug,
+          ip: input.requester.kind === 'anonymous' ? input.requester.ip : null,
+        }
+      : undefined,
   });
-
-  if (requester.unverifiedEmail) {
-    await db.insert(conversationEvents).values({
-      conversationId: created.conversationId,
-      type: 'unverified_submitter',
-      actorLabel: 'form',
-      data: {
-        email: requester.unverifiedEmail,
-        form: form.slug,
-        ip: input.requester.kind === 'anonymous' ? input.requester.ip : null,
-      },
-    });
-  }
 
   // And discarded outright when the question turned out not to be asked — the
   // element can be behind a condition that did not fire, in which case the files
