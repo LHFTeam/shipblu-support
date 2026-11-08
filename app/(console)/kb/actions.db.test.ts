@@ -1,7 +1,15 @@
 import { eq, sql } from 'drizzle-orm';
 import { describe, expect, it, vi } from 'vitest';
 import { db } from '@/db/client';
-import { agents, kbArticleVersions, kbArticles, kbCategories, kbFolders } from '@/db/schema';
+import {
+  agents,
+  kbArticleVersions,
+  kbArticles,
+  kbCategories,
+  kbFolders,
+  kbImages,
+} from '@/db/schema';
+import { articleBody } from '@/lib/kb/article-write';
 import { withCleanDatabase } from '@/lib/testing/db';
 
 /**
@@ -175,5 +183,85 @@ describe('saveArticle', () => {
       .from(kbArticles)
       .where(eq(kbArticles.id, id));
     expect(row!.tags).toEqual(['pickup']);
+  });
+});
+
+/**
+ * A picture `rehost_kb_images` has copied goes back in as the copy, whatever
+ * the body arriving names: an editor tab opened before the job ran posts
+ * Freshdesk's address, and so does a version cut before it.
+ */
+describe('a Freshdesk picture already copied', () => {
+  const FRESHDESK =
+    'https://s3.amazonaws.com/cdn.freshdesk.com/data/helpdesk/attachments/production/1/original/a.png?1738062536';
+  const UNCOPIED =
+    'https://s3.amazonaws.com/cdn.freshdesk.com/data/helpdesk/attachments/production/2/original/b.png?1738062573';
+
+  async function copied(): Promise<string> {
+    const id = crypto.randomUUID();
+    await db.insert(kbImages).values({
+      id,
+      storagePath: `kb/${id}.png`,
+      contentType: 'image/png',
+      sizeBytes: 16,
+      sha256: 'c'.repeat(64),
+      sourceUrl: FRESHDESK,
+    });
+    return id;
+  }
+
+  const showing = (...srcs: string[]) =>
+    articleBody(srcs.map((src) => `<p><img src="${src}" /></p>`).join('')).bodyHtml;
+
+  async function bodyOf(id: string) {
+    const [row] = await db
+      .select({ bodyHtml: kbArticles.bodyHtml })
+      .from(kbArticles)
+      .where(eq(kbArticles.id, id));
+    return row!.bodyHtml;
+  }
+
+  it("is saved as the copy when a stale editor posts Freshdesk's address", async () => {
+    const image = await copied();
+    const id = await article(showing(`/api/kb/images/${image}`), '');
+    const [row] = await db
+      .select({ folderId: kbArticles.folderId })
+      .from(kbArticles)
+      .where(eq(kbArticles.id, id));
+
+    const state = await saveArticle(
+      { error: null },
+      form({
+        id,
+        title: 'Current title',
+        folderId: row!.folderId,
+        locale: 'en',
+        // What the tab opened before the job still holds, beside a picture
+        // nothing has copied yet, which stays as it was for the job to find.
+        bodyHtml: `<p><img src="${FRESHDESK}" /></p><p><img src="${UNCOPIED}" /></p>`,
+        visibility: 'public',
+        slug: 'current',
+        seoTitle: '',
+        seoDescription: '',
+        tags: '',
+      }),
+    );
+
+    expect(state.error).toBeNull();
+    expect(await bodyOf(id)).toBe(showing(`/api/kb/images/${image}`, UNCOPIED));
+  });
+
+  it('is restored as the copy from a version that names Freshdesk', async () => {
+    const image = await copied();
+    const id = await article(showing(`/api/kb/images/${image}`), '');
+    const [version] = await db
+      .insert(kbArticleVersions)
+      .values({ articleId: id, version: 1, title: 'Old title', bodyHtml: showing(FRESHDESK) })
+      .returning({ id: kbArticleVersions.id });
+
+    const state = await restoreVersion({ error: null }, form({ id, versionId: version!.id }));
+
+    expect(state.error).toBeNull();
+    expect(await bodyOf(id)).toBe(showing(`/api/kb/images/${image}`));
   });
 });

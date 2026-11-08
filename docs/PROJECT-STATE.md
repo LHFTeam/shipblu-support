@@ -1525,7 +1525,9 @@ is code:
   `plans/freshdesk-disconnection.md` has the measurements, the follow-up pull
   requests and the order: the images are copied before the account closes,
   because afterwards there is nothing to copy them from, and the redirects work
-  before `support.shipblu.com` moves.
+  before `support.shipblu.com` moves. PR 1, the copy, is built:
+  `rehost_kb_images` and `/api/kb/images/<id>`. Until it is deployed and run
+  (the plan says how), every image still loads from Freshdesk.
 
 - **Instagram through Unified Login — the next configuration task, and none of
   it is a deploy.** The direct connection's token expired on 2026-10-29 (the

@@ -17,6 +17,7 @@ import {
   type EditableArticle,
 } from '@/lib/kb/admin';
 import { articleBody, changesNothing, cutArticleVersion } from '@/lib/kb/article-write';
+import { withCopiedImages } from '@/lib/kb/images';
 import { FLOOR_LABELS, SELECTABLE_FLOORS, folderFloor, meetsFloor } from '@/lib/kb/floors';
 import { isLocale } from '@/lib/kb/locale';
 import { slugify, uniqueSlug } from '@/lib/kb/slug';
@@ -143,7 +144,13 @@ export async function saveArticle(_state: KbState, formData: FormData): Promise<
   // back different on a Save nobody edited. That save cut a version, floated
   // the article to the top of `/kb`, and left a body the handbook seed then
   // reported as drift.
-  const { bodyHtml, bodyText, excerpt } = articleBody(rawBody.replace(/\r\n?/g, '\n'));
+  const body = articleBody(rawBody.replace(/\r\n?/g, '\n'));
+  const { bodyText, excerpt } = body;
+  // A Freshdesk picture already copied here goes back in as the copy: an editor
+  // tab opened before `rehost_kb_images` ran posts Freshdesk's address, and
+  // would otherwise put it back (`withCopiedImages`). Text is untouched, since
+  // pictures are skipped when it is derived.
+  const bodyHtml = await withCopiedImages(body.bodyHtml);
 
   // The folder decides the category, and the category carries a locale. An
   // English article inside an Arabic category would be unreachable — the public
@@ -468,6 +475,22 @@ export async function restoreVersion(_state: KbState, formData: FormData): Promi
   const version = versions[0];
   if (!version) return { error: 'That version no longer exists' };
 
+  // Re-sanitised and re-normalised on the way back in: an old version was
+  // sanitised by whatever rules were in force when it was written, and those
+  // may since have tightened — and a version cut before the formatting
+  // standard existed still carries the classes and inline styles it took to
+  // restore one and undo the cleanup. Through `articleBody`, like every other
+  // writer, so the excerpt is rebuilt with the body: written by hand here it
+  // was left out, and a listing kept showing the replaced body's opening line.
+  //
+  // And a version cut before its pictures were copied names Freshdesk, so the
+  // copy is what goes back (`withCopiedImages`). Before the transaction,
+  // because that lookup reads on the pool, and a pooled read while this
+  // transaction holds a connection is §6.91's self-deadlock.
+  const body = articleBody(version.bodyHtml);
+  const { bodyText, excerpt } = body;
+  const bodyHtml = await withCopiedImages(body.bodyHtml);
+
   await db.transaction(async (tx) => {
     await cutArticleVersion(tx, {
       articleId: id,
@@ -475,15 +498,6 @@ export async function restoreVersion(_state: KbState, formData: FormData): Promi
       bodyHtml: current.bodyHtml,
       editedByAgentId: agent.id,
     });
-
-    // Re-sanitised and re-normalised on the way back in: an old version was
-    // sanitised by whatever rules were in force when it was written, and those
-    // may since have tightened — and a version cut before the formatting
-    // standard existed still carries the classes and inline styles it took to
-    // restore one and undo the cleanup. Through `articleBody`, like every other
-    // writer, so the excerpt is rebuilt with the body: written by hand here it
-    // was left out, and a listing kept showing the replaced body's opening line.
-    const { bodyHtml, bodyText, excerpt } = articleBody(version.bodyHtml);
 
     await tx
       .update(kbArticles)
