@@ -120,6 +120,24 @@ describe('GET /help/legacy', () => {
     expect(location(response)).toBe('/ar/a/إرشادات-التعبئة-والتغليف');
   });
 
+  // On the help centre's own host the proxy puts `/help` in front of every
+  // path, so the route's direct address there is `/legacy`, and the URL it is
+  // handed is the one the client sent, query and all.
+  it('answers a direct call on the help centre host, and one sending an empty header', async () => {
+    await fixtures();
+    const query = `?path=${encodeURIComponent(`/support/solutions/articles/${ARTICLE}`)}`;
+
+    const onKbHost = await GET(new Request(`https://support.shipblu.com/legacy${query}`));
+    const blankHeader = await GET(
+      new Request(`${ORIGIN}/help/legacy${query}`, { headers: { [LEGACY_PATH_HEADER]: '' } }),
+    );
+
+    for (const response of [onKbHost, blankHeader]) {
+      expect(response.status).toBe(301);
+      expect(location(response)).toBe('/ar/a/إرشادات-التعبئة-والتغليف');
+    }
+  });
+
   it('answers 404, not a guess, for a request that names no path at all', async () => {
     // What the rewritten request looked like to the handler before the header.
     await fixtures();

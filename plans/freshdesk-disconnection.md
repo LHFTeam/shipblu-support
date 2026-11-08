@@ -342,6 +342,15 @@ rewrites to. The route reads that header, or `?path=` on a direct call
   imported article, answered 301 for all six shapes, where the same build of
   `dev` answered 404 for every one. On the deployed build this is still to be
   checked; the checklist item below does that.
+- The lookup is `resolveLegacyPath` (`lib/kb/legacy-resolve.ts`). An article
+  link with its title after the id finds the importer's `kb_redirects` row for
+  the bare id. Without that, an article first written in English answered in
+  English by the bare link and in Arabic by the titled one
+  (`legacy-resolve.db.test.ts`). Every production row points at an Arabic
+  article today, so nothing there moves.
+- Called directly, the route is `/help/legacy?path=…` on the Render host and
+  `/legacy?path=…` on `KB_PUBLIC_HOST`, which puts `/help` in front of every
+  path. The Freshdesk shapes themselves need no such care.
 
 ### 4. Upload an image in the article editor
 

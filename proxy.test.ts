@@ -127,6 +127,15 @@ describe('Freshdesk URLs', () => {
     );
   });
 
+  it('reaches the legacy route directly on the help centre host as /legacy, query kept', () => {
+    setTestEnv({ KB_PUBLIC_HOST: KB_HOST });
+    const response = visit(`https://${KB_HOST}/legacy?path=%2Fsolutions%2Farticles%2F1`);
+    expect(rewrittenTo(response)).toBe('/help/legacy');
+    expect(new URL(response.headers.get('x-middleware-rewrite')!).searchParams.get('path')).toBe(
+      '/solutions/articles/1',
+    );
+  });
+
   it('leaves the query off the rewrite, where nothing would read it', () => {
     const destination = visit(
       'https://shipblu-support.onrender.com/support/solutions/articles/1?utm=x',

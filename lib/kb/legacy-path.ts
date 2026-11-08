@@ -26,9 +26,17 @@ export const LEGACY_PATH_HEADER = 'x-legacy-path';
 /**
  * The Freshdesk path a request to the legacy route asks about: the proxy's
  * header, or `?path=` on a direct call, or empty.
+ *
+ * The direct call has a different address on each host, because the help
+ * centre's own host puts `/help` in front of every path it is asked for:
+ * `/help/legacy?path=…` on the service URL, and `/legacy?path=…` on
+ * `KB_PUBLIC_HOST`, where `/help/legacy` would become `/help/help/legacy` and
+ * answer the page 404. Its `?path=` still arrives there, because the client
+ * sent it and the proxy's rewrite only moves the path.
  */
 export function legacyPathOf(request: Request): string {
+  // `||`, so a header sent empty falls through to `?path=` rather than hiding it.
   return (
-    request.headers.get(LEGACY_PATH_HEADER) ?? new URL(request.url).searchParams.get('path') ?? ''
+    request.headers.get(LEGACY_PATH_HEADER) || new URL(request.url).searchParams.get('path') || ''
   );
 }
