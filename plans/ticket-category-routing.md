@@ -63,7 +63,7 @@ records the answers, and the plan below already reflects them.
 
 ## Status and handoff
 
-As of 2026-10-30, 22:20 UTC. A session picking this plan up starts here.
+As of 2026-11-07, 21:20 UTC. A session picking this plan up starts here.
 Everything after this section is the design as it was reasoned and as each stage
 was built. This section says where the work stands, what comes next and how, and
 what has already bitten. Whoever moves any of it updates this section in the
@@ -74,22 +74,83 @@ update.
 
 ### Where it stands
 
-| Stage | Code                                                                                                                                              | Production                                                                                                                                                                                                                                                                                                                                  |
-| ----- | ------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 0     | Merged: #386 (`01488c9`)                                                                                                                          | Live since 2026-10-20. Of its two operational steps, 0.2's SLA reorder was done on 2026-10-30 and 0.6's staffing is left (below)                                                                                                                                                                                                            |
-| 1.1   | Merged: #387, then `dev` → `main` in #389 (`1f89219`)                                                                                             | Live since 2026-10-21 10:13 UTC                                                                                                                                                                                                                                                                                                             |
-| 1.2   | Merged: #391 (`31f7379`) and follow-up #392 (`7b7d276`), then `dev` → `main` in #393 (`634a28d`), which also carried another session's #390       | **Done.** All six services live on `634a28d` by 17:38 UTC on 2026-10-21, worker first. The user ran the backfill and the rollup from a shell, leaving no `jobs` row. Every check below reads clean                                                                                                                                          |
-| 1.3   | Merged: #395 (`58c5ed9`), then `dev` → `main` in #397 (`447d8be`), which also carried #394, #396 and #398. As built below                         | **Done.** All six services live on `447d8be` by 18:36 UTC, web first. Its checks read clean (below), though no comment has arrived since                                                                                                                                                                                                    |
-| 2.A   | Merged: #400 (`a558c5b`), then `dev` → `main` in #406 (`e88d357`), which also carried #399, #401 and #402. As built below                         | **Done.** All six services live on `e88d357` by 22:13 UTC on 2026-10-23, deployed at once by an environment update. Its checks read clean (below)                                                                                                                                                                                           |
-| 2.B   | Merged: #403 (`1d21cdc`), then `dev` → `main` in #413 (`516c8ff`) and #415 (`48cb284`). As built below                                            | **Done.** All six services live on `48cb284` by 06:01 UTC on 2026-10-25, web first, with nothing suspended. Its checks read clean, and a new message was subcategorised; one read left (below)                                                                                                                                              |
-| 3.1   | Merged: #419 (`ff3bbfd`), then `dev` → `main` in #420 (`b9a4743`), which also carried #411, #416, #417 and #418. As built below                   | **Done.** Web live on `b9a4743` at 19:44 UTC on 2026-10-25, the worker and the four crons by 08:05 UTC on 2026-10-26, and the four categories seeded at 08:13. Its checks read clean (below); the signed-in ones are left                                                                                                                   |
-| 3.2   | Merged: #424 (`07a5527`), then `dev` → `main` in #426 (`f761e5e`), which also carried #421, #422 and #423. As built below                         | **Done.** All six services live on `f761e5e` by 23:32 UTC on 2026-10-26, web first. Its checks read clean (below); the signed-in ones are left                                                                                                                                                                                              |
-| 4.0   | Merged: #425 (`1c733c2`), then `dev` → `main` in #428 (`156004d`). As built below                                                                 | **Done.** All six services live on `156004d` by 07:45:42 UTC on 2026-10-27, web first. Its checks read clean (below)                                                                                                                                                                                                                        |
-| 4.1   | Merged: #427 (`959404a`), then `dev` → `main` in #430 (`dbf4376`). As built below                                                                 | **Done.** All six services live on `dbf4376` by 12:07:54 UTC on 2026-10-27, web first, with `0050` applied. Shipped off: no settings row. Its checks read clean (below)                                                                                                                                                                     |
-| 4.2   | Merged: #429 (`c6eb1ac`), then `dev` → `main` in #431 (`ad6a062`). As built below                                                                 | **Done.** All six services live on `ad6a062` by 21:49:08 UTC on 2026-10-27, web first; code only. Its checks read clean (below). The archive record run is done, and Shadow ran from 06:00:32 UTC on 2026-10-29 until the user switched the classifier to Apply at 18:37:23 the same day (below). The backlog waits for the user's go-ahead |
-| 5.1   | Merged: #432 (`9d5b4fb`), then `dev` → `main` in #435 (`1470902`). As built below                                                                 | **Done.** All six services live on `1470902` by 06:35:36 UTC on 2026-10-29, web first, with `0051` applied. Shipped off: every channel on `default_group`. Its checks read clean (below); the signed-in one is left                                                                                                                         |
-| 5.2   | Operations: turning routing on                                                                                                                    | Under way: Web Chat routes by category since 2026-10-30 (set from the console); route groups, 0.2's SLA reorder, the channel defaults off Support and Support's backlog moved to Customer Care were written on 2026-10-30 at the user's go-ahead. Staffing and the comment rows are left (Next, item 10)                                    |
-| 6     | Merged: #434 (`1daf6a5`), then `dev` → `main` in #437 (`9b4bc5b`); its screenshot pass in #438 (`b237858`), then #439 (`063e477`). As built below | **Done.** All six services live on `9b4bc5b` by 11:29:28 UTC on 2026-10-29, web first, with `0052`–`0055` applied, and on the screenshot pass's `063e477` by 14:27:51. Both sets of checks and the first Stage 6 nightly read clean (below); the signed-in reads are left                                                                   |
+| Stage | Code                                                                                                                                                                                                                | Production                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0     | Merged: #386 (`01488c9`)                                                                                                                                                                                            | Live since 2026-10-20. Of its two operational steps, 0.2's SLA reorder was done on 2026-10-30 and 0.6's staffing is partly done: every route group has members, and at a Saturday-night read on 2026-11-07 Inbound Sales Team had two accepting tickets and Customer Care and Merchant Care none; a weekday re-read is owed (below)                                                                                                                                                                                                                                                             |
+| 1.1   | Merged: #387, then `dev` → `main` in #389 (`1f89219`)                                                                                                                                                               | Live since 2026-10-21 10:13 UTC                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| 1.2   | Merged: #391 (`31f7379`) and follow-up #392 (`7b7d276`), then `dev` → `main` in #393 (`634a28d`), which also carried another session's #390                                                                         | **Done.** All six services live on `634a28d` by 17:38 UTC on 2026-10-21, worker first. The user ran the backfill and the rollup from a shell, leaving no `jobs` row. Every check below reads clean                                                                                                                                                                                                                                                                                                                                                                                              |
+| 1.3   | Merged: #395 (`58c5ed9`), then `dev` → `main` in #397 (`447d8be`), which also carried #394, #396 and #398. As built below                                                                                           | **Done.** All six services live on `447d8be` by 18:36 UTC, web first. Its checks read clean (below). Comments have arrived since (63 comment tickets, read 2026-11-07, against 52 at 1.2), and the "nothing refused" re-read on one is left                                                                                                                                                                                                                                                                                                                                                     |
+| 2.A   | Merged: #400 (`a558c5b`), then `dev` → `main` in #406 (`e88d357`), which also carried #399, #401 and #402. As built below                                                                                           | **Done.** All six services live on `e88d357` by 22:13 UTC on 2026-10-23, deployed at once by an environment update. Its checks read clean (below)                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| 2.B   | Merged: #403 (`1d21cdc`), then `dev` → `main` in #413 (`516c8ff`) and #415 (`48cb284`). As built below                                                                                                              | **Done.** All six services live on `48cb284` by 06:01 UTC on 2026-10-25, web first, with nothing suspended. Its checks read clean, and a new message was subcategorised; one read left (below)                                                                                                                                                                                                                                                                                                                                                                                                  |
+| 3.1   | Merged: #419 (`ff3bbfd`), then `dev` → `main` in #420 (`b9a4743`), which also carried #411, #416, #417 and #418. As built below                                                                                     | **Done.** Web live on `b9a4743` at 19:44 UTC on 2026-10-25, the worker and the four crons by 08:05 UTC on 2026-10-26, and the four categories seeded at 08:13. Its checks read clean (below); the signed-in ones are left                                                                                                                                                                                                                                                                                                                                                                       |
+| 3.2   | Merged: #424 (`07a5527`), then `dev` → `main` in #426 (`f761e5e`), which also carried #421, #422 and #423. As built below                                                                                           | **Done.** All six services live on `f761e5e` by 23:32 UTC on 2026-10-26, web first. Its checks read clean (below); the signed-in ones are left                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| 4.0   | Merged: #425 (`1c733c2`), then `dev` → `main` in #428 (`156004d`). As built below                                                                                                                                   | **Done.** All six services live on `156004d` by 07:45:42 UTC on 2026-10-27, web first. Its checks read clean (below)                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| 4.1   | Merged: #427 (`959404a`), then `dev` → `main` in #430 (`dbf4376`). As built below                                                                                                                                   | **Done.** All six services live on `dbf4376` by 12:07:54 UTC on 2026-10-27, web first, with `0050` applied. Shipped off: no settings row. Its checks read clean (below)                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| 4.2   | Merged: #429 (`c6eb1ac`), then `dev` → `main` in #431 (`ad6a062`). As built below                                                                                                                                   | **Done.** All six services live on `ad6a062` by 21:49:08 UTC on 2026-10-27, web first; code only. Its checks read clean (below). The archive record run is done, and Shadow ran from 06:00:32 UTC on 2026-10-29 until the user switched the classifier to Apply at 18:37:23 the same day (below). The week of Apply has passed; the backlog still waits for the user's go-ahead (read 2026-11-07: no `mode=apply` backfill, and no record run since `archive-1`)                                                                                                                                |
+| 5.1   | Merged: #432 (`9d5b4fb`), then `dev` → `main` in #435 (`1470902`). As built below                                                                                                                                   | **Done.** All six services live on `1470902` by 06:35:36 UTC on 2026-10-29, web first, with `0051` applied. Shipped off: every channel on `default_group`; Web Chat on `category` since 2026-10-30 (5.2). Its checks read clean (below); the signed-in one is left. Amended since by #477 and #481 (the row below)                                                                                                                                                                                                                                                                              |
+| 5.2   | Operations: turning routing on                                                                                                                                                                                      | Under way: Web Chat in `category` mode since 2026-10-30 (set from the console), and nothing has routed: 0 `routing_decisions` and 0 `settle_routing` jobs, since no web chat ticket has opened since 2026-10-20 (read 2026-11-07). Route groups, 0.2's SLA reorder, the channel defaults off Support and Support's backlog moved to Customer Care were written on 2026-10-30 at the user's go-ahead. Left: members accepting in Customer Care and Merchant Care (0 of 3 and 0 of 2 at a Saturday-night read; a weekday re-read first), and the comment rows, still none (Next, items 10 and 11) |
+| 6     | Merged: #434 (`1daf6a5`), then `dev` → `main` in #437 (`9b4bc5b`); its screenshot pass in #438 (`b237858`), then #439 (`063e477`). Draft #433, which #434 superseded, closed unmerged on 2026-11-07. As built below | **Done.** All six services live on `9b4bc5b` by 11:29:28 UTC on 2026-10-29, web first, with `0052`–`0055` applied, and on the screenshot pass's `063e477` by 14:27:51. Both sets of checks and the first two Stage 6 nightlies read clean (below); the signed-in reads are left                                                                                                                                                                                                                                                                                                                 |
+| 5.1+  | #477 (`c844f0e`), released in #482 (`f89d7c1`); #481 (`19eb508`), released in #484 (`db4268c`). Below the table                                                                                                     | Live: #477 on all six from about 10:33–10:36 UTC on 2026-11-07, #481 from 16:27:06–16:29:38 UTC the same day. All six run `db4268c` since 16:29:38 UTC (web last). Neither has run on a routed ticket, since nothing has routed                                                                                                                                                                                                                                                                                                                                                                 |
+
+**Two router and classifier changes after 5.1** (`AGENTS.md`, Routing by
+category and the classifiers' paragraphs, states them as the code has them).
+Neither adds a migration: production holds 61, as `main`'s journal does (read
+2026-11-07).
+
+- **#477, the root comment's author on a reply-first thread.** On a comment
+  thread a passer-by's reply stored before the customer's comment opens the
+  ticket under the passer-by until `adoptRootAuthor` makes the root's author
+  the requester. Since #477 both classifiers never judge the opening, settle
+  the ticket or count toward the cap on a message by somebody other than the
+  requester; `/reports/category-ai` counts the same way, and
+  `backfill_category_ai mode=apply` files only a requester's answer. The
+  router (`categoryStanding` in `lib/routing/decide.ts`, read under the
+  ticket's lock by `categorySource`) does not decide on Jev's reading of such a
+  reply: `routeNow` answers `waiting` and the row moves to `holding` until the
+  requester's own answer or the window's end, where a category read off a
+  non-requester is set aside — `fallback`, no pass, no policy look, named on
+  the `routed` event (`data.setAside`) and in `/reports/routing`'s Set aside
+  column. A category a person, a rule or a form wrote is never held back. When
+  a person or a rule ends the hold, Jev's reading of the requester's own words
+  is still owed its policy look, and after an agent's reply its `on_update`
+  pass (`jevCategoryOwed`, in `heldFollowUp`). Its costs, from its commit: a
+  ticket a reply opened is assigned up to the window (five minutes) later; a
+  root arriving after the window only relabels; a hold ended without a move
+  leaves the replier's category on the policy chosen before it.
+- **#481, `category_agreed`.** A confident, applied answer of Jev's naming the
+  category the ticket already carries now writes a `category_agreed` event,
+  under the ticket's lock and stamped `CHANGE_STAMP`; only the live
+  `classify_category` job writes one, never the backfill. The router's
+  `requesterChose` reads Jev's `category_changed` and `category_agreed` events
+  alone and no longer reads `ai_category_runs`; the `routed` event records the
+  latest answer's probability; and Filed by Jev on `/reports/category-ai`
+  counts the customer's agreeing answer as Jev's filing. It is not a write, for
+  ownership or for the grade's ground truth. Left out, per its commit: a
+  durable record of what Jev's follow-ups owe, so a worker dying between a
+  commit and its follow-up still leaves it unrun (review r4501885596; Still
+  open, and recorded elsewhere).
+
+**A code rollback past `f89d7c1` needs the KB counters' ways back first.**
+#480, released with #477 in `f89d7c1`, applied `0060`, which dropped
+`kb_articles.view_count`, `helpful_count` and `unhelpful_count`; every build
+before it names the three, so its reads and inserts of `kb_articles` fail.
+Every code way back this plan names (`ad6a062`, `1470902`, `9b4bc5b`,
+`dbf4376`, `156004d`) is such a build, and older than #472 (`62eae73`) and
+#466 too, so it keeps the counts on the article rows, not in
+`kb_article_stats`. The switches go first, as before — a channel's mode back
+to `default_group`, the classifier to `off` or `shadow` — and are unaffected.
+A code rollback past `f89d7c1` then follows `plans/kb-article-stats.md`, both
+of its ways back: auto-deploy off on every service;
+`db/runbooks/kb-article-counters-restore.sql` (PR 2's way back, valid only
+while `0060` is the newest migration applied), which puts the three columns
+back at 0; then PR 1's, its UPDATE copying `kb_article_stats` onto them, run
+before the deploy, since after a build older than #466 has replayed its
+`db/sql/001` the same UPDATE dates every article to the rollback — or the
+help centre's counts read 0; then a deploy by hand. Whatever the old build
+counts meanwhile is lost when `0060` drops the columns again on the way
+forward. That plan says going back past its PR 1 "is not prepared here", so
+read it before taking this path. From `db4268c`, `f89d7c1` is the one
+code-only step back: no migration lies between them.
 
 **The second Stage 6 nightly, read on Render and production on 2026-10-31**
 (16:27 UTC). The first to write category rows, so it proves the writer's
@@ -114,6 +175,9 @@ category half as the first proved the rest.
   rolls a figure up under the ticket's group as it stands, so the 183 tickets
   moved from Support to Customer Care at 22:17 UTC on the 30th (Next, item 10) count under Customer Care for the days it rebuilt; older days keep
   Support until a `rollup_metrics from=` rebuild.
+- **Since** (read 2026-11-07): `rollup_days` for 2026-11-04 to 2026-11-06 all
+  carry `categories_computed_at`, and `metrics_daily` holds 17 rows carrying a
+  category. The duplicate-slice and two-dimension queries were not re-run.
 
 **The first Stage 6 nightly, read on Render and production on 2026-10-30.**
 It proves the writer with no hand write, as the deploy said it would.
@@ -207,7 +271,7 @@ migrations...` at 11:19:30.7 and was applying `001` by 11:19:30.9, so
 
   Left: the first Stage 6 nightly, at 00:00 UTC on 2026-10-30, which proves the
   writer (read clean, above); and the signed-in reads of `/reports`, `/reports/routing` and
-  `/admin/dashboard`.
+  `/reports/live` (`/admin/dashboard` until #444, which redirects there).
 
 **5.1's deploy and checks, read on Render and production on 2026-10-29.**
 
@@ -270,16 +334,35 @@ migrations...` at 06:28:24.4, and all nine `db/sql` files were done at
   No `classify_category` job is dead. Of the 85 tickets opened since the
   switch, 83 are on the customer bot, which the classifier skips by design;
   the other two are those two.
+- **A week and more of answers** (read 2026-11-07, ~21:20 UTC).
+  `category_ai_settings` is as the user left it (`apply`, 0.6, five minutes,
+  `updated_at` 18:37:23 UTC on 2026-10-29). `ai_category_runs` holds 195
+  `live` rows under `apply`, the last at 20:28 UTC, beside `archive-1`'s 1,467
+  and Shadow's 17; 187 `classify_category` jobs exist. 36 tickets carry a
+  category — `sales` 20, `customer_support` 14, `merchant_support` 1,
+  `courier_jobs` 1 — and every one of the 36 `category_changed` events is
+  Jev's (`jev:category`, the last at 16:57 UTC). Of the tickets created since
+  14:45 UTC on 2026-10-30, these carry a category: 22 of 37 on Facebook, 6 of
+  9 on Instagram, 2 of 5 Facebook comments, 0 of 1 Instagram comment, 1 of 23
+  on WhatsApp and none of 10,883 on the bot. No person has labelled a ticket or
+  moved a filing, so step 3's criteria still cannot be read, and Filed by Jev
+  shows no move: with nobody filing or re-filing, that is not evidence of
+  precision. Whether any `classify_category` job is dead was not re-read.
 - **Nothing has routed yet.** Web Chat has been in `category` mode since 14:45
   UTC on 2026-10-30 (Next, item 10), and every other channel is on
-  `default_group`. The widget has opened no ticket since 2026-10-20, so at
-  18:04 UTC on 2026-10-31 nothing had been held and there was no
-  `routing_decisions` row.
-- **Next**: the backlog (step 5), after a week of `apply` and the user's
-  go-ahead, then the `rollup_metrics from=2026-08-18` rebuild. The way back
-  is the switch: `shadow` or `off` on `/admin/categories`, effective within
-  thirty seconds per instance; a category Jev wrote stays, and is changed like
-  any other.
+  `default_group`. The widget has opened no ticket since 14:15 UTC on
+  2026-10-20; its last inbound message, at 01:42 UTC on 2026-11-05, continued
+  an existing ticket, which never routes. So at 21:20 UTC on 2026-11-07 there
+  was no `routing_decisions` row and no `settle_routing` job, and no ticket
+  created since 14:45 UTC on 2026-10-30 carries a routing window.
+- **Next**: the backlog (step 5), then the `rollup_metrics from=2026-08-18`
+  rebuild. The week of `apply` ended at 18:37 UTC on 2026-11-05, so only the
+  user's go-ahead is missing: `backfill_category_ai mode=record` under a fresh
+  label with no `since=`, then `mode=apply fromLabel=<that label>`, its dry
+  run read first, which since #477 files only a requester's answer. The way
+  back is the switch: `shadow` or `off` on `/admin/categories`, effective
+  within thirty seconds per instance; a category Jev wrote stays, and is
+  changed like any other.
 
 **4.2's first operation, 2026-10-29.**
 
@@ -617,10 +700,16 @@ web's deploy, which precedes the preDeploy that added the CHECK.
   received since an hour before `<X>` is unprocessed. All 154 jobs run since
   `<X>` completed, and none carries an error.
 - **Not yet exercised.** Facebook sent four deliveries after `<X>`, all
-  processed, and they opened one direct-message ticket. No comment has arrived,
-  so the CHECK has not yet met a new one. Re-read the two queries under
+  processed, and they opened one direct-message ticket. No comment had arrived,
+  so the CHECK had not yet met a new one. Re-read the two queries under
   [1.3, as built](#13-as-built) once one has, and within seven days of it,
   because `cleanup` deletes a completed job a week after it completes.
+  _Since:_ comments have kept arriving. Read 2026-11-07, 63 comment tickets
+  exist (`facebook_comment` 53, `instagram_comment` 10), six of them created
+  since 14:45 UTC on 2026-10-30, each stored on its comment channel, so the
+  CHECK has accepted new comment inserts. The first comment's job is past
+  `cleanup`'s week, so the "nothing refused" read is still owed, on a comment
+  from the last seven days.
 
 **1.2's checks, read at 21:54 UTC on 2026-10-21.**
 
@@ -652,8 +741,8 @@ web's deploy, which precedes the preDeploy that added the CHECK.
   both completed, and no job has failed since 17:25. Deploy rule 7 below
   exists because of this.
 
-**Stage 0's operational steps: 0.2 done on 2026-10-30, 0.6 left.** First read on
-2026-10-21:
+**Stage 0's operational steps: 0.2 done on 2026-10-30, 0.6 partly done.** First
+read on 2026-10-21:
 
 - _Done on 2026-10-30._ **0.2's SLA reorder.** Until then the policies were
   in the "Now" order of 0.2's table, Live Support (Customer Care) at position 1
@@ -679,13 +768,19 @@ web's deploy, which precedes the preDeploy that added the CHECK.
   the old table typed back in: positions 1–4 as Live Support (Customer Care),
   Offline Support (Customer Care), Offline Support (Merchant Care), Live
   Support (Merchant Care), with the group names back in the conditions.
-- **0.6's staffing.** Left, and it blocks Stage 5; operations, not code. As read
-  on 2026-10-21, Customer Care, Inbound Sales Team and Merchant Care had no
-  members, Support had three, none of whom `assign_sweep` could pick, and held
-  129 open unassigned tickets, and every channel defaulted to Support but
-  "Nayera Mohamed" (Merchant Care) and the bot (no group). The groups have
-  gained members since, none of them taking tickets: the current figures are
-  under Next, item 10, read on 2026-10-30.
+- **0.6's staffing.** Partly done, and what is left blocks 5.2's next channel;
+  operations, not code. As read on 2026-10-21, Customer Care, Inbound Sales
+  Team and Merchant Care had no members, Support had three, none of whom
+  `assign_sweep` could pick, and held 129 open unassigned tickets, and every
+  channel defaulted to Support but "Nayera Mohamed" (Merchant Care) and the
+  bot (no group). Since #436 (live in `b63f96e` by 17:00:33 UTC on
+  2026-10-29) membership is set in the console — `/admin/groups`' Members
+  list, Agents → Edit and the invite, behind `admin.groups` — but a member
+  staffs a group only while their own switch says they accept tickets. Read at
+  23:20 Cairo on Saturday 7 November, Egypt's weekend, Inbound Sales Team had
+  two members accepting and Customer Care and Merchant Care none; one read on
+  a weekend night says nothing about the working week. The figures, and what
+  they leave open, are under Next, item 10.
 
 ### Next, in order
 
@@ -696,7 +791,8 @@ Every production write needs the user's go-ahead for that step, and the
    (`447d8be`) took it to `main` on 2026-10-23 with #394, #396 and #398, quoting
    the gate at 0, 0, 0 on production at 18:26:49 UTC. All six services were
    live on it by 18:36 UTC, web first. Its checks read clean at 21:10 UTC
-   (above), with one re-read left for the first comment. Its reviews are
+   (above), with one re-read left, now on a comment from the last seven days,
+   since comments have kept arriving (above). Its reviews are
    answered under [1.3, as built](#13-as-built).
 2. **2.A is deployed.** #406 (`e88d357`) took it to `main` on 2026-10-23, and
    an environment update deployed all six services at once by 22:13 UTC. Its
@@ -729,13 +825,17 @@ Every production write needs the user's go-ahead for that step, and the
    checks read clean (above). At the user's go-ahead the archive record run
    went first, and the classifier ran in Shadow from 06:00:32 UTC on
    2026-10-29 (4.2's first operation, above) until the user switched it to
-   `apply` at 18:37:23 the same day (4.2's Apply, above). The backlog waits
-   for the user's go-ahead. The way back starts with the switch, `off` on
+   `apply` at 18:37:23 the same day (4.2's Apply, above). The week of `apply`
+   has passed and the backlog waits only for the user's go-ahead (read
+   2026-11-07). The way back starts with the switch, `off` on
    `/admin/categories`; the code's way back is then 5.1's (Rolling it back,
    under [5.1, as built](#51-as-built): `ad6a062`, once no `settle_routing` job
    is pending or processing), and only below that `dbf4376` for 4.2 and `156004d` for 4.1, whose tables stay, since
-   nothing reads them there.
-8. **5.1 is deployed, and routes nothing.** #432 was squashed into `dev` as
+   nothing reads them there. Each of those builds is older than `f89d7c1` and
+   #472, so it now needs the KB counters' ways back and auto-deploy off first
+   (below the table).
+8. **5.1 is deployed; Web Chat routes, and nothing has routed yet.** #432 was
+   squashed into `dev` as
    `9d5b4fb`, and #435 (`1470902`) took it to `main` on 2026-10-29; all six
    services were live on it by 06:35:36 UTC, with `0051_routing` applied, and
    its checks read clean (above): [5.1, as built](#51-as-built). It went web
@@ -745,8 +845,11 @@ Every production write needs the user's go-ahead for that step, and the
    `shipblu-sla-sweep` runs an `assign_sweep` that assigns held tickets, and an
    old `shipblu-time-automations` runs rules whose `auto_assign` assigns them
    and whose `assign_group` moves one without ending its hold. Deployed, it
-   routes nothing: every channel reads `default_group`, and nothing is held or
-   enqueued until an admin moves one while the classifier is in `apply`. Four
+   routed nothing: every channel read `default_group`, and nothing is held or
+   enqueued until an admin moves one while the classifier is in `apply`. Web
+   Chat was moved on 2026-10-30 (item 10), and no web chat ticket has opened
+   since, so read 2026-11-07 nothing has routed. #477 and #481 amended the
+   router since, live on 2026-11-07 (below the table). Four
    things changed on every ticket at the deploy, all under
    [5.1, as built](#51-as-built): the out-of-hours acknowledgement's guards
    (decision 6); assignment's ticket-first `FOR NO KEY UPDATE` lock and its
@@ -759,83 +862,151 @@ Every production write needs the user's go-ahead for that step, and the
 9. **6 is deployed.** #434 was squashed into `dev` as `1daf6a5`, and #437
    (`9b4bc5b`) took it to `main` on 2026-10-29; all six services were live on
    it by 11:29:28 UTC, web first, with `0052`–`0055` applied, and its checks
-   read clean (above), and so did the first Stage 6 nightly. The way back
+   read clean (above), and so did the first two Stage 6 nightlies. The way back
    is the plan's Stage 6 rollback: the nightly and the worker to `1470902`
    first, then the category rows deleted, then web. Its screenshot pass went
    out after it: #438 was squashed into `dev` as `b237858`, and #439
    (`063e477`) took it to `main`; all six services were live on it by
    14:27:51 UTC, and its checks read clean (above). It is code and copy only,
-   so its way back is `9b4bc5b` on each service, in any order.
-10. **Before Stage 5.2 turns routing on**, a person does 0.6's staffing and the
-    support lead answers the questions still open (below). Read on 2026-10-30
-    at 13:00 UTC, two of 5.2's prerequisites hold, and two more were written at
-    the user's go-ahead at 14:10–14:11 (above and below); the rest do not:
-    - **done:** all six services run 5.1, and since 15:22:45 UTC on 2026-10-30
-      release #450 (`eaf07ab`, with #445 and #448), which carries it;
-    - **done:** the classifier is in `apply`, switched by the user at 18:37 UTC
-      on 2026-10-29 (4.2's Apply);
+   so its way back was `9b4bc5b` on each service, in any order. Both
+   `1470902` and `9b4bc5b` are older than `f89d7c1` and #472, so either now
+   needs the KB counters' ways back and auto-deploy off first (below the
+   table).
+10. **5.2's prerequisites, read on 2026-11-07 (~21:20 UTC, which is 23:20
+    Cairo on a Saturday).** Web Chat went to `category` on 2026-10-30, ahead of
+    5.2's order (below); the next channel waits on what is still "not yet"
+    here. What was written on 2026-10-30 is condensed below; #452's version of
+    this item (`c3c0df6`) carries each of that day's reads in full.
+    - **done:** all six services run 5.1's code, and since 16:29:38 UTC on
+      2026-11-07 release #484 (`db4268c`), which carries #481 and, since #482
+      (`f89d7c1`), #477 (below the table);
+    - **done:** the classifier is in `apply` since 18:37:23 UTC on 2026-10-29
+      (4.2's Apply), its settings unchanged since;
     - **done on 2026-10-30:** route groups on the categories, as Q5 decided —
       `sales` → Inbound Sales Team, `customer_support` → Customer Care,
-      `merchant_support` → Merchant Care, and `courier_jobs` none — written at
-      14:10:40 UTC as `updateCategory` writes them, the groups key-share locked
-      first. With every channel on `default_group` they route nothing; what
-      they change today is **Hand to <group>** (`handToTarget`), offered to an
-      agent holding `ticket.assign` on any open or pending ticket, assigned or
-      not and in any group, whose category's route group is not its group —
-      unless it is held, on the customer bot, on a coexistence number, or on a
-      number whose active owner answers for it. Only three tickets carried a
-      category at all when it was written, and all three qualify, read with
-      that predicate at 14:47 UTC: open and unassigned in Support, two `sales`
-      (Hand to Inbound Sales Team) and one `customer_support` (Hand to
-      Customer Care). Neither group has anybody accepting, so a hand-over there
-      leaves the ticket in that group's queue. Every ticket Jev files from now
-      on in Support is offered it too. The way back is clearing the three on
-      `/admin/categories`;
-    - **done on 2026-10-30:** 0.2's SLA reorder (above);
-    - **not yet:** staffing. Customer Care has three members and Merchant Care
-      two, none accepting and none with any input in the last seven days;
-      Inbound Sales Team has none. Four of twelve active agents are in no
-      group. Set from the console at 14:43 UTC on 2026-10-30: an open-ticket
-      cap on each of the five agents, 15 in Customer Care and 10 in Merchant
-      Care, so the first to switch on is not handed the whole queue. By 22:09
-      UTC Support had no members left (no record says when); it still holds
-      259 open tickets assigned to two admins, the account admin's 258
-      among them;
+      `merchant_support` → Merchant Care, and `courier_jobs` none (Q3's
+      default, still the support lead's question: [Still open](#still-open)) —
+      written at 14:10:40 UTC as `updateCategory` writes them, the groups
+      key-share locked first, and as they still read. They route Web Chat's
+      new tickets (none since). On every other channel what they change is
+      **Hand to <group>** (`handToTarget`), offered to an
+      agent holding `ticket.assign` on any open or pending ticket whose
+      category's route group is not its group — unless it is held, on the
+      customer bot, on a coexistence number, or on a number whose active owner
+      answers for it. Since the defaults moved, Jev's new filings land in
+      Customer Care, where a `sales` or `merchant_support` one is offered it.
+      Three tickets carried a category at the write, all three qualifying;
+      36 carry one now, and how many qualify was not re-read. The way back is
+      clearing the route groups on `/admin/categories`;
+    - **done on 2026-10-30:** 0.2's SLA reorder (above); the policies were not
+      re-read since;
     - **done on 2026-10-30, at the user's go-ahead:** no channel defaults to
-      Support. Web Chat was moved to Customer Care from the console at 14:45
-      UTC, and at 22:16 UTC the other five that defaulted to Support — the
-      mailbox, Instagram, the Facebook Page, WhatsApp Support and ShipBlu
-      Admin — were moved there too, the column alone, as `saveChannel` writes
-      it, guarded on each still naming Support. The two coexistence numbers
-      stay on Merchant Care. The way back is the five set back to Support;
+      Support. Web Chat moved to Customer Care from the console at 14:45 UTC,
+      and the mailbox, Instagram, the Facebook Page, WhatsApp Support and
+      ShipBlu Admin at 22:16 UTC, the column alone, as `saveChannel` writes
+      it, guarded on each row still naming Support. The two coexistence
+      numbers, Magdy Mohamed and Nayera Mohamed, stay on Merchant Care, and
+      the bot has no group. All as read on 2026-11-07. The way back is the
+      five set back to Support;
     - **done on 2026-10-30, at the user's go-ahead:** Support's 183 open
       unassigned tickets (100 Facebook, 48 Instagram, 31 comments, 4 WhatsApp,
-      every one unanswered and on Live Support (Customer Care)) were moved to
+      every one unanswered and on Live Support (Customer Care)) moved to
       Customer Care at 22:17 UTC, so its agents can see them: an agent-role
       user sees only their groups' tickets and their own, and Support had no
       members. One statement wrote the move and a `group_changed` event for
-      each, as the console's group case does, with no actor (it is nobody's
-      worked ticket, the handover's rule) and the deciding admin in
-      `data.by`, `data.reason` `support_emptied_2026_10_30`. What the console
-      does after a move changed nothing here, so none of it was owed: the
-      same policy wins again before a first response, both groups have the
-      default calendar, no ticket ever routed, no `on_update` or group-keyed
-      rule is active, and assignment out of hours only records a skip; the
-      sweep hands them out from 10:00 Cairo time, within the caps. The way
-      back moves every ticket carrying that `reason` back to Support;
-    - **on 2026-10-30, from the console:** Web Chat is in `category` mode
-      since 14:45 UTC, the first channel to route. A public visitor's chat is
-      held for the window and then goes to its category's group; the
-      `on_create` rule "Route Account Web Chat to Merchant Care" still moves a
-      signed-in visitor's chat at creation, which ends that hold as `rule`.
-      Inbound Sales Team has no members, so a web chat filed `sales` waits
-      there unassigned, seen only by admins and supervisors, until it is
-      staffed; the user is adding its members. No web chat had arrived by
-      22:09 UTC, so no `routing_decisions` row exists yet;
-    - **not yet:** no automatic assignment in the three days to 13:00 UTC on
-      2026-10-30, from the rota or the sweep;
-    - **not yet:** no comment channel row exists (Q11), so all 57 comment
-      tickets are on their platform's row.
+      each, with no actor (nobody's worked ticket, the handover's rule), the
+      deciding admin in `data.by` and `data.reason`
+      `support_emptied_2026_10_30`. None of the console's follow-ups to a move
+      was owed: the same policy wins again before a first response, both
+      groups have the default calendar, no ticket had routed, no `on_update`
+      or group-keyed rule was active, and assignment out of hours only records
+      a skip. The way back moves every ticket carrying that `reason` back. The
+      sweep was to hand them out within the caps: it made 34 assignments in
+      the seven days to 2026-11-07 (below), how many of the 183 it reached was
+      not read, and 206 of Customer Care's 241 open or pending tickets are
+      still unassigned. Support has no members and 258 open or pending
+      tickets, none unassigned; who holds them was not re-read;
+    - **not yet, partly:** staffing. Each route group is `round_robin`. At
+      13:00 UTC on 2026-10-30 (15:00 Cairo, a Friday) Customer Care had three
+      members and Merchant Care two, none accepting and none with any input in
+      the seven days before, and Inbound Sales Team none. At 14:43 UTC an
+      open-ticket cap was set from the console on each of those five agents,
+      15 in Customer Care and 10 in Merchant Care, so the first to switch on is
+      not handed the whole queue; the caps were not re-read since. Read at
+      23:20 Cairo on Saturday 7 November, Egypt's weekend, by group — active
+      members, accepting, with console input in the last seven days, open or
+      pending tickets, of those unassigned: Customer Care 3, 0, 3, 241, 206;
+      Merchant Care 2, 0, 0, 122, 1; Inbound Sales Team 6, 2, 6, 2, 1;
+      Support 0, 0, 0, 258, 0. 17 active agents, six of them in no group.
+      That read cannot say whether anybody accepts during the working week:
+      Customer Care's three all used the console in it, and the sweep, which
+      picks only members who accept, made 34 assignments in it (next bullet),
+      to which groups not split out. What it does show is the queue: Customer
+      Care, the default group of every channel but the coexistence numbers and
+      the bot, holds 206 unassigned open or pending tickets;
+    - **not yet, partly:** the sweep's proof, which 5.2 states as "the sweep
+      has assigned something in the last day". 54 automatic `assigned` events
+      in the seven days to 2026-11-07 — `assign_sweep` 34, the number owner
+      20 — by Cairo day 6, 3, 16, 18 and 9 from Sunday 1 to Thursday 5
+      November, then 0 on Friday 6 and 2 on Saturday 7, Egypt's weekend: the
+      shape of a working week. At least 32 of the sweep's 34 fell Sunday to
+      Thursday, so it assigns again on working days. Not split out: the
+      sweep's share of each day, and which groups its 34 went to;
+    - **on 2026-10-30, from the console, ahead of 5.2's order:** Web Chat in
+      `category` mode since 14:45 UTC, first and with no shadow week, where
+      step 2 begins with Instagram and the comment channels in
+      `category_shadow` (5.2, below). A public visitor's chat is held for the
+      window and then goes to its category's group; "Route Account Web Chat to
+      Merchant Care" still moves a signed-in visitor's chat at creation, which
+      ends that hold as `rule` (the rules were last read on 2026-10-28).
+      Inbound Sales Team had no members then and has six now, two accepting
+      even at the weekend read, so a chat filed `sales` can be assigned while
+      one of them accepts and is in hours. No web chat ticket has opened
+      since 14:15 UTC on 2026-10-20, so nothing has routed: no
+      `routing_decisions` row and no `settle_routing` job;
+    - **not yet:** no comment channel row exists (Q11), so all 63 comment
+      tickets (`facebook_comment` 53, `instagram_comment` 10) are on their
+      platform's row. Optional while the Page and Instagram rows stay on
+      `default_group`; read `docs/PROJECT-STATE.md` §5.1 before either leaves
+      it.
+11. **Next: members who accept tickets in Customer Care and Merchant Care**
+    (0.6). First, re-read who accepts in each group during Cairo working hours
+    on a weekday (Sunday to Thursday): the only reads so far fell on Egypt's
+    weekend, a Friday afternoon on 2026-10-30 and a Saturday night on
+    2026-11-07 (item 10). Only if either group still has nobody accepting then
+    does the user, with the support lead, decide who should; each agent turns
+    on their own switch. Nothing in code blocks it. Its proof is 5.2's: the
+    sweep assigns something within a day, and Customer Care's 206 unassigned
+    tickets go out within the caps.
+12. **Then the backlog** (4.2's step 5, under 4.2's Apply above), and after it
+    the `rollup_metrics from=2026-08-18` rebuild. It waits only for the
+    user's go-ahead.
+13. **The comment rows, optional for now** (Q11). The support lead decides
+    whether to add the "Facebook comments" and "Instagram comments" rows now;
+    their group is settled, since Q11 gives each its platform's channel's
+    group, Customer Care today. The user, or an admin, adds them on
+    `/admin/channels`. 5.2 makes them a prerequisite before the Page or
+    Instagram row leaves `default_group`.
+14. **The next channel to route.** Each move is the user's decision, from
+    `/admin/channels`, and needs item 11 first, and item 13 for Instagram or
+    the comments. 5.2's order: Instagram and the comment channels in
+    `category_shadow` for a week, read on `/reports/routing`, then `category`;
+    Messenger in `category_shadow` until the Freshworks swap; then email. Since
+    #477 a comment ticket a passer-by's reply opened is assigned up to the
+    window later.
+15. **Watch the first web chat that routes**, whenever a visitor opens one:
+    its `routed` line, who was assigned, and `/reports/routing`. Anybody can
+    read it; nothing waits on it but the evidence.
+16. **The reads left.** 1.3's "nothing refused" read on a comment from the last
+    seven days, which anybody with production read access can run. The
+    signed-in reads — 2.B's page loads, 3.1's and 3.2's, 5.1's
+    `/admin/channels`, and 6's `/reports`, `/reports/routing` and
+    `/reports/live` — which need a person signed in to the console.
+17. **The code left**, each its own change: 5.1's Left items under
+    [5.1, as built](#51-as-built) (the three comments that say more than the
+    code, the CHECK on `held_strategy` and `held_actor_label`, the pick's
+    group), #481's durable record of Jev's follow-ups, and, if the support
+    lead wants it, a writer for "fits no category" ([Still open](#still-open)).
 
 ### 1.3, as built
 
@@ -1663,17 +1834,30 @@ preDeploy applied both at 19:43:50 UTC on 2026-10-25.
 
 ### Still open, and recorded elsewhere
 
-- **The support lead's three.** The first two are under
-  [Still open](#still-open), and are needed before Stage 5.
-  - Where courier jobs route.
-  - Whether channel defaults move off Support.
+- **The support lead's three.** One was settled on 2026-10-30 (Next, item 10,
+  and [Still open](#still-open)).
+  - Where courier jobs route. No route group, as Q3's default has it, and
+    still the support lead's to answer.
+  - _Decided 2026-10-30, at the user's go-ahead._ Whether channel defaults
+    move off Support: to Customer Care, Web Chat's at 14:45 UTC with its
+    switch to `category` and the other five at 22:16 UTC, the two
+    coexistence numbers staying on Merchant Care.
   - Whether an automation may ever answer a public comment. Today
     `sendCannedReply` refuses that. It is recorded under
     [Risks](#risks-not-closed-by-the-design), and blocks nothing.
-- **Comments rows.** None exists, and creating one is optional. A
-  "Facebook comments" or "Instagram comments" row gives new comment tickets a
-  default group of their own; the moved tickets keep the platform row they were
-  filed through. Which group is the support lead's call.
+- **Comments rows.** None exists (read 2026-11-07), and creating one is
+  optional while the Page and Instagram rows stay on `default_group`; 5.2
+  makes it a prerequisite before either leaves it. A "Facebook comments" or
+  "Instagram comments" row gives new comment tickets a default group of their
+  own; the moved tickets keep the platform row they were filed through. Q11
+  settles the group, its platform's channel's (Customer Care today); whether
+  to add the rows before 5.2 needs them is the support lead's call.
+- **Jev's follow-ups have no durable record** (left out of #481, review
+  r4501885596). A worker dying between the commit of Jev's answer and its
+  follow-up leaves the policy look and the `on_update` pass unrun, and
+  nothing records that they were owed. A route it owed on a held ticket is
+  only late: the routing row and its `settle_routing` job still route the
+  ticket at the window's end. Its own change.
 - _Closed, outside this plan, on 2026-10-29._ **A gap older than this plan.**
   An automation's `send_reply` on a `whatsapp_bot` ticket was queued as an
   email: the engine asked only `automatedReplyBlocked`, which knew nothing of
@@ -1868,7 +2052,8 @@ cost and the code half has none:
 
 Step B has to happen, and before Stage 3: the new field wants the name
 `ticket_categories`, and the name cannot mean two things. The deploy window is
-real, because only the web service runs migrations (`render.yaml:286-288`).
+real, because only the web service runs migrations (its `preDeployCommand` in
+`render.yaml`).
 Until traffic shifts to the new release, old web instances (up to three) keep
 serving against renamed tables. That fails their ticket pages through
 `allLimited` (`lib/tickets/conversation.ts:254-322`). It also silently skips
@@ -2426,10 +2611,12 @@ how Stages 1 to 6 shipped. Since 2026-11-06 every production service deploys
 once the checks on `main` pass, all six at once (`docs/PROJECT-STATE.md` §2), so
 rule 1's order is not one a merge can keep. Its first half, the migration
 before the worker and the crons, is held by their wait at startup
-(`worker/schema-gate.ts`). The rest — web before the worker, rule 3's argument
+(`worker/schema-gate.ts`), live in production since `db4268c` (16:27–16:29 UTC
+on 2026-11-07). The rest — web before the worker, rule 3's argument
 from it, and rule 2's readers before writers — is not, and rule 4 holds as
 written.
-Only web runs migrations, as its preDeploy (`render.yaml:286-288`). The worker
+Only web runs migrations, as its preDeploy (the web service's
+`preDeployCommand` in `render.yaml`). The worker
 and the four crons each build and run their own copy of the code:
 `shipblu-sla-sweep`, which runs `assign_sweep`;
 `shipblu-time-automations`; `shipblu-whatsapp-template-sync`; and
@@ -4377,7 +4564,10 @@ evening, and step 5 waits for the go-ahead.
     every such answer wrong. They are counted apart, and Jev's own filings
     under "Filed by Jev": what it filed in answer to the run's messages, how
     many a person moved since, and to what. That is the figure step 3's
-    merchant-support watch reads.
+    merchant-support watch reads. Since #477 it counts only answers about the
+    requester's own messages, and since #481 a customer's answer agreeing with
+    the category the ticket already carries (`category_agreed`) counts as
+    Jev's filing (both live on 2026-11-07).
   - **So a ticket no label can reach is in no rate read off labels**: one
     something wrote first, and one deleted, spam, merged or carrying a
     category no event explains. Kept in the weights it would be stood for by
@@ -4850,7 +5040,10 @@ production on 2026-10-29, it is now as fixed as any other.
     to Merchant Care for a requester with an email and to Customer Care for
     one without, both `channel eq webchat`) move every new web chat ticket
     out of Support, so on that row every hold ends as `rule` and the router
-    decides nothing. That is by design: rules decide.
+    decides nothing. That is by design: rules decide. It held until
+    2026-10-30, when the row's default moved to Customer Care: since then the
+    public rule names the group a visitor's chat is already in and ends no
+    hold, so a public chat routes by category.
 - **"Hand to <group>" and the badge.**
   - **Offered by state, not by "a category edit just happened"**: to an agent
     holding `ticket.assign`, on open or pending work, not held, whose
@@ -5330,8 +5523,10 @@ production on 2026-10-29, it is now as fixed as any other.
     `number-owner.ts` would add one more module outside `lib/routing/` to those
     that end holds, with neither of `endHold`'s outcomes fitting it — a handover
     is no person or rule deciding where one ticket goes, which is why its events
-    carry no `actorAgentId` — for a case production has never had: no channel
-    routes yet, and an owned number's new tickets are never held, so a ticket on
+    carry no `actorAgentId` — for a case production has never had: no ticket
+    has routed yet (Web Chat alone in `category` mode since 2026-10-30; no
+    `routing_decisions` row, read 2026-11-07), and an owned number's new
+    tickets are never held, so a ticket on
     a number is held only if the number had no active owner when it arrived, and
     meets a handover only when an admin gives it one inside that ticket's
     window. The review's general cure, ending a hold at the assignee write
@@ -5439,7 +5634,18 @@ production on 2026-10-29, it is now as fixed as any other.
     only within those and any skew between the hosts; the handler's real
     tolerance, the same reporting day except near midnight, still holds.
     AGENTS.md states the deferral as the code has it; the comments go with the
-    next change to those files.
+    next change to those files. Neither #477 nor #481 corrected them, though
+    #477 edited both files' comments: phase two's paragraph in `apply.ts`'s
+    header, and `routerDecidedOn`'s docstring in `state.ts`.
+  - **Jev's follow-ups have no durable record** (left out of #481): a worker
+    dying between Jev's commit and its follow-up leaves the follow-up unrun
+    (Still open, and recorded elsewhere).
+- **Changed since, live on 2026-11-07.** #477 gave `routeNow` a `waiting`
+  answer, for a category Jev read off a reply on a thread whose root has not
+  arrived or off somebody no longer the requester, and the window's end a
+  set-aside one (`fallback`, no pass, `data.setAside`); #481 has the router
+  read Jev's `category_changed` and `category_agreed` events alone. Both are
+  under Status and handoff, below the table.
 - **Deploying it.** Web first, then the worker and **all four** crons, before
   any channel leaves `default_group`. Done so on 2026-10-29, with one
   expectation different: the classifier was in Shadow rather than off, which
@@ -5489,7 +5695,14 @@ production on 2026-10-29, it is now as fixed as any other.
     `notify_conversation_change()` without the two routing columns. `0051`'s
     columns and table stay, unread there — the old schema names none of them
     and an insert takes their defaults — and so does the CHECK, on a table
-    nothing writes. Dropping them is a forward migration of its own.
+    nothing writes. Dropping them is a forward migration of its own. Since
+    `f89d7c1` (2026-11-07) `ad6a062` cannot run on production's schema until
+    `db/runbooks/kb-article-counters-restore.sql` has put back the three
+    `kb_articles` columns `0060` dropped, with auto-deploy off on every service
+    first; being older than #472, it also needs `kb_article_stats` copied onto
+    them before the deploy, or the help centre's counts read 0
+    (`plans/kb-article-stats.md`, PR 1's way back; Status and handoff, below
+    the table).
 
 **5.2 — Turning it on, channel by channel (operations).**
 
@@ -5513,6 +5726,14 @@ production on 2026-10-29, it is now as fixed as any other.
    Freshchat agents are answering.
 5. Email and webchat follow on the same evidence. The coexistence numbers
    stay `default_group`; `routingModeOf` enforces it.
+
+_Not as planned._ Web Chat went first, straight to `category`, set from the
+console at 14:45 UTC on 2026-10-30 with no shadow week; steps 2 to 4 have not
+started, and no row is in `category_shadow` (read 2026-11-07). Its
+prerequisites stand as the spec; Status and handoff (Next, item 10) carries
+their state. Since #477, a comment ticket a passer-by's reply opened is
+assigned up to the window later in step 2's channels, which is worth naming
+when the Page or Instagram moves.
 
 **Rollback.** Set a channel's mode back to `default_group`. New tickets are
 never held again. Tickets already held settle at the end of their own window
@@ -5548,12 +5769,15 @@ review) and since merged with #432's final head `ec8487b` and with `dev`
 (`4622f71`), and a fix for each thread, and replaces #433 as the stage's pull request,
 #434. #432 was squash-merged into `dev` as `9d5b4fb` on 2026-10-29, and #434
 targets `dev` since, with its own review's thirteen threads answered (below).
-Four builders
+#434 shipped the stage as `1daf6a5`, and #433 was closed without merging on
+2026-11-07; both branches are still on `origin`, and deleting them is the
+user's call. Four builders
 worked from one written design, each piece with its own tests. The organisation's
 spend limit stopped the first session's screenshot pass, docs, full check and
 adversarial review on 2026-10-28; the review on #433 and the docs are answered
-below, and the screenshot pass is still owed. What follows is what is on the
-branch, what was verified, and what is left, in order.
+below, and the screenshot pass was done after the deploy (#438, Left to do,
+item 1). What follows is what is on the branch, what was verified, and what is
+left, in order.
 
 **Decisions, as built.**
 
@@ -5633,7 +5857,8 @@ branch, what was verified, and what is left, in order.
    table draw a CSAT column, for the same reason. The rollup still files each
    score under its ticket's category, so a category slice is one partition in
    every column and "No category" stays exact.
-6. **The live board** (`/admin/dashboard`) gains "Open work by category":
+6. **The live board** (`/admin/dashboard`, `/reports/live` since #444) gains
+   "Open work by category":
    `backlogCuts()`, one scan of the open backlog grouped by channel and by
    category (`grouping sets`), its category cut full-joined to the registry.
    Active categories always show, retired ones only while they hold open work,
@@ -5667,7 +5892,9 @@ started_at`, over a settled category only. It shows p50, p90 from ten
      the window.
    - **Why a fallback fell back**: a category that arrived after the decision
      (Jev, a person, or a rule or form), and what Jev had said by then
-     (nothing asked, unsure, every call failed).
+     (nothing asked, unsure, every call failed). Since #477, also a category
+     Jev read off somebody other than the requester, set aside at the window's
+     end (Set aside).
    - **Routed, then assigned**, with the median wait. Every taken ticket is
      listed.
    - **Now, not range-bound**: routed tickets nobody has been assigned since
@@ -5897,8 +6124,8 @@ checks, in the status section).
   00:00 UTC on 2026-10-30 and read clean, with no category row, since the
   first ticket Jev filed opened after the days it rebuilt (status section).
 - **The `rollup_metrics from=2026-08-18` rebuild** would write category rows
-  today only for the tickets Jev has filed since 2026-10-29: the backlog
-  carries no category. Its moment is after 4.2's
+  today only for the tickets Jev has filed since 2026-10-29 (36, read
+  2026-11-07): the backlog carries no category. Its moment is after 4.2's
   `backfill_category_ai mode=apply`, and again whenever the backlog is
   re-filed. It runs from the worker's shell, on Stage 6 code, with the user's
   go-ahead.
@@ -5911,6 +6138,13 @@ checks, in the status section).
   3. Redeploy web.
 
   `0052`'s column, key and CHECK stay, since the old code satisfies all three.
+  Since `f89d7c1` (2026-11-07), `1470902` cannot run on production's schema
+  until `db/runbooks/kb-article-counters-restore.sql` has put back the three
+  `kb_articles` columns `0060` dropped, with auto-deploy off on every service
+  first; being older than #472, it also needs `kb_article_stats` copied onto
+  them before the deploy, or the help centre's counts read 0
+  (`plans/kb-article-stats.md`, PR 1's way back; Status and handoff, below the
+  table).
 
 ## Verification queries (run after each stage, read-only)
 
@@ -6020,7 +6254,8 @@ ones the stages cite (Q2, Q5, Q8, Q11, Q12, Q15).
 3. **A fourth value.** **Courier jobs** is added, for couriers and outsourcing
    companies looking to work with or for ShipBlu. `unknown` stays the escape
    hatch for greetings and content-free openers. _Changed from the default
-   (no fourth value)._ It has no route group (see Still open).
+   (no fourth value)._ It has no route group (still none, read 2026-11-07;
+   see Still open).
 4. **Category and subcategories are independent.** _Default accepted._
 5. **Where each category routes:**
    - Sales → Inbound Sales Team.
@@ -6030,7 +6265,9 @@ ones the stages cite (Q2, Q5, Q8, Q11, Q12, Q15).
    - Customer support → Customer Care.
 
    Support is unused once the three are staffed. That moves every channel's
-   default group (0.6).
+   default group (0.6). The defaults moved on 2026-10-30, ahead of the
+   staffing; Support has no members and still holds 258 open or pending
+   tickets, none unassigned (read 2026-11-07).
 
 6. **The hold window.** 5 minutes, tuned from the shadow data. _Default
    assumed; not separately answered._
@@ -6080,15 +6317,23 @@ ones the stages cite (Q2, Q5, Q8, Q11, Q12, Q15).
 
 ### Still open
 
-None blocks Stage 1. The first two are needed before Stage 5 turns on.
+None blocks Stage 1. The first two were needed before Stage 5 turned on. The
+second was settled on 2026-10-30 (Status and handoff, Next, item 10); the
+first still runs on its default.
 
-- **Where courier jobs go.** The default is no route group, so a courier-jobs
-  ticket stays in its channel's default group: Customer Care, once 0.6 has run.
-  If those enquiries belong to another team (operations, fleet), naming a group
-  on the category's row is all it takes.
-- **Moving channel defaults off Support.** Customer Care, as 0.6 proposes, or
-  another group per channel? The coexistence number "Nayera Mohamed" already
-  defaults to Merchant Care and stays there.
+- **Where courier jobs go.** The default is no route group, and it is in
+  force: `courier_jobs` was left without one when the other three were
+  written, at 14:10:40 UTC on 2026-10-30, as it still reads on 2026-11-07. No
+  record says the support lead chose it. So a courier-jobs ticket stays in its
+  channel's default group, Customer Care, or Merchant Care on a coexistence
+  number. If those enquiries belong to another team (operations, fleet),
+  naming a group on the category's row is all it takes.
+- _Decided 2026-10-30, at the user's go-ahead: Customer Care._ **Moving
+  channel defaults off Support.** Web Chat's moved at 14:45 UTC, with its
+  switch to `category`, and the mailbox's, Instagram's, the Facebook Page's,
+  WhatsApp Support's and ShipBlu Admin's at 22:16 UTC. The two coexistence
+  numbers, "Magdy Mohamed" and "Nayera Mohamed", default to Merchant Care and
+  stay there.
 - **Whether an automation may ever answer a public comment.** Since 1.2,
   `sendCannedReply` refuses every `send_reply` on a comment ticket. Allowing one
   needs a trigger that names the comment that set the rule off, which the
@@ -6100,4 +6345,7 @@ None blocks Stage 1. The first two are needed before Stage 5 turns on.
   review event beside the select, say, which the grading reads as "no category"
   — and whether the evaluation needs it before `apply` is the support lead's
   call. Without it, step 3's precision counts only tickets a person put a
-  category on.
+  category on. `apply` was taken without it on 2026-10-29, so the question is
+  now whether it is wanted at all: under `apply` a false filing shows only if a
+  person changes it, and read on 2026-11-07 no person had changed or labelled
+  any of the 36 tickets carrying a category.

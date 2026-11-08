@@ -51,7 +51,13 @@ export type Requester =
   | { kind: 'anonymous'; ip: string | null }
   | {
       kind: 'agent';
-      contactId: string;
+      /**
+       * The customer's address as the agent typed it, and the name beside it:
+       * an address rather than a contact, so the contact is resolved only after
+       * every refusal (`resolveRequester` says why).
+       */
+      email: string;
+      name: string | null;
       agentId: string;
       /**
        * The console's category chooser, already re-read and authorised by the
@@ -76,7 +82,10 @@ export type SubmitResult =
   | { ok: false; reason: 'missing'; keys: string[] }
   /** The same, for answers a field's own rules refused. */
   | { ok: false; reason: 'invalid'; keys: string[] }
-  /** An anonymous form that cannot tell who is writing. */
+  /**
+   * A requester named by an address that is not one: the address an anonymous
+   * visitor claimed, or the one an agent typed.
+   */
   | { ok: false; reason: 'requester' }
   | { ok: false; reason: 'files'; refusal: FileRefusal };
 
@@ -163,25 +172,46 @@ function readAnswers(
  * an address that already exists — `resolveContact` only sets one when it
  * creates the row, so a stranger cannot rename a known customer. And the
  * identity it may create is unverified, so it grants no portal sign-in.
+ *
+ * An agent's requester is resolved the same way an inbound email is, so a
+ * ticket opened for somebody on the phone joins their existing history rather
+ * than starting a second stranger with the same address. It carries no
+ * `unverified_submitter`: the agent typed the address of somebody they were
+ * speaking to, and the ticket already says which agent opened it.
+ *
+ * Called only after every other refusal `submitForm` can answer, and it
+ * refuses an address that is not one before it resolves anything: resolving
+ * inserts a contact and its identity for an address nobody has written from,
+ * and a refusal after that leaves a customer record behind for a ticket never
+ * opened. One path for both requesters named by an address, so that order
+ * cannot hold for one and not the other.
  */
 async function resolveRequester(
   requester: Requester,
   system: SystemValues,
 ): Promise<{ contactId: string; unverifiedEmail: string | null } | null> {
-  if (requester.kind !== 'anonymous') {
+  if (requester.kind === 'session') {
     return { contactId: requester.contactId, unverifiedEmail: null };
   }
 
-  const email = normaliseEmail(system.requester_email ?? '');
-  if (!email || !looksLikeEmail(email)) return null;
+  const claimed =
+    requester.kind === 'agent'
+      ? { address: requester.email, name: requester.name }
+      : { address: system.requester_email ?? '', name: system.requester_name ?? null };
+
+  const email = normaliseEmail(claimed.address);
+  if (!looksLikeEmail(email)) return null;
 
   const resolved = await resolveContact({
     channel: 'email',
     identifier: email,
-    displayName: system.requester_name ?? null,
+    displayName: claimed.name,
   });
 
-  return { contactId: resolved.contactId, unverifiedEmail: email };
+  return {
+    contactId: resolved.contactId,
+    unverifiedEmail: requester.kind === 'anonymous' ? email : null,
+  };
 }
 
 export async function submitForm(input: {

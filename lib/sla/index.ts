@@ -106,19 +106,59 @@ type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 /**
  * The ticket and the facts about it the clocks read. Given a transaction, the
- * ticket's row is locked for it (`withTicketLocked`); the joined rows are read,
- * not claimed — unless `held`, a transaction whose own write already holds the
- * row's lock (`inWrite`). Nothing can move the row under that read, and a FOR
- * UPDATE taken after the transaction has written the row waits on the KEY
- * SHARE of a message being inserted for the ticket while that ingest's update
- * waits on the write, and Postgres aborts one of them (§6.106).
+ * ticket's row is locked for it first (`withTicketLocked`) and read after; the
+ * joined rows are read, not claimed — unless `held`, a transaction whose own
+ * write already holds the row's lock (`inWrite`). Nothing can move the row
+ * under that read, and a FOR UPDATE taken after the transaction has written
+ * the row waits on the KEY SHARE of a message being inserted for the ticket
+ * while that ingest's update waits on the write, and Postgres aborts one of
+ * them (§6.106).
+ *
+ * Locked in one statement and read in the next, never both in one, because of
+ * what a locked read does when it waits. Under READ COMMITTED a FOR UPDATE that
+ * waited on another writer re-checks the newest version of the row it waited
+ * for against the rows it joined before waiting. Read in one statement, a
+ * writer that moved the ticket to another status — an agent's reply resolving
+ * it or setting it pending, a `set_status` rule, a merge — failed the join to
+ * the old status, the read answered no row, and `withTicketLocked` did nothing:
+ * the re-time owed was lost, and the ticket kept due dates for its old
+ * priority, group or policy. A writer that changed the requester — a contact
+ * merge, `adoptRootAuthor` — kept the row but null-extended the join to
+ * `contacts`, so a policy keyed on the requester's address was chosen against
+ * nobody's.
+ *
+ * The second statement takes its snapshot once the lock is held, so it reads
+ * the ticket as the writer it waited on left it, joined to the status,
+ * requester and form the ticket names now — a status created during the wait
+ * included, which a subquery inside the locked statement, reading that
+ * statement's older snapshot, would not find. Nothing can move the row between
+ * the two statements, since this transaction holds its lock.
+ * `locked-read.db.test.ts` holds every clock writer to this.
+ *
+ * The lock is FOR NO KEY UPDATE. Every clock writer under it updates columns
+ * no foreign key points at and inserts events, which is all NO KEY UPDATE
+ * covers, and it waits on every other writer of the row just the same. FOR
+ * UPDATE, which this took before, also conflicts with the KEY SHARE that a
+ * row inserted for the ticket takes through its foreign key, so a reaction,
+ * an event or a classifier's run on the ticket waited for the re-time to
+ * commit (§6.106). A customer's message still does, at its ingest's update of
+ * the ticket after the insert: that is a writer of the row like any other.
  */
 async function loadConversation(
   conversationId: string,
   tx?: Tx,
   { held = false }: { held?: boolean } = {},
 ): Promise<ConversationRow | null> {
-  const query = (tx ?? db)
+  if (tx && !held) {
+    const [locked] = await tx
+      .select({ id: conversations.id })
+      .from(conversations)
+      .where(eq(conversations.id, conversationId))
+      .for('no key update');
+    if (!locked) return null;
+  }
+
+  const [row] = await (tx ?? db)
     .select({
       conversation: conversations,
       statusCategory: ticketStatuses.category,
@@ -132,9 +172,7 @@ async function loadConversation(
     .leftJoin(ticketForms, eq(ticketForms.id, conversations.formId))
     .where(eq(conversations.id, conversationId))
     .limit(1);
-
-  const rows = tx && !held ? await query.for('update', { of: conversations }) : await query;
-  return rows[0] ?? null;
+  return row ?? null;
 }
 
 /**

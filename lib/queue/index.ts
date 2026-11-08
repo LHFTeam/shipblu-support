@@ -38,6 +38,7 @@ export type JobType =
   | 'classify_category'
   | 'settle_routing'
   | 'normalise_kb_formatting'
+  | 'rehost_kb_images'
   | 'restore_resolved_at'
   | 'seed_console_handbook'
   | 'seed_canned_responses'

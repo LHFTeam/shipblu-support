@@ -42,16 +42,38 @@ export function holdNextTransaction(at: 'before' | 'after') {
   return { atHold: atHold.then(() => spy.mockRestore()), release };
 }
 
-/** Resolves once some session is waiting on a lock, so a release lands behind it. */
-export async function untilWaitingOnALock(executor: {
-  execute: (query: ReturnType<typeof sql>) => Promise<unknown>;
-}): Promise<void> {
+/**
+ * Resolves once some session is waiting on a lock, so a release lands behind
+ * it: true then, and false if none was after two seconds. `rowLockIn`, a
+ * Postgres regular expression, narrows it to a session waiting on a row — on
+ * another transaction's id or a tuple, not on a table — in a statement whose
+ * text matches.
+ *
+ * For a test that must know which statement waited: an unlocked read followed
+ * by an UPDATE queues too, on the UPDATE, having read the row before the
+ * writer it waited on committed. Anchor the pattern at the start of the text:
+ * `'^\\s*select\\M'` is a locked read, since a plain read never waits on a
+ * row, though it can wait on a table behind a TRUNCATE or other DDL, which is
+ * why the wait itself is narrowed too. `pg_stat_activity.query` keeps only the
+ * first `track_activity_query_size` bytes of a statement, 1kB by default, so a
+ * `for update` at the end of a wide select is cut off, and a pattern looking
+ * for it answers false while the session waits (`docs/PROJECT-STATE.md`
+ * §6.114).
+ */
+export async function untilWaitingOnALock(
+  executor: { execute: (query: ReturnType<typeof sql>) => Promise<unknown> },
+  { rowLockIn }: { rowLockIn?: string } = {},
+): Promise<boolean> {
+  const matching = rowLockIn
+    ? sql`and wait_event in ('transactionid', 'tuple') and query ~* ${rowLockIn}`
+    : sql``;
   for (let i = 0; i < 100; i++) {
     const [{ waiting }] = (await executor.execute(
       sql`select count(*)::int as waiting from pg_stat_activity
-          where datname = current_database() and wait_event_type = 'Lock'`,
+          where datname = current_database() and wait_event_type = 'Lock' ${matching}`,
     )) as unknown as [{ waiting: number }];
-    if (waiting > 0) return;
+    if (waiting > 0) return true;
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
+  return false;
 }

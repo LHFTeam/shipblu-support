@@ -405,6 +405,29 @@ taken inside `db.transaction` (`lockThread` in
 pooler hands the backend to another client when each transaction ends, and a
 session lock would stay behind on it, held for somebody else.
 
+**A read that locks a row joins nothing through a column another writer can
+change.** Under READ COMMITTED a `FOR UPDATE` that waited on another writer
+re-checks the newest version of the row against the rows it joined before
+waiting. A writer that moved the ticket to another status fails an inner join
+to the old one, and the read answers no row: the ticket reads as gone. A
+changed requester null-extends a left join instead. An `IN (select …)` or an
+`EXISTS (select …)` ANDed into the `WHERE` is turned into a join whenever the
+planner can: the WhatsApp handover read the number's tickets through an `IN`,
+and left a ticket set pending while it waited with the previous owner (§6.114).
+So lock the row in one statement and read what it points at in the next, as
+`loadConversation` in `lib/sla/index.ts` does; or read a column of another
+table through a correlated scalar subquery (`statusCategoryOf`); or, filtering
+many rows, compare with a list read once per statement,
+`<> all(array(select …))`, which runs as an InitPlan (`movesWithNumber` in
+`lib/whatsapp/number-owner.ts`). Those two read in the locked statement's older
+snapshot and cannot see a row created during the wait, so the filter keeps such
+a row rather than dropping it, and a second read once the lock is held decides
+(`lockedStatusCategory`). A join on a column nothing changes is
+safe: the two credential reads in `lib/whatsapp/credentials.ts` join the
+account on the credential's own primary key, and the WABA id they read cannot
+change while a credential is stored (`storedCredentialEditRefusal`). In the SLA
+clocks the join cost every writer its work (`docs/PROJECT-STATE.md` §6.114).
+
 **postgres.js must never pipeline through the transaction pooler.** Once every
 connection is busy, postgres.js writes the next query onto a connection still
 waiting for its answer. Supavisor v2.9 hands that backend back at the first
@@ -1317,6 +1340,13 @@ Three rules hold, and each closes something a request could otherwise do:
   DKIM behind it. So the ticket carries an `unverified_submitter` event with the
   claimed address and the client address, and the console badges it. Do not
   "improve" this by writing a display name onto an existing contact.
+
+`submitForm` resolves a requester named by an address — that claimed one, or
+the one an agent types on the console's New form — only after every refusal it
+can answer, because resolving inserts a contact and its identity for an address
+nobody has written from. So a caller hands it the address, never a contact it
+resolved first: the New form once did, and every submission refused for a
+blank question left a customer record behind for a ticket never opened.
 
 **A form's defaults are read when the ticket is created, and never again.**
 `createTicket` writes the default priority and the default category inside the
@@ -2313,6 +2343,18 @@ regex pass over markup safe — it only ever runs on sanitize-html's own output,
 and it never touches a text node. Applying it to what is already stored is
 `normalise_kb_formatting`, which is idempotent and cuts a `kb_article_versions`
 row per article so the pass is undoable from the console.
+
+**An article's picture is ours, named by its route.** A picture held in the
+bucket is a `kb_images` row, and an article's `<img>` names it as
+`/api/kb/images/<id>` (`kbImageSrc` in `lib/kb/image-src.ts`). That is a path,
+not a URL, so it loads on every host an article is drawn on. It is never the
+object key, since the route signs a URL for the key when it serves the
+picture. `rehost_kb_images` copies
+Freshdesk's hot-linked images in (`plans/freshdesk-disconnection.md`, PR 1). It
+rewrites versions in place rather than cutting one, so no Restore can bring
+Freshdesk's address back, and its way back is `revert=true` from
+`kb_images.source_url`. Until the editor uploads (PR 4), a new screenshot is
+still hot-linked from wherever its author found it.
 
 **Who on the team may read an internal article.** `kb_visibility` answers
 whether a _customer_ may (`lib/kb/visibility.ts`); `min_role` on `kb_articles`

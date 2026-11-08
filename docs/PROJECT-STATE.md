@@ -5,13 +5,47 @@ it is designed; **this file is about the state of the work** — what is live,
 what is merely built, what is left, and the mistakes that have already cost us
 time. Read both. Do not re-derive settled decisions.
 
-Last updated: 2026-11-06, against `main` at `eb69c8c`. The figures in §1 and §5
+Last updated: 2026-11-07, against `main` at `db4268c`. The figures in §1 and §5
 were last re-measured as a whole against production on 2026-09-20, and a
 paragraph re-read since gives its own date; where a number here disagrees with
 an older paragraph elsewhere in the file, the older one has not been re-checked.
 
-**Production runs `eb69c8c`, which deployed itself on 2026-11-06, all six
-services by 20:04:51 UTC:** release #478, which carries #473 — "Take thread
+**Production runs `db4268c`, which deployed itself on 2026-11-07, all six
+services by 16:29:38 UTC:** release #484, which carries #479 — the worker and
+every `npm run job` wait at startup for their build's newest migration (§2) —
+#481, Jev's `category_agreed` (§5.1), and #483, the phone layout and the
+Tajawal font metrics. The four crons were live at 16:27:06–09, the worker at
+16:28:48 and the web service at 16:29:38 (read on Render). It adds no
+migration: production holds 61, as `main`'s journal does (`0000`–`0060`, read
+at about 21:20 UTC). So it is the first release production ran with the
+schema gate, and the gate had nothing to wait for. Its checks are not recorded
+here. Its way back is `f89d7c1` on each service, as a dashboard rollback,
+which turns that service's auto-deploy off (below); no migration lies between
+the two.
+
+**Before it, production ran `f89d7c1`, deployed itself on 2026-11-07 at
+about 10:33–10:36 UTC on all six:** release #482, which carries #480 — the
+knowledge base's old reader counters dropped, migrations `0059` and `0060`
+(`plans/kb-article-stats.md`) — #477, on a comment thread a passer-by's reply
+opened, the classifiers and the router follow the root's author (§5.1), and
+the widget's #474 and #476. It went out without the schema gate, which #479
+brought after it. Its checks are not recorded here. A code rollback from
+either release to anything older needs
+`db/runbooks/kb-article-counters-restore.sql` first, with auto-deploy off on
+every service: every build before `0060` names the three `kb_articles` columns
+it dropped, and fails on them. For `eb69c8c` that runbook is the whole way
+back (`plans/kb-article-stats.md`, PR 2's). A build older than #472
+(`62eae73`) — every way back the paragraphs below name but `31c8973`, and
+every one `plans/ticket-category-routing.md` names — keeps the counts on the
+article rows, so it needs PR 1's way back too: `kb_article_stats` copied onto
+the restored columns before the deploy, or the help centre's counts read 0, and
+what it counts meanwhile is lost when `0060` drops them again on the way
+forward. That plan says going back past its PR 1 "is not prepared here". The
+ways back below were written before `0060` and held until `f89d7c1`.
+
+**Before those, production ran `eb69c8c`, which deployed itself on
+2026-11-06, all six services by 20:04:51 UTC:** release #478, which carries
+#473 — "Take thread
 control" offered only where it can work, and Instagram's switch of default app
 stored in `meta_app_role_events` (§6.111). Nobody deployed it. Since 19:44 UTC
 that day every production service deploys once the checks on `main` pass (§2),
@@ -26,10 +60,11 @@ now wait for the migration at startup (§2). Checked at 20:13:
 `meta_app_role_events` holds the Page's switch and the Instagram account's,
 written by `012` at 20:04:01; since the deploy neither the web service nor the
 worker has logged an error, the web service has answered no 5xx and no job has
-failed. Its way back is a rollback from the Render dashboard of each service to
-the deploy before it: `31c8973` on the web service and the worker, `cfd10ca` on
-the four crons. A dashboard rollback turns that service's auto-deploy off
-(Render's rollback docs; one made through the API does not), so the next merge
+failed. Its way back, until `f89d7c1` applied `0060`, was a rollback from the
+Render dashboard of each service to the deploy before it: `31c8973` on the web
+service and the worker, `cfd10ca` on the four crons. A dashboard rollback
+turns that service's auto-deploy off (Render's rollback docs; one made through
+the API does not), so the next merge
 cannot undo it, and §2's brake then applies. The old code never names
 `meta_app_role_events`, so the table stays. A plain revert of #473 is not a way
 back: it deletes migration 0058, which `generated-files` refuses, so its run on
@@ -90,9 +125,10 @@ Chrome on Windows, on ticket #67335, the route answering in 1.5 s; Storage holds
 the object as `image/png` at the 11,733 bytes the row records, and its signed
 link answered 307 at once and again at 08:46, under the next window's signature.
 The players in Safari and on an iPhone are still proved by the tests and a local
-build alone. Its way back is `eaf07ab` on each service, in any order, with no
-migration to undo, at one cost: a file sent since stays on its ticket and in the
-console's thread, and one sent without words is drawn under its stand-in text
+build alone. Its way back, until `f89d7c1`, was `eaf07ab` on each service, in
+any order, with no migration to undo, at one cost: a file sent since stays on
+its ticket and in the console's thread, and one sent without words is drawn
+under its stand-in text
 (`[image]`, `[document: …]`), which that release's thread does not hide; the
 visitor's own widget loses the file — one sent without words shows its stand-in
 where the file was, and one sent with words shows the words alone.
@@ -122,7 +158,8 @@ and the crons ran clean on the new code from their first runs (`sla_sweep`,
 it, at 00:00 UTC on 2026-10-31, was clean: `cleanup`, then `rollup_metrics`
 rebuilding 2026-10-28 to 2026-10-30, the 30th with the first two rows by
 category; and no service logged an error from 22:05 to 18:04 UTC on 2026-10-31.
-Its way back is `83f1889` on each service, in any order, at one cost: that
+Its way back, until `f89d7c1`, was `83f1889` on each service, in any order,
+at one cost: that
 release's field editor posts no Active switch and `saveField` reads a missing
 one as on, so a field deactivated since comes back on at its next save there,
 its forms ask it again, and the condition builder draws a rule naming it as the
@@ -144,9 +181,9 @@ after 11:56 had all completed, none overdue, and the only dead jobs were the two
 from before the deploy (2026-09-21 and 2026-10-29); and the first runs on the
 new code were ok (`sla_sweep`, `presence_sweep` and `assign_sweep` at 12:05,
 12:11 and 12:15; `run_time_automations` at 12:02 and 12:16, one rule over 555
-tickets, nothing changed). Its way back is `69a22b6` on each service, in any
-order. #444's handbook wording reaches the knowledge base only by a console edit
-or `seed_console_handbook overwrite=true` (§5.5).
+tickets, nothing changed). Its way back, until `f89d7c1`, was `69a22b6` on
+each service, in any order. #444's handbook wording reaches the knowledge
+base only by a console edit or `seed_console_handbook overwrite=true` (§5.5).
 
 **The Instagram Login token expired at 15:25:38 UTC on 2026-10-29.** Every
 `graph.instagram.com` call has failed since with code 190, "Session has
@@ -188,13 +225,20 @@ ticket.
 2026-10-29**, switched by the user on `/admin/categories` after twelve and a
 half hours of Shadow and before any ticket carried a person's label, so 4.2's
 criteria were not read. By 09:40 UTC on 2026-10-30 it had filed two tickets,
-both Facebook and both `sales`. Nothing has routed yet: Web Chat has been in
+both Facebook and both `sales`. Read at about 21:20 UTC on 2026-11-07, its
+settings are unchanged since the switch, 36 tickets carry a category (`sales`
+20, `customer_support` 14, `merchant_support` 1, `courier_jobs` 1), every one
+of the 36 `category_changed` events is Jev's, and `ai_category_runs` holds 195
+`live` answers under `apply`, the last at 20:28 UTC; no person has labelled a
+ticket or moved a filing. Nothing has routed yet: Web Chat has been in
 `category` mode since 14:45 UTC on 2026-10-30, set from the console, the first
 channel to route, and every other channel is on `default_group`; the widget has
-opened no ticket since 2026-10-20, so at 18:04 UTC on 2026-10-31
-`routing_decisions` held no row (the plan's item 10 has the staffing a routed
-chat lands on). The backlog (`backfill_category_ai mode=apply`) waits for the
-user's go-ahead. The plan's status section has the reads (4.2's Apply).
+opened no ticket since 14:15 UTC on 2026-10-20, so at 21:20 UTC on 2026-11-07
+`routing_decisions` held no row and no `settle_routing` job existed (the plan's
+item 10 has the staffing a routed chat lands on). The backlog
+(`backfill_category_ai mode=apply`) waits for the user's go-ahead; the week of
+`apply` it was to follow ended on 2026-11-05. The plan's status section has the
+reads (4.2's Apply).
 
 **The first Stage 6 nightly read clean** (00:00 UTC on 2026-10-30): it rebuilt
 2026-10-27 to 2026-10-29 with categories, so `rollup_days` stamps
@@ -204,7 +248,10 @@ Jev's first filed ticket opened at 00:31 on the 30th in Cairo, the night the
 clocks went back. The second nightly, at 00:00 UTC on 2026-10-31, wrote the
 first and read clean: the 30th's `sales` row counts 2 tickets created and its
 `customer_support` row 1, exactly the tickets created that Cairo day carrying
-each, with still no duplicate slice and no row naming two dimensions.
+each, with still no duplicate slice and no row naming two dimensions. Read on
+2026-11-07, `rollup_days` for 2026-11-04 to 2026-11-06 carry
+`categories_computed_at`, and `metrics_daily` holds 17 rows carrying a
+category; the two slice checks were not re-run.
 
 The release before that, `69a22b6`, was deployed by hand on 2026-10-29, all six
 services by 17:47:16 UTC: release #442, which carries #440: every automated reply on a
@@ -218,7 +265,8 @@ checks read clean: no service logged a warning or an error from 17:42 to 18:10,
 web served no 5xx, the 54 jobs created after 17:42 had all completed by 17:48,
 and the first runs on the new code were ok (`sla_sweep`, `presence_sweep` and
 `assign_sweep` at 17:51; `run_time_automations` at 18:01, one rule over 553
-tickets, nothing changed). Its way back is `b63f96e` on each service.
+tickets, nothing changed). Its way back, until `f89d7c1`, was `b63f96e` on
+each service.
 
 The release before that, `b63f96e`, was deployed by hand from another session on
 2026-10-29, all six services by 17:00:33 UTC: release #441, which carries #436,
@@ -232,7 +280,8 @@ services by 14:27:51 UTC: release #439, which carries Stage 6's screenshot pass
 (#438): what the reports, the dashboard, the channels page's readiness panel
 and the classifier report say is made true of their code, every console table
 shows when it scrolls sideways, and the column charts' labels are readable on
-a phone. Code and copy only, so its way back is `9b4bc5b` on each service.
+a phone. Code and copy only, so its way back, until `f89d7c1`, was `9b4bc5b`
+on each service.
 
 Before it, `9b4bc5b` was deployed by hand on 2026-10-29, all six
 services by 11:29:28 UTC: release #437, which carries Stage 6 (#434) of
@@ -256,8 +305,9 @@ The release before that, `1470902`, was deployed by hand on 2026-10-29, all six
 services by 06:35:36 UTC: release #435, which carries Stage 5.1 (#432) of
 `plans/ticket-category-routing.md`, routing by category, shipped off. Web went
 first, and its preDeploy applied `0051_routing`; then the worker and the four
-crons. Every channel reads `default_group`, so nothing is held or routed until
-an admin moves one _and_ the classifier is in `apply` (§5.1). Four things
+crons. Every channel read `default_group` then, so nothing was held or routed
+until an admin moved one _and_ the classifier was in `apply` (§5.1); Web Chat
+has been in `category` mode since 2026-10-30. Four things
 changed on every ticket at once (§5.1): the out-of-hours acknowledgement's
 guards, assignment's locks, what it re-reads under them and its checked update,
 a console group move running the rules before it assigns, and the transactions
@@ -378,11 +428,13 @@ is written now, by the console's lightweight presence stream and by nothing
 else. Conversation invalidations use a separate inbox-only stream, so ticket
 traffic cannot make presence expensive. Every group ships on `manual`, so none
 of it changes behaviour until somebody opts a team in. Stage 5.1 of
-`plans/ticket-category-routing.md`, deployed on 2026-10-29 and routing nothing
-until an admin moves a channel while the classifier is in `apply`, gives a
-fresh ticket one more way to find its group: its category, on a channel an admin has moved
-off `default_group`, with the ticket held unassigned for a few minutes while
-the classifier files it (README, "Ticket assignment"; §5.1 below).
+`plans/ticket-category-routing.md`, deployed on 2026-10-29, gives a fresh
+ticket one more way to find its group: its category, on a channel an admin has
+moved off `default_group`, with the ticket held unassigned for a few minutes
+while the classifier files it (README, "Ticket assignment"; §5.1 below). Web
+Chat has been in `category` mode since 2026-10-30, with the classifier in
+`apply`, and every other channel is on `default_group`; no ticket has routed
+yet, because no web chat ticket has opened since 2026-10-20 (read 2026-11-07).
 
 And now **agent productivity reporting**, at `/reports/agents` behind a new
 `report.agents` permission. It answers punctuality, availability, speed and
@@ -667,6 +719,8 @@ carries an entire message timeline. Two articles have no body text at all — th
 Arabic and English packaging guides are images and nothing else — and the panel
 says so rather than showing an empty box. Those images are still hot-linked from
 `s3.amazonaws.com/cdn.freshdesk.com` and will die with the Freshdesk account.
+_Still true on 2026-11-07, and of every image in the knowledge base — 214 in 61
+articles. `plans/freshdesk-disconnection.md` is the plan for copying them._
 
 And now **the widget knows who it is talking to, and opens with answers rather
 than a blank box.** Both were found by the same question: what does a merchant
@@ -818,7 +872,12 @@ reach, filed under bare numeric ids and none of them answered by anybody.
 — "Support Mailbox", "Facebook Page", "Instagram", "Web Chat", "WhatsApp
 Support" — every one active and routed to `Support`; `whatsapp_bot` alone carries
 no default group, which is right. There is still no `portal` row, so a ticket
-opened from the customer portal lands with no default group.
+opened from the customer portal lands with no default group. _Read 2026-11-07:_
+nine rows, all active, and none defaults to `Support` since 2026-10-30. The
+mailbox, Web Chat, the Facebook Page, Instagram, WhatsApp Support and ShipBlu
+Admin default to Customer Care, the two coexistence numbers (Magdy Mohamed and
+Nayera Mohamed) to Merchant Care, and the bot to no group; still no `portal`
+row, and no comment row. Seven web chat tickets exist in all.
 
 `sla_policies` holds **4** rows and `automation_rules` **1** ("Close resolved
 tickets after 3 days", §6.30), so both crons finally have work. `locations` holds
@@ -1455,6 +1514,21 @@ is code:
   the Meta inboxes are answered here or not at all, so the channel rows, the
   agents and the groups below need to be in place first rather than after.
 
+- **The knowledge base still depends on Freshdesk for every image, and closing
+  the account has a checklist.** Audited 2026-11-07: no article links to
+  Freshworks, but all 214 images in 61 of the 112 articles load from
+  Freshdesk's attachment bucket, and so do the same 214 in the version
+  history. 18 versions still hold the 29 old Freshdesk links, which one Restore
+  or one re-import puts back. Freshdesk's old article URLs 404 here through the
+  proxy (§5.2). And the phone's quick replies, the merchant dashboard and its
+  Freshchat widget still send customers to the Freshdesk copy.
+  `plans/freshdesk-disconnection.md` has the measurements, the follow-up pull
+  requests and the order: the images are copied before the account closes,
+  because afterwards there is nothing to copy them from, and the redirects work
+  before `support.shipblu.com` moves. PR 1, the copy, is built:
+  `rehost_kb_images` and `/api/kb/images/<id>`. Until it is deployed and run
+  (the plan says how), every image still loads from Freshdesk.
+
 - **Instagram through Unified Login — the next configuration task, and none of
   it is a deploy.** The direct connection's token expired on 2026-10-29 (the
   header), so Instagram answers nothing until a credential is in place, and
@@ -1487,7 +1561,9 @@ is code:
   "WhatsApp Support" — active and routed to `Support`, and `whatsapp_bot` is
   still the observed bot number the team does not answer (§1). **A `portal` row
   is the one still missing**, so a ticket opened from the customer portal lands
-  with no default group and nothing routes it.
+  with no default group and nothing routes it. Since 2026-10-30 the rows that
+  defaulted to `Support` default to Customer Care, and the coexistence numbers
+  to Merchant Care; still no `portal` row (read 2026-11-07).
   A WhatsApp row now also needs a **business account** to point at — Settings →
   Channels, "WhatsApp business accounts". Nothing has to be done by hand for the
   existing setup: the hourly template sync turns `WHATSAPP_WABA_ID` into the
@@ -1576,16 +1652,31 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
   groups; on 2026-10-29 that was all five of them, and Customer Care, Merchant
   Care and Inbound Sales Team had nobody. By 13:00 UTC on 2026-10-30 Customer
   Care had three members and Merchant Care two, none of them taking tickets,
-  and Inbound Sales Team still none (the plan's Next, item 10).
+  and Inbound Sales Team still none (the plan's Next, item 10). _Read at 23:20
+  Cairo on Saturday 2026-11-07, Egypt's weekend:_ 17 active agents, six of
+  them in no group. Customer Care has three members, none accepting tickets at
+  that moment; Merchant Care two, none accepting; Inbound Sales Team six, two
+  accepting; Support none, since 2026-10-30. All three route groups are
+  `round_robin`. Both reads of who accepts fell on the weekend (13:00 UTC on
+  2026-10-30 was a Friday afternoon in Cairo), so neither says who accepts in
+  the working week; the plan's Next, item 11, re-reads it on a weekday first.
 - ~~**Assignment is configured but off.**~~ **Switched on for `Support` on
-  2026-09-02**, round robin; 161 conversations now carry an assignee. **The
-  roster is still 3 of 11 agents**, though, which is the thing to fix next here —
-  eight of the people who now have accounts are in no group, and auto-assignment
-  only ever considers members of the ticket's group. `Customer Care` and
-  `Merchant Care` had empty rosters and no channel pointing at them when this
-  was written (2026-09); on 2026-10-30 they had three and two members, none
-  accepting, and both coexistence numbers default to Merchant Care (the plan's
-  Next, item 10).
+  2026-09-02**, round robin; 161 conversations then carried an assignee. **The
+  roster was still 3 of 11 agents** in 2026-09, though, which was the thing to
+  fix next here — eight of the people who had accounts were in no group, and
+  auto-assignment only ever considers members of the ticket's group.
+  `Customer Care` and `Merchant Care` had empty rosters and no channel pointing
+  at them when this was written (2026-09); on 2026-10-30 they had three and
+  two members, none accepting, and both coexistence numbers default to
+  Merchant Care (the plan's Next, item 10). Read at 23:20 Cairo on Saturday
+  2026-11-07, Egypt's weekend, still none accepting in either at that moment;
+  Customer Care holds 241 open or pending tickets, 206 of them unassigned, and
+  Merchant Care 122, one unassigned. In the seven days to then, 54 automatic
+  `assigned` events were written — 34 by `assign_sweep`, which picks only
+  members who accept, and 20 to a number's owner — by Cairo day 6, 3, 16, 18
+  and 9 from Sunday 1 to Thursday 5 November, none on Friday 6 and 2 on
+  Saturday 7: the shape of a working week. Which groups the sweep's 34 went to
+  was not split out.
 
   Two things were in the way and are worth knowing about, because both made the
   feature look broken rather than unconfigured:
@@ -1593,7 +1684,8 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
   - **`facebook`, `instagram` and `whatsapp` had no `channels` rows**, so every
     ticket on those channels arrived with `group_id` null and could never be
     assigned — 71 of them had accumulated. Rows now exist, all defaulting to
-    `Support`, and the 71 were backfilled. The WhatsApp row carries
+    `Support` until 2026-10-30 and to Customer Care since, and the 71 were
+    backfilled. The WhatsApp row carries
     `phoneNumberId` `838961722630554`, the support line; it must **never** carry
     the bot's `128318316834446`, which would route 13,693 bot transcripts into
     the team's queue. `resolveWhatsAppChannel` matches the number exactly and
@@ -1699,7 +1791,9 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
      to "Nobody — team number": accountability clears, and the tickets stay with
      her until somebody reassigns them.
 
-  5. **The SLA policies cannot match on group, and that is the team's call to
+  5. _Done 2026-10-30, at the user's go-ahead (the plan's 0.2 reorder): the
+     group conditions name the groups' uuids. Not re-read since._ **The SLA
+     policies cannot match on group, and that is the team's call to
      fix.** All four compare `group.id` with a group's _name_ — "Customer
      Care", "Merchant Care" — which no ticket's group id ever equals. The three
      with `all` conditions therefore match nothing, and the default, "Live
@@ -1860,6 +1954,18 @@ https://merchant-web-production.onrender.com`. The new merchant app's
   it was scheduled has not been observed. Nothing replays a refused row by
   itself — `process_webhook` skips unverified rows — so a delivery that exhausts
   its retries needs replaying by hand.
+
+  _**No longer true on 2026-11-07, on the web service.** Every absolute URL it
+  publishes is on `shipblu-support.onrender.com` now: `/widget/embed.js`'s
+  `BASE`, all 114 sitemap `<loc>`, `robots.txt`, and every canonical, hreflang
+  and JSON-LD URL. The console is still served on that host too, so the
+  variable is unset or names the Render host. That was read from output; nobody
+  recorded the change. The worker's value is unverified, and the worker builds
+  the CSAT and portal-email links. It is dormant while CSAT is off, so check it
+  before CSAT is switched on. Set it to `support.shipblu.com` again only once
+  that name answers from this app, on both services together
+  (`plans/freshdesk-disconnection.md`). What follows is the record of
+  August and September._
 
   **`KB_PUBLIC_HOST` was on this list and should not have been. It is set, to
   `support.shipblu.com`, and that domain still serves Freshdesk.** Measured
@@ -2026,21 +2132,35 @@ https://merchant-web-production.onrender.com`. The new merchant app's
   here sets `first_responded_at`, so only the five-message cap stops it; on the
   coexistence number the phone's first reply does. Rollback is the switch,
   effective within thirty seconds per instance; nothing it wrote needs undoing
-  for that, and a category it set is changed like any other.
+  for that, and a category it set is changed like any other. Read at about
+  21:20 UTC on 2026-11-07: 195 `live` answers under `apply`, the last at 20:28
+  UTC, and 36 tickets filed, every `category_changed` event Jev's; no person
+  has labelled or moved a filing, so `/reports/category-ai`'s Filed by Jev has
+  nothing to grade it by yet. Two changes since are live on all six: #477
+  (`f89d7c1`, about 10:36 UTC on 2026-11-07), after which a run on a message
+  by somebody other than the requester never judges the opening, never
+  settles the ticket and never counts toward the cap, and the backfill's
+  `apply` mode files only a requester's answer; and #481 (`db4268c`, 16:29:38
+  UTC that day), after which a confident answer naming the category the
+  ticket already carries writes a `category_agreed` event, which the router
+  reads and Filed by Jev counts as Jev's filing.
 
-- **Routing by category is deployed, and routes nothing** (Stage 5.1 of
-  `plans/ticket-category-routing.md`, #432, live on all six services on
-  `1470902` since 06:35:36 UTC on 2026-10-29; `lib/routing/`). A channel's mode on
+- **Routing by category is deployed; Web Chat routes, and no ticket has routed
+  yet** (Stage 5.1 of `plans/ticket-category-routing.md`, #432, first live on
+  all six services on `1470902` by 06:35:36 UTC on 2026-10-29, and amended by
+  #477 and #481, on all six with `db4268c` since 16:29:38 UTC on 2026-11-07;
+  `lib/routing/`). A channel's mode on
   `/admin/channels` sends a fresh ticket to the group its category names,
   holding it unassigned, with its out-of-hours reply kept back, for the routing
-  window (five minutes by default) while the classifier files it. It routes
-  nothing yet: every channel reads `default_group` (read 07:59 UTC on
-  2026-10-29), and a ticket is held, or
-  a `settle_routing` job queued, only on a channel an admin has moved to a
-  category mode _while the classifier is in `apply`_. The classifier has been
-  in `apply` since 18:37 UTC on 2026-10-29, and Web Chat has been in
+  window (five minutes by default) while the classifier files it. A ticket is
+  held, or a `settle_routing` job queued, only on a channel an admin has moved
+  to a category mode _while the classifier is in `apply`_. The classifier has
+  been in `apply` since 18:37 UTC on 2026-10-29, and Web Chat has been in
   `category` mode since 14:45 UTC on 2026-10-30, the first channel to route;
-  every other channel is on `default_group` (read 22:09 UTC). Since 14:10 UTC
+  every other channel is on `default_group`. No web chat ticket has opened
+  since 14:15 UTC on 2026-10-20, and a customer writing again on an existing
+  one never routes, so at about 21:20 UTC on 2026-11-07 there was no
+  `routing_decisions` row and no `settle_routing` job. Since 14:10 UTC
   on 2026-10-30 three
   categories have route groups (the plan's Q5: sales to Inbound Sales Team,
   customer support to Customer Care, merchant support to Merchant Care), so
@@ -2048,7 +2168,9 @@ https://merchant-web-production.onrender.com`. The new merchant app's
   route group is not its group, unless it is held, on the bot, on a
   coexistence number or on an owned number whose owner answers for it
   (`handToTarget`) — three tickets at the write, all in Support, the only
-  three carrying a category, to groups with nobody accepting. Four
+  three carrying a category, to groups with nobody accepting. Read
+  2026-11-07, 36 tickets carry a category and Inbound Sales Team has two
+  members accepting; how many tickets it is offered on was not re-read. Four
   things changed on every ticket at the deploy:
   - **Assignment** locks the ticket (`FOR NO KEY UPDATE`) before the group,
     re-reads there its assignee, group and hold and whether the ticket is still
@@ -2087,16 +2209,22 @@ https://merchant-web-production.onrender.com`. The new merchant app's
   so every service ran it before any channel could leave `default_group`. Turning it on is the plan's Stage 5.2,
   channel by channel through `category_shadow`, and it needs what 5.2 lists: the
   plan's 0.2 SLA reorder, 0.6's staffing (the plan's Next, item 10, has the
-  roster as read on 2026-10-30; the roster paragraph above is older), route
+  roster as read on 2026-11-07), route
   groups on the categories, and the classifier in `apply`. The reorder and the
   route groups were written at the user's go-ahead on 2026-10-30, and the
   classifier has been in `apply` since the day before. Later that day, also at
   the user's go-ahead, every channel that defaulted to Support was moved to
   Customer Care, with Support's 183 open unassigned tickets, once Support had
-  no members; staffing and the comment rows are what is left (the plan's Next,
-  item 10). The readiness panel
-  on `/admin/channels` names what would leave routed tickets unassigned, and the
-  active rules that would decide before the router. Production has two (read
+  no members. Web Chat went first, straight to `category` with no shadow week.
+  What is left, read 2026-11-07: members who accept tickets in Customer Care
+  and Merchant Care (none in either at a Saturday-night read, so a weekday
+  re-read comes first; Inbound Sales Team had two), the sweep shown assigning
+  within a day (34 sweep assignments in the week; 52 of the 54 automatic ones
+  fell Sunday to Thursday, none on Friday 6 November), the comment rows, and
+  then 5.2's channels in order (the plan's Next, items 10 to 14). The
+  readiness panel on `/admin/channels` names what would leave routed tickets
+  unassigned, and the active rules that would decide before the router.
+  Production has two (read
   10:06 UTC on 2026-10-28): "Route Account Web Chat to Merchant Care" and "Route
   Public Web Chat to Customer Care", `on_create` `assign_group` on
   `channel eq webchat`, one for a requester with an email and one without.
@@ -2118,11 +2246,12 @@ https://merchant-web-production.onrender.com`. The new merchant app's
 
   **Before the Facebook Page and Instagram rows leave `default_group`**, read
   this: no `facebook_comment` or `instagram_comment` row exists, so comment
-  tickets route by those two rows (read 2026-11-06: both `default_group`, Web
+  tickets route by those two rows (read 2026-11-07: both `default_group`, Web
   Chat the only `category` row, 0 `routing_decisions`). A passer-by's reply
   stored before the customer's comment opens the ticket under the passer-by
-  until the comment arrives and takes it (`adoptRootAuthor`, #417). Until the
-  change that added `categoryStanding` (2026-11-06, `lib/routing/decide.ts`)
+  until the comment arrives and takes it (`adoptRootAuthor`, #417). Until #477,
+  which added `categoryStanding` (`lib/routing/decide.ts`; live in `f89d7c1`
+  since about 10:36 UTC on 2026-11-07),
   the router decided within seconds on Jev's reading of the reply, and the
   classifiers kept counting the replier's runs; now the router waits for the
   root until the window's end and sets a category read off a non-requester
@@ -2131,15 +2260,17 @@ https://merchant-web-production.onrender.com`. The new merchant app's
   stores — is assigned up to the window's length later than a ticket its root
   opened; 1 of 63 comment tickets was opened by a reply (read 2026-11-06), and
   0 by a reply whose root then arrived (0 `requester_changed` events ever).
-  **And not before #481 is live on the web service and the worker alike.**
+  **And not before #481 is live on the web service and the worker alike** —
+  which it is, in `db4268c`: the worker since 16:28:48 and the web service
+  since 16:29:38 UTC on 2026-11-07.
   Since #481 the router reads whose words a category stands on off Jev's
   events alone, and the customer's answer agreeing with the reply's reading
   is recorded only as a `category_agreed`, which the worker writes. Before it
-  runs there, such an answer leaves a run and no event, the router reads the
-  category as the passer-by's, and the window's end sets it aside. Nothing
+  ran there, such an answer left a run and no event, the router read the
+  category as the passer-by's, and the window's end set it aside. Nothing
   backfills those, and nothing needs to while no comment ticket routes: read
-  2026-11-07, 0 answers had ever agreed, and 0 `category_agreed` events
-  existed.
+  on 2026-11-07, before the deploy, 0 answers had ever agreed, and 0
+  `category_agreed` events existed; neither count has been re-read since.
 
 ### 5.2 Live-provider verification
 
@@ -2199,6 +2330,19 @@ shipblu.com` still serves Freshdesk, so each one took a reader out of this
   help centre and into the old portal. They are now `/{locale}/a/{slug}`
   (§6.50). The redirects still matter for inbound traffic; nothing we publish
   depends on them any more.
+
+  **Followed on 2026-11-07, and they fail through the proxy.** Every legacy
+  shape `proxy.ts` rewrites to `/help/legacy` answers 404 on production:
+  `/support/solutions/articles/<id>` with or without a title suffix or a locale
+  prefix, `/a/solutions/articles/<id>`, `/solutions/articles/<id>` and
+  `/support/solutions/folders/<id>`. The same route called directly
+  (`/help/legacy?path=%2Fsupport%2Fsolutions%2Farticles%2F154000189336`) answers
+  the right 301. So the route does not see the `path` the rewrite adds. That
+  is observed, not yet diagnosed. It has to be fixed before
+  `support.shipblu.com` moves here: 30 WhatsApp messages sent from the
+  Business app since 2026-10-07, and 16 help links in the merchant dashboard,
+  name these URLs (`plans/freshdesk-disconnection.md`, PR 3).
+
 - ~~**A WhatsApp template send outside the 24-hour window**~~ — moot: the
   console no longer replies on WhatsApp at all, template or free text
   (`consoleReplyReason` in `lib/tickets/channel-policy.ts`), and nothing else
@@ -2990,6 +3134,8 @@ message bodies — the same reasoning as the deliberately tiny `pg_notify` paylo
   `/widget/embed.js` showed the real value in a second. Article links in the
   composer and the editor now come from `requestBaseUrl()` and follow the host
   the agent is on. §5.1 carries what is still broken for everything else.
+  _(By 2026-11-07 the web service no longer publishes `support.shipblu.com`
+  either; §5.1 has the measurement.)_
 - ~~`logged_in` and `selected_companies` knowledge base articles are still not
   served.~~ Both are evaluated now. `publiclyVisible()` is gone; every query in
   `lib/kb/queries.ts` takes a `KbViewer`, resolved from the portal session by
@@ -8113,6 +8259,92 @@ dryRun=true`, then without, gives those two theirs back from their
       0.5px at 15px, which nobody has seen. Its files are as shipped and pass.
       Not yet seen on an iPhone with the patched files: the evidence is
       WebKit's source, the metrics and the simulation.
+
+114.  **Every SLA clock writer dropped its work when the ticket's status
+      changed while it waited for the lock.** _2026-11-07, found by reading
+      `lib/sla/` for the shape #429 fixed in the category classifier, where
+      it read a ticket as gone and sent the job to `dead`._ Under READ
+      COMMITTED a `SELECT … FOR UPDATE OF conversations` that waits on another
+      writer re-checks the newest version of the row it waited for against
+      the rows it joined before waiting (Postgres's EvalPlanQual).
+      `loadConversation` in `lib/sla/index.ts`, which every clock writer reads
+      the ticket through under `withTicketLocked`, joined the ticket to
+      `ticket_statuses`, and left-joined `contacts` and `ticket_forms`, in that
+      locked statement. A writer that changed `status_id` meanwhile — an
+      agent's reply that resolves the ticket or sets it pending, a
+      `set_status` rule, a merge — failed the join to the old status, the read
+      answered no row, and `withTicketLocked` ran nothing. Whichever was owed
+      was dropped, with no line in the log: a new ticket's first clocks, a
+      re-time for its priority or group, the policy chosen again before the
+      first response, a pause's resume, the reply clock. A writer that changed
+      the requester — a contact merge, `adoptRootAuthor` on a comment thread —
+      kept the row but null-extended the join to `contacts`, so a policy keyed
+      on `requester.email` was chosen against no address at all. The joined
+      read has been in `main` since #344 (`f7eeff0`, 2026-10-09), which put
+      every clock writer under the row lock. How often it lost a write in
+      production has not been measured. A lost writer logs nothing, and what
+      it leaves behind looks like a writer with nothing to do: a ticket with
+      no policy, or a priority change with no re-time after it.
+
+      `loadConversation` now locks the row in one statement and reads it in
+      the next. The second statement takes its snapshot once the lock is held,
+      so it reads the ticket as the writer it waited on left it, joined to
+      what the ticket names now. The lock is `FOR NO KEY UPDATE`, where the
+      joined read took `FOR UPDATE`: every clock writer writes only columns
+      no foreign key points at, and `FOR UPDATE` made every row inserted for
+      the ticket — a reaction, an event — wait for the re-time to commit
+      (§6.106). A customer's message still waits, at its ingest's update of
+      the ticket, which is a writer of the row like any other: what the
+      weaker lock changes is the insert, not the ingest. #429's shape, the status through a correlated
+      subquery (`statusCategoryOf`), fixes the status and not the requester,
+      and needs `lockedStatusCategory`'s second read for a status created
+      during the wait, since the subquery runs in the locked statement's older
+      snapshot. `lib/sla/locked-read.db.test.ts` holds each clock writer to it.
+      Every case fails against the joined read, and the requester and
+      new-status cases fail against the subquery shape. The lesson, now under
+      **Database** in AGENTS.md: a row-locking read joins nothing through a
+      column another writer can change, and an `IN (select …)` or an
+      `EXISTS (select …)` ANDed into the `WHERE` is turned into a join
+      whenever the planner can (`EXPLAIN` shows a join to the other table,
+      hash or nested loop, where a `SubPlan` or `InitPlan` would be safe).
+      Lock, then read.
+
+      The WhatsApp handover had the `IN` shape (#490). `movesWithNumber()`
+      filtered a number's tickets with
+      `status_id IN (select id from ticket_statuses …)` under the handover's
+      row lock. An agent setting one of them pending takes no lock on the
+      number, since only a ticket leaving resolved or closed asks who owns
+      it, so the handover could wait on that write, re-check the ticket
+      against the Open it had read, and leave it out. It then stayed
+      accountable to the previous owner for good: nothing realigns an open
+      ticket, and handing the number to the same person again changes
+      nothing. `movesWithNumber()` now asks whether the status is not one
+      that stays behind, against a list read once per statement
+      (`status_id <> all(array(select …))`, an `InitPlan`), which the
+      re-check compares with the ticket's new status as with any column. It
+      asks the negative question because the list is read in the statement's
+      snapshot: a status created during the wait is in no list, so the
+      ticket is kept, and the handover reads that status again once the lock
+      is held (`lockedStatusCategory`), moving the ticket only if it is open
+      or pending. A correlated subquery per ticket did the same and cost
+      about fifteen times as much on a number with a long history, which the
+      admin page counts for every number on each render. The tickets are
+      locked `FOR NO KEY UPDATE`, for the reason the SLA lock is above.
+      `lib/whatsapp/number-owner.db.test.ts` holds it: a ticket set pending,
+      one moved to a pending status and one to a resolved status created
+      during the wait, and a row inserted for a ticket while the handover
+      holds it.
+
+      A second, smaller one came from the test. Its precondition, that the
+      clock writer is queued in a locked read rather than on its `UPDATE`,
+      first matched `for update` in `pg_stat_activity.query`. That column
+      keeps only the first `track_activity_query_size` bytes, 1kB by default,
+      and the old read of the whole ticket row with its joins is longer than
+      that. So the check matched only the short lock statement, and failed
+      for the wrong reason against the read it was meant to catch. It now
+      matches a `select` at the start of the statement, waiting on a row
+      (`wait_event` `transactionid` or `tuple`): a plain read never waits on
+      a row, though it can wait on a table behind a TRUNCATE or other DDL.
 
 ### Tooling notes for this environment
 
