@@ -179,11 +179,12 @@ function readAnswers(
  * `unverified_submitter`: the agent typed the address of somebody they were
  * speaking to, and the ticket already says which agent opened it.
  *
- * Called only after every other refusal `submitForm` can answer, and each
- * branch that names the customer by an address refuses one that is not an
- * address before it resolves anything: both insert a contact and its identity
- * for an address nobody has written from, and a refusal after that leaves a
- * customer record behind for a ticket never opened.
+ * Called only after every other refusal `submitForm` can answer, and it
+ * refuses an address that is not one before it resolves anything: resolving
+ * inserts a contact and its identity for an address nobody has written from,
+ * and a refusal after that leaves a customer record behind for a ticket never
+ * opened. One path for both requesters named by an address, so that order
+ * cannot hold for one and not the other.
  */
 async function resolveRequester(
   requester: Requester,
@@ -193,29 +194,24 @@ async function resolveRequester(
     return { contactId: requester.contactId, unverifiedEmail: null };
   }
 
-  if (requester.kind === 'agent') {
-    const email = normaliseEmail(requester.email);
-    if (!looksLikeEmail(email)) return null;
+  const claimed =
+    requester.kind === 'agent'
+      ? { address: requester.email, name: requester.name }
+      : { address: system.requester_email ?? '', name: system.requester_name ?? null };
 
-    const resolved = await resolveContact({
-      channel: 'email',
-      identifier: email,
-      displayName: requester.name,
-    });
-
-    return { contactId: resolved.contactId, unverifiedEmail: null };
-  }
-
-  const email = normaliseEmail(system.requester_email ?? '');
-  if (!email || !looksLikeEmail(email)) return null;
+  const email = normaliseEmail(claimed.address);
+  if (!looksLikeEmail(email)) return null;
 
   const resolved = await resolveContact({
     channel: 'email',
     identifier: email,
-    displayName: system.requester_name ?? null,
+    displayName: claimed.name,
   });
 
-  return { contactId: resolved.contactId, unverifiedEmail: email };
+  return {
+    contactId: resolved.contactId,
+    unverifiedEmail: requester.kind === 'anonymous' ? email : null,
+  };
 }
 
 export async function submitForm(input: {

@@ -256,10 +256,10 @@ describe('createTicketFromForm refusing the chooser', () => {
 });
 
 describe('createTicketFromForm refusing the form’s answers', () => {
-  // `submitForm`'s own refusals — `missing`, `invalid`, `files` — and the
-  // address, which the action refuses first and `submitForm` again. Before the
-  // contact was resolved inside `submitForm`, each of the first three left a
-  // contact and its identity behind, one per address an agent tried.
+  // `submitForm`'s own refusals — `missing`, `invalid`, `files` and the
+  // address, which only `submitForm` checks. Before the contact was resolved
+  // inside `submitForm`, each of the first three left a contact and its
+  // identity behind, one per address an agent tried.
   it.each<[string, (data: FormData) => void, string]>([
     [
       'a required question left blank',

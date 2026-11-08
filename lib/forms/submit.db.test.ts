@@ -299,8 +299,8 @@ describe('submitForm: the contact a ticket is filed under', () => {
   // Both requesters named by an address resolve it by inserting a contact and
   // its identity when nobody owns it yet, so a refusal after that would leave a
   // customer record behind for a ticket never opened. The address itself is
-  // refused inside `resolveRequester`, before `resolveContact`; the console
-  // action refuses a bad one before calling, so only this reaches the agent's.
+  // refused inside `resolveRequester`, before `resolveContact`, on one path for
+  // both.
   it.each<[string, () => Promise<Requester>, (values: FormData) => void, SubmitResult]>([
     ['an anonymous visitor a question left blank', helpCentre.anonymous, blank, missing],
     ['an agent a question left blank', () => byAgent(), blank, missing],

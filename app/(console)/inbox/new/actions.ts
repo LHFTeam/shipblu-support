@@ -2,7 +2,6 @@
 
 import { redirect } from 'next/navigation';
 import { requirePermission } from '@/lib/auth/guard';
-import { looksLikeEmail, normaliseEmail } from '@/lib/auth/normalise';
 import { can } from '@/lib/auth/permissions';
 import { consoleCategoryChoice } from '@/lib/forms/category';
 import { getFormBySlug } from '@/lib/forms/queries';
@@ -35,9 +34,6 @@ export async function createTicketFromForm(
     return { error: 'That form is no longer available' };
   }
 
-  const email = normaliseEmail(String(formData.get('requesterEmail') ?? ''));
-  if (!looksLikeEmail(email)) return { error: 'Enter the customer’s email address' };
-
   // Before the contact is resolved: that inserts a contact for a new address,
   // and a refusal after it would leave one behind for a ticket never opened.
   const category = await consoleCategoryChoice(
@@ -46,16 +42,18 @@ export async function createTicketFromForm(
   );
   if ('error' in category) return { error: category.error };
 
-  // The address rather than a contact, for the same reason: `submitForm`
-  // resolves it after its own refusals — a question left blank, an answer a
-  // field refuses, a file it will not take — so none of them leaves a contact
-  // behind either.
+  // The address as typed rather than a contact, for the same reason:
+  // `submitForm` checks it and resolves it after its own refusals — a question
+  // left blank, an answer a field refuses, a file it will not take — so none of
+  // them leaves a contact behind either. Checked there and nowhere else, so the
+  // console and the help centre cannot come to disagree about what an address
+  // is.
   const result = await submitForm({
     loaded,
     values: formData,
     requester: {
       kind: 'agent',
-      email,
+      email: text(formData, 'requesterEmail'),
       name: text(formData, 'requesterName') || null,
       agentId: agent.id,
       categoryId: category.categoryId,
