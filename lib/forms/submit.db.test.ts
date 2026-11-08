@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { db } from '@/db/client';
 import {
   agents,
+  contactIdentities,
   contacts,
   conversationEvents,
   conversations,
@@ -12,18 +13,21 @@ import {
 import { appendReply } from '@/lib/portal/tickets';
 import { withCleanDatabase } from '@/lib/testing/db';
 import { getFormBySlug, type LoadedForm } from './queries';
-import { submitForm, type Requester } from './submit';
+import { submitForm, type Requester, type SubmitResult } from './submit';
 
 /**
- * The category a form opens a ticket with, through `submitForm` and a real
- * `ticket_forms` row, as the help centre and the console's New form call it.
+ * The category a form opens a ticket with, and the contact it is filed under,
+ * through `submitForm` and a real `ticket_forms` row, as the help centre and the
+ * console's New form call it.
  *
  * What only the whole path shows: who is credited — the form for its default
  * whoever submitted it, an agent only for a choice they made, because from
  * Stage 4 an agent's `category_changed` is the ground truth Jev is measured
  * against and a default is nobody's judgement — that nothing a help-centre
  * request carries can name a category, and that the form is read once, as the
- * ticket is filed, and never again.
+ * ticket is filed, and never again. And that a requester named by an address,
+ * an anonymous visitor's or an agent's, is resolved to a contact only once
+ * every refusal has been made.
  */
 
 withCleanDatabase();
@@ -159,7 +163,8 @@ describe('submitForm: the category a form opens a ticket with', () => {
 
     const { conversationId } = await submit(loaded, {
       kind: 'agent',
-      contactId: await contact(),
+      email: 'amira@example.test',
+      name: 'Amira',
       agentId,
       categoryId: support,
     });
@@ -186,7 +191,8 @@ describe('submitForm: the category a form opens a ticket with', () => {
 
     const { conversationId } = await submit(loaded, {
       kind: 'agent',
-      contactId: await contact(),
+      email: 'amira@example.test',
+      name: 'Amira',
       agentId: await agent(),
       categoryId: undefined,
     });
@@ -202,7 +208,8 @@ describe('submitForm: the category a form opens a ticket with', () => {
 
     const { conversationId } = await submit(loaded, {
       kind: 'agent',
-      contactId: await contact(),
+      email: 'amira@example.test',
+      name: 'Amira',
       agentId,
       categoryId: null,
     });
@@ -275,5 +282,95 @@ describe('submitForm: the category a form opens a ticket with', () => {
     // The edit did take: the next ticket the form files carries it.
     const later = await submit(await load(), requester);
     expect(await categoryOf(later.conversationId)).toEqual(byTheForm(sales, 'sales', 'Sales'));
+  });
+});
+
+describe('submitForm: the contact a ticket is filed under', () => {
+  const byAgent = async (email = 'amira@example.test'): Promise<Requester> => ({
+    kind: 'agent',
+    email,
+    name: 'Amira',
+    agentId: await agent(),
+  });
+
+  const blank = (values: FormData) => values.delete('system.description');
+  const missing: SubmitResult = { ok: false, reason: 'missing', keys: ['system:description'] };
+
+  // Both requesters named by an address resolve it by inserting a contact and
+  // its identity when nobody owns it yet, so a refusal after that would leave a
+  // customer record behind for a ticket never opened. The address itself is
+  // refused inside `resolveRequester`, before `resolveContact`, on one path for
+  // both.
+  it.each<[string, () => Promise<Requester>, (values: FormData) => void, SubmitResult]>([
+    ['an anonymous visitor a question left blank', helpCentre.anonymous, blank, missing],
+    ['an agent a question left blank', () => byAgent(), blank, missing],
+    [
+      'an anonymous visitor an address that is not one',
+      helpCentre.anonymous,
+      (values) => values.set('system.requester_email', 'amira'),
+      { ok: false, reason: 'requester' },
+    ],
+    [
+      'an agent an address that is not one',
+      () => byAgent('amira'),
+      () => {},
+      { ok: false, reason: 'requester' },
+    ],
+  ])('refuses %s before writing a contact', async (_name, requester, change, refusal) => {
+    const loaded = await form(null);
+    const values = answers();
+    change(values);
+
+    expect(
+      await submitForm({ loaded, values, requester: await requester(), locale: 'en' }),
+    ).toEqual(refusal);
+
+    expect(await db.select({ id: contacts.id }).from(contacts)).toEqual([]);
+    expect(await db.select({ id: contactIdentities.id }).from(contactIdentities)).toEqual([]);
+    expect(await db.select({ id: conversations.id }).from(conversations)).toEqual([]);
+  });
+
+  // The help centre's anonymous path, which the agent's now shares a point in
+  // `submitForm` with and nothing else: the claimed address resolves onto the
+  // contact that owns it, the name typed beside it renames nobody, and the
+  // ticket says nobody proved who sent it.
+  it('files an anonymous submission under the contact owning the claimed address, unverified', async () => {
+    const loaded = await form(null);
+    const [owner] = await db
+      .insert(contacts)
+      .values({ name: 'Amira Saleh', primaryEmail: 'amira@example.test' })
+      .returning({ id: contacts.id });
+    await db
+      .insert(contactIdentities)
+      .values({ contactId: owner!.id, channel: 'email', identifier: 'amira@example.test' });
+    const values = answers();
+    values.set('system.requester_email', '  Amira@Example.TEST ');
+
+    const { conversationId } = await submit(loaded, await helpCentre.anonymous(), values);
+
+    const [ticket] = await db
+      .select({ contactId: conversations.requesterContactId })
+      .from(conversations)
+      .where(eq(conversations.id, conversationId));
+    expect(ticket).toEqual({ contactId: owner!.id });
+    expect(await db.select({ id: contacts.id, name: contacts.name }).from(contacts)).toEqual([
+      { id: owner!.id, name: 'Amira Saleh' },
+    ]);
+    expect(
+      await db
+        .select({ actorLabel: conversationEvents.actorLabel, data: conversationEvents.data })
+        .from(conversationEvents)
+        .where(
+          and(
+            eq(conversationEvents.conversationId, conversationId),
+            eq(conversationEvents.type, 'unverified_submitter'),
+          ),
+        ),
+    ).toEqual([
+      {
+        actorLabel: 'form',
+        data: { email: 'amira@example.test', form: SLUG, ip: '203.0.113.7' },
+      },
+    ]);
   });
 });
