@@ -60,7 +60,9 @@ const FRESHWORKS_DOMAINS = [
   'freshworks.com',
   'myfreshworks.com',
   'freshchat.com',
+  'freshservice.com',
   'fw-cdn.com',
+  'fwcdn.com',
   'fwusercontent.com',
 ];
 
@@ -74,8 +76,8 @@ const FRESHDESK_BUCKET = 'cdn.freshdesk.com';
 const FRESHDESK_VIRTUAL_HOST = /^cdn\.freshdesk\.com\.s3(?:[.-][a-z0-9-]+)?\.amazonaws\.com$/;
 
 /**
- * Whether the job may download this `src`: HTTPS, on a Freshworks domain or in
- * Freshdesk's bucket on S3, addressed either way S3 allows.
+ * Whether the job may download this `src`: HTTPS, with no credentials in it,
+ * and on Freshworks' own hosts (`onFreshworks`).
  *
  * The job runs on the worker with a deadline and a size cap, so this is not a
  * defence against a hostile URL so much as a promise about what it reaches:
@@ -92,7 +94,19 @@ export function fetchableFreshworksImage(src: string): boolean {
     return false;
   }
   if (url.protocol !== 'https:' || url.username || url.password) return false;
+  return onFreshworks(url);
+}
 
+/**
+ * Whether an address is served by Freshworks: on one of its domains, or in
+ * Freshdesk's bucket on S3, addressed either way S3 allows. The scheme is not
+ * asked — an `http://` picture breaks with Freshdesk all the same.
+ *
+ * One answer for the two questions that need it, so they cannot drift apart:
+ * what the copy job may download (`fetchableFreshworksImage`), and what an
+ * article may not gain once the copies exist (`lib/kb/freshdesk-refs.ts`).
+ */
+export function onFreshworks(url: URL): boolean {
   const host = url.hostname.toLowerCase();
   if (FRESHWORKS_DOMAINS.some((domain) => host === domain || host.endsWith(`.${domain}`))) {
     return true;
@@ -156,7 +170,7 @@ export function rewriteImageSources(
  * The entities sanitize-html writes into an attribute value, and the numeric
  * forms a stored body could carry from before it was sanitised the same way.
  */
-function decodeAttribute(value: string): string {
+export function decodeAttribute(value: string): string {
   return value.replace(/&(amp|lt|gt|quot|#39|#x27|#34|#x22);/gi, (_, name: string) => {
     switch (name.toLowerCase()) {
       case 'amp':

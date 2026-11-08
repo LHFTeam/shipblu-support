@@ -1,9 +1,17 @@
 import { asc, eq, sql } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { db } from '@/db/client';
-import { kbArticleStats, kbArticles, kbCategories, kbFolders, kbRedirects } from '@/db/schema';
+import {
+  kbArticleStats,
+  kbArticles,
+  kbCategories,
+  kbFolders,
+  kbImages,
+  kbRedirects,
+} from '@/db/schema';
 import { resetEnvCache } from '@/lib/env';
 import type { FreshdeskArticle, FreshdeskCategory, FreshdeskFolder } from '@/lib/freshdesk/client';
+import { articleBody } from '@/lib/kb/article-write';
 import {
   articleHelpful,
   articleUnhelpful,
@@ -412,6 +420,65 @@ describe('importFreshdeskKb', () => {
 
     expect(await written()).toEqual(before);
     expect(byExternalId(await articles(), '31:ar').viewCount).toBe(500);
+  });
+
+  // Freshdesk's copy names its own bucket for every picture and the old portal
+  // for every cross-reference, so a re-import would otherwise put back,
+  // unversioned, what `rehost_kb_images` and the formatting pass took out.
+  it('points a re-import at what is here, and then writes nothing more', async () => {
+    const picture =
+      'https://s3.amazonaws.com/cdn.freshdesk.com/data/helpdesk/attachments/production/9/original/p.png';
+    const freshdesk = account({
+      articles: {
+        21: [
+          {
+            ...WHERE,
+            description:
+              `<p><img src="${picture}" /></p>` +
+              '<p><a href="https://support.shipblu.com/ar/support/solutions/articles/32-x">العنوان</a></p>',
+          },
+          ADDRESS,
+        ],
+        22: [ESCALATE],
+      },
+    });
+
+    // The first import reaches 31 before 32 exists, and nothing has been
+    // copied yet: both of Freshdesk's addresses stay, for the next run and
+    // for the copy job.
+    serve(freshdesk);
+    await importFreshdeskKb();
+    expect(byExternalId(await articles(), '31:ar').bodyHtml).toContain(picture);
+
+    const image = crypto.randomUUID();
+    await db.insert(kbImages).values({
+      id: image,
+      storagePath: `kb/${image}.png`,
+      contentType: 'image/png',
+      sizeBytes: 16,
+      sha256: 'd'.repeat(64),
+      sourceUrl: picture,
+    });
+
+    serve(freshdesk);
+    await importFreshdeskKb();
+    const address = byExternalId(await articles(), '32:ar');
+    expect(byExternalId(await articles(), '31:ar').bodyHtml).toBe(
+      articleBody(
+        `<p><img src="/api/kb/images/${image}" /></p>` +
+          `<p><a href="/ar/a/${address.slug}">العنوان</a></p>`,
+      ).bodyHtml,
+    );
+
+    const written = () =>
+      db
+        .select({ externalId: kbArticles.externalId, xmin: sql<string>`xmin::text` })
+        .from(kbArticles)
+        .orderBy(asc(kbArticles.externalId));
+    const settled = await written();
+    serve(freshdesk);
+    await importFreshdeskKb();
+    expect(await written()).toEqual(settled);
   });
 
   it("keeps a folder's description on a re-run when Freshdesk has none", async () => {

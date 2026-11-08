@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { articlePath, normaliseArticleHtml, rewriteLegacyArticleLinks } from './format';
+import {
+  articlePath,
+  legacyArticleIds,
+  legacyArticleIndex,
+  legacyArticleResolver,
+  normaliseArticleHtml,
+  rewriteLegacyArticleLinks,
+} from './format';
 
 /**
  * Every fixture here is markup taken from a real article, shortened only by
@@ -287,6 +294,73 @@ describe('rewriteLegacyArticleLinks', () => {
   it('does not touch a link to anywhere else', () => {
     const html = '<a href="https://apps.shopify.com/shipblu">Shopify</a>';
     expect(rewriteLegacyArticleLinks(html, resolve)).toBe(html);
+  });
+
+  // The portal's path pasted without its host: ours once the domain moves,
+  // and an article reached only by a 301 through the legacy route.
+  it('rewrites a relative portal link, with or without a locale', () => {
+    expect(
+      rewriteLegacyArticleLinks(
+        '<a href="/ar/support/solutions/articles/154000189336-x">إرشادات</a>',
+        resolve,
+      ),
+    ).toBe('<a href="/ar/a/إرشادات-التعبئة-والتغليف">إرشادات</a>');
+    expect(
+      rewriteLegacyArticleLinks(
+        '<a href="/support/solutions/articles/154000189336">x</a>',
+        resolve,
+      ),
+    ).toBe('<a href="/en/a/packaging-guidelines">x</a>');
+  });
+});
+
+describe('legacyArticleIds', () => {
+  it('names each linked Freshdesk article once, whatever shape its link takes', () => {
+    const html =
+      '<a href="https://support.shipblu.com/en/support/solutions/articles/154000189336-p">a</a>' +
+      '<a href="https://shipblu1.freshdesk.com/a/solutions/articles/154000206447?lang=ar">b</a>' +
+      '<a href="/support/solutions/articles/154000189336">c</a>' +
+      '<a href="https://support.shipblu.com/en/support/solutions/folders/154000100">d</a>';
+
+    expect(legacyArticleIds(html)).toEqual(['154000189336', '154000206447']);
+  });
+});
+
+describe('legacyArticleResolver', () => {
+  const index = legacyArticleIndex([
+    { locale: 'ar', slug: 'التغليف', externalId: '1:ar' },
+    { locale: 'en', slug: 'packaging', externalId: '1:en' },
+    { locale: 'en', slug: 'english-only', externalId: '2:en' },
+    // The older single-language form, without the suffix.
+    { locale: 'ar', slug: 'قديم', externalId: '3' },
+    { locale: 'ar', slug: 'local', externalId: null },
+  ]);
+
+  it("prefers the link's own language, then the article's, then the default", () => {
+    expect(legacyArticleResolver(index, 'ar')('1', 'en')).toEqual({
+      locale: 'en',
+      slug: 'packaging',
+    });
+    expect(legacyArticleResolver(index, 'en')('1', undefined)).toEqual({
+      locale: 'en',
+      slug: 'packaging',
+    });
+    expect(legacyArticleResolver(index, 'fr')('1', undefined)).toEqual({
+      locale: 'ar',
+      slug: 'التغليف',
+    });
+  });
+
+  it('falls back to the translation that exists, and answers nothing for an unknown id', () => {
+    expect(legacyArticleResolver(index, 'ar')('2', 'ar')).toEqual({
+      locale: 'en',
+      slug: 'english-only',
+    });
+    expect(legacyArticleResolver(index, 'en')('3', undefined)).toEqual({
+      locale: 'ar',
+      slug: 'قديم',
+    });
+    expect(legacyArticleResolver(index, 'ar')('9', undefined)).toBeUndefined();
   });
 });
 

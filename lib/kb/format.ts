@@ -65,6 +65,8 @@
  * characters a reader would have seen.
  */
 
+import { DEFAULT_LOCALE } from './locale';
+
 /**
  * Elements that own their own vertical space, so a `br` at either edge of one
  * is spacing rather than a line break.
@@ -506,20 +508,97 @@ export function articlePath(locale: string, slug: string): string {
 }
 
 /**
- * Freshdesk article URLs, in the two forms the imported bodies actually carry.
+ * Freshdesk article URLs, in the forms the imported bodies carry, and relative.
  *
  * The customer-facing one is `support.shipblu.com/<locale>/support/solutions/
  * articles/<id>-<title-text>`; the other is the *agent* console at
  * `<account>.freshdesk.com/a/solutions/articles/<id>?lang=<locale>`, which a
  * customer cannot open at all. Both name the article by id, which is what makes
  * them resolvable — the title text after the id changes whenever somebody edits
- * the title, and was never the key.
+ * the title, and was never the key. A relative one (`/en/support/solutions/
+ * articles/<id>`) is the portal's path pasted without its host: none is stored
+ * today, and once the domain moves it would be ours, reaching the article only
+ * by a 301 through `app/help/legacy`.
  */
 const LEGACY_ARTICLE_LINK =
-  /href="https?:\/\/[^"]*?(?:\/([a-z]{2})\/support)?\/(?:a\/)?solutions\/articles\/(\d+)[^"]*"/gi;
+  /href="(?:https?:\/\/)?[^"]*?(?:\/([a-z]{2})\/support)?\/(?:a\/)?solutions\/articles\/(\d+)[^"]*"/gi;
 
 /** `?lang=ar` on an agent-console URL, which is where its locale hides. */
 const LANG_PARAM = /[?&]lang=([a-z]{2})/i;
+
+/** Where a Freshdesk article id leads here: an article, in one language. */
+type LegacyTarget = { locale: string; slug: string };
+
+/** Freshdesk id → that article's slug here, per locale. */
+export type LegacyArticleIndex = Map<string, Map<string, string>>;
+
+/**
+ * The Freshdesk ids a body links to, each once, so a caller can read only the
+ * rows those ids became.
+ */
+export function legacyArticleIds(html: string): string[] {
+  const ids = new Set<string>();
+  for (const match of html.matchAll(LEGACY_ARTICLE_LINK)) {
+    if (match[2]) ids.add(match[2]);
+  }
+  return [...ids];
+}
+
+/**
+ * Freshdesk id → the article that id became, per locale.
+ *
+ * `external_id` is `<freshdeskId>:<locale>` — one Freshdesk article becomes one
+ * row per language — and the older single-language form without the suffix is
+ * accepted for the same reason `app/help/legacy/route.ts` accepts it.
+ */
+export function legacyArticleIndex(
+  rows: readonly { locale: string; slug: string; externalId: string | null }[],
+): LegacyArticleIndex {
+  const index: LegacyArticleIndex = new Map();
+
+  for (const row of rows) {
+    if (!row.externalId) continue;
+    const [freshdeskId] = row.externalId.split(':');
+    if (!freshdeskId) continue;
+
+    const byLocale = index.get(freshdeskId) ?? new Map<string, string>();
+    byLocale.set(row.locale, row.slug);
+    index.set(freshdeskId, byLocale);
+  }
+
+  return index;
+}
+
+/**
+ * How a link in an article written in `articleLocale` resolves, for
+ * `rewriteLegacyArticleLinks`.
+ *
+ * To the same language as the URL asked for, and failing that to the language
+ * of the article the link is *in* — not to the default locale. An Arabic
+ * article linking to an id whose URL carries no language is linking to the
+ * Arabic translation; sending that reader to the English one is the kind of
+ * thing nobody notices in a diff and everybody notices on the page. One copy,
+ * for the formatting pass and for every writer that points a body here
+ * (`lib/kb/off-freshdesk.ts`), so the two cannot send the same link to
+ * different translations.
+ */
+export function legacyArticleResolver(
+  index: LegacyArticleIndex,
+  articleLocale: string,
+): (freshdeskId: string, locale: string | undefined) => LegacyTarget | undefined {
+  return (freshdeskId, locale) => {
+    const byLocale = index.get(freshdeskId);
+    if (!byLocale) return undefined;
+
+    for (const candidate of [locale, articleLocale, DEFAULT_LOCALE]) {
+      const slug = candidate ? byLocale.get(candidate) : undefined;
+      if (slug && candidate) return { locale: candidate, slug };
+    }
+
+    const first = [...byLocale.entries()][0];
+    return first ? { locale: first[0], slug: first[1] } : undefined;
+  };
+}
 
 /**
  * Points internal cross-references at this help centre.
@@ -533,14 +612,11 @@ const LANG_PARAM = /[?&]lang=([a-z]{2})/i;
  * this knowledge base and into the old portal.
  *
  * `resolve` is passed in rather than read from the database here so this module
- * stays pure and testable; the job that runs it does the lookup.
+ * stays pure and testable; its callers do the lookup (`legacyArticleResolver`).
  */
 export function rewriteLegacyArticleLinks(
   html: string,
-  resolve: (
-    freshdeskId: string,
-    locale: string | undefined,
-  ) => { locale: string; slug: string } | undefined,
+  resolve: (freshdeskId: string, locale: string | undefined) => LegacyTarget | undefined,
 ): string {
   return html.replace(LEGACY_ARTICLE_LINK, (match, pathLocale: string | undefined, id: string) => {
     const locale = pathLocale ?? LANG_PARAM.exec(match)?.[1];

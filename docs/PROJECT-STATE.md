@@ -1527,7 +1527,10 @@ is code:
   because afterwards there is nothing to copy them from, and the redirects work
   before `support.shipblu.com` moves. PR 1, the copy, is built:
   `rehost_kb_images` and `/api/kb/images/<id>`. Until it is deployed and run
-  (the plan says how), every image still loads from Freshdesk.
+  (the plan says how), every image still loads from Freshdesk. PR 2 is built
+  too: Save, Restore and the import point Freshdesk's pictures and article
+  links here as they write, and Save and Restore refuse to add one that has no
+  home here.
 
 - **Instagram through Unified Login — the next configuration task, and none of
   it is a deploy.** The direct connection's token expired on 2026-10-29 (the
