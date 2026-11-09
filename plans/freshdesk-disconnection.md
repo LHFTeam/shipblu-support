@@ -352,6 +352,22 @@ picture is a `kept <url>: <reason>` line and is retried by the next run. An
 article saved in the console while the job ran is a `skipped <slug>` line and
 is picked up by the next run.
 
+**Run on production, 2026-11-08.** `main` took PR 1 with #497, and the web
+service was live on it at 21:05 UTC. The job ran at 21:13 and copied 207
+pictures in a minute: 30,171,562 bytes, PNG and JPEG. It rewrote 214 `src` in
+61 articles and the same in 61 version rows, and cut no version. Measured the
+next morning:
+
+- The audit query's two `images` rows answer 0.
+- `/api/kb/images/<id>` answers 307 with `public, max-age=3600` to a signed
+  Storage URL, and an unknown id answers 404.
+- All 207 rows answer their route with an image (205 PNG, 2 JPEG).
+- A full navigation of `/en/a/action-center` draws its three pictures from the
+  route and none from Freshdesk.
+
+The 29 portal links in 18 version rows are still there, as they should be
+until PR 2: Restore points them here once it is deployed.
+
 ### 2. Keep Freshdesk links from coming back
 
 - **Restore** passes the restored body through `rewriteLegacyArticleLinks` and
@@ -489,10 +505,12 @@ Order matters. The check beside each item is what proves it, not the merge.
       the 29 links again. After this, nothing imports: unset
       `FRESHDESK_DOMAIN` and `FRESHDESK_API_KEY` on the worker. _Check:_ the
       audit query's `links, live` row answers 0.
-- [ ] **PR 1 is deployed and its job has run** — `dryRun=true`, then for
+- [x] **PR 1 is deployed and its job has run** — `dryRun=true`, then for
       real, then `dryRun=true` again reporting nothing to do. _Check:_ the
       audit query's two `images` rows answer 0; every `kb_images` row loads
-      through its route.
+      through its route. Done 2026-11-08: deployed at 21:05 UTC (#497), run
+      at 21:13. On 2026-11-09 both `images` rows read 0, and all 207 rows
+      answered their route with an image.
 - [ ] **PR 2 is deployed.** _Check:_ its tests restore a version carrying a
       Freshdesk link and save one carrying a Freshdesk `href` and `src`, and
       neither reaches `kb_articles` (staging holds no knowledge base to try it

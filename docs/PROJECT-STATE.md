@@ -1514,7 +1514,7 @@ is code:
   the Meta inboxes are answered here or not at all, so the channel rows, the
   agents and the groups below need to be in place first rather than after.
 
-- **The knowledge base still depends on Freshdesk for every image, and closing
+- **The knowledge base's images no longer depend on Freshdesk, and closing
   the account has a checklist.** Audited 2026-11-07: no article links to
   Freshworks, but all 214 images in 61 of the 112 articles load from
   Freshdesk's attachment bucket, and so do the same 214 in the version
@@ -1525,12 +1525,15 @@ is code:
   `plans/freshdesk-disconnection.md` has the measurements, the follow-up pull
   requests and the order: the images are copied before the account closes,
   because afterwards there is nothing to copy them from, and the redirects work
-  before `support.shipblu.com` moves. PR 1, the copy, is built:
-  `rehost_kb_images` and `/api/kb/images/<id>`. Until it is deployed and run
-  (the plan says how), every image still loads from Freshdesk. PR 2 is built
-  too: Save, Restore and the import point Freshdesk's pictures and article
+  before `support.shipblu.com` moves. PR 1, the copy, is deployed and has
+  run: `main` took it at 21:05 UTC on 2026-11-08 (#497), and
+  `rehost_kb_images` copied all 207 pictures at 21:13. No article or version
+  loads a picture from Freshdesk now; every one comes from
+  `/api/kb/images/<id>`, and all 207 answered there on 2026-11-09. PR 2 is
+  built: Save, Restore and the import point Freshdesk's pictures and article
   links here as they write, and Save and Restore refuse to add one that has no
-  home here.
+  home here. Until it ships, the 29 old links in 18 version rows are one
+  Restore from the help centre.
 
 - **Instagram through Unified Login — the next configuration task, and none of
   it is a deploy.** The direct connection's token expired on 2026-10-29 (the
