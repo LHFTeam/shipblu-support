@@ -3,8 +3,12 @@ import { db } from '@/db/client';
 import { kbArticles } from '@/db/schema';
 import { htmlToText, preview } from '@/lib/html/sanitize';
 import { cutArticleVersion } from '@/lib/kb/article-write';
-import { normaliseArticleHtml, rewriteLegacyArticleLinks } from '@/lib/kb/format';
-import { DEFAULT_LOCALE } from '@/lib/kb/locale';
+import {
+  legacyArticleIndex,
+  legacyArticleResolver,
+  normaliseArticleHtml,
+  rewriteLegacyArticleLinks,
+} from '@/lib/kb/format';
 import type { ClaimedJob } from '@/lib/queue';
 import { parseJobPayload } from '@/lib/queue/payloads';
 import { logger } from '@/lib/log';
@@ -72,29 +76,6 @@ function emptyTally(): Tally {
   };
 }
 
-/**
- * Freshdesk id → the article that id became, per locale.
- *
- * `external_id` is `<freshdeskId>:<locale>` — one Freshdesk article becomes one
- * row per language — and the older single-language form without the suffix is
- * accepted for the same reason `app/help/legacy/route.ts` accepts it.
- */
-function legacyIndex(rows: { locale: string; slug: string; externalId: string | null }[]) {
-  const index = new Map<string, Map<string, string>>();
-
-  for (const row of rows) {
-    if (!row.externalId) continue;
-    const [freshdeskId] = row.externalId.split(':');
-    if (!freshdeskId) continue;
-
-    const byLocale = index.get(freshdeskId) ?? new Map<string, string>();
-    byLocale.set(row.locale, row.slug);
-    index.set(freshdeskId, byLocale);
-  }
-
-  return index;
-}
-
 export async function normaliseKbFormatting(job: ClaimedJob): Promise<void> {
   const payload = parseJobPayload(job, 'normalise_kb_formatting');
   const dryRun = payload.dryRun === true;
@@ -109,11 +90,12 @@ export async function normaliseKbFormatting(job: ClaimedJob): Promise<void> {
       bodyText: kbArticles.bodyText,
       excerpt: kbArticles.excerpt,
       externalId: kbArticles.externalId,
+      status: kbArticles.status,
     })
     .from(kbArticles)
     .orderBy(asc(kbArticles.locale), asc(kbArticles.slug));
 
-  const index = legacyIndex(rows);
+  const index = legacyArticleIndex(rows);
   const selected = payload.locale ? rows.filter((row) => row.locale === payload.locale) : rows;
   const articles = payload.limit ? selected.slice(0, payload.limit) : selected;
 
@@ -124,26 +106,9 @@ export async function normaliseKbFormatting(job: ClaimedJob): Promise<void> {
   for (const article of articles) {
     const tally = tallies.get(article.locale) ?? emptyTally();
 
-    /**
-     * A cross-reference resolves to the same language as the URL asked for, and
-     * failing that to the language of the article the link is *in* — not to the
-     * default locale. An Arabic article linking to an id whose URL carries no
-     * language is linking to the Arabic translation; sending that reader to the
-     * English one is the kind of thing nobody notices in a diff and everybody
-     * notices on the page.
-     */
-    const resolve = (freshdeskId: string, locale: string | undefined) => {
-      const byLocale = index.get(freshdeskId);
-      if (!byLocale) return undefined;
-
-      for (const candidate of [locale, article.locale, DEFAULT_LOCALE]) {
-        const slug = candidate ? byLocale.get(candidate) : undefined;
-        if (slug && candidate) return { locale: candidate, slug };
-      }
-
-      const first = [...byLocale.entries()][0];
-      return first ? { locale: first[0], slug: first[1] } : undefined;
-    };
+    // A cross-reference resolves in the language its URL asked for, else the
+    // language of the article it is in (`legacyArticleResolver` says why).
+    const resolve = legacyArticleResolver(index, article.locale);
 
     const normalised = normaliseArticleHtml(article.bodyHtml);
     const bodyHtml = rewriteLegacyArticleLinks(normalised, resolve);

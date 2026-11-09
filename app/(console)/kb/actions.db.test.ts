@@ -223,7 +223,9 @@ describe('a Freshdesk picture already copied', () => {
 
   it("is saved as the copy when a stale editor posts Freshdesk's address", async () => {
     const image = await copied();
-    const id = await article(showing(`/api/kb/images/${image}`), '');
+    // Beside a picture the job could not copy, which the article already
+    // shows, so the save adds nothing of Freshdesk's and it stays for the job.
+    const id = await article(showing(`/api/kb/images/${image}`, UNCOPIED), '');
     const [row] = await db
       .select({ folderId: kbArticles.folderId })
       .from(kbArticles)
@@ -236,8 +238,7 @@ describe('a Freshdesk picture already copied', () => {
         title: 'Current title',
         folderId: row!.folderId,
         locale: 'en',
-        // What the tab opened before the job still holds, beside a picture
-        // nothing has copied yet, which stays as it was for the job to find.
+        // What the tab opened before the job still holds.
         bodyHtml: `<p><img src="${FRESHDESK}" /></p><p><img src="${UNCOPIED}" /></p>`,
         visibility: 'public',
         slug: 'current',
@@ -263,5 +264,203 @@ describe('a Freshdesk picture already copied', () => {
 
     expect(state.error).toBeNull();
     expect(await bodyOf(id)).toBe(showing(`/api/kb/images/${image}`));
+  });
+});
+
+/**
+ * PR 2 of `plans/freshdesk-disconnection.md`: neither Save nor Restore can put
+ * a Freshdesk address on the help centre that the article did not carry.
+ * What has a home here is pointed at it; what has none is refused, and
+ * nothing reaches `kb_articles`.
+ */
+describe("Freshdesk's links and pictures", () => {
+  const PICTURE =
+    'https://s3.amazonaws.com/cdn.freshdesk.com/data/helpdesk/attachments/production/3/original/c.png';
+  /** As 18 production versions carry them, to an article that was imported. */
+  const PORTAL = (id: string, locale = 'en') =>
+    `https://support.shipblu.com/${locale}/support/solutions/articles/${id}-packaging-guidelines`;
+  const CONSOLE = (id: string) =>
+    `https://shipblu72137318794432249.freshdesk.com/a/solutions/articles/${id}?lang=ar&amp;portalId=154000090201`;
+
+  /** The imported article Freshdesk id 154000189336 became, in both languages. */
+  async function imported(
+    folderId: string,
+    status: 'published' | 'draft' | 'archived' = 'published',
+  ) {
+    await db.insert(kbArticles).values([
+      {
+        folderId,
+        title: 'Packaging guidelines',
+        slug: 'packaging-guidelines',
+        locale: 'en',
+        sourceSystem: 'freshdesk',
+        externalId: '154000189336:en',
+        bodyHtml: '<p>Pack it well.</p>',
+        status,
+      },
+      {
+        folderId,
+        title: 'إرشادات التعبئة والتغليف',
+        slug: 'إرشادات-التعبئة-والتغليف',
+        locale: 'ar',
+        sourceSystem: 'freshdesk',
+        externalId: '154000189336:ar',
+        bodyHtml: '<p>غلّفها جيدا.</p>',
+        status,
+      },
+    ]);
+  }
+
+  async function stored(id: string) {
+    const [row] = await db
+      .select({ bodyHtml: kbArticles.bodyHtml, folderId: kbArticles.folderId })
+      .from(kbArticles)
+      .where(eq(kbArticles.id, id));
+    return row!;
+  }
+
+  const versions = async (id: string) =>
+    db.$count(kbArticleVersions, eq(kbArticleVersions.articleId, id));
+
+  const saving = (id: string, folderId: string, bodyHtml: string) =>
+    saveArticle(
+      { error: null },
+      form({
+        id,
+        title: 'Current title',
+        folderId,
+        locale: 'en',
+        bodyHtml,
+        visibility: 'public',
+        slug: 'current',
+        seoTitle: '',
+        seoDescription: '',
+        tags: '',
+      }),
+    );
+
+  it('refuses a save that adds a Freshdesk link or picture, and writes nothing', async () => {
+    const before = articleBody('<p>Step one.</p>').bodyHtml;
+    const id = await article(before, '');
+    const { folderId } = await stored(id);
+
+    const linked = await saving(
+      id,
+      folderId,
+      '<p>Step one.</p><p><a href="https://support.shipblu.com/support/tickets/new">Ask us</a></p>',
+    );
+    const pictured = await saving(id, folderId, `<p>Step one.</p><p><img src="${PICTURE}" /></p>`);
+
+    expect(linked.error).toContain('a link to Freshdesk');
+    expect(pictured.error).toContain('a picture from Freshdesk');
+    expect(await stored(id)).toMatchObject({ bodyHtml: before });
+    expect(await versions(id)).toBe(0);
+  });
+
+  it('refuses a new article that links to an article Freshdesk never handed over', async () => {
+    const id = await article('<p>Existing.</p>', '');
+    const { folderId } = await stored(id);
+
+    const state = await saveArticle(
+      { error: null },
+      form({
+        title: 'Brand new',
+        folderId,
+        locale: 'en',
+        bodyHtml: `<p><a href="${PORTAL('154000000001')}">See</a></p>`,
+        visibility: 'public',
+      }),
+    );
+
+    expect(state.error).toContain(
+      'Freshdesk article 154000000001, which has no published article here',
+    );
+    expect(await db.$count(kbArticles)).toBe(1);
+  });
+
+  it('saves a link to an imported Freshdesk article as that article', async () => {
+    const id = await article('<p>Step one.</p>', '');
+    const { folderId } = await stored(id);
+    await imported(folderId);
+
+    const state = await saving(
+      id,
+      folderId,
+      `<p>See <a href="${PORTAL('154000189336')}">this</a></p>`,
+    );
+
+    expect(state.error).toBeNull();
+    expect((await stored(id)).bodyHtml).toBe(
+      articleBody('<p>See <a href="/en/a/packaging-guidelines">this</a></p>').bodyHtml,
+    );
+  });
+
+  // Pointed at a draft, the link would 404 for every reader and no longer look
+  // like Freshdesk's, so nothing would refuse it.
+  it('refuses a link to an imported article no reader can open, rather than pointing it there', async () => {
+    const id = await article('<p>Step one.</p>', '');
+    const { folderId } = await stored(id);
+    await imported(folderId, 'draft');
+    const before = (await stored(id)).bodyHtml;
+
+    const state = await saving(
+      id,
+      folderId,
+      `<p>See <a href="${PORTAL('154000189336')}">this</a></p>`,
+    );
+
+    expect(state.error).toContain(
+      'Freshdesk article 154000189336, which has no published article here',
+    );
+    expect((await stored(id)).bodyHtml).toBe(before);
+  });
+
+  it("restores a version's Freshdesk links as the articles they were imported as", async () => {
+    const id = await article('<p>Now.</p>', '');
+    const { folderId } = await stored(id);
+    await imported(folderId);
+    const [version] = await db
+      .insert(kbArticleVersions)
+      .values({
+        articleId: id,
+        version: 1,
+        title: 'Old title',
+        bodyHtml:
+          `<p><a href="${PORTAL('154000189336', 'ar')}">إرشادات</a></p>` +
+          `<p><a href="${CONSOLE('154000189336')}">الجدول</a></p>`,
+      })
+      .returning({ id: kbArticleVersions.id });
+
+    const state = await restoreVersion({ error: null }, form({ id, versionId: version!.id }));
+
+    expect(state.error).toBeNull();
+    expect((await stored(id)).bodyHtml).toBe(
+      articleBody(
+        '<p><a href="/ar/a/إرشادات-التعبئة-والتغليف">إرشادات</a></p>' +
+          '<p><a href="/ar/a/إرشادات-التعبئة-والتغليف">الجدول</a></p>',
+      ).bodyHtml,
+    );
+  });
+
+  it('refuses to restore a version naming Freshdesk where nothing here replaces it', async () => {
+    const now = articleBody('<p>Now.</p>').bodyHtml;
+    const id = await article(now, '');
+    const [version] = await db
+      .insert(kbArticleVersions)
+      .values({
+        articleId: id,
+        version: 1,
+        title: 'Old title',
+        bodyHtml: `<p><a href="${PORTAL('154000000001')}">Gone</a></p>`,
+      })
+      .returning({ id: kbArticleVersions.id });
+
+    const state = await restoreVersion({ error: null }, form({ id, versionId: version!.id }));
+
+    expect(state.error).toMatch(/^That version has a link to Freshdesk article 154000000001/);
+    expect(await stored(id)).toMatchObject({ bodyHtml: now });
+    // Refused before anything is written: no version is cut for a restore
+    // that did not happen.
+    expect(await versions(id)).toBe(1);
   });
 });

@@ -225,12 +225,14 @@ export async function kbImageSources(ids: readonly string[]): Promise<Map<string
  * Points every Freshworks `src` already copied here at its copy, and leaves the
  * rest as they were.
  *
- * The console's Save and Restore run every body through this as they write it,
- * so a body that still carries Freshdesk's address — an editor tab opened
- * before `rehost_kb_images` ran and saved after it, a paste from an old copy of
- * the article — stores the copy instead of putting Freshdesk back. An address
- * with no copy yet is left alone: it is the job's to copy, and the next dry run
- * names it. Costs one query, and none for a body with no Freshworks picture.
+ * Every writer of an article body runs this as it writes, through
+ * `pointedHere` (`./off-freshdesk.ts`), so a body that still carries
+ * Freshdesk's address — an editor tab opened before `rehost_kb_images` ran and
+ * saved after it, a paste from an old copy of the article, a re-import — stores
+ * the copy instead of putting Freshdesk back. An address with no copy yet is
+ * left alone here: whether to refuse it is the writer's question, and copying
+ * it is the job's. Costs one query, and none for a body with no Freshworks
+ * picture.
  */
 export async function withCopiedImages(html: string): Promise<string> {
   const sources = imageSources(html).filter(isFreshworksImage);

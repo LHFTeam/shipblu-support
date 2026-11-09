@@ -17,9 +17,10 @@ import {
   type EditableArticle,
 } from '@/lib/kb/admin';
 import { articleBody, changesNothing, cutArticleVersion } from '@/lib/kb/article-write';
-import { withCopiedImages } from '@/lib/kb/images';
 import { FLOOR_LABELS, SELECTABLE_FLOORS, folderFloor, meetsFloor } from '@/lib/kb/floors';
+import { restoreRefusal, saveRefusal } from '@/lib/kb/freshdesk-refs';
 import { isLocale } from '@/lib/kb/locale';
+import { pointedHere } from '@/lib/kb/off-freshdesk';
 import { slugify, uniqueSlug } from '@/lib/kb/slug';
 
 /**
@@ -146,12 +147,6 @@ export async function saveArticle(_state: KbState, formData: FormData): Promise<
   // reported as drift.
   const body = articleBody(rawBody.replace(/\r\n?/g, '\n'));
   const { bodyText, excerpt } = body;
-  // A Freshdesk picture already copied here goes back in as the copy: an editor
-  // tab opened before `rehost_kb_images` ran posts Freshdesk's address, and
-  // would otherwise put it back (`withCopiedImages`). Text is untouched, since
-  // pictures are skipped when it is derived.
-  const bodyHtml = await withCopiedImages(body.bodyHtml);
-
   // The folder decides the category, and the category carries a locale. An
   // English article inside an Arabic category would be unreachable — the public
   // routes filter on the category's locale — so this is rejected rather than
@@ -202,6 +197,19 @@ export async function saveArticle(_state: KbState, formData: FormData): Promise<
 
   const unreachable = refuseUnreachableFloor(agent.role, internal ? minRole : null);
   if (unreachable) return unreachable;
+
+  // A Freshdesk picture already copied here goes back in as the copy, and a
+  // link to an imported Freshdesk article as that article: an editor tab
+  // opened before `rehost_kb_images` ran posts Freshdesk's address, and a
+  // paste from the old portal carries its links (`pointedHere`). What has no
+  // home here is refused, unless the stored row already carries it — Freshdesk
+  // is being disconnected, and an address of its added today breaks with it.
+  //
+  // After every other refusal, since it can read the pool twice and a save the
+  // folder checks turn away would have spent those reads for nothing.
+  const bodyHtml = await pointedHere(body.bodyHtml, locale);
+  const refusal = saveRefusal(bodyHtml, before?.bodyHtml ?? null);
+  if (refusal) return { error: refusal };
 
   const baseSlug = slugify(requestedSlug || title, `article-${Date.now()}`);
   const slug = uniqueSlug(baseSlug, await takenSlugs(locale, id || undefined));
@@ -483,13 +491,19 @@ export async function restoreVersion(_state: KbState, formData: FormData): Promi
   // writer, so the excerpt is rebuilt with the body: written by hand here it
   // was left out, and a listing kept showing the replaced body's opening line.
   //
-  // And a version cut before its pictures were copied names Freshdesk, so the
-  // copy is what goes back (`withCopiedImages`). Before the transaction,
-  // because that lookup reads on the pool, and a pooled read while this
-  // transaction holds a connection is §6.91's self-deadlock.
+  // And a version cut before its pictures were copied, or before the
+  // formatting pass rewrote its links, names Freshdesk: 29 links in 18 version
+  // rows did on 2026-11-08, every one to an article that was imported. So the
+  // copy and the article are what go back (`pointedHere`), and a version
+  // naming Freshdesk where nothing here replaces it, beyond what the article
+  // already carries, is refused rather than republished. Before the
+  // transaction, because those lookups read on the pool, and a pooled read
+  // while this transaction holds a connection is §6.91's self-deadlock.
   const body = articleBody(version.bodyHtml);
   const { bodyText, excerpt } = body;
-  const bodyHtml = await withCopiedImages(body.bodyHtml);
+  const bodyHtml = await pointedHere(body.bodyHtml, current.locale);
+  const refusal = restoreRefusal(bodyHtml, current.bodyHtml);
+  if (refusal) return { error: refusal };
 
   await db.transaction(async (tx) => {
     await cutArticleVersion(tx, {

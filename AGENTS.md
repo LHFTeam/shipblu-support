@@ -2356,6 +2356,21 @@ Freshdesk's address back, and its way back is `revert=true` from
 `kb_images.source_url`. Until the editor uploads (PR 4), a new screenshot is
 still hot-linked from wherever its author found it.
 
+**A body written into `kb_articles` is pointed off Freshdesk first.** Every
+writer of a body (the console's Save and Restore, the Freshdesk import and the
+handbook seed) runs `pointedHere` (`lib/kb/off-freshdesk.ts`) after
+`articleBody` and before its transaction, and the `article-off-freshdesk` repo
+rule refuses an `articleBody` call with no `pointedHere` after it. A copied
+picture goes to its copy, and a link to an imported article goes to that
+article while it is published: pointed at a draft, the link would 404 and no
+longer look like Freshdesk's. Only our Freshdesk is rewritten, by the same
+`isFreshdeskAddress` the refusal asks, so another company's portal with the
+same path is left alone. Save and Restore then refuse a Freshdesk link or
+picture the write would _add_ (`saveRefusal`, `restoreRefusal` in
+`lib/kb/freshdesk-refs.ts`), and leave one the stored row already carries, so
+an article whose picture could not be copied can still be edited
+(`plans/freshdesk-disconnection.md`, PR 2).
+
 **Who on the team may read an internal article.** `kb_visibility` answers
 whether a _customer_ may (`lib/kb/visibility.ts`); `min_role` on `kb_articles`
 and `kb_folders` answers which of _us_ may, and the two are separate axes on
