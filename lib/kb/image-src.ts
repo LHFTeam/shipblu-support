@@ -41,6 +41,36 @@ export const KB_IMAGE_TYPES: Readonly<Record<string, string>> = {
   'image/webp': 'webp',
 };
 
+/** What an editor is told about a file that is not a picture an article may show. */
+export const NOT_A_PICTURE = 'Only a PNG, JPEG, GIF or WebP picture can go in an article.';
+
+/**
+ * Why a file of `size` bytes cannot be an article's picture, or null.
+ *
+ * One copy for the editor, which asks before it uploads, and the server, which
+ * asks again, so the limit an editor reads is the one enforced. "Over", never a
+ * rounded figure: a file one byte past the limit read as "10.0 MB" beside a
+ * limit of 10 MB.
+ */
+export function pictureSizeRefusal(size: number): string | null {
+  if (size === 0) return 'That file is empty. Choose a picture to upload.';
+  if (size > KB_IMAGE_MAX_BYTES) {
+    return `That picture is over ${KB_IMAGE_MAX_BYTES / (1024 * 1024)} MB, the most a picture can be.`;
+  }
+  return null;
+}
+
+/**
+ * Whether the browser's own label rules a file out before it is sent.
+ *
+ * Only a label that plainly names something else: an empty one, or an image
+ * type spelled unusually (`image/jpg`), goes to the server, which reads the
+ * bytes and is the only judge. This saves a round trip; it decides nothing.
+ */
+export function labelRulesOut(type: string): boolean {
+  return type !== '' && !type.startsWith('image/');
+}
+
 /**
  * The markup the editor puts in for a picture it uploaded: a paragraph of its
  * own, so the formatting standard keeps it a block, with `alt` left for the
@@ -50,18 +80,63 @@ export function pictureParagraph(src: string): string {
   return `<p><img src="${encodeAttribute(src)}" alt="" /></p>`;
 }
 
+/** An opening or closing tag in an author's draft: `<p>`, `</a>`, `<br />`. */
+const DRAFT_TAG = /<(\/?)([a-zA-Z][a-zA-Z0-9]*)\b[^>]*?(\/?)>/g;
+
+/** Tags that never take a closing tag, so they open no element to stay inside. */
+const VOID_TAGS = new Set([
+  'area',
+  'base',
+  'br',
+  'col',
+  'embed',
+  'hr',
+  'img',
+  'input',
+  'link',
+  'meta',
+  'source',
+  'track',
+  'wbr',
+]);
+
 /**
- * `text` with `block` put where the selection was, on lines of its own, and
- * where the caret goes after it. The selection, if any, is replaced.
+ * Where a block can go in an author's HTML draft at or after `caret`: the caret
+ * itself when it is between top-level elements, otherwise the end of the
+ * top-level element it is in.
+ *
+ * The draft is the editor's source text, not stored HTML, so this reads tags as
+ * an author types them. A caret in the middle of a paragraph (`<p>Open the|
+ * settings</p>`) or inside a tag (`<a hr|ef=…>`) would otherwise split it: the
+ * browser closes the paragraph early, the rest becomes loose text with a stray
+ * `</p>` after it, and that is what Save stores. A draft whose tags never close
+ * again gets the block at its end.
+ */
+export function blockBoundaryAfter(html: string, caret: number): number {
+  let depth = 0;
+  for (const match of html.matchAll(DRAFT_TAG)) {
+    const start = match.index;
+    if (depth === 0 && caret <= start) return caret;
+    const name = (match[2] ?? '').toLowerCase();
+    if (match[1] === '/') depth = Math.max(0, depth - 1);
+    else if (match[3] !== '/' && !VOID_TAGS.has(name)) depth += 1;
+    const end = start + match[0].length;
+    if (depth === 0 && end >= caret) return end;
+  }
+  return depth === 0 ? Math.min(caret, html.length) : html.length;
+}
+
+/**
+ * `text` with `block` put at `at`, on lines of its own, and where the caret
+ * goes after it.
  */
 export function insertBlock(
   text: string,
-  start: number,
-  end: number,
+  at: number,
   block: string,
 ): { text: string; caret: number } {
-  const before = text.slice(0, start);
-  const after = text.slice(end);
+  const before = text.slice(0, at);
+  const after = text.slice(at);
   const lead = before && !before.endsWith('\n') ? '\n' : '';
   const trail = after && !after.startsWith('\n') ? '\n' : '';
   const inserted = `${lead}${block}${trail}`;

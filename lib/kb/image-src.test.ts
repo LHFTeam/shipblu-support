@@ -2,13 +2,17 @@ import { describe, expect, it } from 'vitest';
 import { htmlToText, sanitiseArticleHtml } from '@/lib/html/sanitize';
 import { normaliseArticleHtml } from './format';
 import {
+  blockBoundaryAfter,
   fetchableFreshworksImage,
   imageSources,
   insertBlock,
   isFreshworksImage,
+  KB_IMAGE_MAX_BYTES,
   kbImageIdOf,
   kbImageSrc,
+  labelRulesOut,
   pictureParagraph,
+  pictureSizeRefusal,
   rewriteImageSources,
 } from './image-src';
 
@@ -176,9 +180,9 @@ describe('fetchableFreshworksImage', () => {
   });
 });
 
-describe('pictureParagraph and insertBlock', () => {
-  const src = kbImageSrc('0b5f8c1e-2a4b-4c3d-9e8f-1a2b3c4d5e6f');
+const src = kbImageSrc('0b5f8c1e-2a4b-4c3d-9e8f-1a2b3c4d5e6f');
 
+describe('pictureParagraph and insertBlock', () => {
   it('puts an uploaded picture in a paragraph of its own, which the write path keeps', () => {
     expect(pictureParagraph(src)).toBe(`<p><img src="${src}" alt="" /></p>`);
     // Saved as written, but for the `loading` the sanitiser adds to every picture.
@@ -187,23 +191,71 @@ describe('pictureParagraph and insertBlock', () => {
     );
   });
 
-  it('inserts on lines of its own where the caret is, and puts the caret after it', () => {
+  it('inserts on lines of its own, and puts the caret after it', () => {
     const text = '<p>One</p><p>Two</p>';
     const at = '<p>One</p>'.length;
 
-    expect(insertBlock(text, at, at, '<p>X</p>')).toEqual({
+    expect(insertBlock(text, at, '<p>X</p>')).toEqual({
       text: '<p>One</p>\n<p>X</p>\n<p>Two</p>',
       caret: '<p>One</p>\n<p>X</p>\n'.length,
     });
   });
 
-  it('adds no blank line where one is already, and replaces a selection', () => {
-    expect(insertBlock('a\n\nb', 2, 2, 'X').text).toBe('a\nX\nb');
-    expect(insertBlock('keep REPLACE keep', 5, 12, 'X').text).toBe('keep \nX\n keep');
+  it('adds no blank line where one is already, and writes into an empty body or at the end', () => {
+    expect(insertBlock('a\n\nb', 2, 'X').text).toBe('a\nX\nb');
+    expect(insertBlock('', 0, 'X')).toEqual({ text: 'X', caret: 1 });
+    expect(insertBlock('a', 1, 'X')).toEqual({ text: 'a\nX', caret: 3 });
+  });
+});
+
+describe('blockBoundaryAfter', () => {
+  const body = '<p>Open the settings page</p>\n<ul><li>One <a href="/x">link</a></li></ul>';
+  const afterParagraph = '<p>Open the settings page</p>'.length;
+
+  it('moves a caret in the middle of a paragraph to its end', () => {
+    expect(blockBoundaryAfter(body, '<p>Open the'.length)).toBe(afterParagraph);
   });
 
-  it('writes into an empty body, and at the end, with nothing around it', () => {
-    expect(insertBlock('', 0, 0, 'X')).toEqual({ text: 'X', caret: 1 });
-    expect(insertBlock('a', 1, 1, 'X')).toEqual({ text: 'a\nX', caret: 3 });
+  it('moves a caret inside a tag, or deep in a list, out of the whole top-level block', () => {
+    expect(blockBoundaryAfter(body, 2)).toBe(afterParagraph);
+    const insideHref = body.indexOf('href') + 2;
+    expect(blockBoundaryAfter(body, insideHref)).toBe(body.length);
+  });
+
+  it('leaves a caret between top-level blocks where it is', () => {
+    expect(blockBoundaryAfter(body, afterParagraph)).toBe(afterParagraph);
+    expect(blockBoundaryAfter(body, afterParagraph + 1)).toBe(afterParagraph + 1);
+    expect(blockBoundaryAfter(body, 0)).toBe(0);
+    expect(blockBoundaryAfter(body, body.length)).toBe(body.length);
+  });
+
+  it('reads a void tag as opening nothing, and sends a draft never closed to its end', () => {
+    expect(blockBoundaryAfter('<p>a<br>b</p>tail', 4)).toBe('<p>a<br>b</p>'.length);
+    expect(blockBoundaryAfter('<p>half written', 5)).toBe('<p>half written'.length);
+  });
+
+  it('puts an uploaded picture after the paragraph the caret was in, not inside it', () => {
+    const at = blockBoundaryAfter(body, '<p>Open the'.length);
+    expect(insertBlock(body, at, pictureParagraph(src)).text).toBe(
+      `<p>Open the settings page</p>\n${pictureParagraph(src)}\n<ul><li>One <a href="/x">link</a></li></ul>`,
+    );
+  });
+});
+
+describe('pictureSizeRefusal and labelRulesOut', () => {
+  it('refuses an empty file and one a byte over the limit, saying so without rounding', () => {
+    expect(pictureSizeRefusal(0)).toBe('That file is empty. Choose a picture to upload.');
+    expect(pictureSizeRefusal(KB_IMAGE_MAX_BYTES)).toBeNull();
+    expect(pictureSizeRefusal(KB_IMAGE_MAX_BYTES + 1)).toBe(
+      'That picture is over 10 MB, the most a picture can be.',
+    );
+  });
+
+  it('rules out only a label that names something else, leaving the bytes to the server', () => {
+    expect(labelRulesOut('application/pdf')).toBe(true);
+    expect(labelRulesOut('text/plain')).toBe(true);
+    expect(labelRulesOut('')).toBe(false);
+    expect(labelRulesOut('image/jpg')).toBe(false);
+    expect(labelRulesOut('image/png')).toBe(false);
   });
 });

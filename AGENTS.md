@@ -485,7 +485,7 @@ returns a full instant whose **time component is an artifact of when you asked**
 `YYYY-MM-DD` and never convert through a `Date` — the value carries `+03:00`, so
 a call answered after 21:00 UTC reads as the previous day in UTC.
 
-**Background work.** Anything slow, external or retryable is a job — with three
+**Background work.** Anything slow, external or retryable is a job — with four
 narrow exceptions, written down because they look like violations. The first: a
 control an agent presses and _waits on_, whose entire output is the provider's
 answer, calls the provider in the action instead. `refreshRequesterProfile`,
@@ -520,7 +520,12 @@ files (`storeVisitorFiles`, **The widget carries files**), in the visitor's own
 request: they are still there to try again, and a message stored before its
 files would leave an agent reading about a photo that is not there, so a
 failure refuses the send and gives the files back rather than queueing
-anything. Each upload has its own deadline (`sizedTimeout`). Everything else is
+anything. Each upload has its own deadline (`sizedTimeout`). The fourth is the
+knowledge-base editor's picture upload (`uploadArticlePicture`), for the same
+reasons as the third. The author is waiting for the `src` to put in their
+draft, and the file exists only in their browser, so a queued job would have
+nothing to read. One file goes up at a time, under the upload's own deadline,
+and a failure is a sentence beside the draft. Everything else is
 a job: add the type
 to `JobType` in `lib/queue/index.ts`, a handler under `worker/handlers/`, and
 register it in `worker/handlers/index.ts`. CI checks that the three agree, and

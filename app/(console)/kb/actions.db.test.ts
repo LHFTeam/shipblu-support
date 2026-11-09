@@ -31,6 +31,23 @@ vi.mock('@/lib/auth/guard', () => ({
 }));
 vi.mock('next/cache', () => ({ revalidatePath: () => {} }));
 
+/**
+ * Who the picture upload finds signed in. It asks the session itself rather
+ * than through the guard, because a redirect from an action the editor calls
+ * directly would take the unsaved draft with the page.
+ */
+const session = vi.hoisted(() => ({
+  agent: { id: 'agent-1', role: 'admin', permissions: {} } as {
+    id: string;
+    role: string;
+    permissions: Record<string, boolean>;
+  } | null,
+}));
+vi.mock('@/lib/auth/session', async (original) => ({
+  ...(await original<typeof import('@/lib/auth/session')>()),
+  getSessionAgent: async () => session.agent,
+}));
+
 const { restoreVersion, saveArticle, uploadArticlePicture } = await import('./actions');
 
 withCleanDatabase();
@@ -482,6 +499,7 @@ describe('uploadArticlePicture', () => {
     vi.stubEnv('SUPABASE_URL', SUPABASE);
     vi.stubEnv('SUPABASE_SERVICE_ROLE_KEY', 'service-role');
     resetEnvCache();
+    session.agent = { id: 'agent-1', role: 'admin', permissions: {} };
   });
 
   afterEach(() => {
@@ -517,7 +535,7 @@ describe('uploadArticlePicture', () => {
     const answer = await upload(PNG, 'screenshot.jpg', 'image/jpeg');
 
     const [row] = await db.select().from(kbImages);
-    expect(answer).toEqual({ src: `/api/kb/images/${row!.id}` });
+    expect(answer).toMatchObject({ error: null, src: `/api/kb/images/${row!.id}` });
     expect(row).toMatchObject({
       storagePath: `kb/${row!.id}.png`,
       contentType: 'image/png',
@@ -534,13 +552,43 @@ describe('uploadArticlePicture', () => {
       error: 'Only a PNG, JPEG, GIF or WebP picture can go in an article.',
     });
     expect(await upload(new Uint8Array(0), 'empty.png', 'image/png')).toEqual({
-      error: 'Choose a picture to upload.',
+      error: 'That file is empty. Choose a picture to upload.',
     });
     const big = new Uint8Array(10 * 1024 * 1024 + 1);
     big.set(PNG);
     expect(await upload(big, 'huge.png', 'image/png')).toEqual({
-      error: 'That picture is 10.0 MB. A picture can be at most 10 MB.',
+      error: 'That picture is over 10 MB, the most a picture can be.',
     });
+
+    expect(uploads).toEqual([]);
+    expect(await db.$count(kbImages)).toBe(0);
+  });
+
+  it('refuses a request carrying no file, and one carrying text in its place', async () => {
+    const uploads = storage();
+    const asText = new FormData();
+    asText.set('picture', 'not a file');
+
+    expect(await uploadArticlePicture(new FormData())).toEqual({
+      error: 'Choose a picture to upload.',
+    });
+    expect(await uploadArticlePicture(asText)).toEqual({ error: 'Choose a picture to upload.' });
+    expect(uploads).toEqual([]);
+  });
+
+  // Answered in words, not redirected: the editor calls this directly, and a
+  // followed redirect would take the unsaved draft with the page.
+  it('stores nothing for somebody signed out or without kb.edit, and says why', async () => {
+    const uploads = storage();
+
+    session.agent = null;
+    expect((await upload(PNG, 'step.png', 'image/png')).error).toMatch(/^You have been signed out/);
+    session.agent = { id: 'agent-2', role: 'agent', permissions: {} };
+    expect(await upload(PNG, 'step.png', 'image/png')).toEqual({
+      error: 'You can no longer edit the knowledge base, so the picture was not added.',
+    });
+    session.agent = { id: 'agent-3', role: 'admin', permissions: { 'kb.edit': false } };
+    expect((await upload(PNG, 'step.png', 'image/png')).error).toMatch(/no longer edit/);
 
     expect(uploads).toEqual([]);
     expect(await db.$count(kbImages)).toBe(0);

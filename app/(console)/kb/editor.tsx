@@ -1,16 +1,19 @@
 'use client';
 
-import { useRef, useState, type ClipboardEvent, type DragEvent } from 'react';
+import { useEffect, useRef, useState, type ClipboardEvent, type DragEvent } from 'react';
 import { useFormStatus } from 'react-dom';
 import { Button, ErrorText, Input, Label, Select, Textarea } from '@/components/ui';
 import type { AgentRole } from '@/lib/auth/permissions';
 import type { FolderOption } from '@/lib/kb/admin';
 import { FLOOR_LABELS, SELECTABLE_FLOORS } from '@/lib/kb/floors';
 import {
+  blockBoundaryAfter,
   insertBlock,
-  KB_IMAGE_MAX_BYTES,
   KB_IMAGE_TYPES,
+  labelRulesOut,
+  NOT_A_PICTURE,
   pictureParagraph,
+  pictureSizeRefusal,
 } from '@/lib/kb/image-src';
 import { useActionForm } from '@/components/use-action-form';
 import { saveArticle, uploadArticlePicture, type KbState } from './actions';
@@ -78,21 +81,40 @@ export function ArticleEditor({
 
   const bodyRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
-  // Whether the author has been in the body at all. A box never focused has
-  // no caret worth trusting (it reads 0), so a picture goes at the end.
-  const [bodyFocused, setBodyFocused] = useState(false);
+  // Whether the author has been in the body at all, read when an upload
+  // answers rather than in the render it started from: an upload begun from
+  // the button before the author clicked into the body would otherwise put the
+  // picture at the end however they moved the caret since. A box never focused
+  // has no caret worth trusting (it reads 0), so its picture goes at the end.
+  const bodyTouched = useRef(false);
   const picture = usePictureUpload();
 
-  async function addPicture(file: File) {
-    const src = await picture.upload(file);
-    if (!src) return;
-    // Where the caret is when the upload answers, not where it was when it
-    // started: the author may have kept typing.
+  // A file released anywhere but the body (the preview beside it, a label, the
+  // gutter) would otherwise open in place of the console, and the unsaved draft
+  // with it. The body's own handlers below are what upload a picture.
+  useEffect(() => {
+    const hold = (event: globalThis.DragEvent) => {
+      if (event.dataTransfer?.types.includes('Files')) event.preventDefault();
+    };
+    window.addEventListener('dragover', hold);
+    window.addEventListener('drop', hold);
+    return () => {
+      window.removeEventListener('dragover', hold);
+      window.removeEventListener('drop', hold);
+    };
+  }, []);
+
+  /**
+   * Puts an uploaded picture in where the caret is when the upload answers, at
+   * the end of the block the caret is in: a caret mid-paragraph or inside a
+   * tag would otherwise split it (`blockBoundaryAfter`).
+   */
+  function insertPicture(src: string) {
     const box = bodyRef.current;
+    const touched = bodyTouched.current;
     setBody((current) => {
-      const start = box && bodyFocused ? box.selectionStart : current.length;
-      const end = box && bodyFocused ? box.selectionEnd : current.length;
-      const next = insertBlock(current, start, end, pictureParagraph(src));
+      const at = box && touched ? blockBoundaryAfter(current, box.selectionEnd) : current.length;
+      const next = insertBlock(current, at, pictureParagraph(src));
       requestAnimationFrame(() => {
         box?.focus();
         box?.setSelectionRange(next.caret, next.caret);
@@ -101,12 +123,26 @@ export function ArticleEditor({
     });
   }
 
-  /** The first picture among `files`, ignoring anything else carried with it. */
-  const firstPicture = (files: FileList) =>
-    Array.from(files).find((file) => file.type.startsWith('image/'));
-
+  const addPictures = (files: File[]) => void picture.add(files, insertPicture);
   return (
-    <form {...form} className="flex flex-col gap-4">
+    <form
+      {...form}
+      // A Save sent while a picture is still uploading posts the body without
+      // it, and the picture lands after the page has moved on. The Save button
+      // is disabled meanwhile, which also stops Enter in a field submitting (a
+      // form whose default button is disabled is not submitted implicitly);
+      // this refuses a submit that arrives any other way.
+      onSubmit={(event) => {
+        if (picture.uploading) {
+          event.preventDefault();
+          picture.refuse('A picture is still uploading. Save once it is in the body.');
+          return;
+        }
+        picture.refuse(null);
+        form.onSubmit(event);
+      }}
+      className="flex flex-col gap-4"
+    >
       {article ? <input type="hidden" name="id" value={article.id} /> : null}
 
       <div>
@@ -242,11 +278,12 @@ export function ArticleEditor({
             ref={fileRef}
             type="file"
             accept={Object.keys(KB_IMAGE_TYPES).join(',')}
+            multiple
             onChange={(event) => {
-              const file = event.target.files?.[0];
+              const files = Array.from(event.target.files ?? []);
               // Cleared, so choosing the same file again still fires a change.
               event.target.value = '';
-              if (file) void addPicture(file);
+              if (files.length > 0) addPictures(files);
             }}
             className="hidden"
             tabIndex={-1}
@@ -266,25 +303,30 @@ export function ArticleEditor({
             name="bodyHtml"
             rows={22}
             value={body}
-            onChange={(event) => setBody(event.target.value)}
-            onFocus={() => setBodyFocused(true)}
-            onPaste={(event: ClipboardEvent<HTMLTextAreaElement>) => {
-              const file = firstPicture(event.clipboardData.files);
-              if (!file) return;
-              event.preventDefault();
-              if (!picture.uploading) void addPicture(file);
+            onChange={(event) => {
+              setBody(event.target.value);
+              picture.refuse(null);
             }}
-            // Without this a file dropped on the box makes the browser open it
-            // in place of the console, and the unsaved draft goes with the page.
+            onFocus={() => {
+              bodyTouched.current = true;
+            }}
+            onPaste={(event: ClipboardEvent<HTMLTextAreaElement>) => {
+              // Word, Excel and Sheets put a rendered picture of what was copied
+              // beside its text, and the text is what an author pasting from them
+              // means. A screenshot or a copied image comes with no text.
+              if (event.clipboardData.getData('text/plain').trim()) return;
+              const files = Array.from(event.clipboardData.files);
+              if (files.length === 0) return;
+              event.preventDefault();
+              addPictures(files);
+            }}
             onDragOver={(event: DragEvent<HTMLTextAreaElement>) => {
               if (event.dataTransfer.types.includes('Files')) event.preventDefault();
             }}
             onDrop={(event: DragEvent<HTMLTextAreaElement>) => {
               if (!event.dataTransfer.types.includes('Files')) return;
               event.preventDefault();
-              const file = firstPicture(event.dataTransfer.files);
-              if (!file) picture.refuse(NOT_A_PICTURE);
-              else if (!picture.uploading) void addPicture(file);
+              addPictures(Array.from(event.dataTransfer.files));
             }}
             className="font-mono text-xs"
             dir="ltr"
@@ -370,65 +412,87 @@ export function ArticleEditor({
         {state.ok ? (
           <span className="text-xs text-(--color-feedback-success-fg)">Saved.</span>
         ) : null}
-        <SaveButton />
+        <SaveButton holding={picture.uploading} />
       </div>
     </form>
   );
 }
 
-function SaveButton() {
+/** `holding` while a picture uploads: see the form's `onSubmit`. */
+function SaveButton({ holding }: { holding: boolean }) {
   const { pending } = useFormStatus();
   return (
-    <Button type="submit" disabled={pending} loading={pending} className="ms-auto">
+    <Button type="submit" disabled={pending || holding} loading={pending} className="ms-auto">
       {pending ? 'Saving…' : 'Save'}
     </Button>
   );
 }
 
-const NOT_A_PICTURE = 'Only a PNG, JPEG, GIF or WebP picture can go in an article.';
-
 /**
- * The editor's picture upload: one file at a time, from the button, a paste or
- * a drop, checked here for what the browser can tell and judged again by its
- * bytes on the server. Answers the `src` to insert, or null with `error` set.
+ * The editor's picture upload, from the button, a paste or a drop: each file in
+ * turn, checked here for what the browser can tell and judged again by its bytes
+ * on the server.
  *
  * Calls the action directly rather than through a form, so a refusal keeps the
  * draft and the answer lands in the editor's own state. `useActionForm`'s rule
  * about a thrown action is kept by hand: a dropped connection is a sentence,
- * not `global-error`.
+ * not `global-error`. One batch at a time, and a second one asked for while it
+ * runs is told to wait rather than dropped in silence.
  */
 function usePictureUpload() {
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const busy = useRef(false);
 
-  async function upload(file: File): Promise<string | null> {
-    // The browser's own label, which the server does not trust; it only saves
-    // a round trip for a file that is plainly not a picture an article can show.
-    if (!(file.type in KB_IMAGE_TYPES)) {
-      setError(NOT_A_PICTURE);
+  async function uploadOne(file: File): Promise<string | null> {
+    const refusal = labelRulesOut(file.type) ? NOT_A_PICTURE : pictureSizeRefusal(file.size);
+    if (refusal) {
+      setError(refusal);
       return null;
     }
-    if (file.size > KB_IMAGE_MAX_BYTES) {
-      const megabytes = (file.size / (1024 * 1024)).toFixed(1);
-      setError(`That picture is ${megabytes} MB. A picture can be at most 10 MB.`);
-      return null;
-    }
-
-    setUploading(true);
-    setError(null);
     const data = new FormData();
     data.set('picture', file);
     try {
       const answer = await uploadArticlePicture(data);
-      if (answer.error === undefined) return answer.src;
-      setError(answer.error);
+      if (answer.src) return answer.src;
+      setError(answer.error ?? 'The picture could not be stored. Try again in a moment.');
     } catch {
       setError('The picture did not reach the server. Check the connection and try again.');
-    } finally {
-      setUploading(false);
     }
     return null;
   }
 
-  return { uploading, error, upload, refuse: setError };
+  /** Uploads `files` one after another, handing each `src` to `insert` as it answers. */
+  async function add(files: File[], insert: (src: string) => void) {
+    if (busy.current) {
+      setError('A picture is still uploading. Add the next one once it is in the body.');
+      return;
+    }
+    const pictures = files.filter((file) => !labelRulesOut(file.type));
+    if (pictures.length === 0) {
+      setError(NOT_A_PICTURE);
+      return;
+    }
+
+    busy.current = true;
+    setUploading(true);
+    setError(null);
+    try {
+      for (const file of pictures) {
+        const src = await uploadOne(file);
+        if (!src) return;
+        insert(src);
+      }
+      if (pictures.length < files.length) {
+        setError(
+          'Only the pictures were added. The other files are not pictures an article can show.',
+        );
+      }
+    } finally {
+      busy.current = false;
+      setUploading(false);
+    }
+  }
+
+  return { uploading, error, add, refuse: setError };
 }

@@ -15,6 +15,8 @@ import {
   KB_IMAGE_MAX_BYTES,
   KB_IMAGE_TYPES,
   kbImageSrc,
+  NOT_A_PICTURE,
+  pictureSizeRefusal,
   rewriteImageSources,
 } from './image-src';
 import { ANONYMOUS, articleVisibleTo, folderVisibleTo, type KbViewer } from './visibility';
@@ -200,15 +202,14 @@ export type PictureUpload = { src: string; error?: undefined } | { error: string
  * an article stays a row and an object nobody outside the console can load.
  */
 export async function storeUploadedPicture(file: File): Promise<PictureUpload> {
-  if (file.size === 0) return { error: 'Choose a picture to upload.' };
-  if (file.size > KB_IMAGE_MAX_BYTES) {
-    const megabytes = (file.size / (1024 * 1024)).toFixed(1);
-    return { error: `That picture is ${megabytes} MB. A picture can be at most 10 MB.` };
-  }
+  const refusal = pictureSizeRefusal(file.size);
+  if (refusal) return { error: refusal };
 
+  // The type from the first bytes alone, so a 9 MB PDF labelled `image/png` is
+  // refused without being read whole.
+  const type = kbImageType(new Uint8Array(await file.slice(0, 64).arrayBuffer()));
+  if (!type) return { error: NOT_A_PICTURE };
   const content = Buffer.from(await file.arrayBuffer());
-  const type = kbImageType(content);
-  if (!type) return { error: 'Only a PNG, JPEG, GIF or WebP picture can go in an article.' };
 
   try {
     const { id } = await storeKbImage({ content, ...type, sourceUrl: null });

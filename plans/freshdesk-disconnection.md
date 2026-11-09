@@ -496,11 +496,24 @@ where the caret is. The article's Save is unchanged.
 - **Who sees it is PR 1's rule.** Until an article that shows it is saved, a
   picture is in no article, so only a console agent gets it; that is what lets
   the preview draw it. Once a public article is saved with it, it is public.
-- **The action answers `{ src }` or `{ error }` and revalidates nothing.** No
-  page draws a picture until a Save does, and that Save revalidates as always.
-  The editor puts the answer into its own unsaved body.
-- **A dropped file no longer opens in place of the console.** A drop on the
-  body is caught whether or not it is a picture, so the unsaved draft stays.
+- **Where it goes.** At the caret when the upload answers, moved to the end of
+  the top-level block the caret is in (`blockBoundaryAfter`), so a caret in the
+  middle of a paragraph or inside a tag does not split it. A body never
+  focused gets it at the end. Several files from one drop or one choice go up
+  in turn. A second batch asked for while one runs is told to wait, and Save is
+  held until the upload has answered, Enter in the title included.
+- **A paste carrying text pastes the text.** Word, Excel and Sheets put a
+  rendered picture of what was copied beside its text, so only a paste with no
+  text (a screenshot, a copied image) is uploaded.
+- **The action answers in words where the guard would redirect.** The editor
+  calls it directly, and a followed redirect would take the unsaved draft
+  with the page, so a signed-out or no longer permitted author is told why
+  instead. It revalidates on success like any action, although no page draws
+  the picture until the next Save. A shape chosen to slip past
+  `action-revalidates` was the hole that rule exists to close.
+- **A dropped file no longer opens in place of the console.** A drop anywhere
+  on the page while the editor is open is caught, so the unsaved draft stays.
+  Only a drop on the body uploads.
 - PR 2's refusal for a Freshdesk picture nobody copied now says to add it again
   with Insert picture, where it could only say to remove it.
 
@@ -518,8 +531,10 @@ GET:
 Real Storage and the deployed console are still to see once.
 
 **Left out:** a picture uploaded and never saved into an article stays a row
-and an object that only the console can load. It can be swept later, by a job
-that deletes rows no article or version names after a week.
+and an object that only the console can load. So does one whose insert the
+admission gate gave up as lost while it committed: the author is told to try
+again, and a second copy is stored beside the first. Both can be swept later
+by a job that deletes rows no article or version names after a week.
 
 ### 5. The `robots.txt` sitemap line on the Render host
 

@@ -9,7 +9,8 @@ import { requirePermission } from '@/lib/auth/guard';
 import { ok, type ActionState } from '@/lib/http/action-state';
 import { canonicalUuid, isUuid } from '@/lib/http/uuid';
 import { text } from '@/lib/http/form-data';
-import type { AgentRole } from '@/lib/auth/permissions';
+import { can, type AgentRole } from '@/lib/auth/permissions';
+import { getSessionAgent } from '@/lib/auth/session';
 import {
   getArticleForEdit,
   takenSlugs,
@@ -19,7 +20,7 @@ import {
 import { articleBody, changesNothing, cutArticleVersion } from '@/lib/kb/article-write';
 import { FLOOR_LABELS, SELECTABLE_FLOORS, folderFloor, meetsFloor } from '@/lib/kb/floors';
 import { restoreRefusal, saveRefusal } from '@/lib/kb/freshdesk-refs';
-import { storeUploadedPicture, type PictureUpload } from '@/lib/kb/images';
+import { storeUploadedPicture } from '@/lib/kb/images';
 import { isLocale } from '@/lib/kb/locale';
 import { pointedHere } from '@/lib/kb/off-freshdesk';
 import { slugify, uniqueSlug } from '@/lib/kb/slug';
@@ -464,22 +465,43 @@ export async function linkTranslation(_state: KbState, formData: FormData): Prom
   return ok();
 }
 
+/** What the editor's picture upload answers: the `src` to insert, or why not. */
+export type PictureUploadState = ActionState & { src?: string };
+
 /**
  * Stores a picture for the article editor and answers the `src` to insert.
  *
- * It answers `{ src }` or `{ error }`, not an `ActionState`, and revalidates
- * nothing, on purpose. Nothing any page draws has changed: the picture belongs
- * to no article until the editor's next Save, which revalidates as it always
- * does, and the editor puts the answer into its own unsaved body. A
- * revalidation here would render the whole editor page into the response of
- * every upload for nothing (`action-revalidates` says why an answer that
- * reads as a success otherwise owes one).
+ * The editor calls this directly, not through a form, so a redirect here would
+ * be followed and the unsaved draft would go with the page. So it asks the
+ * session itself and answers a sentence where `requirePermission` would
+ * redirect: an author whose session ended mid-article keeps the draft on screen
+ * to copy out.
+ *
+ * It revalidates although no page draws anything this writes: the picture
+ * belongs to no article until the next Save. `action-revalidates` holds every
+ * success to a revalidation, and an answer shaped to slip past it is the hole
+ * the rule exists to close. The cost is one render of the editor page per
+ * upload, which keeps the editor's own state.
  */
-export async function uploadArticlePicture(formData: FormData): Promise<PictureUpload> {
-  await requirePermission('kb.edit');
+export async function uploadArticlePicture(formData: FormData): Promise<PictureUploadState> {
+  const agent = await getSessionAgent();
+  if (!agent) {
+    return {
+      error:
+        'You have been signed out, so the picture was not added. Copy anything unsaved, then sign in again in a new tab.',
+    };
+  }
+  if (!can(agent, 'kb.edit')) {
+    return { error: 'You can no longer edit the knowledge base, so the picture was not added.' };
+  }
+
   const file = formData.get('picture');
   if (!(file instanceof File)) return { error: 'Choose a picture to upload.' };
-  return storeUploadedPicture(file);
+  const stored = await storeUploadedPicture(file);
+  if (stored.error !== undefined) return { error: stored.error };
+
+  revalidatePath('/kb', 'layout');
+  return { ...ok(), src: stored.src };
 }
 
 /** Restores a previous body, cutting a version for the state being replaced. */
