@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { SESSION_COOKIE } from '@/lib/auth/cookie';
+import { LEGACY_PATH_HEADER } from '@/lib/kb/legacy-path';
 import { LOCALES } from '@/lib/kb/locale';
 
 /**
@@ -134,8 +135,15 @@ export default function proxy(request: NextRequest) {
   if (legacyArticle || legacyFolder) {
     const url = request.nextUrl.clone();
     url.pathname = '/help/legacy';
-    url.search = `?path=${encodeURIComponent(pathname)}`;
-    return NextResponse.rewrite(url);
+    url.search = '';
+    // In a header on the rewritten request, not `?path=` on its URL: the route
+    // handler is handed the request as it arrived, so a query added here never
+    // reaches it, and every legacy URL answered 404 (`lib/kb/legacy-path.ts`).
+    // Set, not appended, so a value the client sent is replaced by the path it
+    // actually asked for.
+    const headers = new Headers(request.headers);
+    headers.set(LEGACY_PATH_HEADER, pathname);
+    return NextResponse.rewrite(url, { request: { headers } });
   }
 
   // --- Help centre hostname ------------------------------------------------

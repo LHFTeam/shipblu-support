@@ -291,7 +291,7 @@ export async function alignAccountable(
   // message or event inserted for the ticket refuses. An ingest holding one,
   // about to update the ticket, then waited on the status write while this
   // waited on it, and Postgres aborted one: an agent's reopen failed, or a
-  // phone reply's echo was lost (§6.106, §6.115). The write already holds NO KEY
+  // phone reply's echo was lost (§6.106, §6.116). The write already holds NO KEY
   // UPDATE, and this writes no key.
   const [ticket] = await tx
     .select({
