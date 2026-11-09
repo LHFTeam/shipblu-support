@@ -393,9 +393,22 @@ from PR 1), and a link to an article the import brought in goes to that
 article (`rewriteLegacyArticleLinks`, widened to relative portal paths). Which
 translation a link reaches is decided in one place for this and for
 `normalise_kb_formatting` (`legacyArticleResolver` in `lib/kb/format.ts`).
-`lib/kb/freshdesk-refs.ts` finds what is left and words the refusal.
+`lib/kb/freshdesk-refs.ts` finds what is left and words the refusal. The
+`article-off-freshdesk` repo rule holds every writer to it: an `articleBody`
+call with no `pointedHere` after it fails CI.
 
-- **Save and Restore** both point the body here before anything else, and
+- **A link is pointed only at a published article** (`legacyArticleIndex`).
+  Pointed at a draft or an archived one, it would 404 for every reader and no
+  longer look like Freshdesk's, so nothing would refuse it. Left as Freshdesk's
+  address, a Save is refused for adding it. Every imported article was
+  published on 2026-11-09, so no stored link changes. Visibility is not asked:
+  an internal article linking to another internal one is right, and a public
+  one linking to an internal one was as closed to customers on Freshdesk.
+- **Only our Freshdesk is rewritten.** The rewrite asks `isFreshdeskAddress` of
+  every match, as the refusal does, so a link to another company's portal with
+  the same path is not turned into a link to whatever we imported under that
+  id. A `#fragment` is kept; the link's text is left as the author wrote it.
+- **Save and Restore** both point the body here before they write, and
   then refuse a Freshdesk link or picture the write would _add_, naming the
   address and what to do. One the stored article already carries is left
   alone. Otherwise an article whose picture the copy job could not copy could
@@ -412,13 +425,15 @@ translation a link reaches is decided in one place for this and for
 - **What counts as Freshdesk's** is narrower than the audit's pattern, and on
   purpose. It is Freshworks' own domains, Freshdesk's bucket (the host test
   the copy job downloads by, `onFreshworks`), a Freshdesk mailbox, and the
-  portal's paths (`/support/solutions|home|tickets|…`,
-  `/solutions/articles|folders|categories/…`) on `support.shipblu.com` or with
-  no host. A page that only mentions Freshdesk, or another company's portal
+  portal's paths (`/support/solutions|home|tickets|discussions|topics|…`,
+  `/solutions/articles|folders|categories/…`, `/helpdesk/attachments/…`) on
+  `support.shipblu.com` or with no host. None of the forum or attachment shapes
+  was stored on 2026-11-09. A page that only mentions Freshdesk, or another company's portal
   on its own domain, does not break when ours closes. An editor refused a
   link to one would have nothing to fix.
-- **Not covered:** the handbook seed, whose content is ours and in the repo.
-  The formatting pass does not report a Freshdesk link it cannot resolve,
+- **The handbook seed** runs `pointedHere` too, for the rule's sake: its
+  content names nothing of Freshdesk's, so it reads nothing and changes nothing.
+- **Not covered:** the formatting pass does not report a Freshdesk link it cannot resolve,
   because none is stored: the audit's `links, live` row is 0, and Save and
   Restore now refuse to add one.
 

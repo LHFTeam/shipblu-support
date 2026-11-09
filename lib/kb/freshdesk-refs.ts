@@ -11,7 +11,7 @@ import { decodeAttribute, imageSources, onFreshworks } from './image-src';
  *
  * Asked by the console's Save and Restore once the body has been pointed here
  * (`./off-freshdesk.ts`), so what it finds is what has no home here: a picture
- * nobody copied, a link to an article that was never imported, a link to a
+ * nobody copied, a link to an article with no published copy here, a link to a
  * part of the portal nothing here replaces. Each of those breaks the day
  * Freshdesk is disconnected, and each is refused only when the write would
  * *add* it. One the stored row already carries is left alone: refusing it
@@ -35,12 +35,16 @@ const RELATIVE_BASE = 'https://relative.invalid/';
 
 /**
  * A Freshdesk portal path: the knowledge base's articles, folders and
- * categories, and the portal's home, tickets, sign-in and search, with or
- * without a locale first. The agent console's `/a/solutions/articles/<id>`
- * matches too, though its host already does.
+ * categories, the portal's home, tickets, sign-in, search and forums, with or
+ * without a locale first, and the attachments it serves from its own host
+ * (`/helpdesk/attachments/<id>`, which names no Freshworks domain at all). The
+ * agent console's `/a/solutions/articles/<id>` matches too, though its host
+ * already does. None of the forum or attachment shapes is stored today
+ * (measured 2026-11-09); they are here because a paste from the portal can
+ * carry them, and each breaks the day the domain moves.
  */
 const PORTAL_PATH =
-  /\/solutions\/(?:articles|folders|categories)(?:\/|$)|\/support\/(?:solutions|home|tickets|login|search|signup|profile)(?:\/|$)/i;
+  /\/solutions\/(?:articles|folders|categories)(?:\/|$)|\/support\/(?:solutions|home|tickets|login|search|signup|profile|discussions|topics)(?:\/|$)|\/helpdesk\/attachments(?:\/|$)/i;
 
 /** A Freshdesk article, by id, in any of the shapes above. */
 const ARTICLE_ID = /\/solutions\/articles\/(\d+)/i;
@@ -150,7 +154,8 @@ function key(reference: FreshdeskReference): string {
  * The reference, said so that whoever reads it knows which one and why.
  *
  * An article link names the id, because the only way one survives being
- * pointed here is that no article was imported under it.
+ * pointed here is that no published article here came from it: never
+ * imported, or imported and since unpublished (`legacyArticleIndex`).
  */
 function described(reference: FreshdeskReference): string {
   if (reference.kind === 'image') {
@@ -158,7 +163,7 @@ function described(reference: FreshdeskReference): string {
   }
   const id = ARTICLE_ID.exec(reference.address)?.[1];
   if (id) {
-    return `a link to Freshdesk article ${id}, which was never imported here (${reference.address})`;
+    return `a link to Freshdesk article ${id}, which has no published article here (${reference.address})`;
   }
   return `a link to Freshdesk, which goes away once Freshdesk is disconnected (${reference.address})`;
 }

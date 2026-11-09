@@ -283,7 +283,10 @@ describe("Freshdesk's links and pictures", () => {
     `https://shipblu72137318794432249.freshdesk.com/a/solutions/articles/${id}?lang=ar&amp;portalId=154000090201`;
 
   /** The imported article Freshdesk id 154000189336 became, in both languages. */
-  async function imported(folderId: string) {
+  async function imported(
+    folderId: string,
+    status: 'published' | 'draft' | 'archived' = 'published',
+  ) {
     await db.insert(kbArticles).values([
       {
         folderId,
@@ -293,6 +296,7 @@ describe("Freshdesk's links and pictures", () => {
         sourceSystem: 'freshdesk',
         externalId: '154000189336:en',
         bodyHtml: '<p>Pack it well.</p>',
+        status,
       },
       {
         folderId,
@@ -302,6 +306,7 @@ describe("Freshdesk's links and pictures", () => {
         sourceSystem: 'freshdesk',
         externalId: '154000189336:ar',
         bodyHtml: '<p>غلّفها جيدا.</p>',
+        status,
       },
     ]);
   }
@@ -367,7 +372,9 @@ describe("Freshdesk's links and pictures", () => {
       }),
     );
 
-    expect(state.error).toContain('Freshdesk article 154000000001, which was never imported here');
+    expect(state.error).toContain(
+      'Freshdesk article 154000000001, which has no published article here',
+    );
     expect(await db.$count(kbArticles)).toBe(1);
   });
 
@@ -386,6 +393,26 @@ describe("Freshdesk's links and pictures", () => {
     expect((await stored(id)).bodyHtml).toBe(
       articleBody('<p>See <a href="/en/a/packaging-guidelines">this</a></p>').bodyHtml,
     );
+  });
+
+  // Pointed at a draft, the link would 404 for every reader and no longer look
+  // like Freshdesk's, so nothing would refuse it.
+  it('refuses a link to an imported article no reader can open, rather than pointing it there', async () => {
+    const id = await article('<p>Step one.</p>', '');
+    const { folderId } = await stored(id);
+    await imported(folderId, 'draft');
+    const before = (await stored(id)).bodyHtml;
+
+    const state = await saving(
+      id,
+      folderId,
+      `<p>See <a href="${PORTAL('154000189336')}">this</a></p>`,
+    );
+
+    expect(state.error).toContain(
+      'Freshdesk article 154000189336, which has no published article here',
+    );
+    expect((await stored(id)).bodyHtml).toBe(before);
   });
 
   it("restores a version's Freshdesk links as the articles they were imported as", async () => {

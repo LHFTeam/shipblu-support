@@ -41,7 +41,12 @@ export async function pointedHere(bodyHtml: string, locale: string): Promise<str
   // Only the rows those ids became. `external_id` is `<id>:<locale>`, and the
   // older single-language rows carry the bare id; both split to the id.
   const rows = await db
-    .select({ locale: kbArticles.locale, slug: kbArticles.slug, externalId: kbArticles.externalId })
+    .select({
+      locale: kbArticles.locale,
+      slug: kbArticles.slug,
+      externalId: kbArticles.externalId,
+      status: kbArticles.status,
+    })
     .from(kbArticles)
     .where(
       and(

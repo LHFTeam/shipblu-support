@@ -312,6 +312,29 @@ describe('rewriteLegacyArticleLinks', () => {
       ),
     ).toBe('<a href="/en/a/packaging-guidelines">x</a>');
   });
+
+  // The same path on another company's own portal is that company's article
+  // 42, not ours, and is no more Freshdesk's than `isFreshdeskAddress` says.
+  it("leaves another company's portal alone, whatever id it names", () => {
+    const html =
+      '<a href="https://help.carrier.example/en/support/solutions/articles/154000189336-x">x</a>';
+    expect(rewriteLegacyArticleLinks(html, resolve)).toBe(html);
+  });
+
+  it('keeps the fragment, and reads a locale wherever the query string puts it', () => {
+    expect(
+      rewriteLegacyArticleLinks(
+        '<a href="https://support.shipblu.com/en/support/solutions/articles/154000189336-x#returns">x</a>',
+        resolve,
+      ),
+    ).toBe('<a href="/en/a/packaging-guidelines#returns">x</a>');
+    expect(
+      rewriteLegacyArticleLinks(
+        '<a href="https://shipblu1.freshdesk.com/a/solutions/articles/154000189336?portalId=2&amp;lang=ar">x</a>',
+        resolve,
+      ),
+    ).toBe('<a href="/ar/a/إرشادات-التعبئة-والتغليف">x</a>');
+  });
 });
 
 describe('legacyArticleIds', () => {
@@ -320,7 +343,8 @@ describe('legacyArticleIds', () => {
       '<a href="https://support.shipblu.com/en/support/solutions/articles/154000189336-p">a</a>' +
       '<a href="https://shipblu1.freshdesk.com/a/solutions/articles/154000206447?lang=ar">b</a>' +
       '<a href="/support/solutions/articles/154000189336">c</a>' +
-      '<a href="https://support.shipblu.com/en/support/solutions/folders/154000100">d</a>';
+      '<a href="https://support.shipblu.com/en/support/solutions/folders/154000100">d</a>' +
+      '<a href="https://help.carrier.example/en/support/solutions/articles/42">e</a>';
 
     expect(legacyArticleIds(html)).toEqual(['154000189336', '154000206447']);
   });
@@ -328,12 +352,15 @@ describe('legacyArticleIds', () => {
 
 describe('legacyArticleResolver', () => {
   const index = legacyArticleIndex([
-    { locale: 'ar', slug: 'التغليف', externalId: '1:ar' },
-    { locale: 'en', slug: 'packaging', externalId: '1:en' },
-    { locale: 'en', slug: 'english-only', externalId: '2:en' },
+    { locale: 'ar', slug: 'التغليف', externalId: '1:ar', status: 'published' },
+    { locale: 'en', slug: 'packaging', externalId: '1:en', status: 'published' },
+    { locale: 'en', slug: 'english-only', externalId: '2:en', status: 'published' },
     // The older single-language form, without the suffix.
-    { locale: 'ar', slug: 'قديم', externalId: '3' },
-    { locale: 'ar', slug: 'local', externalId: null },
+    { locale: 'ar', slug: 'قديم', externalId: '3', status: 'published' },
+    { locale: 'ar', slug: 'local', externalId: null, status: 'published' },
+    // No reader can open these, so a link must not be pointed at them.
+    { locale: 'ar', slug: 'مسودة', externalId: '2:ar', status: 'draft' },
+    { locale: 'en', slug: 'archived', externalId: '4:en', status: 'archived' },
   ]);
 
   it("prefers the link's own language, then the article's, then the default", () => {
@@ -361,6 +388,12 @@ describe('legacyArticleResolver', () => {
       slug: 'قديم',
     });
     expect(legacyArticleResolver(index, 'ar')('9', undefined)).toBeUndefined();
+  });
+
+  it('never resolves to an article no reader can open', () => {
+    // Id 2's Arabic copy is a draft, so the published English one answers.
+    expect(legacyArticleResolver(index, 'ar')('2', 'ar')?.slug).toBe('english-only');
+    expect(legacyArticleResolver(index, 'en')('4', 'en')).toBeUndefined();
   });
 });
 

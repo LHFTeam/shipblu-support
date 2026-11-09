@@ -3,6 +3,7 @@ import { db } from '@/db/client';
 import { kbArticles, kbCategories, kbFolders } from '@/db/schema';
 import { articleBody, cutArticleVersion } from '@/lib/kb/article-write';
 import { HANDBOOK, HANDBOOK_CATEGORY, HANDBOOK_LOCALE } from '@/lib/kb/handbook';
+import { pointedHere } from '@/lib/kb/off-freshdesk';
 import type { AgentRole } from '@/lib/auth/permissions';
 import type { ClaimedJob } from '@/lib/queue';
 import { parseJobPayload } from '@/lib/queue/payloads';
@@ -256,7 +257,13 @@ async function upsertArticle(
   // being handed the sanitiser's canonical output. `handbook.test.ts` asserts
   // each body is already a fixed point of this, so on a healthy run the pair
   // changes nothing — which is what makes the comparison below meaningful.
-  const { bodyHtml, bodyText, excerpt } = articleBody(article.bodyHtml);
+  const body = articleBody(article.bodyHtml);
+  const { bodyText, excerpt } = body;
+  // Pointed off Freshdesk like every other write of a body (`pointedHere`, held
+  // by the `article-off-freshdesk` repo rule). The handbook names nothing of
+  // Freshdesk's, so this reads nothing and changes nothing; a link pasted into
+  // `handbook.ts` from the old portal would be pointed here as a Save's is.
+  const bodyHtml = await pointedHere(body.bodyHtml, HANDBOOK_LOCALE);
 
   const existing = await db
     .select({

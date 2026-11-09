@@ -90,6 +90,7 @@ export async function normaliseKbFormatting(job: ClaimedJob): Promise<void> {
       bodyText: kbArticles.bodyText,
       excerpt: kbArticles.excerpt,
       externalId: kbArticles.externalId,
+      status: kbArticles.status,
     })
     .from(kbArticles)
     .orderBy(asc(kbArticles.locale), asc(kbArticles.slug));

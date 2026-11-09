@@ -147,16 +147,6 @@ export async function saveArticle(_state: KbState, formData: FormData): Promise<
   // reported as drift.
   const body = articleBody(rawBody.replace(/\r\n?/g, '\n'));
   const { bodyText, excerpt } = body;
-  // A Freshdesk picture already copied here goes back in as the copy, and a
-  // link to an imported Freshdesk article as that article: an editor tab
-  // opened before `rehost_kb_images` ran posts Freshdesk's address, and a
-  // paste from the old portal carries its links (`pointedHere`). What has no
-  // home here is refused, unless the stored row already carries it — Freshdesk
-  // is being disconnected, and an address of its added today breaks with it.
-  const bodyHtml = await pointedHere(body.bodyHtml, locale);
-  const refusal = saveRefusal(bodyHtml, before?.bodyHtml ?? null);
-  if (refusal) return { error: refusal };
-
   // The folder decides the category, and the category carries a locale. An
   // English article inside an Arabic category would be unreachable — the public
   // routes filter on the category's locale — so this is rejected rather than
@@ -207,6 +197,19 @@ export async function saveArticle(_state: KbState, formData: FormData): Promise<
 
   const unreachable = refuseUnreachableFloor(agent.role, internal ? minRole : null);
   if (unreachable) return unreachable;
+
+  // A Freshdesk picture already copied here goes back in as the copy, and a
+  // link to an imported Freshdesk article as that article: an editor tab
+  // opened before `rehost_kb_images` ran posts Freshdesk's address, and a
+  // paste from the old portal carries its links (`pointedHere`). What has no
+  // home here is refused, unless the stored row already carries it — Freshdesk
+  // is being disconnected, and an address of its added today breaks with it.
+  //
+  // After every other refusal, since it can read the pool twice and a save the
+  // folder checks turn away would have spent those reads for nothing.
+  const bodyHtml = await pointedHere(body.bodyHtml, locale);
+  const refusal = saveRefusal(bodyHtml, before?.bodyHtml ?? null);
+  if (refusal) return { error: refusal };
 
   const baseSlug = slugify(requestedSlug || title, `article-${Date.now()}`);
   const slug = uniqueSlug(baseSlug, await takenSlugs(locale, id || undefined));

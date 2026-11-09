@@ -437,7 +437,9 @@ describe('importFreshdeskKb', () => {
               `<p><img src="${picture}" /></p>` +
               '<p><a href="https://support.shipblu.com/ar/support/solutions/articles/32-x">العنوان</a></p>',
           },
-          ADDRESS,
+          // Published, since a link is pointed only at an article somebody can
+          // open (`legacyArticleIndex`); the fixture's own copy is a draft.
+          { ...ADDRESS, status: 2 },
         ],
         22: [ESCALATE],
       },

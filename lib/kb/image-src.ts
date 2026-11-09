@@ -85,6 +85,12 @@ const FRESHDESK_VIRTUAL_HOST = /^cdn\.freshdesk\.com\.s3(?:[.-][a-z0-9-]+)?\.ama
  * passing match on the audit's pattern happens to name — a host with
  * "freshdesk" somewhere in its path, say. The 214 images measured on
  * 2026-11-07 are all path-style S3 URLs in that bucket.
+ *
+ * The host list is the refusal's too, so it holds every Freshworks domain an
+ * article might name, `freshservice.com` and `fwcdn.com` among them, and the
+ * job may download from each. That is on purpose: a picture any of Freshworks'
+ * hosts serves goes with Freshdesk, and the job is what keeps it. No stored
+ * image is on either today.
  */
 export function fetchableFreshworksImage(src: string): boolean {
   let url: URL;

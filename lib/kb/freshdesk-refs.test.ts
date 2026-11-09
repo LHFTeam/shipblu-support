@@ -26,6 +26,9 @@ describe('isFreshdeskAddress', () => {
     ],
     ['a portal path with no host', '/en/support/solutions/articles/154000189336'],
     ['a portal path with no scheme', '//support.shipblu.com/support/home'],
+    // Served from the portal's own host, so no Freshworks domain is named.
+    ['an attachment on the portal', 'https://support.shipblu.com/helpdesk/attachments/48012345'],
+    ['the portal forums', 'https://support.shipblu.com/en/support/discussions/topics/154000001'],
     ["Freshdesk's bucket, path-style", BUCKET_IMAGE],
     ["Freshdesk's bucket, virtual-hosted", 'https://cdn.freshdesk.com.s3.amazonaws.com/x.png'],
     ['a Freshworks CDN, over http', 'http://assets.fw-cdn.com/logo.png'],
@@ -82,7 +85,7 @@ describe('saveRefusal', () => {
     const html = `<p><a href="${PORTAL_ARTICLE.replace('154000189336', '154000000001')}">x</a></p>`;
 
     expect(saveRefusal(html, null)).toBe(
-      'The article has a link to Freshdesk article 154000000001, which was never imported here ' +
+      'The article has a link to Freshdesk article 154000000001, which has no published article here ' +
         '(https://support.shipblu.com/en/support/solutions/articles/154000000001-packaging-guidelines). ' +
         'Point it at an article on this help centre (/<language>/a/<slug>) or remove it, then save.',
     );
