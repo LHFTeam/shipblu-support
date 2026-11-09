@@ -199,6 +199,20 @@ export async function reopenWithOwner(
  * accountability would move a breach that already happened; one that does come
  * back is live work on a phone its old owner no longer holds, however it was
  * finished.
+ *
+ * Whether the move is out of resolved or closed is decided under the ticket's
+ * own lock, and the number's lock is taken before it for any move into open or
+ * pending, whatever the status looks like first. Decided from a read with no
+ * lock, as it was, an agent's resolve still in flight read as Open, so the
+ * move took no lock on the number and queued on the ticket behind the resolve.
+ * A handover could then commit between the two: it found the ticket resolved
+ * and left it, as it should, and this move reopened it as though it had never
+ * been resolved, leaving it with the previous owner for good. With the
+ * number's lock taken first, a handover in flight is waited for, and its owner
+ * is the one read. The number before the ticket, because that is the order a
+ * handover takes them, and the reverse would wait on each other. The cost is
+ * a KEY SHARE on the number for every move into open or pending, which waits
+ * on nothing but a handover.
  */
 async function ownerOnReopen(
   tx: typeof db,
@@ -207,26 +221,41 @@ async function ownerOnReopen(
 ): Promise<{ ownerId: string | null; channelId: string } | null> {
   if (to !== 'open' && to !== 'pending') return null;
 
+  // Columns no other writer moves, so a read with no lock answers whether the
+  // number matters at all.
   const [ticket] = await tx
     .select({
       channel: conversations.channel,
       channelId: conversations.channelId,
       sourceSystem: conversations.sourceSystem,
-      category: ticketStatuses.category,
     })
+    .from(conversations)
+    .where(eq(conversations.id, conversationId));
+
+  if (!ticket?.channelId || ticket.channel !== 'whatsapp' || ticket.sourceSystem === 'import') {
+    return null;
+  }
+
+  const ownerId = await lockedOwnerId(tx, ticket.channelId);
+
+  // Locked, then read: the status is joined in a statement of its own, after
+  // the lock, for the reason AGENTS.md's locked-read rule gives. FOR NO KEY
+  // UPDATE, the lock the status write that follows takes anyway.
+  const [locked] = await tx
+    .select({ id: conversations.id })
+    .from(conversations)
+    .where(eq(conversations.id, conversationId))
+    .for('no key update');
+  if (!locked) return null;
+
+  const [now] = await tx
+    .select({ category: ticketStatuses.category })
     .from(conversations)
     .innerJoin(ticketStatuses, eq(ticketStatuses.id, conversations.statusId))
     .where(eq(conversations.id, conversationId));
 
-  if (
-    !ticket?.channelId ||
-    ticket.channel !== 'whatsapp' ||
-    ticket.sourceSystem === 'import' ||
-    (ticket.category !== 'resolved' && ticket.category !== 'closed')
-  ) {
-    return null;
-  }
-  return { ownerId: await lockedOwnerId(tx, ticket.channelId), channelId: ticket.channelId };
+  if (now?.category !== 'resolved' && now?.category !== 'closed') return null;
+  return { ownerId, channelId: ticket.channelId };
 }
 
 /**
@@ -256,6 +285,14 @@ export async function alignAccountable(
     now?: Date;
   },
 ): Promise<{ changed: boolean; reassigned: boolean }> {
+  // FOR NO KEY UPDATE, never FOR UPDATE: every caller has already written this
+  // row (`reopenWithOwner` runs the status write first), so a lock asked for
+  // here is an upgrade, and FOR UPDATE is the one upgrade the KEY SHARE of a
+  // message or event inserted for the ticket refuses. An ingest holding one,
+  // about to update the ticket, then waited on the status write while this
+  // waited on it, and Postgres aborted one: an agent's reopen failed, or a
+  // phone reply's echo was lost (§6.106, §6.115). The write already holds NO KEY
+  // UPDATE, and this writes no key.
   const [ticket] = await tx
     .select({
       accountableAgentId: conversations.accountableAgentId,
@@ -263,7 +300,7 @@ export async function alignAccountable(
     })
     .from(conversations)
     .where(eq(conversations.id, input.conversationId))
-    .for('update');
+    .for('no key update');
 
   if (!ticket || ticket.accountableAgentId === input.ownerId) {
     return { changed: false, reassigned: false };

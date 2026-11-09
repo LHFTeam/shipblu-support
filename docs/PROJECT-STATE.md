@@ -8346,6 +8346,43 @@ dryRun=true`, then without, gives those two theirs back from their
       (`wait_event` `transactionid` or `tuple`): a plain read never waits on
       a row, though it can wait on a table behind a TRUNCATE or other DDL.
 
+115.  **Reopening a WhatsApp ticket could deadlock with the message arriving
+      on it, and could reopen it with the number's previous owner.**
+      _2026-11-08, found by the independent review of the #490 fix and
+      reproduced on Postgres 16; #493. Neither was seen in production._ Both
+      sit in `reopenWithOwner` (`lib/whatsapp/number-owner.ts`), which every
+      status writer goes through, and both hit any WhatsApp ticket on a
+      number's row, owned or not.
+
+      The first is §6.106's upgrade. `reopenWithOwner` runs the status write,
+      then `alignAccountable`, whose first statement was
+      `SELECT … FOR UPDATE` on the row the write had just taken. A phone
+      reply's echo arriving at the same moment inserts its message, holding
+      KEY SHARE on the ticket, and then updates the ticket. So the reopen
+      waited on the insert, the echo's update waited on the reopen, and
+      Postgres aborted one: the agent's reopen failed, or the echo was lost,
+      retried only if it was alone in its delivery. `alignAccountable` now
+      takes `FOR NO KEY UPDATE`, the lock the write already holds.
+
+      The second decided whether a move was a reopen from a read with no
+      lock. Suppose one agent's resolve is still in flight, and a handover is
+      waiting on the ticket behind it. A second agent moving the ticket to
+      Open read it as Open, so took no lock on the number, and queued behind
+      both. The handover found the ticket resolved and left it, and the move
+      then reopened it without realigning it. The ticket stayed open with
+      the previous owner for good. `ownerOnReopen` now takes the number's
+      lock for any move into open or pending, then the ticket's lock, and
+      reads the status under it: a handover in flight is waited for, and its
+      owner is the one read. The number comes before the ticket because a
+      handover takes them in that order. The cost is a KEY SHARE on the
+      number for every such move, which waits on nothing but a handover.
+
+      `lib/whatsapp/number-owner.db.test.ts` holds both. One case reopens
+      beside an echo that has stored its message and goes on to update the
+      ticket. The other reopens behind a resolve and a handover. Each fails
+      against its half of the old code: the first with the echo aborted, the
+      second with the ticket left with the previous owner.
+
 ### Tooling notes for this environment
 
 Supabase and Render MCP tools work and are the fastest way to check real state —

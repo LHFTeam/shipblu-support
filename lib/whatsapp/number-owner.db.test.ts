@@ -184,6 +184,31 @@ async function behindAWriter(
   expect(queued).toBe(true);
 }
 
+/** True once at least `count` sessions wait on a lock, false if not within two seconds. */
+async function untilLockWaiters(count: number): Promise<boolean> {
+  for (let i = 0; i < 100; i++) {
+    const [row] = (await db.execute(
+      sql`select count(*)::int as waiting from pg_stat_activity
+          where datname = current_database() and wait_event_type = 'Lock'`,
+    )) as unknown as [{ waiting: number }];
+    if (row!.waiting >= count) return true;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  return false;
+}
+
+/** A second session, for a writer the code under test must meet mid-transaction. */
+function sideSession() {
+  return postgres(process.env.TEST_DATABASE_URL!, { max: 1, prepare: false, onnotice: () => {} });
+}
+
+/** A promise and the function that settles it, for holding a session open. */
+function latch(): { done: Promise<void>; open: () => void } {
+  let open!: () => void;
+  const done = new Promise<void>((resolve) => (open = resolve));
+  return { done, open };
+}
+
 /** The owner's assignment and that change, as the ticket page draws them: by `created_at`. */
 async function lineOrder(id: string) {
   const lines = await db
@@ -800,6 +825,90 @@ describe('a resolved ticket reopened by an agent or a rule', () => {
     expect(written).toBe(false);
     expect(await holders(resolved)).toEqual({ accountable: nayera, assignee: nayera });
     expect((await eventsOf(resolved)).map((e) => e.type)).not.toContain('accountable_changed');
+  });
+  // An ingest stores the phone's reply on the ticket — its insert holds KEY
+  // SHARE on the ticket's row until it commits — and then updates the ticket.
+  // An agent reopening the ticket meanwhile writes it, then reads it again
+  // under a lock to realign it: FOR UPDATE there was an upgrade that KEY SHARE
+  // refuses, so each waited on the other and Postgres aborted one, the reopen
+  // or the echo (§6.106, #493).
+  it('reopens beside an ingest that stored a message and goes on to update the ticket', async () => {
+    const { admin, ali, resolved } = await handedOver();
+    const open = await status('Open');
+    const other = sideSession();
+    const inserted = latch();
+    const gate = latch();
+    try {
+      const ingest = other.begin(async (tx) => {
+        await tx`insert into messages (conversation_id, direction, kind, body_text)
+                 values (${resolved}, 'outbound', 'reply', 'Typed on the phone')`;
+        inserted.open();
+        await gate.done;
+        await tx`update conversations set last_agent_message_at = now() where id = ${resolved}`;
+      });
+      await inserted.done;
+      const reopening = changeStatus(admin, resolved, open);
+      // Until the reopen has finished, or waits on the ingest's insert.
+      await Promise.race([reopening, untilWaitingOnALock(db)]);
+      gate.open();
+      const [byIngest, byReopen] = await Promise.allSettled([ingest, reopening]);
+
+      expect(byIngest.status).toBe('fulfilled');
+      expect(byReopen.status).toBe('fulfilled');
+    } finally {
+      gate.open();
+      await other.end();
+    }
+    expect(await holders(resolved)).toEqual({ accountable: ali, assignee: ali });
+  });
+
+  // An agent's resolve is in flight; a handover waits on the ticket behind
+  // it; a second agent moves the ticket back to Open, having seen it Open
+  // before the resolve committed. Decided from that read, the move took no
+  // lock on the number, the handover left the ticket as the resolved one it
+  // found, and the move then reopened it with the previous owner, for good
+  // (#493). Decided under the ticket's lock, behind the number's, the move
+  // waits for the handover and realigns the ticket to the new owner.
+  it('brings over a ticket reopened behind a resolve and a handover', async () => {
+    const admin = await agent('Mona Admin', { role: 'admin' });
+    const nayera = await agent('Nayera Mohamed');
+    const ali = await agent('Ali Nasser');
+    const number = await phone('Ali Nasser', ali);
+    const live = await ticket(number, 'Open', { accountableAgentId: ali, assigneeAgentId: ali });
+    const resolvedStatus = await status('Resolved');
+    const open = await status('Open');
+    const other = sideSession();
+    const resolving = latch();
+    const gate = latch();
+    let queued = false;
+    try {
+      const resolve = other.begin(async (tx) => {
+        await tx`update conversations set status_id = ${resolvedStatus.id}, resolved_at = now()
+                 where id = ${live}`;
+        resolving.open();
+        await gate.done;
+      });
+      await resolving.done;
+      const handing = handOverNumber({
+        channelId: number,
+        toAgentId: nayera,
+        actor: { id: admin, label: 'Mona Admin' },
+      });
+      await untilLockWaiters(1);
+      const reopening = changeStatus(admin, live, open);
+      queued = await untilLockWaiters(2);
+      gate.open();
+      await resolve;
+      await handing;
+      await reopening;
+    } finally {
+      gate.open();
+      await other.end();
+    }
+
+    expect(queued).toBe(true);
+    expect(await ownerOf(number)).toBe(nayera);
+    expect(await holders(live)).toEqual({ accountable: nayera, assignee: nayera });
   });
 });
 

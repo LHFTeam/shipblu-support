@@ -1109,7 +1109,11 @@ closed after the number changed hands (`alignAccountable`). That last is
 `set_status` action and `reopenResolved`, which every customer's reopen uses —
 so a new writer cannot forget it: reopened by hand and then continued by the
 customer as an open ticket, which never realigns, a ticket stayed with the
-previous owner for good. Six rules hold:
+previous owner for good. It takes the number's lock before the ticket's for
+every move into open or pending, and decides whether the move is a reopen
+under the ticket's lock. Decided from a read with no lock, a resolve in flight
+read as Open, and a handover between the two left the reopened ticket with the
+previous owner (§6.115). Six rules hold:
 
 - **Reassignment moves the work, never the breach.** Assignment, reclaim, a
   supervisor's reassignment, an automation and a merge never write
