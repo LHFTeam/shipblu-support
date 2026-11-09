@@ -4,9 +4,11 @@ import { normaliseArticleHtml } from './format';
 import {
   fetchableFreshworksImage,
   imageSources,
+  insertBlock,
   isFreshworksImage,
   kbImageIdOf,
   kbImageSrc,
+  pictureParagraph,
   rewriteImageSources,
 } from './image-src';
 
@@ -171,5 +173,37 @@ describe('fetchableFreshworksImage', () => {
     expect(fetchableFreshworksImage('https://user:pass@cdn.freshdesk.com/a.png')).toBe(false);
     expect(fetchableFreshworksImage('/relative/a.png')).toBe(false);
     expect(fetchableFreshworksImage('')).toBe(false);
+  });
+});
+
+describe('pictureParagraph and insertBlock', () => {
+  const src = kbImageSrc('0b5f8c1e-2a4b-4c3d-9e8f-1a2b3c4d5e6f');
+
+  it('puts an uploaded picture in a paragraph of its own, which the write path keeps', () => {
+    expect(pictureParagraph(src)).toBe(`<p><img src="${src}" alt="" /></p>`);
+    // Saved as written, but for the `loading` the sanitiser adds to every picture.
+    expect(normaliseArticleHtml(sanitiseArticleHtml(pictureParagraph(src)))).toBe(
+      `<p><img src="${src}" alt="" loading="lazy" /></p>`,
+    );
+  });
+
+  it('inserts on lines of its own where the caret is, and puts the caret after it', () => {
+    const text = '<p>One</p><p>Two</p>';
+    const at = '<p>One</p>'.length;
+
+    expect(insertBlock(text, at, at, '<p>X</p>')).toEqual({
+      text: '<p>One</p>\n<p>X</p>\n<p>Two</p>',
+      caret: '<p>One</p>\n<p>X</p>\n'.length,
+    });
+  });
+
+  it('adds no blank line where one is already, and replaces a selection', () => {
+    expect(insertBlock('a\n\nb', 2, 2, 'X').text).toBe('a\nX\nb');
+    expect(insertBlock('keep REPLACE keep', 5, 12, 'X').text).toBe('keep \nX\n keep');
+  });
+
+  it('writes into an empty body, and at the end, with nothing around it', () => {
+    expect(insertBlock('', 0, 0, 'X')).toEqual({ text: 'X', caret: 1 });
+    expect(insertBlock('a', 1, 1, 'X')).toEqual({ text: 'a\nX', caret: 3 });
   });
 });

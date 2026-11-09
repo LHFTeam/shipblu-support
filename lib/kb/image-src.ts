@@ -15,6 +15,59 @@
  * those characters and no others.
  */
 
+/**
+ * The largest picture an article may hold, copied in or uploaded. Production's
+ * largest of the 207 copied is well under a megabyte (28.8 MiB across all of
+ * them). For the copy job it bounds what a wrong URL can cost the worker; for
+ * an upload it is the sentence an editor meets before anything is sent, and
+ * well under the 26 MB a server action's body may carry (`next.config.ts`).
+ */
+export const KB_IMAGE_MAX_BYTES = 10 * 1024 * 1024;
+
+/**
+ * The types an article may show, as read from the bytes, with the extension
+ * the stored key takes.
+ *
+ * Raster images a browser draws everywhere. No SVG, which is a document that
+ * runs its author's script; no HEIC, which only Safari draws; and nothing a
+ * remote server or a browser merely *says* is an image, since what is stored
+ * here is served back with this type. Here rather than beside the check in
+ * `./images.ts` so the editor can offer the same list before it uploads.
+ */
+export const KB_IMAGE_TYPES: Readonly<Record<string, string>> = {
+  'image/png': 'png',
+  'image/jpeg': 'jpg',
+  'image/gif': 'gif',
+  'image/webp': 'webp',
+};
+
+/**
+ * The markup the editor puts in for a picture it uploaded: a paragraph of its
+ * own, so the formatting standard keeps it a block, with `alt` left for the
+ * author to fill.
+ */
+export function pictureParagraph(src: string): string {
+  return `<p><img src="${encodeAttribute(src)}" alt="" /></p>`;
+}
+
+/**
+ * `text` with `block` put where the selection was, on lines of its own, and
+ * where the caret goes after it. The selection, if any, is replaced.
+ */
+export function insertBlock(
+  text: string,
+  start: number,
+  end: number,
+  block: string,
+): { text: string; caret: number } {
+  const before = text.slice(0, start);
+  const after = text.slice(end);
+  const lead = before && !before.endsWith('\n') ? '\n' : '';
+  const trail = after && !after.startsWith('\n') ? '\n' : '';
+  const inserted = `${lead}${block}${trail}`;
+  return { text: `${before}${inserted}${after}`, caret: before.length + inserted.length };
+}
+
 /** The route that serves a picture we hold (`app/api/kb/images/[id]/route.ts`). */
 const KB_IMAGE_ROUTE = '/api/kb/images/';
 

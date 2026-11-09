@@ -1533,7 +1533,9 @@ is code:
   built: Save, Restore and the import point Freshdesk's pictures and article
   links here as they write, and Save and Restore refuse to add one that has no
   home here. Until it ships, the 29 old links in 18 version rows are one
-  Restore from the help centre.
+  Restore from the help centre. PR 4 is built on top of it: the article editor
+  uploads a picture (button, paste or drop) into `kb_images`, so a new
+  screenshot is ours rather than hot-linked.
 
 - **Instagram through Unified Login — the next configuration task, and none of
   it is a deploy.** The direct connection's token expired on 2026-10-29 (the

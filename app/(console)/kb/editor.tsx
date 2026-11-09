@@ -1,13 +1,19 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState, type ClipboardEvent, type DragEvent } from 'react';
 import { useFormStatus } from 'react-dom';
 import { Button, ErrorText, Input, Label, Select, Textarea } from '@/components/ui';
 import type { AgentRole } from '@/lib/auth/permissions';
 import type { FolderOption } from '@/lib/kb/admin';
 import { FLOOR_LABELS, SELECTABLE_FLOORS } from '@/lib/kb/floors';
+import {
+  insertBlock,
+  KB_IMAGE_MAX_BYTES,
+  KB_IMAGE_TYPES,
+  pictureParagraph,
+} from '@/lib/kb/image-src';
 import { useActionForm } from '@/components/use-action-form';
-import { saveArticle, type KbState } from './actions';
+import { saveArticle, uploadArticlePicture, type KbState } from './actions';
 
 const INITIAL: KbState = { error: null };
 
@@ -69,6 +75,35 @@ export function ArticleEditor({
   // letting somebody choose "agents and up" and wonder why no agent sees it.
   const folder = available.find((option) => option.id === folderId);
   const internal = visibility === 'agents_only' || folder?.visibility === 'agents_only';
+
+  const bodyRef = useRef<HTMLTextAreaElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+  // Whether the author has been in the body at all. A box never focused has
+  // no caret worth trusting (it reads 0), so a picture goes at the end.
+  const [bodyFocused, setBodyFocused] = useState(false);
+  const picture = usePictureUpload();
+
+  async function addPicture(file: File) {
+    const src = await picture.upload(file);
+    if (!src) return;
+    // Where the caret is when the upload answers, not where it was when it
+    // started: the author may have kept typing.
+    const box = bodyRef.current;
+    setBody((current) => {
+      const start = box && bodyFocused ? box.selectionStart : current.length;
+      const end = box && bodyFocused ? box.selectionEnd : current.length;
+      const next = insertBlock(current, start, end, pictureParagraph(src));
+      requestAnimationFrame(() => {
+        box?.focus();
+        box?.setSelectionRange(next.caret, next.caret);
+      });
+      return next.text;
+    });
+  }
+
+  /** The first picture among `files`, ignoring anything else carried with it. */
+  const firstPicture = (files: FileList) =>
+    Array.from(files).find((file) => file.type.startsWith('image/'));
 
   return (
     <form {...form} className="flex flex-col gap-4">
@@ -189,20 +224,68 @@ export function ArticleEditor({
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => setShowPreview((value) => !value)}
+            onClick={() => fileRef.current?.click()}
+            disabled={picture.uploading}
+            loading={picture.uploading}
             className="ms-auto"
           >
+            {picture.uploading ? 'Uploading picture…' : 'Insert picture'}
+          </Button>
+          {/*
+            No `name`, so the article's own Save never posts it: the picture
+            goes up on its own, through `uploadArticlePicture`, the moment it is
+            chosen. `hidden` rather than `sr-only`, which is absolutely
+            positioned and escapes an unpositioned pane (§6.81); the button
+            above is how anybody reaches it.
+          */}
+          <input
+            ref={fileRef}
+            type="file"
+            accept={Object.keys(KB_IMAGE_TYPES).join(',')}
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              // Cleared, so choosing the same file again still fires a change.
+              event.target.value = '';
+              if (file) void addPicture(file);
+            }}
+            className="hidden"
+            tabIndex={-1}
+            aria-hidden
+          />
+          <Button variant="ghost" size="sm" onClick={() => setShowPreview((value) => !value)}>
             {showPreview ? 'Hide preview' : 'Show preview'}
           </Button>
         </div>
 
+        <ErrorText>{picture.error}</ErrorText>
+
         <div className={showPreview ? 'grid gap-3 lg:grid-cols-2' : ''}>
           <Textarea
+            ref={bodyRef}
             id="bodyHtml"
             name="bodyHtml"
             rows={22}
             value={body}
             onChange={(event) => setBody(event.target.value)}
+            onFocus={() => setBodyFocused(true)}
+            onPaste={(event: ClipboardEvent<HTMLTextAreaElement>) => {
+              const file = firstPicture(event.clipboardData.files);
+              if (!file) return;
+              event.preventDefault();
+              if (!picture.uploading) void addPicture(file);
+            }}
+            // Without this a file dropped on the box makes the browser open it
+            // in place of the console, and the unsaved draft goes with the page.
+            onDragOver={(event: DragEvent<HTMLTextAreaElement>) => {
+              if (event.dataTransfer.types.includes('Files')) event.preventDefault();
+            }}
+            onDrop={(event: DragEvent<HTMLTextAreaElement>) => {
+              if (!event.dataTransfer.types.includes('Files')) return;
+              event.preventDefault();
+              const file = firstPicture(event.dataTransfer.files);
+              if (!file) picture.refuse(NOT_A_PICTURE);
+              else if (!picture.uploading) void addPicture(file);
+            }}
             className="font-mono text-xs"
             dir="ltr"
           />
@@ -221,6 +304,12 @@ export function ArticleEditor({
           ) : null}
         </div>
       </div>
+
+      <p className="-mt-2 text-xs text-(--color-text-tertiary)">
+        Paste a screenshot into the body, drop a picture on it, or use Insert picture: it is stored
+        here and put in where the cursor is. Say what it shows in its <code>alt</code>, which a
+        screen reader reads aloud.
+      </p>
 
       <details className="rounded-md border border-(--color-border-subtle) bg-(--color-background-surface) p-3">
         <summary className="cursor-pointer text-sm font-medium">URL, tags and SEO</summary>
@@ -294,4 +383,52 @@ function SaveButton() {
       {pending ? 'Saving…' : 'Save'}
     </Button>
   );
+}
+
+const NOT_A_PICTURE = 'Only a PNG, JPEG, GIF or WebP picture can go in an article.';
+
+/**
+ * The editor's picture upload: one file at a time, from the button, a paste or
+ * a drop, checked here for what the browser can tell and judged again by its
+ * bytes on the server. Answers the `src` to insert, or null with `error` set.
+ *
+ * Calls the action directly rather than through a form, so a refusal keeps the
+ * draft and the answer lands in the editor's own state. `useActionForm`'s rule
+ * about a thrown action is kept by hand: a dropped connection is a sentence,
+ * not `global-error`.
+ */
+function usePictureUpload() {
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function upload(file: File): Promise<string | null> {
+    // The browser's own label, which the server does not trust; it only saves
+    // a round trip for a file that is plainly not a picture an article can show.
+    if (!(file.type in KB_IMAGE_TYPES)) {
+      setError(NOT_A_PICTURE);
+      return null;
+    }
+    if (file.size > KB_IMAGE_MAX_BYTES) {
+      const megabytes = (file.size / (1024 * 1024)).toFixed(1);
+      setError(`That picture is ${megabytes} MB. A picture can be at most 10 MB.`);
+      return null;
+    }
+
+    setUploading(true);
+    setError(null);
+    const data = new FormData();
+    data.set('picture', file);
+    try {
+      const answer = await uploadArticlePicture(data);
+      if (answer.error === undefined) return answer.src;
+      setError(answer.error);
+    } catch {
+      setError('The picture did not reach the server. Check the connection and try again.');
+    } finally {
+      setUploading(false);
+    }
+    return null;
+  }
+
+  return { uploading, error, upload, refuse: setError };
 }

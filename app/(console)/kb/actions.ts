@@ -19,6 +19,7 @@ import {
 import { articleBody, changesNothing, cutArticleVersion } from '@/lib/kb/article-write';
 import { FLOOR_LABELS, SELECTABLE_FLOORS, folderFloor, meetsFloor } from '@/lib/kb/floors';
 import { restoreRefusal, saveRefusal } from '@/lib/kb/freshdesk-refs';
+import { storeUploadedPicture, type PictureUpload } from '@/lib/kb/images';
 import { isLocale } from '@/lib/kb/locale';
 import { pointedHere } from '@/lib/kb/off-freshdesk';
 import { slugify, uniqueSlug } from '@/lib/kb/slug';
@@ -461,6 +462,24 @@ export async function linkTranslation(_state: KbState, formData: FormData): Prom
   revalidatePath(`/kb/${id}`);
   revalidatePath(`/kb/${otherId}`);
   return ok();
+}
+
+/**
+ * Stores a picture for the article editor and answers the `src` to insert.
+ *
+ * It answers `{ src }` or `{ error }`, not an `ActionState`, and revalidates
+ * nothing, on purpose. Nothing any page draws has changed: the picture belongs
+ * to no article until the editor's next Save, which revalidates as it always
+ * does, and the editor puts the answer into its own unsaved body. A
+ * revalidation here would render the whole editor page into the response of
+ * every upload for nothing (`action-revalidates` says why an answer that
+ * reads as a success otherwise owes one).
+ */
+export async function uploadArticlePicture(formData: FormData): Promise<PictureUpload> {
+  await requirePermission('kb.edit');
+  const file = formData.get('picture');
+  if (!(file instanceof File)) return { error: 'Choose a picture to upload.' };
+  return storeUploadedPicture(file);
 }
 
 /** Restores a previous body, cutting a version for the state being replaced. */

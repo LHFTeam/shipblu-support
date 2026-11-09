@@ -2353,8 +2353,9 @@ picture. `rehost_kb_images` copies
 Freshdesk's hot-linked images in (`plans/freshdesk-disconnection.md`, PR 1). It
 rewrites versions in place rather than cutting one, so no Restore can bring
 Freshdesk's address back, and its way back is `revert=true` from
-`kb_images.source_url`. Until the editor uploads (PR 4), a new screenshot is
-still hot-linked from wherever its author found it.
+`kb_images.source_url`. The editor uploads a new picture the same way
+(`uploadArticlePicture`, PR 4): judged by its bytes, stored with no
+`source_url`, and named by its route.
 
 **A body written into `kb_articles` is pointed off Freshdesk first.** Every
 writer of a body (the console's Save and Restore, the Freshdesk import and the

@@ -122,7 +122,7 @@ export function saveRefusal(next: string, current: string | null): string | null
   if (!added) return null;
 
   return added.kind === 'image'
-    ? `The article shows ${described(added)}. Remove the picture, then save.`
+    ? `The article shows ${described(added)}. Remove it, or add the picture again with Insert picture, then save.`
     : `The article has ${described(added)}. Point it at an article on this help centre (/<language>/a/<slug>) or remove it, then save.`;
 }
 

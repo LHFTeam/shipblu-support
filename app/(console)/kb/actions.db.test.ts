@@ -1,5 +1,5 @@
 import { eq, sql } from 'drizzle-orm';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { db } from '@/db/client';
 import {
   agents,
@@ -9,8 +9,10 @@ import {
   kbFolders,
   kbImages,
 } from '@/db/schema';
+import { resetEnvCache } from '@/lib/env';
 import { articleBody } from '@/lib/kb/article-write';
 import { withCleanDatabase } from '@/lib/testing/db';
+import { stubFetch } from '@/lib/testing/fetch';
 
 /**
  * Restoring an article version writes every column the body feeds. The
@@ -29,7 +31,7 @@ vi.mock('@/lib/auth/guard', () => ({
 }));
 vi.mock('next/cache', () => ({ revalidatePath: () => {} }));
 
-const { restoreVersion, saveArticle } = await import('./actions');
+const { restoreVersion, saveArticle, uploadArticlePicture } = await import('./actions');
 
 withCleanDatabase();
 
@@ -462,5 +464,95 @@ describe("Freshdesk's links and pictures", () => {
     // Refused before anything is written: no version is cut for a restore
     // that did not happen.
     expect(await versions(id)).toBe(1);
+  });
+});
+
+/**
+ * PR 4 of `plans/freshdesk-disconnection.md`: the editor's picture upload,
+ * against real Postgres with Storage faked. What is stored is judged by its
+ * bytes and served from the image route, and nothing else is written.
+ */
+describe('uploadArticlePicture', () => {
+  const SUPABASE = 'https://project.supabase.co';
+  const PNG = new Uint8Array([
+    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 73, 72, 68, 82,
+  ]);
+
+  beforeEach(() => {
+    vi.stubEnv('SUPABASE_URL', SUPABASE);
+    vi.stubEnv('SUPABASE_SERVICE_ROLE_KEY', 'service-role');
+    resetEnvCache();
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+    resetEnvCache();
+  });
+
+  /** Storage, recording what it was sent; refusing when told to. */
+  function storage(refuses = false) {
+    const uploads: { path: string; contentType: string | null }[] = [];
+    stubFetch((url, init) => {
+      if (refuses) return new Response('{"error":"down"}', { status: 503 });
+      uploads.push({
+        path: url.slice(`${SUPABASE}/storage/v1/object/attachments/`.length),
+        contentType: new Headers(init?.headers).get('content-type'),
+      });
+      return new Response('{}', { status: 200 });
+    });
+    return uploads;
+  }
+
+  const upload = (bytes: Uint8Array<ArrayBuffer>, name: string, type: string) => {
+    const data = new FormData();
+    data.set('picture', new File([bytes], name, { type }));
+    return uploadArticlePicture(data);
+  };
+
+  it('stores a picture as its bytes say and answers the route that serves it', async () => {
+    const uploads = storage();
+
+    // Labelled JPEG by the browser; the bytes are a PNG, and that is what is kept.
+    const answer = await upload(PNG, 'screenshot.jpg', 'image/jpeg');
+
+    const [row] = await db.select().from(kbImages);
+    expect(answer).toEqual({ src: `/api/kb/images/${row!.id}` });
+    expect(row).toMatchObject({
+      storagePath: `kb/${row!.id}.png`,
+      contentType: 'image/png',
+      sourceUrl: null,
+    });
+    expect(uploads).toEqual([{ path: `kb/${row!.id}.png`, contentType: 'image/png' }]);
+  });
+
+  it('refuses what is not a picture an article may show, and stores nothing', async () => {
+    const uploads = storage();
+    const svg = new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg"></svg>');
+
+    expect(await upload(svg, 'logo.svg', 'image/png')).toEqual({
+      error: 'Only a PNG, JPEG, GIF or WebP picture can go in an article.',
+    });
+    expect(await upload(new Uint8Array(0), 'empty.png', 'image/png')).toEqual({
+      error: 'Choose a picture to upload.',
+    });
+    const big = new Uint8Array(10 * 1024 * 1024 + 1);
+    big.set(PNG);
+    expect(await upload(big, 'huge.png', 'image/png')).toEqual({
+      error: 'That picture is 10.0 MB. A picture can be at most 10 MB.',
+    });
+
+    expect(uploads).toEqual([]);
+    expect(await db.$count(kbImages)).toBe(0);
+  });
+
+  it('says so when Storage refuses, and records no row', async () => {
+    storage(true);
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    expect(await upload(PNG, 'step.png', 'image/png')).toEqual({
+      error: 'The picture could not be stored. Try again in a moment.',
+    });
+    expect(await db.$count(kbImages)).toBe(0);
   });
 });
