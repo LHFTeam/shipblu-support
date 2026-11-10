@@ -74,8 +74,6 @@ const PUBLIC_PREFIXES = [
   // /login that the widget cannot follow.
   '/api/widget',
   '/widget',
-  '/robots.txt',
-  '/sitemap.xml',
   '/_next',
   '/favicon.ico',
 ];
@@ -111,6 +109,21 @@ const LEGACY_FOLDER = /\/solutions\/folders\/(\d+)/;
  * customers actually visit.
  */
 const KB_HOST_PASSTHROUGH = ['/api', '/_next', '/widget'];
+
+/**
+ * The two files a crawler asks a host for at its root, served by the help
+ * centre (`app/help/robots.txt`, `app/help/sitemap.xml`) on every hostname.
+ *
+ * The help-centre hostname reaches them through its catch-all rewrite. Every
+ * other host answered 404 for both until 2026-11-10. A crawler on the Render
+ * host therefore found no robots file, and could crawl the tracking page, whose
+ * every useful URL carries somebody's parcel number. The `Sitemap:` line, read
+ * at `/help/robots.txt`, named a `/sitemap.xml` that 404s. The help centre's
+ * pages are public on every host, and their canonicals name whichever host
+ * `publicBaseUrl()` does, so its crawl rules and its sitemap belong on every
+ * host too, as a locale path does below.
+ */
+const CRAWLER_FILES = new Set(['/robots.txt', '/sitemap.xml']);
 
 function underPrefix(pathname: string, prefixes: readonly string[]): boolean {
   return prefixes.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
@@ -157,6 +170,12 @@ export default function proxy(request: NextRequest) {
     // two URLs, one of them public-looking.
     const url = request.nextUrl.clone();
     url.pathname = pathname === '/' ? '/help' : `/help${pathname}`;
+    return NextResponse.rewrite(url);
+  }
+
+  if (CRAWLER_FILES.has(pathname)) {
+    const url = request.nextUrl.clone();
+    url.pathname = `/help${pathname}`;
     return NextResponse.rewrite(url);
   }
 
