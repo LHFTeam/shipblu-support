@@ -332,8 +332,8 @@ signed URL), `worker/handlers/rehost-kb-images.ts` and
 - **Save and Restore keep the copies.** The console's Save and Restore map any
   Freshdesk address already copied to its copy as the body is written
   (`withCopiedImages`). So an editor tab opened before the job ran, or a
-  version cut before it, cannot put Freshdesk back. The importer is still
-  PR 2's to deal with.
+  version cut before it, cannot put Freshdesk back. PR 2 does the same for the
+  importer.
 - **What it downloads.** It selects by the audit query's own pattern, so
   everything the check counts is in scope. It downloads only over HTTPS, from
   a Freshworks domain or from Freshdesk's bucket on S3, matched as the whole
@@ -351,6 +351,22 @@ apart), then without `dryRun`, then `dryRun=true` again, which should end
 picture is a `kept <url>: <reason>` line and is retried by the next run. An
 article saved in the console while the job ran is a `skipped <slug>` line and
 is picked up by the next run.
+
+**Run on production, 2026-11-08.** `main` took PR 1 with #497, and the web
+service was live on it at 21:05 UTC. The job ran at 21:13 and copied 207
+pictures in a minute: 30,171,562 bytes, PNG and JPEG. It rewrote 214 `src` in
+61 articles and the same in 61 version rows, and cut no version. Measured the
+next morning:
+
+- The audit query's two `images` rows answer 0.
+- `/api/kb/images/<id>` answers 307 with `public, max-age=3600` to a signed
+  Storage URL, and an unknown id answers 404.
+- All 207 rows answer their route with an image (205 PNG, 2 JPEG).
+- A full navigation of `/en/a/action-center` draws its three pictures from the
+  route and none from Freshdesk.
+
+The 29 portal links in 18 version rows are still there, as they should be
+until PR 2: Restore points them here once it is deployed.
 
 ### 2. Keep Freshdesk links from coming back
 
@@ -371,6 +387,56 @@ is picked up by the next run.
   `/support/tickets/new`, an id with no imported row), so a clean run means
   clean.
 
+**What was built.** `lib/kb/off-freshdesk.ts` points a body here
+(`pointedHere`): a picture with a copy goes to its copy (`withCopiedImages`,
+from PR 1), and a link to an article the import brought in goes to that
+article (`rewriteLegacyArticleLinks`, widened to relative portal paths). Which
+translation a link reaches is decided in one place for this and for
+`normalise_kb_formatting` (`legacyArticleResolver` in `lib/kb/format.ts`).
+`lib/kb/freshdesk-refs.ts` finds what is left and words the refusal. The
+`article-off-freshdesk` repo rule holds every writer to it: an `articleBody`
+call with no `pointedHere` after it fails CI.
+
+- **A link is pointed only at a published article** (`legacyArticleIndex`).
+  Pointed at a draft or an archived one, it would 404 for every reader and no
+  longer look like Freshdesk's, so nothing would refuse it. Left as Freshdesk's
+  address, a Save is refused for adding it. Every imported article was
+  published on 2026-11-09, so no stored link changes. Visibility is not asked:
+  an internal article linking to another internal one is right, and a public
+  one linking to an internal one was as closed to customers on Freshdesk.
+- **Only our Freshdesk is rewritten.** The rewrite asks `isFreshdeskAddress` of
+  every match, as the refusal does, so a link to another company's portal with
+  the same path is not turned into a link to whatever we imported under that
+  id. A `#fragment` is kept; the link's text is left as the author wrote it.
+- **Save and Restore** both point the body here before they write, and
+  then refuse a Freshdesk link or picture the write would _add_, naming the
+  address and what to do. One the stored article already carries is left
+  alone. Otherwise an article whose picture the copy job could not copy could
+  never be saved again, whatever the save was for, until somebody found the
+  picture. Measured on 2026-11-08, all 29 links in the 18 version rows name an
+  article that was imported, so Restore points every one of them here and
+  refuses none.
+- **Import** points the body here too, so a re-import writes our addresses
+  over our addresses and, by `changesNothing`, nothing at all. A picture
+  nobody has copied yet keeps Freshdesk's address for the copy job. So does a
+  link to an article the run has not reached yet, for the next run or the
+  formatting pass. It is not switched off in code: unsetting its two variables
+  after the last run (the checklist) is the switch, and PR 6 retires it.
+- **What counts as Freshdesk's** is narrower than the audit's pattern, and on
+  purpose. It is Freshworks' own domains, Freshdesk's bucket (the host test
+  the copy job downloads by, `onFreshworks`), a Freshdesk mailbox, and the
+  portal's paths (`/support/solutions|home|tickets|discussions|topics|…`,
+  `/solutions/articles|folders|categories/…`, `/helpdesk/attachments/…`) on
+  `support.shipblu.com` or with no host. None of the forum or attachment shapes
+  was stored on 2026-11-09. A page that only mentions Freshdesk, or another company's portal
+  on its own domain, does not break when ours closes. An editor refused a
+  link to one would have nothing to fix.
+- **The handbook seed** runs `pointedHere` too, for the rule's sake: its
+  content names nothing of Freshdesk's, so it reads nothing and changes nothing.
+- **Not covered:** the formatting pass does not report a Freshdesk link it cannot resolve,
+  because none is stored: the audit's `links, live` row is 0, and Save and
+  Restore now refuse to add one.
+
 ### 3. Freshdesk's old URLs resolve through the proxy — blocking the domain move
 
 The 404 above. Find why `app/help/legacy/route.ts` does not see the `path` the
@@ -378,11 +444,97 @@ rewrite adds, fix it so the route works both rewritten and called directly, and
 prove the six shapes 301 on a deployed build, with a test that fails on today's
 code. Record the measurement in §5.2 of `docs/PROJECT-STATE.md`.
 
+**Diagnosed and built.** Next 16 hands a route handler the request as it
+arrived. After the proxy's rewrite, `request.url` was still
+`/support/solutions/articles/<id>`, measured on a production build, so the
+`?path=` the rewrite added was in no URL the handler could read. The proxy now
+passes the path in a request header set on the rewrite (`x-legacy-path`,
+`lib/kb/legacy-path.ts`), which is how a proxy hands a value to what it
+rewrites to. The route reads that header, or `?path=` on a direct call
+(PROJECT-STATE §6.115).
+
+- `proxy.test.ts` checks that each of the six shapes, on both hosts, is
+  rewritten with the path in the header.
+- `app/help/legacy/route.db.test.ts` builds the request Next actually hands
+  the handler. Four of its cases fail against the route as it was.
+- A production build served locally, on a database holding one bilingual
+  imported article, answered 301 for all six shapes, where the same build of
+  `dev` answered 404 for every one. On the deployed build this is still to be
+  checked; the checklist item below does that.
+- The lookup is `resolveLegacyPath` (`lib/kb/legacy-resolve.ts`). An article
+  link with its title after the id finds the importer's `kb_redirects` row for
+  the bare id. Without that, an article first written in English answered in
+  English by the bare link and in Arabic by the titled one
+  (`legacy-resolve.db.test.ts`). Every production row points at an Arabic
+  article today, so nothing there moves.
+- Called directly, the route is `/help/legacy?path=…` on the Render host and
+  `/legacy?path=…` on `KB_PUBLIC_HOST`, which puts `/help` in front of every
+  path. The Freshdesk shapes themselves need no such care.
+
 ### 4. Upload an image in the article editor
 
 Not blocking the disconnection, but without it the next screenshot anybody adds
 is hot-linked from somewhere else, and PR 2's guard would have nowhere to send
 them. Stores through PR 1's table and route.
+
+**What was built.** The editor's body has an Insert picture button, and takes a
+picture pasted into it or dropped on it. Each goes up on its own, the moment it
+is chosen, through `uploadArticlePicture` in `app/(console)/kb/actions.ts`
+(`kb.edit`), and `<p><img src="/api/kb/images/<id>" alt="" /></p>` goes in
+where the caret is. The article's Save is unchanged.
+
+- **Judged by its bytes** (`storeUploadedPicture` in `lib/kb/images.ts`): PNG,
+  JPEG, GIF or WebP as `kbImageType` reads them, at most 10 MB, stored under
+  the type read rather than the browser's label. The editor checks the label
+  and the size first, from the same list (`KB_IMAGE_TYPES` and
+  `KB_IMAGE_MAX_BYTES`, moved into `lib/kb/image-src.ts` so the browser can
+  read them), only to save a round trip.
+- **A `kb_images` row with no `source_url`.** It replaced nothing, so
+  `rehost_kb_images revert=true` reports it as `left_without_source` and leaves
+  it. Once uploads exist, that dry run no longer says `nothing to do`, which is
+  the truth.
+- **Who sees it is PR 1's rule.** Until an article that shows it is saved, a
+  picture is in no article, so only a console agent gets it; that is what lets
+  the preview draw it. Once a public article is saved with it, it is public.
+- **Where it goes.** At the caret when the upload answers, moved to the end of
+  the top-level block the caret is in (`blockBoundaryAfter`), so a caret in the
+  middle of a paragraph or inside a tag does not split it. A body never
+  focused gets it at the end. Several files from one drop or one choice go up
+  in turn. A second batch asked for while one runs is told to wait, and Save is
+  held until the upload has answered, Enter in the title included.
+- **A paste carrying text pastes the text.** Word, Excel and Sheets put a
+  rendered picture of what was copied beside its text, so only a paste with no
+  text (a screenshot, a copied image) is uploaded.
+- **The action answers in words where the guard would redirect.** The editor
+  calls it directly, and a followed redirect would take the unsaved draft
+  with the page, so a signed-out or no longer permitted author is told why
+  instead. It revalidates on success like any action, although no page draws
+  the picture until the next Save. A shape chosen to slip past
+  `action-revalidates` was the hole that rule exists to close.
+- **A dropped file no longer opens in place of the console.** A drop anywhere
+  on the page while the editor is open is caught, so the unsaved draft stays.
+  Only a drop on the body uploads.
+- PR 2's refusal for a Freshdesk picture nobody copied now says to add it again
+  with Insert picture, where it could only say to remove it.
+
+**Measured** on a production build served locally, in Chromium, with
+Storage stood in for by a local server answering its upload, sign and signed
+GET:
+
+- The button, a paste and a drop each stored a PNG as `image/png` and put it
+  where the caret was, and the preview drew it.
+- A dropped text file was refused in words, and the page stayed where it was.
+- Save stored the body with the picture.
+- While the article was a draft, the picture's route answered an agent 307
+  `private, max-age=240` and a stranger 404.
+
+Real Storage and the deployed console are still to see once.
+
+**Left out:** a picture uploaded and never saved into an article stays a row
+and an object that only the console can load. So does one whose insert the
+admission gate gave up as lost while it committed: the author is told to try
+again, and a second copy is stored beside the first. Both can be swept later
+by a job that deletes rows no article or version names after a week.
 
 ### 5. The `robots.txt` sitemap line on the Render host
 
@@ -422,13 +574,17 @@ Order matters. The check beside each item is what proves it, not the merge.
 
 - [ ] **The last import, if any, runs first.** If the cutover re-run in
       `plans/kb-article-stats.md` is still wanted, run `import_freshdesk_kb`
-      now, then `normalise_kb_formatting` to rewrite the 29 links again. After
-      this, nothing imports: unset `FRESHDESK_DOMAIN` and `FRESHDESK_API_KEY`
-      on the worker. _Check:_ the audit query's `links, live` row answers 0.
-- [ ] **PR 1 is deployed and its job has run** — `dryRun=true`, then for
+      now. Once PR 2 is deployed, the import points pictures and links here
+      itself. Before it, follow it with `normalise_kb_formatting` to rewrite
+      the 29 links again. After this, nothing imports: unset
+      `FRESHDESK_DOMAIN` and `FRESHDESK_API_KEY` on the worker. _Check:_ the
+      audit query's `links, live` row answers 0.
+- [x] **PR 1 is deployed and its job has run** — `dryRun=true`, then for
       real, then `dryRun=true` again reporting nothing to do. _Check:_ the
       audit query's two `images` rows answer 0; every `kb_images` row loads
-      through its route.
+      through its route. Done 2026-11-08: deployed at 21:05 UTC (#497), run
+      at 21:13. On 2026-11-09 both `images` rows read 0, and all 207 rows
+      answered their route with an image.
 - [ ] **PR 2 is deployed.** _Check:_ its tests restore a version carrying a
       Freshdesk link and save one carrying a Freshdesk `href` and `src`, and
       neither reaches `kb_articles` (staging holds no knowledge base to try it
@@ -522,7 +678,7 @@ Today `302 https://support.shipblu.com/support/home` — still Freshdesk.
 curl -sS -o /dev/null -w '%{http_code} %{redirect_url}\n' https://shipblu-support.onrender.com/support/solutions/articles/154000189336
 ```
 
-Today `404`; `301` to the article once PR 3 is deployed.
+On 2026-11-07 `404`; `301` to the article once PR 3 is deployed.
 
 ```bash
 curl -sS https://shipblu-support.onrender.com/widget/embed.js | grep -o 'var BASE = "[^"]*"'

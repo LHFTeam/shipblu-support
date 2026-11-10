@@ -27,6 +27,7 @@ import { checkPoolConfinement } from './rules/pool-confinement.mjs';
 import { checkServerActions } from './rules/server-actions.mjs';
 import { checkSanitiserConfinement } from './rules/sanitiser.mjs';
 import { checkArticleNormalisation } from './rules/article-normalisation.mjs';
+import { checkArticleOffFreshdesk } from './rules/article-off-freshdesk.mjs';
 import { checkSlugConfinement } from './rules/slugify.mjs';
 import { checkNoDomTitleAttribute } from './rules/dom-title.mjs';
 import { checkLikePatternsUseTheBuilder } from './rules/like-patterns.mjs';
@@ -79,6 +80,7 @@ export const RULES = [
   ['server-actions', checkServerActions],
   ['sanitiser', checkSanitiserConfinement],
   ['article-normalisation', checkArticleNormalisation],
+  ['article-off-freshdesk', checkArticleOffFreshdesk],
   ['slugify', checkSlugConfinement],
   ['dom-title', checkNoDomTitleAttribute],
   ['like-patterns', checkLikePatternsUseTheBuilder],

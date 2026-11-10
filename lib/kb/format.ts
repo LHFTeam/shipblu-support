@@ -65,6 +65,10 @@
  * characters a reader would have seen.
  */
 
+import { isFreshdeskAddress } from './freshdesk-refs';
+import { decodeAttribute } from './image-src';
+import { DEFAULT_LOCALE } from './locale';
+
 /**
  * Elements that own their own vertical space, so a `br` at either edge of one
  * is spacing rather than a line break.
@@ -506,20 +510,118 @@ export function articlePath(locale: string, slug: string): string {
 }
 
 /**
- * Freshdesk article URLs, in the two forms the imported bodies actually carry.
+ * Freshdesk article URLs, in the forms the imported bodies carry, and relative.
  *
  * The customer-facing one is `support.shipblu.com/<locale>/support/solutions/
  * articles/<id>-<title-text>`; the other is the *agent* console at
  * `<account>.freshdesk.com/a/solutions/articles/<id>?lang=<locale>`, which a
  * customer cannot open at all. Both name the article by id, which is what makes
  * them resolvable — the title text after the id changes whenever somebody edits
- * the title, and was never the key.
+ * the title, and was never the key. A relative one (`/en/support/solutions/
+ * articles/<id>`) is the portal's path pasted without its host: none is stored
+ * today, and once the domain moves it would be ours, reaching the article only
+ * by a 301 through `app/help/legacy`.
+ *
+ * The pattern finds the shape anywhere; whether the address is *ours* is
+ * `isFreshdeskAddress`, asked of every match (`legacyFreshdeskLink`), so the
+ * rewrite and the refusal in `./freshdesk-refs.ts` agree on what Freshdesk is.
+ * Another company's portal on its own domain has the same path, and its
+ * article 42 is not ours: rewritten, an editor's link to it would have become
+ * a link to whatever we imported under that id, on every Save.
+ *
+ * Groups: the attribute's value as stored, the path's locale, the id.
  */
 const LEGACY_ARTICLE_LINK =
-  /href="https?:\/\/[^"]*?(?:\/([a-z]{2})\/support)?\/(?:a\/)?solutions\/articles\/(\d+)[^"]*"/gi;
+  /href="([^"]*?(?:\/([a-z]{2})\/support)?\/(?:a\/)?solutions\/articles\/(\d+)[^"]*)"/gi;
+
+/** Whether a matched `href` value, as stored, is one of our Freshdesk's. */
+function legacyFreshdeskLink(value: string): boolean {
+  return isFreshdeskAddress(decodeAttribute(value));
+}
 
 /** `?lang=ar` on an agent-console URL, which is where its locale hides. */
 const LANG_PARAM = /[?&]lang=([a-z]{2})/i;
+
+/** Where a Freshdesk article id leads here: an article, in one language. */
+type LegacyTarget = { locale: string; slug: string };
+
+/** Freshdesk id → that article's slug here, per locale. */
+export type LegacyArticleIndex = Map<string, Map<string, string>>;
+
+/**
+ * The Freshdesk ids a body links to, each once, so a caller can read only the
+ * rows those ids became.
+ */
+export function legacyArticleIds(html: string): string[] {
+  const ids = new Set<string>();
+  for (const [, value, , id] of html.matchAll(LEGACY_ARTICLE_LINK)) {
+    if (value !== undefined && id && legacyFreshdeskLink(value)) ids.add(id);
+  }
+  return [...ids];
+}
+
+/**
+ * Freshdesk id → the article that id became, per locale.
+ *
+ * `external_id` is `<freshdeskId>:<locale>` — one Freshdesk article becomes one
+ * row per language — and the older single-language form without the suffix is
+ * accepted for the same reason `app/help/legacy/route.ts` accepts it.
+ *
+ * Published articles only. A draft or an archived article answers no reader on
+ * the help centre, so a link pointed at one is a dead link that no longer
+ * looks like Freshdesk's, and the refusal in `./freshdesk-refs.ts` cannot see
+ * it. Left as Freshdesk's address, it still works today, a Save is refused for
+ * adding it, and the formatting pass leaves it alone. Every imported article
+ * is published (measured 2026-11-09), so this changes no link stored today.
+ */
+export function legacyArticleIndex(
+  rows: readonly { locale: string; slug: string; externalId: string | null; status: string }[],
+): LegacyArticleIndex {
+  const index: LegacyArticleIndex = new Map();
+
+  for (const row of rows) {
+    if (row.status !== 'published' || !row.externalId) continue;
+    const [freshdeskId] = row.externalId.split(':');
+    if (!freshdeskId) continue;
+
+    const byLocale = index.get(freshdeskId) ?? new Map<string, string>();
+    byLocale.set(row.locale, row.slug);
+    index.set(freshdeskId, byLocale);
+  }
+
+  return index;
+}
+
+/**
+ * How a link in an article written in `articleLocale` resolves, for
+ * `rewriteLegacyArticleLinks`.
+ *
+ * To the same language as the URL asked for, and failing that to the language
+ * of the article the link is *in* — not to the default locale. An Arabic
+ * article linking to an id whose URL carries no language is linking to the
+ * Arabic translation; sending that reader to the English one is the kind of
+ * thing nobody notices in a diff and everybody notices on the page. One copy,
+ * for the formatting pass and for every writer that points a body here
+ * (`lib/kb/off-freshdesk.ts`), so the two cannot send the same link to
+ * different translations.
+ */
+export function legacyArticleResolver(
+  index: LegacyArticleIndex,
+  articleLocale: string,
+): (freshdeskId: string, locale: string | undefined) => LegacyTarget | undefined {
+  return (freshdeskId, locale) => {
+    const byLocale = index.get(freshdeskId);
+    if (!byLocale) return undefined;
+
+    for (const candidate of [locale, articleLocale, DEFAULT_LOCALE]) {
+      const slug = candidate ? byLocale.get(candidate) : undefined;
+      if (slug && candidate) return { locale: candidate, slug };
+    }
+
+    const first = [...byLocale.entries()][0];
+    return first ? { locale: first[0], slug: first[1] } : undefined;
+  };
+}
 
 /**
  * Points internal cross-references at this help centre.
@@ -533,19 +635,28 @@ const LANG_PARAM = /[?&]lang=([a-z]{2})/i;
  * this knowledge base and into the old portal.
  *
  * `resolve` is passed in rather than read from the database here so this module
- * stays pure and testable; the job that runs it does the lookup.
+ * stays pure and testable; its callers do the lookup (`legacyArticleResolver`).
+ *
+ * Only the `href` changes. A `#fragment` on the old address is kept, since it
+ * named a heading in the same article; the link's text is left as written,
+ * because it is the author's words, and a bare old URL shown there still
+ * reaches the article through `app/help/legacy` once the domain moves.
  */
 export function rewriteLegacyArticleLinks(
   html: string,
-  resolve: (
-    freshdeskId: string,
-    locale: string | undefined,
-  ) => { locale: string; slug: string } | undefined,
+  resolve: (freshdeskId: string, locale: string | undefined) => LegacyTarget | undefined,
 ): string {
-  return html.replace(LEGACY_ARTICLE_LINK, (match, pathLocale: string | undefined, id: string) => {
-    const locale = pathLocale ?? LANG_PARAM.exec(match)?.[1];
-    const target = resolve(id, locale);
-    if (!target) return match;
-    return `href="${articlePath(target.locale, target.slug)}"`;
-  });
+  return html.replace(
+    LEGACY_ARTICLE_LINK,
+    (match, value: string, pathLocale: string | undefined, id: string) => {
+      if (!legacyFreshdeskLink(value)) return match;
+      const locale = pathLocale ?? LANG_PARAM.exec(decodeAttribute(value))?.[1];
+      const target = resolve(id, locale);
+      if (!target) return match;
+      // Kept as stored, so already escaped as the sanitiser escapes a value.
+      const hash = value.indexOf('#');
+      const fragment = hash === -1 ? '' : value.slice(hash);
+      return `href="${articlePath(target.locale, target.slug)}${fragment}"`;
+    },
+  );
 }

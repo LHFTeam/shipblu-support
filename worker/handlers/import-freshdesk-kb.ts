@@ -20,6 +20,7 @@ import {
   type FreshdeskFolder,
 } from '@/lib/freshdesk/client';
 import { articleBody, changesNothing } from '@/lib/kb/article-write';
+import { pointedHere } from '@/lib/kb/off-freshdesk';
 import { detectCategoryLocale, detectLocale, looksUntranslated } from '@/lib/kb/language';
 import { LOCALES, LOCALE_NAMES, type Locale } from '@/lib/kb/locale';
 import { slugify, uniqueSlug } from '@/lib/kb/slug';
@@ -531,7 +532,17 @@ async function upsertArticle(
   // theme cannot survive, and 128 body `h1`s the help centre's stylesheet does
   // not dress. Re-importing without this would undo the cleanup article by
   // article — `lib/kb/format.ts` has the standard and the evidence for it.
-  const { bodyHtml, bodyText, excerpt } = articleBody(article.description ?? '');
+  //
+  // And then pointed here (`pointedHere`): Freshdesk's copy names its own
+  // bucket for every picture and the old portal for every cross-reference, so
+  // a re-import would otherwise put back, unversioned, every picture
+  // `rehost_kb_images` copied and every link the formatting pass rewrote. A
+  // picture nobody has copied yet keeps Freshdesk's address for the copy job,
+  // and a link to an article this run has not reached yet keeps the portal's
+  // for the next run or the formatting pass.
+  const body = articleBody(article.description ?? '');
+  const { bodyText, excerpt } = body;
+  const bodyHtml = await pointedHere(body.bodyHtml, locale);
 
   const values = {
     title: article.title,
