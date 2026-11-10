@@ -103,7 +103,7 @@ describe('saveRefusal', () => {
 
   it('refuses a picture Freshdesk serves', () => {
     expect(saveRefusal(`<p><img src="${BUCKET_IMAGE}" /></p>`, '<p>Before.</p>')).toBe(
-      `The article shows a picture from Freshdesk, which stops loading once Freshdesk is disconnected (${BUCKET_IMAGE}). Remove the picture, then save.`,
+      `The article shows a picture from Freshdesk, which stops loading once Freshdesk is disconnected (${BUCKET_IMAGE}). Remove it, or add the picture again with Insert picture, then save.`,
     );
   });
 

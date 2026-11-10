@@ -12,7 +12,11 @@ import {
   fetchableFreshworksImage,
   imageSources,
   isFreshworksImage,
+  KB_IMAGE_MAX_BYTES,
+  KB_IMAGE_TYPES,
   kbImageSrc,
+  NOT_A_PICTURE,
+  pictureSizeRefusal,
   rewriteImageSources,
 } from './image-src';
 import { ANONYMOUS, articleVisibleTo, folderVisibleTo, type KbViewer } from './visibility';
@@ -35,29 +39,6 @@ import { ANONYMOUS, articleVisibleTo, folderVisibleTo, type KbViewer } from './v
  */
 
 const log = logger('kb_images');
-
-/**
- * The largest picture copied in. Production's largest of 207 is well under a
- * megabyte (28.8 MiB across all of them); this only bounds what a wrong URL
- * can cost the worker, and is enforced while reading, not after.
- */
-const MAX_KB_IMAGE_BYTES = 10 * 1024 * 1024;
-
-/**
- * The types an article may show, as read from the bytes, with the extension
- * the stored key takes.
- *
- * Raster images a browser draws everywhere. No SVG, which is a document that
- * runs its author's script; no HEIC, which only Safari draws; and nothing the
- * remote server merely *says* is an image, since what is stored here is served
- * back with this type.
- */
-const KB_IMAGE_TYPES: Record<string, string> = {
-  'image/png': 'png',
-  'image/jpeg': 'jpg',
-  'image/gif': 'gif',
-  'image/webp': 'webp',
-};
 
 /** What the bytes are, if they are a picture an article may show. */
 export function kbImageType(bytes: Uint8Array): { contentType: string; extension: string } | null {
@@ -94,7 +75,7 @@ export async function downloadFreshworksImage(
     throw new KbImageFetchError('not a Freshworks address this job downloads from');
   }
 
-  const timeoutMs = sizedTimeout(MAX_KB_IMAGE_BYTES);
+  const timeoutMs = sizedTimeout(KB_IMAGE_MAX_BYTES);
   let content: Buffer;
   try {
     const response = await fetch(url, {
@@ -113,8 +94,8 @@ export async function downloadFreshworksImage(
     }
     content = await readBodyCapped(
       response,
-      MAX_KB_IMAGE_BYTES,
-      () => new KbImageFetchError(`is larger than ${MAX_KB_IMAGE_BYTES} bytes`),
+      KB_IMAGE_MAX_BYTES,
+      () => new KbImageFetchError(`is larger than ${KB_IMAGE_MAX_BYTES} bytes`),
     );
   } catch (error) {
     if (error instanceof KbImageFetchError) throw error;
@@ -141,8 +122,9 @@ function redirectHost(response: Response, from: string): string {
 }
 
 /**
- * Stores a downloaded picture and records it as the copy of `sourceUrl`,
- * answering the id an article should name.
+ * Stores a picture and answers the id an article should name: one downloaded
+ * by the copy job, recorded as the copy of `sourceUrl`, or one an editor
+ * uploaded, which replaced nothing and has none.
  *
  * The object first, then the row, so a row never names bytes that are not
  * there; the key is built from an id generated here. If another run recorded
@@ -161,7 +143,8 @@ export async function storeKbImage(image: {
   content: Buffer;
   contentType: string;
   extension: string;
-  sourceUrl: string;
+  /** Null for an upload: no conflict is possible, and the way back leaves it. */
+  sourceUrl: string | null;
 }): Promise<{ id: string }> {
   const id = randomUUID();
   const stored = await uploadObject(
@@ -184,17 +167,57 @@ export async function storeKbImage(image: {
     .returning({ id: kbImages.id });
   if (inserted) return inserted;
 
+  // Only a copy gets here: a null `source_url` conflicts with nothing.
+  const { sourceUrl } = image;
+  if (sourceUrl === null) throw new Error(`kb_images stored no row for the upload ${id}`);
+
   const { failed } = await removeObjects([stored.path]);
   if (failed.length > 0) {
-    log.warn(`another run copied ${image.sourceUrl} first; its duplicate is left at ${failed[0]}`);
+    log.warn(`another run copied ${sourceUrl} first; its duplicate is left at ${failed[0]}`);
   }
   const [existing] = await db
     .select({ id: kbImages.id })
     .from(kbImages)
-    .where(eq(kbImages.sourceUrl, image.sourceUrl))
+    .where(eq(kbImages.sourceUrl, sourceUrl))
     .limit(1);
-  if (!existing) throw new Error(`kb_images lost the row for ${image.sourceUrl}`);
+  if (!existing) throw new Error(`kb_images lost the row for ${sourceUrl}`);
   return existing;
+}
+
+/**
+ * What an editor's upload answers: the `src` to put in the article, or the
+ * sentence saying why not.
+ */
+export type PictureUpload = { src: string; error?: undefined } | { error: string; src?: undefined };
+
+/**
+ * Stores a picture an editor uploaded, judged by its bytes, and answers the
+ * `src` the editor puts in the body.
+ *
+ * The browser's label is never trusted: what is stored is served back with the
+ * type read here, the same rule the copy job and the widget keep. Until an
+ * article that shows it is saved, the picture goes only to console agents —
+ * the image route's rule for a picture no article shows yet — which is what
+ * lets the editor's preview draw it. A picture uploaded and never saved into
+ * an article stays a row and an object nobody outside the console can load.
+ */
+export async function storeUploadedPicture(file: File): Promise<PictureUpload> {
+  const refusal = pictureSizeRefusal(file.size);
+  if (refusal) return { error: refusal };
+
+  // The type from the first bytes alone, so a 9 MB PDF labelled `image/png` is
+  // refused without being read whole.
+  const type = kbImageType(new Uint8Array(await file.slice(0, 64).arrayBuffer()));
+  if (!type) return { error: NOT_A_PICTURE };
+  const content = Buffer.from(await file.arrayBuffer());
+
+  try {
+    const { id } = await storeKbImage({ content, ...type, sourceUrl: null });
+    return { src: kbImageSrc(id) };
+  } catch (error) {
+    log.error('could not store an uploaded picture', error);
+    return { error: 'The picture could not be stored. Try again in a moment.' };
+  }
 }
 
 /** The copy already made of each address, by the address it replaced. */

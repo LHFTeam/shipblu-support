@@ -477,6 +477,65 @@ Not blocking the disconnection, but without it the next screenshot anybody adds
 is hot-linked from somewhere else, and PR 2's guard would have nowhere to send
 them. Stores through PR 1's table and route.
 
+**What was built.** The editor's body has an Insert picture button, and takes a
+picture pasted into it or dropped on it. Each goes up on its own, the moment it
+is chosen, through `uploadArticlePicture` in `app/(console)/kb/actions.ts`
+(`kb.edit`), and `<p><img src="/api/kb/images/<id>" alt="" /></p>` goes in
+where the caret is. The article's Save is unchanged.
+
+- **Judged by its bytes** (`storeUploadedPicture` in `lib/kb/images.ts`): PNG,
+  JPEG, GIF or WebP as `kbImageType` reads them, at most 10 MB, stored under
+  the type read rather than the browser's label. The editor checks the label
+  and the size first, from the same list (`KB_IMAGE_TYPES` and
+  `KB_IMAGE_MAX_BYTES`, moved into `lib/kb/image-src.ts` so the browser can
+  read them), only to save a round trip.
+- **A `kb_images` row with no `source_url`.** It replaced nothing, so
+  `rehost_kb_images revert=true` reports it as `left_without_source` and leaves
+  it. Once uploads exist, that dry run no longer says `nothing to do`, which is
+  the truth.
+- **Who sees it is PR 1's rule.** Until an article that shows it is saved, a
+  picture is in no article, so only a console agent gets it; that is what lets
+  the preview draw it. Once a public article is saved with it, it is public.
+- **Where it goes.** At the caret when the upload answers, moved to the end of
+  the top-level block the caret is in (`blockBoundaryAfter`), so a caret in the
+  middle of a paragraph or inside a tag does not split it. A body never
+  focused gets it at the end. Several files from one drop or one choice go up
+  in turn. A second batch asked for while one runs is told to wait, and Save is
+  held until the upload has answered, Enter in the title included.
+- **A paste carrying text pastes the text.** Word, Excel and Sheets put a
+  rendered picture of what was copied beside its text, so only a paste with no
+  text (a screenshot, a copied image) is uploaded.
+- **The action answers in words where the guard would redirect.** The editor
+  calls it directly, and a followed redirect would take the unsaved draft
+  with the page, so a signed-out or no longer permitted author is told why
+  instead. It revalidates on success like any action, although no page draws
+  the picture until the next Save. A shape chosen to slip past
+  `action-revalidates` was the hole that rule exists to close.
+- **A dropped file no longer opens in place of the console.** A drop anywhere
+  on the page while the editor is open is caught, so the unsaved draft stays.
+  Only a drop on the body uploads.
+- PR 2's refusal for a Freshdesk picture nobody copied now says to add it again
+  with Insert picture, where it could only say to remove it.
+
+**Measured** on a production build served locally, in Chromium, with
+Storage stood in for by a local server answering its upload, sign and signed
+GET:
+
+- The button, a paste and a drop each stored a PNG as `image/png` and put it
+  where the caret was, and the preview drew it.
+- A dropped text file was refused in words, and the page stayed where it was.
+- Save stored the body with the picture.
+- While the article was a draft, the picture's route answered an agent 307
+  `private, max-age=240` and a stranger 404.
+
+Real Storage and the deployed console are still to see once.
+
+**Left out:** a picture uploaded and never saved into an article stays a row
+and an object that only the console can load. So does one whose insert the
+admission gate gave up as lost while it committed: the author is told to try
+again, and a second copy is stored beside the first. Both can be swept later
+by a job that deletes rows no article or version names after a week.
+
 ### 5. The `robots.txt` sitemap line on the Render host
 
 Side observation, not Freshworks: `robots.txt` advertises
