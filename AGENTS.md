@@ -1626,13 +1626,16 @@ README says why it is a setting and not a rule. The rules:
   (`docs/PROJECT-STATE.md` §6.106). So a lock on a ticket's row taken after the
   same transaction has written it is NO KEY UPDATE, always. Taken before any
   write, FOR UPDATE closes no cycle but holds every inbound message on the
-  ticket until it commits, which is why these writers take NO KEY UPDATE there
-  too; the older ones that lock first and write a non-key column (the category
-  writer, Jev, the priority classifier) still say UPDATE, which costs a message
-  a wait and nothing more. `endHold` and `beginRouting` read the routing row
-  before they lock anything, so a ticket that never routed takes no lock there
-  at all — and in the creation pass, which every new ticket on every channel
-  runs, no transaction either. The unlocked answer cannot go stale: the row is
+  ticket until it commits, which is why every lock on a ticket's row is NO KEY
+  UPDATE, wherever it is taken. The one exception is a transaction that deletes
+  the ticket (`purgeConversation`), whose lock keeps a message out between what
+  it counts and the delete. CI holds it (`ticket-lock`): a FOR UPDATE on a read
+  reaching `conversations`, through the builder or in SQL, is refused in any
+  function that does not delete from the table. It was prose until the upgrade
+  shipped a second time, in `alignAccountable` (§6.116). `endHold` and
+  `beginRouting` read the routing row before they lock anything, so a ticket
+  that never routed takes no lock there at all — and in the creation pass,
+  which every new ticket on every channel runs, no transaction either. The unlocked answer cannot go stale: the row is
   born in the insert's transaction, which has committed before anything reads
   it, and a decided row is never undecided again. `assignConversation`'s rota
   re-reads under its lock the assignee, the group, the hold and whether the

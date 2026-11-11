@@ -92,7 +92,7 @@ export async function ingestMetaMessage(
       if (existing.statusCategory === 'resolved') {
         await reopenResolved(
           tx,
-          { id: conversationId, reopenCount: existing.reopenCount },
+          { id: conversationId },
           { actorLabel: `inbound_${message.platform}`, reason: 'customer_replied' },
         );
       }
@@ -246,7 +246,7 @@ export async function ingestMetaComment(comment: NormalisedComment): Promise<Met
       if (existing.statusCategory === 'resolved') {
         await reopenResolved(
           tx,
-          { id: conversationId, reopenCount: existing.reopenCount },
+          { id: conversationId },
           { actorLabel: `inbound_${comment.platform}`, reason: 'customer_replied' },
         );
       }
@@ -502,7 +502,7 @@ export async function applyMetaInteraction(interaction: NormalisedInteraction): 
     if (existing.statusCategory === 'resolved') {
       await reopenResolved(
         tx,
-        { id: existing.id, reopenCount: existing.reopenCount },
+        { id: existing.id },
         { actorLabel: `inbound_${interaction.platform}`, reason: 'customer_replied' },
       );
     }
@@ -603,7 +603,6 @@ type FoundConversation = {
   id: string;
   number: number;
   statusCategory: 'open' | 'pending' | 'resolved' | 'closed';
-  reopenCount: number;
 };
 
 /**
@@ -727,7 +726,6 @@ async function findByExternalId(externalId: string): Promise<FoundConversation |
       id: conversations.id,
       number: conversations.number,
       statusCategory: ticketStatuses.category,
-      reopenCount: conversations.reopenCount,
     })
     .from(conversations)
     .innerJoin(ticketStatuses, eq(ticketStatuses.id, conversations.statusId))

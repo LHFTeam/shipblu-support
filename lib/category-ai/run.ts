@@ -621,7 +621,7 @@ async function readTicket(
     .from(conversations)
     .where(eq(conversations.id, conversationId))
     .limit(1);
-  const [read] = lock ? await query.for('update') : await query;
+  const [read] = lock ? await query.for('no key update') : await query;
   if (!read) return null;
   const ticket = { ...read, statusCategory: await lockedStatusCategory(executor, read) };
 

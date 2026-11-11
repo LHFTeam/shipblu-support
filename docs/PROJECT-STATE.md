@@ -8442,6 +8442,32 @@ found"}` and not Next's page. The same route called by its own URL
       the first with the echo aborted, the other two with the ticket left with
       the wrong owner.
 
+      The first was §6.106's upgrade shipping a second time, after AGENTS.md
+      had said it in prose. CI now holds it (`ticket-lock`, in
+      `scripts/ci/rules/`): a FOR UPDATE on a ticket's row is refused outside
+      a function that deletes the ticket. The six reads that still took one
+      before writing (the category writer, Jev's classifier and its backfill,
+      the priority classifier, the survey and the low-rating alert) take NO
+      KEY UPDATE, so an arriving message no longer waits on them.
+      `purgeConversation` keeps FOR UPDATE, which holds a message out between
+      what it counts and the delete.
+
+117.  **A customer's message could count a reopen against a ticket that was
+      already open.** _2026-11-11, found by the review of #501. Not seen in
+      production._ Every inbound path (email, WhatsApp, Meta, the widget and
+      the portal) decides whether to reopen from a read with no lock, and
+      `reopenResolved` then wrote whatever that read said. An agent or a rule
+      putting the ticket back in a queue in between left the stale answer to
+      reopen an open ticket: `reopen_count` raised from the caller's copy, and
+      a second `reopened` event naming the resolver, which the rollup counts
+      as a customer reopen against them. `reopenResolved` now reads the status
+      again under the ticket's lock, leaves a ticket open or pending by then as
+      it is, and raises the count from the row. A ticket closed in between is
+      still reopened, as it always was, since the caller has already chosen it
+      for the message, and a closed ticket is in no queue to be seen in.
+      `lib/tickets/reopen.db.test.ts` holds it, with an agent's reopen in
+      flight.
+
 ### Tooling notes for this environment
 
 Supabase and Render MCP tools work and are the fastest way to check real state —

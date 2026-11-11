@@ -380,7 +380,6 @@ export async function appendReply(
       .select({
         id: conversations.id,
         statusCategory: ticketStatuses.category,
-        reopenCount: conversations.reopenCount,
       })
       .from(conversations)
       .innerJoin(ticketStatuses, eq(ticketStatuses.id, conversations.statusId))
@@ -404,7 +403,7 @@ export async function appendReply(
       // inside `reopenResolved`, as every customer's reopen does.
       await reopenResolved(
         tx,
-        { id: ticket.id, reopenCount: ticket.reopenCount },
+        { id: ticket.id },
         { actorLabel: 'portal', reason: 'customer_replied' },
       );
     }

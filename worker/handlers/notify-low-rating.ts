@@ -134,7 +134,7 @@ export async function notifyLowRating(job: ClaimedJob): Promise<void> {
       .select({ id: conversations.id })
       .from(conversations)
       .where(and(eq(conversations.id, survey.conversationId), surveyedConversation()))
-      .for('update');
+      .for('no key update');
     if (!held) return 'gone' as const;
 
     const already = await tx

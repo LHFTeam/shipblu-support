@@ -178,7 +178,7 @@ export async function classifyMessagePriority(
       })
       .from(conversations)
       .where(eq(conversations.id, row.conversationId))
-      .for('update')
+      .for('no key update')
       .limit(1);
     if (!ticket) return null;
 
