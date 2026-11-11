@@ -37,7 +37,6 @@ export type LiveConversation = {
   id: string;
   number: number;
   statusCategory: StatusCategory;
-  reopenCount: number;
 };
 
 /**
@@ -121,7 +120,6 @@ export async function findLiveConversation(
       id: conversations.id,
       number: conversations.number,
       statusCategory: ticketStatuses.category,
-      reopenCount: conversations.reopenCount,
     })
     .from(conversations)
     .innerJoin(ticketStatuses, eq(ticketStatuses.id, conversations.statusId))

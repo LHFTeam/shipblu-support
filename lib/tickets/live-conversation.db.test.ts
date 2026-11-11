@@ -71,7 +71,6 @@ describe('findLiveConversation', () => {
     expect(await findLiveConversation(amira, NO_ROW)).toMatchObject({
       id,
       statusCategory: 'open',
-      reopenCount: 0,
     });
   });
 

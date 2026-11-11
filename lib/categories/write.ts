@@ -242,7 +242,7 @@ export async function setConversationCategoryOn(
     .select({ categoryId: conversations.categoryId })
     .from(conversations)
     .where(eq(conversations.id, conversationId))
-    .for('update');
+    .for('no key update');
   if (!ticket) return { outcome: 'no_ticket' };
   // Compared in the column's spelling, so asking in upper case for what the
   // ticket already carries is still nothing to write.

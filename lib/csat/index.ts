@@ -224,7 +224,7 @@ async function lockTicket(tx: Tx, conversationId: string): Promise<void> {
     .select({ id: conversations.id })
     .from(conversations)
     .where(eq(conversations.id, conversationId))
-    .for('update');
+    .for('no key update');
 }
 
 /** True when this ticket carries a survey sent inside the resurvey window. */

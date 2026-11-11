@@ -52,6 +52,7 @@ import { checkFormsDoNotReset } from './rules/form-reset.mjs';
 import { checkActionsRevalidate } from './rules/action-revalidates.mjs';
 import { checkButtonTypeIsFixed } from './rules/button-type.mjs';
 import { checkRoutingResultKept } from './rules/routing-result.mjs';
+import { checkTicketLocksAreNoKeyUpdate } from './rules/ticket-lock.mjs';
 
 export const RULES = [
   ['env-parity', checkEnvParity],
@@ -74,6 +75,7 @@ export const RULES = [
   ['shipment-payload', checkShipmentPayloadConfinement],
   ['credential-confinement', checkCredentialConfinement],
   ['pool-confinement', checkPoolConfinement],
+  ['ticket-lock', checkTicketLocksAreNoKeyUpdate],
   // ---------------------------------------------------------------------------
   // Source conventions that are one grep away from being enforced
   // ---------------------------------------------------------------------------

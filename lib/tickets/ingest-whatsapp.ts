@@ -124,7 +124,7 @@ export async function ingestWhatsAppMessage(
       if (existing.statusCategory === 'resolved') {
         await reopenResolved(
           tx,
-          { id: conversationId, reopenCount: existing.reopenCount },
+          { id: conversationId },
           { actorLabel: 'inbound_whatsapp', reason: 'customer_replied' },
         );
       }

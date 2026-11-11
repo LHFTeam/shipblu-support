@@ -120,6 +120,11 @@ async function eventsOf(id: string) {
     .orderBy(asc(conversationEvents.type));
 }
 
+/** A second session, for a writer the code under test must meet mid-transaction. */
+function sideSession() {
+  return postgres(process.env.TEST_DATABASE_URL!, { max: 1, prepare: false, onnotice: () => {} });
+}
+
 /** What the session `behindAWriter` holds the ticket with writes before it commits. */
 type HeldWrite = (tx: postgres.TransactionSql) => Promise<unknown>;
 
@@ -152,11 +157,7 @@ async function behindAWriter(
   write: () => Promise<unknown>,
   change: HeldWrite = raisePriority(id),
 ): Promise<void> {
-  const other = postgres(process.env.TEST_DATABASE_URL!, {
-    max: 1,
-    prepare: false,
-    onnotice: () => {},
-  });
+  const other = sideSession();
   let release!: () => void;
   const gate = new Promise<void>((resolve) => (release = resolve));
   let locked!: () => void;
@@ -182,6 +183,13 @@ async function behindAWriter(
     await other.end();
   }
   expect(queued).toBe(true);
+}
+
+/** A promise and the function that settles it, for holding a session open. */
+function latch(): { done: Promise<void>; open: () => void } {
+  let open!: () => void;
+  const done = new Promise<void>((resolve) => (open = resolve));
+  return { done, open };
 }
 
 /** The owner's assignment and that change, as the ticket page draws them: by `created_at`. */
@@ -800,6 +808,150 @@ describe('a resolved ticket reopened by an agent or a rule', () => {
     expect(written).toBe(false);
     expect(await holders(resolved)).toEqual({ accountable: nayera, assignee: nayera });
     expect((await eventsOf(resolved)).map((e) => e.type)).not.toContain('accountable_changed');
+  });
+  // An ingest stores the phone's reply on the ticket — its insert holds KEY
+  // SHARE on the ticket's row until it commits — and then updates the ticket.
+  // An agent reopening the ticket meanwhile writes it, then reads it again
+  // under a lock to realign it: FOR UPDATE there was an upgrade that KEY SHARE
+  // refuses, so each waited on the other and Postgres aborted one, the reopen
+  // or the echo (§6.106, #493).
+  it('reopens beside an ingest that stored a message and goes on to update the ticket', async () => {
+    const { admin, ali, resolved } = await handedOver();
+    const open = await status('Open');
+    const other = sideSession();
+    const inserted = latch();
+    const gate = latch();
+    try {
+      const ingest = other.begin(async (tx) => {
+        await tx`insert into messages (conversation_id, direction, kind, body_text)
+                 values (${resolved}, 'outbound', 'reply', 'Typed on the phone')`;
+        inserted.open();
+        await gate.done;
+        await tx`update conversations set last_agent_message_at = now() where id = ${resolved}`;
+      });
+      await inserted.done;
+      const reopening = changeStatus(admin, resolved, open);
+      // Until the reopen has finished, or waits on the ingest's insert.
+      await Promise.race([reopening, untilWaitingOnALock(db)]);
+      gate.open();
+      const [byIngest, byReopen] = await Promise.allSettled([ingest, reopening]);
+
+      expect(byIngest.status).toBe('fulfilled');
+      expect(byReopen.status).toBe('fulfilled');
+    } finally {
+      gate.open();
+      await other.end();
+    }
+    expect(await holders(resolved)).toEqual({ accountable: ali, assignee: ali });
+  });
+
+  // An agent's resolve is in flight; a handover waits on the ticket behind
+  // it; a second agent moves the ticket back to Open, having seen it Open
+  // before the resolve committed. Decided from that read, the move took no
+  // lock on the number, the handover left the ticket as the resolved one it
+  // found, and the move then reopened it with the previous owner, for good
+  // (#493). Decided under the ticket's lock, behind the number's, the move
+  // waits for the handover and realigns the ticket to the new owner.
+  it('brings over a ticket reopened behind a resolve and a handover', async () => {
+    const admin = await agent('Mona Admin', { role: 'admin' });
+    const nayera = await agent('Nayera Mohamed');
+    const ali = await agent('Ali Nasser');
+    const number = await phone('Ali Nasser', ali);
+    const live = await ticket(number, 'Open', { accountableAgentId: ali, assigneeAgentId: ali });
+    const resolvedStatus = await status('Resolved');
+    const open = await status('Open');
+    const other = sideSession();
+    const resolving = latch();
+    const gate = latch();
+    let resolve: Promise<unknown> | undefined;
+    let handing: Promise<unknown> | undefined;
+    let reopening: Promise<unknown> | undefined;
+    let handoverQueued = false;
+    let reopenQueued = false;
+    let outcomes: PromiseSettledResult<unknown>[] = [];
+    try {
+      resolve = other.begin(async (tx) => {
+        await tx`update conversations set status_id = ${resolvedStatus.id}, resolved_at = now()
+                 where id = ${live}`;
+        resolving.open();
+        await gate.done;
+      });
+      await resolving.done;
+      handing = handOverNumber({
+        channelId: number,
+        toAgentId: nayera,
+        actor: { id: admin, label: 'Mona Admin' },
+      });
+      // Only once the handover waits on the ticket. Started before, the
+      // reopen's own write queues on the ticket ahead of the handover, which
+      // then finds it Open and moves it: the case passes against the
+      // unlocked read it exists to catch.
+      handoverQueued = await untilWaitingOnALock(db);
+      if (handoverQueued) {
+        reopening = changeStatus(admin, live, open);
+        reopenQueued = await untilWaitingOnALock(db, { count: 2 });
+      }
+      gate.open();
+      outcomes = await Promise.allSettled([resolve, handing, reopening]);
+    } finally {
+      // Settled on every path, so a writer still running cannot finish
+      // against the next case's truncated database.
+      gate.open();
+      await Promise.allSettled([resolve, handing, reopening]);
+      await other.end();
+    }
+
+    expect(handoverQueued).toBe(true);
+    expect(reopenQueued).toBe(true);
+    expect(outcomes.map((outcome) => outcome.status)).toEqual([
+      'fulfilled',
+      'fulfilled',
+      'fulfilled',
+    ]);
+    expect(await ownerOf(number)).toBe(nayera);
+    expect(await holders(live)).toEqual({ accountable: nayera, assignee: nayera });
+  });
+
+  // A resolved ticket filed under no row, before its number had one, is
+  // adopted onto the row by a phone reply's echo (`findOrAdoptLive`), which
+  // has not committed when an agent moves the ticket to Open. Read with no
+  // lock, the ticket was under no row, so the move realigned nothing and
+  // reopened it on Ali's number, accountable to nobody. Its number is read
+  // again under the ticket's lock, which waits for the adoption.
+  it('brings over a ticket adopted onto the number while the reopen waits', async () => {
+    const admin = await agent('Mona Admin', { role: 'admin' });
+    const ali = await agent('Ali Nasser');
+    const number = await phone('Ali Nasser', ali);
+    const unfiled = await ticket(null, 'Resolved');
+    const open = await status('Open');
+    const other = sideSession();
+    const adopted = latch();
+    const gate = latch();
+    let adopting: Promise<unknown> | undefined;
+    let reopening: Promise<unknown> | undefined;
+    let queued = false;
+    let outcomes: PromiseSettledResult<unknown>[] = [];
+    try {
+      adopting = other.begin(async (tx) => {
+        await tx`update conversations set channel_id = ${number}
+                 where id = ${unfiled} and channel_id is null`;
+        adopted.open();
+        await gate.done;
+      });
+      await adopted.done;
+      reopening = changeStatus(admin, unfiled, open);
+      queued = await untilWaitingOnALock(db);
+      gate.open();
+      outcomes = await Promise.allSettled([adopting, reopening]);
+    } finally {
+      gate.open();
+      await Promise.allSettled([adopting, reopening]);
+      await other.end();
+    }
+
+    expect(queued).toBe(true);
+    expect(outcomes.map((outcome) => outcome.status)).toEqual(['fulfilled', 'fulfilled']);
+    expect(await holders(unfiled)).toEqual({ accountable: ali, assignee: ali });
   });
 });
 

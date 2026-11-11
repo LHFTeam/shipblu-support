@@ -828,7 +828,7 @@ async function fileTicket(
       })
       .from(conversations)
       .where(eq(conversations.id, conversationId))
-      .for('update');
+      .for('no key update');
     if (!read) return 'gone';
     // The author read here rather than with the candidate, for the reason the
     // live job reads it under its lock: a contact merge moves the requester and

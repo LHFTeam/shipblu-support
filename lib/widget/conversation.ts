@@ -660,13 +660,13 @@ export async function attachVisitorDetails(
 /**
  * Reopen the conversation if it is resolved.
  *
- * The caller holds only the conversation's id, so its category and reopen count
- * are read here; the reopen itself is the shared one, with the widget's own
+ * The caller holds only the conversation's id, so its category is read here;
+ * the reopen itself is the shared one, with the widget's own
  * reason — `visitor_replied`, where every other path says `customer_replied`.
  */
 async function reopenIfResolved(tx: typeof db, conversationId: string): Promise<void> {
   const rows = await tx
-    .select({ category: ticketStatuses.category, reopenCount: conversations.reopenCount })
+    .select({ category: ticketStatuses.category })
     .from(conversations)
     .innerJoin(ticketStatuses, eq(ticketStatuses.id, conversations.statusId))
     .where(eq(conversations.id, conversationId))
@@ -676,7 +676,7 @@ async function reopenIfResolved(tx: typeof db, conversationId: string): Promise<
 
   await reopenResolved(
     tx,
-    { id: conversationId, reopenCount: rows[0].reopenCount },
+    { id: conversationId },
     { actorLabel: 'webchat', reason: 'visitor_replied' },
   );
 }

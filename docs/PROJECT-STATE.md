@@ -8391,6 +8391,91 @@ found"}` and not Next's page. The same route called by its own URL
       else in `proxy.ts` added a query to a rewrite. The `?next=` it adds is
       on a redirect, which the browser follows as a new request.
 
+116.  **Reopening a WhatsApp ticket could deadlock with the message arriving
+      on it, and could reopen it with the number's previous owner.**
+      _2026-11-08, found by the independent review of the #490 fix and
+      reproduced on Postgres 16; #493. Neither was seen in production._ Both
+      sit in `reopenWithOwner` (`lib/whatsapp/number-owner.ts`), which every
+      status writer goes through, and both hit any WhatsApp ticket on a
+      number's row, owned or not.
+
+      The first is §6.106's upgrade. `reopenWithOwner` runs the status write,
+      then `alignAccountable`, whose first statement was
+      `SELECT … FOR UPDATE` on the row the write had just taken. A phone
+      reply's echo arriving at the same moment inserts its message, holding
+      KEY SHARE on the ticket, and then updates the ticket. So the reopen
+      waited on the insert, the echo's update waited on the reopen, and
+      Postgres aborted one: the agent's reopen failed, or the echo was lost,
+      retried only if it was alone in its delivery. `alignAccountable` now
+      takes `FOR NO KEY UPDATE`, the lock the write already holds.
+
+      The second decided whether a move was a reopen from a read with no
+      lock. Suppose one agent's resolve is still in flight, and a handover is
+      waiting on the ticket behind it. A second agent moving the ticket to
+      Open read it as Open, so took no lock on the number, and queued behind
+      both. The handover found the ticket resolved and left it, and the move
+      then reopened it without realigning it. The ticket stayed open with
+      the previous owner for good. `ownerOnReopen` now takes the number's
+      lock for any move into open or pending, then the ticket's lock, and
+      reads the status under it: a handover in flight is waited for, and its
+      owner is the one read. The number comes before the ticket because a
+      handover takes them in that order.
+
+      The ticket's number is read under that lock too, because it moves once,
+      from no row to the number's row, when `findOrAdoptLive` adopts the
+      ticket. A resolved ticket under no row, adopted by a phone reply's echo
+      that had not committed when an agent moved it to Open, was read under
+      no row, so the move realigned nothing and left it open on the number,
+      accountable to nobody. Only there is the number's lock taken after the
+      ticket's, which cannot close a cycle with a handover: a handover locks
+      only open and pending tickets, and this one is resolved or closed.
+
+      The cost is a KEY SHARE on the number for every move into open or
+      pending. That conflicts only with a handover's FOR UPDATE, but a
+      handover holds it while it waits on each of the number's open and
+      pending tickets. So while a handover waits on a slow writer, every move
+      into open or pending on that number waits as well, each in its
+      transaction and on a place in the pool, up to the pooler's five-minute
+      `transaction_timeout` where the writer hangs: §6.91's shape. Before,
+      only a reopen and a new ticket on the number queued there. Accepted,
+      because a handover is rare and deliberate, and a writer holding a
+      ticket's row for minutes already stops every message on that ticket.
+
+      `lib/whatsapp/number-owner.db.test.ts` holds all three. One case
+      reopens beside an echo that has stored its message and goes on to
+      update the ticket. One reopens behind a resolve and a handover,
+      asserting that each writer queued in turn, since a reopen started before
+      the handover waited passes against the unlocked read. One reopens while
+      an adoption is in flight. Each fails against its half of the old code:
+      the first with the echo aborted, the other two with the ticket left with
+      the wrong owner.
+
+      The first was §6.106's upgrade shipping a second time, after AGENTS.md
+      had said it in prose. CI now holds it (`ticket-lock`, in
+      `scripts/ci/rules/`): a FOR UPDATE on a ticket's row is refused outside
+      a function that deletes the ticket. The six reads that still took one
+      before writing (the category writer, Jev's classifier and its backfill,
+      the priority classifier, the survey and the low-rating alert) take NO
+      KEY UPDATE, so an arriving message no longer waits on them.
+      `purgeConversation` keeps FOR UPDATE, which holds a message out between
+      what it counts and the delete.
+
+117.  **A customer's message could count a reopen against a ticket that was
+      already open.** _2026-11-11, found by the review of #501. Not seen in
+      production._ Every inbound path (email, WhatsApp, Meta, the widget and
+      the portal) decides whether to reopen from a read with no lock, and
+      `reopenResolved` then wrote whatever that read said. An agent or a rule
+      putting the ticket back in a queue in between left the stale answer to
+      reopen an open ticket: `reopen_count` raised from the caller's copy, and
+      a second `reopened` event naming the resolver, which the rollup counts
+      as a customer reopen against them. `reopenResolved` now reads the status
+      again under the ticket's lock, leaves a ticket open or pending by then as
+      it is, and raises the count from the row. A ticket closed in between is
+      still reopened, as it always was, since the caller has already chosen it
+      for the message, and a closed ticket is in no queue to be seen in.
+      `lib/tickets/reopen.db.test.ts` holds it, with an agent's reopen in
+      flight.
+
 ### Tooling notes for this environment
 
 Supabase and Render MCP tools work and are the fastest way to check real state —

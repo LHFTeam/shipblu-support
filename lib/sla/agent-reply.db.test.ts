@@ -130,13 +130,9 @@ async function resolvedTicket(): Promise<string> {
 /** The customer's job: its ingest transaction, reopening the ticket. */
 async function reopenedByCustomer(id: string): Promise<void> {
   await db.transaction(async (tx) => {
-    const [ticket] = await tx
-      .select({ reopenCount: conversations.reopenCount })
-      .from(conversations)
-      .where(eq(conversations.id, id));
     await reopenResolved(
       tx as unknown as typeof db,
-      { id, reopenCount: ticket!.reopenCount },
+      { id },
       { actorLabel: 'inbound_whatsapp', reason: 'customer_replied' },
     );
     await tx

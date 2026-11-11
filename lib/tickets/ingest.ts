@@ -161,7 +161,7 @@ export async function ingestInboundEmail(
       if (existingConversation.statusCategory === 'resolved' && !automation.isAutoReply) {
         await reopenResolved(
           tx,
-          { id: conversationId, reopenCount: existingConversation.reopenCount },
+          { id: conversationId },
           { actorLabel: 'inbound_email', reason: 'customer_replied' },
         );
       }
@@ -314,7 +314,6 @@ type FoundConversation = {
   id: string;
   number: number;
   statusCategory: 'open' | 'pending' | 'resolved' | 'closed';
-  reopenCount: number;
 };
 
 /** Applies the resolved thread signal to find the actual conversation row. */
@@ -330,7 +329,6 @@ async function findConversation(
         id: conversations.id,
         number: conversations.number,
         statusCategory: ticketStatuses.category,
-        reopenCount: conversations.reopenCount,
       })
       .from(conversations)
       .innerJoin(ticketStatuses, eq(ticketStatuses.id, conversations.statusId));
