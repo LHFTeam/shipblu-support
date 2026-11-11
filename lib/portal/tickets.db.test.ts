@@ -16,7 +16,7 @@ import {
   ticketStatuses,
 } from '@/db/schema';
 import { isForeignKeyViolation } from '@/lib/db/errors';
-import { pendingContact, resolveContact } from '@/lib/tickets/contacts';
+import { pendingContact, resolveContact, type PendingContact } from '@/lib/tickets/contacts';
 import { withCleanDatabase } from '@/lib/testing/db';
 import { untilWaitingOnALock } from '@/lib/testing/hold-transaction';
 import { shownLabel } from './status-words';
@@ -480,13 +480,15 @@ describe('createTicket', () => {
         prepare: false,
         onnotice: () => {},
       });
+      let release!: () => void;
+      const released = new Promise<void>((resolve) => (release = resolve));
+      let racing: Promise<unknown> | undefined;
+      let creating: Promise<unknown> | undefined;
       try {
         let written!: () => void;
         const writing = new Promise<void>((resolve) => (written = resolve));
-        let release!: () => void;
-        const released = new Promise<void>((resolve) => (release = resolve));
         let winner = '';
-        const racing = side.begin(async (tx) => {
+        racing = side.begin(async (tx) => {
           const [row] = await tx<{ id: string }[]>`
             insert into contacts (name, primary_email) values ('Nadia H.', ${ADDRESS})
             returning id`;
@@ -499,11 +501,12 @@ describe('createTicket', () => {
         });
         await writing;
 
-        const creating = createTicket(pending, {
+        const ticket = createTicket(pending, {
           subject: 'Parcel late',
           body: 'A week.',
           category: { id: sales, chosenBy: { label: 'form:claims' } },
         });
+        creating = ticket;
         expect(
           await untilWaitingOnALock(db, { rowLockIn: '^\\s*insert into "contact_identities"' }),
         ).toBe(true);
@@ -515,7 +518,7 @@ describe('createTicket', () => {
 
         release();
         await racing;
-        const created = await creating;
+        const created = await ticket;
 
         expect(await everyRow()).toEqual({
           contacts: [{ id: winner, name: 'Nadia H.', primaryEmail: ADDRESS }],
@@ -526,6 +529,12 @@ describe('createTicket', () => {
         });
         expect(await conversation(created.conversationId)).toMatchObject({ categoryId: sales });
       } finally {
+        // On a failure above, both transactions finish here rather than
+        // outliving the test: ended with one still open, the side connection
+        // would abort the held identity and let the ticket commit under the
+        // next test's truncate.
+        release();
+        await Promise.allSettled([racing, creating]);
         await side.end({ timeout: 5 });
       }
     });
@@ -539,9 +548,10 @@ describe('createTicket', () => {
         displayName: null,
         companyId: null,
       } as const;
+      // On a line of its own, so no other type error can satisfy the directive.
       // @ts-expect-error — only `pendingContact` builds the arm that writes a contact.
-      const call = () => createTicket({ create: handBuilt }, { subject: 'x', body: 'y' });
-      expect(call).toBeTypeOf('function');
+      const pending: PendingContact = { create: handBuilt };
+      expect(pending).toHaveProperty('create');
     });
   });
 });

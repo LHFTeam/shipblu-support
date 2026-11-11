@@ -3610,8 +3610,9 @@ own transaction.** Everything else follows from it.
   - from Stage 4, Jev could act first.
 
   This is the lesson `NewTicket.openedBy`'s comment records. `submitForm`'s
-  `unverified_submitter`, written after `createTicket`, is the shape not to
-  copy.
+  `unverified_submitter`, then written after `createTicket`, was the shape not
+  to copy; it has since moved into the transaction as well
+  (`NewTicket.unverifiedSubmitter`).
 
 - **`setConversationCategory` cannot be called inside that transaction.** It
   opens its own `db.transaction`, which cannot see the uncommitted row and

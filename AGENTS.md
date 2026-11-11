@@ -1343,6 +1343,7 @@ left a customer record behind; and `submitForm` itself once resolved before
 `createTicket`'s transaction, so every ticket that then failed to open did too,
 on both paths. So a caller hands it the address, never a contact it resolved
 first.
+
 `submitForm` refuses an address that is not one after every other refusal,
 reads the contact that owns it (`pendingContact`), and leaves a new one to
 `createTicket`, which inserts it first in the transaction that opens the ticket
