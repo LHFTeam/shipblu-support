@@ -2847,6 +2847,13 @@ PR was thrown away.
   for a while before it ships.
 - Claim your seam out loud before starting anything longer than one commit.
 - Prefer rebasing onto `dev` over merging `dev` in.
+- A release — the pull request from `dev` into `main` — is merged with a merge
+  commit, never squashed or rebased: a squash puts one commit on `main` for
+  changes `dev` holds under their own SHAs, and the next merge of `main` back
+  into `dev` resolves every one of them as a conflict
+  (`docs/PROJECT-STATE.md` §6.116). Anything that lands on `main` without
+  passing through `dev`, such as a file uploaded through GitHub's editor, is
+  merged back into `dev` the same day.
 
 `.github/pull_request_template.md` is the PR body's shape: why, how it was
 verified, what deploys with it and what rolls it back. Fill it in rather than
