@@ -34,8 +34,9 @@ export async function createTicketFromForm(
     return { error: 'That form is no longer available' };
   }
 
-  // Before the contact is resolved: that inserts a contact for a new address,
-  // and a refusal after it would leave one behind for a ticket never opened.
+  // Before `submitForm`, which writes a new customer's contact together with
+  // the ticket: a refusal has to come before that write, or it would leave a
+  // contact behind for a ticket never opened.
   const category = await consoleCategoryChoice(
     text(formData, 'categoryId'),
     can(agent, 'ticket.set_category'),
@@ -43,11 +44,12 @@ export async function createTicketFromForm(
   if ('error' in category) return { error: category.error };
 
   // The address as typed rather than a contact, for the same reason:
-  // `submitForm` checks it and resolves it after its own refusals — a question
-  // left blank, an answer a field refuses, a file it will not take — so none of
-  // them leaves a contact behind either. Checked there and nowhere else, so the
-  // console and the help centre cannot come to disagree about what an address
-  // is.
+  // `submitForm` checks it after its own refusals — a question left blank, an
+  // answer a field refuses, a file it will not take — and a new customer's
+  // contact is written in the transaction that opens the ticket, so neither a
+  // refusal nor a ticket that fails to open leaves one behind. Checked there
+  // and nowhere else, so the console and the help centre cannot come to
+  // disagree about what an address is.
   const result = await submitForm({
     loaded,
     values: formData,

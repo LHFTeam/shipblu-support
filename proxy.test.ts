@@ -3,6 +3,7 @@ import { NextRequest } from 'next/server';
 import { LEGACY_PATH_HEADER } from '@/lib/kb/legacy-path';
 import { LOCALES } from '@/lib/kb/locale';
 import { setTestEnv, withTestEnv } from '@/lib/testing/env';
+import { GET as robotsTxt } from '@/app/help/robots.txt/route';
 import proxy from './proxy';
 
 /**
@@ -71,6 +72,18 @@ describe('every other hostname', () => {
     expect(rewrittenTo(visit('https://shipblu-support.onrender.com/area'))).toBeNull();
   });
 
+  // A crawler asks a host for both at its root, and both are the help
+  // centre's. They answered 404 here until the proxy sent them to it.
+  it('serves robots.txt and the sitemap to a visitor with no session', () => {
+    for (const file of ['/robots.txt', '/sitemap.xml']) {
+      const response = visit(`https://shipblu-support.onrender.com${file}`);
+      expect(rewrittenTo(response)).toBe(`/help${file}`);
+      expect(response.status).not.toBe(307);
+    }
+    // The files themselves, not a path beneath one.
+    expect(rewrittenTo(visit('https://shipblu-support.onrender.com/robots.txt/x'))).toBeNull();
+  });
+
   it('lets a signed-out visitor reach the widget but not the console', () => {
     expect(visit('https://shipblu-support.onrender.com/widget').status).not.toBe(307);
     expect(visit('https://shipblu-support.onrender.com/inbox').status).toBe(307);
@@ -82,6 +95,30 @@ describe('every other hostname', () => {
     // missing marker would say anything was wrong.
     expect(visit('http://127.0.0.1:10000/probe').status).not.toBe(307);
     expect(rewrittenTo(visit('http://127.0.0.1:10000/probe'))).toBeNull();
+  });
+});
+
+/**
+ * The `Sitemap:` line names `publicBaseUrl()`'s host, which is the Render host
+ * until the domain moves and the help centre's after. Either way a crawler
+ * reading it must reach the sitemap, so the address is followed through this
+ * proxy as the crawler would follow it.
+ */
+describe('the sitemap robots.txt advertises', () => {
+  it.each([
+    [
+      'the Render host, before the domain moves',
+      { APP_URL: 'https://shipblu-support.onrender.com' },
+    ],
+    ['the help-centre host, after it', { KB_PUBLIC_HOST: KB_HOST }],
+  ])('is an address this proxy serves the sitemap at, on %s', async (_, env) => {
+    setTestEnv(env);
+    const robots = await (await robotsTxt()).text();
+    const sitemap = /^Sitemap: (\S+)$/m.exec(robots)?.[1];
+
+    expect(sitemap).toBeDefined();
+    if (!sitemap) return;
+    expect(rewrittenTo(visit(sitemap))).toBe('/help/sitemap.xml');
   });
 });
 

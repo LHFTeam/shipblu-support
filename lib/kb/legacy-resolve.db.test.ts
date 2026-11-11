@@ -1,3 +1,4 @@
+import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { db } from '@/db/client';
 import { kbArticles, kbCategories, kbFolders, kbRedirects } from '@/db/schema';
@@ -19,6 +20,9 @@ import { resolveLegacyPath } from './legacy-resolve';
 withCleanDatabase();
 
 const ID = '154000300001';
+
+const permanent = (to: string) => ({ to, permanent: true });
+const temporary = (to: string) => ({ to, permanent: false });
 
 async function englishFirst() {
   const [category] = await db
@@ -55,6 +59,7 @@ async function englishFirst() {
         `/a/solutions/articles/${ID}`,
       ].map((fromPath) => ({ fromPath, articleId: english })),
     );
+  return { english, folder: folder!.id };
 }
 
 describe('resolveLegacyPath', () => {
@@ -67,15 +72,79 @@ describe('resolveLegacyPath', () => {
       `/a/solutions/articles/${ID}`,
       `/solutions/articles/${ID}`,
     ]) {
-      expect(await resolveLegacyPath(path), path).toBe('/en/a/shopify');
+      expect(await resolveLegacyPath(path), path).toEqual(permanent('/en/a/shopify'));
     }
   });
 
   it('keeps the language a portal URL names, with or without a title', async () => {
     await englishFirst();
 
-    expect(await resolveLegacyPath(`/ar/support/solutions/articles/${ID}-x`)).toBe('/ar/a/شوبيفاي');
-    expect(await resolveLegacyPath(`/ar/support/solutions/articles/${ID}`)).toBe('/ar/a/شوبيفاي');
+    expect(await resolveLegacyPath(`/ar/support/solutions/articles/${ID}-x`)).toEqual(
+      permanent('/ar/a/شوبيفاي'),
+    );
+    expect(await resolveLegacyPath(`/ar/support/solutions/articles/${ID}`)).toEqual(
+      permanent('/ar/a/شوبيفاي'),
+    );
+  });
+
+  // A redirect to an article nobody can open is a dead link a browser keeps,
+  // where another translation would answer. And one to the stand-in is
+  // temporary, or the browser and the search index keep it once the article
+  // reopens.
+  it('answers a closed translation with another, temporarily, the explicit row included', async () => {
+    await englishFirst();
+    await db
+      .update(kbArticles)
+      .set({ status: 'archived' })
+      .where(eq(kbArticles.externalId, `${ID}:en`));
+
+    // The importer's own rows name the English article, so they step aside.
+    expect(await resolveLegacyPath(`/support/solutions/articles/${ID}`)).toEqual(
+      temporary('/ar/a/شوبيفاي'),
+    );
+    // A URL asking for English gets the translation that answers.
+    expect(await resolveLegacyPath(`/en/support/solutions/articles/${ID}-x`)).toEqual(
+      temporary('/ar/a/شوبيفاي'),
+    );
+    // A URL asking for the translation that answers keeps its permanence.
+    expect(await resolveLegacyPath(`/ar/support/solutions/articles/${ID}`)).toEqual(
+      permanent('/ar/a/شوبيفاي'),
+    );
+
+    await db.update(kbArticles).set({ status: 'draft' });
+    expect(await resolveLegacyPath(`/support/solutions/articles/${ID}`)).toBeNull();
+  });
+
+  // Production's internal articles are public on the row and agents-only
+  // through their folder: four imported ones, 2026-11-11, each with three
+  // redirect rows.
+  it('never answers with an article in an agents-only folder, or one marked agents-only', async () => {
+    const { folder } = await englishFirst();
+    await db.update(kbFolders).set({ visibility: 'agents_only' }).where(eq(kbFolders.id, folder));
+
+    expect(await resolveLegacyPath(`/support/solutions/articles/${ID}`)).toBeNull();
+    expect(await resolveLegacyPath(`/ar/support/solutions/articles/${ID}`)).toBeNull();
+
+    await db.update(kbFolders).set({ visibility: 'public' });
+    await db
+      .update(kbArticles)
+      .set({ visibility: 'agents_only' })
+      .where(eq(kbArticles.externalId, `${ID}:en`));
+    expect(await resolveLegacyPath(`/support/solutions/articles/${ID}`)).toEqual(
+      temporary('/ar/a/شوبيفاي'),
+    );
+  });
+
+  it("falls back to a row's own to_path when the article it names is closed", async () => {
+    const { english } = await englishFirst();
+    await db
+      .insert(kbRedirects)
+      .values({ fromPath: '/support/home/shopify', articleId: english, toPath: '/en/c/stores' });
+
+    expect(await resolveLegacyPath('/support/home/shopify')).toEqual(permanent('/en/a/shopify'));
+
+    await db.update(kbArticles).set({ status: 'archived' }).where(eq(kbArticles.id, english));
+    expect(await resolveLegacyPath('/support/home/shopify')).toEqual(temporary('/en/c/stores'));
   });
 
   it('answers nothing for an empty path or one nothing here knows', async () => {

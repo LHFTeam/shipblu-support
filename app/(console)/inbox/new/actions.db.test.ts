@@ -326,7 +326,7 @@ describe('createTicketFromForm filing the requester', () => {
   // Resolved the way an inbound email is, so a ticket opened for a customer on
   // the phone joins their history rather than starting a second stranger with
   // the same address. The name the agent typed is only for a contact created
-  // here: `resolveContact` never renames one that exists. And an agent typing
+  // here: `resolveContactIn` never renames one that exists. And an agent typing
   // the address of somebody they are speaking to is not a stranger's claim, so
   // there is no `unverified_submitter`.
   it('joins the contact that owns the address, as typed in any case, and keeps its name', async () => {
