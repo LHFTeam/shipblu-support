@@ -5,13 +5,60 @@ it is designed; **this file is about the state of the work** — what is live,
 what is merely built, what is left, and the mistakes that have already cost us
 time. Read both. Do not re-derive settled decisions.
 
-Last updated: 2026-11-07, against `main` at `db4268c`. The figures in §1 and §5
+Last updated: 2026-11-11, against `main` at `7605993`. The figures in §1 and §5
 were last re-measured as a whole against production on 2026-09-20, and a
 paragraph re-read since gives its own date; where a number here disagrees with
 an older paragraph elsewhere in the file, the older one has not been re-checked.
 
-**Production runs `db4268c`, which deployed itself on 2026-11-07, all six
-services by 16:29:38 UTC:** release #484, which carries #479 — the worker and
+**Production runs `7605993`, which deployed itself on 2026-11-11, all six
+services by 14:19:54 UTC:** release #508, which carries #491 — a form's new
+requester is written in the transaction that opens the ticket, so a refused or
+failed submission leaves no contact behind — #503, `robots.txt` and the sitemap
+answered at the root on every host (PR 5 of `plans/freshdesk-disconnection.md`),
+#504, the knowledge base fixes from the review of that plan's PR 5, and #506 and
+#507, `main` merged back into `dev` and the art comment that merge made stale
+(§6.116). Merged at 14:04:51 with all nine checks green on the pull request; the
+checks on the push to `main` released the deploys at 14:15:52, the four crons
+were live at 14:17:16–14:17:30, the worker at 14:18:21 and the web service at
+14:19:54 (read on Render). It adds no migration: production holds 62, as
+`main`'s journal does (`0000`–`0061`). At 14:27 `/api/health` answered with the
+database at 6 ms, nothing pending or processing, the dead jobs still the 27
+named below and no lost admission on the first pool; on the Render host
+`/robots.txt` and `/sitemap.xml` answered 200, where on 2026-11-10 both were
+404, and Freshdesk's three article URL shapes 301 to the article (PR 3, live
+since `932e8ea` below; the folder shape still 404s, because `kb_redirects`
+holds 174 rows for 58 article ids and none for a folder). Its way back is
+`932e8ea` on each service: a code-only revert through `dev`, or a dashboard
+rollback, which turns that service's auto-deploy off (below); no migration lies
+between the two.
+
+**Before it, production ran `932e8ea`, which deployed itself on 2026-11-10, the
+web service live at 18:16:28 UTC and the worker at 18:15:10** (the crons were
+not read): release #502, a squash of #496 — Freshdesk's old URLs reach the
+legacy route through a request header the rewrite actually delivers (§6.115,
+PR 3) — #498, Save, Restore and the import keep Freshdesk's links and pictures
+out (PR 2), and #499, a picture uploaded in the article editor (PR 4). Being a
+squash, it put one commit on `main` that `dev` did not have, over the same
+changes `dev` carried under their own SHAs, and the merge back (#506) met ten
+conflicts over it (§6.116). Its checks are not recorded here, and it adds no
+migration. Between it and #497 sits `8b03e61`, one help-centre drawing
+uploaded straight to `main` through GitHub on 2026-11-06, which reached `dev`
+only with #506.
+
+**Before it, production ran `918ac12`, which deployed itself on 2026-11-08, the
+web service live at 21:05:01 UTC and the worker at 21:04:13** (the crons were
+not read), and was deployed again on 2026-11-10, the web service live at
+08:43:28 after an environment variable was changed on it from the dashboard and
+the worker at 08:42:40 in the same minute: release #497, which carries #494 —
+Freshdesk's images copied into our bucket, migration `0061_kb_images` (PR 1,
+§5.1) — #492, a WhatsApp handover moves a ticket set pending while it waited
+(§6.114), #489, the SLA clock writers lock the ticket and then read it
+(§6.114), #487, the New ticket form resolves the contact after its refusals,
+and the docs of #486 and #488. Its checks are not recorded here. `0061` is the
+one migration between `db4268c` and `main`.
+
+**Before those, production ran `db4268c`, which deployed itself on 2026-11-07,
+all six services by 16:29:38 UTC:** release #484, which carries #479 — the worker and
 every `npm run job` wait at startup for their build's newest migration (§2) —
 #481, Jev's `category_agreed` (§5.1), and #483, the phone layout and the
 Tajawal font metrics. The four crons were live at 16:27:06–09, the worker at
@@ -1519,8 +1566,8 @@ is code:
   Freshworks, but all 214 images in 61 of the 112 articles load from
   Freshdesk's attachment bucket, and so do the same 214 in the version
   history. 18 versions still hold the 29 old Freshdesk links, which one Restore
-  or one re-import puts back. Freshdesk's old article URLs 404 here through the
-  proxy (§5.2). And the phone's quick replies, the merchant dashboard and its
+  or one re-import puts back. Freshdesk's old article URLs 404'd here through
+  the proxy until `932e8ea` (§6.115). And the phone's quick replies, the merchant dashboard and its
   Freshchat widget still send customers to the Freshdesk copy.
   `plans/freshdesk-disconnection.md` has the measurements, the follow-up pull
   requests and the order: the images are copied before the account closes,
@@ -1529,13 +1576,21 @@ is code:
   run: `main` took it at 21:05 UTC on 2026-11-08 (#497), and
   `rehost_kb_images` copied all 207 pictures at 21:13. No article or version
   loads a picture from Freshdesk now; every one comes from
-  `/api/kb/images/<id>`, and all 207 answered there on 2026-11-09. PR 2 is
-  built: Save, Restore and the import point Freshdesk's pictures and article
-  links here as they write, and Save and Restore refuse to add one that has no
-  home here. Until it ships, the 29 old links in 18 version rows are one
-  Restore from the help centre. PR 4 is built on top of it: the article editor
-  uploads a picture (button, paste or drop) into `kb_images`, so a new
-  screenshot is ours rather than hot-linked.
+  `/api/kb/images/<id>`, and all 207 answered there on 2026-11-09. PRs 2, 3
+  and 4 went live together in #502 on 2026-11-10 (the header): Save, Restore
+  and the import point Freshdesk's pictures and article links here as they
+  write, and Save and Restore refuse to add one that has no home here, so the
+  29 old links in 18 version rows are no longer one Restore away; Freshdesk's
+  old article URLs 301 through the proxy (measured on the Render host on
+  2026-11-11: the bare id, the titled and the `/a/` shapes each 301 to the
+  article, and the folder shape 404s, since `kb_redirects` has no folder
+  rows); and the article editor uploads a picture (button, paste or drop)
+  into `kb_images`, so a new screenshot is ours rather than hot-linked. PR 5,
+  the crawler files on every host, and its review fixes went live in #508 on
+  2026-11-11. PR 6, retiring the importer, waits for the disconnection. The
+  plan's checklist still shows PRs 2 and 3 unchecked: its own checks there (a
+  Restore of a version carrying a Freshdesk link, the six shapes on the
+  deployed build) have not all been run.
 
 - **Instagram through Unified Login — the next configuration task, and none of
   it is a deploy.** The direct connection's token expired on 2026-10-29 (the
@@ -8390,6 +8445,26 @@ found"}` and not Next's page. The same route called by its own URL
       at all. A value meant for a handler rides in a request header. Nothing
       else in `proxy.ts` added a query to a rewrite. The `?next=` it adds is
       on a redirect, which the browser follows as a new request.
+
+116.  **A release squash-merged into `main` makes `main` and `dev` disagree
+      about history, and the merge back pays for it in conflicts.**
+      _2026-11-11._ Release #502 was merged with "Squash and merge", so `main`
+      took one commit, `932e8ea`, holding the changes `dev` carried as #496,
+      #498 and #499 under their own SHAs. `git log origin/dev..origin/main`
+      then listed 30 commits `main` had and `dev` did not — 28 of them the
+      release merges of `dev` into `main`, harmless, plus the squash and
+      `8b03e61`, a drawing uploaded straight to `main` on 2026-11-06 — and
+      merging `main` back into `dev` (#506) met ten conflicts in files both
+      sides had changed identically. Each was resolved to `dev`'s side, and
+      `git diff --stat origin/dev HEAD` listing only the drawing was the proof
+      that the result was `dev` plus the one file `main` alone had. A release
+      merged with a merge commit puts `dev`'s own commits on `main`, so the
+      merge back has nothing to resolve. So a release pull request from `dev`
+      into `main` takes "Create a merge commit", never a squash and never a
+      rebase, and a change made on `main` directly — a file uploaded through
+      GitHub's web editor is the one way it has happened — is merged back into
+      `dev` the same day, before `dev` moves on. `AGENTS.md` says so now, under
+      Git.
 
 ### Tooling notes for this environment
 
