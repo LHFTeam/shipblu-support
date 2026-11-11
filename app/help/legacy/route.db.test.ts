@@ -1,3 +1,4 @@
+import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { db } from '@/db/client';
 import { kbArticles, kbCategories, kbFolders, kbRedirects } from '@/db/schema';
@@ -105,6 +106,14 @@ describe('GET /help/legacy', () => {
       .values({ fromPath: `/support/solutions/articles/${ARTICLE}`, articleId: english });
     const response = await rewritten(`/support/solutions/articles/${ARTICLE}`);
     expect(location(response)).toBe('/en/a/packaging-guidelines');
+  });
+
+  it('redirects temporarily while another translation stands in for a closed one', async () => {
+    await fixtures();
+    await db.update(kbArticles).set({ status: 'archived' }).where(eq(kbArticles.locale, 'en'));
+    const response = await rewritten(`/en/support/solutions/articles/${ARTICLE}`);
+    expect(response.status).toBe(302);
+    expect(location(response)).toBe('/ar/a/إرشادات-التعبئة-والتغليف');
   });
 
   it('answers 404 for an id nothing was imported as', async () => {

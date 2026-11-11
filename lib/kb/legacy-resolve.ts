@@ -5,6 +5,19 @@ import { articlePath, legacyArticleIndex, legacyArticleResolver } from './format
 import { DEFAULT_LOCALE } from './locale';
 import { findRedirect } from './queries';
 import { freshdeskArticleId } from './slug';
+import { someReaderMayOpen } from './visibility';
+
+/**
+ * Where a legacy URL sends its reader, and whether for good.
+ *
+ * `permanent` is false when the answer stands in for an article closed for now
+ * (a draft, archived, agents-only): the translation answered is not the one the
+ * URL, or its `kb_redirects` row, names. A 301 there is kept by the browser and
+ * moves the old URL's standing in search to the stand-in, so once the article
+ * reopens its readers would still land on the other one. A 302 serves them
+ * meanwhile and pins nothing.
+ */
+export type LegacyAnswer = { to: string; permanent: boolean };
 
 /**
  * Where a Freshdesk URL's reader goes now: a help-centre path, or null when
@@ -20,14 +33,18 @@ import { freshdeskArticleId } from './slug';
  * The id lookup is what makes this work without a redirect row per article:
  * the importer stores every article's Freshdesk id, so the mapping exists
  * whether or not anybody remembered to write a redirect.
+ *
+ * Only an article some reader can open answers (`someReaderMayOpen`), and
+ * the answer is permanent only when it is the one this would give were every
+ * article open (`LegacyAnswer`).
  */
-export async function resolveLegacyPath(path: string): Promise<string | null> {
+export async function resolveLegacyPath(path: string): Promise<LegacyAnswer | null> {
   // A bare hit — a crawler, a scanner, a direct call with nothing in it — can
   // only miss, so it costs no query.
   if (!path) return null;
 
   const explicit = (await findRedirect(path)) ?? (await titledRedirect(path));
-  if (explicit) return explicit;
+  if (explicit?.to) return { to: explicit.to, permanent: explicit.to === explicit.ideal };
 
   const freshdeskId = freshdeskArticleId(path);
   if (freshdeskId) {
@@ -48,8 +65,11 @@ export async function resolveLegacyPath(path: string): Promise<string | null> {
         locale: kbArticles.locale,
         externalId: kbArticles.externalId,
         status: kbArticles.status,
+        visibility: kbArticles.visibility,
+        folderVisibility: kbFolders.visibility,
       })
       .from(kbArticles)
+      .leftJoin(kbFolders, eq(kbFolders.id, kbArticles.folderId))
       .where(
         and(
           eq(kbArticles.sourceSystem, 'freshdesk'),
@@ -60,17 +80,26 @@ export async function resolveLegacyPath(path: string): Promise<string | null> {
         ),
       );
 
-    // Published translations only, chosen in the order every writer of a body
-    // points a link at one (`legacyArticleResolver`, which with the default
-    // locale as the article's own is the order above). A draft or an archived
-    // translation would be a permanent redirect to a page that 404s, where
+    // Chosen in the order every writer of a body points a link at a
+    // translation (`legacyArticleResolver`, which with the default locale as
+    // the article's own is the order above), from the translations a reader
+    // can open. A closed one would be a redirect to a page that 404s, where
     // another translation answers.
-    const article = legacyArticleResolver(legacyArticleIndex(rows), DEFAULT_LOCALE)(
-      freshdeskId,
-      preferred,
-    );
+    const choose = (translations: typeof rows) => {
+      const article = legacyArticleResolver(legacyArticleIndex(translations), DEFAULT_LOCALE)(
+        freshdeskId,
+        preferred,
+      );
+      return article ? articlePath(article.locale, article.slug) : null;
+    };
 
-    if (article) return articlePath(article.locale, article.slug);
+    const to = choose(rows.filter(someReaderMayOpen));
+    if (to) {
+      // The same choice were every translation open, unless the row named one.
+      const ideal =
+        explicit?.ideal ?? choose(rows.map((row) => ({ ...row, status: 'published' as const })));
+      return { to, permanent: to === ideal };
+    }
   }
 
   const folderId = /\/solutions\/folders\/(\d+)/.exec(path)?.[1];
@@ -90,7 +119,7 @@ export async function resolveLegacyPath(path: string): Promise<string | null> {
     // moved category since import would send the reader somewhere wrong. The
     // help centre home is a worse answer than the right folder but a better
     // one than a 404.
-    if (byFolder[0]) return `/${DEFAULT_LOCALE}`;
+    if (byFolder[0]) return { to: `/${DEFAULT_LOCALE}`, permanent: true };
   }
 
   return null;
@@ -108,7 +137,7 @@ export async function resolveLegacyPath(path: string): Promise<string | null> {
  * (`/en/support/…`) matches no row either way, and keeps the language it
  * names.
  */
-async function titledRedirect(path: string): Promise<string | null> {
+async function titledRedirect(path: string): ReturnType<typeof findRedirect> {
   const untitled = path.replace(/(\/solutions\/articles\/\d+)-[^/?#]*$/, '$1');
   return untitled === path ? null : findRedirect(untitled);
 }

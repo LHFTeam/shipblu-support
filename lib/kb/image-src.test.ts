@@ -4,6 +4,7 @@ import { normaliseArticleHtml } from './format';
 import {
   blockBoundaryAfter,
   fetchableFreshworksImage,
+  FRESHWORKS_DOMAINS,
   imageSources,
   insertBlock,
   isFreshworksImage,
@@ -125,6 +126,16 @@ describe('isFreshworksImage', () => {
     expect(isFreshworksImage(kbImageSrc(ID))).toBe(false);
     expect(isFreshworksImage('https://example.com/x.png')).toBe(false);
   });
+
+  // A domain the refusal knows and the pattern misses is a picture Save
+  // refuses and the copy job never selects, so nothing ever moves it.
+  it.each(FRESHWORKS_DOMAINS)(
+    'matches every address on %s, so the copy job selects it',
+    (domain) => {
+      expect(isFreshworksImage(`https://x.${domain}/a.png`)).toBe(true);
+      expect(isFreshworksImage(`https://${domain}/a.png`)).toBe(true);
+    },
+  );
 });
 
 describe('fetchableFreshworksImage', () => {
@@ -247,6 +258,28 @@ describe('blockBoundaryAfter', () => {
     const plain = 'just some words typed';
     expect(blockBoundaryAfter(plain, 4)).toBe(plain.length);
     expect(blockBoundaryAfter('<p>a</p>tail', '<p>a</p>ta'.length)).toBe('<p>a</p>tail'.length);
+  });
+
+  // Save wraps text and the inline tags in it in one paragraph, so a link in
+  // a loose sentence is part of the sentence.
+  it('reads an inline element in loose text as part of the text', () => {
+    const loose = '<p>a</p>\nplease see <a href="/x">the guide</a> below\n<p>b</p>';
+    const afterRun = loose.indexOf('\n<p>b');
+    expect(blockBoundaryAfter(loose, loose.indexOf(' see'))).toBe(afterRun);
+    expect(blockBoundaryAfter(loose, loose.indexOf('ide<'))).toBe(afterRun);
+    expect(blockBoundaryAfter(loose, loose.indexOf('href'))).toBe(afterRun);
+    const broken = '<p>a</p>\nline one<br>line <code>two</code>\n<hr>';
+    expect(blockBoundaryAfter(broken, broken.indexOf('one'))).toBe(broken.indexOf('\n<hr>'));
+  });
+
+  it('leaves a caret at the start of loose text where it is', () => {
+    const loose = '<p>intro</p>\nLoose sentence here.\n<p>b</p>';
+    const atStart = loose.indexOf('Loose');
+    expect(blockBoundaryAfter(loose, atStart)).toBe(atStart);
+    expect(blockBoundaryAfter('just some words typed', 0)).toBe(0);
+    expect(blockBoundaryAfter('<p>a</p>\n<a href="/x">link</a> after', '<p>a</p>\n'.length)).toBe(
+      '<p>a</p>\n'.length,
+    );
   });
 
   it('puts an uploaded picture after the paragraph the caret was in, not inside it', () => {

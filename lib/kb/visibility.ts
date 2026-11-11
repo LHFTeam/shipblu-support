@@ -58,6 +58,30 @@ export function folderVisibleTo(viewer: KbViewer): SQL {
   return levelAllowed(viewer, 'folder');
 }
 
+/**
+ * Whether some reader of the help centre can open this article: published, and
+ * neither it nor its folder `agents_only`.
+ *
+ * For an answer given once for every reader, which no viewer's predicate fits:
+ * the legacy route's redirect, which a browser keeps (`./legacy-resolve.ts`).
+ * An agents-only article 404s for everybody, so a redirect to it is a dead link
+ * kept for good. `logged_in` and `selected_companies` pass: the page opens for
+ * the customers it names, and the redirect is the right one for them.
+ * Production's internal articles are public on the row and internal through
+ * their folder, which is why the folder is asked.
+ */
+export function someReaderMayOpen(article: {
+  status: string | null;
+  visibility: string | null;
+  folderVisibility: string | null;
+}): boolean {
+  return (
+    article.status === 'published' &&
+    article.visibility !== 'agents_only' &&
+    article.folderVisibility !== 'agents_only'
+  );
+}
+
 function levelAllowed(viewer: KbViewer, on: 'article' | 'folder'): SQL {
   const table = on === 'article' ? kbArticles : kbFolders;
 

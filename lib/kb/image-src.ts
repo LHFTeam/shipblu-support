@@ -101,9 +101,38 @@ const VOID_TAGS = new Set([
 ]);
 
 /**
+ * The tags an article keeps inside a paragraph. At the top level of a body,
+ * text and these together are one run, which `normaliseArticleHtml` wraps in
+ * one paragraph on every write (`wrapLooseContent` in `./format.ts`), so the
+ * editor reads a draft's runs by the same list (`blockBoundaryAfter`). Every
+ * other tag is a block.
+ */
+export const INLINE_TAGS = [
+  'a',
+  'strong',
+  'em',
+  'b',
+  'i',
+  'u',
+  's',
+  'strike',
+  'sub',
+  'sup',
+  'mark',
+  'small',
+  'code',
+  'br',
+  'img',
+  'span',
+  'iframe',
+] as const;
+
+const INLINE = new Set<string>(INLINE_TAGS);
+
+/**
  * Where a block can go in an author's HTML draft at or after `caret`: the caret
- * itself when it is between top-level elements, otherwise the end of the
- * top-level element it is in.
+ * itself when it is between top-level blocks, otherwise the end of the
+ * top-level block, or of the run of loose text, it is in.
  *
  * The draft is the editor's source text, not stored HTML, so this reads tags as
  * an author types them. A caret in the middle of a paragraph (`<p>Open the|
@@ -111,35 +140,75 @@ const VOID_TAGS = new Set([
  * browser closes the paragraph early, the rest becomes loose text with a stray
  * `</p>` after it, and that is what Save stores. A draft whose tags never close
  * again gets the block at its end.
+ *
+ * Text outside any block is read the way Save reads it: together with the
+ * inline elements in it (`INLINE_TAGS`), one run that becomes one paragraph. So
+ * a link in a loose sentence is part of the sentence, not a block of its own
+ * to put a picture after.
  */
 export function blockBoundaryAfter(html: string, caret: number): number {
   let depth = 0;
+  // Whether the top-level element open now is a block. A top-level inline
+  // element is part of the run around it.
+  let inBlock = false;
+  // Where the run the walk is in began: the start of the draft, or the end of
+  // the last top-level block.
+  let runStart = 0;
+
   for (const match of html.matchAll(DRAFT_TAG)) {
     const start = match.index;
-    if (depth === 0 && caret <= start) return afterLooseText(html, caret, start);
-    const name = (match[2] ?? '').toLowerCase();
-    if (match[1] === '/') depth = Math.max(0, depth - 1);
-    else if (match[3] !== '/' && !VOID_TAGS.has(name)) depth += 1;
     const end = start + match[0].length;
-    if (depth === 0 && end >= caret) return end;
+    const name = (match[2] ?? '').toLowerCase();
+    const closing = match[1] === '/';
+    const opens = !closing && match[3] !== '/' && !VOID_TAGS.has(name);
+
+    if (depth === 0) {
+      if (INLINE.has(name)) {
+        if (opens) {
+          depth = 1;
+          inBlock = false;
+        }
+        continue;
+      }
+      // A block starts here, so the run before it ends.
+      if (caret <= start) return withinRun(html, runStart, caret, start);
+      if (opens) {
+        depth = 1;
+        inBlock = true;
+        continue;
+      }
+      // A block with nothing inside it: `<hr>`, `<p/>`, a stray `</p>`.
+      if (end >= caret) return end;
+      runStart = end;
+      continue;
+    }
+
+    if (closing) depth -= 1;
+    else if (opens) depth += 1;
+    if (depth === 0 && inBlock) {
+      if (end >= caret) return end;
+      runStart = end;
+    }
   }
+
   return depth === 0
-    ? afterLooseText(html, Math.min(caret, html.length), html.length)
+    ? withinRun(html, runStart, Math.min(caret, html.length), html.length)
     : html.length;
 }
 
 /**
- * A caret outside every element, moved past the text it is in: the caret
- * itself when only whitespace lies between it and `next` (the next tag, or the
- * end), so it already sits between blocks; otherwise the end of that text.
+ * A caret in the run from `from` to `to`: the caret itself when only
+ * whitespace lies behind it back to the run's start, or ahead of it to the
+ * run's end, since it already sits between blocks there; otherwise the end of
+ * the run's text.
  *
- * Text outside any element is one run to the browser, line breaks and all, so
- * a block put in the middle of it splits a sentence. A body typed with no tags
- * at all is that run, and gets the block at its end.
+ * A run is one paragraph once saved, line breaks and all, so a block put in the
+ * middle of it splits a sentence. A body typed with no tags at all is one run.
  */
-function afterLooseText(html: string, caret: number, next: number): number {
-  const run = html.slice(caret, next);
-  return run.trim() === '' ? caret : caret + run.trimEnd().length;
+function withinRun(html: string, from: number, caret: number, to: number): number {
+  const ahead = html.slice(caret, to);
+  if (html.slice(from, caret).trim() === '' || ahead.trim() === '') return caret;
+  return caret + ahead.trimEnd().length;
 }
 
 /**
@@ -198,8 +267,14 @@ export function isFreshworksImage(src: string): boolean {
   return /(freshdesk|freshworks|freshchat|freshservice|fwcdn|fw-cdn|fwusercontent)/i.test(src);
 }
 
-/** Freshworks' own domains, each matched with every subdomain beneath it. */
-const FRESHWORKS_DOMAINS = [
+/**
+ * Freshworks' own domains, each matched with every subdomain beneath it.
+ *
+ * `isFreshworksImage` must match every one: a domain here that the pattern
+ * misses is a picture Save refuses and the copy job never selects, so nothing
+ * moves it. `image-src.test.ts` holds the two together.
+ */
+export const FRESHWORKS_DOMAINS = [
   'freshdesk.com',
   'freshworks.com',
   'myfreshworks.com',

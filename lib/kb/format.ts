@@ -66,7 +66,7 @@
  */
 
 import { isFreshdeskAddress } from './freshdesk-refs';
-import { decodeAttribute } from './image-src';
+import { decodeAttribute, INLINE_TAGS } from './image-src';
 import { DEFAULT_LOCALE } from './locale';
 
 /**
@@ -421,9 +421,11 @@ const CLOSED_BLOCK = 'p|ul|ol|h2|h3|h4|h5|h6|blockquote|table|pre|figure|dl';
  * which is the version of this rule that was wrong: with `li` missing from the
  * block list, a run happily swallowed the `</li><li>` between two list items
  * and wrapped them in a paragraph, moving the list's own structure inside it.
- * Inline is the small, enumerable set — so enumerate it.
+ * Inline is the small, enumerable set — so enumerate it. The list is
+ * `INLINE_TAGS`, beside the editor's reading of a draft, which has to agree
+ * with this one about where a loose run ends (`blockBoundaryAfter`).
  */
-const INLINE = 'a|strong|em|b|i|u|s|strike|sub|sup|mark|small|code|br|img|span|iframe';
+const INLINE = INLINE_TAGS.join('|');
 
 /**
  * The inline leftovers of an unwrapped `div`, given a paragraph of their own.

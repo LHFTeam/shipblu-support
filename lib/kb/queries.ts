@@ -11,7 +11,13 @@ import {
 import type { Locale } from './locale';
 import { hybridMatch, hybridRank } from './rank';
 import { articleHelpful, statsOfArticle } from './stats';
-import { ANONYMOUS, articleVisibleTo, folderVisibleTo, type KbViewer } from './visibility';
+import {
+  ANONYMOUS,
+  articleVisibleTo,
+  folderVisibleTo,
+  someReaderMayOpen,
+  type KbViewer,
+} from './visibility';
 
 /**
  * Read models for the public knowledge base.
@@ -788,36 +794,46 @@ export async function searchArticles(
 }
 
 /**
- * Resolves a legacy Freshdesk path.
+ * The `kb_redirects` row for a legacy Freshdesk path: where it sends a reader
+ * now (`to`), and where it would were every article it names open (`ideal`).
+ *
+ * `to` is null when the row names an article nobody can open and has no
+ * `to_path` to answer instead; the caller goes on to the article's other
+ * translations (`resolveLegacyPath`). The two differ whenever the answer stands
+ * in for an article that is closed for now, which the caller answers with a
+ * temporary redirect rather than a permanent one.
  *
  * Reached only for a path the proxy already recognised as a Freshdesk URL,
  * which is why this is not in the hot path: after cutover almost all traffic
  * uses the new URLs, and looking every request up here would add a query to
  * every page load to serve a shrinking minority.
  */
-export async function findRedirect(fromPath: string): Promise<string | null> {
+export async function findRedirect(
+  fromPath: string,
+): Promise<{ to: string | null; ideal: string } | null> {
   const rows = await db
     .select({
       toPath: kbRedirects.toPath,
       articleSlug: kbArticles.slug,
       articleLocale: kbArticles.locale,
-      articleStatus: kbArticles.status,
+      status: kbArticles.status,
+      visibility: kbArticles.visibility,
+      folderVisibility: kbFolders.visibility,
     })
     .from(kbRedirects)
     .leftJoin(kbArticles, eq(kbArticles.id, kbRedirects.articleId))
+    .leftJoin(kbFolders, eq(kbFolders.id, kbArticles.folderId))
     .where(eq(kbRedirects.fromPath, fromPath))
     .limit(1);
 
   const row = rows[0];
   if (!row) return null;
-  if (row.articleSlug) {
-    // A draft or an archived article is no answer: the legacy route answers a
-    // permanent redirect, which a browser keeps and a search engine moves the
-    // old URL's standing to, and the page 404s. Answered null, the caller
-    // goes on to the article's other translations (`resolveLegacyPath`).
-    return row.articleStatus === 'published' ? `/${row.articleLocale}/a/${row.articleSlug}` : null;
-  }
-  return row.toPath;
+  if (!row.articleSlug) return row.toPath ? { to: row.toPath, ideal: row.toPath } : null;
+
+  // A draft, an archived article or an agents-only one is no answer: the legacy
+  // route's redirect is one a browser keeps, and the page 404s.
+  const article = `/${row.articleLocale}/a/${row.articleSlug}`;
+  return { to: someReaderMayOpen(row) ? article : row.toPath, ideal: article };
 }
 
 /**
