@@ -470,6 +470,22 @@ rewrites to. The route reads that header, or `?path=` on a direct call
 - Called directly, the route is `/help/legacy?path=…` on the Render host and
   `/legacy?path=…` on `KB_PUBLIC_HOST`, which puts `/help` in front of every
   path. The Freshdesk shapes themselves need no such care.
+- It answers with an article some reader can open, the importer's own
+  `kb_redirects` row included (`someReaderMayOpen`): published, and neither it
+  nor its folder agents-only. A redirect to anything else is a dead link a
+  browser keeps, where another translation may answer. The id lookup chooses
+  the translation in the order every writer points a link at one
+  (`legacyArticleResolver`), and a row whose article is closed answers with its
+  own `to_path` when it has one.
+- It answers 301 only with the article it would choose were every article
+  open, and 302 while another translation or a row's `to_path` stands in for
+  a closed one: a 301 to the stand-in is kept by the browser and moves the old
+  URL's standing in search to it, so readers would still land there once the
+  article reopened.
+- On 2026-11-11 every imported article was published and 4 sat in an
+  agents-only folder, Arabic only, with 3 redirect rows each. Their 12 old
+  URLs answered a 301 to a page that 404s, and answer 404 from this change on.
+  No other redirect moves.
 
 ### 4. Upload an image in the article editor
 
@@ -656,11 +672,11 @@ Freshdesk links sent from the phone in the last 7 days (30 in all).
 ```sql
 select 'images, live' as what, count(*) as n, count(distinct a.id) as rows_
 from kb_articles a, regexp_matches(a.body_html, '<img[^>]*src="([^"]*)"', 'gi') m
-where m[1] ~* '(freshdesk|freshworks|freshchat|fwcdn|fw-cdn|fwusercontent)'
+where m[1] ~* '(freshdesk|freshworks|freshchat|freshservice|fwcdn|fw-cdn|fwusercontent)'
 union all
 select 'images, versions', count(*), count(distinct v.id)
 from kb_article_versions v, regexp_matches(v.body_html, '<img[^>]*src="([^"]*)"', 'gi') m
-where m[1] ~* '(freshdesk|freshworks|freshchat|fwcdn|fw-cdn|fwusercontent)'
+where m[1] ~* '(freshdesk|freshworks|freshchat|freshservice|fwcdn|fw-cdn|fwusercontent)'
 union all
 select 'links, live', count(*), count(distinct a.id)
 from kb_articles a, regexp_matches(a.body_html, 'href="([^"]*)"', 'gi') m
