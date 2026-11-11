@@ -29,10 +29,15 @@ import trackingPin from './art/tracking-pin.webp';
  * tracking parcel's 150px — so they stay sharp on a 2x screen, and the
  * optimiser would spend a request and a CPU cycle on Render to save a few KB.
  *
- * The questions scene reaches the edges of its tile — a pedestal at one, the
- * magnifier at the other — where `.kb-art-fade` would fade them out, so its file
- * frames the tile in a transparent margin: the tile at 74% of the frame, as the
- * earlier export had it.
+ * `.kb-art-fade` is a radial mask, so whatever a file carries at its edges is
+ * faded out. A file drawn on a tile that reaches its edges therefore needs a
+ * transparent margin around the tile, or the fade takes the tile's corners and
+ * whatever stands in them: the questions drawing's first 600px export arrived
+ * opaque to its edges, with a pedestal at one and the magnifier at the other,
+ * and was framed with its tile at 74% of the file. Its current export (uploaded
+ * straight to `main` on 2026-11-06) is the scene alone on a transparent
+ * background, nothing but the tip of its swoosh at an edge, so it needs no
+ * margin and sits in the same 600px frame as the other topic drawings.
  *
  * Every one is decoration: the words beside it say everything it does, so it
  * carries an empty `alt` and is hidden from assistive technology.
