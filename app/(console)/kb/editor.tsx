@@ -111,15 +111,18 @@ export function ArticleEditor({
    */
   function insertPicture(src: string) {
     const box = bodyRef.current;
-    const touched = bodyTouched.current;
-    setBody((current) => {
-      const at = box && touched ? blockBoundaryAfter(current, box.selectionEnd) : current.length;
-      const next = insertBlock(current, at, pictureParagraph(src));
-      requestAnimationFrame(() => {
-        box?.focus();
-        box?.setSelectionRange(next.caret, next.caret);
-      });
-      return next.text;
+    if (!box) return;
+    // Read and acted on here rather than in a state updater, which React may
+    // run twice: an updater that reads the selection and schedules the caret
+    // move would do both twice. The box's own value is the draft as the author
+    // last left it, a keystroke not yet rendered included.
+    const current = box.value;
+    const at = bodyTouched.current ? blockBoundaryAfter(current, box.selectionEnd) : current.length;
+    const next = insertBlock(current, at, pictureParagraph(src));
+    setBody(next.text);
+    requestAnimationFrame(() => {
+      box.focus();
+      box.setSelectionRange(next.caret, next.caret);
     });
   }
 

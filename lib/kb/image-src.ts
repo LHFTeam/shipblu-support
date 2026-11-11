@@ -116,14 +116,30 @@ export function blockBoundaryAfter(html: string, caret: number): number {
   let depth = 0;
   for (const match of html.matchAll(DRAFT_TAG)) {
     const start = match.index;
-    if (depth === 0 && caret <= start) return caret;
+    if (depth === 0 && caret <= start) return afterLooseText(html, caret, start);
     const name = (match[2] ?? '').toLowerCase();
     if (match[1] === '/') depth = Math.max(0, depth - 1);
     else if (match[3] !== '/' && !VOID_TAGS.has(name)) depth += 1;
     const end = start + match[0].length;
     if (depth === 0 && end >= caret) return end;
   }
-  return depth === 0 ? Math.min(caret, html.length) : html.length;
+  return depth === 0
+    ? afterLooseText(html, Math.min(caret, html.length), html.length)
+    : html.length;
+}
+
+/**
+ * A caret outside every element, moved past the text it is in: the caret
+ * itself when only whitespace lies between it and `next` (the next tag, or the
+ * end), so it already sits between blocks; otherwise the end of that text.
+ *
+ * Text outside any element is one run to the browser, line breaks and all, so
+ * a block put in the middle of it splits a sentence. A body typed with no tags
+ * at all is that run, and gets the block at its end.
+ */
+function afterLooseText(html: string, caret: number, next: number): number {
+  const run = html.slice(caret, next);
+  return run.trim() === '' ? caret : caret + run.trimEnd().length;
 }
 
 /**
@@ -179,7 +195,7 @@ export function kbImageIdOf(src: string): string | null {
  * silence.
  */
 export function isFreshworksImage(src: string): boolean {
-  return /(freshdesk|freshworks|freshchat|fwcdn|fw-cdn|fwusercontent)/i.test(src);
+  return /(freshdesk|freshworks|freshchat|freshservice|fwcdn|fw-cdn|fwusercontent)/i.test(src);
 }
 
 /** Freshworks' own domains, each matched with every subdomain beneath it. */

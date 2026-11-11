@@ -119,6 +119,9 @@ describe('isFreshworksImage', () => {
   it('matches what the audit query counts', () => {
     expect(isFreshworksImage(FRESHDESK)).toBe(true);
     expect(isFreshworksImage('https://fwusercontent.com/x.png')).toBe(true);
+    // On the refusal's host list too, so it must be copied, or Save refuses it
+    // and nothing ever moves it here.
+    expect(isFreshworksImage('https://attachment.freshservice.com/x.png')).toBe(true);
     expect(isFreshworksImage(kbImageSrc(ID))).toBe(false);
     expect(isFreshworksImage('https://example.com/x.png')).toBe(false);
   });
@@ -232,6 +235,18 @@ describe('blockBoundaryAfter', () => {
   it('reads a void tag as opening nothing, and sends a draft never closed to its end', () => {
     expect(blockBoundaryAfter('<p>a<br>b</p>tail', 4)).toBe('<p>a<br>b</p>'.length);
     expect(blockBoundaryAfter('<p>half written', 5)).toBe('<p>half written'.length);
+  });
+
+  // Text outside any element is one run to the browser, so a block in the
+  // middle of it splits a sentence.
+  it('moves a caret in text outside any element to the end of that text', () => {
+    const loose = '<p>a</p>\nplease see the screenshot below\n<p>b</p>';
+    expect(blockBoundaryAfter(loose, loose.indexOf(' the screenshot'))).toBe(
+      loose.indexOf('\n<p>b'),
+    );
+    const plain = 'just some words typed';
+    expect(blockBoundaryAfter(plain, 4)).toBe(plain.length);
+    expect(blockBoundaryAfter('<p>a</p>tail', '<p>a</p>ta'.length)).toBe('<p>a</p>tail'.length);
   });
 
   it('puts an uploaded picture after the paragraph the caret was in, not inside it', () => {

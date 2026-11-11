@@ -156,7 +156,7 @@ async function images() {
 
 /** The two `images` rows of the plan's audit query, which PR 1 is verified by. */
 async function audit(): Promise<{ live: number; versions: number }> {
-  const pattern = '(freshdesk|freshworks|freshchat|fwcdn|fw-cdn|fwusercontent)';
+  const pattern = '(freshdesk|freshworks|freshchat|freshservice|fwcdn|fw-cdn|fwusercontent)';
   const rows = await db.execute<{ what: string; n: number }>(sql`
     select 'live' as what, count(*)::int as n
     from kb_articles a, regexp_matches(a.body_html, '<img[^>]*src="([^"]*)"', 'gi') m

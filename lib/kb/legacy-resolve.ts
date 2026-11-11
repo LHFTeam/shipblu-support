@@ -1,6 +1,7 @@
 import { and, eq, like, or } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { kbArticles, kbFolders } from '@/db/schema';
+import { articlePath, legacyArticleIndex, legacyArticleResolver } from './format';
 import { DEFAULT_LOCALE } from './locale';
 import { findRedirect } from './queries';
 import { freshdeskArticleId } from './slug';
@@ -42,7 +43,12 @@ export async function resolveLegacyPath(path: string): Promise<string | null> {
     const preferred = /^\/([a-z]{2})(-[A-Za-z]{2})?\//.exec(path)?.[1];
 
     const rows = await db
-      .select({ slug: kbArticles.slug, locale: kbArticles.locale })
+      .select({
+        slug: kbArticles.slug,
+        locale: kbArticles.locale,
+        externalId: kbArticles.externalId,
+        status: kbArticles.status,
+      })
       .from(kbArticles)
       .where(
         and(
@@ -54,12 +60,17 @@ export async function resolveLegacyPath(path: string): Promise<string | null> {
         ),
       );
 
-    const article =
-      rows.find((row) => row.locale === preferred) ??
-      rows.find((row) => row.locale === DEFAULT_LOCALE) ??
-      rows[0];
+    // Published translations only, chosen in the order every writer of a body
+    // points a link at one (`legacyArticleResolver`, which with the default
+    // locale as the article's own is the order above). A draft or an archived
+    // translation would be a permanent redirect to a page that 404s, where
+    // another translation answers.
+    const article = legacyArticleResolver(legacyArticleIndex(rows), DEFAULT_LOCALE)(
+      freshdeskId,
+      preferred,
+    );
 
-    if (article) return `/${article.locale}/a/${article.slug}`;
+    if (article) return articlePath(article.locale, article.slug);
   }
 
   const folderId = /\/solutions\/folders\/(\d+)/.exec(path)?.[1];

@@ -470,6 +470,12 @@ rewrites to. The route reads that header, or `?path=` on a direct call
 - Called directly, the route is `/help/legacy?path=…` on the Render host and
   `/legacy?path=…` on `KB_PUBLIC_HOST`, which puts `/help` in front of every
   path. The Freshdesk shapes themselves need no such care.
+- It answers with a published article only, the importer's own
+  `kb_redirects` row included: a permanent redirect to a draft or an archived
+  translation is a dead link a browser keeps, where another translation would
+  answer. The id lookup chooses the translation in the order every writer
+  points a link at one (`legacyArticleResolver`). Every imported article was
+  published on 2026-11-09, so no redirect moves today.
 
 ### 4. Upload an image in the article editor
 
@@ -656,11 +662,11 @@ Freshdesk links sent from the phone in the last 7 days (30 in all).
 ```sql
 select 'images, live' as what, count(*) as n, count(distinct a.id) as rows_
 from kb_articles a, regexp_matches(a.body_html, '<img[^>]*src="([^"]*)"', 'gi') m
-where m[1] ~* '(freshdesk|freshworks|freshchat|fwcdn|fw-cdn|fwusercontent)'
+where m[1] ~* '(freshdesk|freshworks|freshchat|freshservice|fwcdn|fw-cdn|fwusercontent)'
 union all
 select 'images, versions', count(*), count(distinct v.id)
 from kb_article_versions v, regexp_matches(v.body_html, '<img[^>]*src="([^"]*)"', 'gi') m
-where m[1] ~* '(freshdesk|freshworks|freshchat|fwcdn|fw-cdn|fwusercontent)'
+where m[1] ~* '(freshdesk|freshworks|freshchat|freshservice|fwcdn|fw-cdn|fwusercontent)'
 union all
 select 'links, live', count(*), count(distinct a.id)
 from kb_articles a, regexp_matches(a.body_html, 'href="([^"]*)"', 'gi') m

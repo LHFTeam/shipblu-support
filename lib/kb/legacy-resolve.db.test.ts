@@ -1,3 +1,4 @@
+import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { db } from '@/db/client';
 import { kbArticles, kbCategories, kbFolders, kbRedirects } from '@/db/schema';
@@ -76,6 +77,24 @@ describe('resolveLegacyPath', () => {
 
     expect(await resolveLegacyPath(`/ar/support/solutions/articles/${ID}-x`)).toBe('/ar/a/شوبيفاي');
     expect(await resolveLegacyPath(`/ar/support/solutions/articles/${ID}`)).toBe('/ar/a/شوبيفاي');
+  });
+
+  // A permanent redirect to an article nobody can open is a dead link a
+  // browser keeps, where another translation would answer.
+  it('never answers with a draft or an archived translation, the explicit row included', async () => {
+    await englishFirst();
+    await db
+      .update(kbArticles)
+      .set({ status: 'archived' })
+      .where(eq(kbArticles.externalId, `${ID}:en`));
+
+    // The importer's own rows name the English article, so they step aside.
+    expect(await resolveLegacyPath(`/support/solutions/articles/${ID}`)).toBe('/ar/a/شوبيفاي');
+    // A URL asking for English gets the translation that answers.
+    expect(await resolveLegacyPath(`/en/support/solutions/articles/${ID}-x`)).toBe('/ar/a/شوبيفاي');
+
+    await db.update(kbArticles).set({ status: 'draft' });
+    expect(await resolveLegacyPath(`/support/solutions/articles/${ID}`)).toBeNull();
   });
 
   it('answers nothing for an empty path or one nothing here knows', async () => {

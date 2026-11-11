@@ -801,6 +801,7 @@ export async function findRedirect(fromPath: string): Promise<string | null> {
       toPath: kbRedirects.toPath,
       articleSlug: kbArticles.slug,
       articleLocale: kbArticles.locale,
+      articleStatus: kbArticles.status,
     })
     .from(kbRedirects)
     .leftJoin(kbArticles, eq(kbArticles.id, kbRedirects.articleId))
@@ -809,7 +810,13 @@ export async function findRedirect(fromPath: string): Promise<string | null> {
 
   const row = rows[0];
   if (!row) return null;
-  if (row.articleSlug) return `/${row.articleLocale}/a/${row.articleSlug}`;
+  if (row.articleSlug) {
+    // A draft or an archived article is no answer: the legacy route answers a
+    // permanent redirect, which a browser keeps and a search engine moves the
+    // old URL's standing to, and the page 404s. Answered null, the caller
+    // goes on to the article's other translations (`resolveLegacyPath`).
+    return row.articleStatus === 'published' ? `/${row.articleLocale}/a/${row.articleSlug}` : null;
+  }
   return row.toPath;
 }
 
