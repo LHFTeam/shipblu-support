@@ -544,6 +544,25 @@ Side observation, not Freshworks: `robots.txt` advertises
 works, so this resolves itself at the domain move; fix it only if the Render
 host is meant to be crawled meanwhile.
 
+**What was built.** `proxy.ts` sends `/robots.txt` and `/sitemap.xml` to the
+help centre's two routes on every host (`CRAWLER_FILES`), as it already did a
+locale path. Until the domain moves, the Render host is where the help centre's
+canonicals point, so it is the host being crawled. Measured on 2026-11-10, it
+answered 404 for both files. A crawler there found no robots file at all, so
+`Disallow: /*/track`, which keeps the URLs carrying a parcel number out of a
+crawler's logs, did not apply on the one host the help centre is served on. The
+`Sitemap:` line named a sitemap that 404s. Now both answer there, on a
+production build served locally:
+
+- `/robots.txt` and `/sitemap.xml` answer 200 with no session;
+- a path beneath one of them still goes to sign-in.
+
+`proxy.test.ts` follows the `Sitemap:` line `robots.txt` writes through the
+proxy, both before the domain moves and after, and checks that it reaches the
+sitemap. On the help-centre host nothing changes: its catch-all rewrite already
+sent both there. `/help/robots.txt` and `/help/sitemap.xml` still answer, and
+nothing advertises them.
+
 ### 6. Retire the Freshdesk importer — after the disconnection
 
 `import_freshdesk_kb`, its handler and test, `lib/freshdesk/`, the
