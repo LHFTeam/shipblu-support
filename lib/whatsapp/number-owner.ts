@@ -210,9 +210,19 @@ export async function reopenWithOwner(
  * been resolved, leaving it with the previous owner for good. With the
  * number's lock taken first, a handover in flight is waited for, and its owner
  * is the one read. The number before the ticket, because that is the order a
- * handover takes them, and the reverse would wait on each other. The cost is
- * a KEY SHARE on the number for every move into open or pending, which waits
- * on nothing but a handover.
+ * handover takes them, and the reverse would wait on each other.
+ *
+ * The cost is a KEY SHARE on the number for every move into open or pending.
+ * It conflicts with nothing but a handover's FOR UPDATE, and a handover holds
+ * that while it waits on each of the number's open and pending tickets. So
+ * while a handover waits on a slow writer, every move into open or pending on
+ * that number waits too, an agent's or a rule's, inside its transaction and on
+ * a place in the pool: up to the pooler's five-minute `transaction_timeout`
+ * where the writer hangs, which is §6.91's shape. Before this, only a reopen
+ * and a ticket being created on the number queued there. Accepted, because a
+ * handover is an admin's rare and deliberate act, and a ticket's writer holds
+ * its row for milliseconds; a writer that holds it for minutes is already
+ * stopping every message on that ticket.
  */
 async function ownerOnReopen(
   tx: typeof db,
@@ -221,8 +231,11 @@ async function ownerOnReopen(
 ): Promise<{ ownerId: string | null; channelId: string } | null> {
   if (to !== 'open' && to !== 'pending') return null;
 
-  // Columns no other writer moves, so a read with no lock answers whether the
-  // number matters at all.
+  // `channel` and `sourceSystem` no writer moves, so a read with no lock
+  // answers whether the number can matter at all. `channelId` moves once, from
+  // no row to the number's (`findOrAdoptLive`, `db/sql/009`), so this read only
+  // names the number whose lock comes first, and the ticket's lock reads it
+  // again.
   const [ticket] = await tx
     .select({
       channel: conversations.channel,
@@ -232,30 +245,37 @@ async function ownerOnReopen(
     .from(conversations)
     .where(eq(conversations.id, conversationId));
 
-  if (!ticket?.channelId || ticket.channel !== 'whatsapp' || ticket.sourceSystem === 'import') {
-    return null;
-  }
+  if (!ticket || ticket.channel !== 'whatsapp' || ticket.sourceSystem === 'import') return null;
 
-  const ownerId = await lockedOwnerId(tx, ticket.channelId);
+  const ownerId = ticket.channelId ? await lockedOwnerId(tx, ticket.channelId) : null;
 
-  // Locked, then read: the status is joined in a statement of its own, after
-  // the lock, for the reason AGENTS.md's locked-read rule gives. FOR NO KEY
+  // Locked and read in one statement, the status through a subquery rather
+  // than a join, for the reason AGENTS.md's locked-read rule gives. FOR NO KEY
   // UPDATE, the lock the status write that follows takes anyway.
   const [locked] = await tx
-    .select({ id: conversations.id })
+    .select({
+      channelId: conversations.channelId,
+      statusId: conversations.statusId,
+      statusCategory: statusCategoryOf(),
+    })
     .from(conversations)
     .where(eq(conversations.id, conversationId))
     .for('no key update');
-  if (!locked) return null;
+  if (!locked?.channelId) return null;
 
-  const [now] = await tx
-    .select({ category: ticketStatuses.category })
-    .from(conversations)
-    .innerJoin(ticketStatuses, eq(ticketStatuses.id, conversations.statusId))
-    .where(eq(conversations.id, conversationId));
+  const category = await lockedStatusCategory(tx, locked);
+  if (category !== 'resolved' && category !== 'closed') return null;
+  if (locked.channelId === ticket.channelId) return { ownerId, channelId: locked.channelId };
 
-  if (now?.category !== 'resolved' && now?.category !== 'closed') return null;
-  return { ownerId, channelId: ticket.channelId };
+  // Adopted onto the number's row while this waited: an echo's adoption was
+  // in flight when the ticket was read under no row, and the reopen would
+  // otherwise have left it open on the number, accountable to nobody. The
+  // number's lock comes after the ticket's here, the one place the order is
+  // reversed, and it cannot close a cycle with a handover: a KEY SHARE on a
+  // number conflicts only with a handover's FOR UPDATE, and a handover locks
+  // only the number's open and pending tickets, which this one, resolved or
+  // closed and not yet written by this transaction, is not.
+  return { ownerId: await lockedOwnerId(tx, locked.channelId), channelId: locked.channelId };
 }
 
 /**

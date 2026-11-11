@@ -8411,14 +8411,36 @@ found"}` and not Next's page. The same route called by its own URL
       lock for any move into open or pending, then the ticket's lock, and
       reads the status under it: a handover in flight is waited for, and its
       owner is the one read. The number comes before the ticket because a
-      handover takes them in that order. The cost is a KEY SHARE on the
-      number for every such move, which waits on nothing but a handover.
+      handover takes them in that order.
 
-      `lib/whatsapp/number-owner.db.test.ts` holds both. One case reopens
-      beside an echo that has stored its message and goes on to update the
-      ticket. The other reopens behind a resolve and a handover. Each fails
-      against its half of the old code: the first with the echo aborted, the
-      second with the ticket left with the previous owner.
+      The ticket's number is read under that lock too, because it moves once,
+      from no row to the number's row, when `findOrAdoptLive` adopts the
+      ticket. A resolved ticket under no row, adopted by a phone reply's echo
+      that had not committed when an agent moved it to Open, was read under
+      no row, so the move realigned nothing and left it open on the number,
+      accountable to nobody. Only there is the number's lock taken after the
+      ticket's, which cannot close a cycle with a handover: a handover locks
+      only open and pending tickets, and this one is resolved or closed.
+
+      The cost is a KEY SHARE on the number for every move into open or
+      pending. That conflicts only with a handover's FOR UPDATE, but a
+      handover holds it while it waits on each of the number's open and
+      pending tickets. So while a handover waits on a slow writer, every move
+      into open or pending on that number waits as well, each in its
+      transaction and on a place in the pool, up to the pooler's five-minute
+      `transaction_timeout` where the writer hangs: §6.91's shape. Before,
+      only a reopen and a new ticket on the number queued there. Accepted,
+      because a handover is rare and deliberate, and a writer holding a
+      ticket's row for minutes already stops every message on that ticket.
+
+      `lib/whatsapp/number-owner.db.test.ts` holds all three. One case
+      reopens beside an echo that has stored its message and goes on to
+      update the ticket. One reopens behind a resolve and a handover,
+      asserting that each writer queued in turn, since a reopen started before
+      the handover waited passes against the unlocked read. One reopens while
+      an adoption is in flight. Each fails against its half of the old code:
+      the first with the echo aborted, the other two with the ticket left with
+      the wrong owner.
 
 ### Tooling notes for this environment
 

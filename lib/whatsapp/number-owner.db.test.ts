@@ -120,6 +120,11 @@ async function eventsOf(id: string) {
     .orderBy(asc(conversationEvents.type));
 }
 
+/** A second session, for a writer the code under test must meet mid-transaction. */
+function sideSession() {
+  return postgres(process.env.TEST_DATABASE_URL!, { max: 1, prepare: false, onnotice: () => {} });
+}
+
 /** What the session `behindAWriter` holds the ticket with writes before it commits. */
 type HeldWrite = (tx: postgres.TransactionSql) => Promise<unknown>;
 
@@ -152,11 +157,7 @@ async function behindAWriter(
   write: () => Promise<unknown>,
   change: HeldWrite = raisePriority(id),
 ): Promise<void> {
-  const other = postgres(process.env.TEST_DATABASE_URL!, {
-    max: 1,
-    prepare: false,
-    onnotice: () => {},
-  });
+  const other = sideSession();
   let release!: () => void;
   const gate = new Promise<void>((resolve) => (release = resolve));
   let locked!: () => void;
@@ -182,24 +183,6 @@ async function behindAWriter(
     await other.end();
   }
   expect(queued).toBe(true);
-}
-
-/** True once at least `count` sessions wait on a lock, false if not within two seconds. */
-async function untilLockWaiters(count: number): Promise<boolean> {
-  for (let i = 0; i < 100; i++) {
-    const [row] = (await db.execute(
-      sql`select count(*)::int as waiting from pg_stat_activity
-          where datname = current_database() and wait_event_type = 'Lock'`,
-    )) as unknown as [{ waiting: number }];
-    if (row!.waiting >= count) return true;
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
-  return false;
-}
-
-/** A second session, for a writer the code under test must meet mid-transaction. */
-function sideSession() {
-  return postgres(process.env.TEST_DATABASE_URL!, { max: 1, prepare: false, onnotice: () => {} });
 }
 
 /** A promise and the function that settles it, for holding a session open. */
@@ -880,35 +863,95 @@ describe('a resolved ticket reopened by an agent or a rule', () => {
     const other = sideSession();
     const resolving = latch();
     const gate = latch();
-    let queued = false;
+    let resolve: Promise<unknown> | undefined;
+    let handing: Promise<unknown> | undefined;
+    let reopening: Promise<unknown> | undefined;
+    let handoverQueued = false;
+    let reopenQueued = false;
+    let outcomes: PromiseSettledResult<unknown>[] = [];
     try {
-      const resolve = other.begin(async (tx) => {
+      resolve = other.begin(async (tx) => {
         await tx`update conversations set status_id = ${resolvedStatus.id}, resolved_at = now()
                  where id = ${live}`;
         resolving.open();
         await gate.done;
       });
       await resolving.done;
-      const handing = handOverNumber({
+      handing = handOverNumber({
         channelId: number,
         toAgentId: nayera,
         actor: { id: admin, label: 'Mona Admin' },
       });
-      await untilLockWaiters(1);
-      const reopening = changeStatus(admin, live, open);
-      queued = await untilLockWaiters(2);
+      // Only once the handover waits on the ticket. Started before, the
+      // reopen's own write queues on the ticket ahead of the handover, which
+      // then finds it Open and moves it: the case passes against the
+      // unlocked read it exists to catch.
+      handoverQueued = await untilWaitingOnALock(db);
+      if (handoverQueued) {
+        reopening = changeStatus(admin, live, open);
+        reopenQueued = await untilWaitingOnALock(db, { count: 2 });
+      }
       gate.open();
-      await resolve;
-      await handing;
-      await reopening;
+      outcomes = await Promise.allSettled([resolve, handing, reopening]);
+    } finally {
+      // Settled on every path, so a writer still running cannot finish
+      // against the next case's truncated database.
+      gate.open();
+      await Promise.allSettled([resolve, handing, reopening]);
+      await other.end();
+    }
+
+    expect(handoverQueued).toBe(true);
+    expect(reopenQueued).toBe(true);
+    expect(outcomes.map((outcome) => outcome.status)).toEqual([
+      'fulfilled',
+      'fulfilled',
+      'fulfilled',
+    ]);
+    expect(await ownerOf(number)).toBe(nayera);
+    expect(await holders(live)).toEqual({ accountable: nayera, assignee: nayera });
+  });
+
+  // A resolved ticket filed under no row, before its number had one, is
+  // adopted onto the row by a phone reply's echo (`findOrAdoptLive`), which
+  // has not committed when an agent moves the ticket to Open. Read with no
+  // lock, the ticket was under no row, so the move realigned nothing and
+  // reopened it on Ali's number, accountable to nobody. Its number is read
+  // again under the ticket's lock, which waits for the adoption.
+  it('brings over a ticket adopted onto the number while the reopen waits', async () => {
+    const admin = await agent('Mona Admin', { role: 'admin' });
+    const ali = await agent('Ali Nasser');
+    const number = await phone('Ali Nasser', ali);
+    const unfiled = await ticket(null, 'Resolved');
+    const open = await status('Open');
+    const other = sideSession();
+    const adopted = latch();
+    const gate = latch();
+    let adopting: Promise<unknown> | undefined;
+    let reopening: Promise<unknown> | undefined;
+    let queued = false;
+    let outcomes: PromiseSettledResult<unknown>[] = [];
+    try {
+      adopting = other.begin(async (tx) => {
+        await tx`update conversations set channel_id = ${number}
+                 where id = ${unfiled} and channel_id is null`;
+        adopted.open();
+        await gate.done;
+      });
+      await adopted.done;
+      reopening = changeStatus(admin, unfiled, open);
+      queued = await untilWaitingOnALock(db);
+      gate.open();
+      outcomes = await Promise.allSettled([adopting, reopening]);
     } finally {
       gate.open();
+      await Promise.allSettled([adopting, reopening]);
       await other.end();
     }
 
     expect(queued).toBe(true);
-    expect(await ownerOf(number)).toBe(nayera);
-    expect(await holders(live)).toEqual({ accountable: nayera, assignee: nayera });
+    expect(outcomes.map((outcome) => outcome.status)).toEqual(['fulfilled', 'fulfilled']);
+    expect(await holders(unfiled)).toEqual({ accountable: ali, assignee: ali });
   });
 });
 

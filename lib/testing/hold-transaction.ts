@@ -44,7 +44,10 @@ export function holdNextTransaction(at: 'before' | 'after') {
 
 /**
  * Resolves once some session is waiting on a lock, so a release lands behind
- * it: true then, and false if none was after two seconds. `rowLockIn`, a
+ * it: true then, and false if none was after two seconds. `count` asks for
+ * that many sessions at once, for a test queueing several writers in an order
+ * it then relies on: each wait asserted, since a false here means the next
+ * writer started ahead of the one meant to queue first. `rowLockIn`, a
  * Postgres regular expression, narrows it to a session waiting on a row — on
  * another transaction's id or a tuple, not on a table — in a statement whose
  * text matches.
@@ -62,7 +65,7 @@ export function holdNextTransaction(at: 'before' | 'after') {
  */
 export async function untilWaitingOnALock(
   executor: { execute: (query: ReturnType<typeof sql>) => Promise<unknown> },
-  { rowLockIn }: { rowLockIn?: string } = {},
+  { rowLockIn, count = 1 }: { rowLockIn?: string; count?: number } = {},
 ): Promise<boolean> {
   const matching = rowLockIn
     ? sql`and wait_event in ('transactionid', 'tuple') and query ~* ${rowLockIn}`
@@ -72,7 +75,7 @@ export async function untilWaitingOnALock(
       sql`select count(*)::int as waiting from pg_stat_activity
           where datname = current_database() and wait_event_type = 'Lock' ${matching}`,
     )) as unknown as [{ waiting: number }];
-    if (waiting > 0) return true;
+    if (waiting >= count) return true;
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
   return false;
