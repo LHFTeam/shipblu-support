@@ -12,6 +12,7 @@ import {
 import { categoryChangedEvent, holdCategory, type CategoryActor } from '@/lib/categories/write';
 import { logger } from '@/lib/log';
 import { readOnlyChannels } from '@/lib/tickets/channel-policy';
+import { resolveContactIn, type PendingContact } from '@/lib/tickets/contacts';
 import { notReaction } from '@/lib/tickets/not-reaction';
 import { afterInboundMessage, afterMessageStored } from '@/lib/tickets/lifecycle';
 import { reopenResolved } from '@/lib/tickets/reopen';
@@ -202,6 +203,16 @@ export type NewTicket = {
    */
   openedBy?: { agentId: string; form: string };
   /**
+   * The address an anonymous form's visitor claimed, the form and the client
+   * address, recorded as `unverified_submitter` — the badge saying nobody proved
+   * who sent the ticket — inside the transaction that creates it, for
+   * `openedBy`'s reason and one more. Written after `createTicket` returned, a
+   * throw there told the visitor their ticket had failed, so a retry opened a
+   * second, and the first carried no badge; and the on-create rules had already
+   * run before the event existed.
+   */
+  unverifiedSubmitter?: { email: string; form: string; ip: string | null };
+  /**
    * Who chose `priority`, recorded as its `priority_changed` in the same
    * transaction: the agent who picked it, or the form (`form:<slug>`) for its
    * default or a customer's answer. The priority classifier leaves alone a
@@ -246,12 +257,30 @@ export type CreatedTicket = { number: number; conversationId: string; messageId:
  * Channel `portal` rather than `email`: it did not arrive by mail and has no
  * Message-ID, so filing it as email would put it in reporting's email column
  * and leave the threading code looking for a header that was never there.
+ *
+ * The requester is a contact id, or a contact still to be written for an
+ * address nobody has written from (`pendingContact`), which is inserted in the
+ * transaction that opens the ticket. Resolved before it, the contact outlived
+ * every ticket that then failed to open — a pool error, a group deleted since
+ * the form was read — and a retry joined the orphan. First in the transaction,
+ * so a wait on a racing writer's identity holds none of the locks the rest of
+ * it takes — the category's share lock among them — only the contact it has
+ * just inserted, which nobody else can see, and a key-share lock on that
+ * contact's company, which nothing in the app updates or deletes.
  */
-export async function createTicket(contactId: string, input: NewTicket): Promise<CreatedTicket> {
+export async function createTicket(
+  requester: string | PendingContact,
+  input: NewTicket,
+): Promise<CreatedTicket> {
   const now = new Date();
   const portal = await portalChannel();
 
   const created = await db.transaction(async (tx) => {
+    const { contactId } = await resolveContactIn(
+      tx,
+      typeof requester === 'string' ? { contactId: requester } : requester,
+    );
+
     const statusId = await requireDefaultOpenStatusId(tx);
 
     // Read before the insert, so the column is only ever written with a live
@@ -339,6 +368,15 @@ export async function createTicket(contactId: string, input: NewTicket): Promise
         type: 'opened_by_agent',
         actorAgentId: input.openedBy.agentId,
         data: { form: input.openedBy.form },
+      });
+    }
+
+    if (input.unverifiedSubmitter) {
+      await tx.insert(conversationEvents).values({
+        conversationId: row.id,
+        type: 'unverified_submitter',
+        actorLabel: 'form',
+        data: input.unverifiedSubmitter,
       });
     }
 

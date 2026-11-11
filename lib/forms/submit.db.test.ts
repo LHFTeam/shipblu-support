@@ -7,9 +7,11 @@ import {
   contacts,
   conversationEvents,
   conversations,
+  groups,
   ticketCategories,
   ticketForms,
 } from '@/db/schema';
+import { isForeignKeyViolation } from '@/lib/db/errors';
 import { appendReply } from '@/lib/portal/tickets';
 import { withCleanDatabase } from '@/lib/testing/db';
 import { getFormBySlug, type LoadedForm } from './queries';
@@ -296,11 +298,10 @@ describe('submitForm: the contact a ticket is filed under', () => {
   const blank = (values: FormData) => values.delete('system.description');
   const missing: SubmitResult = { ok: false, reason: 'missing', keys: ['system:description'] };
 
-  // Both requesters named by an address resolve it by inserting a contact and
-  // its identity when nobody owns it yet, so a refusal after that would leave a
-  // customer record behind for a ticket never opened. The address itself is
-  // refused inside `resolveRequester`, before `resolveContact`, on one path for
-  // both.
+  // Each refusal returns before `createTicket`, which is where a new
+  // requester's contact and identity are written, with the ticket; and the
+  // address itself is refused inside `resolveRequester` before `pendingContact`
+  // reads anything for it, on one path for both requesters named by one.
   it.each<[string, () => Promise<Requester>, (values: FormData) => void, SubmitResult]>([
     ['an anonymous visitor a question left blank', helpCentre.anonymous, blank, missing],
     ['an agent a question left blank', () => byAgent(), blank, missing],
@@ -356,9 +357,20 @@ describe('submitForm: the contact a ticket is filed under', () => {
     expect(await db.select({ id: contacts.id, name: contacts.name }).from(contacts)).toEqual([
       { id: owner!.id, name: 'Amira Saleh' },
     ]);
+    // Stamped with the ticket's own transaction time: written in the
+    // transaction that opens it, so the on-create rules run with it present
+    // and a failure after the commit cannot leave the ticket without it.
+    const [opened] = await db
+      .select({ createdAt: conversations.createdAt })
+      .from(conversations)
+      .where(eq(conversations.id, conversationId));
     expect(
       await db
-        .select({ actorLabel: conversationEvents.actorLabel, data: conversationEvents.data })
+        .select({
+          actorLabel: conversationEvents.actorLabel,
+          data: conversationEvents.data,
+          createdAt: conversationEvents.createdAt,
+        })
         .from(conversationEvents)
         .where(
           and(
@@ -370,7 +382,40 @@ describe('submitForm: the contact a ticket is filed under', () => {
       {
         actorLabel: 'form',
         data: { email: 'amira@example.test', form: SLUG, ip: '203.0.113.7' },
+        createdAt: opened!.createdAt,
       },
     ]);
+  });
+
+  // A form read before its default group was deleted names a group that is
+  // gone, and the ticket's insert is refused. The new requester's contact is
+  // written in that same transaction, so it goes too: resolved before it, the
+  // contact stayed, and the retry the console's form offers joined the orphan.
+  it.each<[string, () => Promise<Requester>]>([
+    ['an anonymous visitor', helpCentre.anonymous],
+    ['an agent', () => byAgent()],
+  ])('leaves no contact for %s when the ticket fails to open', async (_name, requester) => {
+    const [group] = await db.insert(groups).values({ name: 'Claims' }).returning({ id: groups.id });
+    await db
+      .insert(ticketForms)
+      .values({ slug: SLUG, nameEn: 'Delivery', elements: ELEMENTS, defaultGroupId: group!.id });
+    const loaded = await load();
+    await db.delete(groups).where(eq(groups.id, group!.id));
+    const asking = await requester();
+
+    const failure = await submitForm({
+      loaded,
+      values: answers(),
+      requester: asking,
+      locale: 'en',
+    }).then(
+      (result) => result,
+      (error: unknown) => error,
+    );
+
+    expect(isForeignKeyViolation(failure, 'conversations_group_id_groups_id_fk')).toBe(true);
+    expect(await db.select({ id: contacts.id }).from(contacts)).toEqual([]);
+    expect(await db.select({ id: contactIdentities.id }).from(contactIdentities)).toEqual([]);
+    expect(await db.select({ id: conversations.id }).from(conversations)).toEqual([]);
   });
 });

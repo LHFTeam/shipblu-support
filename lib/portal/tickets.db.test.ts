@@ -1,9 +1,11 @@
 import { and, asc, eq, sql } from 'drizzle-orm';
+import postgres from 'postgres';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { db } from '@/db/client';
 import {
   agents,
   channels,
+  contactIdentities,
   contacts,
   conversationEvents,
   conversations,
@@ -13,7 +15,10 @@ import {
   ticketForms,
   ticketStatuses,
 } from '@/db/schema';
+import { isForeignKeyViolation } from '@/lib/db/errors';
+import { pendingContact, resolveContact, type PendingContact } from '@/lib/tickets/contacts';
 import { withCleanDatabase } from '@/lib/testing/db';
+import { untilWaitingOnALock } from '@/lib/testing/hold-transaction';
 import { shownLabel } from './status-words';
 import { appendReply, createTicket, getTicket, listTickets } from './tickets';
 
@@ -21,8 +26,9 @@ import { appendReply, createTicket, getTicket, listTickets } from './tickets';
  * What the portal's two ingest paths write today, quirks included, so the
  * shared ingest steps of Stage 4.2 can be proven to change nothing.
  *
- * Both take the contact the portal session already resolved, and stamp their
- * own clock. `appendReply` is the one path that finds its ticket by number
+ * Both take the contact the portal session already resolved — `createTicket`
+ * may instead be handed one still to be written, below — and stamp their own
+ * clock. `appendReply` is the one path that finds its ticket by number
  * rather than by thread, and every refusal it can give is pinned here, since a
  * refusal is what stops a customer writing onto a ticket that is not theirs.
  */
@@ -350,6 +356,202 @@ describe('createTicket', () => {
       expect(warn).toHaveBeenCalledWith(
         `[create_ticket] category left off a new ticket category=${id} reason=${reason}`,
       );
+    });
+  });
+
+  // A form's requester for an address nobody has written from is written in
+  // the transaction that opens the ticket, so the two exist together or not at
+  // all: resolved first, the contact outlived a ticket that failed to open.
+  describe('with a contact still to be written', () => {
+    const ADDRESS = 'nadia@example.test';
+
+    async function everyRow() {
+      return {
+        contacts: await db
+          .select({ id: contacts.id, name: contacts.name, primaryEmail: contacts.primaryEmail })
+          .from(contacts),
+        identities: await db
+          .select({
+            contactId: contactIdentities.contactId,
+            channel: contactIdentities.channel,
+            identifier: contactIdentities.identifier,
+            displayName: contactIdentities.displayName,
+          })
+          .from(contactIdentities),
+        tickets: await db
+          .select({ requesterContactId: conversations.requesterContactId })
+          .from(conversations),
+      };
+    }
+
+    it('writes the contact with the ticket, and files the ticket under it', async () => {
+      const pending = await pendingContact({
+        channel: 'email',
+        identifier: ADDRESS,
+        displayName: 'Nadia',
+      });
+      expect(await everyRow()).toEqual({ contacts: [], identities: [], tickets: [] });
+
+      const created = await createTicket(pending, { subject: 'Parcel late', body: 'A week.' });
+
+      const rows = await everyRow();
+      const contactId = rows.contacts[0]?.id;
+      expect(rows).toEqual({
+        contacts: [{ id: contactId, name: 'Nadia', primaryEmail: ADDRESS }],
+        identities: [{ contactId, channel: 'email', identifier: ADDRESS, displayName: 'Nadia' }],
+        tickets: [{ requesterContactId: contactId }],
+      });
+      expect(await messagesOf(created.conversationId)).toMatchObject([
+        { authorContactId: contactId, bodyText: 'A week.' },
+      ]);
+    });
+
+    // As an email from the same new customer would, landing between the form's
+    // read and its ticket: the unique identity decides, and the ticket joins
+    // the contact that won rather than splitting the customer in two.
+    it('adopts a contact written for the address since it was read', async () => {
+      const pending = await pendingContact({
+        channel: 'email',
+        identifier: ADDRESS,
+        displayName: 'Nadia',
+      });
+      const winner = await resolveContact({
+        channel: 'email',
+        identifier: ADDRESS,
+        displayName: 'Nadia H.',
+      });
+
+      await createTicket(pending, { subject: 'Parcel late', body: 'A week.' });
+
+      expect(await everyRow()).toEqual({
+        contacts: [{ id: winner.contactId, name: 'Nadia H.', primaryEmail: ADDRESS }],
+        identities: [
+          {
+            contactId: winner.contactId,
+            channel: 'email',
+            identifier: ADDRESS,
+            displayName: 'Nadia H.',
+          },
+        ],
+        tickets: [{ requesterContactId: winner.contactId }],
+      });
+    });
+
+    // A group that no longer exists, as a form read before the group was
+    // deleted names it: the conversation's foreign key refuses the insert, and
+    // the contact goes with it.
+    it('writes no contact when the ticket fails to open', async () => {
+      const pending = await pendingContact({
+        channel: 'email',
+        identifier: ADDRESS,
+        displayName: 'Nadia',
+      });
+
+      const failure = await createTicket(pending, {
+        subject: 'Parcel late',
+        body: 'A week.',
+        groupId: '5d1c2b3a-4e5f-4a6b-8c7d-9e0f1a2b3c4d',
+      }).then(
+        () => null,
+        (error: unknown) => error,
+      );
+
+      expect(isForeignKeyViolation(failure, 'conversations_group_id_groups_id_fk')).toBe(true);
+      expect(await everyRow()).toEqual({ contacts: [], identities: [], tickets: [] });
+      expect(await db.select({ id: messages.id }).from(messages)).toEqual([]);
+    });
+
+    // The race the sequential case above cannot show: the identity written by
+    // a transaction still open on a connection of its own, as a second form or
+    // an email from the same new customer would leave it. The ticket's
+    // transaction waits on that identity before it takes any lock of its own —
+    // a write to the category it is about to hold goes straight through
+    // meanwhile, which it could not once `holdCategory` had run — and then
+    // adopts the contact the other transaction committed.
+    it('waits on an identity being written, holding no category lock, then adopts it', async () => {
+      const sales = await categoryId('sales');
+      const pending = await pendingContact({
+        channel: 'email',
+        identifier: ADDRESS,
+        displayName: 'Nadia',
+      });
+      const side = postgres(process.env.TEST_DATABASE_URL!, {
+        max: 2,
+        prepare: false,
+        onnotice: () => {},
+      });
+      let release!: () => void;
+      const released = new Promise<void>((resolve) => (release = resolve));
+      let racing: Promise<unknown> | undefined;
+      let creating: Promise<unknown> | undefined;
+      try {
+        let written!: () => void;
+        const writing = new Promise<void>((resolve) => (written = resolve));
+        let winner = '';
+        racing = side.begin(async (tx) => {
+          const [row] = await tx<{ id: string }[]>`
+            insert into contacts (name, primary_email) values ('Nadia H.', ${ADDRESS})
+            returning id`;
+          winner = row!.id;
+          await tx`
+            insert into contact_identities (contact_id, channel, identifier, display_name)
+            values (${winner}, 'email', ${ADDRESS}, 'Nadia H.')`;
+          written();
+          await released;
+        });
+        await writing;
+
+        const ticket = createTicket(pending, {
+          subject: 'Parcel late',
+          body: 'A week.',
+          category: { id: sales, chosenBy: { label: 'form:claims' } },
+        });
+        creating = ticket;
+        expect(
+          await untilWaitingOnALock(db, { rowLockIn: '^\\s*insert into "contact_identities"' }),
+        ).toBe(true);
+
+        await side.begin(async (tx) => {
+          await tx`set local lock_timeout = '2s'`;
+          await tx`update ticket_categories set label_en = label_en where id = ${sales}`;
+        });
+
+        release();
+        await racing;
+        const created = await ticket;
+
+        expect(await everyRow()).toEqual({
+          contacts: [{ id: winner, name: 'Nadia H.', primaryEmail: ADDRESS }],
+          identities: [
+            { contactId: winner, channel: 'email', identifier: ADDRESS, displayName: 'Nadia H.' },
+          ],
+          tickets: [{ requesterContactId: winner }],
+        });
+        expect(await conversation(created.conversationId)).toMatchObject({ categoryId: sales });
+      } finally {
+        // On a failure above, both transactions finish here rather than
+        // outliving the test: ended with one still open, the side connection
+        // would abort the held identity and let the ticket commit under the
+        // next test's truncate.
+        release();
+        await Promise.allSettled([racing, creating]);
+        await side.end({ timeout: 5 });
+      }
+    });
+
+    // A type-level case: `npm run typecheck` fails if the hand-built arm below
+    // ever compiles, since its identifier would skip `normaliseIdentifier`.
+    it('takes the arm that writes a contact only from `pendingContact`', () => {
+      const handBuilt = {
+        channel: 'email',
+        identifier: 'Nadia@Example.test',
+        displayName: null,
+        companyId: null,
+      } as const;
+      // On a line of its own, so no other type error can satisfy the directive.
+      // @ts-expect-error — only `pendingContact` builds the arm that writes a contact.
+      const pending: PendingContact = { create: handBuilt };
+      expect(pending).toHaveProperty('create');
     });
   });
 });

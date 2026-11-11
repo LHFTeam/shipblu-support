@@ -1,10 +1,10 @@
 import { db } from '@/db/client';
 import { isPriority, type Priority } from '@/lib/tickets/vocabulary';
-import { conversationEvents, messages } from '@/db/schema';
+import { messages } from '@/db/schema';
 import { normaliseEmail, looksLikeEmail } from '@/lib/auth/normalise';
 import type { Locale } from '@/lib/kb/locale';
 import { createTicket, type NewTicket } from '@/lib/portal/tickets';
-import { resolveContact } from '@/lib/tickets/contacts';
+import { pendingContact, type PendingContact } from '@/lib/tickets/contacts';
 import { applyFieldValue } from '@/lib/tickets/custom-fields-parse';
 import {
   fieldLabel,
@@ -53,8 +53,8 @@ export type Requester =
       kind: 'agent';
       /**
        * The customer's address as the agent typed it, and the name beside it:
-       * an address rather than a contact, so the contact is resolved only after
-       * every refusal (`resolveRequester` says why).
+       * an address rather than a contact, so a new customer's contact is
+       * written only with their ticket (`resolveRequester` says why).
        */
       email: string;
       name: string | null;
@@ -163,15 +163,17 @@ function readAnswers(
  *
  * The answer is not to confirm the address before creating the ticket, which
  * loses every customer who could not be bothered and which no helpdesk in this
- * category does. It is to say so on the ticket: `submitForm` writes an
- * `unverified_submitter` event carrying the claimed address and the client
- * address, and the console shows it, so an agent reads the ticket knowing
- * nobody proved who sent it.
+ * category does. It is to say so on the ticket: an `unverified_submitter`
+ * event carrying the claimed address and the client address, written in the
+ * transaction that opens the ticket (`NewTicket.unverifiedSubmitter`), and the
+ * console shows it, so an agent reads the ticket knowing nobody proved who sent
+ * it.
  *
- * Two things this deliberately does not do. It does not pass a display name for
- * an address that already exists — `resolveContact` only sets one when it
- * creates the row, so a stranger cannot rename a known customer. And the
- * identity it may create is unverified, so it grants no portal sign-in.
+ * Two things this deliberately does not do. It never writes a display name
+ * onto an address that already exists — a name is set only on a contact
+ * `resolveContactIn` creates, so a stranger cannot rename a known customer. And
+ * the identity `createTicket` may create for it is unverified, so it grants no
+ * portal sign-in.
  *
  * An agent's requester is resolved the same way an inbound email is, so a
  * ticket opened for somebody on the phone joins their existing history rather
@@ -179,19 +181,20 @@ function readAnswers(
  * `unverified_submitter`: the agent typed the address of somebody they were
  * speaking to, and the ticket already says which agent opened it.
  *
- * Called only after every other refusal `submitForm` can answer, and it
- * refuses an address that is not one before it resolves anything: resolving
- * inserts a contact and its identity for an address nobody has written from,
- * and a refusal after that leaves a customer record behind for a ticket never
- * opened. One path for both requesters named by an address, so that order
- * cannot hold for one and not the other.
+ * Nothing here writes. For an address nobody has written from it answers the
+ * contact still to be inserted (`pendingContact`), and `createTicket` inserts
+ * it in the transaction that opens the ticket, so neither a refusal nor a
+ * ticket that fails to open leaves a customer record behind. Called only after
+ * every other refusal `submitForm` can answer, and an address that is not one
+ * is refused before anything is read for it. One path for both requesters
+ * named by an address, so that order cannot hold for one and not the other.
  */
 async function resolveRequester(
   requester: Requester,
   system: SystemValues,
-): Promise<{ contactId: string; unverifiedEmail: string | null } | null> {
+): Promise<{ contact: PendingContact; unverifiedEmail: string | null } | null> {
   if (requester.kind === 'session') {
-    return { contactId: requester.contactId, unverifiedEmail: null };
+    return { contact: { contactId: requester.contactId }, unverifiedEmail: null };
   }
 
   const claimed =
@@ -202,14 +205,12 @@ async function resolveRequester(
   const email = normaliseEmail(claimed.address);
   if (!looksLikeEmail(email)) return null;
 
-  const resolved = await resolveContact({
-    channel: 'email',
-    identifier: email,
-    displayName: claimed.name,
-  });
-
   return {
-    contactId: resolved.contactId,
+    contact: await pendingContact({
+      channel: 'email',
+      identifier: email,
+      displayName: claimed.name,
+    }),
     unverifiedEmail: requester.kind === 'anonymous' ? email : null,
   };
 }
@@ -309,7 +310,7 @@ export async function submitForm(input: {
 
   const answered = priorityFrom(resolved.system);
   const priority = answered ?? form.defaultPriority;
-  const created = await createTicket(requester.contactId, {
+  const created = await createTicket(requester.contact, {
     subject,
     body,
     customFields: resolved.custom,
@@ -337,20 +338,14 @@ export async function submitForm(input: {
       input.requester.kind === 'agent'
         ? { agentId: input.requester.agentId, form: form.slug }
         : undefined,
+    unverifiedSubmitter: requester.unverifiedEmail
+      ? {
+          email: requester.unverifiedEmail,
+          form: form.slug,
+          ip: input.requester.kind === 'anonymous' ? input.requester.ip : null,
+        }
+      : undefined,
   });
-
-  if (requester.unverifiedEmail) {
-    await db.insert(conversationEvents).values({
-      conversationId: created.conversationId,
-      type: 'unverified_submitter',
-      actorLabel: 'form',
-      data: {
-        email: requester.unverifiedEmail,
-        form: form.slug,
-        ip: input.requester.kind === 'anonymous' ? input.requester.ip : null,
-      },
-    });
-  }
 
   // And discarded outright when the question turned out not to be asked — the
   // element can be behind a condition that did not fire, in which case the files
