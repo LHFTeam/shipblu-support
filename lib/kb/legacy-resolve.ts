@@ -2,7 +2,7 @@ import { and, asc, eq, like, or } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { kbArticles, kbCategories, kbFolders } from '@/db/schema';
 import { articlePath, legacyArticleIndex, legacyArticleResolver } from './format';
-import { freshdeskCategoryId, portalLanguage } from './legacy-path';
+import { freshdeskCategoryId, freshdeskFolderId, portalLanguage } from './legacy-path';
 import { DEFAULT_LOCALE, isLocale } from './locale';
 import { findRedirect } from './queries';
 import { freshdeskArticleId } from './slug';
@@ -11,8 +11,8 @@ import { someReaderMayOpen } from './visibility';
 /**
  * Where a legacy URL sends its reader, and whether for good.
  *
- * `permanent` is false when the answer stands in for an article or a category
- * closed for now (a draft, archived, agents-only): the translation answered is
+ * `permanent` is false when the answer stands in for an article, a folder or a
+ * category closed for now (a draft, archived, agents-only): the translation answered is
  * not the one the URL, or its `kb_redirects` row, names. A 301 there is kept by the browser and
  * moves the old URL's standing in search to the stand-in, so once the article
  * reopens its readers would still land on the other one. A 302 serves them
@@ -30,11 +30,11 @@ export type LegacyAnswer = { to: string; permanent: boolean };
  *
  * Four strategies, in order. First, an explicit `kb_redirects` row, which the
  * importer writes and an admin can add by hand. Then the article's Freshdesk id
- * recorded in `external_id` at import. Then a folder some reader can open, to
- * the help centre home. Last, a category, to its own page (`resolveCategory`). The id lookups are
- * what make this work without a redirect row per URL: the importer stores
- * every article's and category's Freshdesk id, so the mapping exists whether
- * or not anybody remembered to write a redirect.
+ * recorded in `external_id` at import. Then a folder, to its own page
+ * (`resolveFolder`). Last, a category, to its own page (`resolveCategory`). The
+ * id lookups are what make this work without a redirect row per URL: the
+ * importer stores every article's, folder's and category's Freshdesk id, so
+ * the mapping exists whether or not anybody remembered to write a redirect.
  *
  * Only an article, a folder or a category some reader can open answers
  * (`someReaderMayOpen`), and the answer is permanent only when it is the one
@@ -104,37 +104,8 @@ export async function resolveLegacyPath(path: string): Promise<LegacyAnswer | nu
     }
   }
 
-  const folderId = /\/solutions\/folders\/(\d+)/.exec(path)?.[1];
-  if (folderId) {
-    // What the folder's articles in its category's language let a reader do,
-    // as `resolveCategory` asks it of a category.
-    const byFolder = await db
-      .selectDistinct({
-        status: kbArticles.status,
-        visibility: kbArticles.visibility,
-        folderVisibility: kbFolders.visibility,
-      })
-      .from(kbFolders)
-      .innerJoin(kbCategories, eq(kbCategories.id, kbFolders.categoryId))
-      .leftJoin(
-        kbArticles,
-        and(eq(kbArticles.folderId, kbFolders.id), eq(kbArticles.locale, kbCategories.locale)),
-      )
-      .where(
-        and(
-          eq(kbFolders.sourceSystem, 'freshdesk'),
-          or(eq(kbFolders.externalId, folderId), like(kbFolders.externalId, `${folderId}:%`)),
-        ),
-      );
-
-    // The help centre home is a worse answer than the folder's own page but a
-    // better one than a 404, for a folder somebody can open. One nobody can
-    // open — the employee guide's four, agents-only — answers as an id nothing
-    // was imported under does, for the reasons `resolveCategory` gives its
-    // category: a redirect home for it alone would say an internal folder
-    // exists under the id, and the home holds nothing of it.
-    if (byFolder.some(someReaderMayOpen)) return { to: `/${DEFAULT_LOCALE}`, permanent: true };
-  }
+  const folderId = freshdeskFolderId(path);
+  if (folderId) return resolveFolder(folderId, portalLanguage(path), explicit?.ideal);
 
   const categoryId = freshdeskCategoryId(path);
   if (categoryId) return resolveCategory(categoryId, portalLanguage(path), explicit?.ideal);
@@ -222,19 +193,117 @@ async function resolveCategory(
     )
     .orderBy(asc(kbCategories.locale), asc(kbCategories.slug));
 
+  return translationAnswer(rows, (row) => `/${row.locale}/c/${row.slug}`, preferred, named);
+}
+
+/**
+ * Where a Freshdesk folder URL's reader goes: the folder's own page,
+ * `/<locale>/c/<category slug>/<folder slug>`, or null.
+ *
+ * The importer kept Freshdesk's folder ids as it kept the categories'
+ * (`kb_folders.external_id` is `<id>:<locale>`, one row per translation). A
+ * folder has no language or path of its own: its page is under its category,
+ * whose language is the page's and whose slug comes before the folder's, so
+ * each translation is read with its category as it stands now, and a folder
+ * moved to another category since the import answers at the page it has there.
+ * The translation is chosen as a category's is (`translationAnswer`).
+ *
+ * **Only a folder some reader can open answers**: not agents-only, and holding
+ * an article in its category's language that `someReaderMayOpen` passes. Both
+ * halves are what `getFolder` reads, the folder's own visibility and the
+ * articles it lists in the page's language. `getFolder` opens a folder that
+ * lists none, with a line saying it is empty; this sends nobody there, because
+ * a 301 to a page with nothing on it is a soft 404 that the browser keeps. So
+ * such a folder answers null, as a category with nothing to list does, whose
+ * page is a 404 (`getCategory`).
+ *
+ * **A folder nobody can open answers null, so the route's 404**, exactly as an
+ * id nothing was imported under does. The employee guide's four agents-only
+ * folders are the case, for the reasons `resolveCategory` gives for the guide
+ * itself: it is what their own pages answer for every reader, and what the
+ * route answers for the articles inside them; and a redirect for these ids
+ * alone would confirm that an internal folder exists under each. Every
+ * imported folder answered a 301 to the home until the category rule's change
+ * refused these four. The others still did until this, which pinned the home
+ * in browsers and search indexes where the folder's own page could answer.
+ *
+ * The 301 follows `LegacyAnswer`, as a category's does: only when the
+ * translation answered is the one this would choose were every translation
+ * open (or a `kb_redirects` row for the URL names one, `named`). A page of the
+ * folder's list (`/page/2`) answers as the folder does (`freshdeskFolderId`).
+ */
+async function resolveFolder(
+  freshdeskId: string,
+  preferred: string | undefined,
+  named: string | undefined,
+): Promise<LegacyAnswer | null> {
+  // Each translation with its category, and what its articles in the
+  // category's language let a reader do. Distinct and ordered, as a category's.
+  const rows = await db
+    .selectDistinct({
+      locale: kbCategories.locale,
+      categorySlug: kbCategories.slug,
+      folderSlug: kbFolders.slug,
+      folderVisibility: kbFolders.visibility,
+      status: kbArticles.status,
+      visibility: kbArticles.visibility,
+    })
+    .from(kbFolders)
+    .innerJoin(kbCategories, eq(kbCategories.id, kbFolders.categoryId))
+    .leftJoin(
+      kbArticles,
+      and(eq(kbArticles.folderId, kbFolders.id), eq(kbArticles.locale, kbCategories.locale)),
+    )
+    .where(
+      and(
+        eq(kbFolders.sourceSystem, 'freshdesk'),
+        or(eq(kbFolders.externalId, freshdeskId), like(kbFolders.externalId, `${freshdeskId}:%`)),
+      ),
+    )
+    .orderBy(asc(kbCategories.locale), asc(kbCategories.slug), asc(kbFolders.slug));
+
+  return translationAnswer(
+    rows,
+    (row) => `/${row.locale}/c/${row.categorySlug}/${row.folderSlug}`,
+    preferred,
+    named,
+  );
+}
+
+/**
+ * The answer for a Freshdesk category's or folder's URL, from its translations
+ * here: `rows` holds one per translation and per kind of article it holds in
+ * its own language, in an order that makes "whichever translation answers"
+ * the same one on every request, and `pageOf` names a translation's page.
+ *
+ * The translation is the one in the language the URL names, then the default
+ * locale, then the first in `rows` that answers: the order an article's is
+ * chosen in. One answers when `someReaderMayOpen` passes one of its rows, and a
+ * locale the help centre does not have never does. The answer is permanent
+ * when it is the page this would choose were every translation open, or the
+ * one `named` when a `kb_redirects` row for the URL names one (`LegacyAnswer`).
+ */
+function translationAnswer<
+  Row extends Parameters<typeof someReaderMayOpen>[0] & { locale: string },
+>(
+  rows: readonly Row[],
+  pageOf: (row: Row) => string,
+  preferred: string | undefined,
+  named: string | undefined,
+): LegacyAnswer | null {
   // The page of the first translation, in the order above, among those `open`
   // passes for some article.
-  const choose = (open: (row: (typeof rows)[number]) => boolean): string | null => {
-    const slugs = new Map<string, string>();
+  const choose = (open: (row: Row) => boolean): string | null => {
+    const pages = new Map<string, string>();
     for (const row of rows) {
-      if (isLocale(row.locale) && open(row) && !slugs.has(row.locale)) {
-        slugs.set(row.locale, row.slug);
+      if (isLocale(row.locale) && open(row) && !pages.has(row.locale)) {
+        pages.set(row.locale, pageOf(row));
       }
     }
-    const locale = [preferred, DEFAULT_LOCALE, ...slugs.keys()].find(
-      (candidate) => candidate !== undefined && slugs.has(candidate),
+    const locale = [preferred, DEFAULT_LOCALE, ...pages.keys()].find(
+      (candidate) => candidate !== undefined && pages.has(candidate),
     );
-    return locale ? `/${locale}/c/${slugs.get(locale)}` : null;
+    return locale ? (pages.get(locale) ?? null) : null;
   };
 
   const to = choose(someReaderMayOpen);

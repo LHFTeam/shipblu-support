@@ -28,7 +28,9 @@ named below and no lost admission on the first pool; on the Render host
 404, and Freshdesk's old URLs 301 (PR 3, live since `932e8ea` below). Every
 article shape went to the article, and a folder URL to `/ar` when its id is a
 Freshdesk folder `kb_folders.external_id` holds; `kb_redirects` holds no folder
-rows, and the route does not need any. Its way back is
+rows, and the route does not need any. From the folder rule on, which is not
+deployed until `dev` reaches `main`, a folder somebody can open goes to its
+own page instead (§5.1). Its way back is
 `932e8ea` on each service: a code-only revert through `dev`, or a dashboard
 rollback, which turns that service's auto-deploy off (below); no migration lies
 between the two.
@@ -1715,9 +1717,15 @@ the rest of the cutover still needs, and some of it is now partly done:_
   translation stands in for a closed one. The internal employee guide
   (`154000297102`), whose folders are all agents-only, answers 404, as an
   unknown id does, since its own page is a 404 for every reader; so do those
-  four folders, which the legacy route had sent home with a 301, while a
-  folder somebody can open still goes home. Each reaches production with the
-  release after it merges.
+  four folders, which the legacy route had sent home with a 301. A folder
+  somebody can open goes to its own page, `/<locale>/c/<category>/<folder>`,
+  found by the Freshdesk id the importer kept and read with the category it
+  is in now, and a page of its list (`/page/2`, followed by crawlers since the
+  move) goes with it. It went home with a 301 before: Render's log holds 37
+  folder URLs answered that way between the move and 16:50 UTC on
+  2026-11-12, every one for a public folder, our own curl checks left out
+  (`plans/freshdesk-disconnection.md`, PR 7). Each reaches production with
+  the release after it merges.
 
   **Open outside the repository, as of 2026-11-12:**
 
@@ -2616,8 +2624,8 @@ nobody has run, that somebody has to actually watch against the real provider:
 
   **Shipped in #502 (2026-11-10), and measured on the deployed build on
   2026-11-11.** All six shapes answer 301 on the Render host. A folder URL
-  goes to `/ar` when its id is a stored Freshdesk folder, and an unknown id
-  answers 404. Of the 58 imported article ids, 54 answer with a 301 to an
+  goes to `/ar` when its id is a stored Freshdesk folder, until the folder
+  rule (§5.1) is deployed, and an unknown id answers 404. Of the 58 imported article ids, 54 answer with a 301 to an
   article that answers 200. The 4 in agents-only folders answer 404 since
   #504 (#508): they are empty placeholders, and a 301 to a page that 404s
   would have been a dead link a browser keeps. **The domain moved the same

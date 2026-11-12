@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { SESSION_COOKIE } from '@/lib/auth/cookie';
 import { freshdeskPortalRedirect } from '@/lib/kb/freshdesk-portal';
-import { freshdeskCategoryId, LEGACY_PATH_HEADER } from '@/lib/kb/legacy-path';
+import { FRESHDESK_FOLDER, freshdeskCategoryId, LEGACY_PATH_HEADER } from '@/lib/kb/legacy-path';
 import { LOCALES } from '@/lib/kb/locale';
 
 /**
@@ -118,7 +118,16 @@ const LEGACY_ARTICLE = /\/solutions\/articles\/(\d+)/;
  * so joining them needs no escaping.
  */
 const LOCALE_PREFIX = new RegExp(`^/(${LOCALES.join('|')})(/|$)`);
-const LEGACY_FOLDER = /\/solutions\/folders\/(\d+)/;
+
+/**
+ * Freshdesk's folder page, `/support/solutions/folders/<id>`, in the same
+ * prefix variants as an article's, and a page of its list (`/<id>/page/2`),
+ * which reads as the folder. Its page here is `/<locale>/c/<category>/<folder>`,
+ * found by a lookup (`resolveLegacyPath`). The pattern is
+ * `lib/kb/legacy-path.ts`'s, the one `freshdeskFolderId` reads the id with,
+ * and that module says why it is anchored at neither end.
+ */
+const LEGACY_FOLDER = FRESHDESK_FOLDER;
 
 /**
  * Paths served as themselves on the help-centre hostname, rather than being

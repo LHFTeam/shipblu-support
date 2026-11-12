@@ -13,7 +13,7 @@ import {
 } from 'next/dist/lib/metadata/is-metadata-route';
 import { normalizeAppPath } from 'next/dist/shared/lib/router/utils/app-paths';
 import { SESSION_COOKIE } from '@/lib/auth/cookie';
-import { freshdeskCategoryId, LEGACY_PATH_HEADER } from '@/lib/kb/legacy-path';
+import { freshdeskCategoryId, freshdeskFolderId, LEGACY_PATH_HEADER } from '@/lib/kb/legacy-path';
 import { LOCALES } from '@/lib/kb/locale';
 import { setTestEnv, withTestEnv } from '@/lib/testing/env';
 import { GET as robotsTxt } from '@/app/help/robots.txt/route';
@@ -428,6 +428,80 @@ describe("Freshdesk's category pages", () => {
       expect(freshdeskCategoryId(path)).toBeNull();
       expect(legacyPathSent(visit(`https://${RENDER_HOST}${path}`))).toBe(path);
     }
+  });
+});
+
+/**
+ * Freshdesk's folder pages, `/support/solutions/folders/<id>`, and a page of a
+ * folder's list (`/page/2`): Render's log shows both followed on
+ * `support.shipblu.com` since the move, under `/ar`, `/en` and no language,
+ * crawlers and browsers among them. Each folder's page here is found by id, so
+ * the proxy hands it to the legacy route as it always has. Checked on both
+ * hosts with `KB_PUBLIC_HOST` set and unset, and every path it sends is one
+ * `freshdeskFolderId` reads the id of, as the route will: one pattern
+ * (`FRESHDESK_FOLDER`).
+ */
+describe("Freshdesk's folder pages", () => {
+  const RENDER_HOST = 'shipblu-support.onrender.com';
+
+  /** Each shape, and the id the legacy route reads out of it. */
+  const FOLDERS: [string, string][] = [
+    ['/support/solutions/folders/154000746959', '154000746959'],
+    ['/ar/support/solutions/folders/154000746964', '154000746964'],
+    ['/en/support/solutions/folders/154000746963', '154000746963'],
+    ['/en/support/solutions/folders/154000746959/page/2', '154000746959'],
+    ['/en/support/solutions/folders/154000746959/page/1', '154000746959'],
+    ['/ar/support/solutions/folders/154000746959/page/2', '154000746959'],
+    ['/solutions/folders/154000746962', '154000746962'],
+    ['/a/solutions/folders/154000746962', '154000746962'],
+    ['/support/solutions/folders/154000745060', '154000745060'],
+  ];
+
+  const legacyPathSent = (response: Response) =>
+    response.headers.get(`x-middleware-request-${LEGACY_PATH_HEADER}`);
+
+  for (const [label, host, env] of [
+    ['the help-centre host', KB_HOST, { KB_PUBLIC_HOST: KB_HOST }],
+    ['the Render host, KB_PUBLIC_HOST set', RENDER_HOST, { KB_PUBLIC_HOST: KB_HOST }],
+    ['the Render host, KB_PUBLIC_HOST unset', RENDER_HOST, {}],
+  ] as const) {
+    it(`hands each one to the legacy route in a header, on ${label}`, () => {
+      setTestEnv(env);
+      for (const [path, id] of FOLDERS) {
+        const response = visit(`https://${host}${path}`);
+        expect({ path, to: rewrittenTo(response), sent: legacyPathSent(response) }).toEqual({
+          path,
+          to: '/help/legacy',
+          sent: path,
+        });
+        expect(response.headers.get('location')).toBeNull();
+        expect({ path, id: freshdeskFolderId(path) }).toEqual({ path, id });
+      }
+    });
+  }
+
+  // The log's page 2 carries Freshdesk's `?url_locale=`, which the route never
+  // sees: the language it reads is the path's own.
+  it('leaves Freshdesk’s url_locale off, with the rest of the query', () => {
+    const response = visit(
+      `https://${RENDER_HOST}/en/support/solutions/folders/154000746959/page/2?url_locale=en`,
+    );
+    expect(rewrittenTo(response)).toBe('/help/legacy');
+    expect(new URL(response.headers.get('x-middleware-rewrite')!).search).toBe('');
+    expect(legacyPathSent(response)).toBe('/en/support/solutions/folders/154000746959/page/2');
+  });
+
+  it('reads no folder out of an article, a category or a folder with no id', () => {
+    for (const path of [
+      '/support/solutions/articles/154000746959',
+      '/support/solutions/154000746959',
+      '/ar/support/solutions/folders/most-viewed',
+    ]) {
+      expect({ path, id: freshdeskFolderId(path) }).toEqual({ path, id: null });
+    }
+    expect(rewrittenTo(visit(`https://${RENDER_HOST}/ar/support/solutions/folders/x`))).not.toBe(
+      '/help/legacy',
+    );
   });
 });
 

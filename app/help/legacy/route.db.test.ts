@@ -92,11 +92,73 @@ describe('GET /help/legacy', () => {
     expect(location(response)).toBe('/en/a/packaging-guidelines');
   });
 
-  it('sends a folder to the help centre home', async () => {
+  // Its own page, found by the Freshdesk id as an article's is, a page of
+  // Freshdesk's list of it included. It went to the help centre home until
+  // the folder had a lookup of its own.
+  it('redirects a folder to its page, and a page of its list there too', async () => {
     await fixtures();
-    const response = await rewritten(`/support/solutions/folders/${FOLDER}`);
+    for (const path of [
+      `/support/solutions/folders/${FOLDER}`,
+      `/en/support/solutions/folders/${FOLDER}/page/2`,
+      `/solutions/folders/${FOLDER}`,
+    ]) {
+      const response = await rewritten(path);
+      expect(response.status, path).toBe(301);
+      // Arabic only: its English article is in a folder of an Arabic category,
+      // which no English page lists.
+      expect(location(response), path).toBe('/ar/c/shipping/packing');
+    }
+  });
+
+  it('puts an Arabic folder page in the Location percent-encoded', async () => {
+    const [category] = await db
+      .insert(kbCategories)
+      .values({ name: 'عملاء', slug: 'عملاء-شيب-بلو', locale: 'ar' })
+      .returning({ id: kbCategories.id });
+    const [folder] = await db
+      .insert(kbFolders)
+      .values({
+        categoryId: category!.id,
+        name: 'دعم',
+        slug: 'دعم-تطبيق-ماي-بلو',
+        sourceSystem: 'freshdesk',
+        externalId: '154000746964:ar',
+      })
+      .returning({ id: kbFolders.id });
+    await db.insert(kbArticles).values({
+      folderId: folder!.id,
+      locale: 'ar',
+      slug: 'تتبع',
+      title: 'تتبع',
+      status: 'published',
+    });
+
+    const response = await rewritten('/ar/support/solutions/folders/154000746964');
     expect(response.status).toBe(301);
-    expect(location(response)).toBe('/ar');
+    // Arabic in a `Location` is a 500 unless it is encoded (`lib/http/redirect.ts`).
+    expect(response.headers.get('location')).toMatch(/^[\x20-\x7e]+$/);
+    expect(location(response)).toBe('/ar/c/عملاء-شيب-بلو/دعم-تطبيق-ماي-بلو');
+  });
+
+  // The employee guide's four folders are agents-only. Each answered a 301 to
+  // the home, which said a folder was imported under the id; now nothing in
+  // the response tells it from an id nothing was imported under.
+  it('answers an agents-only folder exactly as an id nothing was imported under', async () => {
+    await fixtures();
+    await db.update(kbFolders).set({ visibility: 'agents_only' });
+
+    const internal = await rewritten(`/support/solutions/folders/${FOLDER}`);
+    const unknown = await rewritten('/support/solutions/folders/154000999999');
+    expect(internal.status).toBe(404);
+    expect({
+      status: internal.status,
+      headers: [...internal.headers],
+      body: await internal.text(),
+    }).toEqual({
+      status: unknown.status,
+      headers: [...unknown.headers],
+      body: await unknown.text(),
+    });
   });
 
   it('follows a kb_redirects row before the article id', async () => {

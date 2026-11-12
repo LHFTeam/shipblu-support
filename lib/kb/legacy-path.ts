@@ -2,7 +2,7 @@ import { isLocale } from './locale';
 
 /**
  * How a Freshdesk URL reaches `app/help/legacy/route.ts`, the one place that
- * resolves it to an article or a category here.
+ * resolves it to an article, a folder or a category here.
  *
  * Pure, importing only `./locale`, which imports nothing, because `proxy.ts`
  * imports it and the proxy stays out of the database (its header says why).
@@ -19,8 +19,10 @@ import { isLocale } from './locale';
  *
  * Anybody can send the header to `/help/legacy` themselves, and that is no more
  * than calling the route with `?path=`, which stays supported for exactly that:
- * the route only ever answers a redirect to a public article or category page
- * or the help centre's home, or a 404.
+ * the route only ever answers a redirect to an article, folder or category
+ * page some reader of the help centre can open (`someReaderMayOpen`, which
+ * counts a page only signed-in customers can open), or to a `kb_redirects`
+ * row's own path, or a 404.
  */
 
 /** The header the proxy puts the requested Freshdesk path in. */
@@ -98,6 +100,43 @@ export function freshdeskCategoryId(path: string): string | null {
   const language = match?.groups?.language?.toLowerCase();
   if (language !== undefined && !isLocale(language)) return null;
   return match?.groups?.id ?? null;
+}
+
+/**
+ * Freshdesk's folder URL, which `proxy.ts` hands to the legacy route as its
+ * `LEGACY_FOLDER` and `freshdeskFolderId` reads the id out of: one pattern, as
+ * the category has one reader, so the proxy cannot send a path the route reads
+ * no id from.
+ */
+export const FRESHDESK_FOLDER = /\/solutions\/folders\/(\d+)/;
+
+/**
+ * The id in a Freshdesk folder URL, `/support/solutions/folders/154000746959`,
+ * in every prefix an article's URL takes (`/support`, `/a`, none, a portal
+ * language in front), or null.
+ *
+ * Anchored at neither end, unlike the category's pattern, and not asking that
+ * a language in front be ours, because the folder shape has always been read
+ * this way (`freshdeskCategoryId` says why changing that is a change of its
+ * own) and the log shows each variant followed: `/solutions/folders/<id>` and
+ * `/<locale>/support/…` by crawlers since the domain moved. `folders` is a
+ * segment no help-centre path has, so nothing of ours is read as one, and a
+ * language the help centre lacks falls back to the default (`portalLanguage`).
+ *
+ * **A page of a folder's list reads as the folder.** Freshdesk split a folder's
+ * articles over pages, `/folders/<id>/page/2`, and the log shows pages 1 and 2
+ * of `154000746959` (15 articles) followed since the move, under `/ar` and
+ * `/en`, by crawlers and two headless browsers. The help centre's folder page
+ * lists every article in one page (`getFolder` takes no limit), so whatever a
+ * page of Freshdesk's listed is on it, and that page is the answer for any of
+ * them, as it is for the folder: a 404 would turn away a reader whose answer is
+ * one page away, and a page of its own here would be the same list cut short.
+ * Freshdesk's `?url_locale=` beside it is a query, which the proxy does not
+ * pass to the legacy route (only the portal's own pages read it); the path's
+ * own language is read instead.
+ */
+export function freshdeskFolderId(path: string): string | null {
+  return FRESHDESK_FOLDER.exec(path)?.[1] ?? null;
 }
 
 /**
