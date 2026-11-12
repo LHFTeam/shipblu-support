@@ -1590,7 +1590,16 @@ is code:
   2026-11-11. PR 6, retiring the importer, waits for the disconnection. The
   plan's checklist still shows PRs 2 and 3 unchecked: its own checks there (a
   Restore of a version carrying a Freshdesk link, the six shapes on the
-  deployed build) have not all been run.
+  deployed build) have not all been run. `support.shipblu.com` moved here at
+  about 20:54 UTC on 2026-11-11. Freshdesk's portal pages other than articles and
+  folders answered the console's sign-in or the help centre's 404 there:
+  `/support/home`, `/<locale>/support/home`, the index, the ticket form, the
+  sign-in, the search and a category. They are bookmarked and still mailed, and
+  the request log shows them followed. PR 7 of the plan sends each to its
+  counterpart with a 302 from `proxy.ts`. It is not deployed until `dev`
+  reaches `main`. Freshdesk's own notification emails still link
+  `support.shipblu.com/support/tickets/<n>`, which no redirect here can answer
+  with the ticket (the plan's to-dos).
 
 - **Instagram through Unified Login — the next configuration task, and none of
   it is a deploy.** The direct connection's token expired on 2026-10-29 (the
