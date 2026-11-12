@@ -260,8 +260,9 @@ worse of the two.
 The requester's name, email and phone on the ticket, the shipping account in the
 ticket's Shipping accounts panel when the account id is an SBID, and a line in
 the activity trail saying who the dashboard said this was — marked _the
-dashboard's word, not verified_ when it was not signed, so nobody reads a
-claimed name back to a caller as though we had checked it.
+dashboard's word, not verified_ when it was not signed, or named neither an
+account id nor an email, so nobody reads a claimed name back to a caller as
+though we had checked it.
 
 ## Moving off Freshchat
 
