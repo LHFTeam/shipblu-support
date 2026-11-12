@@ -2,7 +2,7 @@ import { and, asc, eq, like, or } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { kbArticles, kbCategories, kbFolders } from '@/db/schema';
 import { articlePath, legacyArticleIndex, legacyArticleResolver } from './format';
-import { freshdeskCategoryId, freshdeskFolderId } from './legacy-path';
+import { freshdeskCategoryId, freshdeskFolderId, portalLanguage } from './legacy-path';
 import { DEFAULT_LOCALE, isLocale } from './locale';
 import { findRedirect } from './queries';
 import { freshdeskArticleId } from './slug';
@@ -114,15 +114,6 @@ export async function resolveLegacyPath(path: string): Promise<LegacyAnswer | nu
 }
 
 /**
- * The language a Freshdesk portal URL names (`/en/support/…`, `/en-US/support/…`),
- * or undefined. Not checked against `LOCALES`: a language the help centre lacks
- * matches no row, and the choice goes on to the default.
- */
-function portalLanguage(path: string): string | undefined {
-  return /^\/([a-z]{2})(-[A-Za-z]{2})?\//.exec(path)?.[1];
-}
-
-/**
  * Where a Freshdesk category URL's reader goes: the category's own page,
  * `/<locale>/c/<slug>`, or null.
  *
@@ -231,10 +222,10 @@ async function resolveCategory(
  * folders are the case, for the reasons `resolveCategory` gives for the guide
  * itself: it is what their own pages answer for every reader, and what the
  * route answers for the articles inside them; and a redirect for these ids
- * alone would confirm that an internal folder exists under each. Until this,
- * every imported folder answered a 301 to the home, these four included, which
- * confirmed exactly that and pinned the home in browsers and search indexes
- * where the folder's own page could answer.
+ * alone would confirm that an internal folder exists under each. Every
+ * imported folder answered a 301 to the home until the category rule's change
+ * refused these four. The others still did until this, which pinned the home
+ * in browsers and search indexes where the folder's own page could answer.
  *
  * The 301 follows `LegacyAnswer`, as a category's does: only when the
  * translation answered is the one this would choose were every translation

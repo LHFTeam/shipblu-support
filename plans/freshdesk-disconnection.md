@@ -69,9 +69,7 @@ account to close.
   sent its own `/` to `/support/home` and then to `/ar/support/home`, so those
   are the URLs bookmarks hold, and `/ar/support/home` already answers the help
   centre's 404. A redirect to the locale's home page would keep the people who
-  arrive that way. _PR 7 (§7) does that, and sends a category and a folder to
-  their own pages through the legacy route; none of it is deployed until
-  `dev` next reaches `main`._
+  arrive that way. _Done in PR 7 below (#513), not yet in production._
 
 Measured read-only on 2026-11-11 and 2026-11-12, the same way as on
 2026-11-07: Render's deploys and logs, the production database, every public
@@ -858,8 +856,10 @@ the help-centre host, the locale rewrite and the sign-in check, on every host.
 `lib/kb/freshdesk-portal.ts` decides where each goes and carries the reasons.
 None of those needs a lookup, so none goes through `/help/legacy`. A category
 does, and since its own pull request it goes there with the articles and the
-folders (below). The language is the path's own when the help centre has it,
-and Arabic otherwise:
+folders (below). The language is the path's own, then Freshdesk's `url_locale`
+parameter, then Arabic. A first segment of two letters that is not one of our
+languages (`/kb/support`, which is the console's) is not a Freshdesk path of
+ours and is left alone:
 
 | Freshdesk                                            | Here                                    |
 | ---------------------------------------------------- | --------------------------------------- |
@@ -897,12 +897,18 @@ which production does not yet, and the help centre's 404 from then on.
   an account. Once a public form exists, the ticket form's rule becomes
   `/forms`. Once the portal opens, the sign-in's and the tickets' become the
   portal's.
-- `proxy.test.ts` checks every shape on the help-centre host and on the Render
-  host with `KB_PUBLIC_HOST` set and unset. It also checks that the answer is a
-  302 for any method, that a session cookie changes nothing, that the search
-  carries its term and nothing else, that articles and folders still reach the
-  legacy route, and that the leftovers answer as they did. Seven of its cases
-  fail against `proxy.ts` as it was.
+- `proxy.test.ts` checks every shape on both hosts, with `KB_PUBLIC_HOST` set
+  and unset. It also checks:
+  - that the answer is a 302 for any method;
+  - that a session cookie changes nothing;
+  - that `url_locale` names the language where the path does not;
+  - that the search carries its term, whole, and nothing else;
+  - that articles and folders still reach the legacy route;
+  - that the leftovers answer as they did, and so does a two-letter prefix
+    that is not one of our languages.
+
+  Eight of its cases fail against `proxy.ts` as it was.
+
 - A production build served locally answered each shape, a category then
   among them, with a 302 and a relative `Location` on both hosts, with the
   variable set and unset:
@@ -915,11 +921,13 @@ which production does not yet, and the help centre's 404 from then on.
   request, after this one). The importer kept Freshdesk's category ids
   (`kb_categories.external_id`, `<id>:<locale>`), so the page is a lookup:
   `proxy.ts` hands `[/<l>]/support/solutions/<id>[-<title>]` to `/help/legacy`
-  (`LEGACY_CATEGORY`, the pattern `freshdeskCategoryId` reads the id with:
-  no article's, folder's or help-centre path matches it, and its anchors keep
-  out a Freshdesk tail behind another prefix and `/<id>/page/2`), and
-  `resolveLegacyPath` finds the page (`resolveCategory`). The rule left
-  `lib/kb/freshdesk-portal.ts`. What production's rows, read on 2026-11-12,
+  by asking `freshdeskCategoryId` (`lib/kb/legacy-path.ts`), the function the
+  route reads the id with. It reads exactly the paths the portal's rules took
+  as a category: one of our languages or none, in any case, and no article's,
+  folder's or help-centre path; its anchors keep out a Freshdesk tail behind
+  another prefix and `/<id>/page/2`. `resolveLegacyPath` finds the page
+  (`resolveCategory`). The rule left `lib/kb/freshdesk-portal.ts`, and the
+  language's shape is one source for both, `FRESHDESK_LANGUAGE`. What production's rows, read on 2026-11-12,
   make each answer once it is deployed:
 
   | Freshdesk                                  | Here                          |
@@ -931,7 +939,13 @@ which production does not yet, and the help centre's 404 from then on.
   | `[/<l>]/support/solutions/154000297102`    | 404 (the employee guide)      |
   | any other id                               | 404                           |
   - The translation is chosen as an article's is: the path's language, then
-    Arabic, then whichever translation answers.
+    Arabic, then whichever translation answers. Freshdesk's `url_locale`
+    parameter is not read, as it is not for an article or a folder: the
+    route is handed the path alone. So `/support/solutions/<id>?url_locale=en`
+    goes to the Arabic page with a 301, where the portal's rule sent it to
+    `/en`. Its language switch leads to the English home, where the category
+    heads the topic list, and Render's log holds no category URL with the
+    parameter.
   - Only a category some reader can open answers. A category has no visibility
     of its own, and its page is a 404 for anybody who can read none of its
     articles in its language (`getCategory`). So a translation answers when it
@@ -978,14 +992,20 @@ which production does not yet, and the help centre's 404 from then on.
     units, and matched a unit at a time it threw `URI malformed`, so a
     category or an article named with one answered its old URL with a 500.
     None in production is.
+  - **A folder nobody can open answers 404 too.** The folder branch sent every
+    imported folder home with a 301, reading no visibility, so the employee
+    guide's four agents-only folders said, by their 301, what the guide's
+    category no longer does. It now asks of a folder's articles in its
+    category's language what `resolveCategory` asks of a category's
+    (`someReaderMayOpen`), and a folder nobody can open answers as an unknown
+    id does. Production holds 16 public folders and 4 agents-only ones, every
+    one with a Freshdesk id (2026-11-12).
 
 - **A folder goes to its own page, through the legacy route** (its own pull
-  request, after the category's). Until it, `resolveLegacyPath` read no
-  visibility for a folder and answered every imported one with a 301 to the
-  home, the employee guide's four agents-only folders included. So the
-  response confirmed that an internal folder existed under the id, and the
-  301 pinned the home in browsers and search indexes where the folder's own
-  page could answer. The importer kept the folders' ids as it kept the
+  request, after the category's). Until it, `resolveLegacyPath` sent every
+  folder somebody can open to the home with a 301, which pinned the home in
+  browsers and search indexes where the folder's own page could answer; the
+  guide's four agents-only folders it already answered with 404 (above). The importer kept the folders' ids as it kept the
   categories' (`kb_folders.external_id`, `<id>:<locale>`), so the page,
   `/<l>/c/<category>/<folder>`, is a lookup (`resolveFolder`), and each
   translation is read with the category it is in now: a folder moved since
@@ -1015,9 +1035,9 @@ which production does not yet, and the help centre's 404 from then on.
     with nothing to list does.
   - The answer is 301 when it is the translation the URL names, and 302 while
     another stands in for one closed for now (`LegacyAnswer`).
-  - **The guide's four folders answer 404**, with the same status, headers and
-    body as an id nothing was imported under, for the reasons the guide itself
-    does (above). In the log, only our own checks asked for any of them.
+  - **The guide's four folders still answer 404** (above), with the same
+    status, headers and body as an id nothing was imported under. In the log,
+    only our own checks asked for any of them.
   - **A page of a folder's list answers as the folder.** Freshdesk listed a
     folder's articles over pages, `/folders/<id>/page/2`, and `LEGACY_FOLDER`
     has always matched them. The help centre's folder page lists every article
@@ -1067,8 +1087,8 @@ which production does not yet, and the help centre's 404 from then on.
     and that an agents-only folder's 404 is an unknown id's, status, headers
     and body. `proxy.test.ts` checks the rewrite on both hosts, with the
     variable set and unset, and that each path it sends is one
-    `freshdeskFolderId` reads an id from. 15 of the new cases fail against
-    the resolver as it was.
+    `freshdeskFolderId` reads an id from. 14 of the new cases fail
+    against the resolver as it was.
 
 ## To-dos outside this repository
 
@@ -1085,7 +1105,7 @@ The state column is as measured on 2026-11-11 and 2026-11-12.
 | Mail admin (Zoho)                    | Say where `support@shipblu.com`, `help@shipblu.com` and `tech@shipblu.com` deliver. If it is Freshdesk, forward them here or change the address the help centre gives. Remove `include:email.freshdesk.com` from SPF once Freshdesk sends nothing (after the disconnection). | Partly. `help@` has reached this app since 2026-11-11 14:28 UTC (above). Where `support@` and `tech@` deliver is unread. SPF still includes `email.freshdesk.com`.                                                    |
 | Meta (the Page's settings)           | Messenger's swap, per §5.1 of `docs/PROJECT-STATE.md`.                                                                                                                                                                                                                       | Not confirmed. Since 09:50 UTC on 2026-11-11, new Messenger threads have been handed to this app. Older threads still arrive in `standby`, and nothing here can read whether Freshchat is still the primary receiver. |
 | DNS                                  | The `support.shipblu.com` move, in the checklist's order.                                                                                                                                                                                                                    | Done on 2026-11-11: the CNAME was switched between about 19:00 and 20:54 UTC. The first request reached the web service at 20:54:12, and by 20:58 resolvers answered with the Render host.                            |
-| Freshdesk admin                      | Point its portal URL back at its own `*.freshdesk.com` address while the team still answers there: its notification emails link `support.shipblu.com/support/tickets/<n>`, which lands here now (PR 7).                                                                      | Not read.                                                                                                                                                                                                             |
+| Freshdesk admin                      | Point its portal URL back at its own `*.freshdesk.com` address while the team still answers there: its notification emails link `support.shipblu.com/support/tickets/<n>`, which lands here now (PR 7).                                                                      | Open. A Freshdesk ticket link, `/en/support/tickets/44105`, was followed here from an iPhone at 22:04 UTC on 2026-11-11.                                                                                              |
 
 ## Checklist before Freshdesk is disconnected
 
@@ -1193,13 +1213,13 @@ Order matters. The check beside each item is what proves it, not the merge.
 - [ ] Every `kb_images` row's route still answers an image — proof the copies,
       not Freshdesk's bucket, are what the pages load.
 - [ ] PR 6. Remove Freshdesk from SPF.
-- [ ] Make the portal's home and index rules 301 (PR 7,
-      `lib/kb/freshdesk-portal.ts`), now that the name cannot go back to
-      Freshdesk. Not the stand-ins, which stay 302.
 - [ ] `rehost_kb_images revert=true` stops being a way back: it would write
       addresses that no longer serve anything. The job's payload says so
       (`lib/queue/payloads.ts`), and AGENTS.md since 2026-11-12. Take the
       option out with PR 6, or leave it with that warning.
+- [ ] Make the portal's home and index rules 301 (PR 7,
+      `lib/kb/freshdesk-portal.ts`), now that the name cannot go back to
+      Freshdesk. Not the stand-ins, which stay 302.
 - [ ] `docs/PROJECT-STATE.md` §1 and §5.1 say Freshdesk is gone, with the date.
 
 ## Re-running this audit
@@ -1266,12 +1286,13 @@ curl -sS -o /dev/null -w '%{http_code} %{redirect_url}\n' https://support.shipbl
 
 Until 2026-11-11, `302 https://support.shipblu.com/support/home`, which was
 Freshdesk. Since the move, `307 https://support.shipblu.com/ar`, which is this
-app. `/support/home` answers `302` to `/ar` once PR 7 is deployed,
-and `/support/solutions/154000297679` answers `301` to `/ar/c/` and the
-category's slug once its category rule is. `/support/solutions/folders/154000746959`
+app. `/support/home` answers `302` to `/ar` once PR 7 is deployed, and
+`/support/solutions/154000297679` answers `301` to `/ar/c/` and the category's
+slug once the category rule is. `/support/solutions/folders/154000746959`
 answers `301` to `/ar` today, and to `/ar/c/` and the category's and folder's
 slugs once the folder rule is; `/support/solutions/folders/154000745060`, the
-employee guide's, answers `301` to `/ar` today and `404` then.
+employee guide's, answers `301` to `/ar` today and `404` once the category rule
+is.
 
 ```bash
 curl -sS -o /dev/null -w '%{http_code} %{redirect_url}\n' https://support.shipblu.com/support/solutions/articles/154000189336

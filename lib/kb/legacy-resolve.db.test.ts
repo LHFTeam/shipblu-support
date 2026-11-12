@@ -244,10 +244,11 @@ describe('resolveLegacyPath, for a category', () => {
       [`/en/support/solutions/${PARTNERS}`, '/en/c/shipblu-partners'],
       [`/en/support/solutions/${CUSTOMERS}`, '/en/c/shipblu-customers'],
       [`/en/support/solutions/${CUSTOMERS}-shipblu-customers`, '/en/c/shipblu-customers'],
-      // A language with a region reads as its language; one the help centre
-      // lacks, and a trailing slash with none, as the default.
+      // A language reads as itself with a region and in any case, and a
+      // trailing slash with none as the default.
       [`/en-US/support/solutions/${CUSTOMERS}`, '/en/c/shipblu-customers'],
-      [`/fr/support/solutions/${CUSTOMERS}`, '/ar/c/عملاء-شيب-بلو'],
+      [`/EN/support/solutions/${CUSTOMERS}`, '/en/c/shipblu-customers'],
+      [`/AR-eg/support/solutions/${PARTNERS}`, '/ar/c/شركاء-شيب-بلو'],
       [`/support/solutions/${CUSTOMERS}/`, '/ar/c/عملاء-شيب-بلو'],
     ];
     for (const [path, to] of answers) {
@@ -346,6 +347,10 @@ describe('resolveLegacyPath, for a category', () => {
       `/ar/support/solutions/${GUIDE}`,
       `/en/support/solutions/${GUIDE}-employee-guide`,
       '/support/solutions/154000999999',
+      // A language that is not ours is no ShipBlu portal's, as the portal's
+      // rules read it: the proxy never sends one, and a direct call gets 404.
+      `/fr/support/solutions/${CUSTOMERS}`,
+      `/kb/support/solutions/${CUSTOMERS}`,
       // A public category's id with its last digit gone, which the colon in
       // `<id>:%` keeps from answering for the longer id.
       `/support/solutions/${PARTNERS.slice(0, -1)}`,
@@ -546,9 +551,10 @@ describe('resolveLegacyPath, for a folder', () => {
       // been read in; the log shows the bare one followed.
       [`/a/solutions/folders/${FAQS}`, '/ar/c/شركاء-شيب-بلو/الأسئلة-الشائعة'],
       [`/solutions/folders/${FAQS}`, '/ar/c/شركاء-شيب-بلو/الأسئلة-الشائعة'],
-      // A language with a region reads as its language; one the help centre
-      // lacks as the default.
+      // A language with a region reads as its language, in any case; one the
+      // help centre lacks as the default.
       [`/en-US/support/solutions/folders/${FAQS}`, '/en/c/shipblu-partners/faqs'],
+      [`/EN/support/solutions/folders/${FAQS}`, '/en/c/shipblu-partners/faqs'],
       [`/fr/support/solutions/folders/${FAQS}`, '/ar/c/شركاء-شيب-بلو/الأسئلة-الشائعة'],
       // The same Arabic slug under the other category: the category is read
       // with the folder, so each id lands in its own.
@@ -674,8 +680,8 @@ describe('resolveLegacyPath, for a folder', () => {
 
   // Their own pages are a 404 for every reader (`getFolder`), and an id nothing
   // was imported under answers the same, so the response says nothing about
-  // whether an internal folder exists under the id. Until this change each
-  // answered a 301 to the home.
+  // whether an internal folder exists under the id. Each answered a 301 to the
+  // home until the category rule's change refused them.
   it('answers nothing for the employee guide’s folders, as for an id nothing was imported under', async () => {
     await production();
 

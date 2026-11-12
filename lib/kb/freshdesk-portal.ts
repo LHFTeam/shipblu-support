@@ -1,3 +1,4 @@
+import { FRESHDESK_LANGUAGE } from './legacy-path';
 import { DEFAULT_LOCALE, isLocale, type Locale } from './locale';
 
 /**
@@ -7,24 +8,24 @@ import { DEFAULT_LOCALE, isLocale, type Locale } from './locale';
  * Freshdesk's article, folder and category URLs are not here: each names a
  * row, so they go to `app/help/legacy/route.ts`, which looks it up
  * (`./legacy-path.ts`), and the proxy sends them there before it asks this
- * module. These name a page of the portal itself — its front door, its knowledge-base
- * index, its ticket form, its sign-in — and each has a counterpart here that no
- * lookup is needed to find. So `proxy.ts` answers them itself, ahead of the
- * help-centre host's catch-all and the console's sign-in redirect, which
- * answered them with the help centre's 404 or the console's
- * `/login?next=…` (measured on production, 2026-11-11 and 12). Pure and
- * import-light for the reason `./legacy-path.ts` is: the proxy imports it and
- * stays out of the database.
+ * module. These name a page of the portal itself — its front door, its
+ * knowledge-base index, its ticket form, its sign-in — and each has a
+ * counterpart here that no lookup is needed to find. So `proxy.ts` answers
+ * them itself, ahead of the help-centre host's catch-all and the console's
+ * sign-in redirect, which answered them with the help centre's 404 or the
+ * console's `/login?next=…` (measured on production, 2026-11-11 and 12).
+ * Pure and import-light for the reason `./legacy-path.ts` is: the proxy
+ * imports it and stays out of the database.
  *
  * What arrived is the evidence for each rule. Render's request log for
  * `support.shipblu.com` from 2026-11-11 21:04 to 2026-11-12 09:15 UTC, our own
  * curl checks left out: the portal home 22 times (`/ar` and `/en`, phones in
- * Egypt among them), the knowledge-base index 6,
- * Freshdesk's search 6 (one person, in Arabic), the ticket form 5 (Googlebot
- * among them), the sign-in and sign-up 4, and one ticket page, from a
- * Freshdesk notification email opened on an iPhone. Its category pages, 8 in
- * the same night, were a rule here until the legacy route could find each
- * one's page (`resolveLegacyPath`).
+ * Egypt among them), the knowledge-base index 6, Freshdesk's search 6 (one
+ * person, in Arabic), the ticket form 5 (Googlebot among them), the sign-in
+ * and sign-up 4, and one ticket page, from a Freshdesk notification email
+ * opened on an iPhone. Its category pages, 8 in the same night, were a rule
+ * here until the legacy route could find each one's page
+ * (`resolveLegacyPath`).
  *
  * **Every answer is a 302, on purpose.** By the rule the legacy route follows
  * (`LegacyAnswer`), the home and the index would earn a 301: each names the page
@@ -86,57 +87,65 @@ import { DEFAULT_LOCALE, isLocale, type Locale } from './locale';
  * would be shadowed by these rules.
  */
 
-/** A redirect for the proxy to answer with. */
-export type PortalRedirect = {
-  pathname: string;
-  search: string;
-  hash: string;
-  status: 302;
-};
+/**
+ * A Freshdesk portal path: an optional language, then `/support`, whole, and
+ * whatever follows it.
+ *
+ * The language must be one the help centre has, `/ar` or `/en`, optionally with
+ * a region (`/en-US`) and in any case. ShipBlu's portal had only those two, and
+ * they are all the request log shows. Any other two letters make the path no
+ * portal path of ours, and it is left to the rest of the proxy. `/kb/support`
+ * is the console's `/kb/[id]`, and this runs on every host, ahead of the
+ * sign-in check, so a two-letter console route with a `support` beneath it must
+ * not be answered here.
+ *
+ * Its shape is `FRESHDESK_LANGUAGE`, the one the legacy route reads a language
+ * with, so the portal's rules and the route cannot read a different language
+ * out of one URL. Whether the language is ours stays each reader's question.
+ * This one decides whether a path is Freshdesk's at all, as
+ * `freshdeskCategoryId` does for a category; `resolveLegacyPath` and
+ * `rewriteLegacyArticleLinks` read a preference out of a path already known to
+ * be Freshdesk's, and fall back when it names a language we lack.
+ */
+const PORTAL_PATH = new RegExp(String.raw`^(?:${FRESHDESK_LANGUAGE})?/support(?<page>/.*)?$`);
+
+/** Freshdesk's own language parameter, `en` or `en-US`. */
+const URL_LOCALE = /^([A-Za-z]{2})(?:-[A-Za-z]{2})?$/;
 
 /**
- * A Freshdesk portal path: an optional language — `/ar`, `/en`, or one with a
- * region, `/en-US`, the shape `resolveLegacyPath` reads a preferred language
- * from — then `/support`, whole, and whatever follows it.
- */
-const PORTAL_PATH = /^(?:\/([a-z]{2})(?:-[A-Za-z]{2})?)?\/support(\/.*)?$/;
-
-/** The longest search carried across, as `/forms` caps a prefilled subject. */
-const MAX_TERM = 200;
-
-/**
- * Where a Freshdesk portal path's reader goes here, or null when it is not one
- * of the portal pages answered for.
+ * Where a Freshdesk portal path's reader goes here — a path, with its query
+ * and fragment — or null when it is not one of the portal pages answered for.
  *
- * The language is the path's own when the help centre has it, so
- * `/en/support/home` opens the English home; otherwise, and with no language at
- * all, Arabic, as Freshdesk's own `/support/home` went on to `/ar/support/home`.
- * `Accept-Language` is never read: the help centre's front door does not read
- * it either, and one bookmark should not land in two places.
+ * The language is the path's own. Without one it is the `url_locale` parameter
+ * Freshdesk puts on some of its links, when that names a language the help
+ * centre has. Otherwise it is Arabic, as Freshdesk's own `/support/home` went
+ * on to `/ar/support/home`. `Accept-Language` is never read: the help centre's
+ * front door does not read it either, and one bookmark should not land in two
+ * places.
  *
- * The query is dropped, as the legacy rewrite drops it — a `utm_` tag,
- * Freshdesk's `url_locale`, its ticket form's `helpdesk_ticket[…]` prefill — but
- * for a search's `term`, which becomes our `q`.
+ * The rest of the query is dropped, as the legacy rewrite drops it: a `utm_`
+ * tag, or its ticket form's `helpdesk_ticket[…]` prefill. The exception is a
+ * search's `term`, which becomes our `q`.
  */
-export function freshdeskPortalRedirect(
-  pathname: string,
-  query: URLSearchParams,
-): PortalRedirect | null {
+export function freshdeskPortalRedirect(pathname: string, query: URLSearchParams): string | null {
   const match = PORTAL_PATH.exec(pathname);
   if (!match) return null;
 
-  const locale: Locale = isLocale(match[1]) ? match[1] : DEFAULT_LOCALE;
+  const named = match.groups?.language?.toLowerCase();
+  if (named !== undefined && !isLocale(named)) return null;
+  const asked = URL_LOCALE.exec(query.get('url_locale') ?? '')?.[1]?.toLowerCase();
+  const locale: Locale = named ?? (isLocale(asked) ? asked : DEFAULT_LOCALE);
   const home = `/${locale}`;
   // Next answers a trailing slash with a 308 before the proxy runs, so this
   // rarely sees one; reading the page alike with or without it costs nothing.
-  const page = (match[2] ?? '').replace(/\/$/, '');
+  const page = (match.groups?.page ?? '').replace(/\/$/, '');
 
   // The portal's front door, bare or by name, and the knowledge-base index,
   // whose counterpart is the home's topic list. A category under the index,
   // `/solutions/<id>`, is not answered here: it has a page of its own, which the
   // legacy route finds, and the proxy sends it there first.
   if (page === '' || page === '/home' || page === '/solutions') {
-    return redirect(home);
+    return home;
   }
 
   // The ticket form, every ticket page and the sign-in: the contact band, for
@@ -147,24 +156,18 @@ export function freshdeskPortalRedirect(
     page === '/login' ||
     page === '/signup'
   ) {
-    return redirect(home, { hash: '#contact' });
+    return `${home}#contact`;
   }
 
   // Freshdesk's search, and its results' articles tab. Only articles are
-  // searchable here, so its ticket and forum tabs fall through.
+  // searchable here, so its ticket and forum tabs fall through. The term goes
+  // across whole, as our search would take it typed into `?q=` directly.
   if (page === '/search' || page === '/search/solutions') {
-    const term = (query.get('term') ?? '').trim().slice(0, MAX_TERM);
-    return redirect(`${home}/search`, {
-      search: term ? `?${new URLSearchParams({ q: term }).toString()}` : '',
-    });
+    const term = (query.get('term') ?? '').trim();
+    return term
+      ? `${home}/search?${new URLSearchParams({ q: term }).toString()}`
+      : `${home}/search`;
   }
 
   return null;
-}
-
-function redirect(
-  pathname: string,
-  { search = '', hash = '' }: { search?: string; hash?: string } = {},
-): PortalRedirect {
-  return { pathname, search, hash, status: 302 };
 }

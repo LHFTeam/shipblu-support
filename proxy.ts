@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { SESSION_COOKIE } from '@/lib/auth/cookie';
 import { freshdeskPortalRedirect } from '@/lib/kb/freshdesk-portal';
-import { FRESHDESK_CATEGORY, FRESHDESK_FOLDER, LEGACY_PATH_HEADER } from '@/lib/kb/legacy-path';
+import { FRESHDESK_FOLDER, freshdeskCategoryId, LEGACY_PATH_HEADER } from '@/lib/kb/legacy-path';
 import { LOCALES } from '@/lib/kb/locale';
 
 /**
@@ -130,20 +130,6 @@ const LOCALE_PREFIX = new RegExp(`^/(${LOCALES.join('|')})(/|$)`);
 const LEGACY_FOLDER = FRESHDESK_FOLDER;
 
 /**
- * Freshdesk's category page, `/support/solutions/<id>`, with the portal's
- * language in front or not (`/ar`, `/en-US`) and the title after the id or not.
- * Render's log showed it followed on `support.shipblu.com` 8 times in the night
- * after the move, under `/ar` and `/en`, real browsers among them. Its page
- * here is `/<locale>/c/<slug>`, which only a lookup finds (`resolveLegacyPath`).
- *
- * Anchored at both ends, where the two above are not; `lib/kb/legacy-path.ts`
- * says why each part is there. The pattern is that module's, the one
- * `freshdeskCategoryId` reads the id with, so this cannot send the route a path
- * it reads no id from.
- */
-const LEGACY_CATEGORY = FRESHDESK_CATEGORY;
-
-/**
  * Paths served as themselves on the help-centre hostname, rather than being
  * rewritten under /help.
  *
@@ -188,12 +174,16 @@ export default function proxy(request: NextRequest) {
   // An article, a folder or a category: each names a row, so finding where it
   // went is a lookup. Handled before anything else so they resolve on either
   // hostname, and ahead of the portal's rules below, which no longer read a
-  // category. The lookup needs the database, so this hands off to a route
-  // handler rather than doing it here.
+  // category. A category's page is `/<locale>/c/<slug>`, and Render's log
+  // showed its URL followed on `support.shipblu.com` 8 times in the night
+  // after the move. It asks `freshdeskCategoryId`, the function the route reads
+  // the id with, so this cannot send a path the route reads no id from. The
+  // lookup needs the database, so this hands off to a route handler rather
+  // than doing it here.
   if (
     LEGACY_ARTICLE.test(pathname) ||
     LEGACY_FOLDER.test(pathname) ||
-    LEGACY_CATEGORY.test(pathname)
+    freshdeskCategoryId(pathname) !== null
   ) {
     const url = request.nextUrl.clone();
     url.pathname = '/help/legacy';
@@ -233,11 +223,7 @@ export default function proxy(request: NextRequest) {
     // than a clone of `nextUrl`, because a clone remembers that the path it was
     // asked for ended in `/` and puts the slash back on whatever path it is
     // given.
-    const target = new URL(
-      `${portal.pathname}${portal.search}${portal.hash}`,
-      request.nextUrl.origin,
-    );
-    return NextResponse.redirect(target, portal.status);
+    return NextResponse.redirect(new URL(portal, request.nextUrl.origin), 302);
   }
 
   // --- Help centre hostname ------------------------------------------------

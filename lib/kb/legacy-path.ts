@@ -1,9 +1,11 @@
+import { isLocale } from './locale';
+
 /**
  * How a Freshdesk URL reaches `app/help/legacy/route.ts`, the one place that
  * resolves it to an article, a folder or a category here.
  *
- * Pure and import-free, because `proxy.ts` imports it and the proxy stays out of
- * the database (its header says why).
+ * Pure, importing only `./locale`, which imports nothing, because `proxy.ts`
+ * imports it and the proxy stays out of the database (its header says why).
  *
  * **In a request header, not a query string.** The proxy used to rewrite to
  * `/help/legacy?path=<the Freshdesk path>`, and the route read `?path=`. Next 16
@@ -27,40 +29,81 @@
 export const LEGACY_PATH_HEADER = 'x-legacy-path';
 
 /**
- * Freshdesk's category URL, which `proxy.ts` hands to the legacy route as its
- * `LEGACY_CATEGORY` and `freshdeskCategoryId` reads the id out of: one pattern,
- * so the proxy cannot send a path the route reads no id from. Its comment says
- * why each part is there.
+ * The language a Freshdesk portal URL can start with: two letters in any case,
+ * optionally with a region (`/ar`, `/EN`, `/en-US`), captured as `language`.
+ * A regex source rather than a pattern, so every reader of a Freshdesk path is
+ * built from it: the category's shape below, `portalLanguage`, and the
+ * portal's own pages (`./freshdesk-portal.ts`). Written once, the proxy, the
+ * legacy route and the portal's rules cannot read a different language out of
+ * one URL.
+ *
+ * Whether the two letters name a language of ours stays each reader's own
+ * question, because they ask it for different reasons. The portal's rules and
+ * `freshdeskCategoryId` decide whether a path is Freshdesk's at all, and refuse
+ * one whose language is not ours: `/kb/support/…` is the console's.
+ * `portalLanguage` reads a preference out of a path already known to be
+ * Freshdesk's, and the choice falls back past a language we lack.
  */
-export const FRESHDESK_CATEGORY =
-  /^(?:\/[a-z]{2}(?:-[A-Za-z]{2})?)?\/support\/solutions\/(\d+)(?:-[^/]*)?\/?$/;
+export const FRESHDESK_LANGUAGE = String.raw`/(?<language>[A-Za-z]{2})(?:-[A-Za-z]{2})?`;
+
+/** Freshdesk's category URL; `freshdeskCategoryId` says why each part is there. */
+const FRESHDESK_CATEGORY = new RegExp(
+  String.raw`^(?:${FRESHDESK_LANGUAGE})?/support/solutions/(?<id>\d+)(?:-[^/]*)?/?$`,
+);
+
+const LEADING_LANGUAGE = new RegExp(String.raw`^${FRESHDESK_LANGUAGE}/`);
+
+/**
+ * The language a Freshdesk portal URL names (`/en/support/…`,
+ * `/EN-us/support/…`), in lower case, or undefined. Not checked against
+ * `LOCALES`: a language the help centre lacks matches no translation, and the
+ * choice goes on to the default.
+ */
+export function portalLanguage(path: string): string | undefined {
+  return LEADING_LANGUAGE.exec(path)?.groups?.language?.toLowerCase();
+}
 
 /**
  * The id in a Freshdesk category URL, `/support/solutions/154000297679`, with
- * the portal's language in front or not (`/ar`, `/en-US`) and the category's
- * title after the id or not (`-shipblu-partners`), or null.
+ * one of our languages in front or not (`/ar`, `/EN`, `/en-US`) and the
+ * category's title after the id or not (`-shipblu-partners`), or null.
  *
- * The pattern is `FRESHDESK_CATEGORY`, the one the proxy sends by. An article's
- * or a folder's URL is this shape with one more segment, `articles` or
- * `folders`, which `\d+` cannot read. The `/support/` it asks for keeps every
- * help-centre path out, since none has that segment. And it is anchored at
- * both ends, where the article's and the folder's patterns are not: the start
- * so that a Freshdesk tail behind another prefix (`/ar/en/support/…`, or
- * `/help/ar/support/…` on the Render host) is not read as Freshdesk's, and the
- * end so that a page of a category's list (`/support/solutions/<id>/page/2`)
- * is not read as the category. A trailing slash is read alike, as
- * `lib/kb/freshdesk-portal.ts` reads one: Next answers it with a 308 before
- * the proxy runs, so one rarely arrives.
+ * `proxy.ts` hands the legacy route exactly the paths this reads an id from, by
+ * asking it, so the proxy cannot send the route a path the route reads no id
+ * from. It reads exactly the paths `./freshdesk-portal.ts` read as a category
+ * before the legacy route could find one's page, so moving them changed the
+ * answer for no other path:
+ *
+ *  - An article's or a folder's URL is this shape with one more segment,
+ *    `articles` or `folders`, which `\d+` cannot read.
+ *  - The `/support/` it asks for keeps every help-centre path out, since none
+ *    has that segment.
+ *  - A language, where there is one, must be ours, as the portal's rules
+ *    require. Any other two letters are no ShipBlu portal's, and a console
+ *    route of two letters with `support` beneath it (`/kb/support/…`) is ours.
+ *    Such a path is left to the rest of the proxy.
+ *  - It is anchored at both ends, where the article's and the folder's patterns
+ *    are not. The start keeps out a Freshdesk tail behind another prefix
+ *    (`/ar/en/support/…`, or `/help/ar/support/…` on the Render host). The end
+ *    keeps out a page of a category's list (`/support/solutions/<id>/page/2`).
+ *    The article and folder patterns are unanchored on purpose, to read every
+ *    prefix an account could be configured with (`proxy.ts`), and anchoring
+ *    them would change PR 3's answers, which is a change of its own.
+ *  - A trailing slash is read alike, as the portal's rules read one: Next
+ *    answers it with a 308 before the proxy runs, so one rarely arrives.
  */
 export function freshdeskCategoryId(path: string): string | null {
-  return FRESHDESK_CATEGORY.exec(path)?.[1] ?? null;
+  const match = FRESHDESK_CATEGORY.exec(path);
+  const language = match?.groups?.language?.toLowerCase();
+  if (language !== undefined && !isLocale(language)) return null;
+  return match?.groups?.id ?? null;
 }
 
 /**
  * Freshdesk's folder URL, which `proxy.ts` hands to the legacy route as its
  * `LEGACY_FOLDER` and `freshdeskFolderId` reads the id out of: one pattern, as
- * the category's is, so the proxy cannot send a path the route reads no id
- * from.
+ * the category has one reader, so the proxy cannot send a path the route reads
+ * no id from.
  */
 export const FRESHDESK_FOLDER = /\/solutions\/folders\/(\d+)/;
 
@@ -69,11 +112,13 @@ export const FRESHDESK_FOLDER = /\/solutions\/folders\/(\d+)/;
  * in every prefix an article's URL takes (`/support`, `/a`, none, a portal
  * language in front), or null.
  *
- * Anchored at neither end, unlike the category's pattern, because the folder
- * shape has always been read this way and the log shows each variant followed:
- * `/solutions/folders/<id>` and `/<locale>/support/…` by crawlers since the
- * domain moved. `folders` is a segment no help-centre path has, so nothing of
- * ours is read as one.
+ * Anchored at neither end, unlike the category's pattern, and not asking that
+ * a language in front be ours, because the folder shape has always been read
+ * this way (`freshdeskCategoryId` says why changing that is a change of its
+ * own) and the log shows each variant followed: `/solutions/folders/<id>` and
+ * `/<locale>/support/…` by crawlers since the domain moved. `folders` is a
+ * segment no help-centre path has, so nothing of ours is read as one, and a
+ * language the help centre lacks falls back to the default (`portalLanguage`).
  *
  * **A page of a folder's list reads as the folder.** Freshdesk split a folder's
  * articles over pages, `/folders/<id>/page/2`, and the log shows pages 1 and 2
@@ -84,7 +129,8 @@ export const FRESHDESK_FOLDER = /\/solutions\/folders\/(\d+)/;
  * them, as it is for the folder: a 404 would turn away a reader whose answer is
  * one page away, and a page of its own here would be the same list cut short.
  * Freshdesk's `?url_locale=` beside it is a query, which the proxy does not
- * pass; the path's own language is read instead.
+ * pass to the legacy route (only the portal's own pages read it); the path's
+ * own language is read instead.
  */
 export function freshdeskFolderId(path: string): string | null {
   return FRESHDESK_FOLDER.exec(path)?.[1] ?? null;
