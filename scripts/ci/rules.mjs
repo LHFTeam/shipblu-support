@@ -24,6 +24,7 @@ import { checkNoForceRls } from './rules/force-rls.mjs';
 import { checkShipmentPayloadConfinement } from './rules/shipment-payload.mjs';
 import { checkCredentialConfinement } from './rules/credential-confinement.mjs';
 import { checkPoolConfinement } from './rules/pool-confinement.mjs';
+import { checkAssigneeConfinement } from './rules/assignee-confinement.mjs';
 import { checkServerActions } from './rules/server-actions.mjs';
 import { checkSanitiserConfinement } from './rules/sanitiser.mjs';
 import { checkArticleNormalisation } from './rules/article-normalisation.mjs';
@@ -75,6 +76,7 @@ export const RULES = [
   ['shipment-payload', checkShipmentPayloadConfinement],
   ['credential-confinement', checkCredentialConfinement],
   ['pool-confinement', checkPoolConfinement],
+  ['assignee-confinement', checkAssigneeConfinement],
   // ---------------------------------------------------------------------------
   // Source conventions that are one grep away from being enforced
   // ---------------------------------------------------------------------------

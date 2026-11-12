@@ -1138,7 +1138,9 @@ things.** `channels.owner_agent_id` is who owns the number now.
 frozen onto the ticket: ownership changes, and `rollup_metrics` rebuilds the
 last three days from current state, so reading the owner at report time would
 re-file the days before a handover onto somebody who did not hold the phone
-then. Both are written only in `lib/whatsapp/number-owner.ts`, and a ticket's
+then. Both are written only in `lib/whatsapp/number-owner.ts` — but for the
+columns a new ticket starts with, `ownerStamp`, which sits beside the assignee
+it is written with in `lib/tickets/assignee.ts` — and a ticket's
 accountability is written at three moments: ingest creating it on an owned number
 (`ownerStamp`, in the insert, assignee included), `handOverNumber` (the number's
 open and pending native tickets), and its coming back out of resolved or
@@ -1205,7 +1207,56 @@ counts is one SQL fragment, `isCoexistenceNumber`: any object under
 the side to be wrong on is hiding. A rule about who may see a ticket is a rule
 about who may hold it — held by somebody it is hidden from, a ticket is in
 nobody's list, counts against their capacity and reads as taken to everybody
-who can see it — so every writer that hands tickets out asks the same module:
+who can see it — so the assignee has one writer, `lib/tickets/assignee.ts`,
+which asks before it writes:
+
+- **Every write of `conversations.assignee_agent_id` goes through it**, in two
+  steps, because of the order locks are taken in. `lockHolders(tx, channelId)`
+  reads who may hold a ticket on the number, under the lock a handover waits
+  for (FOR KEY SHARE on the channel, whatever the row is), inside the
+  transaction that assigns and before that transaction locks or writes the
+  ticket's row: the channel, then the ticket, the order `handOverNumber` takes
+  them. It is also the one read of a number's owner under that lock:
+  `lockedOwnerId`, which ingest and a reopen ask, is its `ownerId`, so the
+  owner stamped and the owner checked cannot differ. The onboarding that
+  makes a plain row a coexistence number takes FOR UPDATE on the row first,
+  so an assignment read while the row was plain commits before it or waits
+  and reads the record. A writer holding only the
+  ticket's id, or a copy of its row read before the transaction, calls
+  `lockHoldersOf(tx, conversationId)`, which reads the number the ticket is on
+  now: a ticket under no row is filed under one by its customer's next
+  message, and the copy would name the wrong number. `assignTicket(tx,
+holders, …)` then answers `hidden` for an agent the ticket would be hidden
+  from, and writes only while the ticket is still on the number that was
+  asked — the channel is in the write's own `where`, so a ticket filed under
+  another row in the moment between the two answers `missed` and is not
+  written. `onlyIf` is the caller's own guard (the rota's "still held by
+  nobody").
+  `unassignTicket` needs neither step: nobody is somebody every ticket may be
+  left with. Each caller keeps its own line on the timeline. `ownerStamp`, the
+  columns a ticket created on an owned number starts with, lives there too,
+  since an object spread into an insert is the one write the rule below
+  cannot see. The `assignee-confinement` repo rule refuses the column written
+  anywhere else: as a key of what a `.set()` or `.values()` is given, read
+  from the syntax tree so a select or a type passes, and given a value in raw
+  SQL, in a source file or under `db/sql/` and `db/migrations/`. A comparison
+  there names its table (`c.assignee_agent_id = …`). It cannot see an object
+  another function returns; its header lists what a reviewer still has to.
+- **Putting a ticket on a number is such a write too.** A ticket under no row
+  is its group's, and anybody may hold it. `fileUnderNumber`, which
+  `findOrAdoptLive` calls, files it and takes it off a holder the row's
+  tickets are hidden from, with an `unassigned` line whose reason is
+  `filed_under_number`; the customer's message then assigns it in its own
+  pass, which asks the number's owner first, and the echo path assigns it
+  itself. `db/sql/009` does the same at a deploy, and is the one SQL file the
+  rule names: it can only give a ticket to nobody, and takes it off everybody
+  but the number's active owner, an agent who sees every ticket included,
+  since SQL cannot ask `can()`. It locks the coexistence numbers in a first
+  statement and reads their owners in a second, so a handover cannot commit
+  between the read and the write; only a number with a ticket to file is
+  locked, so a deploy with nothing to file waits for no handover. It assigns
+  nothing afterwards, and the sweep hands the ticket to the number's owner
+  (below).
 
 - **The rota never picks for one.** `assignConversation` hands it back to an
   active owner as it does any owned ticket, and otherwise answers `owner_only`,
@@ -1214,7 +1265,22 @@ who can see it — so every writer that hands tickets out asks the same module:
   disagree: a ticket that arrived while the owner was deactivated answers to
   nobody, and one adopted onto the row to somebody else. `takeForNumberOwner`
   makes it the owner's under the channel's lock and then the ticket's, asking
-  again that nobody holds it and that it is still work.
+  again that nobody holds it and that it is still work. The rota's own pick
+  and the hand-back ask the number the ticket is on now, under that lock, so a
+  ticket filed under a coexistence row since the snapshot answers `owner_only`
+  before a roster is read or a cursor moved.
+- **The sweep asks every unassigned one on a number with an active owner,
+  whatever its group** (`assignWaiting`), and hands it to the owner. A group's
+  mode says nothing about a ticket its members may not hold, and the things
+  that leave one with nobody and assign nothing after — `db/sql/009`, an owner
+  coming back after it arrived — would otherwise leave one in a manual group
+  waiting for its customer's next message.
+- **The sweep never reclaims one from the number's active owner**, whoever
+  the ticket is accountable to (`reclaimAbandoned`). On a plain number the
+  owner is exempt by the ticket's accountability; here the number's word
+  outranks it, and a ticket accountable to nobody, or to somebody else, read
+  as a colleague holding the owner's ticket: taken back, and handed straight
+  to them again with a line saying they had gone offline before replying.
 - **The console and a rule leave one only with somebody who sees it.** The
   Assignee picker offers the owner and the agents who see every ticket
   (`listAssignableAgents`), `updateTicket` refuses anybody else, and a rule's
@@ -1228,14 +1294,16 @@ who can see it — so every writer that hands tickets out asks the same module:
   "Sees every ticket" is `can()` over each active agent's role and overrides
   (`agentsWhoSeeEveryTicket`), never a role test, so one statement of what a
   role holds decides it; a deactivated agent sees nothing, whatever their
-  role, to a handover and a reopen alike (`hiddenFromHolder`). The console's
+  role, to every writer alike (`admits`). The console's
   copy says "agents who can see every ticket" for the same reason, never
   "supervisors and admins".
 - **A writer that assigns reads the owner under the channel's lock, inside
-  its transaction and before it writes the ticket** (`ownerOnlyNumber` with
-  `lock`, `lockedOwnerId`): the order a handover takes them. Read ahead of the
+  its transaction and before it writes the ticket** (`lockHolders`, which
+  `lockedOwnerId` is): the order a handover takes them. Read ahead of the
   transaction, an assignment to the owner a handover was replacing passed and
-  committed after the handover had collected the number's tickets.
+  committed after the handover had collected the number's tickets. A
+  transaction that already holds that lock may ask again at any point, as
+  `alignAccountable` and the handover do, since it then waits for nobody.
 - **What a page says about such a ticket asks `hasCoexistenceRecord`**
   (`lib/whatsapp/coexistence.ts`), the twin of `isCoexistenceNumber`, not
   `parseCoexistence`: a record written by hand must not be hidden by one rule
@@ -1246,7 +1314,13 @@ that phone is still found by name and number with an empty ticket list; a
 report's own lists (CSAT comments, the labelling and review queues), which
 only somebody given a report key without `ticket.view.all` reads; and the
 inbox's live tick, which carries no content. Each is written down in
-`plans/whatsapp-number-ownership.md`, and is a change of its own.
+`plans/whatsapp-number-ownership.md`, and is a change of its own. Nor the two
+ways a ticket comes to be hidden from its holder with no write of the
+assignee: a plain number's row becoming a coexistence one (a write of
+`channels.config`; an assignment in flight waits for it, one already
+committed is not moved), and a holder who stops seeing every ticket — a role
+lowered, the `ticket.view.all` override removed, a deactivation. Each such
+ticket keeps its holder until a handover or its next reopen.
 
 Only a `whatsapp` row may have an owner — a plain number or a coexistence one,
 never the bot (`channels_owner_only_whatsapp` in `db/sql/003`): the bot and the

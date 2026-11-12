@@ -16,6 +16,7 @@ import {
 } from '@/db/schema';
 import { runAutomations } from '@/lib/automations';
 import { computeAgentDay } from '@/lib/reports/agent-rollup';
+import { lockHolders } from '@/lib/tickets/assignee';
 import { changeStatus } from '@/lib/tickets/status';
 import { reportingContext } from '@/lib/reports/rollup';
 import { withCleanDatabase } from '@/lib/testing/db';
@@ -819,6 +820,33 @@ describe('alignAccountable', () => {
     const kept = await ticket(number, 'Open', { accountableAgentId: ali, assigneeAgentId: sara });
     expect(await align(kept, ali)).toEqual({ changed: false, reassigned: false });
     expect(await eventsOf(kept)).toEqual([]);
+  });
+
+  // What was written, not what was meant: an assignment that matched no row —
+  // here, asked about a number the ticket is not on — writes no `assigned`
+  // line and is not reported as made, though the accountability moves.
+  it('records no assignment it did not write', async () => {
+    const nayera = await agent('Nayera Mohamed');
+    const ali = await agent('Ali Nasser');
+    const number = await teamPhone('Nayera Mohamed', ali);
+    const hers = await ticket(number, 'Open', {
+      accountableAgentId: nayera,
+      assigneeAgentId: nayera,
+    });
+
+    const answer = await db.transaction(async (tx) =>
+      alignAccountable(tx, {
+        conversationId: hers,
+        ownerId: ali,
+        channelId: number,
+        holders: await lockHolders(tx, null),
+        reason: 'reopened_after_handover',
+      }),
+    );
+
+    expect(answer).toEqual({ changed: true, reassigned: false });
+    expect(await holders(hers)).toEqual({ accountable: ali, assignee: nayera });
+    expect((await eventsOf(hers)).map((e) => e.type)).toEqual(['accountable_changed']);
   });
 
   // Its locked read can wait on another writer, and its `assigned` line is
