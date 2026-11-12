@@ -162,8 +162,8 @@ describe('resolveLegacyPath', () => {
  * holds them (2026-11-12): two public categories in Arabic and English, and
  * the internal employee guide, Arabic only, whose four folders are agents-only
  * and whose articles are public on the row. Render's log showed the two public
- * ones followed 8 times in one night, while the proxy stood the home in for
- * them.
+ * ones followed 8 times in the night after the move, each answered with the
+ * help centre's 404.
  */
 describe('resolveLegacyPath, for a category', () => {
   const PARTNERS = '154000297679';

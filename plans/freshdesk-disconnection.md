@@ -632,8 +632,9 @@ and Arabic otherwise:
 is the console's sign-in until `KB_PUBLIC_HOST` names `support.shipblu.com`,
 which production does not yet, and the help centre's 404 from then on.
 
-- **All 302.** The home and the index name the page they land on, so the
-  legacy route's rule would make them 301. A browser keeps a 301 with no expiry,
+- **All 302**, but for the category, which the legacy route now answers
+  (below). The home and the index name the page they land on, so the legacy
+  route's rule would make them 301. A browser keeps a 301 with no expiry,
   though, and these are the paths Freshdesk's own `/` redirects through, so a
   DNS rollback while Freshdesk is live would send every browser that had loaded
   the home here to `/ar` on Freshdesk. A 302 costs little meanwhile: `/ar` is
@@ -655,11 +656,12 @@ which production does not yet, and the help centre's 404 from then on.
 - `proxy.test.ts` checks every shape on the help-centre host and on the Render
   host with `KB_PUBLIC_HOST` set and unset. It also checks that the answer is a
   302 for any method, that a session cookie changes nothing, that the search
-  carries its term and nothing else, that articles, folders and categories
-  still reach the legacy route, and that the leftovers answer as they did.
-  Seven of its cases fail against `proxy.ts` as it was.
-- A production build served locally answered each shape with a 302 and a
-  relative `Location` on both hosts, with the variable set and unset:
+  carries its term and nothing else, that articles and folders still reach the
+  legacy route, and that the leftovers answer as they did. Seven of its cases
+  fail against `proxy.ts` as it was.
+- A production build served locally answered each shape, a category then
+  among them, with a 302 and a relative `Location` on both hosts, with the
+  variable set and unset:
   `/ar#contact` with its fragment, `/ar/search?q=` with the term encoded.
 - **The redirect is absolute in the proxy.** Next parses a proxy's `Location`
   with no base, so the relative one `lib/http/redirect.ts` builds would throw
@@ -669,8 +671,9 @@ which production does not yet, and the help centre's 404 from then on.
   request, after this one). The importer kept Freshdesk's category ids
   (`kb_categories.external_id`, `<id>:<locale>`), so the page is a lookup:
   `proxy.ts` hands `[/<l>]/support/solutions/<id>[-<title>]` to `/help/legacy`
-  (`LEGACY_CATEGORY`, anchored at both ends so it reads neither an article's
-  or a folder's URL nor a help-centre path with a `solutions` segment), and
+  (`LEGACY_CATEGORY`, the pattern `freshdeskCategoryId` reads the id with:
+  no article's, folder's or help-centre path matches it, and its anchors keep
+  out a Freshdesk tail behind another prefix and `/<id>/page/2`), and
   `resolveLegacyPath` finds the page (`resolveCategory`). The rule left
   `lib/kb/freshdesk-portal.ts`. What production's rows, read on 2026-11-12,
   make each answer once it is deployed:
@@ -719,14 +722,18 @@ which production does not yet, and the help centre's 404 from then on.
     and a Mac and four from two crawlers.
 
   - `lib/kb/legacy-resolve.db.test.ts` builds production's three categories and
-    checks each shape against `getCategory`, so an answer is never a page that
+    checks every answer for them against `getCategory`, so none is a page that
     404s. It also checks a translation closed either way, the order of the
     translations, the guide, and a category whose only readable articles are
     in the other language. `app/help/legacy/route.db.test.ts` checks the
     encoded Arabic `Location`. `proxy.test.ts` checks the rewrite on both
-    hosts, with the variable set and unset, and holds `LEGACY_CATEGORY` and
-    `freshdeskCategoryId`, which reads the id out of what it sends, to one
-    answer.
+    hosts, with the variable set and unset, and that each path it sends is one
+    `freshdeskCategoryId` reads an id from.
+  - A slug is now put in a `Location` a code point at a time
+    (`lib/http/redirect.ts`). `slugify` keeps an emoji, which is two UTF-16
+    units, and matched a unit at a time it threw `URI malformed`, so a
+    category or an article named with one answered its old URL with a 500.
+    None in production is.
   - **Left out: a folder.** `/support/solutions/folders/<id>` still goes to the
     home with a 301 whatever the folder's visibility, the employee guide's four
     included (`resolveLegacyPath`'s folder branch reads none). So a folder id

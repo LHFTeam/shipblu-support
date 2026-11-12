@@ -16,6 +16,15 @@ describe('redirectTo', () => {
     );
   });
 
+  // An emoji is two UTF-16 units, and either alone is not something
+  // `encodeURIComponent` will encode: matched a unit at a time, it threw
+  // `URI malformed` and the legacy route answered 500 for a slug `slugify`
+  // keeps (a Freshdesk category named with one).
+  it('survives an emoji in a slug, as a whole code point', () => {
+    const response = redirectTo('/ar/c/shipping-🚚-شحن', 301);
+    expect(response.headers.get('Location')).toBe('/ar/c/shipping-%F0%9F%9A%9A-%D8%B4%D8%AD%D9%86');
+  });
+
   it('leaves an ASCII path exactly as given', () => {
     expect(redirectTo('/login', 303).headers.get('Location')).toBe('/login');
     expect(redirectTo('/en/a/how-to-track-a-shipment', 301).headers.get('Location')).toBe(

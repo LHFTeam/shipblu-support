@@ -249,11 +249,11 @@ describe('the sitemap robots.txt advertises', () => {
 });
 
 /**
- * Freshdesk's article and folder URLs, on whichever host they arrive.
+ * Freshdesk's article, folder and category URLs, on whichever host they arrive.
  *
  * The rewrite used to put the path in `?path=`, which the route handler never
- * saw: Next hands it the request as it arrived, so every one of these answered
- * the route's own 404 (PROJECT-STATE §6.115). What reaches the handler is a
+ * saw: Next hands it the request as it arrived, so every article and folder
+ * answered the route's own 404 (PROJECT-STATE §6.115). What reaches the handler is a
  * header set on the rewritten request, which Next sends as
  * `x-middleware-request-<name>` and lists in `x-middleware-override-headers`.
  */
@@ -311,13 +311,13 @@ describe('Freshdesk URLs', () => {
 
 /**
  * Freshdesk's category page, `/support/solutions/<id>`, which Render's log
- * showed followed 8 times in one night on `support.shipblu.com`. Its page here
- * is found by id, so the proxy hands it to the legacy route, as it does an
- * article, ahead of the portal's rules, which stood the home in for it until
- * then. Checked on both hosts with `KB_PUBLIC_HOST` set and unset, since the
- * catch-all, the locale rewrite and the sign-in check would each answer it
- * otherwise; and `LEGACY_CATEGORY` and `freshdeskCategoryId`, which reads the id
- * out of what it sends, are held to one answer.
+ * showed followed 8 times in the night after the move on `support.shipblu.com`.
+ * Its page here is found by id, so the proxy hands it to the legacy route, as
+ * it does an article, ahead of the portal's rules, which stood the home in for
+ * it before. Checked on both hosts with `KB_PUBLIC_HOST` set and unset, since
+ * the catch-all, the locale rewrite and the sign-in check would each answer it
+ * otherwise; and every path the proxy sends is checked to be one
+ * `freshdeskCategoryId` reads the id of, as the route will.
  */
 describe("Freshdesk's category pages", () => {
   const RENDER_HOST = 'shipblu-support.onrender.com';
@@ -376,15 +376,19 @@ describe("Freshdesk's category pages", () => {
     expect(freshdeskCategoryId(path)).toBe('154000297679');
   });
 
-  // An article or a folder URL is this shape with one more segment, and a
-  // help-centre path can have a segment called `solutions`. Each answers as it
-  // did before the category rule, and the id reader reads none of them.
+  // An article or a folder URL is this shape with one more segment, a
+  // help-centre path has no `/support/` segment, and a Freshdesk tail behind
+  // another prefix, or a page of a category's list, is kept out by the
+  // anchors. Each answers as it did before the category rule, and the id
+  // reader reads none of them.
   it('reads a category only in the shape Freshdesk gives it', () => {
     setTestEnv({ KB_PUBLIC_HOST: KB_HOST });
     const NOT_CATEGORIES: [string, string | null][] = [
-      // Ours, under /help, on the Render host.
+      // Ours, with a `solutions` segment: rewritten under /help, or under it
+      // already and served as itself.
       ['/ar/c/solutions/2024-rates', '/help/ar/c/solutions/2024-rates'],
       ['/en/c/shipping/solutions/154000297679', '/help/en/c/shipping/solutions/154000297679'],
+      ['/help/ar/support/solutions/154000297679', null],
       // Freshdesk's, but no category page: the leftovers' answer.
       [
         '/ar/support/solutions/articles/most-viewed',

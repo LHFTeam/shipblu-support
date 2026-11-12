@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { SESSION_COOKIE } from '@/lib/auth/cookie';
 import { freshdeskPortalRedirect } from '@/lib/kb/freshdesk-portal';
-import { LEGACY_PATH_HEADER } from '@/lib/kb/legacy-path';
+import { FRESHDESK_CATEGORY, LEGACY_PATH_HEADER } from '@/lib/kb/legacy-path';
 import { LOCALES } from '@/lib/kb/locale';
 
 /**
@@ -127,14 +127,12 @@ const LEGACY_FOLDER = /\/solutions\/folders\/(\d+)/;
  * after the move, under `/ar` and `/en`, real browsers among them. Its page
  * here is `/<locale>/c/<slug>`, which only a lookup finds (`resolveLegacyPath`).
  *
- * Anchored at both ends, where the two above are not. An article or a folder
- * URL is this shape with one more segment, which `\d+` cannot read, and the
- * start anchor keeps a help-centre path whose segment happens to be `solutions`
- * (`/ar/c/solutions/2024-rates`) away from Freshdesk's. The same pattern as
- * `freshdeskCategoryId` (`lib/kb/legacy-path.ts`), which reads the id out of
- * what this sends; `proxy.test.ts` holds the two to one answer.
+ * Anchored at both ends, where the two above are not; `lib/kb/legacy-path.ts`
+ * says why each part is there. The pattern is that module's, the one
+ * `freshdeskCategoryId` reads the id with, so this cannot send the route a path
+ * it reads no id from.
  */
-const LEGACY_CATEGORY = /^(?:\/[a-z]{2}(?:-[A-Za-z]{2})?)?\/support\/solutions\/\d+(?:-[^/]*)?\/?$/;
+const LEGACY_CATEGORY = FRESHDESK_CATEGORY;
 
 /**
  * Paths served as themselves on the help-centre hostname, rather than being

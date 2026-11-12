@@ -46,7 +46,11 @@ export function redirectTo(path: string, status: 301 | 302 | 303 | 307 | 308): N
  * that is *already* encoded: `%` is ASCII, so a `%D8` sequence is left alone
  * rather than becoming `%25D8`. `encodeURI` would double-encode it, and
  * `kb_redirects.to_path` is typed by an admin and may arrive either way.
+ *
+ * Matched a code point at a time (`u`), not a UTF-16 unit: `slugify` keeps an
+ * emoji, which is two units, and either half alone makes `encodeURIComponent`
+ * throw `URI malformed`, the 500 this exists to prevent.
  */
 function headerSafe(path: string): string {
-  return path.replace(/[^\x00-\x7F]/g, (char) => encodeURIComponent(char));
+  return path.replace(/[^\x00-\x7F]/gu, (char) => encodeURIComponent(char));
 }

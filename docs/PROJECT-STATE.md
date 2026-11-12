@@ -26,9 +26,10 @@ database at 6 ms, nothing pending or processing, the dead jobs still the 27
 named below and no lost admission on the first pool; on the Render host
 `/robots.txt` and `/sitemap.xml` answered 200, where on 2026-11-10 both were
 404, and Freshdesk's three article URL shapes 301 to the article (PR 3, live
-since `932e8ea` below; the folder shape still 404s, because `kb_redirects`
-holds 174 rows for 58 article ids and none for a folder). Its way back is
-`932e8ea` on each service: a code-only revert through `dev`, or a dashboard
+since `932e8ea` below; the folder shape 301s to the home for an imported
+folder, and this check's `154000050001`, under which no folder was imported,
+answered 404). Its way back is `932e8ea` on each service: a code-only revert
+through `dev`, or a dashboard
 rollback, which turns that service's auto-deploy off (below); no migration lies
 between the two.
 
@@ -1583,9 +1584,11 @@ is code:
   29 old links in 18 version rows are no longer one Restore away; Freshdesk's
   old article URLs 301 through the proxy (measured on the Render host on
   2026-11-11: the bare id, the titled and the `/a/` shapes each 301 to the
-  article, and the folder shape 404s, since `kb_redirects` has no folder
-  rows); and the article editor uploads a picture (button, paste or drop)
-  into `kb_images`, so a new screenshot is ours rather than hot-linked. PR 5,
+  article; the folder shape answered 404 for `154000050001`, an id no folder
+  was imported under, and 301 to the home for an imported folder, as
+  `154000745060` and `154000746959` did that day in Render's log); and the
+  article editor uploads a picture (button, paste or drop) into `kb_images`,
+  so a new screenshot is ours rather than hot-linked. PR 5,
   the crawler files on every host, and its review fixes went live in #508 on
   2026-11-11. PR 6, retiring the importer, waits for the disconnection. The
   plan's checklist still shows PRs 2 and 3 unchecked: its own checks there (a
@@ -1595,10 +1598,10 @@ is code:
   folders answered the console's sign-in or the help centre's 404 there:
   `/support/home`, `/<locale>/support/home`, the index, the ticket form, the
   sign-in, the search and a category. They are bookmarked and still mailed, and
-  the request log shows them followed. PR 7 of the plan sends each to its
-  counterpart with a 302 from `proxy.ts`. A category goes to its own page,
-  `/<locale>/c/<slug>`, through the legacy route, which finds it by the
-  Freshdesk id the importer kept. That is a 301, or a 302 while another
+  the request log shows them followed. PR 7 of the plan sends each but the
+  category to its counterpart with a 302 from `proxy.ts`. A category goes to
+  its own page, `/<locale>/c/<slug>`, through the legacy route, which finds it
+  by the Freshdesk id the importer kept. That is a 301, or a 302 while another
   translation stands in for a closed one. The internal employee guide
   (`154000297102`), whose folders are all agents-only, answers 404, as an
   unknown id does: its own page is a 404 for every reader. Neither is deployed

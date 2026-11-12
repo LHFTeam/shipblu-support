@@ -24,8 +24,13 @@
 /** The header the proxy puts the requested Freshdesk path in. */
 export const LEGACY_PATH_HEADER = 'x-legacy-path';
 
-/** `freshdeskCategoryId`'s pattern; its comment says why each part is there. */
-const FRESHDESK_CATEGORY =
+/**
+ * Freshdesk's category URL, which `proxy.ts` hands to the legacy route as its
+ * `LEGACY_CATEGORY` and `freshdeskCategoryId` reads the id out of: one pattern,
+ * so the proxy cannot send a path the route reads no id from. Its comment says
+ * why each part is there.
+ */
+export const FRESHDESK_CATEGORY =
   /^(?:\/[a-z]{2}(?:-[A-Za-z]{2})?)?\/support\/solutions\/(\d+)(?:-[^/]*)?\/?$/;
 
 /**
@@ -33,15 +38,17 @@ const FRESHDESK_CATEGORY =
  * the portal's language in front or not (`/ar`, `/en-US`) and the category's
  * title after the id or not (`-shipblu-partners`), or null.
  *
- * The shape `proxy.ts` hands to the legacy route as `LEGACY_CATEGORY`, and
- * `proxy.test.ts` holds the two to one answer, so every path the proxy sends
- * is one `resolveLegacyPath` reads an id from. Anchored at both ends, where the
- * article's and the folder's patterns are not: theirs are this shape with one
- * more segment, which `\d+` cannot read, and the start anchor keeps a
- * help-centre path whose segment happens to be `solutions`
- * (`/ar/c/solutions/2024-rates`) from reading as a Freshdesk URL. A trailing
- * slash is read alike, as `lib/kb/freshdesk-portal.ts` reads one: Next answers
- * it with a 308 before the proxy runs, so one rarely arrives.
+ * The pattern is `FRESHDESK_CATEGORY`, the one the proxy sends by. An article's
+ * or a folder's URL is this shape with one more segment, `articles` or
+ * `folders`, which `\d+` cannot read. The `/support/` it asks for keeps every
+ * help-centre path out, since none has that segment. And it is anchored at
+ * both ends, where the article's and the folder's patterns are not: the start
+ * so that a Freshdesk tail behind another prefix (`/ar/en/support/…`, or
+ * `/help/ar/support/…` on the Render host) is not read as Freshdesk's, and the
+ * end so that a page of a category's list (`/support/solutions/<id>/page/2`)
+ * is not read as the category. A trailing slash is read alike, as
+ * `lib/kb/freshdesk-portal.ts` reads one: Next answers it with a 308 before
+ * the proxy runs, so one rarely arrives.
  */
 export function freshdeskCategoryId(path: string): string | null {
   return FRESHDESK_CATEGORY.exec(path)?.[1] ?? null;
