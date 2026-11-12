@@ -1066,7 +1066,7 @@ answered that fast, and Business Suite's automations echo under the same app
 id. Anything that asks whether a person on
 the team answered treats a team echo as one (`teamEchoLabel`; the canned
 suggestion's `authorOf`), never as `automatic_message`
-(`docs/PROJECT-STATE.md` §6.117).
+(`docs/PROJECT-STATE.md` §6.118).
 
 **A Business-app number connected in Meta's own interface is adopted, not
 signed in.** WhatsApp Manager and Business Suite can put a phone's number on

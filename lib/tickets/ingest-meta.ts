@@ -429,7 +429,7 @@ const TYPED_REPLY_FLOOR_MS = 10_000;
  * Suite. By 15:15 the next day 19 such replies had come back as echoes, on 8
  * tickets, and every one was dropped — so each ticket read as unanswered, its
  * clocks running, and one answered at 12:29 on the 11th recorded its first
- * response at 14:39 on the 12th (`docs/PROJECT-STATE.md` §6.117).
+ * response at 14:39 on the 12th (`docs/PROJECT-STATE.md` §6.118).
  *
  * What it writes, and why each half is the shape it is:
  *

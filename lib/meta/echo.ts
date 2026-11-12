@@ -7,7 +7,7 @@ import type { NormalisedEcho } from './types';
  *
  * Pure, so the decision is a table of tests rather than a reading of the
  * handler. Measured against production on 2026-11-12, over every delivery kept
- * since 2026-10-13 (`docs/PROJECT-STATE.md` §6.117):
+ * since 2026-10-13 (`docs/PROJECT-STATE.md` §6.118):
  *
  * - **Every Messenger echo names its app.** 37 were this app's own sends, and
  *   every one of them matched a row `send_meta` had already stored; in the 14
@@ -39,7 +39,7 @@ export type EchoDisposition =
    * the team answering a thread another tool holds still answered the
    * customer, and all 171 stored read as typed — none within 10 s of the
    * customer, the same signed greetings — on 101 tickets, 94 of them never
-   * answered in the console (§6.117).
+   * answered in the console (§6.118).
    */
   | 'standby'
   /**
