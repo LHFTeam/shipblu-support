@@ -62,16 +62,45 @@ export function signedClaim(identity: WidgetIdentity): string {
 }
 
 /**
+ * Whether a signature over this identity could vouch for anybody.
+ *
+ * The signed claim names an account id and an email and nothing else, so an
+ * identity carrying neither — a phone alone, an account name alone — signs the
+ * constant `"|"`. One HMAC of that, which any integrator's backend mints for its
+ * first phone-only user, is then a valid signature for every phone number there
+ * is, and `identityKey` falls back to the phone, so the contact would be marked
+ * verified under a key the signature never mentioned. Such a signature proves
+ * only that somebody once held the secret, not who this visitor is.
+ *
+ * Unverified rather than refused: the signature is not *wrong*, it says nothing,
+ * and a deployed integration that signs every user it has must not start
+ * failing with a 401 for the ones without an email. A phone-keyed integration
+ * that needs the phone vouched for gets a second accepted claim form, added
+ * beside this one, rather than a change to what this one covers.
+ */
+export function claimNamesSomebody(identity: WidgetIdentity): boolean {
+  return Boolean(identity.accountId || identity.email);
+}
+
+/**
  * Whether the platform, rather than the browser, is asserting this identity.
  *
  * False when no secret is configured: an integration that has not been given
  * one cannot be producing real signatures, and treating an unverifiable
- * signature as valid would make the whole mechanism decorative.
+ * signature as valid would make the whole mechanism decorative. False, too, for
+ * an identity whose claim names nobody (`claimNamesSomebody`) — the one place
+ * that rule is applied, so the second claim form a phone-keyed integration
+ * needs changes it here and nowhere else.
+ *
+ * Private, as is `identitySigningEnabled`: `judgeSignature` is the one public
+ * decision. A caller holding these two would rebuild the route's old
+ * "signed, not verified, signing on → 401", which refuses a claim naming nobody
+ * that this module answers as unverified.
  */
-export function verifyIdentity(identity: WidgetIdentity, signature: unknown): boolean {
+function verifyIdentity(identity: WidgetIdentity, signature: string): boolean {
   const secret = env().WIDGET_IDENTITY_SECRET;
-  const supplied = typeof signature === 'string' ? signature.trim().toLowerCase() : '';
-  if (!secret || !supplied) return false;
+  const supplied = signature.trim().toLowerCase();
+  if (!secret || !supplied || !claimNamesSomebody(identity)) return false;
 
   const expected = createHmac('sha256', secret).update(signedClaim(identity)).digest('hex');
   return safeEqual(expected, supplied);
@@ -85,8 +114,61 @@ export function verifyIdentity(identity: WidgetIdentity, signature: unknown): bo
  * simply unverified. With one, a bad signature is either tampering or a broken
  * deployment, and both deserve a 401 rather than a quiet downgrade to
  * unverified — a downgrade is how a signing integration breaks and nobody
- * notices for a month.
+ * notices for a month. The one exception is a claim that names nobody, which
+ * no signature could have vouched for: `judgeSignature` answers it unverified
+ * on purpose, and a route "fixed" back to refusing it breaks every signed
+ * integration's users who have no email.
  */
-export function identitySigningEnabled(): boolean {
+function identitySigningEnabled(): boolean {
   return Boolean(env().WIDGET_IDENTITY_SECRET);
+}
+
+/**
+ * Whether the host's raw identity carried an account id or an email that the
+ * parser threw away — an address `looksLikeEmail` refuses, an account id that
+ * was nothing but punctuation.
+ *
+ * The parsed identity then names nobody, but the host's backend signed the raw
+ * value (`|nour@merchant`), so its signature is wrong rather than empty. That
+ * was a 401 before claims naming nobody stopped being refused, and it stays
+ * one: the integration is broken, and the 401 is what makes that visible.
+ */
+function claimLostInParsing(raw: unknown, identity: WidgetIdentity): boolean {
+  if (!raw || typeof raw !== 'object') return false;
+  const input = raw as Record<string, unknown>;
+  const given = (value: unknown) =>
+    typeof value === 'number' || (typeof value === 'string' && value.trim() !== '');
+  return (
+    (!identity.email && given(input.email)) ||
+    (!identity.accountId && given(input.accountId ?? input.account_id))
+  );
+}
+
+export type SignatureVerdict = 'verified' | 'unverified' | 'refused';
+
+/**
+ * What a host page's signature makes of the identity it came with — the one
+ * decision `/api/widget/identify` acts on, and the only one this module
+ * exports.
+ *
+ * `refused` (a 401) for a signature that fails to verify while a secret is
+ * configured (`identitySigningEnabled`), except over a claim that names nobody,
+ * which is `unverified` whether or not it matches, because it could not have
+ * proved anything either way — unless the host named an account id or email
+ * the parser dropped (`claimLostInParsing`). `raw` is the identity as the host
+ * sent it, before `parseIdentity`, for that last question alone.
+ *
+ * The signature is trimmed here, so the answer does not depend on whether the
+ * caller trimmed it: a blank one is no signature.
+ */
+export function judgeSignature(
+  identity: WidgetIdentity,
+  signature: string,
+  raw: unknown,
+): SignatureVerdict {
+  if (!signature.trim()) return 'unverified';
+  if (verifyIdentity(identity, signature)) return 'verified';
+  if (!identitySigningEnabled()) return 'unverified';
+  if (claimNamesSomebody(identity) || claimLostInParsing(raw, identity)) return 'refused';
+  return 'unverified';
 }

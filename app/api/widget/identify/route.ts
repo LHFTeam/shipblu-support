@@ -4,7 +4,7 @@ import { hashToken } from '@/lib/auth/tokens';
 import { readJsonBody } from '@/lib/http/json-body';
 import { allow, clientIp } from '@/lib/http/rate-limit';
 import { applyVisitorIdentity, recordIdentityOnConversation } from '@/lib/widget/identify';
-import { identitySigningEnabled, parseIdentity, verifyIdentity } from '@/lib/widget/identity';
+import { judgeSignature, parseIdentity } from '@/lib/widget/identity';
 import { findLiveConversation, resolveVisitor } from '@/lib/widget/session';
 
 export const dynamic = 'force-dynamic';
@@ -46,10 +46,11 @@ export async function POST(request: Request) {
   if (!identity) return NextResponse.json({ ok: true, verified: false });
 
   const signature = typeof body.signature === 'string' ? body.signature.trim() : '';
-  const verified = signature ? verifyIdentity(identity, signature) : false;
-  if (signature && !verified && identitySigningEnabled()) {
+  const verdict = judgeSignature(identity, signature, body.identity);
+  if (verdict === 'refused') {
     return NextResponse.json({ error: 'bad signature' }, { status: 401 });
   }
+  const verified = verdict === 'verified';
 
   const outcome = await applyVisitorIdentity({
     contactId,
