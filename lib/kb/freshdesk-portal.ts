@@ -4,9 +4,10 @@ import { DEFAULT_LOCALE, isLocale, type Locale } from './locale';
  * Where Freshdesk's portal pages send their reader, now that
  * `support.shipblu.com` is this app (moved 2026-11-11, about 20:54 UTC).
  *
- * Freshdesk's article and folder URLs are not here: they name a row, so they
- * go to `app/help/legacy/route.ts`, which looks it up (`./legacy-path.ts`).
- * These name a page of the portal itself — its front door, its knowledge-base
+ * Freshdesk's article, folder and category URLs are not here: each names a
+ * row, so they go to `app/help/legacy/route.ts`, which looks it up
+ * (`./legacy-path.ts`), and the proxy sends them there before it asks this
+ * module. These name a page of the portal itself — its front door, its knowledge-base
  * index, its ticket form, its sign-in — and each has a counterpart here that no
  * lookup is needed to find. So `proxy.ts` answers them itself, ahead of the
  * help-centre host's catch-all and the console's sign-in redirect, which
@@ -18,10 +19,12 @@ import { DEFAULT_LOCALE, isLocale, type Locale } from './locale';
  * What arrived is the evidence for each rule. Render's request log for
  * `support.shipblu.com` from 2026-11-11 21:04 to 2026-11-12 09:15 UTC, our own
  * curl checks left out: the portal home 22 times (`/ar` and `/en`, phones in
- * Egypt among them), Freshdesk category pages 8, the knowledge-base index 6,
+ * Egypt among them), the knowledge-base index 6,
  * Freshdesk's search 6 (one person, in Arabic), the ticket form 5 (Googlebot
  * among them), the sign-in and sign-up 4, and one ticket page, from a
- * Freshdesk notification email opened on an iPhone.
+ * Freshdesk notification email opened on an iPhone. Its category pages, 8 in
+ * the same night, were a rule here until the legacy route could find each
+ * one's page (`resolveLegacyPath`).
  *
  * **Every answer is a 302, on purpose.** By the rule the legacy route follows
  * (`LegacyAnswer`), the home and the index would earn a 301: each names the page
@@ -98,13 +101,6 @@ export type PortalRedirect = {
  */
 const PORTAL_PATH = /^(?:\/([a-z]{2})(?:-[A-Za-z]{2})?)?\/support(\/.*)?$/;
 
-/**
- * Freshdesk's category page, `/support/solutions/<id>`. Its article and folder
- * pages never reach this — the proxy hands them to the legacy route first — and
- * `\d+` could not read their `articles` or `folders` segment if they did.
- */
-const CATEGORY_PAGE = /^\/solutions\/\d+(?:-[^/]*)?$/;
-
 /** The longest search carried across, as `/forms` caps a prefilled subject. */
 const MAX_TERM = 200;
 
@@ -135,14 +131,11 @@ export function freshdeskPortalRedirect(
   // rarely sees one; reading the page alike with or without it costs nothing.
   const page = (match[2] ?? '').replace(/\/$/, '');
 
-  // The portal's front door, bare or by name; the knowledge-base index, whose
-  // counterpart is the home's topic list; and a category. A category deserves
-  // its own page here, `/<locale>/c/<slug>` — the importer kept the id in
-  // `kb_categories.external_id` — but finding it is a lookup, which the proxy
-  // does not make. Until the legacy route makes it, the home stands in, where
-  // both public categories head the topic list. The internal employee guide's
-  // id lands there too, which says nothing about it.
-  if (page === '' || page === '/home' || page === '/solutions' || CATEGORY_PAGE.test(page)) {
+  // The portal's front door, bare or by name, and the knowledge-base index,
+  // whose counterpart is the home's topic list. A category under the index,
+  // `/solutions/<id>`, is not answered here: it has a page of its own, which the
+  // legacy route finds, and the proxy sends it there first.
+  if (page === '' || page === '/home' || page === '/solutions') {
     return redirect(home);
   }
 

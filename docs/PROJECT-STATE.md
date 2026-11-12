@@ -1596,8 +1596,13 @@ is code:
   `/support/home`, `/<locale>/support/home`, the index, the ticket form, the
   sign-in, the search and a category. They are bookmarked and still mailed, and
   the request log shows them followed. PR 7 of the plan sends each to its
-  counterpart with a 302 from `proxy.ts`. It is not deployed until `dev`
-  reaches `main`. Freshdesk's own notification emails still link
+  counterpart with a 302 from `proxy.ts`. A category goes to its own page,
+  `/<locale>/c/<slug>`, through the legacy route, which finds it by the
+  Freshdesk id the importer kept. That is a 301, or a 302 while another
+  translation stands in for a closed one. The internal employee guide
+  (`154000297102`), whose folders are all agents-only, answers 404, as an
+  unknown id does: its own page is a 404 for every reader. Neither is deployed
+  until `dev` reaches `main`. Freshdesk's own notification emails still link
   `support.shipblu.com/support/tickets/<n>`, which no redirect here can answer
   with the ticket (the plan's to-dos).
 

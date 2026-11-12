@@ -121,6 +121,22 @@ const LOCALE_PREFIX = new RegExp(`^/(${LOCALES.join('|')})(/|$)`);
 const LEGACY_FOLDER = /\/solutions\/folders\/(\d+)/;
 
 /**
+ * Freshdesk's category page, `/support/solutions/<id>`, with the portal's
+ * language in front or not (`/ar`, `/en-US`) and the title after the id or not.
+ * Render's log showed it followed on `support.shipblu.com` 8 times in the night
+ * after the move, under `/ar` and `/en`, real browsers among them. Its page
+ * here is `/<locale>/c/<slug>`, which only a lookup finds (`resolveLegacyPath`).
+ *
+ * Anchored at both ends, where the two above are not. An article or a folder
+ * URL is this shape with one more segment, which `\d+` cannot read, and the
+ * start anchor keeps a help-centre path whose segment happens to be `solutions`
+ * (`/ar/c/solutions/2024-rates`) away from Freshdesk's. The same pattern as
+ * `freshdeskCategoryId` (`lib/kb/legacy-path.ts`), which reads the id out of
+ * what this sends; `proxy.test.ts` holds the two to one answer.
+ */
+const LEGACY_CATEGORY = /^(?:\/[a-z]{2}(?:-[A-Za-z]{2})?)?\/support\/solutions\/\d+(?:-[^/]*)?\/?$/;
+
+/**
  * Paths served as themselves on the help-centre hostname, rather than being
  * rewritten under /help.
  *
@@ -162,13 +178,16 @@ export default function proxy(request: NextRequest) {
   const kbHost = process.env.KB_PUBLIC_HOST?.toLowerCase();
 
   // --- Legacy Freshdesk links ---------------------------------------------
-  // Handled before anything else so they resolve on either hostname. The
-  // lookup itself needs the database, so this hands off to a route handler
-  // rather than doing it here.
-  const legacyArticle = LEGACY_ARTICLE.exec(pathname);
-  const legacyFolder = legacyArticle ? null : LEGACY_FOLDER.exec(pathname);
-
-  if (legacyArticle || legacyFolder) {
+  // An article, a folder or a category: each names a row, so finding where it
+  // went is a lookup. Handled before anything else so they resolve on either
+  // hostname, and ahead of the portal's rules below, which no longer read a
+  // category. The lookup needs the database, so this hands off to a route
+  // handler rather than doing it here.
+  if (
+    LEGACY_ARTICLE.test(pathname) ||
+    LEGACY_FOLDER.test(pathname) ||
+    LEGACY_CATEGORY.test(pathname)
+  ) {
     const url = request.nextUrl.clone();
     url.pathname = '/help/legacy';
     url.search = '';

@@ -613,14 +613,16 @@ page from a Freshdesk notification email, opened on an iPhone.
 **Built.** `proxy.ts` answers them itself, after the legacy block and ahead of
 the help-centre host, the locale rewrite and the sign-in check, on every host.
 `lib/kb/freshdesk-portal.ts` decides where each goes and carries the reasons.
-None needs a lookup, so none goes through `/help/legacy`. The language is the
-path's own when the help centre has it, and Arabic otherwise:
+None of those needs a lookup, so none goes through `/help/legacy`. A category
+does, and since its own pull request it goes there with the articles and the
+folders (below). The language is the path's own when the help centre has it,
+and Arabic otherwise:
 
 | Freshdesk                                            | Here                        |
 | ---------------------------------------------------- | --------------------------- |
 | `[/<l>]/support`, `/support/home`                    | `/<l>`                      |
 | `[/<l>]/support/solutions`                           | `/<l>`                      |
-| `[/<l>]/support/solutions/<category id>`             | `/<l>`, standing in         |
+| `[/<l>]/support/solutions/<category id>[-<title>]`   | `/<l>/c/<slug>`, by lookup  |
 | `[/<l>]/support/tickets/new`, `/tickets[/…]`         | `/<l>#contact`, standing in |
 | `[/<l>]/support/login`, `/signup`                    | `/<l>#contact`, standing in |
 | `[/<l>]/support/search[/solutions]?term=…`           | `/<l>/search?q=…`           |
@@ -653,9 +655,9 @@ which production does not yet, and the help centre's 404 from then on.
 - `proxy.test.ts` checks every shape on the help-centre host and on the Render
   host with `KB_PUBLIC_HOST` set and unset. It also checks that the answer is a
   302 for any method, that a session cookie changes nothing, that the search
-  carries its term and nothing else, that articles and folders still reach the
-  legacy route, and that the leftovers answer as they did. Seven of its cases fail
-  against `proxy.ts` as it was.
+  carries its term and nothing else, that articles, folders and categories
+  still reach the legacy route, and that the leftovers answer as they did.
+  Seven of its cases fail against `proxy.ts` as it was.
 - A production build served locally answered each shape with a 302 and a
   relative `Location` on both hosts, with the variable set and unset:
   `/ar#contact` with its fragment, `/ar/search?q=` with the term encoded.
@@ -663,14 +665,68 @@ which production does not yet, and the help centre's 404 from then on.
   with no base, so the relative one `lib/http/redirect.ts` builds would throw
   there (`ERR_INVALID_URL`, a 500). Next relativises a same-host absolute one
   itself, as the measurement shows.
-- **Not covered: a category's own page.** The importer kept Freshdesk's
-  category ids (`kb_categories.external_id`, e.g. `154000297680:en` →
-  `shipblu-customers`), so `/support/solutions/<id>` could go to
-  `/<l>/c/<slug>`. That is a lookup, so it belongs in the legacy route with a
-  database test, and it is left for a pull request of its own. That pull
-  request must leave the internal employee guide (`154000297102`, all four
-  folders agents-only) on the home, not on its own page, and it replaces the
-  category row above.
+- **A category goes to its own page, through the legacy route** (its own pull
+  request, after this one). The importer kept Freshdesk's category ids
+  (`kb_categories.external_id`, `<id>:<locale>`), so the page is a lookup:
+  `proxy.ts` hands `[/<l>]/support/solutions/<id>[-<title>]` to `/help/legacy`
+  (`LEGACY_CATEGORY`, anchored at both ends so it reads neither an article's
+  or a folder's URL nor a help-centre path with a `solutions` segment), and
+  `resolveLegacyPath` finds the page (`resolveCategory`). The rule left
+  `lib/kb/freshdesk-portal.ts`. What production's rows, read on 2026-11-12,
+  make each answer once it is deployed:
+
+  | Freshdesk                                  | Here                          |
+  | ------------------------------------------ | ----------------------------- |
+  | `[/ar]/support/solutions/154000297679[-…]` | `301 /ar/c/شركاء-شيب-بلو`     |
+  | `/en/support/solutions/154000297679[-…]`   | `301 /en/c/shipblu-partners`  |
+  | `[/ar]/support/solutions/154000297680[-…]` | `301 /ar/c/عملاء-شيب-بلو`     |
+  | `/en/support/solutions/154000297680[-…]`   | `301 /en/c/shipblu-customers` |
+  | `[/<l>]/support/solutions/154000297102`    | 404 (the employee guide)      |
+  | any other id                               | 404                           |
+  - The translation is chosen as an article's is: the path's language, then
+    Arabic, then whichever translation answers.
+  - Only a category some reader can open answers. A category has no visibility
+    of its own, and its page is a 404 for anybody who can read none of its
+    articles in its language (`getCategory`). So a translation answers when it
+    holds an article in its own language that `someReaderMayOpen` passes:
+    published, and neither it nor its folder agents-only.
+  - The answer is 301 when it is the translation the URL names, and 302 while
+    another stands in for one closed for now (`LegacyAnswer`). A 301 here
+    carries the risk the home's and the index's would. On a DNS rollback, a
+    browser that kept one would ask Freshdesk for `/ar/c/…`, which it does not
+    have. Every article URL has carried that same risk since PR 3, though, and
+    a category URL is not one of the paths Freshdesk's own `/` redirects
+    through, which is what made the home's 301 a loop or a dead end.
+  - **The employee guide answers 404.** This section once asked for the home
+    instead. Four things decide it:
+    - It is what the route already answers for production's four internal
+      articles (PR 3).
+    - It is what the guide's own page answers: `/ar/c/دليل-الموظف` is a 404
+      for every reader.
+    - It answers exactly as an id nothing was imported as does. A redirect
+      home for this id alone would confirm that an internal category exists
+      under it.
+    - The home holds nothing of the guide, so sending readers there is a soft
+      404: a search engine treats it as one, and a reader looks for something
+      that is not there. The guide's readers are agents, whose copy is in the
+      console's knowledge base, which a public route must not point at.
+
+    An id nothing was imported as answers 404 too, where this section's
+    stand-in sent it home. That is the legacy route's rule for an unknown URL.
+    Every category URL Render's log holds from the move to 16:30 UTC on
+    2026-11-12, our own curl checks left out, named one of the two public
+    categories: 8 requests, under `/ar` or `/en`, four from browsers on Windows
+    and a Mac and four from two crawlers.
+
+  - `lib/kb/legacy-resolve.db.test.ts` builds production's three categories and
+    checks each shape against `getCategory`, so an answer is never a page that
+    404s. It also checks a translation closed either way, the order of the
+    translations, the guide, and a category whose only readable articles are
+    in the other language. `app/help/legacy/route.db.test.ts` checks the
+    encoded Arabic `Location`. `proxy.test.ts` checks the rewrite on both
+    hosts, with the variable set and unset, and holds `LEGACY_CATEGORY` and
+    `freshdeskCategoryId`, which reads the id out of what it sends, to one
+    answer.
 
 ## To-dos outside this repository
 
@@ -796,7 +852,9 @@ curl -sS -o /dev/null -w '%{http_code} %{redirect_url}\n' https://support.shipbl
 
 Until the move on 2026-11-11, `302 https://support.shipblu.com/support/home` —
 Freshdesk. Since then, `307 https://support.shipblu.com/ar` (2026-11-12): this
-app's front door. `/support/home` answers `302` to `/ar` once PR 7 is deployed.
+app's front door. `/support/home` answers `302` to `/ar` once PR 7 is deployed,
+and `/support/solutions/154000297679` answers `301` to `/ar/c/` and the
+category's slug once its category rule is.
 
 ```bash
 curl -sS -o /dev/null -w '%{http_code} %{redirect_url}\n' https://shipblu-support.onrender.com/support/solutions/articles/154000189336
