@@ -19,12 +19,25 @@ export type AccountablePerson = { id: string; name: string; active: boolean };
 export function accountableNote(
   accountable: AccountablePerson | null,
   number: { owner: AccountablePerson | null } | null,
+  /**
+   * A coexistence number, which is never a team number: with nobody active
+   * owning it, its tickets are the supervisors' and admins' alone
+   * (`lib/tickets/owner-only.ts`).
+   */
+  ownerOnly = false,
 ): string | null {
   // Not on one of our WhatsApp numbers: there is no owner to compare with.
   if (!number) return null;
   const { owner } = number;
 
-  if (!owner) return accountable ? 'Nobody owns this number now.' : null;
+  if (!owner) {
+    // A coexistence number with no owner is nobody's queue: said whether or
+    // not the ticket still names somebody, since it is why the team cannot
+    // see it.
+    if (ownerOnly)
+      return 'Nobody owns this number now, so only agents who can see every ticket see its tickets.';
+    return accountable ? 'Nobody owns this number now.' : null;
+  }
 
   if (owner.id === accountable?.id) {
     // A deactivated owner keeps the tickets they had until somebody hands the
@@ -39,5 +52,7 @@ export function accountableNote(
   // as a promise that the ticket is theirs.
   return owner.active
     ? `${owner.name} owns this number now, but this ticket was not handed to them.`
-    : `${owner.name} owns this number but is deactivated, so it counts as a team number.`;
+    : ownerOnly
+      ? `${owner.name} owns this number but is deactivated, so only agents who can see every ticket see its tickets.`
+      : `${owner.name} owns this number but is deactivated, so it counts as a team number.`;
 }

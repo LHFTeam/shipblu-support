@@ -259,12 +259,15 @@ export type OwnerChoice = { id: string; name: string; email: string };
 export function OwnerEditor({
   channelId,
   owner,
+  ownerOnly,
   agents,
   movableTickets,
 }: {
   channelId: string;
   /** As the row records it; `active` false is an owner who can no longer sign in. */
   owner: { id: string; label: string; active: boolean } | null;
+  /** A coexistence number, whose tickets only its owner and agents who see every ticket see. */
+  ownerOnly: boolean;
   /** Active agents, by name. */
   agents: OwnerChoice[];
   /** Open and pending native tickets on the number: what a handover moves now. */
@@ -299,6 +302,7 @@ export function OwnerEditor({
     <OwnerForm
       channelId={channelId}
       owner={owner}
+      ownerOnly={ownerOnly}
       agents={agents}
       movableTickets={movableTickets}
       onCancel={() => setOpen(false)}
@@ -329,6 +333,7 @@ export function OwnerEditor({
 function OwnerForm({
   channelId,
   owner,
+  ownerOnly,
   agents,
   movableTickets,
   onCancel,
@@ -336,6 +341,7 @@ function OwnerForm({
 }: {
   channelId: string;
   owner: { id: string; label: string; active: boolean } | null;
+  ownerOnly: boolean;
   agents: OwnerChoice[];
   movableTickets: number;
   onCancel: () => void;
@@ -357,20 +363,31 @@ function OwnerForm({
         label="Owner"
         className="sm:w-96"
         explain={
-          <>
-            The team member who answers this number from the phone. New tickets on it are assigned
-            to them, and every ticket on it counts against them for its SLA, whoever it is later
-            reassigned to. Nobody makes it a team number: its default group&rsquo;s rota assigns new
-            tickets, and each ticket counts against whoever holds it.
-          </>
+          ownerOnly ? (
+            <>
+              The team member whose phone this is. New tickets on it are assigned to them, every
+              ticket on it counts against them for its SLA, and only they and agents who can see
+              every ticket see its tickets. With nobody, only those agents see them, and new tickets
+              are assigned to nobody.
+            </>
+          ) : (
+            <>
+              The team member who answers this number from the phone. New tickets on it are assigned
+              to them, and every ticket on it counts against them for its SLA, whoever it is later
+              reassigned to. Nobody makes it a team number: its default group&rsquo;s rota assigns
+              new tickets, and each ticket counts against whoever holds it.
+            </>
+          )
         }
-        hint={movesHint(movableTickets)}
+        hint={movesHint(movableTickets, ownerOnly)}
       >
         {/* Named outright: `Field` puts its InfoTip button inside the label,
             and a label with no `for` names its first labelable descendant —
             the button — so the select would reach a screen reader unnamed. */}
         <Select name="ownerAgentId" defaultValue={owner?.id ?? ''} aria-label="Owner">
-          <option value="">Nobody — team number</option>
+          <option value="">
+            {ownerOnly ? 'Nobody — only agents who see every ticket' : 'Nobody — team number'}
+          </option>
           {owner && !listed ? (
             <option value={owner.id}>
               {owner.active ? owner.label : `${owner.label} (deactivated)`}
@@ -410,11 +427,23 @@ function OwnerForm({
  * `movesWithNumber`'s, so it is the set the handover then moves. Worded for
  * both choices, because the select is uncontrolled and the hint cannot follow
  * it: choosing Nobody moves the tickets' accountability and none of their work.
+ *
+ * A coexistence number is worded apart, because it moves more: its tickets are
+ * hidden from whoever is not its owner, so none is left with them.
  */
-function movesHint(count: number): string {
+function movesHint(count: number, ownerOnly: boolean): string {
+  const none = 'It has no open or pending tickets now.';
+  if (ownerOnly) {
+    const after =
+      'The previous owner stops seeing its tickets, resolved ones included, unless they can see every ticket. Choosing Nobody unassigns what such holders cannot see, and only agents who can see every ticket see the number’s tickets until it has an owner.';
+    if (count === 0) return `${none} ${after}`;
+    const tickets =
+      count === 1 ? 'Its 1 open or pending ticket goes' : `Its ${count} open or pending tickets go`;
+    return `${tickets} to the new owner, except what an agent who can see every ticket holds. ${after}`;
+  }
   const resolved =
     'A resolved ticket follows only if it is reopened. Choosing Nobody leaves every ticket with whoever holds it, and each counts against them.';
-  if (count === 0) return `It has no open or pending tickets now. ${resolved}`;
+  if (count === 0) return `${none} ${resolved}`;
   if (count === 1) {
     return `Its 1 open or pending ticket goes with it: from now it counts against the new owner, and is reassigned to them if the current owner or nobody holds it. ${resolved}`;
   }

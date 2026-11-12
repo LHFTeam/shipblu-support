@@ -332,7 +332,7 @@ export const conversations = pgTable(
     index('conversations_inbox_idx').on(t.statusId, t.groupId, t.lastMessageAt),
     index('conversations_assignee_idx').on(t.assigneeAgentId, t.lastMessageAt),
     // Every restricted agent's visibility ORs `accountable_agent_id = me` beside
-    // the assignee and the numbers they own (`answerableBy`). Postgres combines
+    // the assignee and the numbers they own (`heldByOrInGroupsOf`). Postgres combines
     // the arms of an OR only when each has an index; without this one the inbox,
     // its counts and the stream's authorisation scan the whole table, bot
     // transcripts included, on every render. Partial, because only tickets on an

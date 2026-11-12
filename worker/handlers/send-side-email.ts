@@ -3,6 +3,7 @@ import { db } from '@/db/client';
 import { agents, conversations, sideConversationMessages, sideConversations } from '@/db/schema';
 import { env, replyDomain } from '@/lib/env';
 import { emailProvider } from '@/lib/email/providers';
+import { senderAddress } from '@/lib/email/sender';
 import { REPLY_ABOVE_MARKER } from '@/lib/email/quote-strip';
 import { textToHtml } from '@/lib/html/sanitize';
 import { replyToAddress } from '@/lib/email/reply-address';
@@ -62,7 +63,7 @@ export async function sendSideEmail(job: ClaimedJob): Promise<void> {
   if (alreadySent('send_side_email', messageId, row.message.deliveryStatus)) return;
 
   const e = env();
-  if (!e.EMAIL_FROM_ADDRESS) throw new Error('EMAIL_FROM_ADDRESS is not configured');
+  const from = senderAddress();
 
   const recipients = row.message.toAddresses.length
     ? row.message.toAddresses
@@ -115,7 +116,7 @@ export async function sendSideEmail(job: ClaimedJob): Promise<void> {
     to: recipients.map((address) => ({ address })),
     cc: row.message.ccAddresses.map((address) => ({ address })),
     from: {
-      address: e.EMAIL_FROM_ADDRESS,
+      address: from,
       name: row.agent ? `${row.agent.name} (${e.EMAIL_FROM_NAME})` : e.EMAIL_FROM_NAME,
     },
     // The `s` token, not the `c` one. A hub replying to the ticket's reply

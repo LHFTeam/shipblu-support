@@ -129,7 +129,11 @@ export function Sidebar({
               back to whoever is accountable for it, while they are active.
             </InfoTip>
           }
-          hint={accountableNote(conversation.accountable, conversation.businessNumber)}
+          hint={accountableNote(
+            conversation.accountable,
+            conversation.businessNumber,
+            conversation.onCoexistenceNumber,
+          )}
         >
           {conversation.accountable ? (
             <p className="flex min-w-0 items-center gap-1.5 text-sm text-(--color-text-primary)">

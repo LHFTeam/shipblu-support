@@ -105,7 +105,8 @@ import { DEFAULT_LOCALE, isLocale, type Locale } from './locale';
  * This one decides whether a path is Freshdesk's at all, as
  * `freshdeskCategoryId` does for a category; `resolveLegacyPath` and
  * `rewriteLegacyArticleLinks` read a preference out of a path already known to
- * be Freshdesk's, and fall back when it names a language we lack.
+ * be Freshdesk's, and fall back when it names a language we lack (the rewriter
+ * also when it names one of ours in upper case, which it does not lower).
  */
 const PORTAL_PATH = new RegExp(String.raw`^(?:${FRESHDESK_LANGUAGE})?/support(?<page>/.*)?$`);
 

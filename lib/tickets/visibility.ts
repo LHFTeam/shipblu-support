@@ -51,6 +51,12 @@ export function conversationVisibility(agent: SessionAgent): SQL[] {
  * what is attached to it, and is offered a view for exactly the groups whose
  * tickets they can list.
  *
+ * One kind of ticket is outside all of that: on a coexistence number, which is
+ * one person's phone, only the number's own half admits anybody, so a ticket
+ * there is its owner's and no group member's, assignee's or accountable
+ * agent's (`lib/tickets/owner-only.ts`). An agent who sees every ticket still
+ * does.
+ *
  * Membership is read in the query rather than carried on the session, so
  * taking an agent out of a group takes the group's tickets away at their next
  * request rather than at their next sign-in.

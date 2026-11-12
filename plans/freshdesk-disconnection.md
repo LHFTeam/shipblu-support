@@ -623,7 +623,8 @@ rewrites to. The route reads that header, or `?path=` on a direct call
 (PROJECT-STATE §6.115).
 
 - `proxy.test.ts` checks that each of the six shapes, on both hosts, is
-  rewritten with the path in the header.
+  rewritten with the path in the header. The same list holds two category
+  shapes too since the category rule (PR 7, below).
 - `app/help/legacy/route.db.test.ts` builds the request Next actually hands
   the handler. Four of its cases fail against the route as it was.
 - A production build served locally, on a database holding one bilingual
@@ -857,9 +858,10 @@ the help-centre host, the locale rewrite and the sign-in check, on every host.
 None of those needs a lookup, so none goes through `/help/legacy`. A category
 does, and since its own pull request it goes there with the articles and the
 folders (below). The language is the path's own, then Freshdesk's `url_locale`
-parameter, then Arabic. A first segment of two letters that is not one of our
-languages (`/kb/support`, which is the console's) is not a Freshdesk path of
-ours and is left alone:
+parameter, then Arabic, for every row but the category's, which reads the path
+alone (below). A first segment of two letters that is not one of our languages
+(`/kb/support`, which is the console's) is not a Freshdesk path of ours and is
+left alone:
 
 | Freshdesk                                            | Here                                    |
 | ---------------------------------------------------- | --------------------------------------- |
@@ -903,11 +905,15 @@ which production does not yet, and the help centre's 404 from then on.
   - that a session cookie changes nothing;
   - that `url_locale` names the language where the path does not;
   - that the search carries its term, whole, and nothing else;
-  - that articles and folders still reach the legacy route;
+  - that articles, folders and, since the category rule, categories still
+    reach the legacy route;
   - that the leftovers answer as they did, and so does a two-letter prefix
     that is not one of our languages.
 
-  Eight of its cases fail against `proxy.ts` as it was.
+  Eight of its portal-page cases failed against `proxy.ts` as it was. Nine do
+  since the category rule added two category paths to the legacy-route case,
+  and the file as a whole fails seventeen there, with the category rule's own
+  cases.
 
 - A production build served locally answered each shape, a category then
   among them, with a 302 and a relative `Location` on both hosts, with the
@@ -979,9 +985,10 @@ which production does not yet, and the help centre's 404 from then on.
     categories: 8 requests, under `/ar` or `/en`, four from browsers on Windows
     and a Mac and four from two crawlers.
 
-  - `lib/kb/legacy-resolve.db.test.ts` builds production's three categories and
-    checks every answer for them against `getCategory`, so none is a page that
-    404s. It also checks a translation closed either way, the order of the
+  - `lib/kb/legacy-resolve.db.test.ts` builds production's three categories,
+    and checks the answers of its shape cases and of a translation closed
+    either way against `getCategory`, so none of those is a page that 404s.
+    It also checks a translation closed either way, the order of the
     translations, the guide, and a category whose only readable articles are
     in the other language. `app/help/legacy/route.db.test.ts` checks the
     encoded Arabic `Location`. `proxy.test.ts` checks the rewrite on both

@@ -154,7 +154,11 @@ export function describeEvent(type: string, data: Record<string, unknown>): stri
         return 'gave the ticket to the owner of the WhatsApp number it arrived on';
       }
       if (data.reason === 'number_handover') {
-        return 'gave the ticket to the new owner of its WhatsApp number';
+        // Taken off a colleague, which only a coexistence number's handover
+        // does: said, because the ticket left their inbox without a word.
+        return data.from
+          ? 'gave the ticket to the new owner of its WhatsApp number: only the number’s owner and agents who can see every ticket can open its tickets'
+          : 'gave the ticket to the new owner of its WhatsApp number';
       }
       return 'reassigned the ticket';
     /*
@@ -176,6 +180,12 @@ export function describeEvent(type: string, data: Record<string, unknown>): stri
           ? `made the owner of its WhatsApp number accountable for the ticket ${when}: it did not name the number's current owner`
           : `cleared who is accountable for the ticket ${when}: its WhatsApp number has no active owner now, so breaches count against whoever holds it`;
       }
+      // No handover happened: the ticket arrived while its number's owner was
+      // deactivated, or before it had one, and nobody answered for it since
+      // (`takeForNumberOwner`).
+      if (data.reason === 'owner_returned') {
+        return 'made the owner of its WhatsApp number accountable for the ticket: nobody was when it arrived, and breaches on it count against them from now';
+      }
       return data.to
         ? 'made the new owner of its WhatsApp number accountable for the ticket: breaches on it count against them'
         : 'cleared who is accountable for the ticket: its WhatsApp number has no owner now, so breaches count against whoever holds it';
@@ -190,6 +200,12 @@ export function describeEvent(type: string, data: Record<string, unknown>): stri
         ? 'made the author of the thread’s first comment the requester: a reply under it had arrived first and opened the ticket'
         : 'changed the requester';
     case 'unassigned':
+      // Nobody clicked anything: a coexistence number's ticket was taken off
+      // a holder it is hidden from, and the sentence has to say why it is
+      // back in the queue.
+      if (data.reason === 'owner_only') {
+        return 'unassigned the ticket: its WhatsApp number has no active owner now, and only the number’s owner and agents who can see every ticket can open its tickets';
+      }
       return 'unassigned the ticket';
     case 'group_changed':
       return 'moved the ticket to another group';

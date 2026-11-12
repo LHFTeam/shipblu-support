@@ -31,6 +31,7 @@ import { checkArticleOffFreshdesk } from './rules/article-off-freshdesk.mjs';
 import { checkSlugConfinement } from './rules/slugify.mjs';
 import { checkNoDomTitleAttribute } from './rules/dom-title.mjs';
 import { checkLikePatternsUseTheBuilder } from './rules/like-patterns.mjs';
+import { checkOneEmailCheck } from './rules/email-check.mjs';
 import { checkConsolePagesScroll } from './rules/console-scroll.mjs';
 import { checkScrollContainersArePositioned } from './rules/scroll-positioned.mjs';
 import { checkLightOnly } from './rules/light-only.mjs';
@@ -84,6 +85,7 @@ export const RULES = [
   ['slugify', checkSlugConfinement],
   ['dom-title', checkNoDomTitleAttribute],
   ['like-patterns', checkLikePatternsUseTheBuilder],
+  ['email-check', checkOneEmailCheck],
   ['console-scroll', checkConsolePagesScroll],
   ['scroll-positioned', checkScrollContainersArePositioned],
   ['form-reset', checkFormsDoNotReset],

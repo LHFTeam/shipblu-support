@@ -9,7 +9,7 @@ import { lockAddress } from '@/lib/admin/agent-profile';
 import { joinGroups } from '@/lib/admin/group-members';
 import { needsBootstrap } from '@/lib/auth/guard';
 import { safePath } from '@/lib/auth/next-path';
-import { normaliseEmail } from '@/lib/auth/normalise';
+import { looksLikeEmail, normaliseEmail } from '@/lib/auth/normalise';
 import { hashPassword, validatePasswordStrength } from '@/lib/auth/password';
 import { createSession } from '@/lib/auth/session';
 import { DEFAULT_LOCALE } from '@/lib/kb/locale';
@@ -72,6 +72,11 @@ export async function bootstrapAdmin(
   const password = String(formData.get('password') ?? '');
 
   if (!name || !email) return { error: 'Enter your name and email' };
+  // The check every other form that makes an agent asks (`createInvite`,
+  // `saveAgentProfile`): the first admin's address is where the survey test
+  // and low-rating alerts go, through a job that refuses what this refuses
+  // (§6.117).
+  if (!looksLikeEmail(email)) return { error: 'Enter a valid email address' };
   if (name.length > MAX_AGENT_NAME) {
     return { error: `A name cannot be longer than ${MAX_AGENT_NAME} characters` };
   }

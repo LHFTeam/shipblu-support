@@ -31,11 +31,14 @@ export const LEGACY_PATH_HEADER = 'x-legacy-path';
 /**
  * The language a Freshdesk portal URL can start with: two letters in any case,
  * optionally with a region (`/ar`, `/EN`, `/en-US`), captured as `language`.
- * A regex source rather than a pattern, so every reader of a Freshdesk path is
- * built from it: the category's shape below, `portalLanguage`, and the
- * portal's own pages (`./freshdesk-portal.ts`). Written once, the proxy, the
- * legacy route and the portal's rules cannot read a different language out of
- * one URL.
+ * A regex source rather than a pattern, so every reader of a Freshdesk path a
+ * request names is built from it: the category's shape below, `portalLanguage`,
+ * and the portal's own pages (`./freshdesk-portal.ts`). Written once, the
+ * proxy, the legacy route and the portal's rules cannot read a different
+ * language out of one URL. A link inside an article body is read by
+ * `rewriteLegacyArticleLinks` (`./format.ts`), with a pattern of its own that
+ * finds the URL in markup. It reads `/EN/` as no language of ours and falls
+ * back to the linking article's own, where the route reads it as English.
  *
  * Whether the two letters name a language of ours stays each reader's own
  * question, because they ask it for different reasons. The portal's rules and

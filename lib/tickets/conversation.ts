@@ -22,7 +22,7 @@ import type { SessionAgent } from '@/lib/auth/session';
 import { configuredAccountId } from '@/lib/meta/client';
 import { metaConnection } from '@/lib/meta/connection';
 import { metaThreadStateFromMessage, type MetaThreadState } from '@/lib/meta/thread';
-import { parseCoexistence } from '@/lib/whatsapp/coexistence';
+import { hasCoexistenceRecord, parseCoexistence } from '@/lib/whatsapp/coexistence';
 import type { CustomFieldValues } from './custom-fields';
 import { threadOwnershipFacts } from './meta-thread';
 import {
@@ -107,6 +107,8 @@ export type ConversationDetail = {
    * the same map `custom.<key>` conditions are evaluated against.
    */
   customFields: CustomFieldValues;
+  /** The `channels` row of our number, where one names it. */
+  channelId: string | null;
   assigneeAgentId: string | null;
   assigneeName: string | null;
   /**
@@ -526,6 +528,9 @@ export async function getConversation(
     statusCategory: row.statusCategory,
     tags: row.conversation.tags,
     customFields: row.conversation.customFields,
+    // Which of our numbers it is on, for the Assignee picker
+    // (`listAssignableAgents`).
+    channelId: row.conversation.channelId,
     assigneeAgentId: row.conversation.assigneeAgentId,
     assigneeName: row.assigneeName,
     accountable: row.accountableId
@@ -541,10 +546,12 @@ export async function getConversation(
               : null,
           }
         : null,
-    // As `routingModeOf` reads it: only a WhatsApp ticket's number is answered
-    // from a phone; the bot's is read-only whatever its config says.
+    // Only a WhatsApp ticket's number is answered from a phone; the bot's is
+    // read-only whatever its config says. Any record counts, as it does for
+    // who may see the ticket (`hasCoexistenceRecord`): the page must not offer
+    // to hand a group a ticket the group cannot open.
     onCoexistenceNumber:
-      row.conversation.channel === 'whatsapp' && parseCoexistence(row.numberConfig) !== null,
+      row.conversation.channel === 'whatsapp' && hasCoexistenceRecord(row.numberConfig),
     groupId: row.conversation.groupId,
     groupName: row.groupName,
     category: row.conversation.categoryId
