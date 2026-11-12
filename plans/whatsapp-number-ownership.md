@@ -324,6 +324,16 @@ Left as they are, each a change of its own if it is wanted:
   the re-read is the scoped list.
 - **A plain number adopted as a coexistence one, or a ticket filed under no
   row adopted onto one** (`findOrAdoptLive`), keeps the assignee it had.
+- **One place that enforces it.** "Never held by somebody it is hidden from"
+  is asked writer by writer: the rota, the console, `assign_agent`, a handover
+  and a reopen. Two writers do not ask: a ticket adopted onto a coexistence
+  row while a colleague holds it (`findOrAdoptLive`, `db/sql/009`), and the
+  sweep's reclaim. Decided on #516's review, and left to a pull request of its
+  own because it touches every assignment path: one `assignTicket(tx, …)`
+  helper that every writer of `assignee_agent_id` calls, and a repo rule
+  refusing a bare write of the column outside it, as `pool-confinement` does
+  for the pool. Not a trigger: "sees every ticket" is `can()` over a role and
+  an agent's overrides, which SQL would have to copy.
 - **The handover's record.** `channel_owner_changes` counts the tickets moved
   and reassigned, and has no column for those a handover to nobody unassigned;
   that count is in the notice and on each ticket's `unassigned` line, which
