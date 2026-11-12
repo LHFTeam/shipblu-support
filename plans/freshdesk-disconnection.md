@@ -623,7 +623,8 @@ rewrites to. The route reads that header, or `?path=` on a direct call
 (PROJECT-STATE §6.115).
 
 - `proxy.test.ts` checks that each of the six shapes, on both hosts, is
-  rewritten with the path in the header.
+  rewritten with the path in the header. The same list holds two category
+  shapes too since the category rule (PR 7, below).
 - `app/help/legacy/route.db.test.ts` builds the request Next actually hands
   the handler. Four of its cases fail against the route as it was.
 - A production build served locally, on a database holding one bilingual
@@ -903,12 +904,15 @@ which production does not yet, and the help centre's 404 from then on.
   - that a session cookie changes nothing;
   - that `url_locale` names the language where the path does not;
   - that the search carries its term, whole, and nothing else;
-  - that articles and folders still reach the legacy route;
+  - that articles, folders and, since the category rule, categories still
+    reach the legacy route;
   - that the leftovers answer as they did, and so does a two-letter prefix
     that is not one of our languages.
 
-  Eight of its cases failed against `proxy.ts` as it was, and nine since the
-  category rule added two category paths to the legacy-route case.
+  Eight of its portal-page cases failed against `proxy.ts` as it was. Nine do
+  since the category rule added two category paths to the legacy-route case,
+  and the file as a whole fails seventeen there, with the category rule's own
+  cases.
 
 - A production build served locally answered each shape, a category then
   among them, with a 302 and a relative `Location` on both hosts, with the
