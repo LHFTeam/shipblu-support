@@ -8862,9 +8862,15 @@ found"}` and not Next's page. The same route called by its own URL
       an outbound reply with no author, so `HUMAN_AGENT` is never derived from
       it, and labelled "Meta Business Suite" (`teamEchoLabel`). It moves
       `last_agent_message_at` forward only, never `last_customer_message_at`,
-      and `onAgentReply` follows. It never reopens a ticket, opens one, ends a
-      routing hold or assigns anybody. It files only on the customer's live
-      direct-message ticket: one of the 19 had no contact here at all. What Jev
+      and `onAgentReply` follows. It never reopens a ticket or opens one. On a
+      ticket held for the router it ends the hold as an agent's reply does
+      (`endHold` as `manual`, then `afterHoldEnded`), so it does not read
+      "Routing…" once answered. Facebook's row routes by `default_group`
+      (2026-11-12), but nothing stops an admin moving it to `category`. It
+      files only on the customer's live direct-message ticket: one of the 19
+      had no contact here at all. Echoes left out as unreadable (unsent, or
+      with no id, no customer or nothing to show) are counted on the log
+      line, so a payload change that hid every echo would show. What Jev
       is shown before a canned suggestion now calls such a reply, and a
       coexistence phone's, `support_agent` rather than `automatic_message`, for
       the same reason.

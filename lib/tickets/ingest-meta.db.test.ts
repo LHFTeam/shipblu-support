@@ -41,6 +41,7 @@ import {
   ingestMetaComment,
   ingestMetaEcho,
   ingestMetaMessage,
+  type MetaEchoResult,
 } from './ingest-meta';
 
 /**
@@ -1651,6 +1652,14 @@ describe('ingestMetaEcho', () => {
     };
   }
 
+  /** A result that filed something, narrowed so a test can read its ids. */
+  function filedEcho(result: MetaEchoResult) {
+    if (result.outcome !== 'filed' && result.outcome !== 'duplicate') {
+      throw new Error(`echo not filed: ${result.outcome}`);
+    }
+    return result;
+  }
+
   /** The default policy, so the customer's message gives the ticket its clocks. */
   async function hourlyPolicy() {
     const target = { firstResponseMins: 60, nextResponseMins: 60, resolutionMins: 1440 };
@@ -1679,11 +1688,10 @@ describe('ingestMetaEcho', () => {
   it('files the reply on the customer’s ticket as the team’s, with no author', async () => {
     const opened = await ingestMetaMessage(dm({ sentAt: OPENED }));
 
-    const result = await ingestMetaEcho(echo());
+    const result = filedEcho(await ingestMetaEcho(echo()));
 
     expect(result).toMatchObject({
-      filed: true,
-      duplicate: false,
+      outcome: 'filed',
       conversationId: opened.conversationId,
       conversationNumber: opened.conversationNumber,
     });
@@ -1778,7 +1786,7 @@ describe('ingestMetaEcho', () => {
     await resolveAsAgent(opened.conversationId);
     const before = await eventsOf(opened.conversationId);
 
-    expect(await ingestMetaEcho(echo())).toMatchObject({ filed: true });
+    expect(await ingestMetaEcho(echo())).toMatchObject({ outcome: 'filed' });
 
     expect(await conversation(opened.conversationId)).toMatchObject({
       status: 'Resolved',
@@ -1793,7 +1801,7 @@ describe('ingestMetaEcho', () => {
 
     const again = await ingestMetaEcho(echo({ sentAt: new Date(REPLIED.getTime() + HOUR) }));
 
-    expect(again).toEqual({ ...first, duplicate: true });
+    expect(again).toEqual({ ...first, outcome: 'duplicate' });
     expect((await messagesOf(opened.conversationId)).map((row) => row.channelMessageId)).toEqual([
       'm_first',
       'm_suite',
@@ -1803,8 +1811,7 @@ describe('ingestMetaEcho', () => {
 
   it('files nothing, and makes nobody a contact, without a live ticket', async () => {
     expect(await ingestMetaEcho(echo({ to: 'psid-stranger' }))).toMatchObject({
-      filed: false,
-      notFiled: 'no_ticket',
+      outcome: 'no_ticket',
     });
     expect(
       await db
@@ -1815,7 +1822,7 @@ describe('ingestMetaEcho', () => {
 
     const opened = await ingestMetaMessage(dm({ sentAt: OPENED }));
     await setStatus(opened.conversationId, 'Closed');
-    expect(await ingestMetaEcho(echo())).toMatchObject({ filed: false, notFiled: 'no_ticket' });
+    expect(await ingestMetaEcho(echo())).toEqual({ outcome: 'no_ticket' });
     expect(await db.select().from(messages).where(eq(messages.direction, 'outbound'))).toEqual([]);
   });
 
@@ -1830,9 +1837,32 @@ describe('ingestMetaEcho', () => {
     expect(opened.conversationId).not.toBe(old.conversationId);
 
     expect(await ingestMetaEcho(echo())).toMatchObject({
-      filed: false,
-      notFiled: 'predates_ticket',
+      outcome: 'predates_ticket',
     });
+    expect(await clocks(opened.conversationId)).toMatchObject({
+      lastAgentMessageAt: null,
+      firstRespondedAt: null,
+    });
+  });
+
+  it('stops no clock again for a row it did not file, whatever its mid', async () => {
+    // Under a META_APP_ID naming the wrong app, our own acknowledgement's echo
+    // would arrive here as another app's: its row is found by its mid, and a
+    // re-run of the follow-ups would record a person's answer.
+    const opened = await ingestMetaMessage(dm({ sentAt: OPENED }));
+    await db.insert(messages).values({
+      conversationId: opened.conversationId,
+      direction: 'outbound',
+      kind: 'reply',
+      bodyText: 'We are closed now',
+      channelMessageId: 'm_ack',
+      deliveryStatus: 'sent',
+      meta: { metaKind: 'direct_message', platform: 'facebook', autoResponse: true },
+      createdAt: REPLIED,
+    });
+
+    expect(await ingestMetaEcho(echo({ mid: 'm_ack' }))).toMatchObject({ outcome: 'duplicate' });
+
     expect(await clocks(opened.conversationId)).toMatchObject({
       lastAgentMessageAt: null,
       firstRespondedAt: null,
@@ -1849,8 +1879,8 @@ describe('ingestMetaEcho', () => {
       echo({ mid: 'm_typed', sentAt: new Date(OPENED.getTime() + 13_000) }),
     );
 
-    expect(quick).toMatchObject({ filed: false, notFiled: 'too_quick' });
-    expect(typed).toMatchObject({ filed: true, duplicate: false });
+    expect(quick).toEqual({ outcome: 'too_quick' });
+    expect(typed).toMatchObject({ outcome: 'filed' });
     expect((await messagesOf(opened.conversationId)).map((row) => row.channelMessageId)).toEqual([
       'm_first',
       'm_typed',
@@ -1872,7 +1902,7 @@ describe('ingestMetaEcho', () => {
       .delete(conversationShipments)
       .where(eq(conversationShipments.conversationId, opened.conversationId));
 
-    expect(await ingestMetaEcho(withNumber)).toMatchObject({ duplicate: true });
+    expect(await ingestMetaEcho(withNumber)).toMatchObject({ outcome: 'duplicate' });
 
     expect(await linked()).toHaveLength(1);
   });
@@ -1880,7 +1910,7 @@ describe('ingestMetaEcho', () => {
   it('never files a direct message onto the customer’s public comment thread', async () => {
     // The commenter is the same Facebook user the reply went to privately.
     await ingestMetaComment(comment({ from: PSID }));
-    expect(await ingestMetaEcho(echo())).toMatchObject({ filed: false });
+    expect(await ingestMetaEcho(echo())).toEqual({ outcome: 'no_ticket' });
   });
 
   it('queues a download for a file the team sent, with the row', async () => {
@@ -1889,7 +1919,7 @@ describe('ingestMetaEcho', () => {
       { type: 'image' as const, url: 'https://cdn.example/label.jpg', title: null },
     ];
 
-    const result = await ingestMetaEcho(echo({ text: '[image]', attachments }));
+    const result = filedEcho(await ingestMetaEcho(echo({ text: '[image]', attachments })));
 
     expect(result.conversationId).toBe(opened.conversationId);
     expect((await queued()).filter((job) => job.type === 'download_media')).toEqual([

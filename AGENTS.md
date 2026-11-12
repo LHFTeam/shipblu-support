@@ -1047,7 +1047,7 @@ same way.** Meta echoes everything the Page sends, and `echoDisposition`
 `ingestMetaEcho` then stores it as the team's reply, outbound and with no
 author, labelled by `teamEchoLabel`, on the customer's live direct-message
 ticket only. It moves `last_agent_message_at` forward, then `onAgentReply`
-runs. Our own echo is told apart by its app id, never by finding its mid:
+runs, and on a held ticket it ends the hold as an agent's reply does. Our own echo is told apart by its app id, never by finding its mid:
 `send_meta` writes the mid after Graph answers, and the echo can race that
 write. A `standby` echo is not filed: another app held that thread, and it is
 that tool's until Messenger's swap. Nor is an Instagram echo, which names no

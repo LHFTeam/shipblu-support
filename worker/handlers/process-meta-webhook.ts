@@ -9,6 +9,7 @@ import {
   ingestMetaComment,
   ingestMetaEcho,
   ingestMetaMessage,
+  type MetaEchoResult,
 } from '@/lib/tickets/ingest-meta';
 import { env } from '@/lib/env';
 import { errorMessage } from '@/lib/errors';
@@ -77,11 +78,12 @@ export async function processMetaWebhook(event: {
   let answers = 0;
   let appRoles = 0;
   let echoesFiled = 0;
-  const echoesIgnored: Record<Exclude<EchoDisposition, 'file'>, number> = {
+  const echoesIgnored: Record<Exclude<EchoDisposition, 'file'> | 'unreadable', number> = {
     own: 0,
     standby: 0,
     instagram: 0,
     unattributed: 0,
+    unreadable: parsed.unreadableEchoes,
   };
   // Interactions that found no live ticket, or had already been recorded,
   // survey answers that recorded nothing — a second copy, an unknown survey,
@@ -125,25 +127,16 @@ export async function processMetaWebhook(event: {
       // a failure would send `dead`. A follow-up to a customer whose ticket is
       // closed, or whom this app never heard from, costs no retry at all.
       if (
-        result.notFiled === 'no_ticket' &&
+        result.outcome === 'no_ticket' &&
         !event.finalAttempt &&
         (await metaDeliveryPendingFrom(echo.platform, echo.to, event.id))
       ) {
         failures.push(`echo ${echo.mid}: no live ticket for its customer yet`);
         continue;
       }
-      if (result.filed && !result.duplicate) echoesFiled += 1;
+      if (result.outcome === 'filed') echoesFiled += 1;
       else skipped += 1;
-      log.info(
-        `${echo.platform} echo ${echo.mid} from app ${echo.appId} → ` +
-          (result.filed
-            ? `#${result.conversationNumber} (${result.duplicate ? 'duplicate' : "filed as the team's reply"})`
-            : result.notFiled === 'predates_ticket'
-              ? "not filed: older than every customer message on the customer's ticket"
-              : result.notFiled === 'too_quick'
-                ? "not filed: sent within seconds of the customer's message, as an automation is"
-                : 'not filed: no live ticket for its customer'),
-      );
+      log.info(`${echo.platform} echo ${echo.mid} from app ${echo.appId} → ${echoOutcome(result)}`);
     } catch (error) {
       failures.push(`echo ${echo.mid}: ${errorMessage(error)}`);
     }
@@ -235,6 +228,22 @@ export async function processMetaWebhook(event: {
       `${failures.length} item(s) in the batch failed, so the delivery is retried: ` +
       failures.join(' | ');
     throw new Error(message.slice(0, 2000));
+  }
+}
+
+/** What became of a filed-for echo, for its log line. */
+function echoOutcome(result: MetaEchoResult): string {
+  switch (result.outcome) {
+    case 'filed':
+      return `#${result.conversationNumber} (filed as the team's reply)`;
+    case 'duplicate':
+      return `#${result.conversationNumber} (duplicate)`;
+    case 'no_ticket':
+      return 'not filed: no live ticket for its customer';
+    case 'predates_ticket':
+      return "not filed: older than every customer message on the customer's ticket";
+    case 'too_quick':
+      return "not filed: sent within seconds of the customer's message, as an automation is";
   }
 }
 

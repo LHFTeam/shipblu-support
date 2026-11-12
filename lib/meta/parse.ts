@@ -55,6 +55,7 @@ export function parseMetaWebhook(
     feedbacks: [],
     appRoles: [],
     echoes: [],
+    unreadableEchoes: 0,
     emptyCards: 0,
   };
 
@@ -209,6 +210,7 @@ function readMessagingEvent(
   if (message.is_echo) {
     const echo = readEcho(event, message, platform, connection, accountId, standby);
     if (echo) result.echoes.push(echo);
+    else result.unreadableEchoes += 1;
     return;
   }
 
@@ -268,7 +270,7 @@ function readMessagingEvent(
     sentAt: fromEpoch(event.timestamp),
     text: displayText(message, attachments),
     attachments: attachments.map(normaliseAttachment),
-    replyToMid: message.reply_to?.mid ?? null,
+    replyToMid: nonEmptyString(message.reply_to?.mid),
     standby,
     raw: event as unknown as Record<string, unknown>,
   });
@@ -277,8 +279,9 @@ function readMessagingEvent(
 /**
  * One echo, whoever sent it — or null for one with no id, no customer to file
  * it against, or nothing in it to show, none of which could be a reply on a
- * ticket. Not counted with the empty cards: that count watches for
- * Instagram's phone-number card (§6.79), and an echo is not one.
+ * ticket. Counted as unreadable rather than with the empty cards, which watch
+ * for Instagram's phone-number card (§6.79): a Meta change that left every
+ * echo unreadable then still shows on the log line.
  *
  * Read with the rules a customer's message is read with, so the two sides of a
  * thread draw alike: the same stand-in for a file sent without words, and the
@@ -315,7 +318,9 @@ function readEcho(
     sentAt: fromEpoch(event.timestamp),
     text,
     attachments: attachments.map(normaliseAttachment),
-    replyToMid: message.reply_to?.mid ?? null,
+    // A string or nothing, for `text`'s reason: anything else would fail the
+    // insert into a text column on every retry of the batch.
+    replyToMid: nonEmptyString(message.reply_to?.mid),
     raw: event as unknown as Record<string, unknown>,
   };
 }

@@ -972,6 +972,7 @@ describe('echoes', () => {
     expect(parsed.echoes).toEqual([]);
     // The count watches for Instagram's phone-number card from a customer.
     expect(parsed.emptyCards).toBe(0);
+    expect(parsed.unreadableEchoes).toBe(1);
   });
 
   it('reads text that is not a string as none, rather than losing the batch', () => {
@@ -1010,6 +1011,13 @@ describe('echoes', () => {
     expect([unsent, noId, noCustomer].map((parsed) => parsed.echoes)).toEqual([[], [], []]);
     expect([unsent, noId, noCustomer].map((parsed) => parsed.messages)).toEqual([[], [], []]);
     expect([unsent, noId, noCustomer].map((parsed) => parsed.emptyCards)).toEqual([0, 0, 0]);
+    // Counted, so a Meta change that made every echo unreadable still shows.
+    expect([unsent, noId, noCustomer].map((parsed) => parsed.unreadableEchoes)).toEqual([1, 1, 1]);
+  });
+
+  it('reads a reply-to that is not a string as none', () => {
+    const parsed = parse(echoPayload({ reply_to: { mid: 123 } }));
+    expect(parsed.echoes[0]!.replyToMid).toBeNull();
   });
 });
 

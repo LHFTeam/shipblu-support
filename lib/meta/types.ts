@@ -367,6 +367,12 @@ export type NormalisedMetaWebhook = {
    */
   echoes: NormalisedEcho[];
   /**
+   * Echoes left out as unreadable: unsent, or with no id, no customer or
+   * nothing to show. Counted so a change in Meta's payload that made every
+   * echo unreadable shows on the job's log line.
+   */
+  unreadableEchoes: number;
+  /**
    * Messages that were nothing but a `template` card with nothing in it —
    * Instagram's phone-number card — counted but never ingested.
    */
