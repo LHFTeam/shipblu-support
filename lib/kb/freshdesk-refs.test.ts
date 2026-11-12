@@ -114,24 +114,45 @@ describe('saveRefusal', () => {
     );
   });
 
-  // Not "goes away once Freshdesk is disconnected": it already has. The page
-  // answers a stand-in here at best since the hostname moved on 2026-11-11.
-  it('refuses a link to the rest of the portal, which no longer exists', () => {
+  // Not "goes away once Freshdesk is disconnected": that hostname has been this
+  // app since 2026-11-11, and proxy.ts answers a page of the portal with the
+  // stand-in `freshdeskPortalRedirect` names, so the refusal offers that page.
+  it('refuses a link to a page of the portal, naming where it lands here', () => {
     expect(
       saveRefusal('<p><a href="https://support.shipblu.com/support/tickets/new">x</a></p>', null),
     ).toBe(
-      "The article has a link to Freshdesk's old portal, which no longer exists " +
+      "The article has a link to a page of Freshdesk's old portal, which now only redirects to /ar#contact here " +
         '(https://support.shipblu.com/support/tickets/new). ' +
-        'Point it at an article on this help centre (/<language>/a/<slug>) or remove it, then save.',
+        'Point it at /ar#contact or remove it, then save.',
+    );
+    expect(saveRefusal('<p><a href="/en/support/search?term=cod">x</a></p>', null)).toBe(
+      "The article has a link to a page of Freshdesk's old portal, which now only redirects to /en/search?q=cod here " +
+        '(/en/support/search?term=cod). ' +
+        'Point it at /en/search?q=cod or remove it, then save.',
     );
   });
 
-  it('still says a link on Freshdesk itself goes away once Freshdesk is disconnected', () => {
+  it('refuses a folder or a forum of the portal as having no page here', () => {
     expect(
-      saveRefusal('<p><a href="https://shipblu.freshdesk.com/support/home">x</a></p>', null),
-    ).toBe(
-      'The article has a link to Freshdesk, which goes away once Freshdesk is disconnected ' +
-        '(https://shipblu.freshdesk.com/support/home). ' +
+      saveRefusal(
+        '<p><a href="https://support.shipblu.com/en/support/solutions/folders/154000100">x</a></p>',
+        null,
+      ),
+    ).toContain('a link to Freshdesk folder 154000100, which has no page here');
+    expect(
+      saveRefusal(
+        '<p><a href="https://support.shipblu.com/en/support/discussions/topics/1">x</a></p>',
+        null,
+      ),
+    ).toContain("a link to Freshdesk's old portal, which nothing here answers");
+  });
+
+  // Not "goes away once": the merchant dashboard's links to an older account,
+  // shipblu.freshdesk.com, 404 already, and nothing here can tell the two apart.
+  it('says a link on Freshdesk itself is being disconnected', () => {
+    const live = 'https://shipblu72137318794432249.freshdesk.com/support/home';
+    expect(saveRefusal(`<p><a href="${live}">x</a></p>`, null)).toBe(
+      `The article has a link to Freshdesk, which is being disconnected (${live}). ` +
         'Point it at an article on this help centre (/<language>/a/<slug>) or remove it, then save.',
     );
   });
@@ -171,6 +192,13 @@ describe('restoreRefusal', () => {
   it('refuses a version that would bring Freshdesk back, and says what to do instead', () => {
     expect(restoreRefusal(`<p><img src="${BUCKET_IMAGE}" /></p>`, '<p>Now.</p>')).toBe(
       `That version shows a picture from Freshdesk, which stops loading once Freshdesk is disconnected (${BUCKET_IMAGE}), so restoring it would put Freshdesk back on the help centre. Restore another version, or edit the article instead.`,
+    );
+  });
+
+  it('says a portal address is the old portal, not Freshdesk, coming back', () => {
+    const picture = 'https://support.shipblu.com/helpdesk/attachments/48012345';
+    expect(restoreRefusal(`<p><img src="${picture}" /></p>`, '<p>Now.</p>')).toBe(
+      `That version shows a picture from Freshdesk's old portal, which no longer loads (${picture}), so restoring it would put an address of Freshdesk's old portal back on the help centre. Restore another version, or edit the article instead.`,
     );
   });
 

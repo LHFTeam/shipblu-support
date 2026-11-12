@@ -25,6 +25,7 @@ export function ArticleSidebar({
   translations,
   translationCandidates,
   publicUrl,
+  sendUrl,
   versions,
   stats,
 }: {
@@ -32,7 +33,10 @@ export function ArticleSidebar({
   status: string;
   translations: TranslationGroup;
   translationCandidates: TranslationOption[];
+  /** Where the agent opens it, on the host they are on (`articleOrigins`). */
   publicUrl: string | null;
+  /** The address to send a customer, on the published host. */
+  sendUrl: string | null;
   versions: ArticleVersion[];
   stats: { views: number; helpful: number; unhelpful: number };
 }) {
@@ -93,6 +97,12 @@ export function ArticleSidebar({
           >
             View on the help centre
           </a>
+        ) : null}
+        {sendUrl ? (
+          <p className="mt-1 text-xs text-(--color-text-secondary)">
+            Link for customers:{' '}
+            <span className="break-all text-(--color-text-primary) select-all">{sendUrl}</span>
+          </p>
         ) : null}
       </section>
 

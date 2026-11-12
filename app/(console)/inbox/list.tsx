@@ -434,11 +434,13 @@ export function InboxList({
  * is a sign-in page to them.
  *
  * A path on whichever host served this page rather than `publicBaseUrl()`, for
- * the reason `requestBaseUrl` gives: nothing checks that the published hostname
- * answers from this app, and `proxy.ts` rewrites a locale prefix into the help
- * centre on every host. A new tab, because leaving the console is a full
- * navigation and the place this list keeps (`lib/tickets/inbox-position`) lives
- * in memory, so the agent would come back to the top of the queue.
+ * the reason `articleOrigins` gives for a link an agent opens: their session
+ * lives on this host and keeps the chat launcher off the page, and `proxy.ts`
+ * rewrites a locale prefix into the help centre on every host. The address bar
+ * there is then not the link to send, so an article shows a signed-in agent the
+ * published one. A new tab, because leaving the console is a full navigation
+ * and the place this list keeps (`lib/tickets/inbox-position`) lives in memory,
+ * so the agent would come back to the top of the queue.
  *
  * Behind no permission: a link to a page any stranger can open is not a
  * capability, and gating it on `kb.view` hid nothing.

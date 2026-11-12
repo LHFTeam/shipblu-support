@@ -78,6 +78,15 @@ describe('articleOrigins', () => {
     });
   });
 
+  it("reads on the console's origin, not the published one, with no host to read", () => {
+    setTestEnv({ KB_PUBLIC_HOST: 'support.shipblu.com' });
+
+    expect(articleOrigins(headers({}))).toEqual({
+      read: 'https://shipblu-support.onrender.com',
+      send: 'https://support.shipblu.com',
+    });
+  });
+
   it('sends on APP_URL while KB_PUBLIC_HOST is unset', () => {
     expect(articleOrigins(headers({ host: 'localhost:3000' }))).toEqual({
       read: 'http://localhost:3000',

@@ -390,7 +390,8 @@ changes:
   `/widget/embed.js` (`app/widget/embed.js/route.ts`), which loads nothing.
 - The widget iframe, `/api/widget/search` and `/api/widget/article` (all 108
   articles; the images aside, clean), and the console's knowledge panel, which
-  reads `body_text` and inserts a `requestBaseUrl()` link.
+  reads `body_text` and inserted a `requestBaseUrl()` link (on
+  `publicBaseUrl()` since #521, `articleOrigins`).
 - Seed content: `lib/kb/handbook.ts`, `lib/tickets/canned-library.ts` (its test
   refuses any URL), `db/sql/`, `db/baseline.ts`. Production's 62 canned
   responses, the auto-response and `channels.config`.

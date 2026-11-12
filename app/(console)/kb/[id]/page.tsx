@@ -14,7 +14,7 @@ import {
 } from '@/lib/kb/admin';
 import { FLOOR_LABELS } from '@/lib/kb/floors';
 import { direction } from '@/lib/kb/locale';
-import { requestBaseUrl } from '@/lib/kb/site';
+import { articleOrigins } from '@/lib/kb/site';
 import { ArticleEditor } from '../editor';
 import { ArticleSidebar } from './sidebar';
 
@@ -48,21 +48,22 @@ export default async function ArticlePage({ params }: { params: Promise<{ id: st
   const article = await getArticleForEdit(id, agent.role);
   if (!article) notFound();
 
-  // Built from the host this page is being served on rather than from
-  // `publicBaseUrl()`. This link exists to be clicked by the person who just
-  // wrote the article. The host they are on has just answered from this app;
-  // nothing checks that the published one does, and while `KB_PUBLIC_HOST`
-  // named a host Freshdesk still served, the link was a 404 wearing the
-  // canonical address (`requestBaseUrl`).
+  // Two addresses, for the reasons `articleOrigins` gives. The link the reader
+  // opens is on the host they are on, where their session keeps the chat
+  // launcher off the article. The address printed for them to copy is on the
+  // published host, because a link copied from here is one sent to a customer,
+  // and the console's own host is the Render service URL once `KB_PUBLIC_HOST`
+  // names the help centre's.
   //
   // `effectiveVisibility`, never the column: a `published`/`public` article
   // inside an `agents_only` folder is not on the help centre, so its URL is a
   // guaranteed 404 — the hole `folderVisibleTo` exists to close, offered here
   // as a link somebody will click.
-  const publicUrl =
-    article.status === 'published' && article.effectiveVisibility === 'public'
-      ? `${requestBaseUrl(await headers())}/${article.locale}/a/${encodeURI(article.slug)}`
-      : null;
+  const onHelpCentre = article.status === 'published' && article.effectiveVisibility === 'public';
+  const origins = articleOrigins(await headers());
+  const path = `/${article.locale}/a/${encodeURI(article.slug)}`;
+  const publicUrl = onHelpCentre ? `${origins.read}${path}` : null;
+  const sendUrl = onHelpCentre ? `${origins.send}${path}` : null;
 
   if (!mayEdit) {
     return (
@@ -133,15 +134,17 @@ export default async function ArticlePage({ params }: { params: Promise<{ id: st
           </>
         )}
 
-        {publicUrl ? (
+        {publicUrl && sendUrl ? (
           <p className="text-sm text-(--color-text-secondary)">
             Also on the help centre:{' '}
             <a
               href={publicUrl}
               className="text-(--color-text-link) underline underline-offset-4 hover:text-(--color-text-link-hover)"
             >
-              {publicUrl}
+              open it
             </a>
+            . The link to send a customer is{' '}
+            <span className="break-all text-(--color-text-primary) select-all">{sendUrl}</span>
           </p>
         ) : null}
       </div>
@@ -193,6 +196,7 @@ export default async function ArticlePage({ params }: { params: Promise<{ id: st
         translations={translations}
         translationCandidates={translationCandidates}
         publicUrl={publicUrl}
+        sendUrl={sendUrl}
         versions={versions}
         stats={article.stats}
       />

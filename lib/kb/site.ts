@@ -13,6 +13,11 @@ export function publicBaseUrl(): string {
   // Local development and any deployment whose KB_PUBLIC_HOST is unset — a
   // fact about the variable, not about whether a custom domain answers here.
   // Falling back keeps the pages working; only the absolute URLs are off.
+  return appBaseUrl();
+}
+
+/** The app's own origin, `APP_URL`: where the console is served. */
+function appBaseUrl(): string {
   return (process.env.APP_URL ?? 'http://localhost:3000').replace(/\/$/, '');
 }
 
@@ -58,9 +63,12 @@ const HOSTNAME = /^[a-z0-9.-]+(:\d+)?$/i;
  * hold are `KB_PUBLIC_HOST` and the host of `APP_URL` — and `APP_URL` is
  * `sync: false`, so it cannot be checked from the repository at all.
  */
-export function requestBaseUrl(headers: HeaderSource): string {
+export function requestBaseUrl(
+  headers: HeaderSource,
+  fallback: () => string = publicBaseUrl,
+): string {
   const host = headers.get('x-forwarded-host') ?? headers.get('host');
-  if (!host || !HOSTNAME.test(host)) return publicBaseUrl();
+  if (!host || !HOSTNAME.test(host)) return fallback();
 
   // A comma-separated list when more than one proxy has handled it; the first
   // entry is the scheme the client actually used.
@@ -91,7 +99,11 @@ export type ArticleOrigins = { read: string; send: string };
  * host that answers from this app, which nothing checks (`requestBaseUrl` says
  * what that cost in 2026). A wrong value breaks every address we publish at
  * once, and is mended in the variable rather than link by link.
+ *
+ * With no host to read, `read` falls back to the console's own origin rather
+ * than the published one, which is the one host the agent cannot be signed in
+ * on once the variable names it.
  */
 export function articleOrigins(headers: HeaderSource): ArticleOrigins {
-  return { read: requestBaseUrl(headers), send: publicBaseUrl() };
+  return { read: requestBaseUrl(headers, appBaseUrl), send: publicBaseUrl() };
 }

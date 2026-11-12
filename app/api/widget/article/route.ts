@@ -47,9 +47,16 @@ export async function GET(request: Request) {
     id: article.id,
     title: article.title,
     bodyHtml: article.bodyHtml,
-    // The origin this request actually arrived on, which is the one that served
-    // the frame, not the one we publish, for the reason `/api/widget/search`
-    // gives beside its own links.
+    // The widget's "read more", the one help-centre link a visitor can click
+    // in it, built on the origin this request arrived on, which is the one that
+    // served the frame. Not `publicBaseUrl()`, unlike the link an agent sends
+    // (`articleOrigins`): this is a link for somebody reading right now, not an
+    // address they keep, and the frame's host has just answered from this app,
+    // where nothing checks that the published one does (`requestBaseUrl` says
+    // when it did not). The help-centre page it opens draws its launcher from
+    // that same host, the one whose storage holds the visitor's chat, though a
+    // chat a host page identified is kept there and not reopened, since the
+    // help centre names nobody (`judge()` in `lib/widget/person.ts`).
     url: `${requestBaseUrl(request.headers)}/${locale}/a/${encodeURI(article.slug)}`,
   });
 }

@@ -2232,20 +2232,25 @@ https://merchant.shipblu.com https://business.shipblu.com`:
   that is their word, not a reading. No service had deployed since
   2026-11-11 18:03, and both hosts still published the Render host in
   `BASE`, the sitemap, `robots.txt` and the canonicals, so the value waits
-  for a deploy. No console page answered a 200 on `support.shipblu.com` from
-  the move to then (`/inbox`, `/contacts`, `/admin`, `/kb`, `/api/sse`), so
-  nobody loses a console they were using there. Until #510 is released, the
-  favicon 404s on the domain once the variable is in effect (§1)._
+  for a deploy. From the move to then, the request log for
+  `support.shipblu.com` shows no 200 for a console page (`/inbox`,
+  `/contacts`, `/admin`, `/kb`, `/reports`, `/login`) and no request for the
+  console's live stream (`/api/events`, which stays served there, as all of
+  `/api` does), so nobody loses a console they were using there. Until #510
+  is released, the favicon 404s on the domain once the variable is in effect
+  (the Freshdesk bullet above, in this section)._
 
-  _**The knowledge panel's Insert link follows the published host** (#521, on
-  `dev`). With the variable naming the domain, a link built on the agent's
-  own host named the Render host in every reply, since the console stays
-  there. The link inserted into a reply is now built on `publicBaseUrl()`, and
-  the agent's own Open link stays on the host they are on, where their
-  session hides the chat launcher (`articleOrigins` in `lib/kb/site.ts`). The
-  widget's article links stay on the host that served its frame, where the
-  visitor's chat is stored. What follows is the record of August and
-  September._
+  _**The links agents send follow the published host** (#521, on `dev`). With
+  the variable naming the domain, a link built on the agent's own host named
+  the Render host in every reply, since the console stays there. The
+  knowledge panel's Insert and the address the console's article page shows
+  for copying are now built on `publicBaseUrl()`, and a signed-in agent
+  reading an article on the help centre sees that address in a line for the
+  team, since the address bar there names the Render host. The links an agent
+  opens stay on the host they are on, where their session keeps the chat
+  launcher off the page (`articleOrigins` in `lib/kb/site.ts`). The widget's
+  "read more" stays on the host that served its frame. What follows is the
+  record of August and September._
 
   **`KB_PUBLIC_HOST` was on this list and should not have been. It is set, to
   `support.shipblu.com`, and that domain still serves Freshdesk.** Measured
@@ -3501,7 +3506,10 @@ message bodies — the same reasoning as the deliberately tiny `pg_notify` paylo
   the agent is on. §5.1 carries what is still broken for everything else.
   _(By 2026-11-07 the web service no longer publishes `support.shipblu.com`
   either; §5.1 has the measurement. The domain has answered from this app
-  since 2026-11-11, and the variable is to be set to it again; §5.1.)_
+  since 2026-11-11, and the variable is to be set to it again; §5.1. Since
+  #521 only the links an agent opens follow their host: the one Insert puts
+  in a reply, and the one the article page shows for copying, are on
+  `publicBaseUrl()` (`articleOrigins`).)_
 - ~~`logged_in` and `selected_companies` knowledge base articles are still not
   served.~~ Both are evaluated now. `publiclyVisible()` is gone; every query in
   `lib/kb/queries.ts` takes a `KbViewer`, resolved from the portal session by

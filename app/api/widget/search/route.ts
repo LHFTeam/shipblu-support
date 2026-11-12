@@ -47,16 +47,11 @@ export async function GET(request: Request) {
 
   const hits = await searchArticles(ANONYMOUS, locale, query, RESULTS);
   /*
-   * The host this request arrived on, which is the one that served the frame —
-   * not `publicBaseUrl()`, unlike the link an agent sends (`articleOrigins`).
-   * The visitor's chat lives in that host's storage: the article opens in a
-   * help-centre page whose launcher frames the same host, so their conversation
-   * is still there, where on the other host it would start empty
-   * (`docs/embedding-the-widget.md`). And the host the frame came from has just
-   * answered from this app, where nothing checks that the published one does
-   * (`requestBaseUrl` says when it did not). This is a link for somebody
-   * reading right now, not a published address that has to stay put; the
-   * sitemap and the canonicals keep the configured host.
+   * The host this request arrived on, which is the one that served the frame,
+   * for the reason `/api/widget/article` gives beside its own link. The widget
+   * draws none of these today — a hit opens in the panel by its slug
+   * (`ArticleLink` in `lib/widget/types.ts`) — so the URL is carried for a
+   * caller that would open one, on the same host the article route uses.
    */
   const base = requestBaseUrl(request.headers);
 

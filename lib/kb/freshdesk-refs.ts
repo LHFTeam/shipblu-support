@@ -1,3 +1,4 @@
+import { freshdeskPortalRedirect } from './freshdesk-portal';
 import { decodeAttribute, imageSources, onFreshworks } from './image-src';
 
 /**
@@ -28,8 +29,9 @@ import { decodeAttribute, imageSources, onFreshworks } from './image-src';
 /**
  * Which of Freshdesk's addresses this is: `freshworks` for one on Freshworks'
  * own hosts, its bucket or a mailbox, which breaks when the account closes;
- * `portal` for a portal path on the portal's hostname or with no host, which
- * stopped reaching Freshdesk when that hostname moved here.
+ * `portal` for a portal path, either on the portal's hostname, which stopped
+ * reaching Freshdesk when that hostname moved here on 2026-11-11, or with no
+ * host, which reaches this app wherever an article is read.
  */
 type FreshdeskHome = 'freshworks' | 'portal';
 
@@ -65,6 +67,9 @@ const PORTAL_PATH =
 
 /** A Freshdesk article, by id, in any of the shapes above. */
 const ARTICLE_ID = /\/solutions\/articles\/(\d+)/i;
+
+/** A Freshdesk folder, by id, which `app/help/legacy` answers as it can. */
+const FOLDER_ID = /\/solutions\/folders\/(\d+)/i;
 
 const A_TAG = /<a\b[^>]*>/gi;
 const HREF_ATTR = /\shref="([^"]*)"/i;
@@ -148,9 +153,12 @@ export function saveRefusal(next: string, current: string | null): string | null
   const added = addedReference(next, current);
   if (!added) return null;
 
-  return added.kind === 'image'
-    ? `The article shows ${described(added)}. Remove it, or add the picture again with Insert picture, then save.`
-    : `The article has ${described(added)}. Point it at an article on this help centre (/<language>/a/<slug>) or remove it, then save.`;
+  if (added.kind === 'image') {
+    return `The article shows ${described(added)}. Remove it, or add the picture again with Insert picture, then save.`;
+  }
+  const target = portalPageTarget(added);
+  const instead = target ?? 'an article on this help centre (/<language>/a/<slug>)';
+  return `The article has ${described(added)}. Point it at ${instead} or remove it, then save.`;
 }
 
 /**
@@ -164,7 +172,8 @@ export function restoreRefusal(next: string, current: string): string | null {
   if (!added) return null;
 
   const what = added.kind === 'image' ? `shows ${described(added)}` : `has ${described(added)}`;
-  return `That version ${what}, so restoring it would put Freshdesk back on the help centre. Restore another version, or edit the article instead.`;
+  const back = added.home === 'portal' ? "an address of Freshdesk's old portal" : 'Freshdesk';
+  return `That version ${what}, so restoring it would put ${back} back on the help centre. Restore another version, or edit the article instead.`;
 }
 
 /** The first reference in `next` that `current` does not carry. */
@@ -184,12 +193,15 @@ function key(reference: FreshdeskReference): string {
  * pointed here is that no published article here came from it: never
  * imported, or imported and since unpublished (`legacyArticleIndex`).
  *
- * Anything else is said by where it lives (`FreshdeskHome`). One on Freshworks'
- * own hosts still works and stops when the account closes, so the editor is
- * told that. One on the portal's hostname has not reached Freshdesk since that
- * hostname moved here on 2026-11-11: a picture there answers nothing, and a
- * page answers a stand-in here at best (`./freshdesk-portal.ts`). Telling the
- * editor it goes away later would say it works now.
+ * Anything else is said by where it lives (`FreshdeskHome`), so the editor is
+ * told what the address does today. One on Freshworks' hosts is Freshdesk's
+ * and goes when the account closes, if it has not gone already: the merchant
+ * dashboard's links to an older account (`shipblu.freshdesk.com`) 404 now. One
+ * on the portal's hostname has not reached Freshdesk since 2026-11-11, and gets
+ * what this app answers there: a page of the portal a stand-in, which
+ * `./freshdesk-portal.ts` names and the refusal offers in its place; a folder
+ * the help centre's home at best (`app/help/legacy`); anything else nothing.
+ * Telling the editor such an address goes away later would say it works now.
  */
 function described(reference: FreshdeskReference): string {
   const { address } = reference;
@@ -202,7 +214,31 @@ function described(reference: FreshdeskReference): string {
   if (id) {
     return `a link to Freshdesk article ${id}, which has no published article here (${address})`;
   }
-  return reference.home === 'portal'
-    ? `a link to Freshdesk's old portal, which no longer exists (${address})`
-    : `a link to Freshdesk, which goes away once Freshdesk is disconnected (${address})`;
+  if (reference.home === 'freshworks') {
+    return `a link to Freshdesk, which is being disconnected (${address})`;
+  }
+  const target = portalPageTarget(reference);
+  if (target) {
+    return `a link to a page of Freshdesk's old portal, which now only redirects to ${target} here (${address})`;
+  }
+  const folder = FOLDER_ID.exec(address)?.[1];
+  if (folder) {
+    return `a link to Freshdesk folder ${folder}, which has no page here (${address})`;
+  }
+  return `a link to Freshdesk's old portal, which nothing here answers (${address})`;
+}
+
+/**
+ * Where a link to a page of the portal lands here (`freshdeskPortalRedirect`,
+ * which `proxy.ts` answers it with on every host), or null for anything else.
+ */
+function portalPageTarget(reference: FreshdeskReference): string | null {
+  if (reference.kind !== 'link' || reference.home !== 'portal') return null;
+  let url: URL;
+  try {
+    url = new URL(reference.address.trim(), RELATIVE_BASE);
+  } catch {
+    return null;
+  }
+  return freshdeskPortalRedirect(url.pathname, url.searchParams);
 }

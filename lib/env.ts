@@ -44,11 +44,11 @@ const schema = z.object({
    * pages `lib/kb/freshdesk-portal.ts` redirects, everything there is rewritten
    * under /help. `publicBaseUrl()` builds what we publish from it, or from
    * APP_URL while it is unset: the sitemap, the canonicals, the survey and
-   * portal links, and the origin the widget snippet falls back to. On every
-   * other hostname, and on all of them while it is unset, the help centre
-   * answers at /en, /ar and /help beside the console. Nothing checks that the
-   * name answers from this app, and one that does not publishes a 404
-   * (`requestBaseUrl`).
+   * portal links, the knowledge links agents send customers (`articleOrigins`)
+   * and the origin the widget snippet falls back to. On every other hostname,
+   * and on all of them while it is unset, the help centre answers at /en, /ar
+   * and /help beside the console. Nothing checks that the name answers from
+   * this app, and one that does not publishes a 404 (`requestBaseUrl`).
    */
   KB_PUBLIC_HOST: z.string().optional(),
 

@@ -25,7 +25,9 @@ import {
   type ArticleSummary,
 } from '@/lib/kb/queries';
 import { kbViewer } from '@/lib/kb/viewer';
+import { publicBaseUrl } from '@/lib/kb/site';
 import { decodeSlugParam } from '@/lib/kb/slug';
+import { viewerIsTeamMember } from '@/lib/widget/audience';
 import { HelpCta, PageBody, PageHeader } from '../../chrome';
 import { ArticleFeedback } from './feedback';
 import { PrintButton } from './print-button';
@@ -97,10 +99,11 @@ export default async function ArticlePage({
   // (`folderNeighbours`), the related list already without the next article, so
   // the rail does not spend one of its few places on a link the reader is about
   // to meet under the body anyway.
-  const [{ next, related: rail }, translations, availability] = await Promise.all([
+  const [{ next, related: rail }, translations, availability, teamMember] = await Promise.all([
     folderNeighbours(viewer, locale, article.folderId, article.id),
     translationsOf(viewer, article.translationGroupId),
     supportAvailability(),
+    viewerIsTeamMember(),
   ]);
 
   const others = translations.filter((entry) => entry.locale !== locale);
@@ -205,6 +208,26 @@ export default async function ArticlePage({
               after it are drawn in, and an article in one too made the page a
               stack of boxes with the answer as just one of them.
             */}
+            {/*
+              For a signed-in agent only, who reads here on the console's own
+              host: the queue's help-centre link and the knowledge panel's
+              Open both bring them here, so their session keeps the chat
+              launcher off the page (`articleOrigins` in `lib/kb/site.ts`).
+              That host is the Render service URL once `KB_PUBLIC_HOST` names
+              the help centre's, so the address bar is not the link to send a
+              customer; this is. English, like the console it belongs to.
+              Decided per viewer, which this page may do only because it is
+              `force-dynamic`.
+            */}
+            {teamMember ? (
+              <p dir="ltr" lang="en" className="kb-noprint text-sm text-(--color-text-secondary)">
+                For the team: the link to send a customer is{' '}
+                <span className="break-all text-(--color-text-primary) select-all">
+                  {`${publicBaseUrl()}/${locale}/a/${encodeURI(article.slug)}`}
+                </span>
+              </p>
+            ) : null}
+
             <div className="kb-article" dangerouslySetInnerHTML={{ __html: outline.html }} />
 
             <ArticleFeedback articleId={article.id} locale={locale} />
