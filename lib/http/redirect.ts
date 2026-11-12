@@ -17,6 +17,12 @@ import { NextResponse } from 'next/server';
  * only thing that knows which of our three hostnames this is — the custom
  * domain, the Render service URL, or localhost. So it is not merely a
  * workaround for the trap above; it is the form that is correct on all of them.
+ *
+ * Not for `proxy.ts`. Next parses a proxy's `Location` with no base URL, so a
+ * relative one throws `ERR_INVALID_URL` there and the request answers 500. The
+ * proxy redirects to a clone of `request.nextUrl`, which does carry the host
+ * the request named, and Next makes that same-host URL relative on the way out:
+ * the same `Location` this builds, reached the other way round.
  */
 export function redirectTo(path: string, status: 301 | 302 | 303 | 307 | 308): NextResponse {
   return new NextResponse(null, { status, headers: { Location: headerSafe(path) } });

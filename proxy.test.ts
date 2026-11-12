@@ -12,6 +12,7 @@ import {
   isMetadataRouteFile,
 } from 'next/dist/lib/metadata/is-metadata-route';
 import { normalizeAppPath } from 'next/dist/shared/lib/router/utils/app-paths';
+import { SESSION_COOKIE } from '@/lib/auth/cookie';
 import { LEGACY_PATH_HEADER } from '@/lib/kb/legacy-path';
 import { LOCALES } from '@/lib/kb/locale';
 import { setTestEnv, withTestEnv } from '@/lib/testing/env';
@@ -303,5 +304,166 @@ describe('Freshdesk URLs', () => {
       'https://shipblu-support.onrender.com/support/solutions/articles/1?utm=x',
     ).headers.get('x-middleware-rewrite');
     expect(new URL(destination!).search).toBe('');
+  });
+});
+
+/**
+ * Freshdesk's portal pages: its home, knowledge-base index, ticket form,
+ * sign-in and search, which customers' bookmarks and Freshdesk's emails still
+ * name (`lib/kb/freshdesk-portal.ts`).
+ *
+ * Measured on production before this rule: the bare shapes answered the
+ * console's 307 to `/login`, the locale ones the help centre's 404, and with
+ * `KB_PUBLIC_HOST` set the catch-all would have made every one a 404. So each
+ * is checked on the help centre's host and on the Render host, with the
+ * variable set and unset: the rule has to run before all of those see it.
+ */
+describe("Freshdesk's portal pages", () => {
+  const RENDER_HOST = 'shipblu-support.onrender.com';
+  const HOSTS = [
+    ['the help-centre host', KB_HOST, { KB_PUBLIC_HOST: KB_HOST }],
+    ['the Render host, KB_PUBLIC_HOST set', RENDER_HOST, { KB_PUBLIC_HOST: KB_HOST }],
+    ['the Render host, KB_PUBLIC_HOST unset', RENDER_HOST, {}],
+  ] as const;
+
+  /** A Freshdesk path, and where its reader lands here. */
+  const ANSWERS: [string, string][] = [
+    // The front door, as Freshdesk's own `/` sent it and as bookmarks hold it.
+    ['/support/home', '/ar'],
+    ['/ar/support/home', '/ar'],
+    ['/en/support/home', '/en'],
+    ['/support', '/ar'],
+    ['/en/support', '/en'],
+    // The knowledge-base index, and a category standing in until it is looked up.
+    ['/support/solutions', '/ar'],
+    ['/ar/support/solutions', '/ar'],
+    ['/en/support/solutions', '/en'],
+    ['/ar/support/solutions/154000297679', '/ar'],
+    ['/en/support/solutions/154000297680', '/en'],
+    // The ticket form, a ticket from a Freshdesk email, the sign-in and sign-up.
+    ['/support/tickets/new', '/ar#contact'],
+    ['/ar/support/tickets/new', '/ar#contact'],
+    ['/en/support/tickets/new', '/en#contact'],
+    ['/support/tickets', '/ar#contact'],
+    ['/en/support/tickets/44105', '/en#contact'],
+    ['/support/login', '/ar#contact'],
+    ['/ar/support/login', '/ar#contact'],
+    ['/ar/support/signup', '/ar#contact'],
+    ['/en/support/signup', '/en#contact'],
+    // A language with a region reads as its language; one the help centre lacks
+    // reads as Arabic, as no language at all does.
+    ['/en-US/support/home', '/en'],
+    ['/fr/support/home', '/ar'],
+    ['/support/home/', '/ar'],
+  ];
+
+  /** Where a redirect sends the browser, and on which host. */
+  function landing(response: Response): { host: string; to: string } | null {
+    const location = response.headers.get('location');
+    if (!location) return null;
+    const url = new URL(location);
+    return { host: url.host, to: url.pathname + url.search + url.hash };
+  }
+
+  for (const [label, host, env] of HOSTS) {
+    it(`sends each one to its counterpart here, with a 302, on ${label}`, () => {
+      setTestEnv(env);
+      for (const [path, to] of ANSWERS) {
+        const response = visit(`https://${host}${path}`);
+        // The path rides along so a failure names the shape that failed.
+        expect({ path, status: response.status }).toEqual({ path, status: 302 });
+        expect({ path, landing: landing(response) }).toEqual({ path, landing: { host, to } });
+        expect(rewrittenTo(response)).toBeNull();
+      }
+    });
+  }
+
+  // Never a 301 while Freshdesk could still take the name back, and never a 307
+  // or 308, which would re-send a stale Freshdesk form's body — a password,
+  // from the sign-in — to wherever this points.
+  it('answers every one with a 302, whatever the method', () => {
+    for (const method of ['GET', 'HEAD', 'POST']) {
+      const target = new URL(`https://${RENDER_HOST}/support/login`);
+      const request = new NextRequest(target, { method, headers: { host: target.host } });
+      expect(proxy(request).status).toBe(302);
+    }
+  });
+
+  it('answers the same for a signed-in agent, ahead of the console', () => {
+    const response = visit(`https://${RENDER_HOST}/support/home`, `${SESSION_COOKIE}=x`);
+    expect(response.status).toBe(302);
+    expect(landing(response)?.to).toBe('/ar');
+  });
+
+  it("carries a Freshdesk search's term over as ours, and nothing else", () => {
+    setTestEnv({ KB_PUBLIC_HOST: KB_HOST });
+    const term = 'شوبيفاى';
+    const response = visit(
+      `https://${KB_HOST}/ar/support/search?term=${encodeURIComponent(term)}&page=2`,
+    );
+    expect(response.status).toBe(302);
+    const location = new URL(response.headers.get('location')!);
+    expect(location.pathname).toBe('/ar/search');
+    expect([...location.searchParams]).toEqual([['q', term]]);
+    // Arabic in a `Location` is a 500 unless it is encoded (`lib/http/redirect.ts`).
+    expect(response.headers.get('location')).toMatch(/^[\x20-\x7e]+$/);
+
+    expect(landing(visit(`https://${KB_HOST}/en/support/search/solutions?term=cod`))?.to).toBe(
+      '/en/search?q=cod',
+    );
+    expect(landing(visit(`https://${KB_HOST}/support/search`))?.to).toBe('/ar/search');
+    expect(landing(visit(`https://${KB_HOST}/support/search?term=%20%20`))?.to).toBe('/ar/search');
+  });
+
+  it('drops the rest of the query, which nothing here reads', () => {
+    for (const path of [
+      '/support/home?utm_source=whatsapp&url_locale=en',
+      '/support/tickets/new?helpdesk_ticket%5Bsubject%5D=x',
+    ]) {
+      expect(landing(visit(`https://${RENDER_HOST}${path}`))?.to).toMatch(/^\/ar(#contact)?$/);
+    }
+  });
+
+  it('still hands Freshdesk articles and folders to the legacy route, language and all', () => {
+    setTestEnv({ KB_PUBLIC_HOST: KB_HOST });
+    for (const host of [KB_HOST, RENDER_HOST]) {
+      for (const path of [
+        '/ar/support/solutions/articles/154000189336',
+        '/ar/support/solutions/folders/154000518595',
+        '/en/support/solutions/folders/154000746959/page/2',
+      ]) {
+        expect({ path, to: rewrittenTo(visit(`https://${host}${path}`)) }).toEqual({
+          path,
+          to: '/help/legacy',
+        });
+      }
+    }
+  });
+
+  // Sending every unknown URL to the home is how a site makes itself
+  // unsearchable, so what has no counterpart here keeps its 404.
+  it('leaves what has no counterpart here to the help centre’s 404', () => {
+    setTestEnv({ KB_PUBLIC_HOST: KB_HOST });
+    for (const path of [
+      '/ar/support/search/solutions.json',
+      '/en/support/search/tickets',
+      '/en/support/search/topics',
+      '/ar/support/solutions/articles/most-viewed',
+      '/en/support/discussions',
+      '/support/sitemap.xml',
+      '/support/recaptcha',
+    ]) {
+      const response = visit(`https://${KB_HOST}${path}`);
+      expect({ path, location: response.headers.get('location') }).toEqual({
+        path,
+        location: null,
+      });
+      expect(rewrittenTo(response)).toBe(`/help${path}`);
+    }
+  });
+
+  it('reads `support` only as a whole segment', () => {
+    expect(visit(`https://${RENDER_HOST}/supporting`).status).toBe(307);
+    expect(rewrittenTo(visit(`https://${RENDER_HOST}/ar/supporting`))).toBe('/help/ar/supporting');
   });
 });
