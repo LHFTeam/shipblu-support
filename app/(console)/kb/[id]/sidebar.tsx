@@ -3,11 +3,13 @@
 import Link from 'next/link';
 import { useActionState } from 'react';
 import { useFormStatus } from 'react-dom';
+import { CopyableAddress } from '@/components/copyable-address';
 import { RelativeTime } from '@/components/relative-time';
 import { Badge, Button, ErrorText, Select } from '@/components/ui';
 import { ConfirmSubmit } from '@/components/confirm-submit';
 import { useActionForm } from '@/components/use-action-form';
 import { sentenceCase } from '@/lib/format';
+import type { ArticleLinks } from '@/lib/kb/site';
 import type { ArticleVersion, TranslationGroup, TranslationOption } from '@/lib/kb/admin';
 import {
   deleteArticle,
@@ -24,8 +26,7 @@ export function ArticleSidebar({
   status,
   translations,
   translationCandidates,
-  publicUrl,
-  sendUrl,
+  links,
   versions,
   stats,
 }: {
@@ -33,10 +34,8 @@ export function ArticleSidebar({
   status: string;
   translations: TranslationGroup;
   translationCandidates: TranslationOption[];
-  /** Where the agent opens it, on the host they are on (`articleOrigins`). */
-  publicUrl: string | null;
-  /** The address to send a customer, on the published host. */
-  sendUrl: string | null;
+  /** Where the agent opens it, and the address to send a customer; null off the help centre. */
+  links: ArticleLinks | null;
   versions: ArticleVersion[];
   stats: { views: number; helpful: number; unhelpful: number };
 }) {
@@ -88,9 +87,9 @@ export function ArticleSidebar({
 
         <ErrorText>{statusState.error}</ErrorText>
 
-        {publicUrl ? (
+        {links ? (
           <a
-            href={publicUrl}
+            href={links.url}
             target="_blank"
             rel="noreferrer"
             className="mt-2 block truncate text-xs text-(--color-text-link) underline underline-offset-4 hover:text-(--color-text-link-hover)"
@@ -98,10 +97,9 @@ export function ArticleSidebar({
             View on the help centre
           </a>
         ) : null}
-        {sendUrl ? (
+        {links ? (
           <p className="mt-1 text-xs text-(--color-text-secondary)">
-            Link for customers:{' '}
-            <span className="break-all text-(--color-text-primary) select-all">{sendUrl}</span>
+            Link for customers: <CopyableAddress address={links.sendUrl} />
           </p>
         ) : null}
       </section>

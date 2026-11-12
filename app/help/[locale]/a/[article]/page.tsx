@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { CopyableAddress } from '@/components/copyable-address';
 import { notFound } from 'next/navigation';
 import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
@@ -25,7 +26,7 @@ import {
   type ArticleSummary,
 } from '@/lib/kb/queries';
 import { kbViewer } from '@/lib/kb/viewer';
-import { publicBaseUrl } from '@/lib/kb/site';
+import { articleUrl, publicBaseUrl } from '@/lib/kb/site';
 import { decodeSlugParam } from '@/lib/kb/slug';
 import { viewerIsTeamMember } from '@/lib/widget/audience';
 import { HelpCta, PageBody, PageHeader } from '../../chrome';
@@ -218,13 +219,18 @@ export default async function ArticlePage({
               customer; this is. English, like the console it belongs to.
               Decided per viewer, which this page may do only because it is
               `force-dynamic`.
+
+              Only for an agent the page reads as anonymous, so only on an
+              article anybody may open: one also signed in to the portal as a
+              customer is shown that customer's `logged_in` and company
+              articles, whose link would answer another customer with the
+              sign-in or a 404 — the articles the knowledge panel marks as not
+              to be sent (`linkability`).
             */}
-            {teamMember ? (
+            {teamMember && viewer.kind === 'anonymous' ? (
               <p dir="ltr" lang="en" className="kb-noprint text-sm text-(--color-text-secondary)">
                 For the team: the link to send a customer is{' '}
-                <span className="break-all text-(--color-text-primary) select-all">
-                  {`${publicBaseUrl()}/${locale}/a/${encodeURI(article.slug)}`}
-                </span>
+                <CopyableAddress address={articleUrl(publicBaseUrl(), locale, article.slug)} />
               </p>
             ) : null}
 

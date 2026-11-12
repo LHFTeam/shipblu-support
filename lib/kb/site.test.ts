@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { setTestEnv, withTestEnv } from '@/lib/testing/env';
-import { articleOrigins, publicBaseUrl, requestBaseUrl } from './site';
+import { articleLinks, articleOrigins, articleUrl, publicBaseUrl, requestBaseUrl } from './site';
 
 /** Just enough of `Headers` for the one method `requestBaseUrl` calls. */
 function headers(entries: Record<string, string>) {
@@ -92,5 +92,30 @@ describe('articleOrigins', () => {
       read: 'http://localhost:3000',
       send: 'https://shipblu-support.onrender.com',
     });
+  });
+});
+
+describe('articleLinks', () => {
+  // Swapped, an agent would send customers the Render host again, or read on
+  // the published host and be shown the chat launcher meant for customers.
+  it('opens on the read origin and sends on the send origin', () => {
+    expect(
+      articleLinks(
+        { read: 'https://shipblu-support.onrender.com', send: 'https://support.shipblu.com' },
+        'ar',
+        'شحنتي-فين',
+      ),
+    ).toEqual({
+      url: `https://shipblu-support.onrender.com/ar/a/${encodeURI('شحنتي-فين')}`,
+      sendUrl: `https://support.shipblu.com/ar/a/${encodeURI('شحنتي-فين')}`,
+    });
+  });
+});
+
+describe('articleUrl', () => {
+  it('percent-encodes an Arabic slug once', () => {
+    expect(articleUrl('https://support.shipblu.com', 'ar', 'شحنة')).toBe(
+      'https://support.shipblu.com/ar/a/%D8%B4%D8%AD%D9%86%D8%A9',
+    );
   });
 });

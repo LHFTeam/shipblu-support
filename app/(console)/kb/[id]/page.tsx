@@ -2,6 +2,7 @@ import { ChevronLeftIcon } from '@/components/icons';
 import Link from 'next/link';
 import { headers } from 'next/headers';
 import { notFound } from 'next/navigation';
+import { CopyableAddress } from '@/components/copyable-address';
 import { Badge, Notice } from '@/components/ui';
 import { requirePermission } from '@/lib/auth/guard';
 import { can } from '@/lib/auth/permissions';
@@ -14,7 +15,7 @@ import {
 } from '@/lib/kb/admin';
 import { FLOOR_LABELS } from '@/lib/kb/floors';
 import { direction } from '@/lib/kb/locale';
-import { articleOrigins } from '@/lib/kb/site';
+import { articleLinks, articleOrigins } from '@/lib/kb/site';
 import { ArticleEditor } from '../editor';
 import { ArticleSidebar } from './sidebar';
 
@@ -59,11 +60,10 @@ export default async function ArticlePage({ params }: { params: Promise<{ id: st
   // inside an `agents_only` folder is not on the help centre, so its URL is a
   // guaranteed 404 — the hole `folderVisibleTo` exists to close, offered here
   // as a link somebody will click.
-  const onHelpCentre = article.status === 'published' && article.effectiveVisibility === 'public';
-  const origins = articleOrigins(await headers());
-  const path = `/${article.locale}/a/${encodeURI(article.slug)}`;
-  const publicUrl = onHelpCentre ? `${origins.read}${path}` : null;
-  const sendUrl = onHelpCentre ? `${origins.send}${path}` : null;
+  const links =
+    article.status === 'published' && article.effectiveVisibility === 'public'
+      ? articleLinks(articleOrigins(await headers()), article.locale, article.slug)
+      : null;
 
   if (!mayEdit) {
     return (
@@ -134,17 +134,16 @@ export default async function ArticlePage({ params }: { params: Promise<{ id: st
           </>
         )}
 
-        {publicUrl && sendUrl ? (
+        {links ? (
           <p className="text-sm text-(--color-text-secondary)">
             Also on the help centre:{' '}
             <a
-              href={publicUrl}
+              href={links.url}
               className="text-(--color-text-link) underline underline-offset-4 hover:text-(--color-text-link-hover)"
             >
               open it
             </a>
-            . The link to send a customer is{' '}
-            <span className="break-all text-(--color-text-primary) select-all">{sendUrl}</span>
+            . The link to send a customer is <CopyableAddress address={links.sendUrl} />
           </p>
         ) : null}
       </div>
@@ -195,8 +194,7 @@ export default async function ArticlePage({ params }: { params: Promise<{ id: st
         status={article.status}
         translations={translations}
         translationCandidates={translationCandidates}
-        publicUrl={publicUrl}
-        sendUrl={sendUrl}
+        links={links}
         versions={versions}
         stats={article.stats}
       />

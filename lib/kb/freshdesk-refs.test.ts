@@ -183,6 +183,13 @@ describe('saveRefusal', () => {
     expect(saveRefusal('<p><a href="/support/home?url_locale=ar">x</a></p>', null, 'en')).toContain(
       'Point it at /ar or remove it',
     );
+    // An empty or unknown url_locale names no language of ours, so the
+    // article's wins rather than the default.
+    for (const asked of ['', 'fr', 'en-XX-1']) {
+      expect(
+        saveRefusal(`<p><a href="/support/home?url_locale=${asked}">x</a></p>`, null, 'en'),
+      ).toContain('Point it at /en or remove it');
+    }
   });
 
   // Not "goes away once": the merchant dashboard's links to an older account,

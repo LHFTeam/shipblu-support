@@ -3,7 +3,7 @@ import { DEFAULT_LOCALE, isLocale } from '@/lib/kb/locale';
 import { searchArticles } from '@/lib/kb/queries';
 import { ANONYMOUS } from '@/lib/kb/visibility';
 import { allow, clientIp } from '@/lib/http/rate-limit';
-import { requestBaseUrl } from '@/lib/kb/site';
+import { articleUrl, requestBaseUrl } from '@/lib/kb/site';
 
 export const dynamic = 'force-dynamic';
 
@@ -61,7 +61,7 @@ export async function GET(request: Request) {
       // Carried so a hit opens in the panel like an FAQ does, rather than
       // throwing the visitor out to a browser tab mid-question.
       slug: hit.slug,
-      url: `${base}/${locale}/a/${encodeURI(hit.slug)}`,
+      url: articleUrl(base, locale, hit.slug),
     })),
   });
 }

@@ -6,7 +6,7 @@ import type { ArticleVisibility } from './floors';
 import { effectiveVisibility, readableByRole } from './internal';
 import type { Locale } from './locale';
 import { hybridMatch, hybridRank } from './rank';
-import type { ArticleOrigins } from './site';
+import { articleLinks, type ArticleOrigins } from './site';
 
 /**
  * The knowledge base as an agent answering a ticket sees it.
@@ -119,10 +119,6 @@ type Row = {
 
 function toHit(row: Row, origins: ArticleOrigins): AgentArticleHit {
   const truncated = row.body.length > MAX_BODY_CHARS;
-  // The article's own locale, never the panel's: an Arabic search that
-  // surfaced the English translation must link to the English one, or the
-  // agent sends a URL for a row that does not exist.
-  const path = `/${row.locale}/a/${encodeURI(row.slug)}`;
 
   return {
     id: row.id,
@@ -135,8 +131,10 @@ function toHit(row: Row, origins: ArticleOrigins): AgentArticleHit {
     bodyTruncated: truncated,
     visibility: row.visibility,
     link: linkability(row.visibility),
-    url: `${origins.read}${path}`,
-    sendUrl: `${origins.send}${path}`,
+    // The article's own locale, never the panel's: an Arabic search that
+    // surfaced the English translation must link to the English one, or the
+    // agent sends a URL for a row that does not exist.
+    ...articleLinks(origins, row.locale, row.slug),
   };
 }
 

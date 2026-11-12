@@ -78,8 +78,35 @@ export function requestBaseUrl(
   return `${scheme}://${host}`;
 }
 
+/**
+ * An article's absolute URL on `origin`, for every absolute address we build
+ * for one: the sitemap's, the widget's, the console's and the knowledge
+ * panel's. The slug is the stored one, which can be Arabic, so it is
+ * percent-encoded here once rather than at each call; a relative `href` needs
+ * none of this, since the browser encodes it.
+ */
+export function articleUrl(origin: string, locale: string, slug: string): string {
+  return `${origin}/${locale}/a/${encodeURI(slug)}`;
+}
+
 /** Where a console knowledge link is read, and where one an agent sends points. */
 export type ArticleOrigins = { read: string; send: string };
+
+/** An article's two console links: `url` to open, `sendUrl` to send a customer. */
+export type ArticleLinks = { url: string; sendUrl: string };
+
+/**
+ * The pair every console surface showing an article link builds, read on
+ * `origins.read` and sent on `origins.send` (`articleOrigins` says why), so
+ * the knowledge panel and the article page cannot take them the other way
+ * round.
+ */
+export function articleLinks(origins: ArticleOrigins, locale: string, slug: string): ArticleLinks {
+  return {
+    url: articleUrl(origins.read, locale, slug),
+    sendUrl: articleUrl(origins.send, locale, slug),
+  };
+}
 
 /**
  * The two hosts a knowledge-base link takes in the console.

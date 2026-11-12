@@ -21,7 +21,7 @@ import { articleBody, changesNothing, cutArticleVersion } from '@/lib/kb/article
 import { FLOOR_LABELS, SELECTABLE_FLOORS, folderFloor, meetsFloor } from '@/lib/kb/floors';
 import { restoreRefusal, saveRefusal } from '@/lib/kb/freshdesk-refs';
 import { storeUploadedPicture } from '@/lib/kb/images';
-import { isLocale } from '@/lib/kb/locale';
+import { DEFAULT_LOCALE, isLocale } from '@/lib/kb/locale';
 import { pointedHere } from '@/lib/kb/off-freshdesk';
 import { slugify, uniqueSlug } from '@/lib/kb/slug';
 
@@ -545,7 +545,13 @@ export async function restoreVersion(_state: KbState, formData: FormData): Promi
   const body = articleBody(version.bodyHtml);
   const { bodyText, excerpt } = body;
   const bodyHtml = await pointedHere(body.bodyHtml, current.locale);
-  const refusal = restoreRefusal(bodyHtml, current.bodyHtml, current.locale);
+  // The column is text; a row in a language the help centre lacks is read in
+  // the default one, as the help centre would serve it.
+  const refusal = restoreRefusal(
+    bodyHtml,
+    current.bodyHtml,
+    isLocale(current.locale) ? current.locale : DEFAULT_LOCALE,
+  );
   if (refusal) return { error: refusal };
 
   await db.transaction(async (tx) => {

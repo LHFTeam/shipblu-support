@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { DEFAULT_LOCALE, isLocale } from '@/lib/kb/locale';
 import { getArticle } from '@/lib/kb/queries';
 import { allow, clientIp } from '@/lib/http/rate-limit';
-import { requestBaseUrl } from '@/lib/kb/site';
+import { articleUrl, requestBaseUrl } from '@/lib/kb/site';
 import { ANONYMOUS } from '@/lib/kb/visibility';
 
 export const dynamic = 'force-dynamic';
@@ -57,6 +57,6 @@ export async function GET(request: Request) {
     // that same host, the one whose storage holds the visitor's chat, though a
     // chat a host page identified is kept there and not reopened, since the
     // help centre names nobody (`judge()` in `lib/widget/person.ts`).
-    url: `${requestBaseUrl(request.headers)}/${locale}/a/${encodeURI(article.slug)}`,
+    url: articleUrl(requestBaseUrl(request.headers), locale, article.slug),
   });
 }

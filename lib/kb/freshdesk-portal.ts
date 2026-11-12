@@ -114,6 +114,18 @@ const PORTAL_PATH = new RegExp(String.raw`^(?:${FRESHDESK_LANGUAGE})?/support(?<
 const URL_LOCALE = /^([A-Za-z]{2})(?:-[A-Za-z]{2})?$/;
 
 /**
+ * The language Freshdesk's `url_locale` names, when it is one the help centre
+ * has, or undefined for one missing, empty or of a language we lack. Shared
+ * with the editor's refusals (`./freshdesk-refs.ts`), which read a link with
+ * no language of ours in the article's, so the two cannot read one parameter
+ * differently.
+ */
+export function portalQueryLocale(query: URLSearchParams): Locale | undefined {
+  const asked = URL_LOCALE.exec(query.get('url_locale') ?? '')?.[1]?.toLowerCase();
+  return isLocale(asked) ? asked : undefined;
+}
+
+/**
  * Where a Freshdesk portal path's reader goes here — a path, with its query
  * and fragment — or null when it is not one of the portal pages answered for.
  *
@@ -134,8 +146,7 @@ export function freshdeskPortalRedirect(pathname: string, query: URLSearchParams
 
   const named = match.groups?.language?.toLowerCase();
   if (named !== undefined && !isLocale(named)) return null;
-  const asked = URL_LOCALE.exec(query.get('url_locale') ?? '')?.[1]?.toLowerCase();
-  const locale: Locale = named ?? (isLocale(asked) ? asked : DEFAULT_LOCALE);
+  const locale: Locale = named ?? portalQueryLocale(query) ?? DEFAULT_LOCALE;
   const home = `/${locale}`;
   // Next answers a trailing slash with a 308 before the proxy runs, so this
   // rarely sees one; reading the page alike with or without it costs nothing.
