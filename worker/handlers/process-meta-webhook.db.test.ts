@@ -420,7 +420,8 @@ describe('echoes in a Messenger batch', () => {
         echoSource: sql<string>`${messages.meta}->>'echoSource'`,
       })
       .from(messages)
-      .where(eq(messages.direction, 'outbound'));
+      .where(eq(messages.direction, 'outbound'))
+      .orderBy(messages.createdAt);
   }
 
   async function ticket() {
@@ -434,7 +435,7 @@ describe('echoes in a Messenger batch', () => {
     return row!;
   }
 
-  it('files Business Suite’s reply on a thread this app holds, and no other echo', async () => {
+  it('files Business Suite’s replies wherever they arrived, and no other echo', async () => {
     const now = Date.now();
     const asked = now - 10 * MINUTE;
     const replied = now - 5 * MINUTE;
@@ -445,8 +446,12 @@ describe('echoes in a Messenger batch', () => {
         // Our own send coming back, as an app id written as a string.
         echoOf('m_ours', replied + MINUTE, OURS),
       ],
-      // Business Suite again, on a thread another app held then.
-      [echoOf('m_standby', replied + 2 * MINUTE, SUITE)],
+      // Business Suite again, on a thread another app held then: still the
+      // team's reply. And that other app's own send, which is not.
+      [
+        echoOf('m_standby', replied + 2 * MINUTE, SUITE),
+        echoOf('m_holder', replied + 3 * MINUTE, '576817601276249'),
+      ],
     );
     // The customer's message fails the first run, so the echo beside it finds
     // no ticket then; the retry stores the message first and files the echo.
@@ -459,9 +464,10 @@ describe('echoes in a Messenger batch', () => {
 
     expect(await outbound()).toEqual([
       { mid: 'm_suite', authorAgentId: null, echoSource: 'meta_business_suite' },
+      { mid: 'm_standby', authorAgentId: null, echoSource: 'meta_business_suite' },
     ]);
     expect(await ticket()).toEqual({
-      lastAgentMessageAt: new Date(replied),
+      lastAgentMessageAt: new Date(replied + 2 * MINUTE),
       lastCustomerMessageAt: new Date(asked),
       firstRespondedAt: new Date(replied),
     });
@@ -469,7 +475,7 @@ describe('echoes in a Messenger batch', () => {
 
     // Run once more, as a duplicate delivery would be: nothing new.
     await run(id);
-    expect((await outbound()).map((row) => row.mid)).toEqual(['m_suite']);
+    expect((await outbound()).map((row) => row.mid)).toEqual(['m_suite', 'm_standby']);
   });
 
   it('waits for the customer’s message when the reply is processed first', async () => {

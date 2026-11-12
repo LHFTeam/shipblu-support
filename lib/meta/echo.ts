@@ -19,24 +19,27 @@ import type { NormalisedEcho } from './types';
  *   automated welcome sent 2–5 seconds after the customer's message, which a
  *   person's reply sent from the Instagram app cannot be told from.
  *
- * So an echo is filed only when its app is named, is not this app, and sent on
- * a thread this app holds. Each refusal is a disposition of its own, so the
- * job's log line can count them apart.
+ * So an echo is filed when its app is named and is not this app: Business
+ * Suite's on any thread, and another app's only on a thread this app holds.
+ * Each refusal is a disposition of its own, so the job's log line can count
+ * them apart.
  */
 export type EchoDisposition =
-  /** Another app's message on a thread this app holds: the team's reply. */
+  /**
+   * The team's reply: Business Suite's wherever it arrived, or another app's
+   * on a thread this app holds.
+   */
   | 'file'
   /** Our own send coming back. `send_meta` wrote its row when it sent it. */
   | 'own'
   /**
-   * Another app held the thread, so it is that tool's until Messenger's swap
-   * (`docs/PROJECT-STATE.md` §5.1), and what was asked for here is the threads
-   * this app holds. Not because these are machines: all 171 stored are Page
-   * Inbox's and read as typed — none within 10 s of the customer, the same
-   * signed greetings — on 101 tickets, 94 never answered in the console. One
-   * has arrived since the switch. Filing them is this line and a replay
-   * (§6.117); a third app here would be the holder itself, automations and
-   * all, and should stay out either way.
+   * A third app's message while another app held the thread: the holder
+   * itself, its automations included, whose id says which app sent it and not
+   * whether a person typed it. Business Suite's echoes in `standby` are filed:
+   * the team answering a thread another tool holds still answered the
+   * customer, and all 171 stored read as typed — none within 10 s of the
+   * customer, the same signed greetings — on 101 tickets, 94 of them never
+   * answered in the console (§6.117).
    */
   | 'standby'
   /**
@@ -70,7 +73,7 @@ export function echoDisposition(
   if (echo.platform === 'instagram') return 'instagram';
   if (!ownAppId || !echo.appId) return 'unattributed';
   if (echo.appId === ownAppId) return 'own';
-  if (echo.standby) return 'standby';
+  if (echo.standby && echo.appId !== PAGE_INBOX_APP_ID) return 'standby';
   return 'file';
 }
 

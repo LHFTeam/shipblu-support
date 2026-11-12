@@ -4,7 +4,7 @@ import {
   type MetaMessageMeta,
 } from '@/lib/meta/visibility';
 import { lostReceiptNote } from '@/lib/whatsapp/receipts';
-import { teamEchoLabel } from './team-echo';
+import { teamEchoChip, teamEchoLabel } from './team-echo';
 
 /**
  * How the ticket thread reads a message: whose voice it is, and what became
@@ -51,7 +51,7 @@ export type Voice = {
   kind: 'message' | 'note' | 'bot';
   author: string;
   avatar: 'contact' | 'agent' | 'bot' | 'business-app';
-  badges: { tone: 'note' | 'automated' | 'public' | 'private'; label: string }[];
+  badges: { tone: 'note' | 'automated' | 'public' | 'private' | 'elsewhere'; label: string }[];
 };
 
 export function voiceOf(message: ThreadMessage, meta: MessageMeta): Voice {
@@ -80,6 +80,10 @@ export function voiceOf(message: ThreadMessage, meta: MessageMeta): Voice {
   const badges: Voice['badges'] = [];
   if (isNote) badges.push({ tone: 'note', label: 'Private note' });
   if (machine) badges.push({ tone: 'automated', label: 'Automated' });
+  // The team's reply, typed outside this console: said in so many words, so it
+  // is told from an agent's reply at a glance and not only by its author line.
+  const sentFrom = teamEchoChip(meta);
+  if (sentFrom) badges.push({ tone: 'elsewhere', label: sentFrom });
   // Whether a reply was public is the thing an agent most needs to be sure of
   // on a social ticket, so it is stated rather than implied by which side the
   // bubble is on.

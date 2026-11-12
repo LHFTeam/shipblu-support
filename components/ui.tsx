@@ -3,6 +3,7 @@ import {
   AlertCircleIcon,
   CheckIcon,
   ClockIcon,
+  ExternalIcon,
   GlobeIcon,
   HubIcon,
   InfoIcon,
@@ -340,7 +341,8 @@ export type BadgeTone =
   | 'note'
   | 'public'
   | 'private'
-  | 'automated';
+  | 'automated'
+  | 'elsewhere';
 
 /*
  * One entry of the state grid each. The decisions that are not obvious from the
@@ -389,6 +391,10 @@ const BADGE_TONES: Record<BadgeTone, string> = {
   private: 'border-transparent bg-(--color-feedback-neutral-bg) text-(--color-feedback-neutral-fg)',
   automated:
     'border-dashed border-(--color-border-strong) bg-(--color-message-system-bg) text-(--color-feedback-neutral-fg)',
+  // A person on the team, but not in this console: an outline with the
+  // external mark, neither an agent's plain chip nor the machine's dashes.
+  elsewhere:
+    'border-(--color-border-default) bg-(--color-background-hover) text-(--color-feedback-neutral-fg)',
 };
 
 /** How many of the four bars each priority fills. */
@@ -443,6 +449,8 @@ function badgeGlyph(tone: BadgeTone): ReactNode {
     case 'hub-waiting':
     case 'hub-replied':
       return <HubIcon {...glyph} />;
+    case 'elsewhere':
+      return <ExternalIcon {...glyph} />;
     default:
       return null;
   }

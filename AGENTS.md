@@ -1042,15 +1042,19 @@ replies (`routingModeOf`, **Routing by category**).
 
 **A Messenger reply typed in Meta Business Suite is filed from its echo, the
 same way.** Meta echoes everything the Page sends, and `echoDisposition`
-(`lib/meta/echo.ts`) files an echo only when its `app_id` is named, is not
-`META_APP_ID`, and arrived in `messaging`, on a thread this app held.
-`ingestMetaEcho` then stores it as the team's reply, outbound and with no
-author, labelled by `teamEchoLabel`, on the customer's live direct-message
-ticket only. It moves `last_agent_message_at` forward, then `onAgentReply`
-runs, and on a held ticket it ends the hold as an agent's reply does. Our own echo is told apart by its app id, never by finding its mid:
-`send_meta` writes the mid after Graph answers, and the echo can race that
-write. A `standby` echo is not filed: another app held that thread, and it is
-that tool's until Messenger's swap. Nor is an Instagram echo, which names no
+(`lib/meta/echo.ts`) files an echo only when its `app_id` is named and is not
+`META_APP_ID`. Business Suite's (the Page Inbox app) is filed whichever app
+held the thread. Another app's is filed only from `messaging`, on a thread this
+app held, because in `standby` it is the holder's own send, automations
+included. `ingestMetaEcho` then stores it as the team's reply, outbound and
+with no author, on the customer's live direct-message ticket only. It is
+labelled by `teamEchoLabel` and carries a "Sent from Business Suite" chip
+(`teamEchoChip`, the `elsewhere` badge tone), so it reads as the team's and as
+not typed here. It moves `last_agent_message_at` forward, then `onAgentReply`
+runs, and on a held ticket it ends the hold as an agent's reply does. Our own
+echo is told apart by its app id, never by finding its mid: `send_meta` writes
+the mid after Graph answers, and the echo can race that write. Nor is an
+Instagram echo filed, which names no
 app and includes an automated welcome sent seconds after the customer; with
 `META_APP_ID` unset nothing is filed. Meta sends each Messenger event in a
 delivery of its own, so a reply can be processed before the customer's message

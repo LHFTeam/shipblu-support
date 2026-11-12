@@ -418,7 +418,7 @@ const TYPED_REPLY_FLOOR_MS = 10_000;
 
 /**
  * The team's reply typed somewhere other than this console — Meta Business
- * Suite, on a Messenger thread this app holds — filed from its echo as the
+ * Suite, on any Messenger thread — filed from its echo as the
  * team's reply, the way a coexistence number's phone reply is
  * (`ingestWhatsAppEcho`). Only an echo `echoDisposition` files reaches here:
  * our own sends stay dropped, since `send_meta` wrote their rows, and so does

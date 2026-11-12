@@ -27,8 +27,14 @@ describe('echoDisposition', () => {
     expect(echoDisposition(echo({ appId: OURS, standby: true }), OURS)).toBe('own');
   });
 
-  it('drops what another app sent while it held the thread', () => {
-    expect(echoDisposition(echo({ standby: true }), OURS)).toBe('standby');
+  it('files Business Suite’s reply on a thread another app held, as the team’s', () => {
+    expect(echoDisposition(echo({ standby: true }), OURS)).toBe('file');
+  });
+
+  it('drops what a third app sent while another app held the thread', () => {
+    expect(echoDisposition(echo({ appId: '576817601276249', standby: true }), OURS)).toBe(
+      'standby',
+    );
   });
 
   it('files nothing it cannot attribute', () => {

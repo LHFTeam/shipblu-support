@@ -205,8 +205,8 @@ function readMessagingEvent(
   // an echo would file our reply as if the customer had written it, and then
   // reply to ourselves forever. So it is never one: it is normalised apart,
   // with the app that sent it, and `echoDisposition` (`lib/meta/echo.ts`) files
-  // only another app's reply on a thread this app holds — the team's, typed
-  // somewhere else.
+  // only the team's reply typed somewhere else: Business Suite's on any thread,
+  // a third app's only on a thread this app holds.
   if (message.is_echo) {
     const echo = readEcho(event, message, platform, connection, accountId, standby);
     if (echo) result.echoes.push(echo);

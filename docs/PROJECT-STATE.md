@@ -8832,23 +8832,26 @@ found"}` and not Next's page. The same route called by its own URL
         this app's.
 
       **The decision, in `echoDisposition` (`lib/meta/echo.ts`):** an echo is
-      filed when it names its app, the app is not `META_APP_ID`, and it arrived
-      in `messaging`, on a thread this app held. Everything else stays dropped
-      and is counted by reason on the job's log line, as `echo(es) filed`
-      and `echo(es) ignored` with the reasons beside it.
+      filed when it names its app and the app is not `META_APP_ID`. Page
+      Inbox's is filed whichever app held the thread. Another app's is filed
+      only from `messaging`, on a thread this app held. Everything else stays
+      dropped and is counted by reason on the job's log line, as
+      `echo(es) filed` and `echo(es) ignored` with the reasons beside it.
 
-      - **Ours** by its app id, not by finding its mid: `send_meta` writes the
-        mid after Graph answers, and a match would race that write.
-      - **`standby`**, because another app held the thread: until Messenger's
-        swap it is that tool's, and what was asked for is the threads this app
-        holds. Not because they are machines. All 171 are Page Inbox's and read
-        as typed: none within 10 s of the customer, the same signed greetings.
-        They fall on 101 tickets, 94 never answered in the console, 93 of them
-        still open or pending, and those keep reading as unanswered. Only one
-        has arrived since the switch. Filing Page Inbox's `standby` echoes is
-        one line in `echoDisposition` and the replay below over every
-        delivery kept; a third app's would be the holder's own sends and stays
-        out.
+      - **Page Inbox's in `standby` is filed** (decided 2026-11-12: "answered
+        in business suite should be filed and shown on the ticket"). Another
+        app held those threads, but the team answering in Business Suite still
+        answered the customer. All 171 read as typed: none within 10 s of the
+        customer, the same signed greetings. They fall on 101 tickets, 94
+        never answered in the console, 93 of them still open or pending, which
+        read as unanswered until the replay below files them. Only one has
+        arrived since the switch.
+      - **Ours** is dropped, told apart by its app id, not by finding its mid:
+        `send_meta` writes the mid after Graph answers, and a match would race
+        that write.
+      - **A third app's in `standby`** is dropped. It is the holder's own
+        send, automations included, and its id says which app sent it, not
+        whether a person typed it. None has been seen.
       - **Instagram**, because with no app id our own send could be told apart
         only by racing `send_meta`'s write, and the welcome not at all. Filed,
         it would record a first response 4 seconds into every thread it greets.
@@ -8860,7 +8863,11 @@ found"}` and not Next's page. The same route called by its own URL
       A filed echo is the team's reply, as a coexistence number's phone reply
       is (`ingestMetaEcho`, modelled on `ingestWhatsAppEcho`). It is stored as
       an outbound reply with no author, so `HUMAN_AGENT` is never derived from
-      it, and labelled "Meta Business Suite" (`teamEchoLabel`). It moves
+      it. Its author line reads "Meta Business Suite" (`teamEchoLabel`), and
+      a "Sent from Business Suite" chip beside it (`teamEchoChip`, the
+      `elsewhere` tone, an external-link glyph) tells it from an agent's reply
+      at a glance. The phone's echoes on a coexistence number now carry "Sent
+      from the phone" the same way. It moves
       `last_agent_message_at` forward only, never `last_customer_message_at`,
       and `onAgentReply` follows. It never reopens a ticket or opens one. On a
       ticket held for the router it ends the hold as an agent's reply does
@@ -8904,29 +8911,35 @@ found"}` and not Next's page. The same route called by its own URL
       (`accountableOrAssigneeAt`). 15 of the 49 in `messaging` are signed by
       name by the Sales team, most on Customer Care tickets.
 
-      **The 19 echoes since the switch are still in `webhook_events`**, one per
-      delivery, received 2026-11-11 11:36 to 2026-11-12 13:55 UTC, all marked
-      processed. The 30-day cleanup starts removing them around 2026-12-11.
-      Once this is deployed, a replay files them, and a replay is a production
-      write: `process_webhook` skips a processed row. The deliveries are listed
-      by:
+      **The 220 Page Inbox echoes are still in `webhook_events`**, one per
+      delivery: 49 in `messaging` and 171 in `standby`, received 2026-10-13 to
+      2026-11-12 13:55 UTC, all marked processed. The nightly cleanup deletes a
+      processed delivery 30 days after it was processed. 13 go at 00:00 UTC on
+      2026-11-13, then a few most nights, and the last on 2026-12-13. Once this
+      is deployed, a replay files them, and a replay is a production write:
+      `process_webhook` skips a processed row. The deliveries are listed by:
 
       ```sql
       select distinct w.id from webhook_events w
       cross join lateral jsonb_array_elements(case jsonb_typeof(w.payload->'entry')
         when 'array' then w.payload->'entry' else '[]' end) en(entry)
-      cross join lateral jsonb_array_elements(case jsonb_typeof(en.entry->'messaging')
-        when 'array' then en.entry->'messaging' else '[]' end) e(value)
+      cross join lateral (values ('messaging'), ('standby')) arr(k)
+      cross join lateral jsonb_array_elements(case jsonb_typeof(en.entry->arr.k)
+        when 'array' then en.entry->arr.k else '[]' end) e(value)
       where w.provider = 'meta' and w.payload->>'object' = 'page'
         and (e.value->'message'->>'is_echo')::boolean
-        and e.value->'message'->>'app_id' <> '1009187740467732'
-        and w.received_at >= '2026-11-11 09:50:17+00';
+        and e.value->'message'->>'app_id' = '263902037430900';
       ```
+
+      A replayed echo files only on its customer's live ticket, and only when
+      the ticket has a customer message no newer than the echo. So an old reply
+      whose customer has written again since, on a new ticket, stays out. One
+      whose ticket is closed stays out too.
 
       For each id: set its `processed_at` to null, then run
       `npm run job -- process_webhook webhookEventId=<id>`. Every other item in
       a delivery is idempotent on a second run (`process-meta-webhook.ts`).
-      Then run `rollup_metrics from=2026-11-11` so the reports take the first
+      Then run `rollup_metrics from=2026-10-13` so the reports take the first
       responses. The way back is deleting the rows the replay filed (`messages`
       whose `meta->>'echoSource'` is `meta_business_suite`), which leaves the
       tickets' `last_agent_message_at` and `first_responded_at` where the
