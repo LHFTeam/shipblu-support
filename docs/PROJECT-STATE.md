@@ -1704,7 +1704,11 @@ the rest of the cutover still needs, and some of it is now partly done:_
   `dev` in #510 (`7074dee`), and reaches production with the next release. Setting the variable is the next step (the
   `KB_PUBLIC_HOST` paragraph below). Once it is set, the Freshdesk portal
   paths that are not an article or a folder become the help centre's 404
-  rather than the sign-in page.
+  rather than the sign-in page. PR 7 of the plan (#513) answers them first, on
+  every host and with the variable set or not, each with a 302. The home, the
+  index and a category go to `/<locale>`, the ticket pages and the sign-in to
+  the home's contact band, and Freshdesk's search to ours. It reaches
+  production with the release after it merges.
 
   **Open outside the repository, as of 2026-11-12:**
 
@@ -1724,6 +1728,11 @@ the rest of the cutover still needs, and some of it is now partly done:_
   - **Article wording.** "Support Portal" is in 2 articles, and the chat
     instruction in 16 (the plan counted 15).
   - **Messenger's swap** (the bullet above).
+  - **Freshdesk's notification emails** still link
+    `support.shipblu.com/support/tickets/<n>`, and one was followed here from
+    a phone on 2026-11-11. No redirect here can show that ticket. While the
+    team still answers in Freshdesk, its portal URL belongs back on its own
+    `*.freshdesk.com` address (the plan's to-dos).
 
   The "Support" links on the marketing site, go.shipblu.com and the App Store
   listing need nothing more: `https://support.shipblu.com/` now lands here.
@@ -3186,6 +3195,15 @@ on node type (User)` with no subcode, which that predicate declines by design,
   scanners (verification tolerates a replayed token for exactly this reason, a
   reset deliberately does not), and that `Auto-Submitted: auto-generated` keeps
   autoresponders from opening a ticket per verification email.
+
+  **Customers began registering on 2026-11-12**, the day after
+  `support.shipblu.com` moved here: four identities with a password and four
+  `verify_email` tokens by 16:00 UTC. The first link was followed 18 seconds
+  after it was issued, once its `send_notification_email` job had completed.
+  The next two were sent and not followed. The fourth was never sent: its job
+  went `dead` on its first attempt, because the job's payload schema refused
+  an address the registration form had accepted. That customer cannot verify
+  until registration and the job agree on what an address is.
 
 ### 5.3 Phase 7 — ticket, conversation and contact importers
 

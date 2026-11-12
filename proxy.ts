@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { SESSION_COOKIE } from '@/lib/auth/cookie';
+import { freshdeskPortalRedirect } from '@/lib/kb/freshdesk-portal';
 import { LEGACY_PATH_HEADER } from '@/lib/kb/legacy-path';
 import { LOCALES } from '@/lib/kb/locale';
 
@@ -184,6 +185,30 @@ export default function proxy(request: NextRequest) {
   // Before the host split, because the help-centre hostname rewrites
   // everything it does not pass through.
   if (HEAD_FILE.test(pathname)) return NextResponse.next();
+
+  // --- Freshdesk's portal pages --------------------------------------------
+  // Its home, knowledge-base index, ticket form, sign-in and search, which
+  // customers' bookmarks and Freshdesk's own emails still name. Here, on every
+  // host, because what comes after answers them wrongly: the help-centre
+  // host's catch-all and the locale rewrite with the help centre's 404, and the
+  // console's check with its sign-in. Each has a counterpart that needs no
+  // lookup, so no route handler; `lib/kb/freshdesk-portal.ts` says which, and
+  // why every answer is a 302.
+  const portal = freshdeskPortalRedirect(pathname, request.nextUrl.searchParams);
+  if (portal) {
+    // An absolute URL on `nextUrl`'s origin, and not the relative `Location`
+    // `lib/http/redirect.ts` builds for a route handler. Next parses a proxy's
+    // `Location` with no base, so a relative one throws (`ERR_INVALID_URL`) and
+    // the request answers 500. One on the proxy's own origin it makes relative
+    // before it goes out, so `/ar#contact` is what the browser gets, as for the
+    // sign-in redirect below. That origin is not the host the request named:
+    // under `next start` it is the server's listen address, `localhost:<port>`,
+    // so it is safe only in a `Location` Next relativises. A plain URL rather
+    // than a clone of `nextUrl`, because a clone remembers that the path it was
+    // asked for ended in `/` and puts the slash back on whatever path it is
+    // given.
+    return NextResponse.redirect(new URL(portal, request.nextUrl.origin), 302);
+  }
 
   // --- Help centre hostname ------------------------------------------------
   if (kbHost && host === kbHost) {

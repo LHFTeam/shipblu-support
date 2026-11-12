@@ -69,7 +69,7 @@ account to close.
   sent its own `/` to `/support/home` and then to `/ar/support/home`, so those
   are the URLs bookmarks hold, and `/ar/support/home` already answers the help
   centre's 404. A redirect to the locale's home page would keep the people who
-  arrive that way.
+  arrive that way. _Done in PR 7 below (#513), not yet in production._
 
 Measured read-only on 2026-11-11 and 2026-11-12, the same way as on
 2026-11-07: Render's deploys and logs, the production database, every public
@@ -830,6 +830,97 @@ one.
   writer on them. Once the importer goes, nothing writes `kb_redirects`, and
   nothing needs to: its 174 rows are data.
 
+### 7. Freshdesk's portal pages land on their counterparts
+
+Added after the domain moved, and it lands before PR 6, not after it.
+
+PR 3 answers the URLs that name an article or a folder. Everything else of
+Freshdesk's portal still answered as nothing here: on `support.shipblu.com`,
+with `KB_PUBLIC_HOST` unset, `/support/home`, `/support/tickets/new`,
+`/support/login` and `/support/solutions` answered the console's
+`307 /login?next=…`, and `/ar/support/home`, `/en/support/home` and
+`/ar/support/solutions` the help centre's 404 (measured 2026-11-11 and 12).
+With the variable set, the help-centre host's catch-all would have made every
+one a 404. These are the paths customers' bookmarks hold, since Freshdesk's own
+`/` went to `/support/home` and on to `/ar/support/home`.
+
+What arrived, from Render's request log for `support.shipblu.com` between
+2026-11-11 21:04 and 2026-11-12 09:15 UTC, with our own curl checks left out:
+the portal home 22 times (phones in Egypt among them), Freshdesk's category
+pages 8, the knowledge-base index 6, its search 6 (one person, in Arabic), the
+ticket form 5 (Googlebot among them), the sign-in and sign-up 4, and one ticket
+page from a Freshdesk notification email, opened on an iPhone.
+
+**Built.** `proxy.ts` answers them itself, after the legacy block and ahead of
+the help-centre host, the locale rewrite and the sign-in check, on every host.
+`lib/kb/freshdesk-portal.ts` decides where each goes and carries the reasons.
+None needs a lookup, so none goes through `/help/legacy`. The language is the
+path's own, then Freshdesk's `url_locale` parameter, then Arabic. A first
+segment of two letters that is not one of our languages (`/kb/support`, which is
+the console's) is not a Freshdesk path of ours and is left alone:
+
+| Freshdesk                                            | Here                        |
+| ---------------------------------------------------- | --------------------------- |
+| `[/<l>]/support`, `/support/home`                    | `/<l>`                      |
+| `[/<l>]/support/solutions`                           | `/<l>`                      |
+| `[/<l>]/support/solutions/<category id>`             | `/<l>`, standing in         |
+| `[/<l>]/support/tickets/new`, `/tickets[/…]`         | `/<l>#contact`, standing in |
+| `[/<l>]/support/login`, `/signup`                    | `/<l>#contact`, standing in |
+| `[/<l>]/support/search[/solutions]?term=…`           | `/<l>/search?q=…`           |
+| anything else under `/support` (`solutions.json`, …) | as before                   |
+
+"As before" is the help centre's 404 for a locale path. For a bare one, it
+is the console's sign-in until `KB_PUBLIC_HOST` names `support.shipblu.com`,
+which production does not yet, and the help centre's 404 from then on.
+
+- **All 302.** The home and the index name the page they land on, so the
+  legacy route's rule would make them 301. A browser keeps a 301 with no expiry,
+  though, and these are the paths Freshdesk's own `/` redirects through, so a
+  DNS rollback while Freshdesk is live would send every browser that had loaded
+  the home here to `/ar` on Freshdesk. A 302 costs little meanwhile: `/ar` is
+  already the canonical page and in the sitemap. They become 301 after the
+  disconnection (the checklist). The others stand in for pages this help centre
+  does not have yet, and stay 302 so the stand-in is not kept once it does.
+  Never 307 or 308, which would re-send a stale Freshdesk sign-in form's
+  password to the page it was redirected to.
+- **The ticket pages, the sign-in and the sign-up go to the contact band, not
+  the portal.** `/forms` is a sign-in wall in production, which has no ticket
+  form (0 rows on 2026-11-12). Freshdesk's requester accounts were not
+  migrated: every portal identity with a password was made here after the move (four on 2026-11-12, one verified). Its tickets were not
+  imported either, and its numbers are not ours: our own `#44105` is a
+  different ticket from the Freshdesk one a customer followed. The band offers
+  the chat, the address, the form card and a Sign in card, none of them behind
+  an account. Once a public form exists, the ticket form's rule becomes
+  `/forms`. Once the portal opens, the sign-in's and the tickets' become the
+  portal's.
+- `proxy.test.ts` checks every shape on both hosts, with `KB_PUBLIC_HOST` set
+  and unset. It also checks:
+  - that the answer is a 302 for any method;
+  - that a session cookie changes nothing;
+  - that `url_locale` names the language where the path does not;
+  - that the search carries its term, whole, and nothing else;
+  - that articles and folders still reach the legacy route;
+  - that the leftovers answer as they did, and so does a two-letter prefix
+    that is not one of our languages.
+
+  Eight of its cases fail against `proxy.ts` as it was.
+
+- A production build served locally answered each shape with a 302 and a
+  relative `Location` on both hosts, with the variable set and unset:
+  `/ar#contact` with its fragment, `/ar/search?q=` with the term encoded.
+- **The redirect is absolute in the proxy.** Next parses a proxy's `Location`
+  with no base, so the relative one `lib/http/redirect.ts` builds would throw
+  there (`ERR_INVALID_URL`, a 500). Next relativises a same-host absolute one
+  itself, as the measurement shows.
+- **Not covered: a category's own page.** The importer kept Freshdesk's
+  category ids (`kb_categories.external_id`, e.g. `154000297680:en` →
+  `shipblu-customers`), so `/support/solutions/<id>` could go to
+  `/<l>/c/<slug>`. That is a lookup, so it belongs in the legacy route with a
+  database test, and it is left for a pull request of its own. That pull
+  request must leave the internal employee guide (`154000297102`, all four
+  folders agents-only) on the home, not on its own page, and it replaces the
+  category row above.
+
 ## To-dos outside this repository
 
 The state column is as measured on 2026-11-11 and 2026-11-12.
@@ -845,6 +936,7 @@ The state column is as measured on 2026-11-11 and 2026-11-12.
 | Mail admin (Zoho)                    | Say where `support@shipblu.com`, `help@shipblu.com` and `tech@shipblu.com` deliver. If it is Freshdesk, forward them here or change the address the help centre gives. Remove `include:email.freshdesk.com` from SPF once Freshdesk sends nothing (after the disconnection). | Partly. `help@` has reached this app since 2026-11-11 14:28 UTC (above). Where `support@` and `tech@` deliver is unread. SPF still includes `email.freshdesk.com`.                                                    |
 | Meta (the Page's settings)           | Messenger's swap, per §5.1 of `docs/PROJECT-STATE.md`.                                                                                                                                                                                                                       | Not confirmed. Since 09:50 UTC on 2026-11-11, new Messenger threads have been handed to this app. Older threads still arrive in `standby`, and nothing here can read whether Freshchat is still the primary receiver. |
 | DNS                                  | The `support.shipblu.com` move, in the checklist's order.                                                                                                                                                                                                                    | Done on 2026-11-11: the CNAME was switched between about 19:00 and 20:54 UTC. The first request reached the web service at 20:54:12, and by 20:58 resolvers answered with the Render host.                            |
+| Freshdesk admin                      | Point its portal URL back at its own `*.freshdesk.com` address while the team still answers there: its notification emails link `support.shipblu.com/support/tickets/<n>`, which lands here now (PR 7).                                                                      | Open. A Freshdesk ticket link, `/en/support/tickets/44105`, was followed here from an iPhone at 22:04 UTC on 2026-11-11.                                                                                              |
 
 ## Checklist before Freshdesk is disconnected
 
@@ -956,6 +1048,9 @@ Order matters. The check beside each item is what proves it, not the merge.
       addresses that no longer serve anything. The job's payload says so
       (`lib/queue/payloads.ts`), and AGENTS.md since 2026-11-12. Take the
       option out with PR 6, or leave it with that warning.
+- [ ] Make the portal's home and index rules 301 (PR 7,
+      `lib/kb/freshdesk-portal.ts`), now that the name cannot go back to
+      Freshdesk. Not the stand-ins, which stay 302.
 - [ ] `docs/PROJECT-STATE.md` §1 and §5.1 say Freshdesk is gone, with the date.
 
 ## Re-running this audit
@@ -1022,7 +1117,8 @@ curl -sS -o /dev/null -w '%{http_code} %{redirect_url}\n' https://support.shipbl
 
 Until 2026-11-11, `302 https://support.shipblu.com/support/home`, which was
 Freshdesk. Since the move, `307 https://support.shipblu.com/ar`, which is this
-app.
+app. `/support/home` answers `302` to `/ar` once PR 7 is
+deployed.
 
 ```bash
 curl -sS -o /dev/null -w '%{http_code} %{redirect_url}\n' https://support.shipblu.com/support/solutions/articles/154000189336
