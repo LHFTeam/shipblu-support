@@ -129,12 +129,16 @@ async function store(messaging: MessagingEvent[]): Promise<string> {
   return event!.id;
 }
 
-/** One run of the job for a stored delivery, as the queue makes on each attempt. */
-function run(webhookEventId: string): Promise<void> {
+/**
+ * One run of the job for a stored delivery, as the queue makes on each attempt:
+ * by default one that is not the job's last.
+ */
+function run(webhookEventId: string, attempt = { attempts: 1, maxAttempts: 5 }): Promise<void> {
   return processWebhook({
     id: 'job-1',
     type: 'process_webhook',
     payload: { webhookEventId },
+    ...attempt,
   } as unknown as ClaimedJob);
 }
 
@@ -472,12 +476,13 @@ describe('echoes in a Messenger batch', () => {
     // Meta sends each event in a delivery of its own, so the reply can be
     // processed while the message opening the ticket waits on its retry.
     const now = Date.now();
+    const asked = await storePage([customer('m_customer', now - 3 * MINUTE)]);
     const reply = await storePage([echoOf('m_suite', now - 2 * MINUTE, SUITE)]);
 
     await expect(run(reply)).rejects.toThrow('no live ticket for its customer yet');
     expect(await outbound()).toEqual([]);
 
-    await run(await storePage([customer('m_customer', now - 3 * MINUTE)]));
+    await run(asked);
     await run(reply);
 
     expect(await outbound()).toEqual([
@@ -486,15 +491,25 @@ describe('echoes in a Messenger batch', () => {
     expect(await delivery(reply)).toMatchObject({ error: null });
   });
 
-  it('gives up on a reply to nobody with a ticket on its fourth run, before the job dies', async () => {
+  it('gives up on the job’s last run, though the customer’s message still waits', async () => {
+    const now = Date.now();
+    await storePage([customer('m_customer', now - 3 * MINUTE)]);
+    const reply = await storePage([echoOf('m_suite', now - 2 * MINUTE, SUITE)]);
+
+    await run(reply, { attempts: 5, maxAttempts: 5 });
+
+    expect(await delivery(reply)).toMatchObject({ error: null });
+    expect(await outbound()).toEqual([]);
+  });
+
+  it('gives up at once on a reply to somebody with nothing on its way', async () => {
+    // A follow-up to a customer this app never heard from, or whose ticket is
+    // closed: no retry, no logged failure.
     const id = await storePage([echoOf('m_suite', Date.now() - MINUTE, SUITE)]);
 
-    for (let attempt = 1; attempt <= 3; attempt += 1) {
-      await expect(run(id)).rejects.toThrow('no live ticket');
-    }
     await run(id);
 
-    expect(await delivery(id)).toMatchObject({ attempts: 4, error: null });
+    expect(await delivery(id)).toMatchObject({ attempts: 1, error: null });
     expect(await outbound()).toEqual([]);
     expect(
       await db.select().from(contactIdentities).where(eq(contactIdentities.identifier, PSID)),

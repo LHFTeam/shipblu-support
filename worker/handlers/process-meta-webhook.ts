@@ -13,14 +13,9 @@ import {
 import { env } from '@/lib/env';
 import { errorMessage } from '@/lib/errors';
 import { logger } from '@/lib/log';
+import { metaDeliveryPendingFrom } from '@/lib/webhooks/pending';
 
 const log = logger('meta');
-
-/**
- * The run of a delivery on which an echo that found no ticket is given up:
- * every run before it fails the delivery so the queue tries again.
- */
-const ECHO_TICKET_ATTEMPTS = 4;
 
 /**
  * Turns a stored Facebook or Instagram payload into conversations.
@@ -65,8 +60,12 @@ export async function processMetaWebhook(event: {
   id: string;
   payload: unknown;
   connection: string | null;
-  /** Which run of the delivery this is, from 1 (`webhook_events.attempts`). */
-  attempt: number;
+  /**
+   * Whether the job's run is its last, after which a failure sends it `dead`
+   * (`isFinalAttempt`). The job's own count, not `webhook_events.attempts`,
+   * since it is the one that ends the job, and a replay by hand is always final.
+   */
+  finalAttempt: boolean;
 }): Promise<void> {
   const parsed = parseMetaWebhook(event.payload, readConnection(event.connection));
 
@@ -120,11 +119,16 @@ export async function processMetaWebhook(event: {
       // The customer's message may still be on its way: Meta sends each event
       // in a delivery of its own, and the one opening the ticket can be
       // waiting on its retry, or running beside this one, when the reply is
-      // processed. So an echo with no ticket fails the delivery while it is
-      // young enough for that to be the reason — its first three runs, 10 s
-      // and 50 s after the first — and is given up on the fourth, at 140 s,
-      // never reaching the fifth that sends a job `dead`.
-      if (result.notFiled === 'no_ticket' && event.attempt < ECHO_TICKET_ATTEMPTS) {
+      // processed. So an echo with no ticket fails the delivery while one of
+      // the customer's is stored and unprocessed, for the queue to try it
+      // again — and is given up otherwise, and on the job's last run, which
+      // a failure would send `dead`. A follow-up to a customer whose ticket is
+      // closed, or whom this app never heard from, costs no retry at all.
+      if (
+        result.notFiled === 'no_ticket' &&
+        !event.finalAttempt &&
+        (await metaDeliveryPendingFrom(echo.platform, echo.to, event.id))
+      ) {
         failures.push(`echo ${echo.mid}: no live ticket for its customer yet`);
         continue;
       }
@@ -136,7 +140,9 @@ export async function processMetaWebhook(event: {
             ? `#${result.conversationNumber} (${result.duplicate ? 'duplicate' : "filed as the team's reply"})`
             : result.notFiled === 'predates_ticket'
               ? "not filed: older than every customer message on the customer's ticket"
-              : 'not filed: no live ticket for its customer'),
+              : result.notFiled === 'too_quick'
+                ? "not filed: sent within seconds of the customer's message, as an automation is"
+                : 'not filed: no live ticket for its customer'),
       );
     } catch (error) {
       failures.push(`echo ${echo.mid}: ${errorMessage(error)}`);

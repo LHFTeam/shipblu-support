@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, isNull, lte } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull, lte, max } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { channels, conversationEvents, conversations, messages, ticketStatuses } from '@/db/schema';
 import { echoSourceOf } from '@/lib/meta/echo';
@@ -385,16 +385,31 @@ export type MetaEchoResult = {
   /**
    * Why an echo was not filed. `no_ticket`: the customer has no contact or no
    * live direct-message ticket here — yet, possibly, which is why the job
-   * retries it a while (`process-meta-webhook.ts`). `predates_ticket`: every
-   * customer message on their live ticket is newer than the echo, so it
-   * answered an earlier, closed conversation.
+   * retries it while one of the customer's deliveries is still waiting
+   * (`process-meta-webhook.ts`). `predates_ticket`: every customer message on
+   * their live ticket is newer than the echo, so it answered an earlier,
+   * closed conversation. `too_quick`: sent within `TYPED_REPLY_FLOOR_MS` of
+   * the customer's message before it, as only an automation is.
    */
-  notFiled?: 'no_ticket' | 'predates_ticket';
+  notFiled?: 'no_ticket' | 'predates_ticket' | 'too_quick';
   duplicate: boolean;
   conversationId: string | null;
   conversationNumber: number;
   messageId: string | null;
 };
+
+/**
+ * The quickest a person answers in Business Suite, as measured. Every Page
+ * Inbox echo kept to 2026-11-12 was timed against the customer's message
+ * before it: of 220, two came sooner than 10 s — a card at 4.9 s and a
+ * 270-character "thanks for contacting us" at 8.6 s, both shaped like an
+ * automation — and the quickest typed reply took 13.2 s. Business Suite's own
+ * automations (an instant reply, an away message) echo under the same app id
+ * as a person's reply, and Instagram's welcome went 2–5.4 s after the
+ * customer. A reply refused here leaves the ticket unanswered, which a person
+ * sees; one filed wrongly reads as answered, which nobody does.
+ */
+const TYPED_REPLY_FLOOR_MS = 10_000;
 
 function notFiled(reason: NonNullable<MetaEchoResult['notFiled']>): MetaEchoResult {
   return {
@@ -448,14 +463,16 @@ function notFiled(reason: NonNullable<MetaEchoResult['notFiled']>): MetaEchoResu
  * Page deliveries to 2026-11-12), and Business Suite answered one thread 4.9 s
  * after its first message, so the customer's message can still be waiting on
  * its own retry, or running beside this one after a deploy, when the reply is
- * processed. So `no_ticket` is answered, and the job retries the delivery for
- * its first three attempts — about 50 seconds — before giving it up.
+ * processed. So `no_ticket` is answered, and the job retries the delivery
+ * while one of the customer's own is still waiting to be processed.
  *
  * And it files only onto a ticket the reply can have answered: one with a
  * customer message no newer than the echo. A follow-up sent in Business Suite
  * to a customer whose ticket was closed, processed after the customer's answer
  * opened a new one, would otherwise land on that new ticket as its first
- * response, before the question it is supposed to answer.
+ * response, before the question it is supposed to answer. Nor onto one whose
+ * customer wrote less than 10 seconds before it: no person in Business Suite
+ * has answered that fast, and its automations do (`TYPED_REPLY_FLOOR_MS`).
  *
  * Nor does it end a routing hold or assign anybody: the reply was not made in
  * this console, and the window's end still routes the ticket. Facebook's row
@@ -470,12 +487,20 @@ function notFiled(reason: NonNullable<MetaEchoResult['notFiled']>): MetaEchoResu
 export async function ingestMetaEcho(echo: NormalisedEcho): Promise<MetaEchoResult> {
   const stored = await findByChannelMessageId(echo.mid);
   if (stored) {
-    // Again, for a run that committed the row and stopped before the clocks —
-    // a deploy's shutdown — which every later run would otherwise answer
-    // "duplicate" and leave owing a reply it was given. The same instant
-    // changes nothing the second time (`earliest`, and the next-response
-    // clock decided against the row as it is).
+    // Again, for a run that committed the row and stopped before what follows
+    // it — a deploy's shutdown — which every later run would otherwise answer
+    // "duplicate" and leave owing a reply it was given. Both are safe twice:
+    // the same instant changes nothing in the clocks (`earliest`, and the
+    // next-response clock decided against the row as it is), and shipment
+    // linking writes only a link it did not have.
     await onAgentReply(stored.conversationId, echo.sentAt);
+    await afterMessageStored({
+      conversationId: stored.conversationId,
+      messageId: stored.messageId,
+      bodyText: echo.text,
+      kind: 'reply',
+      direction: 'outbound',
+    });
     return {
       filed: true,
       duplicate: true,
@@ -493,9 +518,10 @@ export async function ingestMetaEcho(echo: NormalisedEcho): Promise<MetaEchoResu
   const live = await findLiveConversation(contactId, { channel: echo.platform });
   if (!live) return notFiled('no_ticket');
 
-  // Both instants are Meta's own (`sentAt`), so the comparison is on one clock.
-  const [answerable] = await db
-    .select({ id: messages.id })
+  // The customer's newest message the reply can have answered. Both instants
+  // are Meta's own (`sentAt`), so the comparisons are on one clock.
+  const [answered] = await db
+    .select({ at: max(messages.createdAt) })
     .from(messages)
     .where(
       and(
@@ -503,9 +529,11 @@ export async function ingestMetaEcho(echo: NormalisedEcho): Promise<MetaEchoResu
         eq(messages.direction, 'inbound'),
         lte(messages.createdAt, echo.sentAt),
       ),
-    )
-    .limit(1);
-  if (!answerable) return notFiled('predates_ticket');
+    );
+  if (!answered?.at) return notFiled('predates_ticket');
+  if (echo.sentAt.getTime() - answered.at.getTime() < TYPED_REPLY_FLOOR_MS) {
+    return notFiled('too_quick');
+  }
 
   const messageId = await db.transaction(async (tx) => {
     const [inserted] = await tx

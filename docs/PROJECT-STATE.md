@@ -8873,23 +8873,30 @@ found"}` and not Next's page. The same route called by its own URL
       delivery of its own (838 of 838 Page deliveries kept), and Business Suite
       answered one thread 4.9 s after its first message. So the reply can be
       processed while the customer's message waits on its retry, or beside it
-      after a deploy. An echo that finds no ticket fails its delivery on its
-      first three runs, at 0, 10 and 50 s, and is given up on the fourth, at
-      140 s, before the fifth would send the job `dead`. And an echo files only
-      onto a ticket with a customer message no newer than itself. Without that,
-      a follow-up to a closed ticket, processed after the customer's answer
-      opened a new one, would become the new ticket's first response, before
-      its question.
+      after a deploy. An echo that finds no ticket fails its delivery, for the
+      queue to try again, while a delivery from that customer is stored and
+      unprocessed (`metaDeliveryPendingFrom`), and never on the job's last run.
+      A follow-up to a customer whose ticket is closed, or whom this app never
+      heard from, costs no retry. And an echo files only onto a ticket with a
+      customer message no newer than itself. Without that, a follow-up to a
+      closed ticket, processed after the customer's answer opened a new one,
+      would become the new ticket's first response, before its question.
 
-      **Two costs accepted.** A Business Suite automation, such as an instant
-      reply or an away message, would echo under the Page Inbox's id and be
-      filed as a person's reply. None was seen on Messenger in the 30 days: one
-      of 220 Page Inbox echoes came within 10 s of the customer's message, a
-      card with one titled element. WhatsApp's phone echoes carry the same
-      exposure. And the echo names no person, so the rollup credits the first
-      response to whoever holds the ticket then (`accountableOrAssigneeAt`).
-      15 of the 49 in `messaging` are signed by name by the Sales team, most
-      on Customer Care tickets.
+      **Nothing sent within 10 s of the customer's message is filed**
+      (`TYPED_REPLY_FLOOR_MS`). Business Suite's automations, such as an
+      instant reply or an away message, echo under the Page Inbox's id, as a
+      person's reply does. Of all 220 Page Inbox echoes, timed against the
+      customer's message before each, two came sooner than 10 s: a card at
+      4.9 s and a 270-character "thanks for contacting us" at 8.6 s, both
+      shaped like an automation. The quickest typed reply took 13.2 s.
+      Instagram's welcome went 2–5.4 s after the customer. A reply refused
+      here leaves its ticket reading as unanswered, which somebody sees. One
+      filed wrongly reads as answered, which nobody does.
+
+      **Cost accepted:** the echo names no person, so the rollup credits the
+      first response to whoever holds the ticket then
+      (`accountableOrAssigneeAt`). 15 of the 49 in `messaging` are signed by
+      name by the Sales team, most on Customer Care tickets.
 
       **The 19 echoes since the switch are still in `webhook_events`**, one per
       delivery, received 2026-11-11 11:36 to 2026-11-12 13:55 UTC, all marked

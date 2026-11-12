@@ -1054,9 +1054,12 @@ that tool's until Messenger's swap. Nor is an Instagram echo, which names no
 app and includes an automated welcome sent seconds after the customer; with
 `META_APP_ID` unset nothing is filed. Meta sends each Messenger event in a
 delivery of its own, so a reply can be processed before the customer's message
-it answers: an echo that finds no ticket fails its delivery on its first three
-runs, and one older than every customer message on the ticket is not filed
-there. Anything that asks whether a person on
+it answers: an echo that finds no ticket fails its delivery while one of the
+customer's is still unprocessed (`metaDeliveryPendingFrom`), never on the job's
+last run, and one older than every customer message on the ticket is not filed
+there. Nor is one sent within 10 s of the customer's message: no person has
+answered that fast, and Business Suite's automations echo under the same app
+id. Anything that asks whether a person on
 the team answered treats a team echo as one (`teamEchoLabel`; the canned
 suggestion's `authorOf`), never as `automatic_message`
 (`docs/PROJECT-STATE.md` §6.117).

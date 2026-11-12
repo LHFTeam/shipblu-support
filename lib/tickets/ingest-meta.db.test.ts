@@ -9,6 +9,7 @@ import {
   contactIdentities,
   contacts,
   conversationEvents,
+  conversationShipments,
   conversations,
   groupMembers,
   groups,
@@ -1836,6 +1837,44 @@ describe('ingestMetaEcho', () => {
       lastAgentMessageAt: null,
       firstRespondedAt: null,
     });
+  });
+
+  it('files nothing sent within seconds of the customer, as an automation is', async () => {
+    const opened = await ingestMetaMessage(dm({ sentAt: OPENED }));
+
+    const quick = await ingestMetaEcho(
+      echo({ mid: 'm_quick', sentAt: new Date(OPENED.getTime() + 4_000) }),
+    );
+    const typed = await ingestMetaEcho(
+      echo({ mid: 'm_typed', sentAt: new Date(OPENED.getTime() + 13_000) }),
+    );
+
+    expect(quick).toMatchObject({ filed: false, notFiled: 'too_quick' });
+    expect(typed).toMatchObject({ filed: true, duplicate: false });
+    expect((await messagesOf(opened.conversationId)).map((row) => row.channelMessageId)).toEqual([
+      'm_first',
+      'm_typed',
+    ]);
+  });
+
+  it('links a shipment again on a second run, for a first run stopped after its commit', async () => {
+    const opened = await ingestMetaMessage(dm({ sentAt: OPENED }));
+    const withNumber = echo({ text: 'الشحنة رقم 1903828629327 في الطريق' });
+    await ingestMetaEcho(withNumber);
+    const linked = () =>
+      db
+        .select({ shipmentId: conversationShipments.shipmentId })
+        .from(conversationShipments)
+        .where(eq(conversationShipments.conversationId, opened.conversationId));
+    expect(await linked()).toHaveLength(1);
+    // As if the worker had stopped between the echo's commit and the linking.
+    await db
+      .delete(conversationShipments)
+      .where(eq(conversationShipments.conversationId, opened.conversationId));
+
+    expect(await ingestMetaEcho(withNumber)).toMatchObject({ duplicate: true });
+
+    expect(await linked()).toHaveLength(1);
   });
 
   it('never files a direct message onto the customer’s public comment thread', async () => {
