@@ -60,13 +60,12 @@ describe('the canned-response library', () => {
     expect(text).not.toMatch(/[[\]{}<>]|_{2,}|\bX{2,}\b|\.{3}|…/);
   });
 
-  // The address the help centre publishes has not settled:
-  // `support.shipblu.com` served Freshdesk until November 2026, and published
-  // URLs name the Render host until `KB_PUBLIC_HOST` names that one. A link
-  // written into the library would point at an address that moves — and a link
-  // that moves cannot be fixed by editing a row nobody knows is stale. Agents add
-  // links through the knowledge panel, which builds them from the live host.
-  // The customer is already talking to support, so no address or number either.
+  // The rule dates from when `support.shipblu.com` served the Freshdesk help
+  // centre (until 2026-11-11), when a link here would have pointed at the old
+  // one. A link written into the library can still go stale with nobody
+  // knowing which row holds it. Agents add links through the knowledge panel,
+  // which builds them from the live host. The customer is already talking to
+  // support, so no address or number either.
   it.each(bodies)('$key ($locale) carries no link, address or phone number', ({ text }) => {
     expect(text).not.toMatch(/https?:|www\.|\.com\b|@/i);
     // Both digit sets: a number in Arabic text is as likely written ٠١٠… as 010…,

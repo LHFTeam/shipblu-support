@@ -31,10 +31,15 @@ const DEFAULT_APP = 'default_app';
  * Routing, where the default app is the one that answers a thread no other app
  * holds. Messenger: no, and the evidence is the same morning. The Page's own
  * event, twelve seconds before Instagram's, named this app `default_app` too,
- * and all 23 Messenger messages received in the day after it still arrived in
- * `standby`: the Page's inbox is still held through the handover protocol by
- * Freshworks, its primary receiver. So a Page's switch supersedes nothing, and
- * a Messenger thread is taken back only by `thread_control_taken`.
+ * and all 19 Messenger messages stored in the day after it still arrived in
+ * `standby`: the Page's inbox was still held through the handover protocol by
+ * another app, Freshworks as `docs/PROJECT-STATE.md` §5.1 records it. So a
+ * Page's switch supersedes nothing, and a Messenger thread is taken back only
+ * by `thread_control_taken`. Since 2026-11-11 Meta has handed each new
+ * Messenger thread to this app with a `pass_thread_control`, and its messages
+ * arrive in `messaging`; whether Freshworks is still primary receiver cannot
+ * be read from the deliveries (§5.1). A thread opened before then still
+ * arrives in `standby`, which is the case this answer is for.
  */
 const DEFAULT_APP_OWNS_THREADS: Record<MetaPlatform, boolean> = {
   instagram: true,
