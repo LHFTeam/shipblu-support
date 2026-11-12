@@ -29,8 +29,10 @@ service at 20:38:58 (read on Render). It adds no migration. At 21:08
 pending or processing, no lost admission, and 28 dead jobs. The one added
 since the 27 below is a `send_notification_email` refused at 15:51 for an
 address the old format check rejected, the case #517 fixes. Its way back is
-`7605993` on each service, by a revert through `dev` or a dashboard rollback.
-No migration lies between the two.
+`7605993` on each service. That is a revert through `dev`, or a dashboard
+rollback, which turns that service's auto-deploy off (below), so the next
+merge into `main` does not deploy it until auto-deploy is turned back on. No
+migration lies between the two.
 
 The release before it:
 
@@ -52,9 +54,9 @@ named below and no lost admission on the first pool; on the Render host
 404, and Freshdesk's old URLs 301 (PR 3, live since `932e8ea` below). Every
 article shape went to the article, and a folder URL to `/ar` when its id is a
 Freshdesk folder `kb_folders.external_id` holds; `kb_redirects` holds no folder
-rows, and the route does not need any. From the folder rule on, which is not
-deployed until `dev` reaches `main`, a folder somebody can open goes to its
-own page instead (§5.1). Its way back is
+rows, and the route does not need any. From the folder rule on (#520, live
+with `aa0131d` above), a folder somebody can open goes to its own page
+instead (§5.1). Its way back is
 `932e8ea` on each service: a code-only revert through `dev`, or a dashboard
 rollback, which turns that service's auto-deploy off (below); no migration lies
 between the two.
@@ -1726,10 +1728,12 @@ the rest of the cutover still needs, and some of it is now partly done:_
   console host. Freshdesk's bookmarks there, `/support/home` and
   `/support/tickets/new`, go to the console's sign-in, and so does `/inbox`.
   The widget's `BASE`, the sitemap and the canonicals still name the Render
-  host. The favicon is behind sign-in on every host, a separate bug:
-  `/icon.svg` is not a public path, and once the variable is set the help
-  centre's host rewrites it to `/help/icon.svg`, which 404s. It is fixed on
-  `dev` in #510 (`7074dee`), and reaches production with the next release. Setting the variable is the next step (the
+  host. The favicon was behind sign-in on every host, a separate bug:
+  `/icon.svg` was not a public path, and once the variable is set the help
+  centre's host would rewrite it to `/help/icon.svg`, which 404s. #510
+  (`7074dee`) fixed it, live with `aa0131d`. At 22:15 UTC on 2026-11-12
+  `/icon.svg` answered 200 `image/svg+xml` signed out on both the Render host
+  and `support.shipblu.com`. Setting the variable is the next step (the
   `KB_PUBLIC_HOST` paragraph below). Once it is set, the Freshdesk portal
   paths that are not an article or a folder become the help centre's 404
   rather than the sign-in page. PR 7 of the plan (#513) answers them first, on
@@ -8984,14 +8988,28 @@ found"}` and not Next's page. The same route called by its own URL
 
       **Replayed on 2026-11-12, once production ran this build.** The release
       (LHFTeam/shipblu-support#522, aa0131d) put every service on it by 20:38:58
-      UTC. At 21:02:35 one statement cleared `processed_at` on the 220 kept
-      deliveries holding a Page Inbox echo and queued a `process_webhook` job
-      for each, without a dedupe key, since the live key is still taken for a
-      week. The 220 are 49 in `messaging` and 171 in `standby`, received
-      2026-10-13 to 2026-11-12 13:55 UTC, each holding only the echo. The
-      selection was bounded to deliveries received before the new worker went
-      live, so nothing it had filed was replayed. Every job completed on its
+      UTC. At 21:02:35 one statement cleared `processed_at` on 220 deliveries
+      and queued a `process_webhook` job for each. Every job completed on its
       first attempt.
+
+      **The 220 are every kept delivery holding a Page Inbox echo.** 49 are in
+      `messaging` and 171 in `standby`, received 2026-10-13 to 2026-11-12
+      13:55:58 UTC, and each holds only the echo. None arrived between then and
+      the deploy: 46 Page deliveries came in over that window and none was an
+      echo. None has arrived since either, to 22:11. The selection was bounded
+      to `received_at` before 20:38:27, when the new worker went live. That
+      bound alone does not prove the old worker processed them: a delivery
+      received just before then could have been processed by the new one. What
+      proves it is the list saved before the write. Every target's original
+      `processed_at` was 13:55:58 or earlier, so none had been filed by the new
+      build.
+
+      **The jobs carry no dedupe key.** The live path keys a delivery's job
+      `process_webhook:<id>`. The nightly cleanup deletes a completed job 7 days
+      after it completes (`completedJobRetentionFilter`), and that frees the
+      key. So the key was free for the October deliveries, and still taken for
+      those processed in the last week. Without a key the insert answers for
+      both.
 
       - **210 echoes were filed, on 120 tickets:** 45 from `messaging` and 165
         from `standby`, all labelled `meta_business_suite`, none with an
@@ -9001,16 +9019,22 @@ found"}` and not Next's page. The same route called by its own URL
         older than every customer message on the customer's current ticket,
         and 1 sent within 10 s of the customer.
       - **Nothing else moved.** No message was sent, no event or survey was
-        written on those tickets, and no job went dead. Two `download_media`
-        jobs ran for the echoes that carried a file.
+        written on those tickets, and no job went dead.
+      - **Two files were stored.** Two `download_media` jobs stored two PNGs,
+        about 63 KB each, both on one ticket. Meta's links still served them.
 
-      The rebuild ran as one `rollup_metrics` job with `from=2026-10-13` and
+      **The rebuild** was one `rollup_metrics` job with `from=2026-10-13` and
       `max_attempts` 1. A failed rebuild is deterministic, and five attempts
-      would rebuild thirty days five times. Each replayed delivery's
-      `processed_at` is now 2026-11-12, so it is kept until about 2026-12-12.
+      would rebuild thirty days five times. It started at 21:07:43, after the
+      web service was live on `aa0131d`. By 21:08:18 it had rebuilt the 30 days
+      from 2026-10-13 to 2026-11-11 (`rollup_days.computed_at`), and it
+      completed on its one attempt at 21:08:19. A day refused by
+      `reconcileFailure` makes the job throw after writing the rest, so no day
+      was refused. 2026-11-12 is the nightly's, at 00:00 UTC.
 
-      The deliveries were found by this query. Bound `received_at` again before
-      reusing it.
+      Each replayed delivery's `processed_at` is now 21:02 on 2026-11-12, so
+      the nightly cleanup keeps it until about 2026-12-12. Until then the
+      deliveries are listed by this query, the selection that ran:
 
       ```sql
       select distinct w.id from webhook_events w
@@ -9020,17 +9044,33 @@ found"}` and not Next's page. The same route called by its own URL
       cross join lateral jsonb_array_elements(case jsonb_typeof(en.entry->arr.k)
         when 'array' then en.entry->arr.k else '[]' end) e(value)
       where w.provider = 'meta' and w.payload->>'object' = 'page'
+        and w.signature_verified
         and w.received_at < '2026-11-12 20:38:27+00'
+        and w.processed_at >= '2026-11-12 21:02:35+00'
+        and w.processed_at < '2026-11-12 21:05:00+00'
         and e.value->'message'->>'is_echo' = 'true'
-        and e.value->'message'->>'app_id' = '263902037430900';
+        and e.value->'message'->>'app_id' is not null
+        and e.value->'message'->>'app_id' <> '1009187740467732';
       ```
 
-      **The way back** is deleting the `messages` rows whose
-      `channel_message_id` is an echo mid in those deliveries and whose
-      `meta->>'echoSource'` is set, then running the same rollup. The
-      replayed rows are dated by the echo, before 20:38:27, which tells them
-      from echoes filed live. It leaves the tickets' `last_agent_message_at`
-      and `first_responded_at` where the replay moved them.
+      **The way back**, while those rows are kept, has three steps:
+
+      1. Delete the `messages` rows whose `channel_message_id` is an echo mid
+         in those deliveries and whose `meta->>'echoSource'` is set. That
+         cascades to their `attachments` rows.
+      2. Remove the two objects the downloads wrote, which nothing deletes
+         when the rows go:
+         `conversations/869d183d-c9ec-4e45-a19d-05a9d2e543db/1897b748-bb43-4a63-93f4-7a7b5a8f7652-0.png`
+         and `…/52aa045f-cbbc-4ebb-98ab-d5ddc3e1a17c-0.png` in the same
+         folder.
+      3. Run the same rollup.
+
+      The deliveries' `processed_at`, not the messages' dates, tells the
+      replay's rows from echoes filed live. A filed row is dated by its echo
+      and carries no marker of the replay. The way back leaves the tickets'
+      `last_agent_message_at` and `first_responded_at` where the replay moved
+      them. Once the deliveries are gone, the replay can no longer be told
+      apart from echoes filed live.
 
 ### Tooling notes for this environment
 
