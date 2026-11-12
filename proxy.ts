@@ -80,23 +80,25 @@ const PUBLIC_PREFIXES = [
 /**
  * The files a page's `<head>` names, at the root: Next serves each from a file
  * in `app/`, and `app/icon.svg` is the `<link rel="icon">` on every page the
- * root layout renders, the help centre's included. Whatever fetches one carries
- * no session, whether it is a browser drawing a tab, a crawler or a link preview.
- * So they are served as themselves on every hostname, signed in or not. Under
- * the cookie check `/icon.svg` answered 307 to /login on every host, so no
- * signed-out reader saw the icon (measured 2026-11-12). On the help-centre host
- * the catch-all would rewrite it to `/help/icon.svg`, where nothing answers.
+ * root layout renders, the help centre's included. Most of what fetches one
+ * carries no session: a signed-out reader's browser drawing a tab, a crawler, a
+ * link preview. So they are served as themselves on every hostname, signed in or
+ * not. Under the cookie check `/icon.svg` answered 307 to /login on every host,
+ * so no signed-out reader saw the icon (measured 2026-11-12). On the help-centre
+ * host the catch-all would rewrite it to `/help/icon.svg`, where nothing answers.
  *
  * The suffixes are the ones Next's own matcher allows (`isMetadataRouteFile`):
  * a numbered variant (`icon1.png`), the hash a file in a route group is served
  * under (`/icon-1u176d.svg`), and no extension for an image drawn by code
- * (`app/icon.tsx` is `/icon`). `proxy.test.ts` finds every such file in `app/`
- * through Next's functions, so a file this pattern misses fails there.
+ * (`app/icon.tsx` is `/icon`). One that draws several, through
+ * `generateImageMetadata`, is served once per id beneath that (`/icon/small`).
+ * `proxy.test.ts` finds every such file in `app/` through Next's functions, so
+ * a file this pattern misses fails there.
  * `robots.txt` and `sitemap.xml` are metadata files too, and they are the help
  * centre's (`CRAWLER_FILES`).
  */
 const HEAD_FILE =
-  /^\/(?:favicon\.ico|manifest\.(?:webmanifest|json)|(?:icon|apple-icon|opengraph-image|twitter-image)\d?(?:-\w{6})?(?:\.(?:ico|jpe?g|png|svg|gif))?)$/;
+  /^\/(?:favicon\.ico|manifest\.(?:webmanifest|json)|(?:icon|apple-icon|opengraph-image|twitter-image)\d?(?:-\w{6})?(?:\.(?:ico|jpe?g|png|svg|gif)|\/[^/]+)?)$/;
 
 /**
  * Freshdesk article URLs, in every prefix variant an account can be configured

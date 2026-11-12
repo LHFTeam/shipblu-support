@@ -2,9 +2,13 @@ import { readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { NextRequest } from 'next/server';
-import { normalizeMetadataRoute } from 'next/dist/lib/metadata/get-metadata-route';
+import {
+  normalizeMetadataPageToRoute,
+  normalizeMetadataRoute,
+} from 'next/dist/lib/metadata/get-metadata-route';
 import {
   DEFAULT_METADATA_ROUTE_EXTENSIONS,
+  STATIC_METADATA_IMAGES,
   isMetadataRouteFile,
 } from 'next/dist/lib/metadata/is-metadata-route';
 import { normalizeAppPath } from 'next/dist/shared/lib/router/utils/app-paths';
@@ -118,10 +122,30 @@ describe('every other hostname', () => {
  */
 describe("the files a page's head names", () => {
   const DRAWN_BY_CODE = new RegExp(`\\.(?:${DEFAULT_METADATA_ROUTE_EXTENSIONS.join('|')})$`);
+  const IMAGE_NAMES: readonly string[] = Object.values(STATIC_METADATA_IMAGES).map(
+    (image) => image.filename,
+  );
 
-  /** Where Next serves an `app/` file. A file drawn by code loses its extension. */
-  const routeOf = (file: string) =>
-    normalizeAppPath(normalizeMetadataRoute(file.replace(DRAWN_BY_CODE, '')));
+  /**
+   * Where Next serves an `app/` file. One drawn by code loses its extension,
+   * and an image drawn by code that exports `generateImageMetadata` is served
+   * once per id beneath that instead (`/icon/small`). Next tells the two apart
+   * by the file's exports, so an image drawn by code is checked both ways.
+   */
+  function routesOf(file: string): string[] {
+    const page = normalizeMetadataRoute(file.replace(DRAWN_BY_CODE, ''));
+    const name = file
+      .slice(file.lastIndexOf('/') + 1)
+      .replace(DRAWN_BY_CODE, '')
+      .replace(/\d$/, '');
+    const perId = DRAWN_BY_CODE.test(file) && IMAGE_NAMES.includes(name) ? [false, true] : [false];
+    return perId.map((dynamic) =>
+      normalizeAppPath(normalizeMetadataPageToRoute(page, dynamic)).replace(
+        '[__metadata_id__]',
+        'small',
+      ),
+    );
+  }
 
   /**
    * The files directly in `app/` and in its route groups, which add no segment.
@@ -152,6 +176,7 @@ describe("the files a page's head names", () => {
     '/icon1.png',
     '/(auth)/icon.png',
     '/icon.tsx',
+    '/(auth)/apple-icon.tsx',
     '/opengraph-image.tsx',
     '/twitter-image.jpg',
     '/favicon.ico',
@@ -161,7 +186,8 @@ describe("the files a page's head names", () => {
 
   it('include the icon every page links, so the checks below cannot pass on nothing', () => {
     expect(present).toContain('/icon.svg');
-    expect(routeOf('/icon.svg')).toBe('/icon.svg');
+    expect(routesOf('/icon.svg')).toEqual(['/icon.svg']);
+    expect(routesOf('/icon.tsx')).toEqual(['/icon', '/icon/small']);
   });
 
   it('are what Next calls a metadata file, each of them', () => {
@@ -177,8 +203,7 @@ describe("the files a page's head names", () => {
     ['the help-centre host', KB_HOST, KB_HOST],
   ])('are served as themselves to a signed-out visitor on %s', (_, host, kbHost) => {
     setTestEnv({ KB_PUBLIC_HOST: kbHost });
-    for (const file of [...present, ...possible]) {
-      const route = routeOf(file);
+    for (const route of [...present, ...possible].flatMap(routesOf)) {
       // Neither redirected to /login nor rewritten under /help.
       expect(visit(`https://${host}${route}`).headers.get('x-middleware-next'), route).toBe('1');
     }
@@ -188,6 +213,7 @@ describe("the files a page's head names", () => {
     for (const path of [
       '/inbox/icon.svg',
       '/icon.svg/x',
+      '/icon/small/x',
       '/icons',
       '/iconography',
       '/icon.svg.map',
